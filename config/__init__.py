@@ -1,0 +1,1 @@
+"""Configuration module for FastMCP2 Drive Upload Server."""

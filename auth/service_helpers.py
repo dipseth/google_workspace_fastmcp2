@@ -1,0 +1,315 @@
+"""Helper functions and utilities for Google service management."""
+
+import logging
+from typing import Any, Optional, Union, List, Dict
+
+from .service_manager import get_google_service, get_available_services, get_available_scope_groups
+from .context import (
+    request_google_service, get_injected_service, get_user_email_context,
+    get_google_service_simple
+)
+
+logger = logging.getLogger(__name__)
+
+# Service defaults configuration - single source of truth
+SERVICE_DEFAULTS = {
+    "drive": {
+        "default_scopes": ["drive_file", "drive_read"],
+        "version": "v3",
+        "description": "Google Drive service"
+    },
+    "gmail": {
+        "default_scopes": ["gmail_read", "gmail_send", "gmail_compose", "gmail_modify", "gmail_labels"],
+        "version": "v1",
+        "description": "Gmail service"
+    },
+    "calendar": {
+        "default_scopes": ["calendar_read", "calendar_events"],
+        "version": "v3",
+        "description": "Google Calendar service"
+    },
+    "docs": {
+        "default_scopes": ["docs_read", "docs_write"],
+        "version": "v1",
+        "description": "Google Docs service"
+    },
+    "sheets": {
+        "default_scopes": ["sheets_read", "sheets_write"],
+        "version": "v4",
+        "description": "Google Sheets service"
+    },
+    "chat": {
+        "default_scopes": ["chat_read", "chat_write"],
+        "version": "v1",
+        "description": "Google Chat service"
+    },
+    "forms": {
+        "default_scopes": ["forms", "forms_read", "forms_responses_read"],
+        "version": "v1",
+        "description": "Google Forms service"
+    },
+    "slides": {
+        "default_scopes": ["slides", "slides_read"],
+        "version": "v1",
+        "description": "Google Slides service"
+    }
+}
+
+
+async def get_service(
+    service_type: str,
+    user_email: str,
+    scopes: Union[str, List[str]] = None,
+    version: Optional[str] = None
+) -> Any:
+    """
+    Universal function to get any Google service with smart defaults.
+    
+    This is the ONE function you need for all Google services. It automatically
+    uses sensible defaults for each service type while allowing full customization.
+    
+    Args:
+        service_type: Type of service ("drive", "gmail", "calendar", etc.)
+        user_email: User's email address
+        scopes: Custom scopes (uses service defaults if None)
+        version: API version (uses service default if None)
+    
+    Returns:
+        Authenticated Google service instance
+        
+    Examples:
+        # Use defaults - most common case
+        drive_service = await get_service("drive", user_email)
+        gmail_service = await get_service("gmail", user_email)
+        
+        # Custom scopes
+        drive_service = await get_service("drive", user_email, ["drive_full"])
+        
+        # Custom version
+        old_gmail = await get_service("gmail", user_email, version="v1beta")
+    """
+    # Get defaults for this service type
+    defaults = SERVICE_DEFAULTS.get(service_type)
+    if not defaults:
+        # If no defaults, let the underlying service_manager handle it
+        logger.warning(f"No defaults found for service type: {service_type}")
+        return await get_google_service(
+            user_email=user_email,
+            service_type=service_type,
+            scopes=scopes,
+            version=version
+        )
+    
+    # Use defaults if not provided
+    final_scopes = scopes if scopes is not None else defaults["default_scopes"]
+    final_version = version if version is not None else defaults["version"]
+    
+    logger.debug(f"Getting {service_type} service for {user_email} with scopes: {final_scopes}")
+    
+    return await get_google_service(
+        user_email=user_email,
+        service_type=service_type,
+        scopes=final_scopes,
+        version=final_version
+    )
+
+
+def request_service(
+    service_type: str,
+    scopes: Union[str, List[str]] = None,
+    version: Optional[str] = None,
+    cache_enabled: bool = True
+) -> str:
+    """
+    Universal function to request any Google service through middleware.
+    
+    Args:
+        service_type: Type of service ("drive", "gmail", "calendar", etc.)
+        scopes: Custom scopes (uses service defaults if None)
+        version: API version (uses service default if None)
+        cache_enabled: Whether to enable caching
+    
+    Returns:
+        Service key for later retrieval with get_injected_service()
+        
+    Examples:
+        # Use defaults
+        drive_key = request_service("drive")
+        gmail_key = request_service("gmail")
+        
+        # Custom scopes
+        drive_key = request_service("drive", ["drive_full"])
+    """
+    # Get defaults for this service type
+    defaults = SERVICE_DEFAULTS.get(service_type)
+    if defaults:
+        final_scopes = scopes if scopes is not None else defaults["default_scopes"]
+        final_version = version if version is not None else defaults["version"]
+    else:
+        # No defaults available, use provided values or let service_manager handle
+        final_scopes = scopes
+        final_version = version
+        logger.warning(f"No defaults found for service type: {service_type}")
+    
+    return request_google_service(
+        service_type=service_type,
+        scopes=final_scopes,
+        version=final_version,
+        cache_enabled=cache_enabled
+    )
+
+
+def get_current_user_email() -> Optional[str]:
+    """Get the current user email from context."""
+    return get_user_email_context()
+
+
+def get_service_defaults(service_type: str) -> Optional[Dict]:
+    """
+    Get default configuration for a service type.
+    
+    Args:
+        service_type: Type of service
+        
+    Returns:
+        Default configuration dict or None if not found
+    """
+    return SERVICE_DEFAULTS.get(service_type)
+
+
+def list_supported_services() -> List[str]:
+    """
+    Get list of services with configured defaults.
+    
+    Returns:
+        List of service type names with defaults
+    """
+    return list(SERVICE_DEFAULTS.keys())
+
+
+def create_service_info_summary() -> str:
+    """
+    Create a summary of available services with their defaults.
+    
+    Returns:
+        Formatted string with service information
+    """
+    summary = "📋 **Supported Google Services**\n\n"
+    
+    summary += "**🔧 Services with Smart Defaults:**\n"
+    for service_type, config in SERVICE_DEFAULTS.items():
+        summary += f"- **`{service_type}`** (v{config['version']}): {config['description']}\n"
+        summary += f"  Default scopes: `{', '.join(config['default_scopes'])}`\n\n"
+    
+    # Also show all available services from service_manager
+    all_services = get_available_services()
+    additional_services = {k: v for k, v in all_services.items() if k not in SERVICE_DEFAULTS}
+    
+    if additional_services:
+        summary += "**⚙️ Additional Available Services:**\n"
+        for service_type, config in additional_services.items():
+            summary += f"- `{service_type}`: {config['service']} v{config['version']}\n"
+        summary += "\n"
+    
+    summary += "**💡 Usage Examples:**\n"
+    summary += "```python\n"
+    summary += "# Simple - uses smart defaults\n"
+    summary += "drive_service = await get_service('drive', user_email)\n"
+    summary += "gmail_service = await get_service('gmail', user_email)\n\n"
+    summary += "# Custom scopes\n"
+    summary += "drive_service = await get_service('drive', user_email, ['drive_full'])\n\n"
+    summary += "# Middleware injection\n"
+    summary += "service_key = request_service('gmail')\n"
+    summary += "gmail_service = get_injected_service(service_key)\n"
+    summary += "```"
+    
+    return summary
+
+
+async def create_multi_service_session(
+    user_email: str,
+    service_types: Union[List[str], List[dict]]
+) -> Dict[str, Any]:
+    """
+    Create multiple Google services in one call with smart defaults.
+    
+    Args:
+        user_email: User's email address
+        service_types: Either:
+                      - List of service type strings (uses defaults)
+                      - List of service config dicts for custom settings
+    
+    Returns:
+        Dictionary mapping service types to service instances
+    
+    Examples:
+        # Simple - uses defaults for all services
+        session = await create_multi_service_session(user_email,
+            ["drive", "gmail", "calendar"])
+        
+        # Mixed - some with defaults, some with custom config
+        session = await create_multi_service_session(user_email, [
+            "gmail",  # Uses defaults
+            {"service_type": "drive", "scopes": ["drive_full"]},  # Custom
+            "calendar"  # Uses defaults
+        ])
+    """
+    result = {}
+    
+    for service_spec in service_types:
+        if isinstance(service_spec, str):
+            # Simple service type string - use defaults
+            service_type = service_spec
+            try:
+                service = await get_service(service_type, user_email)
+                result[service_type] = service
+                logger.info(f"Created {service_type} service with defaults")
+            except Exception as e:
+                logger.error(f"Failed to create {service_type} service: {e}")
+                result[service_type] = None
+            
+        elif isinstance(service_spec, dict):
+            # Custom service configuration
+            service_type = service_spec["service_type"]
+            scopes = service_spec.get("scopes")
+            version = service_spec.get("version")
+            
+            try:
+                service = await get_service(service_type, user_email, scopes, version)
+                result[service_type] = service
+                logger.info(f"Created {service_type} service with custom config")
+                
+            except Exception as e:
+                logger.error(f"Failed to create {service_type} service: {e}")
+                result[service_type] = None
+        else:
+            logger.error(f"Invalid service specification: {service_spec}")
+            result[str(service_spec)] = None
+    
+    return result
+
+
+# Convenience aliases for backward compatibility and ease of use
+async def get_drive_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Drive service - convenience alias."""
+    return await get_service("drive", user_email, scopes)
+
+
+async def get_gmail_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Gmail service - convenience alias."""
+    return await get_service("gmail", user_email, scopes)
+
+
+async def get_calendar_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Calendar service - convenience alias."""
+    return await get_service("calendar", user_email, scopes)
+
+
+def request_drive_service(scopes: Union[str, List[str]] = None) -> str:
+    """Request Drive service through middleware - convenience alias."""
+    return request_service("drive", scopes)
+
+
+def request_gmail_service(scopes: Union[str, List[str]] = None) -> str:
+    """Request Gmail service through middleware - convenience alias."""
+    return request_service("gmail", scopes)

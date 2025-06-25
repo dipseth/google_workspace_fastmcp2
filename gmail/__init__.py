@@ -1,0 +1,1 @@
+"""Gmail tools for FastMCP2 with middleware-based service injection."""
