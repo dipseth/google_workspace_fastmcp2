@@ -11,11 +11,12 @@ requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=2.9.0",
     "google-api-python-client>=2.168.0",
-    "google-auth-httplib2>=0.2.0", 
+    "google-auth-httplib2>=0.2.0",
     "google-auth-oauthlib>=1.2.2",
     "httpx>=0.28.1",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    "python-card-framework>=2.2.5",
     "qdrant-client>=1.7.0",
     "sentence-transformers>=2.2.0",
     "numpy>=1.24.0"

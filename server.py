@@ -11,7 +11,14 @@ from fastmcp import FastMCP
 from config.settings import settings
 from auth.middleware import AuthMiddleware
 from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
+from drive.drive_tools import setup_drive_comprehensive_tools
 from gmail.gmail_tools import setup_gmail_tools
+from docs.docs_tools import setup_docs_tools
+from forms.forms_tools import setup_forms_tools
+from slides.slides_tools import setup_slides_tools
+from gcalendar.calendar_tools import setup_calendar_tools
+from gchat.chat_tools import setup_chat_tools
+from sheets.sheets_tools import setup_sheets_tools
 from middleware.qdrant_wrapper import QdrantMiddlewareWrapper
 
 # Configure logging
@@ -39,8 +46,29 @@ logger.info("✅ Qdrant middleware wrapper enabled - will initialize on first us
 # Register drive upload tools
 setup_drive_tools(mcp)
 
+# Register comprehensive Drive tools (search, list, get content, create)
+setup_drive_comprehensive_tools(mcp)
+
 # Register Gmail tools
 setup_gmail_tools(mcp)
+
+# Register Google Docs tools
+setup_docs_tools(mcp)
+
+# Register Google Forms tools
+setup_forms_tools(mcp)
+
+# Register Google Slides tools
+setup_slides_tools(mcp)
+
+# Register Google Calendar tools
+setup_calendar_tools(mcp)
+
+# Register Google Chat tools
+setup_chat_tools(mcp)
+
+# Register Google Sheets tools
+setup_sheets_tools(mcp)
 
 # Setup OAuth callback handler
 setup_oauth_callback_handler(mcp)
@@ -113,6 +141,10 @@ async def health_check() -> str:
             f"**Available Tools:**\n"
             f"**Drive Tools:**\n"
             f"- `upload_file_to_drive` - Upload local files to Google Drive\n"
+            f"- `search_drive_files` - Search for files and folders in Drive\n"
+            f"- `get_drive_file_content` - Retrieve file content from Drive\n"
+            f"- `list_drive_items` - List files and folders in a directory\n"
+            f"- `create_drive_file` - Create new files directly in Drive\n"
             f"**Gmail Tools:**\n"
             f"- `search_gmail_messages` - Search Gmail messages\n"
             f"- `get_gmail_message_content` - Get single message content\n"
@@ -125,6 +157,46 @@ async def health_check() -> str:
             f"- `modify_gmail_message_labels` - Add/remove message labels\n"
             f"- `reply_to_gmail_message` - Reply to messages\n"
             f"- `draft_gmail_reply` - Draft reply messages\n"
+            f"**Docs Tools:**\n"
+            f"- `search_docs` - Search for Google Docs by name\n"
+            f"- `get_doc_content` - Get content of Google Doc or Drive file\n"
+            f"- `list_docs_in_folder` - List Google Docs in a folder\n"
+            f"- `create_doc` - Create a new Google Doc\n"
+            f"**Forms Tools:**\n"
+            f"- `create_form` - Create a new Google Form\n"
+            f"- `add_questions_to_form` - Add questions to an existing form\n"
+            f"- `get_form` - Get form details including questions\n"
+            f"- `set_form_publish_state` - Update form publish state\n"
+            f"- `publish_form_publicly` - Make form publicly accessible\n"
+            f"- `get_form_response` - Get a single form response\n"
+            f"- `list_form_responses` - List form responses\n"
+            f"- `update_form_questions` - Update existing form questions\n"
+            f"**Slides Tools:**\n"
+            f"- `create_presentation` - Create new presentations with slides\n"
+            f"- `get_presentation_info` - Get presentation details and metadata\n"
+            f"- `add_slide` - Add new slides to presentations\n"
+            f"- `update_slide_content` - Update slide content with batch operations\n"
+            f"- `export_presentation` - Export presentations to various formats\n"
+            f"**Calendar Tools:**\n"
+            f"- `list_calendars` - List accessible calendars\n"
+            f"- `get_events` - Get events with time range support\n"
+            f"- `create_event` - Create events with attachments and attendees\n"
+            f"- `modify_event` - Update existing events\n"
+            f"- `delete_event` - Remove events from calendar\n"
+            f"- `get_event` - Get single event details\n"
+            f"**Chat Tools:**\n"
+            f"- `list_spaces` - List Google Chat spaces and direct messages\n"
+            f"- `get_messages` - Retrieve messages from a Chat space\n"
+            f"- `send_message` - Send messages to Chat spaces\n"
+            f"- `search_messages` - Search messages across Chat spaces\n"
+            f"- `send_card_message` - Send rich card messages using Card Framework\n"
+            f"- `send_simple_card` - Send simple cards with title, text, and image\n"
+            f"- `send_interactive_card` - Send cards with interactive buttons\n"
+            f"- `send_form_card` - Send form cards with input fields\n"
+            f"- `send_rich_card` - Send advanced cards with complex layouts\n"
+            f"- `get_card_framework_status` - Check Card Framework availability\n"
+            f"- `get_adapter_system_status` - Check adapter system integration\n"
+            f"- `list_available_card_types` - List supported card types\n"
             f"**Qdrant Tools (Enhanced):**\n"
             f"- `search_tool_history` - Semantic search of historical tool responses\n"
             f"- `get_tool_analytics` - Get comprehensive tool usage analytics\n"
@@ -163,6 +235,22 @@ async def server_info() -> str:
         f"- Upload local files to Google Drive\n"
         f"- Args: user_google_email, filepath, folder_id (optional), filename (optional)\n"
         f"- Example: `upload_file_to_drive('user@gmail.com', '/path/to/file.pdf')`\n\n"
+        f"**`search_drive_files`**\n"
+        f"- Search for files and folders using Google Drive query syntax\n"
+        f"- Args: user_google_email, query, page_size (optional)\n"
+        f"- Example: `search_drive_files('user@gmail.com', 'name contains \"report\"')`\n\n"
+        f"**`get_drive_file_content`**\n"
+        f"- Retrieve content of any Drive file (Docs, Sheets, Office files, etc.)\n"
+        f"- Args: user_google_email, file_id\n"
+        f"- Example: `get_drive_file_content('user@gmail.com', '1234fileId')`\n\n"
+        f"**`list_drive_items`**\n"
+        f"- List files and folders in a Drive directory\n"
+        f"- Args: user_google_email, folder_id (default: 'root'), page_size (optional)\n"
+        f"- Example: `list_drive_items('user@gmail.com', 'root')`\n\n"
+        f"**`create_drive_file`**\n"
+        f"- Create new files directly in Drive from content or URL\n"
+        f"- Args: user_google_email, file_name, content/fileUrl, folder_id (optional)\n"
+        f"- Example: `create_drive_file('user@gmail.com', 'notes.txt', content='My notes')`\n\n"
         f"**📧 Gmail Tools:**\n\n"
         f"**`search_gmail_messages`**\n"
         f"- Search Gmail messages using Gmail query syntax\n"
@@ -180,6 +268,75 @@ async def server_info() -> str:
         f"- Reply to a specific message with proper threading\n"
         f"- Args: user_google_email, message_id, body\n"
         f"- Example: `reply_to_gmail_message('user@gmail.com', '12345', 'Thanks!')`\n\n"
+        f"**📄 Docs Tools:**\n\n"
+        f"**`search_docs`**\n"
+        f"- Search for Google Docs by name\n"
+        f"- Args: user_google_email, query, page_size (optional)\n"
+        f"- Example: `search_docs('user@gmail.com', 'meeting notes')`\n\n"
+        f"**`get_doc_content`**\n"
+        f"- Get content of a Google Doc or Drive file (e.g., .docx)\n"
+        f"- Args: user_google_email, document_id\n"
+        f"- Example: `get_doc_content('user@gmail.com', '1234docId')`\n\n"
+        f"**`list_docs_in_folder`**\n"
+        f"- List Google Docs within a specific folder\n"
+        f"- Args: user_google_email, folder_id (default: 'root'), page_size (optional)\n"
+        f"- Example: `list_docs_in_folder('user@gmail.com', 'folderId')`\n\n"
+        f"**`create_doc`**\n"
+        f"- Create a new Google Doc with optional initial content\n"
+        f"- Args: user_google_email, title, content (optional)\n"
+        f"- Example: `create_doc('user@gmail.com', 'Meeting Notes', 'Agenda: ...')`\n\n"
+        f"**📋 Forms Tools:**\n\n"
+        f"**`create_form`**\n"
+        f"- Create a new Google Form with title and description\n"
+        f"- Args: user_google_email, title, description (optional), document_title (optional)\n"
+        f"- Example: `create_form('user@gmail.com', 'Customer Survey')`\n\n"
+        f"**`add_questions_to_form`**\n"
+        f"- Add questions to an existing form\n"
+        f"- Args: user_google_email, form_id, questions, insert_at_index (optional)\n"
+        f"- Example: `add_questions_to_form('user@gmail.com', 'formId', [{{'type': 'TEXT_QUESTION', 'title': 'Your name?'}}])`\n\n"
+        f"**`get_form`**\n"
+        f"- Get form details including questions and URLs\n"
+        f"- Args: user_google_email, form_id\n"
+        f"- Example: `get_form('user@gmail.com', 'formId')`\n\n"
+        f"**`list_form_responses`**\n"
+        f"- List responses to a form with pagination\n"
+        f"- Args: user_google_email, form_id, page_size (optional), page_token (optional)\n"
+        f"- Example: `list_form_responses('user@gmail.com', 'formId')`\n\n"
+        f"**📊 Slides Tools:**\n\n"
+        f"**`create_presentation`**\n"
+        f"- Create new presentations with slides\n"
+        f"- Args: user_google_email, title, slide_layouts (optional)\n"
+        f"- Example: `create_presentation('user@gmail.com', 'Project Update')`\n\n"
+        f"**`export_presentation`**\n"
+        f"- Export presentations to various formats (PDF, PPTX, etc.)\n"
+        f"- Args: user_google_email, presentation_id, export_format\n"
+        f"- Example: `export_presentation('user@gmail.com', 'presentationId', 'PDF')`\n\n"
+        f"**📅 Calendar Tools:**\n\n"
+        f"**`list_calendars`**\n"
+        f"- List accessible calendars with primary indicator\n"
+        f"- Args: user_google_email\n"
+        f"- Example: `list_calendars('user@gmail.com')`\n\n"
+        f"**`create_event`**\n"
+        f"- Create events with attachments and attendees\n"
+        f"- Args: user_google_email, calendar_id, summary, start_time, end_time, attendees (optional)\n"
+        f"- Example: `create_event('user@gmail.com', 'primary', 'Meeting', '2024-01-01T10:00:00Z', '2024-01-01T11:00:00Z')`\n\n"
+        f"**💬 Chat Tools:**\n\n"
+        f"**`list_spaces`**\n"
+        f"- List Google Chat spaces and direct messages accessible to the user\n"
+        f"- Args: user_google_email, page_size (optional), space_type (optional)\n"
+        f"- Example: `list_spaces('user@gmail.com', space_type='room')`\n\n"
+        f"**`get_messages`**\n"
+        f"- Retrieve messages from a Google Chat space\n"
+        f"- Args: user_google_email, space_id, page_size (optional), order_by (optional)\n"
+        f"- Example: `get_messages('user@gmail.com', 'spaces/AAAA')`\n\n"
+        f"**`send_message`**\n"
+        f"- Send a text message to a Google Chat space\n"
+        f"- Args: user_google_email, space_id, message_text, thread_key (optional)\n"
+        f"- Example: `send_message('user@gmail.com', 'spaces/AAAA', 'Hello team!')`\n\n"
+        f"**`send_rich_card`**\n"
+        f"- Send rich cards with advanced formatting (supports webhook delivery)\n"
+        f"- Args: user_google_email, space_id, title, subtitle, image_url, sections, webhook_url\n"
+        f"- Example: `send_rich_card('user@gmail.com', 'spaces/AAAA', 'Status Update', webhook_url='https://...')`\n\n"
         f"**🔐 Authentication:**\n"
         f"- Uses OAuth 2.0 with PKCE for security\n"
         f"- Multi-user support with session management\n"
@@ -201,7 +358,9 @@ async def server_info() -> str:
         f"- Intelligent response summarization\n\n"
         f"**📝 Supported Features:**\n"
         f"**Drive:** Upload to folders, custom filenames, all file types, progress tracking\n"
-        f"**Gmail:** Search, read, send, draft, reply, labels, threads, batch operations\n\n"
+        f"**Gmail:** Search, read, send, draft, reply, labels, threads, batch operations\n"
+        f"**Docs:** Search, read native Google Docs and Office files, create docs, list in folders\n"
+        f"**Forms:** Create forms, add questions (all types), manage responses, update questions\n\n"
         f"**Server Configuration:**\n"
         f"- Host: {settings.server_host}:{settings.server_port}\n"
         f"- OAuth Callback: {settings.oauth_redirect_uri}\n"

@@ -82,7 +82,8 @@ def request_google_service(
     current_requests = _service_requests_context.get({})
     
     # Generate a unique key for this service request
-    service_key = f"{service_type}_{version or 'default'}"
+    # Use just the service type as the key (middleware expects "drive", not "drive_v3")
+    service_key = service_type
     
     # Store the service request
     service_data = {

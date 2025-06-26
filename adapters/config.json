@@ -1,0 +1,79 @@
+{
+  "api_paths": {
+    "gchat": "gchat",
+    "gmail": "gmail",
+    "gdrive": "gdrive",
+    "gcalendar": "gcalendar",
+    "gdocs": "gdocs",
+    "gsheets": "gsheets",
+    "gslides": "gslides",
+    "gforms": "gforms",
+    "adapters": "adapters"
+  },
+  "card_framework": {
+    "enabled": true,
+    "version": "2.1.0",
+    "fallback_enabled": true
+  },
+  "adapter_system": {
+    "enabled": true,
+    "auto_discovery": true,
+    "cache_adapters": true
+  },
+  "google_workspace": {
+    "services": [
+      {
+        "name": "chat",
+        "module": "gchat.chat_tools",
+        "requires_auth": true,
+        "scopes": ["https://www.googleapis.com/auth/chat.messages"]
+      },
+      {
+        "name": "gmail",
+        "module": "gmail.gmail_tools",
+        "requires_auth": true,
+        "scopes": ["https://www.googleapis.com/auth/gmail.modify"]
+      },
+      {
+        "name": "drive",
+        "module": "gdrive.drive_tools",
+        "requires_auth": true,
+        "scopes": ["https://www.googleapis.com/auth/drive"]
+      },
+      {
+        "name": "calendar",
+        "module": "gcalendar.calendar_tools",
+        "requires_auth": true,
+        "scopes": ["https://www.googleapis.com/auth/calendar"]
+      },
+      {
+        "name": "docs",
+        "module": "gdocs.docs_tools",
+        "requires_auth": true,
+        "scopes": ["https://www.googleapis.com/auth/documents"]
+      },
+      {
+        "name": "sheets",
+        "module": "gsheets.sheets_tools",
+        "requires_auth": true,
+        "scopes": ["https://www.googleapis.com/auth/spreadsheets"]
+      },
+      {
+        "name": "slides",
+        "module": "gslides.slides_tools",
+        "requires_auth": true,
+        "scopes": ["https://www.googleapis.com/auth/presentations"]
+      },
+      {
+        "name": "forms",
+        "module": "gforms.forms_tools",
+        "requires_auth": true,
+        "scopes": ["https://www.googleapis.com/auth/forms"]
+      }
+    ]
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  }
+}
