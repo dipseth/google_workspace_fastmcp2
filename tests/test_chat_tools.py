@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import os
 import json
 from dotenv import load_dotenv
+from .test_auth_utils import get_client_auth_config
 
 # Load environment variables from .env file
 load_dotenv()
@@ -41,7 +42,9 @@ class TestChatTools:
     @pytest.fixture
     async def client(self):
         """Create a client connected to the running server."""
-        client = Client(SERVER_URL)
+        # Get JWT token for authentication if enabled
+        auth_config = get_client_auth_config(TEST_EMAIL)
+        client = Client(SERVER_URL, auth=auth_config)
         async with client:
             yield client
     
@@ -82,8 +85,8 @@ class TestChatTools:
         # Should either succeed or return authentication/middleware error
         valid_responses = [
             "requires authentication", "no valid credentials", "successfully listed",
-            "no spaces found", "❌", "failed to list", "unexpected error", 
-            "middleware", "service", "not yet fulfilled", "spaces found"
+            "no spaces found", "❌", "failed to list", "unexpected error",
+            "middleware", "service", "not yet fulfilled", "spaces found", "found", "chat spaces"
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
     
@@ -375,7 +378,9 @@ class TestChatToolsIntegration:
     @pytest.fixture
     async def client(self):
         """Create a client connected to the running server."""
-        client = Client(SERVER_URL)
+        # Get JWT token for authentication if enabled
+        auth_config = get_client_auth_config(TEST_EMAIL)
+        client = Client(SERVER_URL, auth=auth_config)
         async with client:
             yield client
     

@@ -134,6 +134,32 @@ def get_valid_credentials(user_email: str) -> Optional[Credentials]:
     return credentials
 
 
+def get_all_stored_users() -> list[str]:
+    """Get a list of all users who have stored credentials.
+    
+    Returns:
+        List of user email addresses with stored credentials
+    """
+    try:
+        credentials_dir = Path(settings.credentials_dir)
+        if not credentials_dir.exists():
+            return []
+        
+        users = []
+        for file_path in credentials_dir.glob("*_credentials.json"):
+            # Convert safe filename back to email
+            safe_email = file_path.stem.replace("_credentials", "")
+            email = safe_email.replace("_at_", "@").replace("_", ".")
+            users.append(email)
+        
+        logger.debug(f"Found {len(users)} stored users: {users}")
+        return users
+        
+    except Exception as e:
+        logger.error(f"Error getting stored users: {e}")
+        return []
+
+
 async def initiate_oauth_flow(user_email: str, service_name: str = "Google Drive") -> str:
     """
     Initiate OAuth flow for a user.

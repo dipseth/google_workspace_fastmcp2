@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import os
 import json
 import re
+from .test_auth_utils import get_client_auth_config
 
 
 # Server configuration from environment variables with defaults
@@ -16,7 +17,7 @@ SERVER_PORT = os.getenv("MCP_SERVER_PORT", os.getenv("SERVER_PORT", "8002"))
 SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://{SERVER_HOST}:{SERVER_PORT}/mcp/")
 
 # Test email address from environment variable
-TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_user@example.com")
+TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test@example.com")
 
 # Global variable to store created spreadsheet ID
 _test_spreadsheet_id = None
@@ -28,7 +29,9 @@ class TestSheetsTools:
     @pytest.fixture
     async def client(self):
         """Create a client connected to the running server."""
-        client = Client(SERVER_URL)
+        # Get JWT token for authentication if enabled
+        auth_config = get_client_auth_config(TEST_EMAIL)
+        client = Client(SERVER_URL, auth=auth_config)
         async with client:
             yield client
     
@@ -41,7 +44,8 @@ class TestSheetsTools:
             return _test_spreadsheet_id
             
         # Try to create a test spreadsheet
-        client = Client(SERVER_URL)
+        auth_config = get_client_auth_config(TEST_EMAIL)
+        client = Client(SERVER_URL, auth=auth_config)
         async with client:
             try:
                 result = await client.call_tool("create_spreadsheet", {
@@ -369,7 +373,9 @@ class TestSheetsIntegration:
     @pytest.fixture
     async def client(self):
         """Create a client connected to the running server."""
-        client = Client(SERVER_URL)
+        # Get JWT token for authentication if enabled
+        auth_config = get_client_auth_config(TEST_EMAIL)
+        client = Client(SERVER_URL, auth=auth_config)
         async with client:
             yield client
     

@@ -55,39 +55,44 @@ else:
 
 async def _get_chat_service_with_fallback(user_google_email: str):
     """
-    Get Google Chat service with fallback pattern.
+    Get Google Chat service with fallback to direct creation if middleware injection fails.
     
     Args:
         user_google_email: User's Google email address
         
     Returns:
-        Google Chat service instance or None if unavailable
+        Authenticated Google Chat service instance or None if unavailable
     """
+    # First, try middleware injection
+    service_key = request_service("chat")
+    
     try:
-        # Try to get service from middleware context first
-        service_key = request_service("chat")
+        # Try to get the injected service from middleware
         chat_service = get_injected_service(service_key)
+        logger.info(f"Successfully retrieved injected Chat service for {user_google_email}")
+        return chat_service
         
-        if chat_service:
-            logger.debug(f"[_get_chat_service_with_fallback] Using middleware-injected service for {user_google_email}")
-            return chat_service
+    except RuntimeError as e:
+        if "not yet fulfilled" in str(e).lower() or "service injection" in str(e).lower():
+            # Middleware injection failed, fall back to direct service creation
+            logger.warning(f"Middleware injection unavailable, falling back to direct service creation for {user_google_email}")
             
-        # Fallback to direct service creation
-        logger.info(f"[_get_chat_service_with_fallback] Middleware service not available, creating direct service for {user_google_email}")
-        from auth.service_manager import get_google_service
-        fallback_service = await get_google_service(
-            user_email=user_google_email,
-            service_type="chat",
-            version="v1",
-            scopes=["https://www.googleapis.com/auth/chat.messages",
-                   "https://www.googleapis.com/auth/chat.messages.create",
-                   "https://www.googleapis.com/auth/chat.spaces.readonly",
-                   "https://www.googleapis.com/auth/chat.spaces"]
-        )
-        return fallback_service
-        
+            try:
+                # Use the same helper function pattern as Gmail
+                chat_service = await get_service("chat", user_google_email)
+                logger.info(f"Successfully created Chat service directly for {user_google_email}")
+                return chat_service
+                
+            except Exception as direct_error:
+                logger.error(f"Direct Chat service creation failed for {user_google_email}: {direct_error}")
+                return None
+        else:
+            # Different type of RuntimeError, log and return None
+            logger.error(f"Chat service injection error for {user_google_email}: {e}")
+            return None
+            
     except Exception as e:
-        logger.error(f"[_get_chat_service_with_fallback] Failed to get Chat service for {user_google_email}: {e}")
+        logger.error(f"Unexpected error getting Chat service for {user_google_email}: {e}")
         return None
 
 

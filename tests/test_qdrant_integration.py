@@ -7,6 +7,7 @@ from fastmcp import Client
 from typing import Any, Dict, List
 import os
 import time
+from .test_auth_utils import get_client_auth_config
 
 
 # Server configuration from environment variables with defaults
@@ -15,6 +16,9 @@ SERVER_PORT = os.getenv("MCP_SERVER_PORT", os.getenv("SERVER_PORT", "8002"))
 SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://{SERVER_HOST}:{SERVER_PORT}/mcp/")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 
+# Test email address from environment variable
+TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_user@example.com")
+
 
 class TestQdrantStorageIntegration:
     """Test Qdrant storage and retrieval functionality."""
@@ -22,7 +26,9 @@ class TestQdrantStorageIntegration:
     @pytest.fixture
     async def client(self):
         """Create a client connected to the running server."""
-        client = Client(SERVER_URL)
+        # Get JWT token for authentication if enabled
+        auth_config = get_client_auth_config(TEST_EMAIL)
+        client = Client(SERVER_URL, auth=auth_config)
         async with client:
             yield client
     
@@ -143,7 +149,9 @@ class TestQdrantSemanticSearch:
     @pytest.fixture
     async def client(self):
         """Create a client connected to the running server."""
-        client = Client(SERVER_URL)
+        # Get JWT token for authentication if enabled
+        auth_config = get_client_auth_config(TEST_EMAIL)
+        client = Client(SERVER_URL, auth=auth_config)
         async with client:
             yield client
     
@@ -198,7 +206,9 @@ class TestQdrantErrorHandling:
     @pytest.fixture
     async def client(self):
         """Create a client connected to the running server."""
-        client = Client(SERVER_URL)
+        # Get JWT token for authentication if enabled
+        auth_config = get_client_auth_config(TEST_EMAIL)
+        client = Client(SERVER_URL, auth=auth_config)
         async with client:
             yield client
     

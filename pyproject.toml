@@ -19,7 +19,8 @@ dependencies = [
     "python-card-framework>=2.2.5",
     "qdrant-client>=1.7.0",
     "sentence-transformers>=2.2.0",
-    "numpy>=1.24.0"
+    "numpy>=1.24.0",
+    "PyJWT>=2.8.0"
 ]
 
 [project.optional-dependencies]

@@ -11,7 +11,7 @@ from typing import List, Optional, Any
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
 
-from auth.service_helpers import request_service, get_injected_service
+from auth.service_helpers import request_service, get_injected_service, get_service
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -89,17 +89,33 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         try:
             # Get Drive service (spreadsheets are stored in Drive)
             drive_service_key = request_service("drive")
-            drive_service = get_injected_service(drive_service_key)
             
-            if not drive_service:
-                # Fallback to direct service creation
-                from auth.service_manager import get_google_service
-                drive_service = await get_google_service(
-                    user_email=user_google_email,
-                    service_type="drive",
-                    version="v3",
-                    scopes=["https://www.googleapis.com/auth/drive.readonly"]
-                )
+            try:
+                # Try to get the injected service from middleware
+                drive_service = get_injected_service(drive_service_key)
+                logger.info(f"Successfully retrieved injected Drive service for {user_google_email}")
+                
+            except RuntimeError as e:
+                if "not yet fulfilled" in str(e).lower() or "service injection" in str(e).lower():
+                    # Middleware injection failed, fall back to direct service creation
+                    logger.warning(f"Middleware injection unavailable, falling back to direct service creation for {user_google_email}")
+                    
+                    try:
+                        # Use the same helper function pattern as Gmail
+                        drive_service = await get_service("drive", user_google_email)
+                        logger.info(f"Successfully created Drive service directly for {user_google_email}")
+                        
+                    except Exception as direct_error:
+                        logger.error(f"Direct Drive service creation failed for {user_google_email}: {direct_error}")
+                        return f"❌ Failed to create Google Drive service for {user_google_email}. Please check your credentials and permissions."
+                else:
+                    # Different type of RuntimeError, log and fail
+                    logger.error(f"Drive service injection error for {user_google_email}: {e}")
+                    return f"❌ Drive service injection error for {user_google_email}: {e}"
+                    
+            except Exception as e:
+                logger.error(f"Unexpected error getting Drive service for {user_google_email}: {e}")
+                return f"❌ Unexpected error getting Drive service for {user_google_email}: {e}"
 
             files_response = await asyncio.to_thread(
                 drive_service.files()

@@ -10,6 +10,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 from config.settings import settings
 from auth.middleware import AuthMiddleware
+from auth.jwt_auth import setup_jwt_auth, create_test_tokens
 from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
 from drive.drive_tools import setup_drive_comprehensive_tools
 from gmail.gmail_tools import setup_gmail_tools
@@ -18,8 +19,12 @@ from forms.forms_tools import setup_forms_tools
 from slides.slides_tools import setup_slides_tools
 from gcalendar.calendar_tools import setup_calendar_tools
 from gchat.chat_tools import setup_chat_tools
+from gchat.jwt_chat_tools import setup_jwt_chat_tools
 from sheets.sheets_tools import setup_sheets_tools
 from middleware.qdrant_wrapper import QdrantMiddlewareWrapper
+from resources.user_resources import setup_user_resources
+from resources.tool_output_resources import setup_tool_output_resources
+from tools.enhanced_tools import setup_enhanced_tools
 
 # Configure logging
 logging.basicConfig(
@@ -28,10 +33,38 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create FastMCP2 instance
+# Conditional JWT authentication - disable for testing
+enable_jwt_auth = os.getenv("ENABLE_JWT_AUTH", "true").lower() == "true"
+
+if enable_jwt_auth:
+    # Setup JWT Bearer Token authentication
+    jwt_auth_provider = setup_jwt_auth()
+    logger.info("🔐 JWT Bearer Token authentication enabled")
+    
+    # Generate test tokens for development
+    logger.info("🎫 Generating test JWT tokens...")
+    test_tokens = create_test_tokens()
+    for email, token in test_tokens.items():
+        logger.info(f"Test token for {email}: {token[:30]}...")
+    
+    # Save test tokens to file for tests to use
+    import json
+    test_tokens_file = "test_tokens.json"
+    try:
+        with open(test_tokens_file, "w") as f:
+            json.dump(test_tokens, f, indent=2)
+        logger.info(f"💾 Test tokens saved to {test_tokens_file}")
+    except Exception as e:
+        logger.error(f"❌ Failed to save test tokens: {e}")
+else:
+    jwt_auth_provider = None
+    logger.info("⚠️ JWT authentication DISABLED (for testing)")
+
+# Create FastMCP2 instance with conditional authentication
 mcp = FastMCP(
     name=settings.server_name,
-    version="1.0.0"
+    version="1.0.0",
+    auth=jwt_auth_provider
 )
 
 # Add authentication middleware
@@ -67,11 +100,23 @@ setup_calendar_tools(mcp)
 # Register Google Chat tools
 setup_chat_tools(mcp)
 
+# Register JWT-enhanced Chat tools (demonstration)
+setup_jwt_chat_tools(mcp)
+
 # Register Google Sheets tools
 setup_sheets_tools(mcp)
 
 # Setup OAuth callback handler
 setup_oauth_callback_handler(mcp)
+
+# Setup user and authentication resources
+setup_user_resources(mcp)
+
+# Setup tool output resources (cached outputs and Qdrant integration)
+setup_tool_output_resources(mcp)
+
+# Setup enhanced tools that use resource templating
+setup_enhanced_tools(mcp)
 
 # Register Qdrant tools if middleware is available
 try:
@@ -139,6 +184,11 @@ async def health_check() -> str:
             f"**Active Sessions:** {active_sessions}\n"
             f"**Log Level:** {settings.log_level}\n\n"
             f"**Available Tools:**\n"
+            f"**🆕 Enhanced Tools (Resource Templating):**\n"
+            f"- `list_my_drive_files` - List Drive files (no email param needed!)\n"
+            f"- `search_my_gmail` - Search Gmail messages (auto-authenticated)\n"
+            f"- `create_my_calendar_event` - Create calendar events (seamless auth)\n"
+            f"- `get_my_auth_status` - Check authentication status\n"
             f"**Drive Tools:**\n"
             f"- `upload_file_to_drive` - Upload local files to Google Drive\n"
             f"- `search_drive_files` - Search for files and folders in Drive\n"
@@ -205,6 +255,18 @@ async def health_check() -> str:
             f"- `start_google_auth` - Initiate OAuth authentication\n"
             f"- `check_drive_auth` - Check authentication status\n"
             f"- `health_check` - This health check\n\n"
+            f"**🌟 Available Resources (NEW!):**\n"
+            f"**User Resources:**\n"
+            f"- `user://current/email` - Current user's email address\n"
+            f"- `user://current/profile` - User profile with auth status\n"
+            f"- `user://profile/{{email}}` - Profile for specific user\n"
+            f"- `template://user_email` - Simple email template\n"
+            f"**Auth Resources:**\n"
+            f"- `auth://session/current` - Current session info\n"
+            f"- `auth://sessions/list` - List active sessions\n"
+            f"- `auth://credentials/{{email}}/status` - Credential status\n"
+            f"**Service Resources:**\n"
+            f"- `google://services/scopes/{{service}}` - Service scope info\n\n"
             f"**OAuth Callback URL:** {settings.oauth_redirect_uri}"
         )
         

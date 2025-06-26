@@ -1,0 +1,771 @@
+"""Resources that expose cached tool outputs for FastMCP2 Google Workspace Platform.
+
+This module provides resources that cache and expose the outputs of various tools,
+making frequently accessed data available as resources for better performance.
+"""
+
+import logging
+import asyncio
+from typing import Dict, Any, Optional
+from datetime import datetime, timedelta
+import json
+
+from fastmcp import FastMCP, Context
+from resources.user_resources import get_current_user_email_simple
+from auth.context import request_google_service, get_injected_service
+
+logger = logging.getLogger(__name__)
+
+# Simple cache for tool outputs with TTL
+_tool_output_cache: Dict[str, Dict[str, Any]] = {}
+_cache_ttl_minutes = 5  # Cache for 5 minutes
+
+
+def _get_cache_key(user_email: str, tool_name: str, **params) -> str:
+    """Generate a cache key for tool output."""
+    param_str = "_".join(f"{k}_{v}" for k, v in sorted(params.items()))
+    return f"{user_email}_{tool_name}_{param_str}"
+
+
+def _is_cache_valid(cache_entry: Dict[str, Any]) -> bool:
+    """Check if a cache entry is still valid."""
+    if "timestamp" not in cache_entry:
+        return False
+    
+    cached_time = datetime.fromisoformat(cache_entry["timestamp"])
+    return datetime.now() - cached_time < timedelta(minutes=_cache_ttl_minutes)
+
+
+def _cache_tool_output(cache_key: str, output: Any) -> None:
+    """Cache tool output with timestamp."""
+    _tool_output_cache[cache_key] = {
+        "output": output,
+        "timestamp": datetime.now().isoformat(),
+        "ttl_minutes": _cache_ttl_minutes
+    }
+
+
+def _get_cached_output(cache_key: str) -> Optional[Any]:
+    """Get cached output if valid."""
+    if cache_key not in _tool_output_cache:
+        return None
+    
+    cache_entry = _tool_output_cache[cache_key]
+    if not _is_cache_valid(cache_entry):
+        del _tool_output_cache[cache_key]
+        return None
+    
+    return cache_entry["output"]
+
+
+def setup_tool_output_resources(mcp: FastMCP) -> None:
+    """Setup resources that expose cached tool outputs."""
+    
+    @mcp.resource("spaces://list")
+    async def get_chat_spaces_list(ctx: Context) -> dict:
+        """Get cached list of Google Chat spaces for the current user.
+        
+        This resource caches the output of list_spaces tool for better performance.
+        """
+        try:
+            user_email = get_current_user_email_simple()
+            cache_key = _get_cache_key(user_email, "list_spaces")
+            
+            # Check cache first
+            cached_result = _get_cached_output(cache_key)
+            if cached_result:
+                return {
+                    "cached": True,
+                    "user_email": user_email,
+                    "data": cached_result,
+                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
+                    "ttl_minutes": _cache_ttl_minutes
+                }
+            
+            # Cache miss - fetch fresh data
+            chat_key = request_google_service("chat", ["chat_read"])
+            chat_service = get_injected_service(chat_key)
+            
+            # Call the Chat API
+            results = chat_service.spaces().list(pageSize=100).execute()
+            spaces = results.get('spaces', [])
+            
+            # Format the output similar to list_spaces tool
+            formatted_spaces = []
+            for space in spaces:
+                space_info = {
+                    'name': space.get('name', ''),
+                    'displayName': space.get('displayName', 'Unnamed Space'),
+                    'type': space.get('type', 'UNKNOWN'),
+                    'spaceType': space.get('spaceType', 'UNKNOWN'),
+                    'memberCount': len(space.get('spaceDetails', {}).get('members', [])),
+                    'threaded': space.get('spaceDetails', {}).get('guidelines', {}).get('threaded', False)
+                }
+                formatted_spaces.append(space_info)
+            
+            output_data = {
+                "user_email": user_email,
+                "total_spaces": len(formatted_spaces),
+                "spaces": formatted_spaces,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Cache the result
+            _cache_tool_output(cache_key, output_data)
+            
+            return {
+                "cached": False,
+                "user_email": user_email,
+                "data": output_data,
+                "cache_timestamp": datetime.now().isoformat(),
+                "ttl_minutes": _cache_ttl_minutes
+            }
+            
+        except ValueError as e:
+            return {
+                "error": f"Authentication error: {str(e)}",
+                "cached": False,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error fetching chat spaces: {e}")
+            return {
+                "error": f"Failed to fetch chat spaces: {str(e)}",
+                "cached": False,
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource("drive://files/recent")
+    async def get_recent_drive_files(ctx: Context) -> dict:
+        """Get cached list of recent Google Drive files for the current user.
+        
+        This resource caches recent drive files for quick access.
+        """
+        try:
+            user_email = get_current_user_email_simple()
+            cache_key = _get_cache_key(user_email, "recent_drive_files")
+            
+            # Check cache first
+            cached_result = _get_cached_output(cache_key)
+            if cached_result:
+                return {
+                    "cached": True,
+                    "user_email": user_email,
+                    "data": cached_result,
+                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
+                    "ttl_minutes": _cache_ttl_minutes
+                }
+            
+            # Cache miss - fetch fresh data
+            drive_key = request_google_service("drive", ["drive_read"])
+            drive_service = get_injected_service(drive_key)
+            
+            # Get recent files (modified in last 30 days)
+            results = drive_service.files().list(
+                q="modifiedTime > '2025-01-01T00:00:00Z'",
+                pageSize=25,
+                orderBy="modifiedTime desc",
+                fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink, owners)"
+            ).execute()
+            
+            files = results.get('files', [])
+            
+            output_data = {
+                "user_email": user_email,
+                "total_files": len(files),
+                "files": files,
+                "query": "Recent files (last 30 days)",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Cache the result
+            _cache_tool_output(cache_key, output_data)
+            
+            return {
+                "cached": False,
+                "user_email": user_email,
+                "data": output_data,
+                "cache_timestamp": datetime.now().isoformat(),
+                "ttl_minutes": _cache_ttl_minutes
+            }
+            
+        except ValueError as e:
+            return {
+                "error": f"Authentication error: {str(e)}",
+                "cached": False,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error fetching recent drive files: {e}")
+            return {
+                "error": f"Failed to fetch recent drive files: {str(e)}",
+                "cached": False,
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource("gmail://messages/recent")
+    async def get_recent_gmail_messages(ctx: Context) -> dict:
+        """Get cached list of recent Gmail messages for the current user.
+        
+        This resource caches recent Gmail messages for quick access.
+        """
+        try:
+            user_email = get_current_user_email_simple()
+            cache_key = _get_cache_key(user_email, "recent_gmail_messages")
+            
+            # Check cache first
+            cached_result = _get_cached_output(cache_key)
+            if cached_result:
+                return {
+                    "cached": True,
+                    "user_email": user_email,
+                    "data": cached_result,
+                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
+                    "ttl_minutes": _cache_ttl_minutes
+                }
+            
+            # Cache miss - fetch fresh data
+            gmail_key = request_google_service("gmail", ["gmail_read"])
+            gmail_service = get_injected_service(gmail_key)
+            
+            # Get recent messages
+            results = gmail_service.users().messages().list(
+                userId='me',
+                q='newer_than:7d',  # Last 7 days
+                maxResults=10
+            ).execute()
+            
+            messages = results.get('messages', [])
+            
+            # Get message details
+            detailed_messages = []
+            for msg in messages[:10]:  # Limit to 10 for performance
+                try:
+                    message = gmail_service.users().messages().get(
+                        userId='me',
+                        id=msg['id'],
+                        format='metadata',
+                        metadataHeaders=['From', 'Subject', 'Date']
+                    ).execute()
+                    
+                    # Extract headers
+                    headers = message.get('payload', {}).get('headers', [])
+                    msg_data = {
+                        'id': message['id'],
+                        'thread_id': message['threadId'],
+                        'snippet': message.get('snippet', ''),
+                    }
+                    
+                    # Parse headers
+                    for header in headers:
+                        name = header['name'].lower()
+                        if name in ['from', 'subject', 'date']:
+                            msg_data[name] = header['value']
+                    
+                    detailed_messages.append(msg_data)
+                    
+                except Exception as e:
+                    logger.warning(f"Error getting message details for {msg['id']}: {e}")
+            
+            output_data = {
+                "user_email": user_email,
+                "total_messages": len(detailed_messages),
+                "messages": detailed_messages,
+                "query": "Recent messages (last 7 days)",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Cache the result
+            _cache_tool_output(cache_key, output_data)
+            
+            return {
+                "cached": False,
+                "user_email": user_email,
+                "data": output_data,
+                "cache_timestamp": datetime.now().isoformat(),
+                "ttl_minutes": _cache_ttl_minutes
+            }
+            
+        except ValueError as e:
+            return {
+                "error": f"Authentication error: {str(e)}",
+                "cached": False,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error fetching recent Gmail messages: {e}")
+            return {
+                "error": f"Failed to fetch recent Gmail messages: {str(e)}",
+                "cached": False,
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource("calendar://events/today")
+    async def get_todays_calendar_events(ctx: Context) -> dict:
+        """Get cached list of today's calendar events for the current user.
+        
+        This resource caches today's calendar events for quick access.
+        """
+        try:
+            user_email = get_current_user_email_simple()
+            cache_key = _get_cache_key(user_email, "todays_events")
+            
+            # Check cache first
+            cached_result = _get_cached_output(cache_key)
+            if cached_result:
+                return {
+                    "cached": True,
+                    "user_email": user_email,
+                    "data": cached_result,
+                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
+                    "ttl_minutes": _cache_ttl_minutes
+                }
+            
+            # Cache miss - fetch fresh data
+            calendar_key = request_google_service("calendar", ["calendar_events"])
+            calendar_service = get_injected_service(calendar_key)
+            
+            # Get today's events
+            from datetime import datetime, timezone
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            today_end = today_start.replace(hour=23, minute=59, second=59)
+            
+            events_result = calendar_service.events().list(
+                calendarId='primary',
+                timeMin=today_start.isoformat(),
+                timeMax=today_end.isoformat(),
+                singleEvents=True,
+                orderBy='startTime',
+                maxResults=50
+            ).execute()
+            
+            events = events_result.get('items', [])
+            
+            # Format events
+            formatted_events = []
+            for event in events:
+                event_info = {
+                    'id': event.get('id'),
+                    'summary': event.get('summary', 'No Title'),
+                    'start': event.get('start', {}),
+                    'end': event.get('end', {}),
+                    'description': event.get('description', ''),
+                    'location': event.get('location', ''),
+                    'attendees': [a.get('email') for a in event.get('attendees', [])],
+                    'htmlLink': event.get('htmlLink')
+                }
+                formatted_events.append(event_info)
+            
+            output_data = {
+                "user_email": user_email,
+                "total_events": len(formatted_events),
+                "events": formatted_events,
+                "date": today_start.strftime("%Y-%m-%d"),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Cache the result
+            _cache_tool_output(cache_key, output_data)
+            
+            return {
+                "cached": False,
+                "user_email": user_email,
+                "data": output_data,
+                "cache_timestamp": datetime.now().isoformat(),
+                "ttl_minutes": _cache_ttl_minutes
+            }
+            
+        except ValueError as e:
+            return {
+                "error": f"Authentication error: {str(e)}",
+                "cached": False,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error fetching today's calendar events: {e}")
+            return {
+                "error": f"Failed to fetch today's calendar events: {str(e)}",
+                "cached": False,
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource("cache://status")
+    async def get_cache_status(ctx: Context) -> dict:
+        """Get the current status of the tool output cache.
+        
+        This resource provides information about cached tool outputs and their freshness.
+        """
+        try:
+            user_email = get_current_user_email_simple()
+            
+            # Analyze cache entries
+            cache_info = []
+            total_entries = 0
+            valid_entries = 0
+            
+            for cache_key, cache_entry in _tool_output_cache.items():
+                total_entries += 1
+                is_valid = _is_cache_valid(cache_entry)
+                if is_valid:
+                    valid_entries += 1
+                
+                # Extract user email and tool name from cache key
+                parts = cache_key.split('_', 2)
+                if len(parts) >= 2:
+                    key_user_email = parts[0] + '@' + parts[1].split('@')[0] if '@' in parts[1] else 'unknown'
+                    tool_name = parts[2] if len(parts) > 2 else 'unknown'
+                else:
+                    key_user_email = 'unknown'
+                    tool_name = 'unknown'
+                
+                cache_info.append({
+                    "cache_key": cache_key,
+                    "user_email": key_user_email,
+                    "tool_name": tool_name,
+                    "timestamp": cache_entry.get("timestamp", "unknown"),
+                    "valid": is_valid,
+                    "ttl_minutes": cache_entry.get("ttl_minutes", _cache_ttl_minutes)
+                })
+            
+            return {
+                "user_email": user_email,
+                "total_cache_entries": total_entries,
+                "valid_cache_entries": valid_entries,
+                "expired_cache_entries": total_entries - valid_entries,
+                "default_ttl_minutes": _cache_ttl_minutes,
+                "cache_entries": cache_info,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except ValueError as e:
+            return {
+                "error": f"Authentication error: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error getting cache status: {e}")
+            return {
+                "error": f"Failed to get cache status: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource("cache://clear")
+    async def clear_cache(ctx: Context) -> dict:
+        """Clear the tool output cache for the current user.
+        
+        This resource allows clearing cached data to force fresh API calls.
+        """
+        try:
+            user_email = get_current_user_email_simple()
+            
+            # Count entries before clearing
+            entries_before = len(_tool_output_cache)
+            
+            # Clear cache entries for this user
+            keys_to_remove = []
+            for cache_key in _tool_output_cache.keys():
+                if cache_key.startswith(user_email.replace('@', '_at_')):
+                    keys_to_remove.append(cache_key)
+            
+            for key in keys_to_remove:
+                del _tool_output_cache[key]
+            
+            entries_after = len(_tool_output_cache)
+            entries_cleared = entries_before - entries_after
+            
+            return {
+                "user_email": user_email,
+                "entries_cleared": entries_cleared,
+                "entries_before": entries_before,
+                "entries_after": entries_after,
+                "timestamp": datetime.now().isoformat(),
+                "status": "Cache cleared successfully"
+            }
+            
+        except ValueError as e:
+            return {
+                "error": f"Authentication error: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error clearing cache: {e}")
+            return {
+                "error": f"Failed to clear cache: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource("qdrant://collection/info")
+    async def get_qdrant_collection_info(ctx: Context) -> dict:
+        """Get information about the Qdrant collection used for storing tool responses.
+        
+        This resource provides metadata about the Qdrant vector database collection.
+        """
+        try:
+            # Import Qdrant middleware to access collection info
+            from middleware.qdrant_enhanced import QdrantEnhancedMiddleware, QdrantConfig
+            
+            # Try to get collection info
+            config = QdrantConfig.from_file()
+            
+            # Create a temporary middleware instance to access collection info
+            middleware = QdrantEnhancedMiddleware()
+            await middleware._ensure_initialized()
+            
+            if not middleware.client:
+                return {
+                    "error": "Qdrant not available",
+                    "qdrant_enabled": False,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Get collection information
+            try:
+                collections = await asyncio.to_thread(middleware.client.get_collections)
+                collection_names = [c.name for c in collections.collections]
+                
+                collection_info = None
+                if middleware.collection_name in collection_names:
+                    collection_info = await asyncio.to_thread(
+                        middleware.client.get_collection,
+                        middleware.collection_name
+                    )
+                
+                return {
+                    "qdrant_enabled": True,
+                    "qdrant_url": middleware.connection_manager.discovered_url,
+                    "collection_name": middleware.collection_name,
+                    "collection_exists": middleware.collection_name in collection_names,
+                    "total_collections": len(collection_names),
+                    "all_collections": collection_names,
+                    "collection_info": {
+                        "vectors_count": collection_info.vectors_count if collection_info else 0,
+                        "indexed_vectors_count": collection_info.indexed_vectors_count if collection_info else 0,
+                        "points_count": collection_info.points_count if collection_info else 0,
+                        "segments_count": collection_info.segments_count if collection_info else 0,
+                        "status": str(collection_info.status) if collection_info else "unknown"
+                    } if collection_info else None,
+                    "config": {
+                        "host": config.host,
+                        "ports": config.ports,
+                        "collection_name": config.collection_name,
+                        "vector_size": config.vector_size,
+                        "enabled": config.enabled
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+            except Exception as e:
+                logger.error(f"Error getting Qdrant collection info: {e}")
+                return {
+                    "error": f"Failed to get collection info: {str(e)}",
+                    "qdrant_enabled": True,
+                    "qdrant_url": getattr(middleware.connection_manager, 'discovered_url', 'unknown'),
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+        except Exception as e:
+            logger.error(f"Error accessing Qdrant: {e}")
+            return {
+                "error": f"Qdrant access error: {str(e)}",
+                "qdrant_enabled": False,
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource("qdrant://collection/responses/recent")
+    async def get_qdrant_stored_responses(ctx: Context) -> dict:
+        """Get recent tool responses stored in Qdrant collection.
+        
+        This resource provides access to the tool responses stored in the vector database.
+        """
+        try:
+            user_email = get_current_user_email_simple()
+            
+            # Import Qdrant middleware
+            from middleware.qdrant_enhanced import QdrantEnhancedMiddleware
+            
+            # Create middleware instance to access stored data
+            middleware = QdrantEnhancedMiddleware()
+            await middleware._ensure_initialized()
+            
+            if not middleware.client:
+                return {
+                    "error": "Qdrant not available",
+                    "user_email": user_email,
+                    "qdrant_enabled": False,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Search for recent responses (last 50)
+            try:
+                # Get all points with metadata
+                search_result = await asyncio.to_thread(
+                    middleware.client.scroll,
+                    collection_name=middleware.collection_name,
+                    limit=50,
+                    with_payload=True,
+                    with_vectors=False  # Don't need vectors, just metadata
+                )
+                
+                points = search_result[0] if search_result else []
+                
+                # Filter and format responses
+                user_responses = []
+                all_responses = []
+                
+                for point in points:
+                    payload = point.payload or {}
+                    
+                    response_data = {
+                        "id": str(point.id),
+                        "tool_name": payload.get("tool_name", "unknown"),
+                        "user_email": payload.get("user_email", "unknown"),
+                        "timestamp": payload.get("timestamp", "unknown"),
+                        "response_size": len(str(payload.get("response", ""))),
+                        "session_id": payload.get("session_id", "unknown"),
+                        "payload_type": payload.get("payload_type", "unknown"),
+                        "has_error": "error" in payload.get("response", {}) if isinstance(payload.get("response"), dict) else False
+                    }
+                    
+                    all_responses.append(response_data)
+                    
+                    # Filter for current user
+                    if payload.get("user_email") == user_email:
+                        user_responses.append(response_data)
+                
+                # Sort by timestamp (most recent first)
+                user_responses.sort(key=lambda x: x["timestamp"], reverse=True)
+                all_responses.sort(key=lambda x: x["timestamp"], reverse=True)
+                
+                return {
+                    "user_email": user_email,
+                    "qdrant_enabled": True,
+                    "collection_name": middleware.collection_name,
+                    "total_responses": len(all_responses),
+                    "user_responses_count": len(user_responses),
+                    "user_responses": user_responses[:20],  # Last 20 for current user
+                    "recent_all_responses": all_responses[:10],  # Last 10 from all users
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+            except Exception as e:
+                logger.error(f"Error querying Qdrant responses: {e}")
+                return {
+                    "error": f"Failed to query responses: {str(e)}",
+                    "user_email": user_email,
+                    "qdrant_enabled": True,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+        except ValueError as e:
+            return {
+                "error": f"Authentication error: {str(e)}",
+                "qdrant_enabled": True,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error accessing Qdrant responses: {e}")
+            return {
+                "error": f"Qdrant access error: {str(e)}",
+                "qdrant_enabled": False,
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource("qdrant://search/{query}")
+    async def search_qdrant_responses(query: str, ctx: Context) -> dict:
+        """Search tool responses stored in Qdrant using semantic search.
+        
+        Args:
+            query: Search query to find semantically similar tool responses
+        """
+        try:
+            user_email = get_current_user_email_simple()
+            
+            # Import Qdrant middleware
+            from middleware.qdrant_enhanced import QdrantEnhancedMiddleware
+            
+            # Create middleware instance for search
+            middleware = QdrantEnhancedMiddleware()
+            await middleware._ensure_initialized()
+            
+            if not middleware.client or not middleware.model:
+                return {
+                    "error": "Qdrant or embedding model not available",
+                    "user_email": user_email,
+                    "query": query,
+                    "qdrant_enabled": False,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Perform semantic search
+            try:
+                # Generate embedding for the query
+                query_embedding = await asyncio.to_thread(
+                    middleware.model.encode,
+                    query
+                )
+                
+                # Search in Qdrant
+                search_results = await asyncio.to_thread(
+                    middleware.client.search,
+                    collection_name=middleware.collection_name,
+                    query_vector=query_embedding.tolist(),
+                    limit=10,
+                    with_payload=True,
+                    score_threshold=0.3  # Only return reasonably similar results
+                )
+                
+                # Format search results
+                formatted_results = []
+                for result in search_results:
+                    payload = result.payload or {}
+                    
+                    result_data = {
+                        "id": str(result.id),
+                        "score": result.score,
+                        "tool_name": payload.get("tool_name", "unknown"),
+                        "user_email": payload.get("user_email", "unknown"),
+                        "timestamp": payload.get("timestamp", "unknown"),
+                        "session_id": payload.get("session_id", "unknown"),
+                        "response_preview": str(payload.get("response", ""))[:200] + "..." if len(str(payload.get("response", ""))) > 200 else str(payload.get("response", "")),
+                        "payload_type": payload.get("payload_type", "unknown")
+                    }
+                    
+                    formatted_results.append(result_data)
+                
+                return {
+                    "user_email": user_email,
+                    "query": query,
+                    "qdrant_enabled": True,
+                    "collection_name": middleware.collection_name,
+                    "total_results": len(formatted_results),
+                    "results": formatted_results,
+                    "search_timestamp": datetime.now().isoformat()
+                }
+                
+            except Exception as e:
+                logger.error(f"Error performing Qdrant search: {e}")
+                return {
+                    "error": f"Search failed: {str(e)}",
+                    "user_email": user_email,
+                    "query": query,
+                    "qdrant_enabled": True,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+        except ValueError as e:
+            return {
+                "error": f"Authentication error: {str(e)}",
+                "query": query,
+                "qdrant_enabled": True,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error accessing Qdrant for search: {e}")
+            return {
+                "error": f"Qdrant search error: {str(e)}",
+                "query": query,
+                "qdrant_enabled": False,
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    logger.info("✅ Tool output resources registered with caching and Qdrant integration")
