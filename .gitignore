@@ -63,3 +63,4 @@ htmlcov/
 /*.md
 !/README.md
 test_tokens.json
+test_downloads/** 

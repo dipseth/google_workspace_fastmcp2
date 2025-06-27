@@ -327,7 +327,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 },
                 "slides_tools": {
                     "description": "Google Slides presentation tools",
-                    "tool_count": 5,
+                    "tool_count": 6,
                     "requires_email": True
                 },
                 "sheets_tools": {
