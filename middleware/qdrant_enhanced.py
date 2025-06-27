@@ -16,13 +16,27 @@ from pathlib import Path
 # from qdrant_client.models import Distance, VectorParams, PointStruct
 # Import SentenceTransformer only when needed to avoid 3.85s blocking import
 # from sentence_transformers import SentenceTransformer
-import numpy as np
+# import numpy as np  # Moved to lazy import below
 
 logger = logging.getLogger(__name__)
 
 # Global variables for lazy-loaded imports
 _qdrant_client = None
 _qdrant_models = None
+_numpy = None
+
+def _get_numpy():
+    """Lazy load numpy to avoid import errors during server startup."""
+    global _numpy
+    if _numpy is None:
+        try:
+            import numpy as np
+            _numpy = np
+            logger.debug("📦 NumPy loaded successfully")
+        except ImportError as e:
+            logger.warning(f"⚠️ NumPy not available: {e}")
+            _numpy = False
+    return _numpy if _numpy is not False else None
 
 def _get_qdrant_imports():
     """Lazy load Qdrant imports when first needed."""

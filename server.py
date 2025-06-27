@@ -9,8 +9,11 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from config.settings import settings
-from auth.middleware import AuthMiddleware
-from auth.jwt_auth import setup_jwt_auth, create_test_tokens
+from auth.middleware import AuthMiddleware, CredentialStorageMode
+from auth.mcp_auth_middleware import MCPAuthMiddleware
+from auth.google_oauth_auth import setup_google_oauth_auth, get_google_oauth_metadata
+from auth.jwt_auth import setup_jwt_auth, create_test_tokens  # Keep for fallback
+from auth.fastmcp_oauth_endpoints import setup_oauth_endpoints_fastmcp
 from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
 from drive.drive_tools import setup_drive_comprehensive_tools
 from gmail.gmail_tools import setup_gmail_tools
@@ -33,42 +36,36 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Conditional JWT authentication - disable for testing
-enable_jwt_auth = os.getenv("ENABLE_JWT_AUTH", "true").lower() == "true"
+# Authentication setup - choose between Google OAuth and custom JWT
+use_google_oauth = os.getenv("USE_GOOGLE_OAUTH", "true").lower() == "true"
+enable_jwt_auth = os.getenv("ENABLE_JWT_AUTH", "false").lower() == "true"
 
-if enable_jwt_auth:
-    # Setup JWT Bearer Token authentication
-    jwt_auth_provider = setup_jwt_auth()
-    logger.info("🔐 JWT Bearer Token authentication enabled")
-    
-    # Generate test tokens for development
-    logger.info("🎫 Generating test JWT tokens...")
-    test_tokens = create_test_tokens()
-    for email, token in test_tokens.items():
-        logger.info(f"Test token for {email}: {token[:30]}...")
-    
-    # Save test tokens to file for tests to use
-    import json
-    test_tokens_file = "test_tokens.json"
-    try:
-        with open(test_tokens_file, "w") as f:
-            json.dump(test_tokens, f, indent=2)
-        logger.info(f"💾 Test tokens saved to {test_tokens_file}")
-    except Exception as e:
-        logger.error(f"❌ Failed to save test tokens: {e}")
-else:
-    jwt_auth_provider = None
-    logger.info("⚠️ JWT authentication DISABLED (for testing)")
+# Credential storage configuration
+storage_mode_str = settings.credential_storage_mode.upper()
+try:
+    credential_storage_mode = CredentialStorageMode[storage_mode_str]
+    logger.info(f"🔐 Credential storage mode: {credential_storage_mode.value}")
+except KeyError:
+    logger.warning(f"⚠️ Invalid CREDENTIAL_STORAGE_MODE '{storage_mode_str}', defaulting to FILE_PLAINTEXT")
+    credential_storage_mode = CredentialStorageMode.FILE_PLAINTEXT
 
-# Create FastMCP2 instance with conditional authentication
+# Create FastMCP2 instance WITHOUT authentication first (to avoid conflicts with OAuth discovery routes)
 mcp = FastMCP(
     name=settings.server_name,
     version="1.0.0",
-    auth=jwt_auth_provider
+    auth=None  # Will add auth later after custom OAuth routes are registered
 )
 
-# Add authentication middleware
-mcp.add_middleware(AuthMiddleware())
+# Add authentication middleware with configured storage mode
+auth_middleware = AuthMiddleware(storage_mode=credential_storage_mode)
+mcp.add_middleware(auth_middleware)
+
+# Register the AuthMiddleware instance in context for tool access
+from auth.context import set_auth_middleware
+set_auth_middleware(auth_middleware)
+
+# Add MCP spec-compliant auth middleware for WWW-Authenticate headers
+mcp.add_middleware(MCPAuthMiddleware())
 
 # Initialize Qdrant middleware wrapper (completely non-blocking)
 logger.info("🔄 Initializing Qdrant middleware wrapper...")
@@ -254,7 +251,14 @@ async def health_check() -> str:
             f"**Auth & System:**\n"
             f"- `start_google_auth` - Initiate OAuth authentication\n"
             f"- `check_drive_auth` - Check authentication status\n"
+            f"- `manage_credentials` - Manage credential storage and security\n"
             f"- `health_check` - This health check\n\n"
+            f"**🔐 Credential Security:**\n"
+            f"- **Storage Mode:** {credential_storage_mode.value}\n"
+            f"- **FILE_PLAINTEXT:** JSON files (backward compatible)\n"
+            f"- **FILE_ENCRYPTED:** AES-256 with machine-specific keys\n"
+            f"- **MEMORY_ONLY:** No disk storage, expires on restart\n"
+            f"- **MEMORY_WITH_BACKUP:** Memory cache + encrypted backup\n\n"
             f"**🌟 Available Resources (NEW!):**\n"
             f"**User Resources:**\n"
             f"- `user://current/email` - Current user's email address\n"
@@ -428,6 +432,135 @@ async def server_info() -> str:
         f"- OAuth Callback: {settings.oauth_redirect_uri}\n"
         f"- Credentials Directory: {settings.credentials_dir}"
     )
+
+
+# Add credential management tool
+@mcp.tool
+async def manage_credentials(
+    email: str,
+    action: str,
+    new_storage_mode: str = None
+) -> str:
+    """
+    Manage credential storage and security settings.
+    
+    Args:
+        email: User's Google email address
+        action: Action to perform ('status', 'migrate', 'summary', 'delete')
+        new_storage_mode: Target storage mode for migration ('PLAINTEXT', 'ENCRYPTED', 'MEMORY_ONLY', 'HYBRID')
+    
+    Returns:
+        str: Result of the credential management operation
+    """
+    try:
+        from auth.context import get_auth_middleware
+        
+        # Get the AuthMiddleware instance
+        auth_middleware = get_auth_middleware()
+        if not auth_middleware:
+            return "❌ AuthMiddleware not available"
+        
+        if action == "status":
+            # Get credential status
+            summary = await auth_middleware.get_credential_summary(email)
+            if summary:
+                return (
+                    f"📊 **Credential Status for {email}**\n\n"
+                    f"**Storage Mode:** {summary['storage_mode']}\n"
+                    f"**File Path:** {summary['file_path']}\n"
+                    f"**File Exists:** {'✅' if summary['file_exists'] else '❌'}\n"
+                    f"**In Memory:** {'✅' if summary['in_memory'] else '❌'}\n"
+                    f"**Is Encrypted:** {'✅' if summary['is_encrypted'] else '❌'}\n"
+                    f"**Last Modified:** {summary.get('last_modified', 'Unknown')}\n"
+                    f"**File Size:** {summary.get('file_size', 'Unknown')} bytes"
+                )
+            else:
+                return f"❌ No credentials found for {email}"
+        
+        elif action == "migrate":
+            if not new_storage_mode:
+                return "❌ new_storage_mode is required for migration"
+            
+            try:
+                target_mode = CredentialStorageMode[new_storage_mode.upper()]
+            except KeyError:
+                return f"❌ Invalid storage mode '{new_storage_mode}'. Valid options: FILE_PLAINTEXT, FILE_ENCRYPTED, MEMORY_ONLY, MEMORY_WITH_BACKUP"
+            
+            # Perform migration
+            success = await auth_middleware.migrate_credentials(email, target_mode)
+            if success:
+                return f"✅ Successfully migrated credentials for {email} to {target_mode.value} mode"
+            else:
+                return f"❌ Failed to migrate credentials for {email} to {target_mode.value} mode"
+        
+        elif action == "summary":
+            # Get summary of all credentials
+            # This would require implementing a method to list all credential files
+            return f"📋 **Credential Summary**\n\nCurrent storage mode: {auth_middleware.storage_mode.value}\n\nUse 'status' action with specific email for detailed information."
+        
+        elif action == "delete":
+            # Delete credentials (this would need to be implemented in AuthMiddleware)
+            return f"⚠️ Credential deletion not yet implemented. Please manually delete credential files if needed."
+        
+        else:
+            return f"❌ Invalid action '{action}'. Valid actions: status, migrate, summary, delete"
+    
+    except Exception as e:
+        logger.error(f"Credential management error: {e}", exc_info=True)
+        return f"❌ Credential management failed: {e}"
+
+# Setup OAuth discovery endpoints for MCP Inspector
+# Setup OAuth discovery endpoints for MCP Inspector (always available)
+logger.info("🔍 Setting up OAuth discovery endpoints for MCP Inspector...")
+try:
+    setup_oauth_endpoints_fastmcp(mcp)
+    logger.info("✅ OAuth discovery endpoints configured via FastMCP custom routes")
+    
+    logger.info("🔍 MCP Inspector can discover OAuth at:")
+    logger.info(f"  http://{settings.server_host}:{settings.server_port}/.well-known/oauth-protected-resource")
+    logger.info(f"  http://{settings.server_host}:{settings.server_port}/.well-known/oauth-authorization-server")
+    logger.info(f"  http://{settings.server_host}:{settings.server_port}/oauth/register")
+except Exception as e:
+    logger.error(f"❌ Failed to setup OAuth discovery endpoints: {e}")
+
+# NOW setup authentication AFTER custom routes are registered to avoid conflicts
+logger.info("🔑 Setting up authentication...")
+jwt_auth_provider = None
+
+if use_google_oauth:
+    # Setup real Google OAuth authentication
+    jwt_auth_provider = setup_google_oauth_auth()
+    logger.info("🔐 Google OAuth Bearer Token authentication enabled")
+    logger.info("🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs")
+    logger.info("🎯 OAuth issuer: https://accounts.google.com")
+    
+elif enable_jwt_auth:
+    # Fallback to custom JWT for development/testing
+    jwt_auth_provider = setup_jwt_auth()
+    logger.info("🔐 Custom JWT Bearer Token authentication enabled (development mode)")
+    
+    # Generate test tokens for development
+    logger.info("🎫 Generating test JWT tokens...")
+    test_tokens = create_test_tokens()
+    for email, token in test_tokens.items():
+        logger.info(f"Test token for {email}: {token[:30]}...")
+    
+    # Save test tokens to file for tests to use
+    import json
+    test_tokens_file = "test_tokens.json"
+    try:
+        with open(test_tokens_file, "w") as f:
+            json.dump(test_tokens, f, indent=2)
+        logger.info(f"💾 Test tokens saved to {test_tokens_file}")
+    except Exception as e:
+        logger.error(f"❌ Failed to save test tokens: {e}")
+else:
+    logger.info("⚠️ Authentication DISABLED (for testing)")
+
+# Apply the auth provider to the MCP instance
+if jwt_auth_provider:
+    mcp._auth = jwt_auth_provider
+    logger.info("✅ Authentication provider applied to MCP instance")
 
 
 def main():

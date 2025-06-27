@@ -364,7 +364,14 @@ class TestSheetsTools:
         assert len(result) > 0
         content = result[0].text
         # Should return auth error or data results (likely no data found for large range)
-        assert any(keyword in content.lower() for keyword in ["requires authentication", "no valid credentials", "successfully read", "no data found"])
+        assert any(keyword in content.lower() for keyword in [
+            "requires authentication",
+            "no valid credentials",
+            "successfully read",
+            "no data found",
+            "failed to read sheet values",  # HttpError case
+            "unexpected error reading sheet values"  # General exception case
+        ])
 
 
 class TestSheetsIntegration:

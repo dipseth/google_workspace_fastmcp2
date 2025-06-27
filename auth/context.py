@@ -21,6 +21,10 @@ _service_requests_context: ContextVar[Dict[str, Dict[str, Any]]] = ContextVar("s
 _session_store: Dict[str, Dict[str, Any]] = {}
 _store_lock = threading.Lock()
 
+# Global storage for middleware instances
+_auth_middleware: Optional[Any] = None
+_middleware_lock = threading.Lock()
+
 
 def set_session_context(session_id: str) -> None:
     """Set the current session ID in the context."""
@@ -339,3 +343,17 @@ def list_sessions() -> list[str]:
     """Get a list of all active session IDs."""
     with _store_lock:
         return list(_session_store.keys())
+
+
+def set_auth_middleware(middleware: Any) -> None:
+    """Set the AuthMiddleware instance for global access."""
+    global _auth_middleware
+    with _middleware_lock:
+        _auth_middleware = middleware
+        logger.debug("Set AuthMiddleware instance in context")
+
+
+def get_auth_middleware() -> Optional[Any]:
+    """Get the AuthMiddleware instance."""
+    with _middleware_lock:
+        return _auth_middleware
