@@ -46,6 +46,8 @@ graph TB
 
 - [🎯 Complete Google Workspace Success](#-complete-google-workspace-success)
 - [Key Features](#key-features)
+- [Authentication Architecture](#authentication-architecture)
+- [Google Chat App Development](#google-chat-app-development)
 - [Quick Start](#quick-start)
 - [Revolutionary Architecture](#revolutionary-architecture)
 - [Complete Service Coverage](#complete-service-coverage)
@@ -91,10 +93,11 @@ graph TB
 - **Multi-Service Coordination**: Seamless integration between services (e.g., Forms + Drive)
 
 ### 🔐 Enterprise-Grade Authentication
-- **OAuth 2.0 with PKCE**: Secure authentication flow across all services
+- **Multi-Flow OAuth Architecture**: Four distinct authentication flows for different use cases
+- **MCP Spec Compliant**: OAuth 2.1 + Dynamic Client Registration for MCP clients
 - **Multi-User Support**: Session-based authentication for unlimited users
 - **Universal Token Management**: Automatic refresh across all Google services
-- **Persistent Storage**: File-based credential storage with intelligent caching
+- **Enhanced Security Modes**: Flexible credential storage with encryption options
 - **Service Isolation**: Independent authentication per Google service
 
 ### 🧠 AI-Powered Intelligence
@@ -110,6 +113,123 @@ graph TB
 - **Intelligent Caching**: Service and credential caching across all Google APIs
 - **Connection Pooling**: Efficient resource management for all services
 - **Parallel Processing**: Concurrent operations across multiple Google services
+
+## Authentication Architecture
+
+### 🔐 Four Authentication Flows
+
+FastMCP2 supports **four distinct authentication flows** to accommodate different usage scenarios:
+
+```mermaid
+graph TB
+    subgraph "🎯 Authentication Flows"
+        A[MCP Inspector OAuth<br/>🕵️ MCP Spec Compliant] --> E[Universal Auth Middleware]
+        B[Direct Server OAuth<br/>🌐 Web Interface] --> E
+        C[Development JWT<br/>⚡ Testing Mode] --> E
+        D[Enhanced File Credentials<br/>💾 Persistent Storage] --> E
+        
+        E --> F[Google OAuth 2.1<br/>+ Dynamic Client Registration]
+        E --> G[27+ API Scopes<br/>All Google Services]
+        E --> H[Automatic Token Refresh<br/>Zero-Downtime Auth]
+    end
+```
+
+#### 🚪 Flow #1: MCP Inspector OAuth (MCP Spec Compliant)
+- **Purpose**: OAuth 2.1 + Dynamic Client Registration for MCP clients
+- **Redirect URIs**: `http://127.0.0.1:6274/oauth/callback/debug`, `http://localhost:3000/auth/callback`
+- **Flow**: MCP Inspector → Your Server → Google → Back to MCP Inspector ✨
+- **Files**: `fastmcp_oauth_endpoints.py`, `dynamic_client_registration.py`, `mcp_auth_middleware.py`
+
+#### 🚪 Flow #2: Direct Server OAuth (Web Interface)
+- **Purpose**: Direct user authentication via web interface
+- **Redirect URI**: `http://localhost:8002/oauth2callback`
+- **Flow**: User → Your Server → Google → Back to Your Server → Tools work ✨
+- **Files**: `google_oauth_auth.py`, upload tools and server functions
+
+#### 🚪 Flow #3: Development JWT (Testing Mode)
+- **Purpose**: Development/testing authentication without Google
+- **Flow**: Development only, generates fake tokens ⚡
+- **Files**: `jwt_auth.py`
+
+#### 🚪 Flow #4: Enhanced File-Based Service Credentials (Persistent)
+- **Purpose**: Stored OAuth credentials from previous authentications
+- **Security Modes**:
+  - **FILE_PLAINTEXT**: Legacy JSON files (backward compatible)
+  - **FILE_ENCRYPTED**: AES-256 encrypted files with machine-specific keys
+  - **MEMORY_ONLY**: No disk storage, credentials expire with server restart
+  - **MEMORY_WITH_BACKUP**: Memory cache + encrypted backup files
+
+### 🎫 Comprehensive API Scopes
+FastMCP2 automatically manages **27+ Google API permissions** including:
+- **Drive**: `auth/drive.file`, `auth/drive.readonly`
+- **Gmail**: `auth/gmail.send`, `auth/gmail.modify`, `auth/gmail.compose`
+- **Calendar**: `auth/calendar.events`, `auth/calendar.readonly`
+- **Sheets**: `auth/spreadsheets`, `auth/spreadsheets.readonly`
+- **Docs**: `auth/documents`, `auth/documents.readonly`
+- **Slides**: `auth/presentations`, `auth/presentations.readonly`
+- **Forms**: `auth/forms.body`, `auth/forms.responses.readonly`
+- **Chat**: `auth/chat.messages`, `auth/chat.spaces`
+- **Cloud Platform**: `auth/cloud-platform`, `auth/cloudfunctions`, `auth/pubsub`, `auth/iam`
+
+## Google Chat App Development
+
+### 🤖 Complete Chat App Development Suite
+
+FastMCP2 includes a **comprehensive Google Chat app development platform** with 12 specialized tools for creating, deploying, and managing Google Chat applications:
+
+```mermaid
+graph TB
+    subgraph "🤖 Google Chat App Development"
+        A[Chat App Manager<br/>📱 Service Account Auth] --> B[App Creation Tools]
+        A --> C[Deployment Templates]
+        A --> D[Card Framework v2]
+        
+        B --> E[create_chat_app_manifest<br/>📋 App Configuration]
+        B --> F[generate_webhook_template<br/>🔗 FastAPI Handler]
+        
+        C --> G[Docker Templates<br/>🐳 Containerization]
+        C --> H[Kubernetes Configs<br/>☸️ Cloud Deployment]
+        C --> I[App Engine YAML<br/>☁️ Google Cloud]
+        
+        D --> J[Interactive Cards<br/>🎨 Rich UI Components]
+        D --> K[Form Handling<br/>📝 User Input Processing]
+        D --> L[Event Processing<br/>⚡ Real-time Responses]
+    end
+```
+
+### 🛠️ Chat App Development Tools
+
+#### App Creation & Configuration
+- **`create_chat_app_manifest`**: Generate complete Google Chat app manifests with OAuth scopes
+- **`initialize_chat_app_manager`**: Set up service account authentication for Chat apps
+- **`list_chat_app_resources`**: Browse available development resources and examples
+
+#### Code Generation & Templates
+- **`generate_webhook_template`**: Create FastAPI webhook handlers with Card Framework integration
+- **Complete Deployment Templates**: Docker, Kubernetes, App Engine, Cloud Run configurations
+- **Development Tools**: Local tunneling setup, health checks, logging configurations
+
+#### Rich Card Framework Integration
+- **Card Framework v2**: Advanced UI components with GoogleChatCardManager
+- **Interactive Elements**: Buttons, forms, dropdowns, date pickers
+- **Event Handling**: ADDED_TO_SPACE, MESSAGE, CARD_CLICKED processing
+- **Response Management**: Automatic JSON formatting and error handling
+
+### 🚀 Chat App Development Workflow
+
+1. **Initialize**: Use `initialize_chat_app_manager` to set up service account authentication
+2. **Create Manifest**: Generate app configuration with `create_chat_app_manifest`
+3. **Generate Code**: Create webhook handler with `generate_webhook_template`
+4. **Deploy**: Use provided templates for Docker, Kubernetes, or App Engine
+5. **Test**: Built-in development server with Cloudflare tunnel support
+6. **Publish**: Configure app visibility (organizational or worldwide)
+
+### 🎨 Advanced Card Framework Features
+- **Rich Visual Components**: Headers, images, buttons, sections
+- **Form Processing**: Text inputs, dropdowns, toggles, date selection
+- **Interactive Actions**: HTTP callbacks, deep linking, multi-step workflows
+- **Error Handling**: Automatic validation and user feedback
+- **Responsive Design**: Mobile-optimized layouts and touch interactions
 
 ## Quick Start
 
