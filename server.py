@@ -23,6 +23,7 @@ from slides.slides_tools import setup_slides_tools
 from gcalendar.calendar_tools import setup_calendar_tools
 from gchat.chat_tools import setup_chat_tools
 from gchat.jwt_chat_tools import setup_jwt_chat_tools
+from gchat.chat_app_tools import setup_chat_app_tools
 from sheets.sheets_tools import setup_sheets_tools
 from middleware.qdrant_wrapper import QdrantMiddlewareWrapper
 from resources.user_resources import setup_user_resources
@@ -99,6 +100,9 @@ setup_chat_tools(mcp)
 
 # Register JWT-enhanced Chat tools (demonstration)
 setup_jwt_chat_tools(mcp)
+
+# Register Google Chat App Development tools
+setup_chat_app_tools(mcp)
 
 # Register Google Sheets tools
 setup_sheets_tools(mcp)

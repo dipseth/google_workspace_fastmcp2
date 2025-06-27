@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Storage Configuration
     credentials_dir: str = "./credentials"
     credential_storage_mode: str = "FILE_PLAINTEXT"
+    chat_service_account_file: str = ""
     
     # Logging
     log_level: str = "INFO"
