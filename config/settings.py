@@ -4,6 +4,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 import os
 from pathlib import Path
+import logging
+
+# Import compatibility shim for OAuth scope management
+try:
+    from ..auth.compatibility_shim import CompatibilityShim
+    _COMPATIBILITY_AVAILABLE = True
+except ImportError:
+    # Fallback for development/testing
+    _COMPATIBILITY_AVAILABLE = False
+    logging.warning("Compatibility shim not available, using fallback scopes")
 
 
 class Settings(BaseSettings):
@@ -31,12 +41,15 @@ class Settings(BaseSettings):
     # Security
     session_timeout_minutes: int = 60
     
-    # Google Drive API scopes
-    drive_scopes: list[str] = [
+    # Legacy OAuth scopes - maintained for backward compatibility
+    # These are now managed through the centralized scope registry
+    _fallback_drive_scopes: list[str] = [
         # Base OAuth scopes for user identification
         "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
         "openid",
         # Google Drive scopes
+        "https://www.googleapis.com/auth/drive",
         "https://www.googleapis.com/auth/drive.readonly",
         "https://www.googleapis.com/auth/drive.file",
         # Google Docs scopes
@@ -71,6 +84,27 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/pubsub",
         "https://www.googleapis.com/auth/iam",
     ]
+    
+    @property
+    def drive_scopes(self) -> list[str]:
+        """
+        Get OAuth scopes for Google services.
+        
+        This property now uses the centralized scope registry through the
+        compatibility shim, ensuring consistency across the application.
+        Falls back to the original hardcoded scopes if the registry is unavailable.
+        
+        Returns:
+            List of OAuth scope URLs
+        """
+        if _COMPATIBILITY_AVAILABLE:
+            try:
+                return CompatibilityShim.get_legacy_drive_scopes()
+            except Exception as e:
+                logging.warning(f"Error getting scopes from registry, using fallback: {e}")
+                return self._fallback_drive_scopes
+        else:
+            return self._fallback_drive_scopes
     
     model_config = SettingsConfigDict(
         env_file=".env",

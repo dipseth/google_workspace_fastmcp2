@@ -10,11 +10,31 @@ from pathlib import Path
 
 from fastmcp.server.auth import BearerAuthProvider
 from config.settings import settings
+from auth.compatibility_shim import CompatibilityShim
 
 logger = logging.getLogger(__name__)
 
 # Global auth provider
 _auth_provider: Optional[BearerAuthProvider] = None
+
+def _get_oauth_metadata_scopes() -> list[str]:
+    """Get OAuth metadata scopes using compatibility shim."""
+    try:
+        shim = CompatibilityShim()
+        return shim.get_legacy_oauth_endpoint_scopes()
+    except Exception as e:
+        logger.warning(f"Failed to get OAuth scopes from compatibility shim: {e}")
+        # Fallback to hardcoded scopes
+        return [
+            "openid",
+            "email",
+            "profile",
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/chat.messages.readonly"
+        ]
 
 def setup_google_oauth_auth() -> BearerAuthProvider:
     """Setup Google OAuth authentication for MCP.
@@ -67,15 +87,7 @@ def get_google_oauth_metadata() -> Dict[str, Any]:
         "code_challenge_methods_supported": ["S256"],
         # Point to our local Dynamic Client Registration endpoint
         "registration_endpoint": f"http://{settings.server_host}:{settings.server_port}/oauth/register",
-        "scopes_supported": [
-            "openid",
-            "email", 
-            "profile",
-            "https://www.googleapis.com/auth/drive",
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/calendar.readonly",
-            "https://www.googleapis.com/auth/chat.messages.readonly"
-        ]
+        "scopes_supported": _get_oauth_metadata_scopes()
     }
 
 

@@ -8,6 +8,39 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
+# Import compatibility shim for OAuth scope management
+try:
+    from .compatibility_shim import CompatibilityShim
+    _COMPATIBILITY_AVAILABLE = True
+except ImportError:
+    # Fallback for development/testing
+    _COMPATIBILITY_AVAILABLE = False
+    logging.warning("Compatibility shim not available, using fallback scopes")
+
+# Fallback default scope string for DCR
+_FALLBACK_DCR_SCOPE = "openid email profile https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file"
+
+
+def _get_dcr_default_scope() -> str:
+    """
+    Get default scope string for Dynamic Client Registration.
+    
+    This function provides backward compatibility for legacy hardcoded scopes
+    while automatically redirecting to the new centralized scope registry.
+    Falls back to the original hardcoded scope string if the registry is unavailable.
+    
+    Returns:
+        Default scope string for DCR
+    """
+    if _COMPATIBILITY_AVAILABLE:
+        try:
+            return CompatibilityShim.get_legacy_dcr_scope_defaults()
+        except Exception as e:
+            logger.warning(f"Error getting DCR scope defaults from registry, using fallback: {e}")
+            return _FALLBACK_DCR_SCOPE
+    else:
+        return _FALLBACK_DCR_SCOPE
+
 logger = logging.getLogger(__name__)
 
 class DynamicClientRegistry:
@@ -108,7 +141,7 @@ class DynamicClientRegistry:
             "grant_types": metadata.get("grant_types", ["authorization_code", "refresh_token"]),
             "response_types": metadata.get("response_types", ["code"]),
             "token_endpoint_auth_method": metadata.get("token_endpoint_auth_method", "client_secret_basic"),
-            "scope": metadata.get("scope", "openid email profile https://www.googleapis.com/auth/drive"),
+            "scope": metadata.get("scope", _get_dcr_default_scope()),
         }
         
         # Add any additional metadata

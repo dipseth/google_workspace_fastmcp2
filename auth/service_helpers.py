@@ -9,10 +9,20 @@ from .context import (
     get_google_service_simple
 )
 
+# Import compatibility shim for OAuth scope management
+try:
+    from .compatibility_shim import CompatibilityShim
+    _COMPATIBILITY_AVAILABLE = True
+except ImportError:
+    # Fallback for development/testing
+    _COMPATIBILITY_AVAILABLE = False
+    logging.warning("Compatibility shim not available, using fallback service defaults")
+
 logger = logging.getLogger(__name__)
 
-# Service defaults configuration - single source of truth
-SERVICE_DEFAULTS = {
+# Legacy service defaults - now managed through centralized registry
+# Maintained for backward compatibility through compatibility shim
+_FALLBACK_SERVICE_DEFAULTS = {
     "drive": {
         "default_scopes": ["drive_file", "drive_read"],
         "version": "v3",
@@ -54,6 +64,58 @@ SERVICE_DEFAULTS = {
         "description": "Google Slides service"
     }
 }
+
+
+def _get_service_defaults() -> Dict[str, Dict]:
+    """
+    Get service defaults dictionary from centralized registry.
+    
+    This function provides backward compatibility for legacy SERVICE_DEFAULTS usage
+    while automatically redirecting to the new centralized scope registry.
+    Falls back to the original hardcoded defaults if the registry is unavailable.
+    
+    Returns:
+        Dictionary mapping service names to their default configurations
+    """
+    if _COMPATIBILITY_AVAILABLE:
+        try:
+            return CompatibilityShim.get_legacy_service_defaults()
+        except Exception as e:
+            logger.warning(f"Error getting service defaults from registry, using fallback: {e}")
+            return _FALLBACK_SERVICE_DEFAULTS
+    else:
+        return _FALLBACK_SERVICE_DEFAULTS
+
+
+# Create a dynamic SERVICE_DEFAULTS that uses the compatibility shim
+# This maintains the same interface for existing code
+class ServiceDefaultsProxy:
+    """Proxy class that provides dictionary-like access to service defaults via the registry"""
+    
+    def __getitem__(self, key: str) -> Dict:
+        return _get_service_defaults()[key]
+    
+    def __contains__(self, key: str) -> bool:
+        return key in _get_service_defaults()
+    
+    def get(self, key: str, default: Dict = None) -> Dict:
+        return _get_service_defaults().get(key, default)
+    
+    def keys(self):
+        return _get_service_defaults().keys()
+    
+    def values(self):
+        return _get_service_defaults().values()
+    
+    def items(self):
+        return _get_service_defaults().items()
+    
+    def copy(self) -> Dict[str, Dict]:
+        return _get_service_defaults().copy()
+
+
+# Create the proxy instance that behaves like the original SERVICE_DEFAULTS dictionary
+SERVICE_DEFAULTS = ServiceDefaultsProxy()
 
 
 async def get_service(

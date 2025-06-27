@@ -233,6 +233,11 @@ async def handle_oauth_callback(
     
     # Create OAuth flow with same configuration used for authorization URL
     oauth_config = settings.get_oauth_client_config()
+    # DIAGNOSTIC LOG: OAuth scope inconsistency debugging
+    logger.info(f"OAUTH_SCOPE_DEBUG: Starting OAuth flow with scopes: {settings.drive_scopes}")
+    logger.info(f"OAUTH_SCOPE_DEBUG: Total scope count: {len(settings.drive_scopes)}")
+    logger.info(f"OAUTH_SCOPE_DEBUG: Scopes sorted: {sorted(settings.drive_scopes)}")
+    
     flow = Flow.from_client_config(
         {"web": oauth_config},
         scopes=settings.drive_scopes,
@@ -243,8 +248,17 @@ async def handle_oauth_callback(
     
     # Exchange authorization code for credentials
     try:
+        # DIAGNOSTIC LOG: OAuth scope inconsistency debugging - callback phase
+        logger.info(f"OAUTH_SCOPE_DEBUG: Processing OAuth callback")
+        logger.info(f"OAUTH_SCOPE_DEBUG: Authorization response: {authorization_response}")
+        
         flow.fetch_token(authorization_response=authorization_response)
         credentials = flow.credentials
+        
+        # DIAGNOSTIC LOG: Check final granted scopes vs requested
+        logger.info(f"OAUTH_SCOPE_DEBUG: OAuth callback successful")
+        logger.info(f"OAUTH_SCOPE_DEBUG: Granted scopes: {getattr(credentials, 'scopes', 'Not available')}")
+        logger.info(f"OAUTH_SCOPE_DEBUG: Expected scopes: {sorted(settings.drive_scopes)}")
         
         # Verify the authenticated user email matches expected
         userinfo_service = build("oauth2", "v2", credentials=credentials)
@@ -263,6 +277,16 @@ async def handle_oauth_callback(
         return user_email, credentials
         
     except Exception as e:
+        # DIAGNOSTIC LOG: OAuth scope inconsistency debugging - error capture
+        logger.error(f"OAUTH_SCOPE_DEBUG: OAuth callback failed with error: {e}")
+        logger.error(f"OAUTH_SCOPE_DEBUG: Error type: {type(e).__name__}")
+        logger.error(f"OAUTH_SCOPE_DEBUG: Full error details: {str(e)}")
+        
+        # Check if this is the specific scope mismatch error
+        if "Scope has changed" in str(e):
+            logger.error(f"OAUTH_SCOPE_DEBUG: SCOPE MISMATCH DETECTED!")
+            logger.error(f"OAUTH_SCOPE_DEBUG: This is the OAuth scope inconsistency error we're debugging")
+        
         logger.error(f"OAuth callback failed: {e}")
         raise GoogleAuthError(f"Authentication failed: {e}")
 

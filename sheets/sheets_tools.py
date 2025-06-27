@@ -40,12 +40,28 @@ async def _get_sheets_service_with_fallback(user_google_email: str):
     # Fallback to direct service creation
     logger.info("Falling back to direct Sheets service creation")
     from auth.service_manager import get_google_service
+    from auth.compatibility_shim import CompatibilityShim
+    
+    # Get sheets scopes using compatibility shim
+    try:
+        shim = CompatibilityShim()
+        sheets_scopes = [
+            shim.get_legacy_scope_groups()["sheets_write"],
+            shim.get_legacy_scope_groups()["sheets_read"]
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to get sheets scopes from compatibility shim: {e}")
+        # Fallback to hardcoded scopes
+        sheets_scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/spreadsheets.readonly"
+        ]
+    
     return await get_google_service(
         user_email=user_google_email,
         service_type="sheets",
         version="v4",
-        scopes=["https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/spreadsheets.readonly"]
+        scopes=sheets_scopes
     )
 
 

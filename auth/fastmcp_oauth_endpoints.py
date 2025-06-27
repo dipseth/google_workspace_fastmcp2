@@ -9,6 +9,47 @@ import logging
 from typing import Any, Dict
 from config.settings import settings
 
+# Import compatibility shim for OAuth scope management
+try:
+    from .compatibility_shim import CompatibilityShim
+    _COMPATIBILITY_AVAILABLE = True
+except ImportError:
+    # Fallback for development/testing
+    _COMPATIBILITY_AVAILABLE = False
+    logging.warning("Compatibility shim not available, using fallback scopes")
+
+# Fallback scopes for OAuth endpoints
+_FALLBACK_OAUTH_SCOPES = [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/calendar.readonly"
+]
+
+
+def _get_oauth_endpoint_scopes():
+    """
+    Get OAuth endpoint scopes from centralized registry.
+    
+    This function provides backward compatibility for legacy hardcoded scopes
+    while automatically redirecting to the new centralized scope registry.
+    Falls back to the original hardcoded scopes if the registry is unavailable.
+    
+    Returns:
+        List of OAuth scope URLs for endpoint metadata
+    """
+    if _COMPATIBILITY_AVAILABLE:
+        try:
+            return CompatibilityShim.get_legacy_oauth_endpoint_scopes()
+        except Exception as e:
+            logger.warning(f"Error getting OAuth endpoint scopes from registry, using fallback: {e}")
+            return _FALLBACK_OAUTH_SCOPES
+    else:
+        return _FALLBACK_OAUTH_SCOPES
+
 logger = logging.getLogger(__name__)
 
 def setup_oauth_endpoints_fastmcp(mcp) -> None:
@@ -48,14 +89,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             "jwks_uri": "https://www.googleapis.com/oauth2/v3/certs",
             "bearer_methods_supported": ["header"],
             "resource_documentation": f"{base_url}/docs",
-            "scopes_supported": [
-                "openid",
-                "email",
-                "profile",
-                "https://www.googleapis.com/auth/drive",
-                "https://www.googleapis.com/auth/gmail.readonly",
-                "https://www.googleapis.com/auth/calendar.readonly"
-            ]
+            "scopes_supported": _get_oauth_endpoint_scopes()
         }
         
         logger.info("📋 OAuth protected resource metadata served")
@@ -103,14 +137,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
             "code_challenge_methods_supported": ["S256"],
-            "scopes_supported": [
-                "openid",
-                "email",
-                "profile",
-                "https://www.googleapis.com/auth/drive",
-                "https://www.googleapis.com/auth/gmail.readonly",
-                "https://www.googleapis.com/auth/calendar.readonly"
-            ],
+            "scopes_supported": _get_oauth_endpoint_scopes(),
             # Point to our local Dynamic Client Registration endpoint
             "registration_endpoint": f"{base_url}/oauth/register",
             "subject_types_supported": ["public"],

@@ -22,14 +22,26 @@ logger = logging.getLogger(__name__)
 # Load settings
 settings = Settings()
 
+# Import compatibility shim for consolidated scope management
+from auth.compatibility_shim import CompatibilityShim
+
+def _get_chat_app_scopes():
+    """Get Google Chat API scopes for app development using compatibility shim."""
+    try:
+        shim = CompatibilityShim()
+        return shim.get_legacy_chat_app_scopes()
+    except Exception as e:
+        # Fallback to hardcoded scopes if shim fails
+        return [
+            'https://www.googleapis.com/auth/chat.bot',
+            'https://www.googleapis.com/auth/chat.messages',
+            'https://www.googleapis.com/auth/chat.spaces',
+            'https://www.googleapis.com/auth/chat.apps',
+            'https://www.googleapis.com/auth/cloud-platform'
+        ]
+
 # Google Chat API scopes for app development
-CHAT_APP_SCOPES = [
-    'https://www.googleapis.com/auth/chat.bot',
-    'https://www.googleapis.com/auth/chat.messages',
-    'https://www.googleapis.com/auth/chat.spaces',
-    'https://www.googleapis.com/auth/chat.apps',
-    'https://www.googleapis.com/auth/cloud-platform'
-]
+CHAT_APP_SCOPES = _get_chat_app_scopes()
 
 class GoogleChatAppManager:
     """Manager for Google Chat app operations using service account."""

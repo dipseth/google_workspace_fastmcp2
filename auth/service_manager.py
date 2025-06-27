@@ -12,6 +12,15 @@ from googleapiclient.errors import HttpError
 from .google_auth import get_valid_credentials, GoogleAuthError
 from .context import get_session_context, store_session_data, get_session_data
 
+# Import compatibility shim for OAuth scope management
+try:
+    from .compatibility_shim import CompatibilityShim
+    _COMPATIBILITY_AVAILABLE = True
+except ImportError:
+    # Fallback for development/testing
+    _COMPATIBILITY_AVAILABLE = False
+    logging.warning("Compatibility shim not available, using fallback scopes")
+
 logger = logging.getLogger(__name__)
 
 # Service configuration mapping - defines how to build each Google service
@@ -54,8 +63,9 @@ SERVICE_CONFIGS = {
     "slides_v1": {"service": "slides", "version": "v1"} # Slides (explicit v1)
 }
 
-# Scope group definitions for easy reference
-SCOPE_GROUPS = {
+# Legacy scope group definitions - now managed through centralized registry
+# Maintained for backward compatibility through compatibility shim
+_FALLBACK_SCOPE_GROUPS = {
     # Base scopes
     "userinfo": "https://www.googleapis.com/auth/userinfo.email",
     "openid": "openid",
@@ -63,7 +73,7 @@ SCOPE_GROUPS = {
     # Drive scopes
     "drive_read": "https://www.googleapis.com/auth/drive.readonly",
     "drive_file": "https://www.googleapis.com/auth/drive.file",
-    "drive_full": "https://www.googleapis.com/auth/drive",
+    # "drive_full": "https://www.googleapis.com/auth/drive",
     "drive_appdata": "https://www.googleapis.com/auth/drive.appdata",
     "drive_metadata": "https://www.googleapis.com/auth/drive.metadata",
     "drive_metadata_readonly": "https://www.googleapis.com/auth/drive.metadata.readonly",
@@ -163,6 +173,58 @@ SCOPE_GROUPS = {
     "plus_me": "https://www.googleapis.com/auth/plus.me"
 }
 
+
+def _get_scope_groups() -> Dict[str, str]:
+    """
+    Get scope groups dictionary from centralized registry.
+    
+    This function provides backward compatibility for legacy SCOPE_GROUPS usage
+    while automatically redirecting to the new centralized scope registry.
+    Falls back to the original hardcoded scopes if the registry is unavailable.
+    
+    Returns:
+        Dictionary mapping scope names to scope URLs
+    """
+    if _COMPATIBILITY_AVAILABLE:
+        try:
+            return CompatibilityShim.get_legacy_scope_groups()
+        except Exception as e:
+            logger.warning(f"Error getting scope groups from registry, using fallback: {e}")
+            return _FALLBACK_SCOPE_GROUPS
+    else:
+        return _FALLBACK_SCOPE_GROUPS
+
+
+# Create a dynamic SCOPE_GROUPS that uses the compatibility shim
+# This maintains the same interface for existing code
+class ScopeGroupsProxy:
+    """Proxy class that provides dictionary-like access to scope groups via the registry"""
+    
+    def __getitem__(self, key: str) -> str:
+        return _get_scope_groups()[key]
+    
+    def __contains__(self, key: str) -> bool:
+        return key in _get_scope_groups()
+    
+    def get(self, key: str, default: str = None) -> str:
+        return _get_scope_groups().get(key, default)
+    
+    def keys(self):
+        return _get_scope_groups().keys()
+    
+    def values(self):
+        return _get_scope_groups().values()
+    
+    def items(self):
+        return _get_scope_groups().items()
+    
+    def copy(self) -> Dict[str, str]:
+        return _get_scope_groups().copy()
+
+
+# Create the proxy instance that behaves like the original SCOPE_GROUPS dictionary
+SCOPE_GROUPS = ScopeGroupsProxy()
+
 # Service cache: {cache_key: (service, cached_time, user_email)}
 _service_cache: Dict[str, tuple[Any, datetime, str]] = {}
 _cache_ttl = timedelta(minutes=30)  # Cache services for 30 minutes
@@ -206,18 +268,29 @@ def _cache_service(cache_key: str, service: Any, user_email: str) -> None:
 
 def _resolve_scopes(scopes: Union[str, List[str]]) -> List[str]:
     """Resolve scope names to actual scope URLs."""
+    # DIAGNOSTIC LOG: OAuth scope inconsistency debugging - scope resolution
+    logger.info(f"OAUTH_SCOPE_DEBUG: _resolve_scopes called with input: {scopes}")
+    
     if isinstance(scopes, str):
         if scopes in SCOPE_GROUPS:
-            return [SCOPE_GROUPS[scopes]]
+            resolved = [SCOPE_GROUPS[scopes]]
+            logger.info(f"OAUTH_SCOPE_DEBUG: Single string scope '{scopes}' resolved to: {resolved}")
+            return resolved
         else:
+            logger.info(f"OAUTH_SCOPE_DEBUG: Single string scope '{scopes}' used as-is (not in SCOPE_GROUPS)")
             return [scopes]
 
     resolved = []
     for scope in scopes:
         if scope in SCOPE_GROUPS:
-            resolved.append(SCOPE_GROUPS[scope])
+            resolved_scope = SCOPE_GROUPS[scope]
+            logger.info(f"OAUTH_SCOPE_DEBUG: Scope '{scope}' resolved to '{resolved_scope}'")
+            resolved.append(resolved_scope)
         else:
+            logger.info(f"OAUTH_SCOPE_DEBUG: Scope '{scope}' used as-is (not in SCOPE_GROUPS)")
             resolved.append(scope)
+    
+    logger.info(f"OAUTH_SCOPE_DEBUG: Final resolved scopes: {resolved}")
     return resolved
 
 
