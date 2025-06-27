@@ -23,13 +23,15 @@ logger = logging.getLogger(__name__)
 def setup_user_resources(mcp: FastMCP) -> None:
     """Setup all user and authentication resources."""
     
-    @mcp.resource("user://current/email")
+    @mcp.resource(
+        uri="user://current/email",
+        name="Current User Email",
+        description="Get the currently authenticated user's email address for session-based authentication",
+        mime_type="application/json",
+        tags={"authentication", "user", "email", "session"}
+    )
     async def get_current_user_email(ctx: Context) -> dict:
-        """Get the currently authenticated user's email address.
-        
-        This resource provides the email of the user authenticated in the current session.
-        Tools can use this instead of requiring user_google_email parameters.
-        """
+        """Internal implementation for current user email resource."""
         user_email = get_user_email_context()
         if not user_email:
             return {
@@ -43,13 +45,15 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "timestamp": datetime.now().isoformat()
         }
     
-    @mcp.resource("user://current/profile")
+    @mcp.resource(
+        uri="user://current/profile",
+        name="Current User Profile",
+        description="Comprehensive profile information including authentication status, credential validity, and available Google services for the current session user",
+        mime_type="application/json",
+        tags={"authentication", "user", "profile", "credentials", "session", "google"}
+    )
     async def get_current_user_profile(ctx: Context) -> dict:
-        """Get the current user's profile including authentication status.
-        
-        Provides comprehensive information about the authenticated user including
-        credential validity and available Google services.
-        """
+        """Internal implementation for current user profile resource."""
         user_email = get_user_email_context()
         if not user_email:
             return {
@@ -74,13 +78,15 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "timestamp": datetime.now().isoformat()
         }
     
-    @mcp.resource("user://profile/{email}")
+    @mcp.resource(
+        uri="user://profile/{email}",
+        name="User Profile by Email",
+        description="Get detailed profile information for a specific user email including authentication status, credential validity, and comparison with current session user",
+        mime_type="application/json",
+        tags={"user", "profile", "authentication", "credentials", "email", "lookup"}
+    )
     async def get_user_profile_by_email(email: str, ctx: Context) -> dict:
-        """Get profile information for a specific user email.
-        
-        Args:
-            email: The user's email address to get profile for
-        """
+        """Internal implementation for user profile by email resource."""
         # Check credential validity for the specified user
         credentials = get_valid_credentials(email)
         auth_status = {
@@ -98,9 +104,15 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "timestamp": datetime.now().isoformat()
         }
     
-    @mcp.resource("auth://session/current")
+    @mcp.resource(
+        uri="auth://session/current",
+        name="Current Authentication Session",
+        description="Detailed information about the current authentication session including token status, expiration times, and granted scopes",
+        mime_type="application/json",
+        tags={"authentication", "session", "oauth", "token", "security"}
+    )
     async def get_current_session_info(ctx: Context) -> dict:
-        """Get information about the current authentication session."""
+        """Internal implementation for current session info resource."""
         session_id = get_session_context()
         user_email = get_user_email_context()
         
@@ -132,12 +144,15 @@ def setup_user_resources(mcp: FastMCP) -> None:
         
         return session_data
     
-    @mcp.resource("auth://sessions/list")
+    @mcp.resource(
+        uri="auth://sessions/list",
+        name="Active Authentication Sessions",
+        description="Administrative view of all active authentication sessions with session details, user information, and expiration status for multi-user session management",
+        mime_type="application/json",
+        tags={"authentication", "sessions", "admin", "multi-user", "management", "security"}
+    )
     async def list_active_sessions(ctx: Context) -> dict:
-        """List all active authentication sessions.
-        
-        Useful for administrative purposes and multi-user session management.
-        """
+        """Internal implementation for active sessions list resource."""
         try:
             active_sessions = list_sessions()
             
@@ -155,13 +170,15 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 "count": 0
             }
     
-    @mcp.resource("auth://credentials/{email}/status")
+    @mcp.resource(
+        uri="auth://credentials/{email}/status",
+        name="User Credential Status",
+        description="Detailed credential status for a specific user including validity, expiration, refresh token availability, and granted scopes for authentication management",
+        mime_type="application/json",
+        tags={"authentication", "credentials", "status", "oauth", "tokens", "security", "user"}
+    )
     async def get_credential_status(email: str, ctx: Context) -> dict:
-        """Get detailed credential status for a specific user.
-        
-        Args:
-            email: The user's email address to check credentials for
-        """
+        """Internal implementation for credential status resource."""
         try:
             credentials = get_valid_credentials(email)
             
@@ -205,26 +222,30 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 "timestamp": datetime.now().isoformat()
             }
     
-    @mcp.resource("template://user_email")
+    @mcp.resource(
+        uri="template://user_email",
+        name="User Email Template",
+        description="Simple template resource that returns just the user email string - the most basic resource for tools that need only the email address",
+        mime_type="text/plain",
+        tags={"template", "user", "email", "simple", "authentication", "string"}
+    )
     async def get_template_user_email(ctx: Context) -> str:
-        """Simple template resource that returns just the user email string.
-        
-        This is the most basic resource for tools that just need the email address.
-        Returns the raw email string instead of a JSON object.
-        """
+        """Internal implementation for user email template resource."""
         user_email = get_user_email_context()
         if not user_email:
             raise ValueError("No authenticated user found in current session. Use start_google_auth tool first.")
         
         return user_email
     
-    @mcp.resource("google://services/scopes/{service}")
+    @mcp.resource(
+        uri="google://services/scopes/{service}",
+        name="Google Service Scopes",
+        description="Get the required OAuth scopes, API version, and configuration details for a specific Google service including Drive, Gmail, Calendar, and other Workspace APIs",
+        mime_type="application/json",
+        tags={"google", "services", "scopes", "oauth", "api", "configuration", "workspace"}
+    )
     async def get_service_scopes(service: str, ctx: Context) -> dict:
-        """Get the required scopes for a specific Google service.
-        
-        Args:
-            service: The Google service name (drive, gmail, calendar, etc.)
-        """
+        """Internal implementation for Google service scopes resource."""
         # Import here to avoid circular imports
         from auth.service_helpers import SERVICE_DEFAULTS
         
@@ -243,13 +264,15 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "timestamp": datetime.now().isoformat()
         }
     
-    @mcp.resource("tools://list/all")
+    @mcp.resource(
+        uri="tools://list/all",
+        name="Complete Tools Directory",
+        description="Comprehensive catalog of all 60+ available tools organized by category including Drive, Gmail, Calendar, Chat, Forms, Docs, Sheets, and authentication tools with detailed capability descriptions",
+        mime_type="application/json",
+        tags={"tools", "directory", "catalog", "discovery", "google", "workspace", "enhanced", "legacy"}
+    )
     async def get_all_tools_list(ctx: Context) -> dict:
-        """Get a comprehensive list of all available tools.
-        
-        This resource provides detailed information about all tools registered
-        in the FastMCP2 platform, making tool discovery easier.
-        """
+        """Internal implementation for complete tools directory resource."""
         try:
             tools_info = {
                 "enhanced_tools": {
@@ -349,12 +372,15 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 "timestamp": datetime.now().isoformat()
             }
     
-    @mcp.resource("tools://enhanced/list")
+    @mcp.resource(
+        uri="tools://enhanced/list",
+        name="Enhanced Tools Collection",
+        description="Curated list of enhanced tools that use automatic resource templating - no user_google_email parameters required, seamless authentication through OAuth session context",
+        mime_type="application/json",
+        tags={"tools", "enhanced", "templating", "oauth", "seamless", "modern", "no-email"}
+    )
     async def get_enhanced_tools_only(ctx: Context) -> dict:
-        """Get only the enhanced tools that use resource templating.
-        
-        These tools don't require user_google_email parameters.
-        """
+        """Internal implementation for enhanced tools collection resource."""
         enhanced_tools = [
             {
                 "name": "list_my_drive_files",
@@ -402,13 +428,15 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "timestamp": datetime.now().isoformat()
         }
     
-    @mcp.resource("tools://usage/guide")
+    @mcp.resource(
+        uri="tools://usage/guide",
+        name="Comprehensive Tools Usage Guide",
+        description="Complete usage guide with examples, workflows, and best practices for both enhanced and legacy tools including authentication flows, migration examples, and error handling patterns",
+        mime_type="application/json",
+        tags={"tools", "guide", "usage", "examples", "workflows", "migration", "authentication", "best-practices"}
+    )
     async def get_tool_usage_guide(ctx: Context) -> dict:
-        """Get a comprehensive usage guide for all tools.
-        
-        This resource provides examples and best practices for using
-        both legacy and enhanced tools.
-        """
+        """Internal implementation for comprehensive tools usage guide resource."""
         return {
             "quick_start": {
                 "step_1": "Authenticate with: start_google_auth('your.email@gmail.com')",

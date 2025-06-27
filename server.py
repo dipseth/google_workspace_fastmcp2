@@ -25,7 +25,7 @@ from gchat.chat_tools import setup_chat_tools
 from gchat.jwt_chat_tools import setup_jwt_chat_tools
 from gchat.chat_app_tools import setup_chat_app_tools
 from sheets.sheets_tools import setup_sheets_tools
-from middleware.qdrant_wrapper import QdrantMiddlewareWrapper
+from middleware.qdrant_unified import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools
 from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
 from tools.enhanced_tools import setup_enhanced_tools
@@ -68,11 +68,11 @@ set_auth_middleware(auth_middleware)
 # Add MCP spec-compliant auth middleware for WWW-Authenticate headers
 mcp.add_middleware(MCPAuthMiddleware())
 
-# Initialize Qdrant middleware wrapper (completely non-blocking)
-logger.info("🔄 Initializing Qdrant middleware wrapper...")
-qdrant_wrapper = QdrantMiddlewareWrapper()
-mcp.add_middleware(qdrant_wrapper)
-logger.info("✅ Qdrant middleware wrapper enabled - will initialize on first use")
+# Initialize Qdrant unified middleware (completely non-blocking)
+logger.info("🔄 Initializing Qdrant unified middleware...")
+qdrant_middleware = QdrantUnifiedMiddleware()
+mcp.add_middleware(qdrant_middleware)
+logger.info("✅ Qdrant unified middleware enabled - will initialize on first use")
 
 # Register drive upload tools
 setup_drive_tools(mcp)
@@ -121,33 +121,9 @@ setup_enhanced_tools(mcp)
 
 # Register Qdrant tools if middleware is available
 try:
-    if qdrant_wrapper and hasattr(qdrant_wrapper, '_inner_middleware'):
+    if qdrant_middleware:
         logger.info("📊 Registering Qdrant search tools...")
-        from middleware.qdrant_enhanced import setup_enhanced_qdrant_tools
-        
-        # Create a proxy object that will use the wrapper's inner middleware
-        class QdrantProxy:
-            def __init__(self, wrapper):
-                self.wrapper = wrapper
-                
-            async def search_responses(self, *args, **kwargs):
-                if self.wrapper._inner_middleware:
-                    return await self.wrapper._inner_middleware.search_responses(*args, **kwargs)
-                return []
-            
-            async def get_analytics(self, *args, **kwargs):
-                if self.wrapper._inner_middleware:
-                    return await self.wrapper._inner_middleware.get_analytics(*args, **kwargs)
-                return {"error": "Qdrant not initialized"}
-            
-            async def get_response_by_id(self, *args, **kwargs):
-                if self.wrapper._inner_middleware:
-                    return await self.wrapper._inner_middleware.get_response_by_id(*args, **kwargs)
-                return None
-        
-        # Use the proxy for tools
-        qdrant_proxy = QdrantProxy(qdrant_wrapper)
-        setup_enhanced_qdrant_tools(mcp, qdrant_proxy)
+        setup_enhanced_qdrant_tools(mcp, qdrant_middleware)
         logger.info("✅ Qdrant search tools registered")
 except Exception as e:
     logger.warning(f"⚠️ Could not register Qdrant tools: {e}")

@@ -13,6 +13,7 @@ from googleapiclient.errors import HttpError
 
 from auth.jwt_auth import get_user_email_from_token
 from auth.service_helpers import get_service
+from resources.user_resources import get_current_user_email_simple
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +34,18 @@ def setup_jwt_chat_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_spaces_jwt(
+        user_google_email: Optional[str] = None,
         page_size: int = 100,
         space_type: str = "all"
     ) -> str:
         """
-        Lists Google Chat spaces using JWT authentication.
+        Lists Google Chat spaces using multiple authentication methods.
         
-        🎯 ENHANCED: Gets user email automatically from JWT token claims!
-        No user_google_email parameter required.
+        🎯 ENHANCED: Gets user email automatically from resources or JWT token!
+        user_google_email parameter is now optional.
         
         Args:
+            user_google_email: User's Google email address (optional - will auto-detect if not provided)
             page_size: Number of spaces to return (default: 100)
             space_type: Filter by space type: "all", "room", or "dm" (default: "all")
             
@@ -50,9 +53,39 @@ def setup_jwt_chat_tools(mcp: FastMCP) -> None:
             JSON formatted list of Google Chat spaces accessible to the authenticated user
         """
         try:
-            # 🎫 Get user email from JWT token automatically
-            user_email = get_user_email_from_token()
-            logger.info(f"🎯 [list_spaces_jwt] JWT auth successful for: {user_email}")
+            # 🎯 Multi-method email detection
+            user_email = None
+            auth_method = "unknown"
+            
+            # Method 1: Use provided email if given
+            if user_google_email and user_google_email.strip():
+                user_email = user_google_email.strip()
+                auth_method = "provided_parameter"
+                logger.info(f"🎯 [list_spaces_jwt] Using provided email: {user_email}")
+            
+            # Method 2: Try resource context (primary method)
+            if not user_email:
+                try:
+                    user_email = get_current_user_email_simple()
+                    auth_method = "resource_context"
+                    logger.info(f"🎯 [list_spaces_jwt] Got email from resource context: {user_email}")
+                except ValueError:
+                    logger.info("🎯 [list_spaces_jwt] No resource context available, trying JWT...")
+            
+            # Method 3: Fallback to JWT token claims
+            if not user_email:
+                try:
+                    user_email = get_user_email_from_token()
+                    auth_method = "jwt_token"
+                    logger.info(f"🎯 [list_spaces_jwt] Got email from JWT token: {user_email}")
+                except Exception as jwt_error:
+                    logger.warning(f"🎯 [list_spaces_jwt] JWT auth failed: {jwt_error}")
+            
+            # Final check
+            if not user_email:
+                return "❌ Authentication error: Could not determine user email. Please provide user_google_email parameter or ensure proper authentication is set up."
+            
+            logger.info(f"🎯 [list_spaces_jwt] Using email: {user_email} (method: {auth_method})")
             
             # Get Google Chat service using the email from JWT
             logger.info(f"🔧 Creating Chat service for {user_email}")

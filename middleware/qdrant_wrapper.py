@@ -92,7 +92,7 @@ class QdrantMiddlewareWrapper(Middleware):
         
         try:
             logger.info("🔄 Initializing Qdrant middleware on first tool call...")
-            from .qdrant_enhanced import EnhancedQdrantResponseMiddleware
+            from .qdrant_unified import QdrantUnifiedMiddleware as EnhancedQdrantResponseMiddleware
             
             # Create the middleware
             self._inner_middleware = EnhancedQdrantResponseMiddleware()

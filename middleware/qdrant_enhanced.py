@@ -1,4 +1,4 @@
-"""Enhanced Qdrant middleware with features inspired by TypeScript implementation."""
+u"""Enhanced Qdrant middleware with features inspired by TypeScript implementation."""
 
 import json
 import gzip
@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, asdict
 from enum import Enum
 from pathlib import Path
+
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 # Defer heavy imports to avoid blocking server startup
 # from qdrant_client import QdrantClient, models
@@ -425,7 +427,7 @@ class SemanticQueryService:
         return payload.get("response_summary", "No summary available")
 
 
-class EnhancedQdrantResponseMiddleware:
+class EnhancedQdrantResponseMiddleware(Middleware):
     """
     Enhanced Qdrant middleware with features from TypeScript implementation.
     
@@ -435,6 +437,7 @@ class EnhancedQdrantResponseMiddleware:
     - Natural language search
     - Structured payloads
     - Configuration management
+    - Proper FastMCP2 middleware inheritance
     """
     
     def __init__(self, config: Optional[QdrantConfig] = None):
@@ -906,6 +909,65 @@ class EnhancedQdrantResponseMiddleware:
             
         except Exception as e:
             logger.error(f"Failed to get analytics: {e}")
+    
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
+        """
+        FastMCP2 middleware hook - intercept tool calls to store responses in Qdrant.
+        
+        Args:
+            context: Middleware context containing tool information
+            call_next: Function to call the next middleware/handler
+        """
+        if not self.config.enabled:
+            return await call_next(context)
+        
+        # Extract tool information
+        tool_name = getattr(context.message, 'name', 'unknown')
+        tool_args = getattr(context.message, 'arguments', {})
+        
+        # Check if verbose mode is requested
+        is_verbose = tool_args.get(self.config.verbose_param, False)
+        
+        # Record start time
+        start_time = datetime.utcnow()
+        
+        try:
+            # Execute the tool
+            result = await call_next(context)
+            
+            # Calculate execution time
+            execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+            
+            # Extract session and user info
+            session_id = None
+            user_email = None
+            
+            if context.fastmcp_context:
+                session_id = context.fastmcp_context.session_id
+                # Try to extract user email from args
+                for key in ['user_email', 'user_google_email', 'email']:
+                    if key in tool_args:
+                        user_email = tool_args[key]
+                        break
+            
+            # Process response (store + return summary/full)
+            processed_result = await self.process_tool_response(
+                tool_name=tool_name,
+                tool_args=tool_args,
+                response=result,
+                execution_time_ms=execution_time_ms,
+                session_id=session_id,
+                user_email=user_email,
+                return_full=is_verbose
+            )
+            
+            return processed_result
+            
+        except Exception as e:
+            # Log error but don't break tool execution
+            logger.error(f"Error in EnhancedQdrantResponseMiddleware for {tool_name}: {e}")
+            # Re-raise the original error
+            raise
             return {"error": str(e)}
 
 
@@ -990,3 +1052,11 @@ def setup_enhanced_qdrant_tools(mcp, middleware: EnhancedQdrantResponseMiddlewar
                 return f"Response with ID {response_id} not found"
         except Exception as e:
             return f"Failed to get response details: {str(e)}"
+
+# Backward compatibility alias
+QdrantEnhancedMiddleware = EnhancedQdrantResponseMiddleware
+
+# Backward compatibility alias
+QdrantEnhancedMiddleware = EnhancedQdrantResponseMiddleware
+# Backward compatibility alias - moved to end of file
+QdrantEnhancedMiddleware = EnhancedQdrantResponseMiddleware

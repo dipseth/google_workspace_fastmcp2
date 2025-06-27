@@ -14,6 +14,7 @@ from fastmcp import FastMCP
 
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
+from resources.user_resources import get_current_user_email_simple
 
 # Card Framework integration
 try:
@@ -169,25 +170,51 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_spaces(
-        user_google_email: str,
+        user_google_email: Optional[str] = None,
         page_size: int = 100,
         space_type: str = "all"  # "all", "room", "dm"
     ) -> str:
         """
         Lists Google Chat spaces (rooms and direct messages) accessible to the user.
 
+        🎯 ENHANCED: Gets user email automatically from resources if not provided!
+        user_google_email parameter is now optional.
+
         Args:
-            user_google_email (str): The user's Google email address. Required.
+            user_google_email (str): The user's Google email address (optional - will auto-detect if not provided).
             page_size (int): Number of spaces to return (default: 100).
             space_type (str): Filter by space type: "all", "room", or "dm" (default: "all").
 
         Returns:
             str: A formatted list of Google Chat spaces accessible to the user.
         """
-        logger.info(f"[list_spaces] Email={user_google_email}, Type={space_type}")
-
         try:
-            chat_service = await _get_chat_service_with_fallback(user_google_email)
+            # 🎯 Multi-method email detection
+            user_email = None
+            auth_method = "unknown"
+            
+            # Method 1: Use provided email if given
+            if user_google_email and user_google_email.strip():
+                user_email = user_google_email.strip()
+                auth_method = "provided_parameter"
+                logger.info(f"🎯 [list_spaces] Using provided email: {user_email}")
+            
+            # Method 2: Try resource context (primary method)
+            if not user_email:
+                try:
+                    user_email = get_current_user_email_simple()
+                    auth_method = "resource_context"
+                    logger.info(f"🎯 [list_spaces] Got email from resource context: {user_email}")
+                except ValueError:
+                    logger.info("🎯 [list_spaces] No resource context available")
+            
+            # Final check
+            if not user_email:
+                return "❌ Authentication error: Could not determine user email. Please provide user_google_email parameter or ensure proper authentication is set up."
+            
+            logger.info(f"🎯 [list_spaces] Using email: {user_email} (method: {auth_method}), Type={space_type}")
+
+            chat_service = await _get_chat_service_with_fallback(user_email)
             
             if chat_service is None:
                 error_msg = f"❌ Failed to create Google Chat service for {user_google_email}. Please check your credentials and permissions."
