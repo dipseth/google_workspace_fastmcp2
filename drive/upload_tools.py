@@ -131,10 +131,10 @@ def setup_drive_tools(mcp: FastMCP) -> None:
     
     @mcp.tool(
         name="start_google_auth",
-        description="Initiate Google OAuth2 authentication flow for Google Drive API access",
-        tags={"auth", "oauth", "google", "drive", "authentication", "setup"},
+        description="Initiate Google OAuth2 authentication flow for Google services (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
+        tags={"auth", "oauth", "google", "services", "authentication", "setup"},
         annotations={
-            "title": "Google Drive OAuth Setup",
+            "title": "Google Services OAuth Setup",
             "readOnlyHint": False,  # Modifies authentication state
             "destructiveHint": False,  # Creates auth tokens, doesn't destroy data
             "idempotentHint": True,  # Can be called multiple times safely
@@ -143,22 +143,22 @@ def setup_drive_tools(mcp: FastMCP) -> None:
     )
     async def start_google_auth(
         user_google_email: str,
-        service_name: str = "Google Drive"
-    ) -> str:
+        service_name: str = "Google Services"
+    ) -> dict:
         """
-        Initiate Google OAuth2 authentication flow for Google Drive API access.
+        Initiate Google OAuth2 authentication flow for Google services access.
         
         This tool generates an OAuth2 authorization URL and provides step-by-step
         instructions for users to authenticate their Google account. The authentication
-        process grants the application permission to access Google Drive on behalf
-        of the specified user.
+        process grants the application permission to access multiple Google services
+        (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.) on behalf of the specified user.
         
         Args:
             user_google_email: Target Google email address for authentication
-            service_name: Human-readable service name for display in auth flow (defaults to "Google Drive")
+            service_name: Human-readable service name for display purposes only (cosmetic parameter)
         
         Returns:
-            str: Formatted instructions containing the OAuth2 authorization URL and step-by-step guide
+            dict: Structured response containing auth URL, instructions, and metadata
             
         Raises:
             Handles generic exceptions during OAuth flow initiation
@@ -171,21 +171,41 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 service_name=service_name
             )
             
-            return (
-                f"🔐 **Google Drive Authentication Required**\n\n"
-                f"Please complete the following steps:\n"
-                f"1. Click this link: {auth_url}\n"
-                f"2. Sign in with: {user_google_email}\n"
-                f"3. Grant Google Drive permissions\n"
-                f"4. Wait for the success page\n"
-                f"5. Return here and retry your upload\n\n"
-                f"The authentication will be linked to your current session."
-            )
+            return {
+                "status": "success",
+                "message": "🔐 **Google Services Authentication Required**",
+                "auth_url": auth_url,
+                "clickable_link": f"[🚀 Click here to authenticate]({auth_url})",
+                "user_email": user_google_email,
+                "service_name": service_name,
+                "instructions": [
+                    f"Click the authentication link above",
+                    f"Sign in with: {user_google_email}",
+                    "Grant permissions for Google services (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
+                    "Wait for the success page",
+                    "Return here and retry your operation"
+                ],
+                "scopes_included": [
+                    "Google Drive (file management)",
+                    "Gmail (email access)",
+                    "Google Docs (document editing)",
+                    "Google Sheets (spreadsheet access)",
+                    "Google Slides (presentation management)",
+                    "Google Calendar (event management)",
+                    "And more Google services"
+                ],
+                "note": "The authentication will be linked to your current session and provide access to all Google services."
+            }
             
         except Exception as e:
-            error_msg = f"❌ Failed to start authentication: {e}"
+            error_msg = f"Failed to start authentication: {e}"
             logger.error(error_msg, exc_info=True)
-            return error_msg
+            return {
+                "status": "error",
+                "message": "❌ Authentication Setup Failed",
+                "error": str(e),
+                "user_email": user_google_email
+            }
     
     @mcp.tool(
         name="check_drive_auth",

@@ -264,11 +264,13 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
     """
     Register comprehensive Google Drive tools with the FastMCP server.
     
-    This function registers the missing Drive tools:
+    This function registers the Drive tools:
     1. search_drive_files: Advanced file/folder search
     2. get_drive_file_content: File content retrieval
     3. list_drive_items: Directory listing
     4. create_drive_file: File creation
+    5. share_drive_files: Share files with specific people
+    6. make_drive_files_public: Make files publicly accessible
     
     Args:
         mcp: FastMCP server instance to register tools with
@@ -643,4 +645,289 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             
         except Exception as e:
             logger.error(f"Unexpected error in create_drive_file: {e}")
+            return f"❌ Unexpected error: {e}"
+    
+    @mcp.tool(
+        name="share_drive_files",
+        description="Share Google Drive files with specific people via email addresses",
+        tags={"drive", "share", "permissions", "collaborate", "batch"},
+        annotations={
+            "title": "Share Drive Files",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True
+        }
+    )
+    async def share_drive_files(
+        user_google_email: str,
+        file_ids: List[str],
+        email_addresses: List[str],
+        role: str = "reader",
+        send_notification: bool = True,
+        message: Optional[str] = None,
+    ) -> str:
+        """
+        Share Google Drive files with specific people via email addresses.
+        Supports batch operations for multiple files and multiple recipients.
+        
+        Args:
+            user_google_email: User's Google email address
+            file_ids: List of Google Drive file IDs to share
+            email_addresses: List of email addresses to share files with
+            role: Permission role ('reader', 'writer', 'commenter') (default: 'reader')
+            send_notification: Whether to send email notification (default: True)
+            message: Optional message to include in sharing notification
+            
+        Returns:
+            str: Detailed results of sharing operations for each file and recipient
+        """
+        logger.info(f"[share_drive_files] Email: '{user_google_email}', Files: {len(file_ids)}, Recipients: {len(email_addresses)}")
+        
+        if not file_ids:
+            return "❌ No file IDs provided."
+        
+        if not email_addresses:
+            return "❌ No email addresses provided."
+        
+        valid_roles = ['reader', 'writer', 'commenter']
+        if role not in valid_roles:
+            return f"❌ Invalid role '{role}'. Must be one of: {', '.join(valid_roles)}"
+        
+        try:
+            drive_service = await _get_drive_service_with_fallback(user_google_email)
+            
+            results = []
+            total_operations = len(file_ids) * len(email_addresses)
+            successful_operations = 0
+            failed_operations = 0
+            
+            for file_id in file_ids:
+                # Get file metadata for better reporting
+                try:
+                    file_metadata = await asyncio.to_thread(
+                        drive_service.files().get(
+                            fileId=file_id,
+                            fields="id, name, webViewLink",
+                            supportsAllDrives=True
+                        ).execute
+                    )
+                    file_name = file_metadata.get('name', 'Unknown File')
+                    file_link = file_metadata.get('webViewLink', '#')
+                except Exception as e:
+                    file_name = f"File ID: {file_id}"
+                    file_link = '#'
+                    logger.warning(f"Could not fetch metadata for file {file_id}: {e}")
+                
+                file_results = []
+                
+                for email in email_addresses:
+                    try:
+                        permission_body = {
+                            "role": role,
+                            "type": "user",
+                            "emailAddress": email
+                        }
+                        
+                        if send_notification and message:
+                            permission_body["message"] = message
+                        
+                        await asyncio.to_thread(
+                            drive_service.permissions().create(
+                                fileId=file_id,
+                                body=permission_body,
+                                sendNotificationEmail=send_notification,
+                                supportsAllDrives=True,
+                            ).execute
+                        )
+                        
+                        file_results.append(f"  ✅ Shared with {email} as {role}")
+                        successful_operations += 1
+                        
+                    except HttpError as e:
+                        error_msg = str(e)
+                        if "already has access" in error_msg.lower():
+                            file_results.append(f"  ℹ️ {email} already has access as {role}")
+                            successful_operations += 1
+                        else:
+                            file_results.append(f"  ❌ Failed to share with {email}: {e}")
+                            failed_operations += 1
+                    except Exception as e:
+                        file_results.append(f"  ❌ Failed to share with {email}: {e}")
+                        failed_operations += 1
+                
+                results.append(f"📁 {file_name} (ID: {file_id})")
+                results.append(f"   Link: {file_link}")
+                results.extend(file_results)
+                results.append("")  # Empty line for spacing
+            
+            # Summary
+            summary = [
+                f"📊 Sharing Summary for {user_google_email}:",
+                f"   Files processed: {len(file_ids)}",
+                f"   Recipients: {len(email_addresses)}",
+                f"   Total operations: {total_operations}",
+                f"   Successful: {successful_operations}",
+                f"   Failed: {failed_operations}",
+                "",
+                "📋 Detailed Results:"
+            ]
+            
+            return "\n".join(summary + results)
+                
+        except HttpError as e:
+            logger.error(f"Drive API error in share_drive_files: {e}")
+            return f"❌ Drive API error: {e}"
+            
+        except Exception as e:
+            logger.error(f"Unexpected error in share_drive_files: {e}")
+            return f"❌ Unexpected error: {e}"
+    
+    @mcp.tool(
+        name="make_drive_files_public",
+        description="Make Google Drive files publicly accessible (anyone with the link can view)",
+        tags={"drive", "public", "share", "permissions", "batch", "publish"},
+        annotations={
+            "title": "Make Drive Files Public",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True
+        }
+    )
+    async def make_drive_files_public(
+        user_google_email: str,
+        file_ids: List[str],
+        public: bool = True,
+        role: str = "reader",
+    ) -> str:
+        """
+        Make Google Drive files publicly accessible or remove public access.
+        Supports batch operations for multiple files.
+        
+        Args:
+            user_google_email: User's Google email address
+            file_ids: List of Google Drive file IDs to make public/private
+            public: If True, makes files publicly viewable. If False, removes public access (default: True)
+            role: Permission role for public access ('reader', 'commenter') (default: 'reader')
+            
+        Returns:
+            str: Detailed results of public sharing operations for each file
+        """
+        logger.info(f"[make_drive_files_public] Email: '{user_google_email}', Files: {len(file_ids)}, Public: {public}")
+        
+        if not file_ids:
+            return "❌ No file IDs provided."
+        
+        valid_public_roles = ['reader', 'commenter']
+        if public and role not in valid_public_roles:
+            return f"❌ Invalid public role '{role}'. Must be one of: {', '.join(valid_public_roles)}"
+        
+        try:
+            drive_service = await _get_drive_service_with_fallback(user_google_email)
+            
+            results = []
+            successful_operations = 0
+            failed_operations = 0
+            
+            for file_id in file_ids:
+                # Get file metadata for better reporting
+                try:
+                    file_metadata = await asyncio.to_thread(
+                        drive_service.files().get(
+                            fileId=file_id,
+                            fields="id, name, webViewLink",
+                            supportsAllDrives=True
+                        ).execute
+                    )
+                    file_name = file_metadata.get('name', 'Unknown File')
+                    file_link = file_metadata.get('webViewLink', '#')
+                except Exception as e:
+                    file_name = f"File ID: {file_id}"
+                    file_link = '#'
+                    logger.warning(f"Could not fetch metadata for file {file_id}: {e}")
+                
+                try:
+                    if public:
+                        # Make file publicly accessible
+                        permission_body = {
+                            "role": role,
+                            "type": "anyone"
+                        }
+                        
+                        await asyncio.to_thread(
+                            drive_service.permissions().create(
+                                fileId=file_id,
+                                body=permission_body,
+                                supportsAllDrives=True,
+                            ).execute
+                        )
+                        
+                        results.append(f"✅ {file_name} (ID: {file_id}) - Made publicly {role}")
+                        results.append(f"   Link: {file_link}")
+                        successful_operations += 1
+                        
+                    else:
+                        # Remove public access - find and delete 'anyone' permission
+                        permissions_list = await asyncio.to_thread(
+                            drive_service.permissions().list(
+                                fileId=file_id,
+                                supportsAllDrives=True
+                            ).execute
+                        )
+                        
+                        anyone_permission_id = None
+                        for perm in permissions_list.get("permissions", []):
+                            if perm.get("type") == "anyone":
+                                anyone_permission_id = perm["id"]
+                                break
+                        
+                        if anyone_permission_id:
+                            await asyncio.to_thread(
+                                drive_service.permissions().delete(
+                                    fileId=file_id,
+                                    permissionId=anyone_permission_id,
+                                    supportsAllDrives=True,
+                                ).execute
+                            )
+                            results.append(f"✅ {file_name} (ID: {file_id}) - Removed public access")
+                        else:
+                            results.append(f"ℹ️ {file_name} (ID: {file_id}) - Was not publicly accessible")
+                        
+                        results.append(f"   Link: {file_link}")
+                        successful_operations += 1
+                    
+                except HttpError as e:
+                    error_msg = str(e)
+                    if public and "already exists" in error_msg.lower():
+                        results.append(f"ℹ️ {file_name} (ID: {file_id}) - Already publicly accessible")
+                        successful_operations += 1
+                    else:
+                        results.append(f"❌ {file_name} (ID: {file_id}) - Failed: {e}")
+                        failed_operations += 1
+                except Exception as e:
+                    results.append(f"❌ {file_name} (ID: {file_id}) - Failed: {e}")
+                    failed_operations += 1
+                
+                results.append("")  # Empty line for spacing
+            
+            # Summary
+            action = "made public" if public else "made private"
+            summary = [
+                f"📊 Public Sharing Summary for {user_google_email}:",
+                f"   Files processed: {len(file_ids)}",
+                f"   Successfully {action}: {successful_operations}",
+                f"   Failed: {failed_operations}",
+                "",
+                "📋 Detailed Results:"
+            ]
+            
+            return "\n".join(summary + results)
+                
+        except HttpError as e:
+            logger.error(f"Drive API error in make_drive_files_public: {e}")
+            return f"❌ Drive API error: {e}"
+            
+        except Exception as e:
+            logger.error(f"Unexpected error in make_drive_files_public: {e}")
             return f"❌ Unexpected error: {e}"
