@@ -2,14 +2,45 @@
 title: FastMCP2 Google Workspace Platform
 description: Google service integration with semantic search capabilities
 author: FastMCP2 Team
-date: 2025-01-26
-version: 2.0.0
+date: 2025-06-26
+version: 1.0.0
 status: COMPLETE - All 8 Google Workspace Services Migrated ✅
 ---
 
 # 🚀 FastMCP2 Google Workspace Platform
 
 A **MCP server** that provides **universal Google service integration** with OAuth authentication, multi-user support, and AI-powered semantic search capabilities via Qdrant. **COMPLETE with all 8 major Google Workspace services** successfully migrated to cutting-edge middleware architecture.
+## 🧪 Comprehensive Testing & Validation
+
+> **📋 Complete Test Documentation**: See [`tests/README.md`](tests/README.md) for comprehensive testing information across all 8 Google Workspace services.
+
+This platform has been extensively tested using the **[GoFastMCP Client](https://gofastmcp.com/clients/client)** - a powerful MCP client that enables real-time testing of all 59 Google Workspace tools. The testing approach includes:
+
+- ✅ **Live Server Testing**: All tests run against actual server instances with real Google API integration
+- ✅ **100% Tool Coverage**: Complete validation of all 59 tools across 8 major Google services
+- ✅ **Universal Architecture Validation**: Proven middleware patterns work consistently across Gmail, Drive, Docs, Forms, Slides, Calendar, Sheets, and Chat
+- ✅ **Multi-Service Workflows**: Integration testing between services (e.g., Forms + Drive + Gmail coordination)
+- ✅ **Authentication Flow Testing**: OAuth 2.0 validation across all Google services
+- ✅ **Real-World Scenarios**: Webhook delivery, semantic search, and production-ready functionality
+
+**Quick Test Validation**: Start the server and use [GoFastMCP Client](https://gofastmcp.com/clients/client) to immediately test any of the 59 available tools with live Google API integration.
+
+### Running Tests
+
+After starting the server in a separate terminal, run the comprehensive test suite:
+
+```bash
+# Detailed testing with verbose output (recommended for development)
+uv run pytest -xvs
+
+# Quick testing with minimal output (recommended for CI/validation)
+uv run python -m pytest --tb=short -q
+```
+
+**Command Differences:**
+- `pytest -xvs`: **Detailed mode** - Verbose output, stops on first failure, shows print statements (ideal for debugging)
+- `python -m pytest --tb=short -q`: **Quick mode** - Minimal output, short tracebacks, quiet operation (ideal for fast validation)
+
 
 ```mermaid
 graph TB
@@ -240,8 +271,8 @@ graph TB
 
 1. **Clone and setup:**
 ```bash
-git clone https://github.com/dipseth/fastmcp2_drive_upload.git
-cd fastmcp2_drive_upload
+git clone https://github.com/dipseth/google_workspace_fastmcp2.git
+cd google_workspace_fastmcp2
 uv sync
 ```
 
@@ -891,6 +922,10 @@ This project is built upon and inspired by the foundational work of **Taylor Wil
 
 The FastMCP2 platform builds upon this solid foundation to deliver a revolutionary universal architecture covering all major Google Workspace services.
 
+### 🧪 Testing & Validation
+
+Special thanks to [MCPJam](https://github.com/MCPJam) - the comprehensive testing framework that was instrumental in validating the platform's functionality across all Google Workspace services. MCPJam's robust testing capabilities helped ensure the reliability and comprehensive coverage of our 59 tools across 8 Google services.
+
 ### 🛠️ Technology Stack
 
 - [FastMCP](https://github.com/jlowin/fastmcp) - The revolutionary MCP framework
@@ -902,7 +937,7 @@ The FastMCP2 platform builds upon this solid foundation to deliver a revolutiona
 
 - 📧 **Email**: support@fastmcp2.com
 - 📚 **Documentation**: [docs.fastmcp2.com](https://docs.fastmcp2.com)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/dipseth/fastmcp2_drive_upload/issues)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/dipseth/google_workspace_fastmcp2/issues)
 - 💬 **Discord**: [Join our community](https://discord.gg/fastmcp2)
 - 🎥 **YouTube**: [Tutorial videos](https://youtube.com/@fastmcp2)
 

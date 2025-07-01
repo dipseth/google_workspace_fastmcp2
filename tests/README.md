@@ -40,7 +40,7 @@ The server must be running before executing tests:
 
 ```bash
 # In one terminal, start the server
-cd fastmcp2_drive_upload
+cd google_workspace_fastmcp2
 uv run python server.py
 ```
 
@@ -76,7 +76,23 @@ docker run -p 6333:6333 qdrant/qdrant
 
 ## Running Tests
 
+**⚠️ IMPORTANT**: Ensure the server is running in a separate terminal before executing any tests!
+
 ### Run All Tests (Recommended)
+
+```bash
+# Detailed testing with verbose output (recommended for development)
+uv run pytest -xvs
+
+# Quick testing with minimal output (recommended for CI/validation)
+uv run python -m pytest --tb=short -q
+```
+
+**Command Differences:**
+- `pytest -xvs`: **Detailed mode** - Verbose output, stops on first failure, shows print statements (ideal for debugging)
+- `python -m pytest --tb=short -q`: **Quick mode** - Minimal output, short tracebacks, quiet operation (ideal for fast validation)
+
+### Alternative Test Commands
 
 ```bash
 # From the project root - tests all 8 Google services
@@ -417,7 +433,7 @@ jobs:
         
       - name: Install Dependencies
         run: |
-          cd fastmcp2_drive_upload
+          cd google_workspace_fastmcp2
           uv sync
           
       - name: Setup Environment
@@ -428,18 +444,18 @@ jobs:
           
       - name: Start MCP Server
         run: |
-          cd fastmcp2_drive_upload
+          cd google_workspace_fastmcp2
           uv run python server.py &
           sleep 10  # Wait for all 59 tools to load
           
       - name: Run All Google Workspace Tests
         run: |
-          cd fastmcp2_drive_upload
+          cd google_workspace_fastmcp2
           uv run pytest tests/ -v --tb=short
           
       - name: Run Service-Specific Tests
         run: |
-          cd fastmcp2_drive_upload
+          cd google_workspace_fastmcp2
           # Test each service individually
           for service in gmail drive docs forms slides calendar sheets chat; do
             echo "Testing $service service..."
