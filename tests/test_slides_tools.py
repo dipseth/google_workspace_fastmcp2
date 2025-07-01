@@ -19,12 +19,12 @@ SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://{SERVER_HOST}:{SERVER_PORT}/mc
 # Test email address from environment variable
 TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test@example.com")
 
-# Global variable to store created presentation ID for session sharing
-_test_presentation_id = None
-
-
+# Class-level storage for shared presentation ID
 class TestSlidesTools:
     """Test Google Slides tools using the FastMCP Client."""
+    
+    # Class variable to store the shared presentation ID
+    _shared_presentation_id = None
     
     @pytest.fixture
     async def client(self):
@@ -40,74 +40,96 @@ class TestSlidesTools:
             print(f"Warning: Client connection error during teardown: {e}")
     
     @pytest.fixture(scope="class")
-    async def shared_test_presentation(self):
+    def shared_test_presentation(self):
         """Create a test presentation once per test class and return its ID."""
-        global _test_presentation_id
-        
         # If we already have a presentation ID, return it
-        if _test_presentation_id is not None:
-            return _test_presentation_id
+        if TestSlidesTools._shared_presentation_id is not None:
+            return TestSlidesTools._shared_presentation_id
+        
+        # Run the async creation in a new event loop
+        async def create_presentation():
+            auth_config = get_client_auth_config(TEST_EMAIL)
+            client = Client(SERVER_URL, auth=auth_config)
             
-        # Create a test presentation for the entire test class with its own client
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
+            try:
+                async with client:
+                    result = await client.call_tool("create_presentation", {
+                        "user_google_email": TEST_EMAIL,
+                        "title": "Shared Test Presentation for MCP Tests"
+                    })
+                    
+                    if result and len(result) > 0:
+                        content = result[0].text
+                        print(f"Create presentation response: {content}")  # Debug output
+                        
+                        if "presentation created successfully" in content.lower():
+                            # Enhanced regex patterns to extract presentation ID
+                            patterns = [
+                                r'presentation\s+id[:\s]*([a-zA-Z0-9_-]{20,})',  # "Presentation ID: ..."
+                                r'id[:\s]*([a-zA-Z0-9_-]{20,})',                 # "ID: ..."
+                                r'([a-zA-Z0-9_-]{44})',                          # Standard Google ID length
+                                r'([a-zA-Z0-9_-]{25,44})',                       # Range of Google ID lengths
+                                r'https://docs\.google\.com/presentation/d/([a-zA-Z0-9_-]+)',  # URL format
+                                r'"([a-zA-Z0-9_-]{20,})"',                       # Quoted ID
+                                r'`([a-zA-Z0-9_-]{20,})`',                       # Backtick quoted ID
+                            ]
+                            
+                            for pattern in patterns:
+                                match = re.search(pattern, content, re.IGNORECASE)
+                                if match:
+                                    presentation_id = match.group(1)
+                                    # Validate that this looks like a Google Slides ID
+                                    if len(presentation_id) >= 20 and len(presentation_id) <= 50:
+                                        TestSlidesTools._shared_presentation_id = presentation_id
+                                        print(f"Extracted presentation ID: {presentation_id}")
+                                        return presentation_id
+                            
+                            # Alternative: Look for any potential Google ID in the response
+                            # Google Slides IDs are typically 44 characters long
+                            words = re.findall(r'[a-zA-Z0-9_-]+', content)
+                            for word in words:
+                                if 20 <= len(word) <= 50 and re.match(r'^[a-zA-Z0-9_-]+$', word):
+                                    # Additional validation: Google IDs often contain both letters and numbers
+                                    if any(c.isalpha() for c in word) and any(c.isdigit() for c in word):
+                                        TestSlidesTools._shared_presentation_id = word
+                                        print(f"Found potential presentation ID: {word}")
+                                        return word
+                        
+                        # Handle authentication errors gracefully
+                        elif any(keyword in content.lower() for keyword in ["requires authentication", "no valid credentials"]):
+                            print("Authentication required - tests will be skipped")
+                            return None
+                            
+            except Exception as e:
+                print(f"Failed to create test presentation: {e}")
+                # Suppress errors during fixture setup to avoid blocking all tests
+                pass
+            
+            return None
         
+        # Run the async function and return the result
         try:
-            async with client:
-                result = await client.call_tool("create_presentation", {
-                    "user_google_email": TEST_EMAIL,
-                    "title": "Shared Test Presentation for MCP Tests"
-                })
-                
-                if result and len(result) > 0:
-                    content = result[0].text
-                    print(f"Create presentation response: {content}")  # Debug output
-                    
-                    if "presentation created successfully" in content.lower():
-                        # Try multiple regex patterns to extract presentation ID
-                        patterns = [
-                            r'presentation id[:\s]+([a-zA-Z0-9_-]{20,})',  # Standard format
-                            r'id[:\s]*([a-zA-Z0-9_-]{20,})',              # Shorter format
-                            r'([a-zA-Z0-9_-]{44})',                       # Google ID length
-                            r'https://docs\.google\.com/presentation/d/([a-zA-Z0-9_-]+)',  # URL format
-                        ]
-                        
-                        for pattern in patterns:
-                            match = re.search(pattern, content, re.IGNORECASE)
-                            if match:
-                                presentation_id = match.group(1)
-                                # Validate that this looks like a Google Slides ID
-                                if len(presentation_id) >= 20:
-                                    _test_presentation_id = presentation_id
-                                    print(f"Extracted presentation ID: {presentation_id}")
-                                    return presentation_id
-                        
-                        # If no regex worked, try to find any long alphanumeric string
-                        words = content.split()
-                        for word in words:
-                            # Clean up the word (remove punctuation)
-                            clean_word = re.sub(r'[^a-zA-Z0-9_-]', '', word)
-                            if len(clean_word) >= 20 and re.match(r'^[a-zA-Z0-9_-]+$', clean_word):
-                                _test_presentation_id = clean_word
-                                print(f"Found potential presentation ID: {clean_word}")
-                                return clean_word
-                    
-                    # Also handle authentication errors gracefully
-                    elif any(keyword in content.lower() for keyword in ["requires authentication", "no valid credentials"]):
-                        print("Authentication required - tests will be skipped")
-                        return None
-                        
-        except Exception as e:
-            print(f"Failed to create test presentation: {e}")
-            # Suppress errors during fixture setup to avoid blocking all tests
-            pass
+            # Try to get existing event loop, if none create a new one
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is running, we need to use a different approach
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, create_presentation())
+                    result = future.result()
+            else:
+                result = loop.run_until_complete(create_presentation())
+        except RuntimeError:
+            # No event loop exists, create one
+            result = asyncio.run(create_presentation())
         
-        return None
+        TestSlidesTools._shared_presentation_id = result
+        return result
     
     @pytest.fixture
-    async def test_presentation_id(self, shared_test_presentation):
+    def test_presentation_id(self, shared_test_presentation):
         """Get the shared test presentation ID."""
-        return await shared_test_presentation if hasattr(shared_test_presentation, '__await__') else shared_test_presentation
+        return shared_test_presentation
     
     @pytest.mark.asyncio
     async def test_slides_tools_available(self, client):
@@ -164,14 +186,12 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_get_presentation_info(self, client, test_presentation_id):
         """Test getting presentation information."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available - authentication required or presentation creation failed")
         
         result = await client.call_tool("get_presentation_info", {
             "user_google_email": TEST_EMAIL,
-            "presentation_id": presentation_id
+            "presentation_id": test_presentation_id
         })
         
         assert len(result) > 0
@@ -184,14 +204,12 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_add_slide(self, client, test_presentation_id):
         """Test adding a slide to a presentation."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available")
         
         result = await client.call_tool("add_slide", {
             "user_google_email": TEST_EMAIL,
-            "presentation_id": presentation_id,
+            "presentation_id": test_presentation_id,
             "layout_id": "TITLE_AND_BODY"
         })
         
@@ -202,9 +220,7 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_update_slide_content(self, client, test_presentation_id):
         """Test updating slide content with batch operations."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available - authentication required or presentation creation failed")
         
         # Test with a simple text update request
@@ -220,7 +236,7 @@ class TestSlidesTools:
         
         result = await client.call_tool("update_slide_content", {
             "user_google_email": TEST_EMAIL,
-            "presentation_id": presentation_id,
+            "presentation_id": test_presentation_id,
             "requests": requests
         })
         
@@ -232,15 +248,13 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_export_presentation(self, client, test_presentation_id):
         """Test exporting a presentation to different formats."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available - authentication required or presentation creation failed")
         
         # Test PDF export
         result = await client.call_tool("export_presentation", {
             "user_google_email": TEST_EMAIL,
-            "presentation_id": presentation_id,
+            "presentation_id": test_presentation_id,
             "export_format": "PDF"
         })
         
@@ -252,15 +266,13 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_get_presentation_file(self, client, test_presentation_id):
         """Test downloading a presentation file to local storage."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available")
         
         # Test PDF download (most common format)
         result = await client.call_tool("get_presentation_file", {
             "user_google_email": TEST_EMAIL,
-            "presentation_id": presentation_id,
+            "presentation_id": test_presentation_id,
             "export_format": "PDF",
             "download_directory": "./test_downloads"
         })
@@ -292,7 +304,7 @@ class TestSlidesTools:
             assert "export format: pdf" in content.lower()
             assert "file size:" in content.lower()
             assert "download duration:" in content.lower()
-            assert presentation_id in content
+            assert test_presentation_id in content
             
             # Verify file size in response matches actual file
             size_match = re.search(r'File Size: ([\d,]+) bytes', content)
@@ -317,9 +329,7 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_get_presentation_file_different_formats(self, client, test_presentation_id):
         """Test downloading presentation files in different formats."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available")
         
         # Test different export formats
@@ -328,7 +338,7 @@ class TestSlidesTools:
         for export_format in formats_to_test:
             result = await client.call_tool("get_presentation_file", {
                 "user_google_email": TEST_EMAIL,
-                "presentation_id": presentation_id,
+                "presentation_id": test_presentation_id,
                 "export_format": export_format,
                 "download_directory": "./test_downloads"
             })
@@ -347,15 +357,13 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_get_presentation_file_invalid_format(self, client, test_presentation_id):
         """Test get_presentation_file with invalid export format."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available")
         
         # Test with invalid format
         result = await client.call_tool("get_presentation_file", {
             "user_google_email": TEST_EMAIL,
-            "presentation_id": presentation_id,
+            "presentation_id": test_presentation_id,
             "export_format": "INVALID_FORMAT"
         })
         
@@ -367,14 +375,12 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_export_presentation_invalid_format(self, client, test_presentation_id):
         """Test exporting with invalid format."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available")
         
         result = await client.call_tool("export_presentation", {
             "user_google_email": TEST_EMAIL,
-            "presentation_id": presentation_id,
+            "presentation_id": test_presentation_id,
             "export_format": "INVALID_FORMAT"
         })
         
@@ -401,9 +407,7 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_add_slide_with_different_layouts(self, client, test_presentation_id):
         """Test adding slides with different layouts."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available")
         
         layouts = ["TITLE_ONLY", "SECTION_HEADER", "BLANK", "ONE_COLUMN_TEXT"]
@@ -411,7 +415,7 @@ class TestSlidesTools:
         for layout in layouts:
             result = await client.call_tool("add_slide", {
                 "user_google_email": TEST_EMAIL,
-                "presentation_id": presentation_id,
+                "presentation_id": test_presentation_id,
                 "layout_id": layout
             })
             
@@ -423,9 +427,7 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_update_slide_complex_requests(self, client, test_presentation_id):
         """Test complex batch update requests."""
-        presentation_id = await test_presentation_id if hasattr(test_presentation_id, '__await__') else test_presentation_id
-        
-        if not presentation_id:
+        if not test_presentation_id:
             pytest.skip("No test presentation ID available")
         
         # Complex batch request with multiple operations
@@ -461,7 +463,7 @@ class TestSlidesTools:
         
         result = await client.call_tool("update_slide_content", {
             "user_google_email": TEST_EMAIL,
-            "presentation_id": presentation_id,
+            "presentation_id": test_presentation_id,
             "requests": requests
         })
         

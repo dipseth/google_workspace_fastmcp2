@@ -895,6 +895,20 @@ MIT License - see LICENSE file for details.
 
 ## Acknowledgments
 
+### 🙏 Original Inspiration & Foundation
+
+This project is built upon and inspired by the foundational work of **Taylor Wilsdon** and the [google_workspace_mcp](https://github.com/taylorwilsdon/google_workspace_mcp) repository. The original repository provided the essential structure, concepts, and architectural vision that made this comprehensive Google Workspace integration platform possible.
+
+**Special thanks to Taylor Wilsdon** for:
+- 🏗️ **Original Architecture**: Establishing the core MCP server structure for Google Workspace services
+- 💡 **Conceptual Foundation**: Pioneering the idea of unified Google Workspace integration via MCP
+- 🔧 **Technical Framework**: Providing the initial OAuth implementation and service patterns
+- 🌟 **Open Source Leadership**: Creating the foundation that enabled this expanded platform
+
+The FastMCP2 platform builds upon this solid foundation to deliver a revolutionary universal architecture covering all major Google Workspace services.
+
+### 🛠️ Technology Stack
+
 - [FastMCP](https://github.com/jlowin/fastmcp) - The revolutionary MCP framework
 - [Google Workspace APIs](https://developers.google.com/workspace) - Complete Google service integration
 - [Qdrant](https://qdrant.tech) - Vector database for universal semantic search
