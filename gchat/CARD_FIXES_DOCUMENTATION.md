@@ -68,6 +68,28 @@ This document explains the fixes implemented to address issues with Google Chat 
 }
 ```
 
+### 3. Template Storage and Retrieval Inconsistency
+
+**Problem:** There were inconsistencies between how templates were stored and retrieved in different parts of the system:
+- In `TemplateManager`, templates were stored with random UUIDs as Qdrant point IDs and the template_id in the payload
+- In `unified_card_tool.py`, templates were stored with the template_id as the Qdrant point ID
+- This caused issues when templates were stored using one component and retrieved using the other
+
+**Fixes Implemented:**
+1. In `unified_card_tool.py`:
+   - Updated `_store_card_template` to use a deterministic template ID generation approach consistent with `TemplateManager`
+   - Modified to store templates with random UUIDs as Qdrant point IDs and the template_id in the payload
+   - Added `payload_type: "template"` marker in the payload for consistent filtering
+   - Updated `_find_card_template` to use payload-based search instead of direct ID lookup
+   - Updated `delete_card_template` to use payload-based search for finding templates to delete
+
+2. Created a new documentation file `CARD_TEMPLATE_SYSTEM.md` that explains:
+   - The architecture of the template storage and retrieval system
+   - The consistent approach now used by both components
+   - Best practices for working with templates
+
+**How to Use:** The template system now works consistently regardless of which component is used to store or retrieve templates. You can use either the `TemplateManager` API or the MCP tools in `unified_card_tool.py` interchangeably.
+
 ## Compatibility Summary
 
 Based on testing, here's what works reliably with Google Chat cards:
@@ -80,10 +102,11 @@ Based on testing, here's what works reliably with Google Chat cards:
 - Webhook delivery for properly formatted cards
 - Announcement style (with the new implementation)
 - Template usage by ID or name (with improved lookup)
+- Consistent template storage and retrieval across components
 
 ❌ **Known Issues:**
 - Numbered lists (cause formatting errors)
-- Template retrieval by name may still be less reliable than by ID
+- Legacy templates created before the fixes may need to be recreated for optimal compatibility
 
 ## Template IDs
 
@@ -93,15 +116,23 @@ For reference, here are the IDs of the templates created during testing:
 
 ## Best Practices
 
-1. **Use Template IDs When Possible**: While template name lookup has been improved, using the template ID is still more reliable.
+1. **Use the TemplateManager API When Possible**: The `TemplateManager` class provides a higher-level interface for working with templates and handles all the details of storage and retrieval.
 
-2. **Avoid Numbered Lists**: Use bullet points instead of numbered lists to avoid formatting errors.
+2. **Include `payload_type: "template"` in Template Payloads**: This marker ensures proper filtering and consistent retrieval across components.
 
-3. **Use Simple Formatting**: Stick to basic markdown (bold, italic, headings) for the most reliable results.
+3. **Use Deterministic Template IDs**: Generate template IDs based on content to prevent duplicates and ensure consistency.
 
-4. **Test Cards**: Always test cards in a development space before sending to production spaces.
+4. **Use Payload-Based Search for Template Retrieval**: This is more flexible and works regardless of which component stored the template.
 
-5. **Check for Unsupported Fields**: If you encounter API errors, check for unsupported fields in your card structure.
+5. **Avoid Numbered Lists**: Use bullet points instead of numbered lists to avoid formatting errors.
+
+6. **Use Simple Formatting**: Stick to basic markdown (bold, italic, headings) for the most reliable results.
+
+7. **Test Cards**: Always test cards in a development space before sending to production spaces.
+
+8. **Check for Unsupported Fields**: If you encounter API errors, check for unsupported fields in your card structure.
+
+9. **Refer to the New Documentation**: See `CARD_TEMPLATE_SYSTEM.md` for detailed information about the template system architecture and best practices.
 
 ## Available Tools
 

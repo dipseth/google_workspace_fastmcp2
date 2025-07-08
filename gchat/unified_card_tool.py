@@ -277,23 +277,43 @@ async def _find_card_template(query_or_id: str, limit: int = 3):
     if not client:
         return []
     
-    # Check if the input looks like a UUID (template ID)
-    is_uuid = False
-    if len(query_or_id) == 36 and query_or_id.count('-') == 4:
-        is_uuid = True
+    # Check if the input looks like a template ID
+    is_template_id = False
+    if query_or_id.startswith("template_") or (len(query_or_id) == 36 and query_or_id.count('-') == 4):
+        is_template_id = True
         
-    # Try direct ID lookup first if it looks like a UUID
-    if is_uuid:
+    # Try payload-based search first if it looks like a template ID
+    if is_template_id:
         try:
-            # Get template by ID
-            points = client.retrieve(
-                collection_name=_card_templates_collection,
-                ids=[query_or_id]
+            # Import required modules for filtering
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            # Create filter for template_id in payload
+            template_id_filter = Filter(
+                must=[
+                    FieldCondition(
+                        key="payload_type",
+                        match=MatchValue(value="template")
+                    ),
+                    FieldCondition(
+                        key="template_id",
+                        match=MatchValue(value=query_or_id)
+                    )
+                ]
             )
             
-            if points and len(points) > 0:
+            # Search with filter
+            search_results = client.scroll(
+                collection_name=_card_templates_collection,
+                scroll_filter=template_id_filter,
+                limit=1,
+                with_payload=True
+            )
+            
+            if search_results and len(search_results[0]) > 0:
                 # Format the result
-                template = points[0].payload
+                point = search_results[0][0]
+                template = point.payload
                 return [{
                     "score": 1.0,  # Perfect match
                     "template_id": template.get("template_id"),
@@ -303,7 +323,7 @@ async def _find_card_template(query_or_id: str, limit: int = 3):
                     "created_at": template.get("created_at")
                 }]
         except Exception as e:
-            logger.warning(f"⚠️ Direct template lookup failed, falling back to search: {e}")
+            logger.warning(f"⚠️ Template ID lookup failed, falling back to semantic search: {e}")
     
     # Fall back to semantic search
     try:
@@ -366,8 +386,9 @@ async def _store_card_template(name: str, description: str, template: Dict[str, 
         from sentence_transformers import SentenceTransformer
         from qdrant_client.models import PointStruct
         
-        # Generate a unique ID for the template
-        template_id = str(uuid.uuid4())
+        # Generate a deterministic template ID based on name and content
+        # This ensures consistency with TemplateManager implementation
+        template_id = f"template_{hashlib.md5(f'{name}:{json.dumps(template, sort_keys=True)}'.encode('utf-8')).hexdigest()}"
         
         # Create payload
         payload = {
@@ -375,22 +396,23 @@ async def _store_card_template(name: str, description: str, template: Dict[str, 
             "name": name,
             "description": description,
             "template": template,
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now().isoformat(),
+            "payload_type": "template"  # Add payload_type for consistency with TemplateManager
         }
         
         # Get embedding model
         model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
         
         # Generate embedding for template
-        text_to_embed = f"{name} {description}"
+        text_to_embed = f"Template: {name}\nDescription: {description}\nType: card template"
         embedding = model.encode(text_to_embed)
         
-        # Store in Qdrant
+        # Store in Qdrant with random UUID as point ID for consistency with TemplateManager
         client.upsert(
             collection_name=_card_templates_collection,
             points=[
                 PointStruct(
-                    id=template_id,
+                    id=str(uuid.uuid4()),  # Use random UUID as point ID
                     vector=embedding.tolist(),
                     payload=payload
                 )
@@ -1083,18 +1105,42 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 logger.error(f"❌ Error checking collections: {coll_error}", exc_info=True)
                 return f"❌ Error checking collections: {str(coll_error)}"
             
-            # Check if template exists
+            # Check if template exists using payload-based search
             try:
-                points = client.retrieve(
-                    collection_name=_card_templates_collection,
-                    ids=[template_id]
+                from qdrant_client.models import Filter, FieldCondition, MatchValue
+                
+                # Create filter for template_id in payload
+                template_id_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="payload_type",
+                            match=MatchValue(value="template")
+                        ),
+                        FieldCondition(
+                            key="template_id",
+                            match=MatchValue(value=template_id)
+                        )
+                    ]
                 )
                 
-                if not points or len(points) == 0:
+                # Search with filter
+                search_results = client.scroll(
+                    collection_name=_card_templates_collection,
+                    scroll_filter=template_id_filter,
+                    limit=10,  # Get all matching points (there should be only one, but just in case)
+                    with_payload=True
+                )
+                
+                if not search_results or len(search_results[0]) == 0:
                     return f"❌ Template not found: {template_id}"
+                
+                # Get point IDs to delete
+                point_ids = [point.id for point in search_results[0]]
+                logger.info(f"Found {len(point_ids)} points to delete for template_id: {template_id}")
+                
             except Exception as retrieve_error:
-                logger.error(f"❌ Error retrieving template: {retrieve_error}", exc_info=True)
-                return f"❌ Error retrieving template: {str(retrieve_error)}"
+                logger.error(f"❌ Error finding template: {retrieve_error}", exc_info=True)
+                return f"❌ Error finding template: {str(retrieve_error)}"
             
             # Delete the template with proper error handling
             try:
@@ -1104,27 +1150,30 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 client.delete(
                     collection_name=_card_templates_collection,
                     points_selector=PointIdsList(
-                        points=[template_id]
+                        points=point_ids
                     )
                 )
                 
                 # Verify deletion
-                verify_points = client.retrieve(
+                verify_results = client.scroll(
                     collection_name=_card_templates_collection,
-                    ids=[template_id]
+                    scroll_filter=template_id_filter,
+                    limit=1,
+                    with_payload=True
                 )
                 
-                if not verify_points or len(verify_points) == 0:
+                if not verify_results or len(verify_results[0]) == 0:
                     return f"✅ Template deleted successfully: {template_id}"
                 else:
                     return f"⚠️ Template may not have been deleted: {template_id}"
                 
             except ImportError:
                 # Fall back to simpler deletion if models not available
-                client.delete(
-                    collection_name=_card_templates_collection,
-                    points_selector=[template_id]
-                )
+                for point_id in point_ids:
+                    client.delete(
+                        collection_name=_card_templates_collection,
+                        points_selector=[point_id]
+                    )
                 return f"✅ Template deleted successfully: {template_id}"
                 
             except Exception as delete_error:

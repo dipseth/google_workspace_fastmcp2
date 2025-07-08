@@ -104,8 +104,8 @@ class TemplateManager:
         # If not in cache and Qdrant middleware is available, search there
         if self.qdrant_middleware:
             try:
-                # Use direct ID lookup query format
-                results = await self.qdrant_middleware.search(f"id:{template_id}")
+                # Search for template by template_id in payload
+                results = await self.qdrant_middleware.search(f"payload_type:template template_id:{template_id}")
                 
                 if results and len(results) > 0:
                     template_data = results[0].get("response_data", {})
@@ -152,7 +152,7 @@ class TemplateManager:
                 
                 # Add to templates list
                 templates.append({
-                    "template_id": result.get("id"),
+                    "template_id": template_data.get("template_id"),
                     "score": result.get("score"),
                     "name": template_data.get("name"),
                     "description": template_data.get("description"),
