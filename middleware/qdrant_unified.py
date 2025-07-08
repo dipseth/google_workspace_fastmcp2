@@ -383,17 +383,138 @@ class QdrantUnifiedMiddleware(Middleware):
         
         return response
     
-    async def _store_response(self, context: MiddlewareContext, response: Any):
-        """Store tool response in Qdrant with embedding."""
+    async def _store_response(self, context=None, response=None, **kwargs):
+        """
+        Store tool response in Qdrant with embedding.
+        
+        This method supports multiple calling patterns:
+        1. With a MiddlewareContext object: _store_response(context, response)
+        2. With individual parameters as positional args: _store_response("tool_name", response_data)
+        3. With individual parameters as kwargs: _store_response(tool_name="name", tool_args={...}, response=data, ...)
+        """
+        # Check if called with all keyword arguments (template_manager.py style)
+        if 'tool_name' in kwargs and 'response' in kwargs:
+            # Called with all keyword arguments
+            return await self._store_response_with_params(
+                tool_name=kwargs.get('tool_name'),
+                tool_args=kwargs.get('tool_args', {}),
+                response=kwargs.get('response'),
+                execution_time_ms=kwargs.get('execution_time_ms', 0),
+                session_id=kwargs.get('session_id'),
+                user_email=kwargs.get('user_email')
+            )
+        
+        # Check if context is a string (tool_name) - positional args style
+        elif isinstance(context, str):
+            # Called with individual parameters as positional args
+            return await self._store_response_with_params(
+                tool_name=context,
+                tool_args={},
+                response=response,
+                execution_time_ms=0,
+                session_id=None,
+                user_email=None
+            )
+        
+        # Default case: context is a MiddlewareContext object
+        elif context is not None and response is not None:
+            # Called with MiddlewareContext object
+            try:
+                # Create response payload
+                response_data = {
+                    "tool_name": context.tool_name,
+                    "arguments": context.arguments,
+                    "response": response,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "user_id": getattr(context, 'user_id', 'unknown'),
+                    "user_email": getattr(context, 'user_email', getattr(context, 'user_id', 'unknown')),
+                    "session_id": str(uuid.uuid4()),
+                    "payload_type": PayloadType.TOOL_RESPONSE.value
+                }
+                
+                # Convert to JSON
+                json_data = json.dumps(response_data, default=str)
+                
+                # Generate text for embedding
+                embed_text = f"Tool: {context.tool_name}\nArguments: {json.dumps(context.arguments)}\nResponse: {str(response)[:1000]}"
+                
+                # Generate embedding
+                embedding = await asyncio.to_thread(self.embedder.encode, embed_text)
+                
+                # Check if compression is needed
+                compressed = self._should_compress(json_data)
+                if compressed:
+                    stored_data = self._compress_data(json_data)
+                    logger.debug(f"📦 Compressed response: {len(json_data)} -> {len(stored_data)} bytes")
+                else:
+                    stored_data = json_data
+                
+                # Create point for Qdrant
+                _, qdrant_models = _get_qdrant_imports()
+                point = qdrant_models['PointStruct'](
+                    id=str(uuid.uuid4()),
+                    vector=embedding.tolist(),
+                    payload={
+                        "tool_name": context.tool_name,
+                        "timestamp": response_data["timestamp"],
+                        "user_id": response_data["user_id"],
+                        "user_email": response_data["user_email"],
+                        "payload_type": PayloadType.TOOL_RESPONSE.value,
+                        "compressed": compressed,
+                        "data": stored_data if not compressed else None,
+                        "compressed_data": stored_data if compressed else None
+                    }
+                )
+                
+                # Store in Qdrant
+                await asyncio.to_thread(
+                    self.client.upsert,
+                    collection_name=self.config.collection_name,
+                    points=[point]
+                )
+                
+                logger.debug(f"✅ Stored response for tool: {context.tool_name}")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to store response: {e}")
+                raise
+        
+        # If we get here, we don't know how to handle the input
+        else:
+            raise ValueError("Invalid parameters for _store_response. Expected MiddlewareContext or keyword arguments.")
+    
+    async def _store_response_with_params(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        response: Any,
+        execution_time_ms: int = 0,
+        session_id: Optional[str] = None,
+        user_email: Optional[str] = None
+    ):
+        """
+        Store tool response in Qdrant with embedding using individual parameters.
+        This method is called by _store_response when it's called with individual parameters
+        instead of a MiddlewareContext object.
+        
+        Args:
+            tool_name: Name of the tool being called
+            tool_args: Arguments passed to the tool
+            response: Response from the tool
+            execution_time_ms: Execution time in milliseconds
+            session_id: Session ID
+            user_email: User email
+        """
         try:
             # Create response payload
             response_data = {
-                "tool_name": context.tool_name,
-                "arguments": context.arguments,
+                "tool_name": tool_name,
+                "arguments": tool_args,
                 "response": response,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "user_id": getattr(context, 'user_id', 'unknown'),
-                "session_id": str(uuid.uuid4()),
+                "user_id": user_email or "unknown",
+                "user_email": user_email or "unknown",
+                "session_id": session_id or str(uuid.uuid4()),
                 "payload_type": PayloadType.TOOL_RESPONSE.value
             }
             
@@ -401,7 +522,7 @@ class QdrantUnifiedMiddleware(Middleware):
             json_data = json.dumps(response_data, default=str)
             
             # Generate text for embedding
-            embed_text = f"Tool: {context.tool_name}\nArguments: {json.dumps(context.arguments)}\nResponse: {str(response)[:1000]}"
+            embed_text = f"Tool: {tool_name}\nArguments: {json.dumps(tool_args)}\nResponse: {str(response)[:1000]}"
             
             # Generate embedding
             embedding = await asyncio.to_thread(self.embedder.encode, embed_text)
@@ -420,9 +541,10 @@ class QdrantUnifiedMiddleware(Middleware):
                 id=str(uuid.uuid4()),
                 vector=embedding.tolist(),
                 payload={
-                    "tool_name": context.tool_name,
+                    "tool_name": tool_name,
                     "timestamp": response_data["timestamp"],
                     "user_id": response_data["user_id"],
+                    "user_email": response_data["user_email"],
                     "payload_type": PayloadType.TOOL_RESPONSE.value,
                     "compressed": compressed,
                     "data": stored_data if not compressed else None,
@@ -437,10 +559,10 @@ class QdrantUnifiedMiddleware(Middleware):
                 points=[point]
             )
             
-            logger.debug(f"✅ Stored response for tool: {context.tool_name}")
+            logger.debug(f"✅ Stored response for tool: {tool_name}")
             
         except Exception as e:
-            logger.error(f"❌ Failed to store response: {e}")
+            logger.error(f"❌ Failed to store response with params: {e}")
             raise
     
     async def search(self, query: str, limit: int = None, score_threshold: float = None) -> List[Dict]:
@@ -667,7 +789,7 @@ class QdrantUnifiedMiddleware(Middleware):
                 match = True
                 if "tool_name" in filters and result.get("tool_name") != filters["tool_name"]:
                     match = False
-                if "user_email" in filters and result.get("user_id") != filters["user_email"]:
+                if "user_email" in filters and result.get("user_email") != filters["user_email"]:
                     match = False
                 if match:
                     filtered_results.append(result)

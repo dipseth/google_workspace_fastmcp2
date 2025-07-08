@@ -4,7 +4,7 @@ Provides rich card-based messaging capabilities for Google Chat with graceful fa
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, cast
 import json
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,24 @@ class GoogleChatCardManager:
         self.framework_available = CARD_FRAMEWORK_AVAILABLE
         
     def create_rich_card(self, title: str, subtitle: Optional[str] = None,
-                        image_url: Optional[str] = None, sections: Optional[List[Dict[str, Any]]] = None):
-        """Create a rich card with advanced formatting and sections."""
+                        image_url: Optional[str] = None, sections: Optional[List[Union[Dict[str, Any], str]]] = None):
+        """
+        Create a rich card with advanced formatting and sections.
+        
+        This method creates a rich card using the Card Framework with support for
+        multiple section formats. It handles both dictionary-based section configurations
+        and simple string sections, converting them to the appropriate Card Framework objects.
+        
+        Args:
+            title: Card title
+            subtitle: Optional subtitle
+            image_url: Optional image URL
+            sections: Optional list of sections, which can be dictionaries or strings
+            
+        Returns:
+            CardWithId or Dict: A Card Framework card object if framework is available,
+                               or a dictionary in the fallback format
+        """
         if CARD_FRAMEWORK_AVAILABLE:
             return self._create_rich_card_with_framework(title, subtitle, image_url, sections)
         else:
@@ -106,15 +122,21 @@ class GoogleChatCardManager:
             raise e
 
     def _create_rich_card_with_framework(self, title: str, subtitle: Optional[str] = None,
-                                        image_url: Optional[str] = None, sections: Optional[List[Dict[str, Any]]] = None) -> CardWithId:
+                                        image_url: Optional[str] = None, sections: Optional[List[Union[Dict[str, Any], str]]] = None) -> CardWithId:
         """Create rich card using Card Framework with advanced widgets."""
         try:
+            # Log the image URL for debugging
+            logger.debug(f"Creating rich card with image_url: {image_url}")
+            
             # Create card header
             header = CardHeader(
                 title=title,
                 subtitle=subtitle or "Rich Card with Advanced Features",
-                image_url=image_url or "https://www.groupon.com/favicon.ico"
+                image_url=image_url  # Explicitly pass the image_url parameter, which might be None
             )
+            
+            # Log the header for debugging
+            logger.debug(f"Created header with image_url: {header.image_url}")
             
             # Create the card with CardWithId
             card = CardWithId(
@@ -123,6 +145,9 @@ class GoogleChatCardManager:
                 sections=[]
             )
             card.card_id = f"rich_{hash(title + str(sections))}"
+            
+            # Log the card header after creation
+            logger.debug(f"Card created with header image_url: {card.header.image_url}")
             
             # Process sections if provided
             if sections:
@@ -157,61 +182,191 @@ class GoogleChatCardManager:
             # Fallback to simple card
             return self._create_simple_card_with_framework(title, subtitle, "Rich card fallback", image_url)
 
-    def _create_section_from_config(self, section_config: Dict[str, Any]) -> Optional[Section]:
-        """Create a Section from configuration dictionary."""
+    def _create_section_from_string(self, section_text: str) -> Section:
+        """
+        Create a Section from a string.
+        
+        This method converts a simple string into a properly formatted Section object
+        with a TextParagraph widget containing the string text. This allows for simple
+        string sections to be used alongside more complex dictionary-based section configs.
+        
+        Args:
+            section_text: The string text to convert into a section
+            
+        Returns:
+            Section: A Card Framework Section object with a TextParagraph widget
+        """
+        logger.debug(f"Creating section from string: {section_text}")
+        text_widget = TextParagraph(text=section_text)
+        return Section(widgets=[text_widget])
+    
+    def _create_section_from_config(self, section_config: Union[Dict[str, Any], str]) -> Optional[Section]:
+        """
+        Create a Section from configuration dictionary or string.
+        
+        This method handles multiple section formats:
+        1. String sections - Converted to sections with TextParagraph widgets
+        2. Dictionary with widgets array - Direct section configuration
+        3. Dictionary with title and content - Creates a section with TextParagraph
+        4. Dictionary with text field - Creates a section with TextParagraph
+        
+        The method includes enhanced error handling with fallback sections for errors.
+        
+        Args:
+            section_config: Either a string or dictionary configuration for the section
+            
+        Returns:
+            Section: A Card Framework Section object, or None if creation fails
+        """
         try:
+            # Handle string sections
+            if isinstance(section_config, str):
+                return self._create_section_from_string(section_config)
+            
+            # Log the incoming section config for debugging
+            logger.debug(f"Creating section from config: {json.dumps(section_config, indent=2)}")
+            
             widgets = []
             
-            # Process widgets in the section
-            for widget_config in section_config.get("widgets", []):
-                widget = self._create_widget_from_config(widget_config)
-                if widget:
-                    widgets.append(widget)
+            # Handle different section formats
+            # Format 1: Direct section config with widgets array
+            if "widgets" in section_config:
+                logger.debug(f"Processing section with widgets array, found {len(section_config.get('widgets', []))} widgets")
+                for widget_config in section_config.get("widgets", []):
+                    widget = self._create_widget_from_config(widget_config)
+                    if widget:
+                        widgets.append(widget)
+                    else:
+                        logger.warning(f"Failed to create widget from config: {json.dumps(widget_config, indent=2)}")
+            # Format 2: Section with title and content
+            elif "title" in section_config and "content" in section_config:
+                logger.debug(f"Processing section with title and content")
+                # Create a text paragraph widget from content
+                text_widget = TextParagraph(text=section_config.get("content", ""))
+                widgets.append(text_widget)
+            # Format 3: Section with just text content as string
+            elif isinstance(section_config.get("text"), str):
+                logger.debug(f"Processing section with text field")
+                text_widget = TextParagraph(text=section_config.get("text", ""))
+                widgets.append(text_widget)
+            
+            # Get header from either header or title field
+            header = section_config.get("header", section_config.get("title"))
+            logger.debug(f"Section header: {header}")
             
             # Create section
             section = Section(
-                header=section_config.get("header"),
+                header=header,
                 widgets=widgets,
                 collapsible=section_config.get("collapsible", False)
             )
             
+            logger.debug(f"Created section with {len(widgets)} widgets")
             return section
         
         except Exception as e:
-            logger.error(f"Error creating section from config: {e}")
-            return None
+            if isinstance(section_config, dict):
+                logger.error(f"Error creating section from config: {e}")
+                logger.debug(f"Section config that caused error: {json.dumps(section_config, indent=2)}")
+            else:
+                logger.error(f"Error creating section from {type(section_config)}: {e}")
+                logger.debug(f"Section content that caused error: {section_config}")
+            
+            # Try to create a fallback section with error information
+            try:
+                error_text = f"Error creating section: {str(e)}"
+                logger.info(f"Creating fallback section with error information")
+                return Section(widgets=[TextParagraph(text=error_text)])
+            except Exception as fallback_error:
+                logger.error(f"Failed to create fallback section: {fallback_error}")
+                return None
 
     def _create_widget_from_config(self, widget_config: Dict[str, Any]):
         """Create a widget from configuration dictionary."""
         try:
-            widget_type = widget_config.get("type")
+            # Log the incoming widget config for debugging
+            logger.debug(f"Creating widget from config: {json.dumps(widget_config, indent=2)}")
+            
+            # Extract widget type, handling both camelCase and snake_case
+            widget_type = None
+            
+            # Check for type field first
+            if "type" in widget_config:
+                widget_type = widget_config.get("type")
+                logger.debug(f"Found widget type in 'type' field: {widget_type}")
+            
+            # Check for direct widget keys if type is not found
+            elif "buttonList" in widget_config:
+                widget_type = "buttonList"
+                logger.debug(f"Found buttonList widget type from direct key")
+            elif "selectionInput" in widget_config:
+                widget_type = "selectionInput"
+                logger.debug(f"Found selectionInput widget type from direct key")
+            elif "textParagraph" in widget_config:
+                widget_type = "textParagraph"
+                logger.debug(f"Found textParagraph widget type from direct key")
+            elif "decoratedText" in widget_config:
+                widget_type = "decoratedText"
+                logger.debug(f"Found decoratedText widget type from direct key")
+            elif "image" in widget_config:
+                widget_type = "image"
+                logger.debug(f"Found image widget type from direct key")
+            
+            logger.debug(f"Detected widget type: {widget_type}")
+            
+            # Convert camelCase to snake_case for consistent handling
+            if widget_type:
+                # Convert camelCase to snake_case
+                if widget_type == "buttonList":
+                    widget_type = "button_list"
+                elif widget_type == "selectionInput":
+                    widget_type = "selection_input"
+                elif widget_type == "textParagraph":
+                    widget_type = "text_paragraph"
+                elif widget_type == "decoratedText":
+                    widget_type = "decorated_text"
+                logger.debug(f"Normalized widget type to: {widget_type}")
             
             if widget_type == "text_paragraph":
-                return TextParagraph(text=widget_config.get("text", ""))
+                # Handle both direct and nested formats
+                text = widget_config.get("text", "")
+                if "textParagraph" in widget_config and isinstance(widget_config["textParagraph"], dict):
+                    text = widget_config["textParagraph"].get("text", text)
+                return TextParagraph(text=text)
             
             elif widget_type == "decorated_text":
+                # Handle both direct and nested formats
+                decorated_text_config = widget_config
+                if "decoratedText" in widget_config and isinstance(widget_config["decoratedText"], dict):
+                    decorated_text_config = widget_config["decoratedText"]
+                
                 icon = None
-                if widget_config.get("start_icon"):
-                    icon_name = widget_config["start_icon"]
+                if decorated_text_config.get("start_icon"):
+                    icon_name = decorated_text_config["start_icon"]
                     if hasattr(Icon.KnownIcon, icon_name):
                         icon = Icon(known_icon=getattr(Icon.KnownIcon, icon_name))
                 
                 on_click = None
-                if widget_config.get("clickable") and widget_config.get("url"):
-                    on_click = OnClick(open_link=OpenLink(url=widget_config["url"]))
+                if decorated_text_config.get("clickable") and decorated_text_config.get("url"):
+                    on_click = OnClick(open_link=OpenLink(url=decorated_text_config["url"]))
                 
                 return DecoratedText(
                     start_icon=icon,
-                    text=widget_config.get("text", ""),
-                    top_label=widget_config.get("top_label"),
-                    bottom_label=widget_config.get("bottom_label"),
+                    text=decorated_text_config.get("text", ""),
+                    top_label=decorated_text_config.get("top_label"),
+                    bottom_label=decorated_text_config.get("bottom_label"),
                     wrap_text=True,
                     on_click=on_click
                 )
             
             elif widget_type == "button_list":
+                # Handle both direct and nested formats
+                button_list_config = widget_config
+                if "buttonList" in widget_config and isinstance(widget_config["buttonList"], dict):
+                    button_list_config = widget_config["buttonList"]
+                
                 buttons = []
-                for button_config in widget_config.get("buttons", []):
+                for button_config in button_list_config.get("buttons", []):
                     button = Button(
                         text=button_config.get("text", "Button"),
                         on_click=OnClick(open_link=OpenLink(url=button_config.get("url", "https://example.com")))
@@ -219,14 +374,31 @@ class GoogleChatCardManager:
                     buttons.append(button)
                 return ButtonList(buttons=buttons)
             
+            elif widget_type == "selection_input":
+                # Handle selectionInput widget
+                selection_input_config = widget_config
+                if "selectionInput" in widget_config and isinstance(widget_config["selectionInput"], dict):
+                    selection_input_config = widget_config["selectionInput"]
+                
+                return SelectionInput(
+                    name=selection_input_config.get("name", "selection"),
+                    label=selection_input_config.get("label", "Select an option"),
+                    items=selection_input_config.get("items", [])
+                )
+            
             elif widget_type == "image":
+                # Handle both direct and nested formats
+                image_config = widget_config
+                if "image" in widget_config and isinstance(widget_config["image"], dict):
+                    image_config = widget_config["image"]
+                
                 on_click = None
-                if widget_config.get("clickable") and widget_config.get("url"):
-                    on_click = OnClick(open_link=OpenLink(url=widget_config["url"]))
+                if image_config.get("clickable") and image_config.get("url"):
+                    on_click = OnClick(open_link=OpenLink(url=image_config["url"]))
                 
                 return Image(
-                    image_url=widget_config.get("image_url", ""),
-                    alt_text=widget_config.get("alt_text", "Image"),
+                    image_url=image_config.get("image_url", image_config.get("imageUrl", "")),
+                    alt_text=image_config.get("alt_text", image_config.get("altText", "Image")),
                     on_click=on_click
                 )
             
@@ -260,11 +432,23 @@ class GoogleChatCardManager:
             
             else:
                 logger.warning(f"Unknown widget type: {widget_type}")
-                return None
+                # Log the full widget config for debugging
+                logger.debug(f"Unknown widget config: {json.dumps(widget_config, indent=2)}")
+                # Create a text paragraph with debug info instead of returning None
+                debug_text = f"Unknown widget type: {widget_type}"
+                return TextParagraph(text=debug_text)
         
         except Exception as e:
             logger.error(f"Error creating widget from config: {e}")
-            return None
+            logger.debug(f"Widget config that caused error: {json.dumps(widget_config, indent=2)}")
+            try:
+                # Create a fallback text widget with error information
+                error_text = f"Error creating widget: {str(e)}"
+                logger.info(f"Creating fallback widget with error information")
+                return TextParagraph(text=error_text)
+            except Exception as fallback_error:
+                logger.error(f"Failed to create fallback widget: {fallback_error}")
+                return None
 
     def _create_rich_card_fallback(self, title: str, subtitle: Optional[str] = None,
                                   image_url: Optional[str] = None, sections: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -589,9 +773,23 @@ class GoogleChatCardManager:
         """
         try:
             logger.debug(f"Attempting to convert card: {card}")
-            # The Card Framework v2 `Card` object should have a `to_dict()` method
-            # that produces the correct structure for a single Google Chat card.
-            google_format_card = card.to_dict() if hasattr(card, 'to_dict') else {}
+            
+            # Handle FunctionTool objects that are not directly callable
+            if hasattr(card, '__class__') and 'FunctionTool' in str(card.__class__):
+                logger.warning("Detected FunctionTool object - using adapter-safe conversion")
+                # Extract card data using a safe method
+                if hasattr(card, 'get_data'):
+                    google_format_card = card.get_data()
+                elif hasattr(card, 'data'):
+                    google_format_card = card.data
+                else:
+                    # Fallback to string representation
+                    google_format_card = {"error": "Unable to extract card data from FunctionTool"}
+                    logger.error("Unable to extract card data from FunctionTool object")
+            else:
+                # The Card Framework v2 `Card` object should have a `to_dict()` method
+                # that produces the correct structure for a single Google Chat card.
+                google_format_card = card.to_dict() if hasattr(card, 'to_dict') else {}
             
             # VALIDATION LOG: Check for field name issues
             logger.info("=== FIELD NAME VALIDATION START ===")

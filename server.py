@@ -24,11 +24,16 @@ from gcalendar.calendar_tools import setup_calendar_tools
 from gchat.chat_tools import setup_chat_tools
 from gchat.jwt_chat_tools import setup_jwt_chat_tools
 from gchat.chat_app_tools import setup_chat_app_tools
+from gchat.chat_app_prompts import setup_chat_app_prompts
+from gchat.unified_card_tool import setup_unified_card_tool
+from gchat.smart_card_tool import setup_smart_card_tool
+from adapters.module_wrapper_mcp import setup_module_wrapper_middleware
 from sheets.sheets_tools import setup_sheets_tools
 from middleware.qdrant_unified import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools
 from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
 from tools.enhanced_tools import setup_enhanced_tools
+from tunnel.tool_provider import setup_tunnel_tools
 
 # Configure logging
 logging.basicConfig(
@@ -50,11 +55,39 @@ except KeyError:
     logger.warning(f"⚠️ Invalid CREDENTIAL_STORAGE_MODE '{storage_mode_str}', defaulting to FILE_PLAINTEXT")
     credential_storage_mode = CredentialStorageMode.FILE_PLAINTEXT
 
+# Import contextlib for proper async context manager implementation
+import contextlib
+
+# Define a proper lifespan context manager for the FastMCP instance
+@contextlib.asynccontextmanager
+async def lifespan_manager(app: FastMCP):
+    """Lifespan context manager for the FastMCP instance."""
+    logger.info("🚀 Starting FastMCP server lifespan...")
+    # Properly initialize the StreamableHTTPSessionManager task group
+    # from fastmcp.server.http import get_session_manager
+    # session_manager = get_session_manager()
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    session_manager = StreamableHTTPSessionManager(
+        app=app._mcp_server,
+        event_store=None,
+        json_response=False,
+        stateless=False,
+    )    
+    # Use a nested context manager to ensure proper cleanup
+    async with session_manager.run():
+        try:
+            yield
+        except Exception as e:
+            logger.error(f"❌ Error in lifespan: {e}", exc_info=True)
+    
+    logger.info("🛑 Shutting down FastMCP server lifespan...")
+
 # Create FastMCP2 instance WITHOUT authentication first (to avoid conflicts with OAuth discovery routes)
 mcp = FastMCP(
     name=settings.server_name,
     version="1.0.0",
-    auth=None  # Will add auth later after custom OAuth routes are registered
+    auth=None,  # Will add auth later after custom OAuth routes are registered
+    lifespan=lifespan_manager  # Add lifespan manager to properly initialize StreamableHTTPSessionManager
 )
 
 # Add authentication middleware with configured storage mode
@@ -98,14 +131,31 @@ setup_calendar_tools(mcp)
 # Register Google Chat tools
 setup_chat_tools(mcp)
 
+# Register Unified Card Tool with ModuleWrapper integration
+setup_unified_card_tool(mcp)
+
+# Register Smart Card Tool with content mapping integration
+setup_smart_card_tool(mcp)
+
+# Register ModuleWrapper middleware
+logger.info("🔄 Initializing ModuleWrapper middleware...")
+setup_module_wrapper_middleware(mcp, modules_to_wrap=["json", "card_framework.v2"])
+logger.info("✅ ModuleWrapper middleware initialized")
+
 # Register JWT-enhanced Chat tools (demonstration)
 setup_jwt_chat_tools(mcp)
 
 # Register Google Chat App Development tools
 setup_chat_app_tools(mcp)
 
+# Register Google Chat App Development prompts
+setup_chat_app_prompts(mcp)
+
 # Register Google Sheets tools
 setup_sheets_tools(mcp)
+
+# Register Cloudflare Tunnel tools
+setup_tunnel_tools(mcp)
 
 # Setup OAuth callback handler
 setup_oauth_callback_handler(mcp)
@@ -224,6 +274,16 @@ async def health_check() -> str:
             f"- `get_card_framework_status` - Check Card Framework availability\n"
             f"- `get_adapter_system_status` - Check adapter system integration\n"
             f"- `list_available_card_types` - List supported card types\n"
+            f"**Unified Card Tool (NEW!):**\n"
+            f"- `send_dynamic_card` - Send any type of card using natural language description\n"
+            f"- `list_available_card_components` - List available card components\n"
+            f"- `get_card_component_info` - Get detailed information about card components\n"
+            f"**Smart Card Tools (NEW!):**\n"
+            f"- `send_smart_card` - Create and send a Google Chat card using natural language content description\n"
+            f"- `create_card_from_template` - Create and send a card using a predefined template\n"
+            f"- `preview_card_from_description` - Preview a card structure from natural language description without sending\n"
+            f"- `optimize_card_layout` - Analyze and optimize a card layout based on engagement metrics\n"
+            f"- `create_multi_modal_card` - Create and send a card with multi-modal content\n"
             f"**Qdrant Tools (Enhanced):**\n"
             f"- `search_tool_history` - Semantic search of historical tool responses\n"
             f"- `get_tool_analytics` - Get comprehensive tool usage analytics\n"
@@ -383,6 +443,31 @@ async def server_info() -> str:
         f"- Send rich cards with advanced formatting (supports webhook delivery)\n"
         f"- Args: user_google_email, space_id, title, subtitle, image_url, sections, webhook_url\n"
         f"- Example: `send_rich_card('user@gmail.com', 'spaces/AAAA', 'Status Update', webhook_url='https://...')`\n\n"
+        f"**`send_dynamic_card`** (NEW!)\n"
+        f"- Send any type of card using natural language description with ModuleWrapper\n"
+        f"- Args: user_google_email, space_id, card_description, card_params, thread_key, webhook_url\n"
+        f"- Example: `send_dynamic_card('user@gmail.com', 'spaces/AAAA', 'simple card with title and text', {'title': 'Hello', 'text': 'World'})`\n\n"
+        f"**Smart Card Tools (NEW!):**\n\n"
+        f"**`send_smart_card`**\n"
+        f"- Create and send a Google Chat card using natural language content description\n"
+        f"- Args: user_google_email, space_id, content, style, auto_format, thread_key, webhook_url\n"
+        f"- Example: `send_smart_card('user@gmail.com', 'spaces/AAAA', 'Title: Meeting Update | Text: Team standup at 2 PM')`\n\n"
+        f"**`create_card_from_template`**\n"
+        f"- Create and send a card using a predefined template with content substitution\n"
+        f"- Args: template_name, content, user_google_email, space_id, thread_key, webhook_url\n"
+        f"- Example: `create_card_from_template('status_report', {'title': 'Project Status', 'status': 'On Track'}, 'user@gmail.com', 'spaces/AAAA')`\n\n"
+        f"**`preview_card_from_description`**\n"
+        f"- Preview a card structure from natural language description without sending\n"
+        f"- Args: description, auto_format\n"
+        f"- Example: `preview_card_from_description('A card with a title saying Welcome and a button to Get Started')`\n\n"
+        f"**`optimize_card_layout`**\n"
+        f"- Analyze and optimize a card layout based on engagement metrics\n"
+        f"- Args: card_id\n"
+        f"- Example: `optimize_card_layout('card-123456')`\n\n"
+        f"**`create_multi_modal_card`**\n"
+        f"- Create and send a card with multi-modal content (text, data, images, video)\n"
+        f"- Args: user_google_email, space_id, content, data, images, video_url, thread_key, webhook_url\n"
+        f"- Example: `create_multi_modal_card('user@gmail.com', 'spaces/AAAA', 'Monthly Sales', data={'labels': ['Jan', 'Feb'], 'values': [100, 150]})`\n\n"
         f"**🔐 Authentication:**\n"
         f"- Uses OAuth 2.0 with PKCE for security\n"
         f"- Multi-user support with session management\n"

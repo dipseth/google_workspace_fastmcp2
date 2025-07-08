@@ -638,12 +638,15 @@ SERVICE_DEFAULTS = {
 
 ## Advanced Usage
 
-### Enterprise Multi-Service Integration
+### Enterprise Multi-Service Integration (POC)
+
+> **⚠️ Proof of Concept**: This section demonstrates potential future functionality for multi-service workflows. The `enterprise_workflow` tool is not currently implemented in the platform - this is conceptual code showing how comprehensive Google Workspace automation could work using the FastMCP2 architecture.
 
 ```python
+# CONCEPTUAL IMPLEMENTATION - NOT YET AVAILABLE AS ACTUAL TOOL
 @mcp.tool()
 async def enterprise_workflow(
-    user_google_email: str, 
+    user_google_email: str,
     project_name: str,
     team_emails: list[str]
 ) -> str:

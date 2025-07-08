@@ -43,15 +43,28 @@ else:
 
 # Initialize adapter system if available
 if ADAPTERS_AVAILABLE:
-    discovery_manager = DiscoveryManager()
-    adapter_factory = AdapterFactory(discovery_manager)
-    adapter_registry = AdapterRegistry(adapter_factory)
-    logger.info("Adapter system initialized for Google Chat")
+    try:
+        discovery_manager = DiscoveryManager()
+        adapter_factory = AdapterFactory(discovery_manager)
+        adapter_registry = AdapterRegistry(adapter_factory)
+        
+        # Properly register card manager with adapter system
+        if card_manager and hasattr(adapter_registry, 'register_adapter'):
+            adapter_registry.register_adapter('chat_cards', card_manager)
+            logger.info("Card manager registered with adapter system")
+        
+        logger.info("Adapter system initialized for Google Chat")
+    except Exception as e:
+        logger.error(f"Error initializing adapter system: {e}")
+        discovery_manager = None
+        adapter_factory = None
+        adapter_registry = None
 else:
     discovery_manager = None
     adapter_factory = None
     adapter_registry = None
     logger.warning("Adapter system not available")
+
 
 
 async def _get_chat_service_with_fallback(user_google_email: str):
@@ -489,7 +502,8 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         buttons: Optional[List[Dict[str, Any]]] = None,
         fields: Optional[List[Dict[str, Any]]] = None,
         submit_action: Optional[Dict[str, Any]] = None,
-        thread_key: Optional[str] = None
+        thread_key: Optional[str] = None,
+        webhook_url: Optional[str] = None
     ) -> str:
         """
         Sends a rich card message to a Google Chat space using Card Framework.
@@ -507,6 +521,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             fields: List of form field configurations for form cards
             submit_action: Submit button action for form cards
             thread_key: Optional thread key for threaded replies
+            webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
 
         Returns:
             str: Confirmation message with sent message details
@@ -542,6 +557,54 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     if not fields or not submit_action:
                         raise ValueError("Form cards require 'fields' and 'submit_action' parameters")
                     card_dict = card_manager.create_form_card(title, fields, submit_action)
+                elif card_type == "rich":
+                    # Support for rich card type
+                    # Format sections if provided, otherwise use empty list
+                    formatted_sections = []
+                    if buttons:
+                        # Convert buttons to a section with buttonList widget
+                        button_section = {
+                            "widgets": [
+                                {
+                                    "buttonList": {
+                                        "buttons": buttons
+                                    }
+                                }
+                            ]
+                        }
+                        formatted_sections.append(button_section)
+                    
+                    # Create rich card
+                    try:
+                        logger.debug(f"Creating rich card with title: {title}, subtitle: {subtitle}, image_url: {image_url}")
+                        card_obj = card_manager.create_rich_card(title, subtitle, image_url, formatted_sections)
+                        logger.debug(f"Rich card created: {type(card_obj)}")
+                        
+                        # Convert to dictionary for JSON serialization
+                        if hasattr(card_obj, 'to_dict'):
+                            card_dict = card_obj.to_dict()
+                            logger.debug(f"Converted card to dictionary using to_dict()")
+                        elif hasattr(card_obj, '__dict__'):
+                            card_dict = card_obj.__dict__
+                            logger.debug(f"Converted card to dictionary using __dict__")
+                        else:
+                            # Use the card manager to convert
+                            card_dict = card_manager._convert_card_to_google_format(card_obj)
+                            logger.debug(f"Converted card using _convert_card_to_google_format")
+                        
+                        # Replace card_obj with the dictionary
+                        card_obj = card_dict
+                        logger.debug(f"Card object replaced with dictionary")
+                    except Exception as e:
+                        logger.error(f"Error creating rich card: {e}", exc_info=True)
+                        # Fallback to simple card
+                        card_obj = card_manager.create_simple_card(
+                            title=title,
+                            subtitle=subtitle or "Error creating rich card",
+                            text=f"Could not create rich card: {str(e)}",
+                            image_url=image_url
+                        )
+                        logger.debug(f"Fell back to simple card due to error")
                 else:
                     raise ValueError(f"Unsupported card type: {card_type}")
 
@@ -574,35 +637,84 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 fallback_text = f"{title}\n{subtitle or ''}\n{text}".strip()
                 return await send_message(user_google_email, space_id, fallback_text, thread_key)
 
-            # Send card message
-            logger.debug(f"Sending card message with body: {json.dumps(message_body, indent=2)}")
+            # Choose delivery method based on webhook_url
+            if webhook_url:
+                # Use webhook delivery (bypasses credential restrictions)
+                logger.info("Sending via webhook URL...")
+                import requests
+                
+                # Create message payload
+                # Ensure we're using a serializable dictionary, not a Card object
+                if isinstance(card_obj, dict):
+                    card_dict = card_obj
+                    logger.debug(f"Card object is already a dictionary")
+                elif hasattr(card_obj, 'to_dict'):
+                    card_dict = card_obj.to_dict()
+                    logger.debug(f"Converted card to dictionary using to_dict()")
+                elif hasattr(card_obj, '__dict__'):
+                    card_dict = card_obj.__dict__
+                    logger.debug(f"Converted card to dictionary using __dict__")
+                else:
+                    # Convert to Google format if it's not already a dict
+                    card_dict = card_manager._convert_card_to_google_format(card_obj)
+                    logger.debug(f"Converted card using _convert_card_to_google_format")
+                
+                rendered_message = {
+                    "text": f"Card message: {title}",
+                    "cardsV2": [card_dict]
+                }
+                
+                logger.debug(f"Rendered message: {json.dumps(rendered_message, default=str)}")
+                
+                logger.debug(f"Sending card message with webhook payload: {json.dumps(rendered_message, indent=2)}")
+                
+                try:
+                    response = requests.post(
+                        webhook_url,
+                        json=rendered_message,
+                        headers={'Content-Type': 'application/json'}
+                    )
+                    
+                    logger.info(f"Webhook response status: {response.status_code}")
+                    if response.status_code == 200:
+                        return f"✅ Card message sent successfully via webhook! Status: {response.status_code}, Card Type: {card_type}"
+                    else:
+                        return f"❌ Webhook delivery failed. Status: {response.status_code}, Response: {response.text}"
+                except Exception as e:
+                    logger.error(f"Error sending card message via webhook: {e}", exc_info=True)
+                    # Fallback to text message
+                    fallback_text = f"{title}\n{subtitle or ''}\n{text}".strip()
+                    return await send_message(user_google_email=user_google_email, space_id=space_id, message_text=fallback_text, thread_key=thread_key)
+            else:
+                # Send card message via API
+                logger.debug(f"Sending card message with body: {json.dumps(message_body, indent=2)}")
 
-            # Add thread key if provided
-            request_params = {
-                'parent': space_id,
-                'body': message_body
-            }
-            if thread_key:
-                request_params['threadKey'] = thread_key
+                # Add thread key if provided
+                request_params = {
+                    'parent': space_id,
+                    'body': message_body
+                }
+                if thread_key:
+                    request_params['threadKey'] = thread_key
 
-            try:
-                message = await asyncio.to_thread(
-                    chat_service.spaces().messages().create(**request_params).execute
-                )
-                logger.debug(f"Google Chat API response: {json.dumps(message, indent=2)}")
+                try:
+                    message = await asyncio.to_thread(
+                        chat_service.spaces().messages().create(**request_params).execute
+                    )
+                    logger.debug(f"Google Chat API response: {json.dumps(message, indent=2)}")
 
-                message_name = message.get('name', '')
-                create_time = message.get('createTime', '')
+                    message_name = message.get('name', '')
+                    create_time = message.get('createTime', '')
 
-                msg = f"Card message sent to space '{space_id}' by {user_google_email}. Message ID: {message_name}, Time: {create_time}, Card Type: {card_type}"
-                logger.info(f"Successfully sent card message to space '{space_id}' by {user_google_email}")
-                return msg
+                    msg = f"Card message sent to space '{space_id}' by {user_google_email}. Message ID: {message_name}, Time: {create_time}, Card Type: {card_type}"
+                    logger.info(f"Successfully sent card message to space '{space_id}' by {user_google_email}")
+                    return msg
 
-            except Exception as e:
-                logger.error(f"Error sending card message: {e}", exc_info=True)
-                # Fallback to text message
-                fallback_text = f"{title}\n{subtitle or ''}\n{text}".strip()
-                return await send_message(user_google_email=user_google_email, space_id=space_id, message_text=fallback_text, thread_key=thread_key)
+                except Exception as e:
+                    logger.error(f"Error sending card message: {e}", exc_info=True)
+                    # Fallback to text message
+                    fallback_text = f"{title}\n{subtitle or ''}\n{text}".strip()
+                    return await send_message(user_google_email=user_google_email, space_id=space_id, message_text=fallback_text, thread_key=thread_key)
                 
         except HttpError as e:
             error_msg = f"❌ Failed to send card message: {e}"
@@ -1005,6 +1117,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         
         return "\n".join(output)
 
+    
     @mcp.tool(
         name="send_rich_card",
         description="Sends a rich card message to a Google Chat space with advanced formatting",
@@ -1023,7 +1136,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         title: str = "Rich Card Test",
         subtitle: Optional[str] = None,
         image_url: Optional[str] = None,
-        sections: Optional[List[Dict[str, Any]]] = None,
+        sections: Optional[List[Any]] = None,
         thread_key: Optional[str] = None,
         webhook_url: Optional[str] = None
     ) -> str:
@@ -1049,23 +1162,70 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             str: Confirmation message with sent message details
         """
         try:
-            logger.info(f"=== RICH CARD TEST START ===")
+            logger.info(f"=== RICH CARD CREATION START ===")
             logger.info(f"User: {user_google_email}, Space: {space_id}, Title: {title}")
+            logger.info(f"Image URL provided: {image_url}")
             logger.info(f"Webhook URL provided: {bool(webhook_url)}")
+            logger.info(f"Sections provided: {len(sections) if sections else 0} sections")
+            if sections:
+                for i, section in enumerate(sections):
+                    section_type = type(section).__name__
+                    if isinstance(section, dict):
+                        section_keys = list(section.keys())
+                        logger.info(f"  Section {i}: type={section_type}, keys={section_keys}")
+                    else:
+                        logger.info(f"  Section {i}: type={section_type}")
             
             if not card_manager:
                 return "Card Framework not available. Cannot send rich cards."
             
             # Create rich card using Card Framework
             logger.info("Creating rich card with Card Framework...")
-            card = card_manager.create_rich_card(
-                title=title,
-                subtitle=subtitle,
-                image_url=image_url,
-                sections=sections
-            )
             
-            logger.info(f"Rich card created: {type(card)}")
+            # Let the card_manager handle section formatting
+            logger.debug(f"Passing sections directly to card_manager: {sections}")
+            
+            try:
+                # Log section types for debugging
+                if sections:
+                    logger.debug(f"Section types before processing:")
+                    for i, section in enumerate(sections):
+                        section_type = type(section).__name__
+                        logger.debug(f"  Section {i}: type={section_type}")
+                
+                # Use the card_manager to create the rich card with proper section handling
+                card = card_manager.create_rich_card(
+                    title=title,
+                    subtitle=subtitle,
+                    image_url=image_url,
+                    sections=sections
+                )
+                logger.info(f"Rich card created: {type(card)}")
+            except Exception as e:
+                logger.error(f"Error creating rich card: {e}", exc_info=True)
+                
+                # Create a more detailed error message
+                error_details = f"Could not create rich card: {str(e)}"
+                
+                # Add section information to the error message if available
+                if sections:
+                    error_details += f"\nProvided {len(sections)} sections:"
+                    for i, section in enumerate(sections):
+                        section_type = type(section).__name__
+                        if isinstance(section, dict):
+                            section_keys = list(section.keys())
+                            error_details += f"\n  Section {i}: type={section_type}, keys={section_keys}"
+                        else:
+                            error_details += f"\n  Section {i}: type={section_type}, value={str(section)[:50]}"
+                
+                # Fallback to simple card with detailed error information
+                card = card_manager.create_simple_card(
+                    title=title,
+                    subtitle=subtitle or "Error creating rich card",
+                    text=error_details,
+                    image_url=image_url
+                )
+                logger.info("Fell back to simple card due to error with detailed information")
             
             # Convert card to proper Google format
             google_format_card = card_manager._convert_card_to_google_format(card)
