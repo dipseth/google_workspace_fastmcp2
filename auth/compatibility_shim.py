@@ -381,6 +381,8 @@ class CompatibilityShim:
         cls._legacy_scope_groups_cache = None
         cls._legacy_service_defaults_cache = None
         cls._legacy_drive_scopes_cache = None
+        # Force immediate cache invalidation
+        logger.info("COMPATIBILITY: Cache cleared - next scope request will regenerate from updated registry")
     
     @classmethod
     def get_cache_stats(cls) -> Dict[str, bool]:

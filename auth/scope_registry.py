@@ -144,7 +144,8 @@ class ScopeRegistry:
         
         "script": {
             "projects": "https://www.googleapis.com/auth/script.projects",
-            "deployments": "https://www.googleapis.com/auth/script.deployments"
+            "deployments": "https://www.googleapis.com/auth/script.deployments",
+            "external_request": "https://www.googleapis.com/auth/script.external_request"
         }
     }
     
