@@ -463,6 +463,18 @@ await list_available_card_types()
 
 ## Tool Documentation
 
+### 📚 Comprehensive API Reference
+
+**[View Complete API Documentation →](docs/api-reference/README.md)**
+
+Access detailed documentation for all 60+ tools including:
+- Complete parameter specifications with types and defaults
+- Response formats and examples
+- Error handling scenarios
+- Service-specific query syntax (Gmail, Drive, etc.)
+- Best practices and performance tips
+- Rate limiting and quota information
+
 ### Universal Authentication Pattern
 
 All 59 tools use the same authentication pattern:
@@ -640,7 +652,7 @@ SERVICE_DEFAULTS = {
 
 ### Enterprise Multi-Service Integration (POC)
 
-> **⚠️ Proof of Concept**: This section demonstrates potential future functionality for multi-service workflows. The `enterprise_workflow` tool is not currently implemented in the platform - this is conceptual code showing how comprehensive Google Workspace automation could work using the FastMCP2 architecture.
+> **⚠️ Proof of Concept**: This section demonstrates potential future functionality for multi-service workflows. The `enterprise_workflow` tool is not currently implemented in the platform - this is conceptual code showing how comprehensive Google Workspace automation could work using the FastMCP2 architecture. It illustrates the platform's extensibility and how developers could build complex, cross-service orchestration tools leveraging the universal service architecture.
 
 ```python
 # CONCEPTUAL IMPLEMENTATION - NOT YET AVAILABLE AS ACTUAL TOOL

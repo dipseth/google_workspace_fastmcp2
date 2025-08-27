@@ -26,6 +26,9 @@ _FALLBACK_OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
     "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/gmail.readonly",
+    # Ensure fallback advertises Gmail Settings so inspectors/clients know they’re supported
+    "https://www.googleapis.com/auth/gmail.settings.basic",
+    "https://www.googleapis.com/auth/gmail.settings.sharing",
     "https://www.googleapis.com/auth/calendar.readonly"
 ]
 
@@ -59,6 +62,64 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
         mcp: FastMCP application instance
     """
     
+    @mcp.custom_route("/.well-known/openid-configuration/mcp", methods=["GET", "OPTIONS"])
+    async def openid_configuration_mcp(request: Any):
+        """OpenID Configuration endpoint for MCP Inspector Quick OAuth.
+        
+        This is the endpoint MCP Inspector expects for Quick OAuth functionality.
+        """
+        from starlette.responses import JSONResponse, Response
+        
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    "Access-Control-Max-Age": "86400",
+                }
+            )
+        
+        # Get base server URL with proper protocol
+        base_url = settings.base_url
+        
+        metadata = {
+            "issuer": "https://accounts.google.com",
+            "authorization_endpoint": "https://accounts.google.com/o/oauth2/auth",
+            "token_endpoint": "https://oauth2.googleapis.com/token",
+            "jwks_uri": "https://www.googleapis.com/oauth2/v3/certs",
+            "userinfo_endpoint": "https://www.googleapis.com/oauth2/v1/userinfo",
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+            "code_challenge_methods_supported": ["S256"],
+            "scopes_supported": _get_oauth_endpoint_scopes(),
+            "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": ["RS256"],
+            # MCP-specific configuration
+            "registration_endpoint": f"{base_url}/oauth/register",
+            "resource_server": base_url,
+            "authorization_servers": ["https://accounts.google.com"],
+            "bearer_methods_supported": ["header"],
+            "resource_documentation": f"{base_url}/docs"
+        }
+        
+        logger.info("📋 OpenID Configuration (MCP) metadata served")
+        
+        # Return proper JSONResponse with comprehensive CORS headers
+        return JSONResponse(
+            content=metadata,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "Access-Control-Max-Age": "86400",
+                "Cache-Control": "public, max-age=3600",
+            }
+        )
+    
     @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET", "OPTIONS"])
     async def oauth_protected_resource(request: Any):
         """OAuth Protected Resource Metadata endpoint.
@@ -78,10 +139,8 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 }
             )
         
-        # Get base server URL
-        server_host = settings.server_host
-        server_port = settings.server_port
-        base_url = f"http://{server_host}:{server_port}"
+        # Get base server URL with proper protocol
+        base_url = settings.base_url
         
         metadata = {
             "resource_server": base_url,
@@ -226,6 +285,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     
     logger.info("✅ OAuth HTTP endpoints registered via FastMCP custom routes")
     logger.info("🔍 Available OAuth endpoints:")
+    logger.info("  GET /.well-known/openid-configuration/mcp (MCP Inspector Quick OAuth)")
     logger.info("  GET /.well-known/oauth-protected-resource")
     logger.info("  GET /.well-known/oauth-authorization-server")
     logger.info("  POST /oauth/register")

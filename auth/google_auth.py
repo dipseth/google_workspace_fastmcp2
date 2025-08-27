@@ -184,7 +184,7 @@ async def initiate_oauth_flow(user_email: str, service_name: str = "Google Drive
         scopes=settings.drive_scopes
     )
     
-    flow.redirect_uri = settings.oauth_redirect_uri
+    flow.redirect_uri = settings.dynamic_oauth_redirect_uri
     
     # Generate state parameter
     state = secrets.token_urlsafe(32)
@@ -193,6 +193,7 @@ async def initiate_oauth_flow(user_email: str, service_name: str = "Google Drive
     _oauth_state_map[state] = user_email
     
     # Generate authorization URL
+    # The Flow object already has scopes configured, don't pass them again
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
@@ -233,6 +234,14 @@ async def handle_oauth_callback(
     
     # Create OAuth flow with same configuration used for authorization URL
     oauth_config = settings.get_oauth_client_config()
+    
+    # DIAGNOSTIC LOG: OAuth client_secret debugging - callback phase
+    logger.info(f"🔍 CALLBACK_DEBUG: Creating OAuth flow for token exchange")
+    logger.info(f"🔍 CALLBACK_DEBUG: - oauth_config keys: {list(oauth_config.keys())}")
+    logger.info(f"🔍 CALLBACK_DEBUG: - client_id: {oauth_config.get('client_id', 'MISSING')[:20]}...")
+    logger.info(f"🔍 CALLBACK_DEBUG: - client_secret: {'PRESENT' if oauth_config.get('client_secret') else 'MISSING'} (length: {len(oauth_config.get('client_secret', '')) if oauth_config.get('client_secret') else 0})")
+    logger.info(f"🔍 CALLBACK_DEBUG: - token_uri: {oauth_config.get('token_uri')}")
+    
     # DIAGNOSTIC LOG: OAuth scope inconsistency debugging
     logger.info(f"OAUTH_SCOPE_DEBUG: Starting OAuth flow with scopes: {settings.drive_scopes}")
     logger.info(f"OAUTH_SCOPE_DEBUG: Total scope count: {len(settings.drive_scopes)}")
@@ -244,7 +253,13 @@ async def handle_oauth_callback(
         state=state
     )
     
-    flow.redirect_uri = settings.oauth_redirect_uri
+    flow.redirect_uri = settings.dynamic_oauth_redirect_uri
+    
+    # DIAGNOSTIC LOG: Verify flow has client credentials
+    logger.info(f"🔍 CALLBACK_DEBUG: Flow configuration after creation:")
+    logger.info(f"🔍 CALLBACK_DEBUG: - flow.client_config: {flow.client_config}")
+    logger.info(f"🔍 CALLBACK_DEBUG: - flow.client_type: {getattr(flow, 'client_type', 'NOT_SET')}")
+    logger.info(f"🔍 CALLBACK_DEBUG: - flow redirect_uri: {flow.redirect_uri}")
     
     # Exchange authorization code for credentials
     try:

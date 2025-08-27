@@ -6,6 +6,7 @@ Migrated from decorator-based pattern to FastMCP2 architecture.
 """
 
 import datetime
+from datetime import timezone
 import logging
 import asyncio
 import re
@@ -221,7 +222,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             # Ensure time_min and time_max are correctly formatted for the API
             formatted_time_min = _correct_time_format_for_api(time_min, "time_min")
             effective_time_min = formatted_time_min or (
-                datetime.datetime.utcnow().isoformat() + "Z"
+                datetime.datetime.now(timezone.utc).isoformat() + "Z"
             )
             if time_min is None:
                 logger.info(

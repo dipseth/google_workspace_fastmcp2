@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Google Service Configuration Resource Schema",
+  "description": "Schema for Google service configuration resources in FastMCP.",
+  "type": "object",
+  "required": [
+    "service",
+    "configuration",
+    "metadata"
+  ],
+  "properties": {
+    "service": {
+      "type": "string",
+      "description": "The type of Google service (e.g., 'gmail', 'drive')."
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Detailed configuration for the Google API service.",
+      "required": [
+        "api_name",
+        "api_version",
+        "base_url",
+        "discovery_url",
+        "scopes",
+        "features",
+        "limits"
+      ],
+      "properties": {
+        "api_name": {
+          "type": "string",
+          "description": "The official API name of the service (e.g., 'gmail', 'drive')."
+        },
+        "api_version": {
+          "type": "string",
+          "description": "The API version of the service (e.g., 'v1', 'v3')."
+        },
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The base URL for the service API."
+        },
+        "discovery_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The URL for the API's discovery document."
+        },
+        "scopes": {
+          "type": "object",
+          "description": "Categorized OAuth scopes required for the service.",
+          "patternProperties": {
+            "^(read|write|full|default|admin|userinfo)$": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              },
+              "minItems": 1
+            }
+          },
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        },
+        "features": {
+          "type": "object",
+          "description": "Supported features of the API.",
+          "properties": {
+            "batch_requests": { "type": "boolean" },
+            "watch_notifications": { "type": "boolean" },
+            "delegation": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        },
+        "limits": {
+          "type": "object",
+          "description": "API quota limits and other operational limits.",
+          "properties": {
+            "requests_per_minute": { "type": "integer", "minimum": 0 },
+            "requests_per_day": { "type": "integer", "minimum": 0 },
+            "concurrent_requests": { "type": "integer", "minimum": 0 },
+            "attachment_size_mb": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional metadata about the service configuration.",
+      "required": [
+        "last_updated",
+        "documentation_url",
+        "authentication_required",
+        "tags"
+      ],
+      "properties": {
+        "last_updated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last update to this configuration."
+        },
+        "documentation_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL to the official Google API documentation for this service."
+        },
+        "authentication_required": {
+          "type": "boolean",
+          "description": "Indicates if authentication is required to use this service."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Categorization tags for the service."
+        },
+        "deprecated_after": {
+          "type": "string",
+          "format": "date",
+          "description": "Date after which the service version is deprecated (optional)."
+        },
+        "requires_domain_admin": {
+          "type": "boolean",
+          "description": "Indicates if the service requires domain-wide administration privileges (optional)."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

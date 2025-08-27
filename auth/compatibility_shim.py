@@ -245,6 +245,8 @@ class CompatibilityShim:
             ScopeRegistry.GOOGLE_API_SCOPES["drive"]["file"],
             ScopeRegistry.GOOGLE_API_SCOPES["drive"]["readonly"],
             ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["readonly"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_basic"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_sharing"],
             ScopeRegistry.GOOGLE_API_SCOPES["calendar"]["readonly"]
         ]
         
@@ -259,13 +261,24 @@ class CompatibilityShim:
         """
         logger.info("COMPATIBILITY: Generating legacy DCR scope defaults")
         
-        # Return the default scope string from DCR
+        # Ensure DCR default scopes include Gmail Settings scopes so clients can request filters/forwarding
         default_scopes = [
+            # Base
             ScopeRegistry.GOOGLE_API_SCOPES["base"]["openid"],
             ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_email"],
             ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_profile"],
+            # Drive basics
             ScopeRegistry.GOOGLE_API_SCOPES["drive"]["readonly"],
-            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["file"]
+            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["file"],
+            # Gmail basics
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["readonly"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["send"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["compose"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["modify"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["labels"],
+            # Gmail settings needed for filters/forwarding
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_basic"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_sharing"]
         ]
         
         return " ".join(default_scopes)

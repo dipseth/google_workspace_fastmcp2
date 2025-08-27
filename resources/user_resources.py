@@ -233,7 +233,9 @@ def setup_user_resources(mcp: FastMCP) -> None:
         """Internal implementation for user email template resource."""
         user_email = get_user_email_context()
         if not user_email:
-            raise ValueError("No authenticated user found in current session. Use start_google_auth tool first.")
+            # Return a helpful error message as string instead of raising exception
+            # This follows FastMCP2 resource patterns - resources should return data gracefully
+            return "❌ Authentication error: No authenticated user found in current session. Use start_google_auth tool first."
         
         return user_email
     
@@ -473,6 +475,313 @@ def setup_user_resources(mcp: FastMCP) -> None:
             },
             "timestamp": datetime.now().isoformat()
         }
+    
+    @mcp.resource(
+        uri="workspace://content/recent",
+        name="Recent Google Workspace Content",
+        description="List of recently accessed Google Docs, Sheets, Drive files, and other Workspace content for dynamic email composition and content linking",
+        mime_type="application/json",
+        tags={"workspace", "content", "drive", "docs", "sheets", "recent", "gmail", "email"}
+    )
+    async def get_recent_workspace_content(ctx: Context) -> dict:
+        """Get recent Google Workspace content for email composition."""
+        user_email = get_user_email_context()
+        if not user_email:
+            return {
+                "error": "No authenticated user found in current session",
+                "suggestion": "Use start_google_auth tool to authenticate first"
+            }
+        
+        try:
+            # Import here to avoid circular imports
+            from drive.drive_tools import search_drive_files
+            from docs.docs_tools import search_docs
+            from sheets.sheets_tools import get_spreadsheets
+            
+            # Get recent Drive files (last 30 days)
+            recent_files = await search_drive_files(
+                user_google_email=user_email,
+                query="modifiedTime > '2025-01-01' and trashed=false",
+                page_size=20
+            )
+            
+            # Get recent Docs (if available)
+            try:
+                recent_docs = await search_docs(
+                    user_google_email=user_email,
+                    query="modified last month",
+                    max_results=10
+                )
+            except Exception:
+                recent_docs = []
+            
+            # Organize by type
+            content_by_type = {
+                "documents": [],
+                "spreadsheets": [],
+                "presentations": [],
+                "folders": [],
+                "other_files": []
+            }
+            
+            for file_info in recent_files.get('files', []):
+                mime_type = file_info.get('mimeType', '')
+                file_entry = {
+                    "id": file_info.get('id'),
+                    "name": file_info.get('name'),
+                    "web_view_link": file_info.get('webViewLink'),
+                    "modified_time": file_info.get('modifiedTime'),
+                    "mime_type": mime_type,
+                    "size": file_info.get('size', 'N/A')
+                }
+                
+                if 'document' in mime_type:
+                    content_by_type["documents"].append(file_entry)
+                elif 'spreadsheet' in mime_type:
+                    content_by_type["spreadsheets"].append(file_entry)
+                elif 'presentation' in mime_type:
+                    content_by_type["presentations"].append(file_entry)
+                elif 'folder' in mime_type:
+                    content_by_type["folders"].append(file_entry)
+                else:
+                    content_by_type["other_files"].append(file_entry)
+            
+            return {
+                "user_email": user_email,
+                "content_summary": {
+                    "total_files": len(recent_files.get('files', [])),
+                    "documents": len(content_by_type["documents"]),
+                    "spreadsheets": len(content_by_type["spreadsheets"]),
+                    "presentations": len(content_by_type["presentations"]),
+                    "folders": len(content_by_type["folders"]),
+                    "other_files": len(content_by_type["other_files"])
+                },
+                "content_by_type": content_by_type,
+                "timestamp": datetime.now().isoformat(),
+                "usage_tips": [
+                    "Use file IDs to create direct links in emails",
+                    "Reference document names in email content",
+                    "Include web_view_links for easy access",
+                    "Check modified_time for freshness"
+                ]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching workspace content: {e}")
+            return {
+                "error": f"Failed to fetch workspace content: {str(e)}",
+                "user_email": user_email,
+                "fallback_suggestion": "Use search_drive_files or list_my_drive_files tools manually",
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource(
+        uri="workspace://content/search/{query}",
+        name="Search Google Workspace Content",
+        description="Search across Google Workspace content (Drive, Docs, Sheets) for specific topics or keywords to dynamically populate email content with relevant links and references",
+        mime_type="application/json",
+        tags={"workspace", "search", "drive", "docs", "sheets", "content", "gmail", "dynamic"}
+    )
+    async def search_workspace_content(query: str, ctx: Context) -> dict:
+        """Search Google Workspace content for email composition."""
+        user_email = get_user_email_context()
+        if not user_email:
+            return {
+                "error": "No authenticated user found in current session",
+                "query": query
+            }
+        
+        try:
+            # Import here to avoid circular imports
+            from drive.drive_tools import search_drive_files
+            
+            # Search Drive files
+            search_results = await search_drive_files(
+                user_google_email=user_email,
+                query=f"name contains '{query}' or fullText contains '{query}'",
+                page_size=15
+            )
+            
+            # Process and categorize results
+            categorized_results = {
+                "documents": [],
+                "spreadsheets": [],
+                "presentations": [],
+                "pdfs": [],
+                "images": [],
+                "other": []
+            }
+            
+            for file_info in search_results.get('files', []):
+                mime_type = file_info.get('mimeType', '')
+                file_entry = {
+                    "id": file_info.get('id'),
+                    "name": file_info.get('name'),
+                    "web_view_link": file_info.get('webViewLink'),
+                    "modified_time": file_info.get('modifiedTime'),
+                    "relevance_score": "high" if query.lower() in file_info.get('name', '').lower() else "medium"
+                }
+                
+                if 'document' in mime_type:
+                    categorized_results["documents"].append(file_entry)
+                elif 'spreadsheet' in mime_type:
+                    categorized_results["spreadsheets"].append(file_entry)
+                elif 'presentation' in mime_type:
+                    categorized_results["presentations"].append(file_entry)
+                elif 'pdf' in mime_type:
+                    categorized_results["pdfs"].append(file_entry)
+                elif 'image' in mime_type:
+                    categorized_results["images"].append(file_entry)
+                else:
+                    categorized_results["other"].append(file_entry)
+            
+            return {
+                "search_query": query,
+                "user_email": user_email,
+                "total_results": len(search_results.get('files', [])),
+                "results_by_type": categorized_results,
+                "suggested_email_content": {
+                    "references": [f"📄 {file['name']}" for file in search_results.get('files', [])[:5]],
+                    "links": [file.get('webViewLink') for file in search_results.get('files', [])[:3]],
+                    "attachment_suggestions": [
+                        file for file in search_results.get('files', [])
+                        if file.get('mimeType', '').startswith('application/')
+                    ][:3]
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error searching workspace content: {e}")
+            return {
+                "error": f"Failed to search workspace content: {str(e)}",
+                "search_query": query,
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    @mcp.resource(
+        uri="gmail://content/suggestions",
+        name="Gmail Content Suggestions",
+        description="Dynamic content suggestions for Gmail composition based on user's recent activity, workspace content, and email patterns",
+        mime_type="application/json",
+        tags={"gmail", "suggestions", "content", "dynamic", "workspace", "email", "composition"}
+    )
+    async def get_gmail_content_suggestions(ctx: Context) -> dict:
+        """Generate dynamic content suggestions for Gmail composition."""
+        user_email = get_user_email_context()
+        if not user_email:
+            return {
+                "error": "No authenticated user found in current session"
+            }
+        
+        try:
+            # Get recent workspace content for suggestions
+            workspace_content = await get_recent_workspace_content(ctx)
+            
+            # Generate suggestions based on available content
+            suggestions = {
+                "quick_links": {
+                    "description": "Recent documents to reference in emails",
+                    "items": []
+                },
+                "meeting_materials": {
+                    "description": "Documents suitable for meeting agendas",
+                    "items": []
+                },
+                "project_updates": {
+                    "description": "Files that could be project-related",
+                    "items": []
+                },
+                "shared_resources": {
+                    "description": "Documents suitable for sharing",
+                    "items": []
+                }
+            }
+            
+            # Process workspace content if available
+            if not workspace_content.get('error'):
+                content_by_type = workspace_content.get('content_by_type', {})
+                
+                # Add documents to quick links
+                for doc in content_by_type.get('documents', [])[:5]:
+                    suggestions["quick_links"]["items"].append({
+                        "name": doc['name'],
+                        "url": doc['web_view_link'],
+                        "type": "document",
+                        "modified": doc['modified_time']
+                    })
+                
+                # Add presentations to meeting materials
+                for pres in content_by_type.get('presentations', [])[:3]:
+                    suggestions["meeting_materials"]["items"].append({
+                        "name": pres['name'],
+                        "url": pres['web_view_link'],
+                        "type": "presentation",
+                        "modified": pres['modified_time']
+                    })
+                
+                # Add spreadsheets to project updates
+                for sheet in content_by_type.get('spreadsheets', [])[:3]:
+                    suggestions["project_updates"]["items"].append({
+                        "name": sheet['name'],
+                        "url": sheet['web_view_link'],
+                        "type": "spreadsheet",
+                        "modified": sheet['modified_time']
+                    })
+            
+            # Add email composition templates
+            email_templates = {
+                "status_update": {
+                    "subject_template": "Weekly Status Update - {date}",
+                    "opening_lines": [
+                        "Hope everyone is doing well. Here's this week's progress update:",
+                        "Quick update on our current projects and milestones:",
+                        "Here's where we stand on our key initiatives:"
+                    ]
+                },
+                "meeting_follow_up": {
+                    "subject_template": "Follow-up: {meeting_topic}",
+                    "opening_lines": [
+                        "Thank you for the productive meeting today. Here are the key takeaways:",
+                        "Following up on our discussion about {topic}:",
+                        "As discussed in today's meeting, here are the next steps:"
+                    ]
+                },
+                "document_sharing": {
+                    "subject_template": "Sharing: {document_name}",
+                    "opening_lines": [
+                        "Please find the attached/linked document for your review:",
+                        "I've prepared the {document_type} we discussed:",
+                        "Here's the document you requested:"
+                    ]
+                }
+            }
+            
+            return {
+                "user_email": user_email,
+                "content_suggestions": suggestions,
+                "email_templates": email_templates,
+                "dynamic_variables": {
+                    "current_date": datetime.now().strftime("%B %d, %Y"),
+                    "current_week": f"Week of {datetime.now().strftime('%B %d, %Y')}",
+                    "user_first_name": user_email.split('@')[0].split('.')[0].capitalize(),
+                    "user_domain": user_email.split('@')[1] if '@' in user_email else 'company.com'
+                },
+                "workspace_integration": {
+                    "available_docs": len(workspace_content.get('content_by_type', {}).get('documents', [])),
+                    "available_sheets": len(workspace_content.get('content_by_type', {}).get('spreadsheets', [])),
+                    "available_presentations": len(workspace_content.get('content_by_type', {}).get('presentations', []))
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating Gmail content suggestions: {e}")
+            return {
+                "error": f"Failed to generate content suggestions: {str(e)}",
+                "user_email": user_email,
+                "timestamp": datetime.now().isoformat()
+            }
     
     logger.info("✅ User and authentication resources registered")
 

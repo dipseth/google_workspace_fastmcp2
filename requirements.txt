@@ -1,0 +1,16 @@
+fastmcp
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+google-auth
+httpx
+aiohttp>=3.8.0
+aiofiles
+pydantic
+python-dotenv
+python-card-framework
+qdrant-client
+sentence-transformers
+numpy
+PyJWT
+fastapi

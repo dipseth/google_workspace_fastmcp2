@@ -3,6 +3,7 @@
 A focused MCP server for uploading files to Google Drive with OAuth authentication.
 """
 
+import argparse
 import logging
 import os
 from pathlib import Path
@@ -25,6 +26,8 @@ from gchat.chat_tools import setup_chat_tools
 from gchat.jwt_chat_tools import setup_jwt_chat_tools
 from gchat.chat_app_tools import setup_chat_app_tools
 from gchat.chat_app_prompts import setup_chat_app_prompts
+from prompts.gmail_prompts import setup_gmail_prompts
+from prompts.gmail_showcase_prompts import setup_gmail_showcase_prompts
 from gchat.unified_card_tool import setup_unified_card_tool
 from gchat.smart_card_tool import setup_smart_card_tool
 from adapters.module_wrapper_mcp import setup_module_wrapper_middleware
@@ -150,6 +153,12 @@ setup_chat_app_tools(mcp)
 
 # Register Google Chat App Development prompts
 setup_chat_app_prompts(mcp)
+
+# Register Gmail prompts
+setup_gmail_prompts(mcp)
+
+# Register Gmail showcase prompts
+setup_gmail_showcase_prompts(mcp)
 
 # Register Google Sheets tools
 setup_sheets_tools(mcp)
@@ -311,7 +320,7 @@ async def health_check() -> str:
             f"- `auth://credentials/{{email}}/status` - Credential status\n"
             f"**Service Resources:**\n"
             f"- `google://services/scopes/{{service}}` - Service scope info\n\n"
-            f"**OAuth Callback URL:** {settings.oauth_redirect_uri}"
+            f"**OAuth Callback URL:** {settings.dynamic_oauth_redirect_uri}"
         )
         
     except Exception as e:
@@ -494,7 +503,7 @@ async def server_info() -> str:
         f"**Forms:** Create forms, add questions (all types), manage responses, update questions\n\n"
         f"**Server Configuration:**\n"
         f"- Host: {settings.server_host}:{settings.server_port}\n"
-        f"- OAuth Callback: {settings.oauth_redirect_uri}\n"
+        f"- OAuth Callback: {settings.dynamic_oauth_redirect_uri}\n"
         f"- Credentials Directory: {settings.credentials_dir}"
     )
 
@@ -582,9 +591,9 @@ try:
     logger.info("✅ OAuth discovery endpoints configured via FastMCP custom routes")
     
     logger.info("🔍 MCP Inspector can discover OAuth at:")
-    logger.info(f"  http://{settings.server_host}:{settings.server_port}/.well-known/oauth-protected-resource")
-    logger.info(f"  http://{settings.server_host}:{settings.server_port}/.well-known/oauth-authorization-server")
-    logger.info(f"  http://{settings.server_host}:{settings.server_port}/oauth/register")
+    logger.info(f"  {settings.base_url}/.well-known/oauth-protected-resource")
+    logger.info(f"  {settings.base_url}/.well-known/oauth-authorization-server")
+    logger.info(f"  {settings.base_url}/oauth/register")
 except Exception as e:
     logger.error(f"❌ Failed to setup OAuth discovery endpoints: {e}")
 
@@ -631,20 +640,54 @@ if jwt_auth_provider:
 def main():
     """Main entry point for the server."""
     logger.info(f"Starting {settings.server_name}")
-    logger.info(f"Configuration: {settings.server_host}:{settings.server_port}")
-    logger.info(f"OAuth callback: {settings.oauth_redirect_uri}")
+    logger.info(f"Configuration: {settings.base_url}")
+    logger.info(f"Protocol: {'HTTPS (SSL enabled)' if settings.enable_https else 'HTTP'}")
+    logger.info(f"OAuth callback: {settings.dynamic_oauth_redirect_uri}")
     logger.info(f"Credentials directory: {settings.credentials_dir}")
+    
+    # Validate SSL configuration if HTTPS is enabled
+    if settings.enable_https:
+        try:
+            settings.validate_ssl_config()
+            logger.info(f"✅ SSL configuration validated")
+            logger.info(f"SSL Certificate: {settings.ssl_cert_file}")
+            logger.info(f"SSL Private Key: {settings.ssl_key_file}")
+            if settings.ssl_ca_file:
+                logger.info(f"SSL CA File: {settings.ssl_ca_file}")
+        except ValueError as e:
+            logger.error(f"❌ SSL configuration error: {e}")
+            raise
     
     # Ensure credentials directory exists
     Path(settings.credentials_dir).mkdir(parents=True, exist_ok=True)
     
     try:
-        # Run the server in HTTP mode for OAuth callbacks
-        mcp.run(
-            transport="http",
-            host=settings.server_host,
-            port=settings.server_port
-        )
+        # Prepare run arguments
+        run_args = {
+            "host": settings.server_host,
+            "port": settings.server_port
+        }
+        
+        # Configure transport and SSL based on HTTPS setting
+        if settings.enable_https:
+            ssl_config = settings.get_uvicorn_ssl_config()
+            if ssl_config:
+                run_args["transport"] = "http"  # FastMCP uses http transport with SSL via uvicorn_config
+                run_args["uvicorn_config"] = ssl_config
+                logger.info("🔒 Starting server with HTTPS/SSL support")
+                logger.info(f"Transport: http (with SSL)")
+                logger.info(f"SSL Certificate: {ssl_config['ssl_certfile']}")
+                logger.info(f"SSL Private Key: {ssl_config['ssl_keyfile']}")
+            else:
+                logger.warning("⚠️ HTTPS enabled but SSL config unavailable, falling back to HTTP")
+                run_args["transport"] = "http"
+        else:
+            run_args["transport"] = "http"
+            logger.info("🌐 Starting server with HTTP support")
+        
+        # Run the server with appropriate transport and SSL configuration
+        mcp.run(**run_args)
+        
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
     except Exception as e:

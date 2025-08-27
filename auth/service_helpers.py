@@ -29,7 +29,15 @@ _FALLBACK_SERVICE_DEFAULTS = {
         "description": "Google Drive service"
     },
     "gmail": {
-        "default_scopes": ["gmail_read", "gmail_send", "gmail_compose", "gmail_modify", "gmail_labels"],
+        "default_scopes": [
+            "gmail_read",
+            "gmail_send",
+            "gmail_compose",
+            "gmail_modify",
+            "gmail_labels",
+            "gmail_settings_basic",
+            "gmail_settings_sharing"
+        ],
         "version": "v1",
         "description": "Gmail service"
     },
@@ -79,7 +87,22 @@ def _get_service_defaults() -> Dict[str, Dict]:
     """
     if _COMPATIBILITY_AVAILABLE:
         try:
-            return CompatibilityShim.get_legacy_service_defaults()
+            # Ensure we pick up the latest registry/group changes each call
+            try:
+                CompatibilityShim.clear_cache()
+            except Exception as _clear_e:
+                logger.debug(f"CompatibilityShim.clear_cache() skipped: {_clear_e}")
+            defaults = CompatibilityShim.get_legacy_service_defaults()
+            # Ensure Gmail defaults include settings scopes required for filters/forwarding
+            try:
+                gmail_defaults = defaults.get("gmail")
+                if gmail_defaults and isinstance(gmail_defaults.get("default_scopes"), list):
+                    for scope_name in ["gmail_settings_basic", "gmail_settings_sharing"]:
+                        if scope_name not in gmail_defaults["default_scopes"]:
+                            gmail_defaults["default_scopes"].append(scope_name)
+            except Exception as _scope_e:
+                logger.warning(f"Failed to augment Gmail default scopes with settings scopes: {_scope_e}")
+            return defaults
         except Exception as e:
             logger.warning(f"Error getting service defaults from registry, using fallback: {e}")
             return _FALLBACK_SERVICE_DEFAULTS

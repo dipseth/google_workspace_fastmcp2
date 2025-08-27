@@ -849,6 +849,145 @@ class TestFormsTools:
         assert "required" in str(exc_info.value).lower() or "missing" in str(exc_info.value).lower()
 
 
+class TestGmailLabelColors:
+    """Test Gmail label color management functionality."""
+    
+    @pytest.fixture
+    async def client(self):
+        """Create a client connected to the running server."""
+        # Get JWT token for authentication if enabled
+        auth_config = get_client_auth_config(TEST_EMAIL)
+        client = Client(SERVER_URL, auth=auth_config)
+        async with client:
+            yield client
+    
+    @pytest.mark.asyncio
+    async def test_manage_gmail_label_available(self, client):
+        """Check if manage_gmail_label tool is available."""
+        tools = await client.list_tools()
+        tool_names = [tool.name for tool in tools]
+        
+        # Check if Gmail label management tool is registered
+        has_label_tool = "manage_gmail_label" in tool_names
+        
+        if has_label_tool:
+            # Test the color functionality
+            await self._test_create_label_with_colors_no_auth(client)
+            await self._test_update_label_with_colors_no_auth(client)
+            await self._test_invalid_color_validation(client)
+    
+    async def _test_create_label_with_colors_no_auth(self, client):
+        """Test creating a label with colors (should fail gracefully without auth)."""
+        test_email = TEST_EMAIL
+        
+        # Test creating a red label with white text
+        result = await client.call_tool("manage_gmail_label", {
+            "user_google_email": test_email,
+            "action": "create",
+            "name": "Urgent Test",
+            "text_color": "#ffffff",
+            "background_color": "#fb4c2f"
+        })
+        
+        # Should indicate authentication status (either success or failure)
+        assert len(result) > 0
+        content = result[0].text
+        assert ("authentication" in content.lower() or
+                "credentials" in content.lower() or
+                "not authenticated" in content.lower() or
+                "label created successfully" in content.lower())
+        
+        # If not auth error, should not have color validation errors
+        if "authentication" not in content.lower() and "credentials" not in content.lower():
+            assert "invalid" not in content.lower()
+    
+    async def _test_update_label_with_colors_no_auth(self, client):
+        """Test updating a label with colors (should fail gracefully without auth)."""
+        test_email = TEST_EMAIL
+        
+        # Test updating a label with green background and black text
+        result = await client.call_tool("manage_gmail_label", {
+            "user_google_email": test_email,
+            "action": "update",
+            "label_id": "Label_test_123",
+            "text_color": "#000000",
+            "background_color": "#43d692"
+        })
+        
+        # Should indicate authentication status (either success or failure)
+        assert len(result) > 0
+        content = result[0].text
+        assert ("authentication" in content.lower() or
+                "credentials" in content.lower() or
+                "not authenticated" in content.lower() or
+                "label updated successfully" in content.lower() or
+                "label id is required" in content.lower())
+        
+        # If not auth error, should not have color validation errors
+        if "authentication" not in content.lower() and "credentials" not in content.lower():
+            assert "invalid" not in content.lower()
+    
+    async def _test_invalid_color_validation(self, client):
+        """Test color validation with invalid colors."""
+        test_email = TEST_EMAIL
+        
+        # Test with invalid text color
+        result = await client.call_tool("manage_gmail_label", {
+            "user_google_email": test_email,
+            "action": "create",
+            "name": "Test Label",
+            "text_color": "#invalid",  # Invalid color
+            "background_color": "#fb4c2f"
+        })
+        
+        assert len(result) > 0
+        content = result[0].text
+        
+        # Should get color validation error before auth check
+        assert "invalid text color" in content.lower()
+        
+        # Test with invalid background color
+        result = await client.call_tool("manage_gmail_label", {
+            "user_google_email": test_email,
+            "action": "create",
+            "name": "Test Label",
+            "text_color": "#ffffff",
+            "background_color": "#badcolor"  # Invalid color
+        })
+        
+        assert len(result) > 0
+        content = result[0].text
+        
+        # Should get color validation error before auth check
+        assert "invalid background color" in content.lower()
+    
+    @pytest.mark.asyncio
+    async def test_manage_gmail_label_color_params_optional(self, client):
+        """Test that color parameters are optional."""
+        tools = await client.list_tools()
+        tool_names = [tool.name for tool in tools]
+        
+        if "manage_gmail_label" in tool_names:
+            test_email = TEST_EMAIL
+            
+            # Test creating without colors (should work)
+            result = await client.call_tool("manage_gmail_label", {
+                "user_google_email": test_email,
+                "action": "create",
+                "name": "No Color Label"
+            })
+            
+            assert len(result) > 0
+            content = result[0].text
+            
+            # Should not get color validation errors
+            assert "invalid" not in content.lower()
+            assert ("authentication" in content.lower() or
+                    "credentials" in content.lower() or
+                    "not authenticated" in content.lower() or
+                    "label created successfully" in content.lower())
+
+
 class TestErrorHandling:
     """Test error handling and edge cases."""
     

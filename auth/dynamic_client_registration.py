@@ -5,7 +5,7 @@ import json
 import logging
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
 # Import compatibility shim for OAuth scope management
@@ -58,19 +58,24 @@ class DynamicClientRegistry:
         
         # Get the real Google OAuth client configuration
         try:
+            # First validate that OAuth is configured
+            if not settings.is_oauth_configured():
+                raise ValueError("OAuth is not configured. Please set GOOGLE_CLIENT_SECRETS_FILE or GOOGLE_CLIENT_ID/SECRET")
+            
             oauth_config = settings.get_oauth_client_config()
-            real_client_id = oauth_config['client_id']
-            real_client_secret = oauth_config['client_secret']
+            real_client_id = oauth_config.get('client_id')
+            real_client_secret = oauth_config.get('client_secret')
+            
+            if not real_client_id or not real_client_secret:
+                raise ValueError(f"OAuth configuration incomplete: client_id={'present' if real_client_id else 'missing'}, client_secret={'present' if real_client_secret else 'missing'}")
             
             logger.info(f"📝 Using real Google OAuth credentials for DCR")
             logger.info(f"   Client ID: {real_client_id[:20]}...")
             
         except Exception as e:
             logger.error(f"❌ Failed to get Google OAuth credentials: {e}")
-            # Fallback to fake credentials if real ones aren't available
-            real_client_id = f"mcp_client_{secrets.token_urlsafe(16)}"
-            real_client_secret = secrets.token_urlsafe(32)
-            logger.warning(f"Using fallback fake credentials: {real_client_id}")
+            # Re-raise the error with more context instead of using fake credentials
+            raise ValueError(f"OAuth configuration error: {str(e)}. Please ensure GOOGLE_CLIENT_SECRETS_FILE points to a valid OAuth client secrets JSON file.")
         
         # Generate other required fields
         registration_access_token = secrets.token_urlsafe(32)
@@ -82,16 +87,23 @@ class DynamicClientRegistry:
         client_info = {
             "client_id": real_client_id,           # Real Google client ID!
             "client_secret": real_client_secret,   # Real Google client secret!
-            "client_id_issued_at": int(datetime.utcnow().timestamp()),
+            "client_id_issued_at": int(datetime.now(timezone.utc).timestamp()),
             "client_secret_expires_at": 0,  # Never expires
             "registration_access_token": registration_access_token,
-            "registration_client_uri": f"http://localhost:8002/oauth/register/{real_client_id}",
+            "registration_client_uri": f"http://localhost:{settings.server_port}/oauth/register/{real_client_id}",
             **validated_metadata
         }
         
         self.clients[real_client_id] = client_info
         
         logger.info(f"✅ Registered OAuth client with REAL Google credentials: {real_client_id[:20]}...")
+        
+        # DIAGNOSTIC LOG: OAuth client_secret debugging
+        logger.info(f"🔍 DCR_DEBUG: Returning client registration to MCP Inspector:")
+        logger.info(f"🔍 DCR_DEBUG: - client_id: {real_client_id[:20]}...")
+        logger.info(f"🔍 DCR_DEBUG: - client_secret: {'PRESENT' if real_client_secret else 'MISSING'} (length: {len(real_client_secret) if real_client_secret else 0})")
+        logger.info(f"🔍 DCR_DEBUG: - token_endpoint_auth_method: {client_info.get('token_endpoint_auth_method')}")
+        logger.info(f"🔍 DCR_DEBUG: - Full response keys: {list(client_info.keys())}")
         
         return client_info
     

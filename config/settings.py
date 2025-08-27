@@ -6,14 +6,8 @@ import os
 from pathlib import Path
 import logging
 
-# Import compatibility shim for OAuth scope management
-try:
-    from ..auth.compatibility_shim import CompatibilityShim
-    _COMPATIBILITY_AVAILABLE = True
-except ImportError:
-    # Fallback for development/testing
-    _COMPATIBILITY_AVAILABLE = False
-    logging.warning("Compatibility shim not available, using fallback scopes")
+# Lazy import for compatibility shim to avoid circular imports
+_COMPATIBILITY_AVAILABLE = None  # Will be checked lazily
 
 
 class Settings(BaseSettings):
@@ -23,12 +17,18 @@ class Settings(BaseSettings):
     google_client_secrets_file: str = ""  # Path to client_secret.json file
     google_client_id: str = ""
     google_client_secret: str = ""
-    oauth_redirect_uri: str = "http://localhost:8000/oauth/callback"
+    oauth_redirect_uri: str = "http://localhost:8000/oauth2callback"
     
     # Server Configuration
     server_port: int = 8000
     server_host: str = "localhost"
     server_name: str = "Google Drive Upload Server"
+    
+    # HTTPS/SSL Configuration
+    enable_https: bool = False
+    ssl_cert_file: str = "cert.pem"
+    ssl_key_file: str = "key.pem"
+    ssl_ca_file: str = ""  # Optional CA file for client certificate verification
     
     # Storage Configuration
     credentials_dir: str = "./credentials"
@@ -61,6 +61,9 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/gmail.compose",
         "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/gmail.labels",
+        # Gmail Settings scopes (CRITICAL for filters/forwarding)
+        "https://www.googleapis.com/auth/gmail.settings.basic",
+        "https://www.googleapis.com/auth/gmail.settings.sharing",
         # Google Chat API scopes
         "https://www.googleapis.com/auth/chat.messages.readonly",
         "https://www.googleapis.com/auth/chat.messages",
@@ -97,13 +100,43 @@ class Settings(BaseSettings):
         Returns:
             List of OAuth scope URLs
         """
+        global _COMPATIBILITY_AVAILABLE
+        
+        # Lazy import to avoid circular dependency issues
+        if _COMPATIBILITY_AVAILABLE is None:
+            try:
+                from ..auth.compatibility_shim import CompatibilityShim
+                _COMPATIBILITY_AVAILABLE = True
+                logging.info("SCOPE_DEBUG: Successfully imported compatibility shim")
+            except ImportError as e:
+                _COMPATIBILITY_AVAILABLE = False
+                logging.warning(f"SCOPE_DEBUG: Compatibility shim not available, using fallback scopes: {e}")
+        
         if _COMPATIBILITY_AVAILABLE:
             try:
-                return CompatibilityShim.get_legacy_drive_scopes()
+                from ..auth.compatibility_shim import CompatibilityShim
+                scopes = CompatibilityShim.get_legacy_drive_scopes()
+                logging.info(f"SCOPE_DEBUG: Retrieved {len(scopes)} scopes from compatibility shim")
+                # Check if Gmail settings scopes are included
+                gmail_settings_basic = "https://www.googleapis.com/auth/gmail.settings.basic"
+                gmail_settings_sharing = "https://www.googleapis.com/auth/gmail.settings.sharing"
+                has_settings_basic = gmail_settings_basic in scopes
+                has_settings_sharing = gmail_settings_sharing in scopes
+                logging.info(f"SCOPE_DEBUG: Gmail settings.basic included: {has_settings_basic}")
+                logging.info(f"SCOPE_DEBUG: Gmail settings.sharing included: {has_settings_sharing}")
+                return scopes
             except Exception as e:
-                logging.warning(f"Error getting scopes from registry, using fallback: {e}")
+                logging.error(f"SCOPE_DEBUG: Error getting scopes from registry, using fallback: {e}")
                 return self._fallback_drive_scopes
         else:
+            logging.info("SCOPE_DEBUG: Using fallback drive scopes (compatibility shim unavailable)")
+            # Check if fallback includes Gmail settings scopes
+            gmail_settings_basic = "https://www.googleapis.com/auth/gmail.settings.basic"
+            gmail_settings_sharing = "https://www.googleapis.com/auth/gmail.settings.sharing"
+            has_settings_basic = gmail_settings_basic in self._fallback_drive_scopes
+            has_settings_sharing = gmail_settings_sharing in self._fallback_drive_scopes
+            logging.warning(f"SCOPE_DEBUG: Fallback Gmail settings.basic included: {has_settings_basic}")
+            logging.warning(f"SCOPE_DEBUG: Fallback Gmail settings.sharing included: {has_settings_sharing}")
             return self._fallback_drive_scopes
     
     model_config = SettingsConfigDict(
@@ -144,38 +177,54 @@ class Settings(BaseSettings):
 
     def get_oauth_client_config(self) -> dict:
         """Get OAuth client configuration from JSON file or environment variables."""
-        if self.google_client_secrets_file and Path(self.google_client_secrets_file).exists():
+        if self.google_client_secrets_file:
+            secrets_path = Path(self.google_client_secrets_file)
+            if not secrets_path.exists():
+                # Log the full path for debugging
+                logging.error(f"OAuth client secrets file not found at: {secrets_path.absolute()}")
+                raise FileNotFoundError(f"OAuth client secrets file not found: {self.google_client_secrets_file}")
+            
             import json
-            with open(self.google_client_secrets_file, 'r') as f:
-                config = json.load(f)
+            try:
+                with open(secrets_path, 'r') as f:
+                    config = json.load(f)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in OAuth client secrets file: {e}")
+            except Exception as e:
+                raise ValueError(f"Error reading OAuth client secrets file: {e}")
             
             # Extract from Google OAuth JSON format
             if 'web' in config:
                 web_config = config['web']
                 return {
-                    'client_id': web_config['client_id'],
-                    'client_secret': web_config['client_secret'],
-                    'auth_uri': web_config['auth_uri'],
-                    'token_uri': web_config['token_uri'],
-                    'redirect_uris': web_config.get('redirect_uris', [self.oauth_redirect_uri])
+                    'client_id': web_config.get('client_id'),
+                    'client_secret': web_config.get('client_secret'),
+                    'auth_uri': web_config.get('auth_uri', 'https://accounts.google.com/o/oauth2/auth'),
+                    'token_uri': web_config.get('token_uri', 'https://oauth2.googleapis.com/token'),
+                    'redirect_uris': web_config.get('redirect_uris', [self.dynamic_oauth_redirect_uri])
                 }
             elif 'installed' in config:
                 installed_config = config['installed']
                 return {
-                    'client_id': installed_config['client_id'],
-                    'client_secret': installed_config['client_secret'],
-                    'auth_uri': installed_config['auth_uri'],
-                    'token_uri': installed_config['token_uri'],
-                    'redirect_uris': installed_config.get('redirect_uris', [self.oauth_redirect_uri])
+                    'client_id': installed_config.get('client_id'),
+                    'client_secret': installed_config.get('client_secret'),
+                    'auth_uri': installed_config.get('auth_uri', 'https://accounts.google.com/o/oauth2/auth'),
+                    'token_uri': installed_config.get('token_uri', 'https://oauth2.googleapis.com/token'),
+                    'redirect_uris': installed_config.get('redirect_uris', [self.dynamic_oauth_redirect_uri])
                 }
+            else:
+                raise ValueError("OAuth client secrets JSON must contain either 'web' or 'installed' configuration")
         
         # Fallback to environment variables
+        if not self.google_client_id or not self.google_client_secret:
+            raise ValueError("OAuth configuration incomplete: Please set either GOOGLE_CLIENT_SECRETS_FILE or both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET")
+        
         return {
             'client_id': self.google_client_id,
             'client_secret': self.google_client_secret,
             'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
             'token_uri': 'https://oauth2.googleapis.com/token',
-            'redirect_uris': [self.oauth_redirect_uri]
+            'redirect_uris': [self.dynamic_oauth_redirect_uri]
         }
 
     def get_credentials_path(self, user_email: str) -> Path:
@@ -183,6 +232,56 @@ class Settings(BaseSettings):
         creds_dir = Path(self.credentials_dir)
         creds_dir.mkdir(exist_ok=True)
         return creds_dir / f"{user_email}_credentials.json"
+    
+    @property
+    def protocol(self) -> str:
+        """Get the protocol (http or https) based on SSL configuration."""
+        return "https" if self.enable_https else "http"
+    
+    @property
+    def base_url(self) -> str:
+        """Get the base URL for the server."""
+        return f"{self.protocol}://{self.server_host}:{self.server_port}"
+    
+    @property
+    def dynamic_oauth_redirect_uri(self) -> str:
+        """Get the OAuth redirect URI that dynamically switches between HTTP and HTTPS."""
+        return f"{self.base_url}/oauth2callback"
+    
+    def get_uvicorn_ssl_config(self) -> Optional[dict]:
+        """Get uvicorn SSL configuration for FastMCP if HTTPS is enabled."""
+        if not self.enable_https:
+            return None
+        
+        # Return uvicorn-compatible SSL configuration
+        uvicorn_config = {
+            "ssl_keyfile": self.ssl_key_file,
+            "ssl_certfile": self.ssl_cert_file,
+        }
+        
+        if self.ssl_ca_file:
+            uvicorn_config["ssl_ca_certs"] = self.ssl_ca_file
+        
+        return uvicorn_config
+    
+    def validate_ssl_config(self) -> None:
+        """Validate that SSL certificate files exist if HTTPS is enabled."""
+        if not self.enable_https:
+            return
+        
+        cert_path = Path(self.ssl_cert_file)
+        key_path = Path(self.ssl_key_file)
+        
+        if not cert_path.exists():
+            raise ValueError(f"SSL certificate file not found: {self.ssl_cert_file}")
+        
+        if not key_path.exists():
+            raise ValueError(f"SSL private key file not found: {self.ssl_key_file}")
+        
+        if self.ssl_ca_file:
+            ca_path = Path(self.ssl_ca_file)
+            if not ca_path.exists():
+                raise ValueError(f"SSL CA file not found: {self.ssl_ca_file}")
 
 
 # Global settings instance
