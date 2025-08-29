@@ -12,7 +12,7 @@ from typing import Dict, Any
 # from fastmcp2_drive_upload.server import app, mcp_server
 
 # Import the tunnel integration
-from fastmcp2_drive_upload.tunnel import initialize_tunnel_integration, get_tunnel_health
+from tunnel import initialize_tunnel_integration, get_tunnel_health
 
 logger = logging.getLogger(__name__)
 

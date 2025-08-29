@@ -108,6 +108,16 @@ class ScopeRegistry:
             "readonly": "https://www.googleapis.com/auth/presentations.readonly"
         },
         
+        # Google Photos scopes
+        "photos": {
+            "readonly": "https://www.googleapis.com/auth/photoslibrary.readonly",
+            "appendonly": "https://www.googleapis.com/auth/photoslibrary.appendonly",
+            "full": "https://www.googleapis.com/auth/photoslibrary",
+            "sharing": "https://www.googleapis.com/auth/photoslibrary.sharing",
+            "readonly_appcreated": "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
+            "edit_appcreated": "https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata"
+        },
+        
         # Admin scopes
         "admin": {
             "users": "https://www.googleapis.com/auth/admin.directory.user",
@@ -144,8 +154,8 @@ class ScopeRegistry:
         
         "script": {
             "projects": "https://www.googleapis.com/auth/script.projects",
-            "deployments": "https://www.googleapis.com/auth/script.deployments",
-            "external_request": "https://www.googleapis.com/auth/script.external_request"
+            "deployments": "https://www.googleapis.com/auth/script.deployments"
+            # Removed external_request - deprecated/invalid scope
         }
     }
     
@@ -163,6 +173,8 @@ class ScopeRegistry:
         "chat_basic": ["base.userinfo_email", "base.openid", "chat.messages_readonly", "chat.messages"],
         "forms_basic": ["base.userinfo_email", "base.openid", "forms.body", "forms.responses_readonly"],
         "slides_basic": ["base.userinfo_email", "base.openid", "slides.full", "slides.readonly"],
+        "photos_basic": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly"],
+        "photos_full": ["base.userinfo_email", "base.openid", "photos.full", "photos.sharing"],
         
         # Multi-service combinations
         "office_suite": ["base.userinfo_email", "base.openid", "drive.file", "docs.full", "sheets.full", "slides.full"],
@@ -180,6 +192,7 @@ class ScopeRegistry:
             "sheets.readonly", "sheets.full",
             "forms.body", "forms.body_readonly", "forms.responses_readonly",
             "slides.full", "slides.readonly",
+            "photos.readonly", "photos.full", "photos.sharing",
             "calendar.readonly", "calendar.events",
             "cloud.platform", "cloud.functions", "cloud.pubsub", "cloud.iam"
         ]
@@ -236,6 +249,8 @@ class ScopeRegistry:
                 result_scopes.extend([service_scopes["readonly"], service_scopes["send"]])
             elif service == "calendar":
                 result_scopes.extend([service_scopes["readonly"], service_scopes["events"]])
+            elif service == "photos":
+                result_scopes.extend([service_scopes["readonly"], service_scopes["appendonly"]])
             else:
                 # Default to readonly and full if available
                 if "readonly" in service_scopes:
@@ -419,7 +434,11 @@ class ScopeRegistry:
             "docs_read": cls.GOOGLE_API_SCOPES["docs"]["readonly"],
             "docs_write": cls.GOOGLE_API_SCOPES["docs"]["full"],
             "sheets_read": cls.GOOGLE_API_SCOPES["sheets"]["readonly"],
-            "sheets_write": cls.GOOGLE_API_SCOPES["sheets"]["full"]
+            "sheets_write": cls.GOOGLE_API_SCOPES["sheets"]["full"],
+            "photos_read": cls.GOOGLE_API_SCOPES["photos"]["readonly"],
+            "photos_write": cls.GOOGLE_API_SCOPES["photos"]["full"],
+            "photos_append": cls.GOOGLE_API_SCOPES["photos"]["appendonly"],
+            "photos_sharing": cls.GOOGLE_API_SCOPES["photos"]["sharing"]
         }
         
         if legacy_scope in legacy_mappings:

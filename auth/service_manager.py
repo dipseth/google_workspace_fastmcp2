@@ -33,6 +33,7 @@ SERVICE_CONFIGS = {
     "chat": {"service": "chat", "version": "v1"},
     "forms": {"service": "forms", "version": "v1"},
     "slides": {"service": "slides", "version": "v1"},
+    "photos": {"service": "photoslibrary", "version": "v1"},
     "oauth2": {"service": "oauth2", "version": "v2"},  # For user info
     "admin": {"service": "admin", "version": "directory_v1"},
     "classroom": {"service": "classroom", "version": "v1"},
@@ -397,8 +398,19 @@ async def get_google_service(
     
     # Build the service
     try:
-        service = build(service_name, service_version, credentials=credentials)
-        logger.info(f"Created {service_type} service (v{service_version}) for {user_email}")
+        # Special handling for Photos Library API which uses a custom discovery URL
+        if service_name == "photoslibrary":
+            from googleapiclient.discovery import build_from_document
+            import requests
+            
+            # Photos Library API uses a custom discovery document
+            discovery_url = f"https://photoslibrary.googleapis.com/$discovery/rest?version={service_version}"
+            discovery_doc = requests.get(discovery_url).json()
+            service = build_from_document(discovery_doc, credentials=credentials)
+            logger.info(f"Created Photos Library service (v{service_version}) for {user_email} using custom discovery")
+        else:
+            service = build(service_name, service_version, credentials=credentials)
+            logger.info(f"Created {service_type} service (v{service_version}) for {user_email}")
         
         # Cache the service
         if cache_enabled:

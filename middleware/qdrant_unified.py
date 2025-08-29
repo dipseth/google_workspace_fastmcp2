@@ -420,10 +420,14 @@ class QdrantUnifiedMiddleware(Middleware):
         elif context is not None and response is not None:
             # Called with MiddlewareContext object
             try:
+                # Extract tool information from context safely
+                tool_name = getattr(context, 'tool_name', None) or getattr(context, 'name', 'unknown_tool')
+                arguments = getattr(context, 'arguments', None) or getattr(context, 'params', {})
+                
                 # Create response payload
                 response_data = {
-                    "tool_name": context.tool_name,
-                    "arguments": context.arguments,
+                    "tool_name": tool_name,
+                    "arguments": arguments,
                     "response": response,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "user_id": getattr(context, 'user_id', 'unknown'),
@@ -436,7 +440,7 @@ class QdrantUnifiedMiddleware(Middleware):
                 json_data = json.dumps(response_data, default=str)
                 
                 # Generate text for embedding
-                embed_text = f"Tool: {context.tool_name}\nArguments: {json.dumps(context.arguments)}\nResponse: {str(response)[:1000]}"
+                embed_text = f"Tool: {tool_name}\nArguments: {json.dumps(arguments)}\nResponse: {str(response)[:1000]}"
                 
                 # Generate embedding
                 embedding = await asyncio.to_thread(self.embedder.encode, embed_text)
@@ -449,16 +453,18 @@ class QdrantUnifiedMiddleware(Middleware):
                 else:
                     stored_data = json_data
                 
-                # Create point for Qdrant
+                # Create point for Qdrant (use proper UUID format)
                 _, qdrant_models = _get_qdrant_imports()
+                point_id = uuid.uuid4()  # Generate proper UUID object
                 point = qdrant_models['PointStruct'](
-                    id=str(uuid.uuid4()),
+                    id=point_id,  # Use UUID object directly, not string
                     vector=embedding.tolist(),
                     payload={
-                        "tool_name": context.tool_name,
+                        "tool_name": tool_name,
                         "timestamp": response_data["timestamp"],
                         "user_id": response_data["user_id"],
                         "user_email": response_data["user_email"],
+                        "session_id": response_data["session_id"],
                         "payload_type": PayloadType.TOOL_RESPONSE.value,
                         "compressed": compressed,
                         "data": stored_data if not compressed else None,
@@ -473,7 +479,7 @@ class QdrantUnifiedMiddleware(Middleware):
                     points=[point]
                 )
                 
-                logger.debug(f"✅ Stored response for tool: {context.tool_name}")
+                logger.debug(f"✅ Stored response for tool: {tool_name} (ID: {point_id})")
                 
             except Exception as e:
                 logger.error(f"❌ Failed to store response: {e}")
@@ -535,16 +541,18 @@ class QdrantUnifiedMiddleware(Middleware):
             else:
                 stored_data = json_data
             
-            # Create point for Qdrant
+            # Create point for Qdrant (use proper UUID format)
             _, qdrant_models = _get_qdrant_imports()
+            point_id = uuid.uuid4()  # Generate proper UUID object
             point = qdrant_models['PointStruct'](
-                id=str(uuid.uuid4()),
+                id=point_id,  # Use UUID object directly, not string
                 vector=embedding.tolist(),
                 payload={
                     "tool_name": tool_name,
                     "timestamp": response_data["timestamp"],
                     "user_id": response_data["user_id"],
                     "user_email": response_data["user_email"],
+                    "session_id": response_data["session_id"],
                     "payload_type": PayloadType.TOOL_RESPONSE.value,
                     "compressed": compressed,
                     "data": stored_data if not compressed else None,
@@ -559,7 +567,7 @@ class QdrantUnifiedMiddleware(Middleware):
                 points=[point]
             )
             
-            logger.debug(f"✅ Stored response for tool: {tool_name}")
+            logger.debug(f"✅ Stored response for tool: {tool_name} (ID: {point_id})")
             
         except Exception as e:
             logger.error(f"❌ Failed to store response with params: {e}")
@@ -602,10 +610,19 @@ class QdrantUnifiedMiddleware(Middleware):
                 logger.debug(f"🎯 Looking up point by ID: {target_id}")
                 
                 try:
+                    # Handle both string and UUID formats
+                    try:
+                        # Try to parse as UUID first
+                        uuid_id = uuid.UUID(target_id)
+                        search_id = uuid_id
+                    except ValueError:
+                        # If not a valid UUID, use as string
+                        search_id = target_id
+                    
                     points = await asyncio.to_thread(
                         self.client.retrieve,
                         collection_name=self.config.collection_name,
-                        ids=[target_id],
+                        ids=[search_id],
                         with_payload=True
                     )
                     
@@ -663,16 +680,29 @@ class QdrantUnifiedMiddleware(Middleware):
                         parsed_query["semantic_query"]
                     )
                     
-                    # Search in Qdrant with filters
-                    search_results = await asyncio.to_thread(
-                        self.client.search,
-                        collection_name=self.config.collection_name,
-                        query_vector=query_embedding.tolist(),
-                        query_filter=qdrant_filter,
-                        limit=limit or self.config.default_search_limit,
-                        score_threshold=score_threshold or self.config.score_threshold,
-                        with_payload=True
-                    )
+                    # Use query_points instead of deprecated search method
+                    try:
+                        search_results = await asyncio.to_thread(
+                            self.client.query_points,
+                            collection_name=self.config.collection_name,
+                            query=query_embedding.tolist(),
+                            query_filter=qdrant_filter,
+                            limit=limit or self.config.default_search_limit,
+                            score_threshold=score_threshold or self.config.score_threshold,
+                            with_payload=True
+                        )
+                        search_results = search_results.points  # Extract points from response
+                    except AttributeError:
+                        # Fallback to old search method if query_points not available
+                        search_results = await asyncio.to_thread(
+                            self.client.search,
+                            collection_name=self.config.collection_name,
+                            query_vector=query_embedding.tolist(),
+                            query_filter=qdrant_filter,
+                            limit=limit or self.config.default_search_limit,
+                            score_threshold=score_threshold or self.config.score_threshold,
+                            with_payload=True
+                        )
                     
                     logger.debug(f"🎯 Semantic search found {len(search_results)} results")
                 
@@ -705,15 +735,27 @@ class QdrantUnifiedMiddleware(Middleware):
                     # Generate embedding for the entire query
                     query_embedding = await asyncio.to_thread(self.embedder.encode, query)
                     
-                    # Search in Qdrant
-                    search_results = await asyncio.to_thread(
-                        self.client.search,
-                        collection_name=self.config.collection_name,
-                        query_vector=query_embedding.tolist(),
-                        limit=limit or self.config.default_search_limit,
-                        score_threshold=score_threshold or self.config.score_threshold,
-                        with_payload=True
-                    )
+                    # Use query_points instead of deprecated search method
+                    try:
+                        search_results = await asyncio.to_thread(
+                            self.client.query_points,
+                            collection_name=self.config.collection_name,
+                            query=query_embedding.tolist(),
+                            limit=limit or self.config.default_search_limit,
+                            score_threshold=score_threshold or self.config.score_threshold,
+                            with_payload=True
+                        )
+                        search_results = search_results.points  # Extract points from response
+                    except AttributeError:
+                        # Fallback to old search method if query_points not available
+                        search_results = await asyncio.to_thread(
+                            self.client.search,
+                            collection_name=self.config.collection_name,
+                            query_vector=query_embedding.tolist(),
+                            limit=limit or self.config.default_search_limit,
+                            score_threshold=score_threshold or self.config.score_threshold,
+                            with_payload=True
+                        )
                     
                     logger.debug(f"🧠 Pure semantic search found {len(search_results)} results")
             
@@ -780,22 +822,27 @@ class QdrantUnifiedMiddleware(Middleware):
         Returns:
             List of matching responses
         """
-        # Use the existing search method and apply filters
-        results = await self.search(query, limit=limit)
-        
-        if filters:
-            filtered_results = []
-            for result in results:
-                match = True
-                if "tool_name" in filters and result.get("tool_name") != filters["tool_name"]:
-                    match = False
-                if "user_email" in filters and result.get("user_email") != filters["user_email"]:
-                    match = False
-                if match:
-                    filtered_results.append(result)
-            return filtered_results
-        
-        return results
+        try:
+            # Use the existing search method and apply filters
+            results = await self.search(query, limit=limit)
+            
+            if filters:
+                filtered_results = []
+                for result in results:
+                    match = True
+                    if "tool_name" in filters and result.get("tool_name") != filters["tool_name"]:
+                        match = False
+                    if "user_email" in filters and result.get("user_email") != filters["user_email"]:
+                        match = False
+                    if match:
+                        filtered_results.append(result)
+                return filtered_results
+            
+            return results
+        except Exception as e:
+            logger.error(f"❌ Search responses failed: {e}")
+            # Return empty list instead of raising to prevent tool failures
+            return []
     
     async def get_analytics(self, start_date=None, end_date=None, group_by="tool_name") -> Dict:
         """
@@ -863,11 +910,20 @@ class QdrantUnifiedMiddleware(Middleware):
             return None
         
         try:
+            # Handle both string and UUID formats
+            try:
+                # Try to parse as UUID first
+                uuid_id = uuid.UUID(response_id)
+                search_id = uuid_id
+            except ValueError:
+                # If not a valid UUID, use as string
+                search_id = response_id
+            
             # Retrieve the specific point by ID
             point = await asyncio.to_thread(
                 self.client.retrieve,
                 collection_name=self.config.collection_name,
-                ids=[response_id]
+                ids=[search_id]
             )
             
             if not point:

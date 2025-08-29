@@ -70,6 +70,11 @@ _FALLBACK_SERVICE_DEFAULTS = {
         "default_scopes": ["slides", "slides_read"],
         "version": "v1",
         "description": "Google Slides service"
+    },
+    "photos": {
+        "default_scopes": ["photos_read", "photos_append"],
+        "version": "v1",
+        "description": "Google Photos service"
     }
 }
 
@@ -398,3 +403,13 @@ def request_drive_service(scopes: Union[str, List[str]] = None) -> str:
 def request_gmail_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Gmail service through middleware - convenience alias."""
     return request_service("gmail", scopes)
+
+
+async def get_photos_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Photos service - convenience alias."""
+    return await get_service("photos", user_email, scopes)
+
+
+def request_photos_service(scopes: Union[str, List[str]] = None) -> str:
+    """Request Photos service through middleware - convenience alias."""
+    return request_service("photos", scopes)

@@ -58,7 +58,7 @@ def _get_cached_output(cache_key: str) -> Optional[Any]:
     return cache_entry["output"]
 
 
-def setup_tool_output_resources(mcp: FastMCP) -> None:
+def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
     """Setup resources that expose cached tool outputs."""
     
     @mcp.resource(
@@ -522,15 +522,19 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
     async def get_qdrant_collection_info(ctx: Context) -> dict:
         """Internal implementation for Qdrant collection information resource."""
         try:
-            # Import Qdrant middleware to access collection info
-            from middleware.qdrant_unified import QdrantUnifiedMiddleware, QdrantConfig
-            
-            # Try to get collection info
-            config = QdrantConfig.from_file()
-            
-            # Create a temporary middleware instance to access collection info
-            middleware = QdrantUnifiedMiddleware()
-            await middleware.initialize()
+            # Use passed middleware or create new one if not available
+            if qdrant_middleware and qdrant_middleware.client:
+                middleware = qdrant_middleware
+            else:
+                # Fallback: Import Qdrant middleware to access collection info
+                from middleware.qdrant_unified import QdrantUnifiedMiddleware, QdrantConfig
+                
+                # Try to get collection info
+                config = QdrantConfig.from_file()
+                
+                # Create a temporary middleware instance to access collection info
+                middleware = QdrantUnifiedMiddleware()
+                await middleware.initialize()
             
             if not middleware.client:
                 return {
@@ -611,12 +615,16 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
             except (ValueError, Exception):
                 logger.info("Accessing Qdrant responses without user authentication")
             
-            # Import Qdrant middleware
-            from middleware.qdrant_unified import QdrantUnifiedMiddleware
-            
-            # Create middleware instance to access stored data
-            middleware = QdrantUnifiedMiddleware()
-            await middleware.initialize()
+            # Use passed middleware or create new one if not available
+            if qdrant_middleware and qdrant_middleware.client:
+                middleware = qdrant_middleware
+            else:
+                # Fallback: Import Qdrant middleware
+                from middleware.qdrant_unified import QdrantUnifiedMiddleware
+                
+                # Create middleware instance to access stored data
+                middleware = QdrantUnifiedMiddleware()
+                await middleware.initialize()
             
             if not middleware.client:
                 return {
@@ -715,12 +723,16 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
                 # Search works without authentication - this is for debugging/analysis
                 logger.info("Performing Qdrant search without user authentication")
             
-            # Import Qdrant middleware
-            from middleware.qdrant_unified import QdrantUnifiedMiddleware
-            
-            # Create middleware instance for search
-            middleware = QdrantUnifiedMiddleware()
-            await middleware.initialize()
+            # Use passed middleware or create new one if not available
+            if qdrant_middleware and qdrant_middleware.client:
+                middleware = qdrant_middleware
+            else:
+                # Fallback: Import Qdrant middleware
+                from middleware.qdrant_unified import QdrantUnifiedMiddleware
+                
+                # Create middleware instance for search
+                middleware = QdrantUnifiedMiddleware()
+                await middleware.initialize()
             
             if not middleware.client or not middleware.embedder:
                 return {

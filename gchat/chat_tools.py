@@ -827,7 +827,37 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             space_id: The space ID to send the message to
             title: Card title
             text: Main text content
-            buttons: List of button configurations
+            buttons: List of button configurations. Each button should be a dict with:
+                - "text": Button label text (required)
+                - "onClick": Action configuration (required), which can be:
+                  * For URL links: {"openLink": {"url": "https://example.com"}}
+                  * For actions: {"action": {"function": "functionName", "parameters": [...]}}
+                  
+                Example buttons:
+                [
+                    {
+                        "text": "Open Google",
+                        "onClick": {
+                            "openLink": {
+                                "url": "https://www.google.com"
+                            }
+                        }
+                    },
+                    {
+                        "text": "Submit",
+                        "onClick": {
+                            "action": {
+                                "function": "handleSubmit",
+                                "parameters": [
+                                    {"key": "action", "value": "submit"}
+                                ]
+                            }
+                        }
+                    }
+                ]
+                
+                NOTE: Do NOT use "actionMethodName" - use "function" instead for action callbacks
+                
             thread_key: Optional thread key for threaded replies
             webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
 
@@ -933,8 +963,42 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             user_google_email: The user's Google email address
             space_id: The space ID to send the message to
             title: Form title
-            fields: List of form field configurations
-            submit_action: Submit button action configuration
+            fields: List of form field configurations. Each field should have:
+                - "name": Field identifier (required)
+                - "label": Display label for the field (required)
+                - "type": Field type, e.g., "text_input", "selection_input" (required)
+                - "required": Boolean indicating if field is required (optional, default: False)
+                
+                Example fields:
+                [
+                    {
+                        "name": "username",
+                        "label": "Username",
+                        "type": "text_input",
+                        "required": true
+                    },
+                    {
+                        "name": "feedback",
+                        "label": "Your Feedback",
+                        "type": "text_input",
+                        "required": false
+                    }
+                ]
+                
+            submit_action: Submit button action configuration. Should be a dict with:
+                - "function": Function name to call on submit (required)
+                - "parameters": Optional list of parameters
+                
+                Example:
+                {
+                    "function": "submitForm",
+                    "parameters": [
+                        {"key": "action", "value": "submit"}
+                    ]
+                }
+                
+                NOTE: Use "function" not "actionMethodName"
+                
             thread_key: Optional thread key for threaded replies
             webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
 

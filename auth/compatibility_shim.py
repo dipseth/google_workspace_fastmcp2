@@ -104,6 +104,21 @@ class CompatibilityShim:
             "slides": ScopeRegistry.GOOGLE_API_SCOPES["slides"]["full"],
             "slides_read": ScopeRegistry.GOOGLE_API_SCOPES["slides"]["readonly"],
             
+            # Photos legacy names
+            "photos_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly"],
+            "photos_write": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["full"],
+            "photos_full": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["full"],
+            "photos_append": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["appendonly"],
+            "photos_sharing": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["sharing"],
+            "photos_readonly_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly_appcreated"],
+            "photos_edit_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["edit_appcreated"],
+            # PhotosLibrary legacy names (for backwards compatibility)
+            "photoslibrary_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly"],
+            "photoslibrary_append": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["appendonly"],
+            "photoslibrary_full": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["full"],
+            "photoslibrary_readonly_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly_appcreated"],
+            "photoslibrary_edit_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["edit_appcreated"],
+            
             # Admin legacy names
             "admin_users": ScopeRegistry.GOOGLE_API_SCOPES["admin"]["users"],
             "admin_groups": ScopeRegistry.GOOGLE_API_SCOPES["admin"]["groups"],
@@ -193,6 +208,16 @@ class CompatibilityShim:
                 "default_scopes": ["slides", "slides_read"],
                 "version": "v1",
                 "description": "Google Slides service"
+            },
+            "photos": {
+                "default_scopes": ["photos_read", "photos_write", "photos_append"],
+                "version": "v1",
+                "description": "Google Photos service"
+            },
+            "photoslibrary": {
+                "default_scopes": ["photos_read", "photos_write", "photos_append"],
+                "version": "v1",
+                "description": "Google Photos Library API service"
             }
         }
         
@@ -218,8 +243,9 @@ class CompatibilityShim:
         logger.info("COMPATIBILITY: Generating legacy drive_scopes format from registry")
         
         # Get comprehensive OAuth scopes for multiple services (matching the original settings.py)
+        # Now includes "photos" for Google Photos Library API access
         oauth_scopes = ScopeRegistry.get_oauth_scopes([
-            "drive", "gmail", "calendar", "docs", "sheets", "chat", "forms", "slides"
+            "drive", "gmail", "calendar", "docs", "sheets", "chat", "forms", "slides", "photos"
         ])
         
         # Cache the result

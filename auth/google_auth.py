@@ -267,8 +267,21 @@ async def handle_oauth_callback(
         logger.info(f"OAUTH_SCOPE_DEBUG: Processing OAuth callback")
         logger.info(f"OAUTH_SCOPE_DEBUG: Authorization response: {authorization_response}")
         
-        flow.fetch_token(authorization_response=authorization_response)
-        credentials = flow.credentials
+        # Disable scope validation to handle Google adding extra scopes
+        # Google sometimes adds scopes like script.external_request automatically
+        import os
+        old_relax = os.environ.get('OAUTHLIB_RELAX_TOKEN_SCOPE', '')
+        os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
+        
+        try:
+            flow.fetch_token(authorization_response=authorization_response)
+            credentials = flow.credentials
+        finally:
+            # Restore original setting
+            if old_relax:
+                os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = old_relax
+            else:
+                os.environ.pop('OAUTHLIB_RELAX_TOKEN_SCOPE', None)
         
         # DIAGNOSTIC LOG: Check final granted scopes vs requested
         logger.info(f"OAUTH_SCOPE_DEBUG: OAuth callback successful")

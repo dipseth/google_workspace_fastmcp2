@@ -783,6 +783,68 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 "timestamp": datetime.now().isoformat()
             }
     
+    @mcp.resource(
+        uri="gmail://allow-list",
+        name="Gmail Allow List",
+        description="Get the configured Gmail allow list for send_gmail_message tool - recipients on this list skip elicitation confirmation",
+        mime_type="application/json",
+        tags={"gmail", "allow-list", "security", "elicitation", "trusted", "recipients"}
+    )
+    async def get_gmail_allow_list_resource(ctx: Context) -> dict:
+        """Internal implementation for Gmail allow list resource."""
+        from config.settings import settings
+        
+        user_email = get_user_email_context()
+        if not user_email:
+            return {
+                "error": "No authenticated user found in current session",
+                "authenticated": False,
+                "allow_list": []
+            }
+        
+        try:
+            # Get the allow list from settings
+            allow_list = settings.get_gmail_allow_list()
+            
+            # Check if the environment variable is configured
+            raw_value = settings.gmail_allow_list
+            is_configured = bool(raw_value and raw_value.strip())
+            
+            # Mask emails for privacy in the response
+            masked_list = []
+            if allow_list:
+                for email in allow_list:
+                    if '@' in email:
+                        local, domain = email.split('@', 1)
+                        if len(local) > 3:
+                            masked = f"{local[:2]}***@{domain}"
+                        else:
+                            masked = f"***@{domain}"
+                    else:
+                        masked = email[:3] + "***" if len(email) > 3 else "***"
+                    masked_list.append(masked)
+            
+            return {
+                "authenticated_user": user_email,
+                "is_configured": is_configured,
+                "environment_variable": "GMAIL_ALLOW_LIST",
+                "allow_list_count": len(allow_list),
+                "allow_list": allow_list,  # Full list for internal use
+                "masked_list": masked_list,  # Privacy-protected list for display
+                "timestamp": datetime.now().isoformat(),
+                "description": "Recipients in this list will skip elicitation confirmation when sending emails",
+                "configuration_format": "Comma-separated email addresses in GMAIL_ALLOW_LIST environment variable"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error retrieving Gmail allow list: {e}")
+            return {
+                "error": f"Failed to retrieve Gmail allow list: {str(e)}",
+                "authenticated_user": user_email,
+                "allow_list": [],
+                "timestamp": datetime.now().isoformat()
+            }
+    
     logger.info("✅ User and authentication resources registered")
 
 

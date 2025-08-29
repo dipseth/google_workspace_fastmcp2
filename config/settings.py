@@ -1,10 +1,11 @@
 """Application configuration using Pydantic Settings."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+from typing import Optional, List
 import os
 from pathlib import Path
 import logging
+from urllib.parse import urlparse
 
 # Lazy import for compatibility shim to avoid circular imports
 _COMPATIBILITY_AVAILABLE = None  # Will be checked lazily
@@ -35,11 +36,21 @@ class Settings(BaseSettings):
     credential_storage_mode: str = "FILE_PLAINTEXT"
     chat_service_account_file: str = ""
     
+    # Qdrant Configuration
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_key: str = "NONE"
+    qdrant_host: Optional[str] = None  # Will be set from qdrant_url
+    qdrant_port: Optional[int] = None  # Will be set from qdrant_url
+    qdrant_api_key: Optional[str] = None  # Will be set from qdrant_key
+    
     # Logging
     log_level: str = "INFO"
     
     # Security
     session_timeout_minutes: int = 60
+    
+    # Gmail Allow List Configuration
+    gmail_allow_list: str = ""  # Comma-separated list of email addresses
     
     # Legacy OAuth scopes - maintained for backward compatibility
     # These are now managed through the centralized scope registry
@@ -81,6 +92,13 @@ class Settings(BaseSettings):
         # Calendar scopes
         "https://www.googleapis.com/auth/calendar.readonly",
         "https://www.googleapis.com/auth/calendar.events",
+        # Google Photos Library API scopes
+        "https://www.googleapis.com/auth/photoslibrary.readonly",
+        "https://www.googleapis.com/auth/photoslibrary.appendonly",
+        "https://www.googleapis.com/auth/photoslibrary",
+        "https://www.googleapis.com/auth/photoslibrary.sharing",
+        "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
+        "https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata",
         # Cloud Platform scopes (for broader Google services)
         "https://www.googleapis.com/auth/cloud-platform",
         "https://www.googleapis.com/auth/cloudfunctions",
@@ -150,6 +168,41 @@ class Settings(BaseSettings):
         super().__init__(**kwargs)
         # Ensure credentials directory exists
         Path(self.credentials_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Parse Qdrant URL to get host and port
+        parsed_url = urlparse(self.qdrant_url)
+        self.qdrant_host = parsed_url.hostname or "localhost"
+        self.qdrant_port = parsed_url.port or 6333
+        # If QDRANT_KEY is "NONE" or empty, treat as no authentication
+        self.qdrant_api_key = None if self.qdrant_key in ["NONE", "", None] else self.qdrant_key
+    
+    def get_gmail_allow_list(self) -> List[str]:
+        """
+        Parse and return the Gmail allow list from the configuration.
+        
+        Returns:
+            List[str]: List of email addresses in the allow list.
+                       Returns empty list if not configured or empty.
+        """
+        if not self.gmail_allow_list or self.gmail_allow_list.strip() == "":
+            return []
+        
+        # Parse comma-separated list, strip whitespace, filter empty strings
+        emails = [
+            email.strip().lower()
+            for email in self.gmail_allow_list.split(",")
+            if email.strip()
+        ]
+        
+        # Log the parsed allow list for debugging (without exposing full emails)
+        if emails:
+            masked_emails = [
+                f"{email[:3]}...{email[-10:]}" if len(email) > 13 else email
+                for email in emails
+            ]
+            logging.debug(f"Gmail allow list contains {len(emails)} email(s): {masked_emails}")
+        
+        return emails
 
     def is_oauth_configured(self) -> bool:
         """Check if OAuth credentials are properly configured."""

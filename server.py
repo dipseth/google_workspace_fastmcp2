@@ -18,6 +18,7 @@ from auth.fastmcp_oauth_endpoints import setup_oauth_endpoints_fastmcp
 from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
 from drive.drive_tools import setup_drive_comprehensive_tools
 from gmail.gmail_tools import setup_gmail_tools
+from gmail.template_tools import setup_template_tools
 from docs.docs_tools import setup_docs_tools
 from forms.forms_tools import setup_forms_tools
 from slides.slides_tools import setup_slides_tools
@@ -29,9 +30,12 @@ from gchat.chat_app_prompts import setup_chat_app_prompts
 from prompts.gmail_prompts import setup_gmail_prompts
 from prompts.gmail_showcase_prompts import setup_gmail_showcase_prompts
 from gchat.unified_card_tool import setup_unified_card_tool
-from gchat.smart_card_tool import setup_smart_card_tool
+# DEPRECATED: smart_card_tool removed due to formatting issues with Google Chat Cards v2 API
+# from gchat.smart_card_tool import setup_smart_card_tool
 from adapters.module_wrapper_mcp import setup_module_wrapper_middleware
 from sheets.sheets_tools import setup_sheets_tools
+from photos.photos_tools import setup_photos_tools
+from photos.advanced_tools import setup_advanced_photos_tools
 from middleware.qdrant_unified import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools
 from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
@@ -119,6 +123,9 @@ setup_drive_comprehensive_tools(mcp)
 # Register Gmail tools
 setup_gmail_tools(mcp)
 
+# Register Email Template tools
+setup_template_tools(mcp)
+
 # Register Google Docs tools
 setup_docs_tools(mcp)
 
@@ -137,12 +144,19 @@ setup_chat_tools(mcp)
 # Register Unified Card Tool with ModuleWrapper integration
 setup_unified_card_tool(mcp)
 
-# Register Smart Card Tool with content mapping integration
-setup_smart_card_tool(mcp)
+# DEPRECATED: Smart Card Tool removed due to formatting issues with Google Chat Cards v2 API
+# The send_smart_card function had structural problems that prevented proper card rendering
+# Use the working card types instead: send_simple_card, send_interactive_card, send_form_card
+# setup_smart_card_tool(mcp)
 
-# Register ModuleWrapper middleware
+# Register ModuleWrapper middleware with custom collection name to match unified_card_tool.py
 logger.info("🔄 Initializing ModuleWrapper middleware...")
-setup_module_wrapper_middleware(mcp, modules_to_wrap=["json", "card_framework.v2"])
+middleware = setup_module_wrapper_middleware(mcp, modules_to_wrap=["card_framework.v2"])
+# Override the collection name to match what unified_card_tool.py expects
+if "card_framework.v2" in middleware.wrappers:
+    wrapper = middleware.wrappers["card_framework.v2"]
+    wrapper.collection_name = "card_framework_components_fastembed"
+    logger.info("✅ Updated ModuleWrapper to use FastEmbed collection: card_framework_components_fastembed")
 logger.info("✅ ModuleWrapper middleware initialized")
 
 # Register JWT-enhanced Chat tools (demonstration)
@@ -163,6 +177,12 @@ setup_gmail_showcase_prompts(mcp)
 # Register Google Sheets tools
 setup_sheets_tools(mcp)
 
+# Register Google Photos tools
+setup_photos_tools(mcp)
+
+# Register Advanced Google Photos tools with optimization
+setup_advanced_photos_tools(mcp)
+
 # Register Cloudflare Tunnel tools
 setup_tunnel_tools(mcp)
 
@@ -173,7 +193,7 @@ setup_oauth_callback_handler(mcp)
 setup_user_resources(mcp)
 
 # Setup tool output resources (cached outputs and Qdrant integration)
-setup_tool_output_resources(mcp)
+setup_tool_output_resources(mcp, qdrant_middleware)
 
 # Setup enhanced tools that use resource templating
 setup_enhanced_tools(mcp)
@@ -243,6 +263,14 @@ async def health_check() -> str:
             f"- `modify_gmail_message_labels` - Add/remove message labels\n"
             f"- `reply_to_gmail_message` - Reply to messages\n"
             f"- `draft_gmail_reply` - Draft reply messages\n"
+            f"**Email Template Tools (NEW!):**\n"
+            f"- `create_email_template` - Create HTML email templates with placeholders\n"
+            f"- `assign_template_to_user` - Assign templates to specific email addresses\n"
+            f"- `list_email_templates` - List and search email templates\n"
+            f"- `preview_email_template` - Preview templates with sample data\n"
+            f"- `get_user_template_assignment` - Check template assignment for users\n"
+            f"- `remove_template_assignment` - Remove template assignments\n"
+            f"- `delete_email_template` - Delete templates and all assignments\n"
             f"**Docs Tools:**\n"
             f"- `search_docs` - Search for Google Docs by name\n"
             f"- `get_doc_content` - Get content of Google Doc or Drive file\n"
@@ -287,9 +315,10 @@ async def health_check() -> str:
             f"- `send_dynamic_card` - Send any type of card using natural language description\n"
             f"- `list_available_card_components` - List available card components\n"
             f"- `get_card_component_info` - Get detailed information about card components\n"
-            f"**Smart Card Tools (NEW!):**\n"
-            f"- `send_smart_card` - Create and send a Google Chat card using natural language content description\n"
-            f"- `create_card_from_template` - Create and send a card using a predefined template\n"
+            f"**Working Card Tools:**\n"
+            f"- `send_simple_card` - Send a basic notification card (✅ Tested & Working)\n"
+            f"- `send_interactive_card` - Send a card with interactive buttons (✅ Tested & Working)\n"
+            f"- `send_form_card` - Send a card with form inputs (✅ Tested & Working)\n"
             f"- `preview_card_from_description` - Preview a card structure from natural language description without sending\n"
             f"- `optimize_card_layout` - Analyze and optimize a card layout based on engagement metrics\n"
             f"- `create_multi_modal_card` - Create and send a card with multi-modal content\n"
@@ -456,12 +485,20 @@ async def server_info() -> str:
         f"- Send any type of card using natural language description with ModuleWrapper\n"
         f"- Args: user_google_email, space_id, card_description, card_params, thread_key, webhook_url\n"
         f"- Example: `send_dynamic_card('user@gmail.com', 'spaces/AAAA', 'simple card with title and text', {'title': 'Hello', 'text': 'World'})`\n\n"
-        f"**Smart Card Tools (NEW!):**\n\n"
-        f"**`send_smart_card`**\n"
-        f"- Create and send a Google Chat card using natural language content description\n"
-        f"- Args: user_google_email, space_id, content, style, auto_format, thread_key, webhook_url\n"
-        f"- Example: `send_smart_card('user@gmail.com', 'spaces/AAAA', 'Title: Meeting Update | Text: Team standup at 2 PM')`\n\n"
-        f"**`create_card_from_template`**\n"
+        f"**Working Card Tools (Tested & Confirmed):**\n\n"
+        f"**`send_simple_card`**\n"
+        f"- Send a basic notification card to Google Chat\n"
+        f"- Args: user_google_email, space_id, title, subtitle, text\n"
+        f"- Example: `send_simple_card('user@gmail.com', 'spaces/AAAA', 'Alert', 'System Status', 'All systems operational')`\n\n"
+        f"**`send_interactive_card`**\n"
+        f"- Send a card with interactive buttons to Google Chat\n"
+        f"- Args: user_google_email, space_id, title, text, buttons\n"
+        f"- Example: `send_interactive_card('user@gmail.com', 'spaces/AAAA', 'Approval Request', 'Please review', [{{\"text\": \"Approve\", \"action\": \"approve_action\"}}])`\n\n"
+        f"**`send_form_card`**\n"
+        f"- Send a card with form inputs to Google Chat\n"
+        f"- Args: user_google_email, space_id, title, fields\n"
+        f"- Example: `send_form_card('user@gmail.com', 'spaces/AAAA', 'Feedback Form', [{{\"name\": \"feedback\", \"label\": \"Your Feedback\", \"type\": \"text_input\"}}])`\n\n"
+        f"**Note:** The smart card tools with natural language processing have been deprecated due to formatting issues with Google Chat Cards v2 API.\n\n"
         f"- Create and send a card using a predefined template with content substitution\n"
         f"- Args: template_name, content, user_google_email, space_id, thread_key, webhook_url\n"
         f"- Example: `create_card_from_template('status_report', {'title': 'Project Status', 'status': 'On Track'}, 'user@gmail.com', 'spaces/AAAA')`\n\n"

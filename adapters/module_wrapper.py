@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Global variables for lazy-loaded imports
 _qdrant_client = None
 _qdrant_models = None
-_sentence_transformer = None
+_fastembed = None
 _numpy = None
 
 def _get_numpy():
@@ -54,15 +54,15 @@ def _get_qdrant_imports():
         logger.info("✅ Qdrant client loaded")
     return _qdrant_client, _qdrant_models
 
-def _get_sentence_transformer():
-    """Lazy load SentenceTransformer when first needed."""
-    global _sentence_transformer
-    if _sentence_transformer is None:
-        logger.info("🤖 Loading SentenceTransformer (first use)...")
-        from sentence_transformers import SentenceTransformer
-        _sentence_transformer = SentenceTransformer
-        logger.info("✅ SentenceTransformer loaded")
-    return _sentence_transformer
+def _get_fastembed():
+    """Lazy load FastEmbed when first needed."""
+    global _fastembed
+    if _fastembed is None:
+        logger.info("🤖 Loading FastEmbed (first use)...")
+        from fastembed import TextEmbedding
+        _fastembed = TextEmbedding
+        logger.info("✅ FastEmbed loaded")
+    return _fastembed
 
 
 class ModuleComponent:
@@ -151,7 +151,8 @@ class ModuleWrapper:
         auto_initialize: bool = True,
         skip_standard_library: bool = True,  # Whether to skip standard library modules
         include_modules: Optional[List[str]] = None,  # List of module prefixes to include (whitelist)
-        exclude_modules: Optional[List[str]] = None   # List of module prefixes to exclude (blacklist)
+        exclude_modules: Optional[List[str]] = None,   # List of module prefixes to exclude (blacklist)
+        force_reindex: bool = False  # Force re-indexing even if collection has data
     ):
         """
         Initialize the module wrapper.
@@ -173,6 +174,8 @@ class ModuleWrapper:
             exclude_modules: List of module prefixes to exclude (blacklist). If provided, modules with these
                              prefixes will be skipped. For example, ['numpy', 'pandas'] would skip all modules
                              that start with 'numpy.' or 'pandas.'.
+            force_reindex: If True, force re-indexing even if the collection already has data. Useful for
+                          updating the index after module changes. Default is False for performance.
         """
         # Store configuration
         self.qdrant_host = qdrant_host
@@ -185,6 +188,7 @@ class ModuleWrapper:
         self.skip_standard_library = skip_standard_library
         self.include_modules = include_modules or []
         self.exclude_modules = exclude_modules or []
+        self.force_reindex = force_reindex
         
         # Initialize state
         self.module = self._resolve_module(module_or_name)
@@ -197,6 +201,7 @@ class ModuleWrapper:
         self._initialized = False
         self._visited_modules = set()  # Track visited modules to prevent recursion
         self._current_depth = 0  # Track current recursion depth
+        self.collection_needs_indexing = True  # Flag to track if collection needs indexing
         
         # Auto-initialize if requested
         if auto_initialize:
@@ -274,22 +279,37 @@ class ModuleWrapper:
     def _initialize_embedder(self):
         """Initialize the embedding model."""
         try:
-            SentenceTransformer = _get_sentence_transformer()
-            self.embedder = SentenceTransformer(self.embedding_model_name)
-            self.embedding_dim = self.embedder.get_sentence_embedding_dimension()
+            TextEmbedding = _get_fastembed()
+            self.embedder = TextEmbedding(model_name=self.embedding_model_name)
+            
+            # Try to get embedding dimension dynamically
+            try:
+                # Generate a test embedding to get the dimension
+                test_embedding = list(self.embedder.embed(["test"]))[0]
+                self.embedding_dim = len(test_embedding) if hasattr(test_embedding, '__len__') else 384
+            except Exception:
+                # Fallback to known dimensions for common models
+                model_dims = {
+                    "sentence-transformers/all-MiniLM-L6-v2": 384,
+                    "sentence-transformers/all-mpnet-base-v2": 768,
+                }
+                self.embedding_dim = model_dims.get(self.embedding_model_name, 384)
+                
             logger.info(f"✅ Embedding model loaded: {self.embedding_model_name} (dim: {self.embedding_dim})")
         except Exception as e:
             logger.error(f"❌ Failed to initialize embedding model: {e}")
             raise
     
     def _ensure_collection(self):
-        """Ensure the Qdrant collection exists."""
+        """Ensure the Qdrant collection exists and check if it needs indexing."""
         try:
             _, qdrant_models = _get_qdrant_imports()
             
             # Check if collection exists
             collections = self.client.get_collections()
             collection_names = [c.name for c in collections.collections]
+            
+            self.collection_needs_indexing = True  # Default to needing indexing
             
             if self.collection_name not in collection_names:
                 # Create collection
@@ -301,8 +321,21 @@ class ModuleWrapper:
                     )
                 )
                 logger.info(f"✅ Created Qdrant collection: {self.collection_name}")
+                self.collection_needs_indexing = True
             else:
-                logger.info(f"✅ Using existing collection: {self.collection_name}")
+                # Check if collection has data
+                collection_info = self.client.get_collection(self.collection_name)
+                point_count = collection_info.points_count
+                
+                if self.force_reindex:
+                    logger.info(f"✅ Using existing collection: {self.collection_name} ({point_count} points) - Force re-indexing enabled")
+                    self.collection_needs_indexing = True
+                elif point_count > 0:
+                    logger.info(f"✅ Using existing collection: {self.collection_name} ({point_count} points) - Skipping indexing")
+                    self.collection_needs_indexing = False
+                else:
+                    logger.info(f"✅ Using existing collection: {self.collection_name} (empty)")
+                    self.collection_needs_indexing = True
                 
         except Exception as e:
             logger.error(f"❌ Failed to ensure collection exists: {e}")
@@ -311,6 +344,11 @@ class ModuleWrapper:
     def _index_module_components(self):
         """Index all components in the module."""
         try:
+            # Check if indexing is needed
+            if not getattr(self, 'collection_needs_indexing', True):
+                logger.info(f"⏩ Skipping indexing for module {self.module_name} - collection already has data")
+                return
+                
             logger.info(f"🔍 Indexing components in module {self.module_name} (max depth: {self.max_depth})...")
             
             # Reset visited modules and depth counter
@@ -845,13 +883,24 @@ class ModuleWrapper:
                     # Generate text for embedding
                     embed_text = self._generate_embedding_text(component)
                     
-                    # Generate embedding
-                    embedding = self.embedder.encode(embed_text)
+                    # Generate embedding using FastEmbed
+                    embedding_list = list(self.embedder.embed([embed_text]))
+                    embedding = embedding_list[0] if embedding_list else None
+                    
+                    if embedding is None:
+                        logger.warning(f"Failed to generate embedding for component: {path}")
+                        continue
                     
                     # Create point with minimal payload
+                    # Convert numpy array to list if needed
+                    if hasattr(embedding, 'tolist'):
+                        vector_list = embedding.tolist()
+                    else:
+                        vector_list = list(embedding)
+                    
                     point = qdrant_models['PointStruct'](
                         id=str(uuid.uuid4()),
-                        vector=embedding.tolist(),
+                        vector=vector_list,
                         payload=component.to_dict()
                     )
                     
@@ -931,15 +980,26 @@ class ModuleWrapper:
                 logger.info(f"Found {len(direct_results)} direct matches for '{query}' (async)")
                 return direct_results
             
-            # Generate embedding for the query
-            query_embedding = await asyncio.to_thread(self.embedder.encode, query)
+            # Generate embedding for the query using FastEmbed
+            embedding_list = await asyncio.to_thread(lambda q: list(self.embedder.embed([q])), query)
+            query_embedding = embedding_list[0] if embedding_list else None
+            
+            if query_embedding is None:
+                logger.error(f"Failed to generate embedding for query: {query}")
+                return []
             
             # Search in Qdrant
             # Use the correct parameter name for query_points: 'query' instead of 'query_vector'
+            # Convert embedding to list format
+            if hasattr(query_embedding, 'tolist'):
+                query_vector = query_embedding.tolist()
+            else:
+                query_vector = list(query_embedding)
+            
             search_results = await asyncio.to_thread(
-                self.client.query_points,
+                self.client.search,
                 collection_name=self.collection_name,
-                query=query_embedding.tolist(),
+                query_vector=query_vector,
                 limit=limit,
                 score_threshold=score_threshold
             )
@@ -949,57 +1009,53 @@ class ModuleWrapper:
             # QueryResponse object doesn't have len(), so we need to check its attributes
             logger.info(f"Async QueryResponse attributes: {dir(search_results)}")
             
-            # Process results
+            # Get the actual points from the QueryResponse
+            points = []
+            if hasattr(search_results, 'points'):
+                points = search_results.points
+                logger.info(f"Found {len(points)} points in async search results")
+            else:
+                # Fallback: try to iterate over search_results directly
+                try:
+                    points = list(search_results)
+                    logger.info(f"Async fallback: Found {len(points)} results by direct iteration")
+                except Exception as e:
+                    logger.warning(f"Could not extract points from async search results: {e}")
+                    return []
+            
+            # Process results - properly handle Qdrant ScoredPoint objects (async)
             results = []
-            for result in search_results:
-                # Handle different result structures
-                if isinstance(result, tuple):
-                    # Try to determine which element is the score and which is the payload
-                    # based on their types
-                    score_value = None
-                    payload_value = None
-                    
-                    # Print the result for debugging
-                    logger.info(f"Result tuple: {result}")
-                    
-                    for item in result:
-                        # Skip the string 'points' which is causing issues
-                        if isinstance(item, str) and item == 'points':
-                            continue
-                            
-                        if isinstance(item, (int, float)) or (isinstance(item, str) and item.replace('.', '', 1).isdigit()):
-                            # This looks like a score (numeric)
-                            score_value = item
-                        elif isinstance(item, (dict, list)):
-                            # This looks like a payload (structured data)
-                            payload_value = item
-                    
-                    # If we couldn't identify them by type, use positional assumption
-                    if score_value is None and len(result) > 0:
-                        # Just use a default score
-                        score_value = 0.9  # High default score
-                    
-                    if payload_value is None and len(result) > 1:
-                        # Use the second element as payload
-                        payload_value = result[1]
-                    
-                    # Ensure we have values
-                    score = 0.9 if score_value is None else score_value
-                    payload = {} if payload_value is None else payload_value
-                    
-                    # Ensure score is a float
-                    try:
-                        score = float(score)
-                    except (ValueError, TypeError):
-                        # If we can't convert to float, use a default
-                        score = 0.9
-                else:
-                    # Fallback to object with attributes for backward compatibility
-                    try:
-                        score = float(getattr(result, 'score', 0.9))
-                    except (ValueError, TypeError):
-                        score = 0.9
+            for result in points:
+                # Handle Qdrant ScoredPoint objects (the correct structure)
+                try:
+                    # Try to get score and payload from ScoredPoint object
+                    score = float(getattr(result, 'score', 0.9))
                     payload = getattr(result, 'payload', {})
+                    
+                    # Log for debugging
+                    logger.info(f"Async ScoredPoint - Score: {score}, Payload keys: {list(payload.keys()) if isinstance(payload, dict) else 'not dict'}")
+                    
+                except (AttributeError, ValueError, TypeError) as e:
+                    logger.warning(f"Error processing async ScoredPoint object: {e}")
+                    # Fall back to tuple handling if needed
+                    if isinstance(result, tuple):
+                        logger.info(f"Async falling back to tuple handling for: {result}")
+                        score_value = None
+                        payload_value = None
+                        
+                        for item in result:
+                            if isinstance(item, (int, float)):
+                                score_value = item
+                            elif isinstance(item, dict):
+                                payload_value = item
+                        
+                        score = float(score_value) if score_value is not None else 0.9
+                        payload = payload_value if payload_value is not None else {}
+                    else:
+                        # Default values if we can't extract anything
+                        logger.warning(f"Async could not extract score/payload from result: {type(result)}")
+                        score = 0.9
+                        payload = {}
                 
                 # Handle different payload structures
                 if isinstance(payload, dict):
@@ -1060,13 +1116,24 @@ class ModuleWrapper:
                 logger.info(f"Found {len(direct_results)} direct matches for '{query}'")
                 return direct_results
             
-            # Generate embedding for the query
-            query_embedding = self.embedder.encode(query)
+            # Generate embedding for the query using FastEmbed
+            embedding_list = list(self.embedder.embed([query]))
+            query_embedding = embedding_list[0] if embedding_list else None
+            
+            if query_embedding is None:
+                logger.error(f"Failed to generate embedding for query: {query}")
+                return []
+            
+            # Convert embedding to list format
+            if hasattr(query_embedding, 'tolist'):
+                query_vector = query_embedding.tolist()
+            else:
+                query_vector = list(query_embedding)
             
             # Search in Qdrant
-            search_results = self.client.query_points(
+            search_results = self.client.search(
                 collection_name=self.collection_name,
-                query=query_embedding.tolist(),
+                query_vector=query_vector,
                 limit=limit,
                 score_threshold=score_threshold
             )
@@ -1076,57 +1143,53 @@ class ModuleWrapper:
             # QueryResponse object doesn't have len(), so we need to check its attributes
             logger.info(f"QueryResponse attributes: {dir(search_results)}")
             
-            # Process results
+            # Get the actual points from the QueryResponse
+            points = []
+            if hasattr(search_results, 'points'):
+                points = search_results.points
+                logger.info(f"Found {len(points)} points in search results")
+            else:
+                # Fallback: try to iterate over search_results directly
+                try:
+                    points = list(search_results)
+                    logger.info(f"Fallback: Found {len(points)} results by direct iteration")
+                except Exception as e:
+                    logger.warning(f"Could not extract points from search results: {e}")
+                    return []
+            
+            # Process results - properly handle Qdrant ScoredPoint objects
             results = []
-            for result in search_results:
-                # Handle different result structures
-                if isinstance(result, tuple):
-                    # Try to determine which element is the score and which is the payload
-                    # based on their types
-                    score_value = None
-                    payload_value = None
-                    
-                    # Print the result for debugging
-                    logger.info(f"Result tuple: {result}")
-                    
-                    for item in result:
-                        # Skip the string 'points' which is causing issues
-                        if isinstance(item, str) and item == 'points':
-                            continue
-                            
-                        if isinstance(item, (int, float)) or (isinstance(item, str) and item.replace('.', '', 1).isdigit()):
-                            # This looks like a score (numeric)
-                            score_value = item
-                        elif isinstance(item, (dict, list)):
-                            # This looks like a payload (structured data)
-                            payload_value = item
-                    
-                    # If we couldn't identify them by type, use positional assumption
-                    if score_value is None and len(result) > 0:
-                        # Just use a default score
-                        score_value = 0.9  # High default score
-                    
-                    if payload_value is None and len(result) > 1:
-                        # Use the second element as payload
-                        payload_value = result[1]
-                    
-                    # Ensure we have values
-                    score = 0.9 if score_value is None else score_value
-                    payload = {} if payload_value is None else payload_value
-                    
-                    # Ensure score is a float
-                    try:
-                        score = float(score)
-                    except (ValueError, TypeError):
-                        # If we can't convert to float, use a default
-                        score = 0.9
-                else:
-                    # Fallback to object with attributes for backward compatibility
-                    try:
-                        score = float(getattr(result, 'score', 0.9))
-                    except (ValueError, TypeError):
-                        score = 0.9
+            for result in points:
+                # Handle Qdrant ScoredPoint objects (the correct structure)
+                try:
+                    # Try to get score and payload from ScoredPoint object
+                    score = float(getattr(result, 'score', 0.9))
                     payload = getattr(result, 'payload', {})
+                    
+                    # Log for debugging
+                    logger.info(f"ScoredPoint - Score: {score}, Payload keys: {list(payload.keys()) if isinstance(payload, dict) else 'not dict'}")
+                    
+                except (AttributeError, ValueError, TypeError) as e:
+                    logger.warning(f"Error processing ScoredPoint object: {e}")
+                    # Fall back to tuple handling if needed
+                    if isinstance(result, tuple):
+                        logger.info(f"Falling back to tuple handling for: {result}")
+                        score_value = None
+                        payload_value = None
+                        
+                        for item in result:
+                            if isinstance(item, (int, float)):
+                                score_value = item
+                            elif isinstance(item, dict):
+                                payload_value = item
+                        
+                        score = float(score_value) if score_value is not None else 0.9
+                        payload = payload_value if payload_value is not None else {}
+                    else:
+                        # Default values if we can't extract anything
+                        logger.warning(f"Could not extract score/payload from result: {type(result)}")
+                        score = 0.9
+                        payload = {}
                 
                 # Handle different payload structures
                 if isinstance(payload, dict):
@@ -1377,6 +1440,27 @@ class ModuleWrapper:
                 pass
         
         return None
+    
+    def force_reindex_components(self):
+        """
+        Force re-indexing of all module components regardless of collection state.
+        
+        This method can be used to update the index after module changes or to
+        rebuild the index from scratch.
+        """
+        logger.info(f"🔄 Force re-indexing module {self.module_name}...")
+        
+        # Clear existing components
+        self.components.clear()
+        self.root_components.clear()
+        
+        # Force indexing even if collection has data
+        self.collection_needs_indexing = True
+        
+        # Re-index all components
+        self._index_module_components()
+        
+        logger.info(f"✅ Force re-indexing completed for {self.module_name}")
 
 
 # Example usage

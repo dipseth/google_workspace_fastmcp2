@@ -578,143 +578,201 @@ class CardValidator:
         """Suggest improvements for better user experience."""
 ```
 
-## 🎯 Proposed Implementation Roadmap
+## 🎯 Current Implementation Status
 
-### Phase 1: Enhanced Content Mapping (Priority: High)
+### ⚠️ Important Update (2025-08-28)
 
-1. **Implement Content Parser**
-   - Parse structured content from natural language
-   - Extract titles, text, buttons, images, forms
-   - Map content types to appropriate widgets
+The smart card natural language processing functionality (`send_smart_card`, `create_card_from_template`, etc.) has been **deprecated and removed** due to structural formatting issues with the Google Chat Cards v2 API. The system now focuses on the working card types that have been thoroughly tested.
 
-2. **Create Widget Factory**
-   - Automatic widget selection based on content type
-   - Smart parameter mapping
-   - Default value inference
+### ✅ Working Card Functions
 
-### Phase 2: Template System Enhancement (Priority: Medium)
+The following card functions remain fully operational:
+- `send_simple_card` - Basic notification cards
+- `send_interactive_card` - Interactive cards with buttons
+- `send_form_card` - Form cards with input fields
+- `send_message` - Plain text messages
+- `send_dynamic_card` - Dynamic card creation using ModuleWrapper
 
-1. **Predefined Templates**
-   - Common card types (announcements, forms, reports)
-   - Template inheritance and customization
-   - Version control for templates
+### 📊 Current Qdrant Collections
 
-2. **Dynamic Template Generation**
-   - Learn from successful card patterns
-   - Auto-generate templates from usage patterns
-   - Community template sharing
+The system creates three Qdrant collections when running:
 
-### Phase 3: LLM Interface Optimization (Priority: High)
+| Collection | Purpose | Required? | Impact if Missing |
+|-----------|---------|-----------|-------------------|
+| **`card_framework_components`** | Stores card component templates for semantic search in unified_card_tool | Yes (for dynamic cards) | Can't use natural language card descriptions |
+| **`mcp_module_card_framework_v2`** | Card framework API introspection for parameter adaptation | Yes (for complex cards) | Card parameter adaptation fails |
+| **`mcp_module_json`** | JSON module introspection for consistent JSON handling | No (nice-to-have) | JSON operations still work normally |
 
-1. **Simplified API Design**
+#### Collection Details:
+
+1. **`card_framework_components`**
+   - Created by: `gchat/unified_card_tool.py`
+   - Used for: Semantic search of card types (simple, interactive, form)
+   - Example: "create a card with buttons" → finds interactive_card component
+
+2. **`mcp_module_card_framework_v2`**
+   - Created by: `adapters/module_wrapper_mcp.py` via middleware
+   - Used for: API introspection and parameter validation
+   - Example: Ensures correct parameter mapping for card_framework.v2 functions
+
+3. **`mcp_module_json`**
+   - Created by: `adapters/module_wrapper_mcp.py` (line 152 in server.py)
+   - Used for: JSON operations consistency across all tools
+   - Note: **Optional** - could be removed to reduce Qdrant connection errors
+
+### 🔧 Reducing Qdrant Connection Errors
+
+If you're experiencing Qdrant connection errors when the service isn't running, you can:
+
 ```python
-# New streamlined interface
-async def send_smart_card(
-    user_google_email: str,
-    space_id: str,
-    content: str,  # "Title: Meeting Update | Text: Quarterly review scheduled | Button: Join Meeting -> https://meet.google.com/abc"
-    style: str = "default",  # "announcement", "form", "report", "interactive"
-    auto_format: bool = True
-):
-    """Create and send card with intelligent content mapping."""
+# In server.py line 152, change from:
+setup_module_wrapper_middleware(mcp, modules_to_wrap=["json", "card_framework.v2"])
+
+# To (removes optional JSON wrapper):
+setup_module_wrapper_middleware(mcp, modules_to_wrap=["card_framework.v2"])
 ```
 
-2. **Content Format Standardization**
-```yaml
-# Standard content format for LLMs
-card_content:
-  type: "announcement"
-  title: "Project Update"
-  subtitle: "Q4 2024 Progress"
-  sections:
-    - header: "Key Metrics"
-      text: "Completed 85% of planned features"
-    - header: "Next Steps"
-      buttons:
-        - text: "View Dashboard"
-          url: "https://dashboard.example.com"
-        - text: "Schedule Review"
-          action: "create_calendar_event"
-  footer:
-    text: "Last updated: 2024-12-15"
-```
+This reduces connection attempts by 1/3 without affecting functionality.
 
-### Phase 4: Advanced Features (Priority: Low)
+## 🛠️ Deprecated Features (Moved to Archive)
 
-1. **AI-Powered Layout Optimization**
-   - Analyze card engagement metrics
-   - Suggest layout improvements
-   - A/B testing for card designs
+The following features have been deprecated and moved to `delete_later/gchat_smart_cards/`:
 
-2. **Multi-Modal Content Support**
-   - Automatic image optimization
-   - Chart generation from data
-   - Video thumbnail extraction
+### Deprecated Files:
+- `gchat/content_mapping/` - Entire module (10 files)
+- `gchat/smart_card_tool.py` - Smart card MCP tool registration
+- `gchat/enhanced_card_tool.py` - Enhanced card tool with content mapping
+
+### Deprecated Functions:
+- `send_smart_card()` - Natural language card creation
+- `create_card_from_template()` - Template-based card creation
+- `create_multi_modal_card()` - Multi-modal card creation
+- `optimize_card_layout()` - Card layout optimization
+
+### Migration Path:
+If you were using deprecated functions:
+- `send_smart_card` → Use `send_simple_card`, `send_interactive_card`, or `send_form_card`
+- `create_card_from_template` → Build cards directly using working functions
+- `create_multi_modal_card` → Use standard card functions with image/button widgets
+
+## 🚀 Future Improvements
+
+While the smart card natural language processing has been deprecated, the following improvements could enhance the existing working system:
+
+### Phase 1: Template System Enhancement (Priority: High)
+
+1. **Predefined Templates for Working Card Types**
+   - Templates for simple, interactive, and form cards
+   - Template storage in Qdrant
+   - Quick template selection
+
+2. **Better Parameter Mapping**
+   - Improved parameter inference for existing card types
+   - Default value handling
+   - Validation and error messages
+
+### Phase 2: Enhanced Dynamic Card Creation (Priority: Medium)
+
+1. **Improve send_dynamic_card**
+   - Better semantic search for card components
+   - Smarter parameter inference
+   - Fallback mechanisms when Qdrant is unavailable
+
+2. **Error Handling**
+   - Graceful degradation when Qdrant is offline
+   - Better error messages for malformed cards
+   - Validation before sending to Google Chat
 
 ## 🔧 Implementation Examples
 
-### Enhanced send_dynamic_card Usage
+### Current Working Card Usage
 
 ```python
-# Current complex usage
+# Simple Card (Working)
+await send_simple_card(
+    user_google_email="user@example.com",
+    space_id="spaces/123",
+    title="Notification",
+    subtitle="System Update",
+    text="The system has been updated successfully"
+)
+
+# Interactive Card with Buttons (Working)
+await send_interactive_card(
+    user_google_email="user@example.com",
+    space_id="spaces/123",
+    title="Approval Request",
+    text="Please review and approve",
+    buttons=[
+        {"text": "Approve", "action": "approve_action"},
+        {"text": "Reject", "action": "reject_action"}
+    ]
+)
+
+# Form Card (Working)
+await send_form_card(
+    user_google_email="user@example.com",
+    space_id="spaces/123",
+    title="Feedback Form",
+    fields=[
+        {"name": "feedback", "label": "Your Feedback", "type": "text_input"},
+        {"name": "rating", "label": "Rating", "type": "selection", "options": ["1", "2", "3", "4", "5"]}
+    ]
+)
+```
+
+### Dynamic Card Creation (Still Working)
+
+```python
+# Using send_dynamic_card with natural language description
 await send_dynamic_card(
     user_google_email="user@example.com",
     space_id="spaces/123",
-    card_description="Create a card with title, text, and button",
+    card_description="simple card with a title and message",
     card_params={
         "title": "Meeting Reminder",
-        "sections": [
-            {
-                "widgets": [
-                    {"textParagraph": {"text": "Team standup at 2 PM"}},
-                    {"buttonList": {"buttons": [{"text": "Join", "onClick": {"openLink": {"url": "https://meet.google.com/abc"}}}]}}
-                ]
-            }
-        ]
+        "text": "Team standup at 2 PM"
     }
 )
-
-# Proposed streamlined usage
-await send_smart_card(
-    user_google_email="user@example.com",
-    space_id="spaces/123",
-    content="Title: Meeting Reminder | Text: Team standup at 2 PM | Button: Join -> https://meet.google.com/abc"
-)
 ```
 
-### Template-Based Creation
+## 📈 Key Technical Findings
 
-```python
-# Using predefined templates
-await create_card_from_template(
-    template="meeting_reminder",
-    content={
-        "meeting_title": "Team Standup",
-        "time": "2 PM today",
-        "join_url": "https://meet.google.com/abc"
-    },
-    user_google_email="user@example.com",
-    space_id="spaces/123"
-)
-```
+From the Rivers Unlimited MCP Testing Report:
 
-## 📈 Success Metrics
+1. **Success Rate:** 80% (4 out of 5 card types working)
+2. **Critical Fix:** Correct button format for interactive cards:
+   ```json
+   // ✅ Correct
+   {"onClick": {"action": {"function": "method"}}}
+   
+   // ❌ Wrong (was causing issues)
+   {"onClick": {"action": {"actionMethodName": "method"}}}
+   ```
 
-To measure the success of these improvements:
+3. **Working Functions:**
+   - ✅ send_simple_card - Perfect for basic notifications
+   - ✅ send_interactive_card - Working with correct "function" button format
+   - ✅ send_form_card - Full form functionality with inputs
+   - ✅ send_message - Basic text messaging
+   - ✅ list_spaces - Space discovery and targeting
 
-1. **Developer Experience**
-   - Reduction in card creation time: Target 80% faster
-   - Error rate: Target <5% malformed cards
-   - Lines of code: Target 70% reduction
+## 🔍 Troubleshooting Qdrant Connection Issues
 
-2. **LLM Integration Quality**
-   - Natural language understanding: Target 95% accuracy
-   - Content mapping success: Target 90% automatic mapping
-   - Template utilization: Target 60% of cards use templates
+If you see errors like `[Errno 61] Connection refused`:
 
-3. **System Performance**
-   - Card generation latency: Target <2 seconds
-   - Template cache hit rate: Target >80%
-   - Memory usage: Target <50MB per ModuleWrapper instance
+1. **Check if Qdrant is running:**
+   ```bash
+   # Start Qdrant using Docker
+   docker run -p 6333:6333 qdrant/qdrant
+   ```
 
-This roadmap will transform the current technical card creation process into an intuitive, LLM-friendly system that enables natural language card specification while maintaining the power and flexibility of the underlying card framework.
+2. **The system works without Qdrant:** The ModuleWrapper components gracefully handle connection failures and continue to work without the optimization benefits.
+
+3. **To reduce connection attempts:** Consider removing the JSON module wrapper as shown above.
+
+4. **For testing:** You can disable Qdrant entirely by setting environment variables or modifying the wrapper initialization to skip Qdrant operations.
+
+## Summary
+
+The ModuleWrapper system provides powerful capabilities for the working card functions in the Google Chat integration. While the smart card natural language processing features have been deprecated, the core functionality remains robust with 4 fully operational card types. The system's architecture with Qdrant provides optimization benefits when available but gracefully degrades when the service is offline.
