@@ -1130,10 +1130,10 @@ class ModuleWrapper:
             else:
                 query_vector = list(query_embedding)
             
-            # Search in Qdrant
-            search_results = self.client.search(
+            # Search in Qdrant using query_points (new API)
+            search_results = self.client.query_points(
                 collection_name=self.collection_name,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=limit,
                 score_threshold=score_threshold
             )

@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
 from resources.user_resources import get_current_user_email_simple
+from .chat_types import SpaceListResponse, MessageListResponse, SpaceInfo, MessageInfo
 
 # Card Framework integration
 try:
@@ -186,7 +187,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         user_google_email: Optional[str] = None,
         page_size: int = 100,
         space_type: str = "all"  # "all", "room", "dm"
-    ) -> str:
+    ) -> SpaceListResponse:
         """
         Lists Google Chat spaces (rooms and direct messages) accessible to the user.
 
@@ -199,7 +200,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             space_type (str): Filter by space type: "all", "room", or "dm" (default: "all").
 
         Returns:
-            str: A formatted list of Google Chat spaces accessible to the user.
+            SpaceListResponse: Structured list of Chat spaces with metadata.
         """
         try:
             # 🎯 Multi-method email detection
@@ -249,18 +250,29 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 chat_service.spaces().list(**request_params).execute
             )
 
-            spaces = response.get('spaces', [])
-            if not spaces:
-                return f"No Chat spaces found for type '{space_type}'."
-
-            output = [f"Found {len(spaces)} Chat spaces (type: {space_type}):"]
-            for space in spaces:
-                space_name = space.get('displayName', 'Unnamed Space')
-                space_id = space.get('name', '')
-                space_type_actual = space.get('spaceType', 'UNKNOWN')
-                output.append(f"- {space_name} (ID: {space_id}, Type: {space_type_actual})")
-
-            return "\n".join(output)
+            items = response.get('spaces', [])
+            
+            # Convert to structured format
+            spaces: List[SpaceInfo] = []
+            for space in items:
+                space_info: SpaceInfo = {
+                    "id": space.get('name', ''),
+                    "displayName": space.get('displayName', 'Unnamed Space'),
+                    "spaceType": space.get('spaceType', 'UNKNOWN'),
+                    "singleUserBotDm": space.get('singleUserBotDm'),
+                    "threaded": space.get('threaded'),
+                    "spaceHistoryState": space.get('spaceHistoryState')
+                }
+                spaces.append(space_info)
+            
+            logger.info(f"Found {len(spaces)} Chat spaces (type: {space_type}) for {user_email}")
+            
+            return SpaceListResponse(
+                spaces=spaces,
+                count=len(spaces),
+                spaceType=space_type,
+                userEmail=user_email
+            )
             
         except HttpError as e:
             error_msg = f"❌ Failed to list spaces: {e}"
@@ -272,25 +284,25 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             return error_msg
 
     @mcp.tool(
-        name="get_messages",
-        description="Retrieves messages from a Google Chat space",
-        tags={"chat", "messages", "get", "google"},
+        name="list_messages",
+        description="Lists messages from a Google Chat space",
+        tags={"chat", "messages", "list", "google"},
         annotations={
-            "title": "Get Chat Messages",
+            "title": "List Chat Messages",
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
             "openWorldHint": True
         }
     )
-    async def get_messages(
+    async def list_messages(
         user_google_email: str,
         space_id: str,
         page_size: int = 50,
         order_by: str = "createTime desc"
-    ) -> str:
+    ) -> MessageListResponse:
         """
-        Retrieves messages from a Google Chat space.
+        Lists messages from a Google Chat space.
 
         Args:
             user_google_email (str): The user's Google email address. Required.
@@ -299,9 +311,9 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             order_by (str): Sort order for messages (default: "createTime desc").
 
         Returns:
-            str: Formatted messages from the specified space.
+            MessageListResponse: Structured list of messages with metadata.
         """
-        logger.info(f"[get_messages] Space ID: '{space_id}' for user '{user_google_email}'")
+        logger.info(f"[list_messages] Space ID: '{space_id}' for user '{user_google_email}'")
 
         try:
             chat_service = await _get_chat_service_with_fallback(user_google_email)
@@ -321,30 +333,41 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 ).execute
             )
 
-            messages = response.get('messages', [])
-            if not messages:
-                return f"No messages found in space '{space_name}' (ID: {space_id})."
-
-            output = [f"Messages from '{space_name}' (ID: {space_id}):\n"]
-            for msg in messages:
-                sender = msg.get('sender', {}).get('displayName', 'Unknown Sender')
-                create_time = msg.get('createTime', 'Unknown Time')
-                text_content = msg.get('text', 'No text content')
-                msg_name = msg.get('name', '')
-
-                output.append(f"[{create_time}] {sender}:")
-                output.append(f"  {text_content}")
-                output.append(f"  (Message ID: {msg_name})\n")
-
-            return "\n".join(output)
+            items = response.get('messages', [])
+            
+            # Convert to structured format
+            messages: List[MessageInfo] = []
+            for msg in items:
+                message_info: MessageInfo = {
+                    "id": msg.get('name', ''),
+                    "text": msg.get('text', 'No text content'),
+                    "senderName": msg.get('sender', {}).get('displayName', 'Unknown Sender'),
+                    "senderEmail": msg.get('sender', {}).get('email') if 'sender' in msg else None,
+                    "createTime": msg.get('createTime', 'Unknown Time'),
+                    "threadId": msg.get('thread', {}).get('name') if 'thread' in msg else None,
+                    "spaceName": space_name,
+                    "attachments": msg.get('attachment') if 'attachment' in msg else None
+                }
+                messages.append(message_info)
+            
+            logger.info(f"Retrieved {len(messages)} messages from space '{space_name}' for {user_google_email}")
+            
+            return MessageListResponse(
+                messages=messages,
+                count=len(messages),
+                spaceId=space_id,
+                spaceName=space_name,
+                orderBy=order_by,
+                userEmail=user_google_email
+            )
             
         except HttpError as e:
-            error_msg = f"❌ Failed to get messages: {e}"
-            logger.error(f"[get_messages] HTTP error: {e}")
+            error_msg = f"❌ Failed to list messages: {e}"
+            logger.error(f"[list_messages] HTTP error: {e}")
             return error_msg
         except Exception as e:
             error_msg = f"❌ Unexpected error: {str(e)}"
-            logger.error(f"[get_messages] {error_msg}")
+            logger.error(f"[list_messages] {error_msg}")
             return error_msg
 
     @mcp.tool(

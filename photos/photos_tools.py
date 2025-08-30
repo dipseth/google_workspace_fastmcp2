@@ -14,6 +14,7 @@ from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
 
 from auth.service_helpers import request_service, get_injected_service, get_service
+from .photos_types import AlbumListResponse, PhotoListResponse, AlbumInfo, PhotoInfo
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
         user_google_email: str,
         max_results: int = 25,
         exclude_non_app_created: bool = False
-    ) -> str:
+    ) -> AlbumListResponse:
         """
         Lists photo albums from Google Photos that the user has access to.
 
@@ -134,7 +135,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             exclude_non_app_created (bool): Exclude albums not created by the app. Defaults to False.
 
         Returns:
-            str: A formatted list of photo albums (title, ID, media count).
+            AlbumListResponse: Structured list of photo albums with metadata.
         """
         logger.info(f"[list_photos_albums] Invoked. Email: '{user_google_email}'")
 
@@ -148,19 +149,29 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             )
             albums_response = await asyncio.to_thread(albums_request.execute)
 
-            albums = albums_response.get("albums", [])
-            if not albums:
-                return f"No photo albums found for {user_google_email}."
-
-            albums_list = [_format_album(album) for album in albums]
-
-            text_output = (
-                f"Successfully listed {len(albums)} photo albums for {user_google_email}:\n"
-                + "\n".join(albums_list)
-            )
+            items = albums_response.get("albums", [])
+            
+            # Convert to structured format
+            albums: List[AlbumInfo] = []
+            for album in items:
+                album_info: AlbumInfo = {
+                    "id": album.get("id", ""),
+                    "title": album.get("title", "Untitled Album"),
+                    "productUrl": album.get("productUrl"),
+                    "mediaItemsCount": album.get("mediaItemsCount"),
+                    "coverPhotoBaseUrl": album.get("coverPhotoBaseUrl"),
+                    "coverPhotoMediaItemId": album.get("coverPhotoMediaItemId")
+                }
+                albums.append(album_info)
 
             logger.info(f"Successfully listed {len(albums)} albums for {user_google_email}.")
-            return text_output
+            
+            return AlbumListResponse(
+                albums=albums,
+                count=len(albums),
+                excludeNonAppCreated=exclude_non_app_created,
+                userEmail=user_google_email
+            )
         
         except HttpError as e:
             error_msg = f"❌ Failed to list photo albums: {e}"
@@ -274,22 +285,22 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             return error_msg
 
     @mcp.tool(
-        name="get_album_photos",
-        description="Get all photos from a specific album",
+        name="list_album_photos",
+        description="List all photos from a specific album",
         tags={"photos", "album", "list", "google"},
         annotations={
-            "title": "Get Album Photos",
+            "title": "List Album Photos",
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
             "openWorldHint": True
         }
     )
-    async def get_album_photos(
+    async def list_album_photos(
         user_google_email: str,
         album_id: str,
         max_results: int = 50
-    ) -> str:
+    ) -> PhotoListResponse:
         """
         Get all photos from a specific album.
 
@@ -299,9 +310,9 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             max_results (int): Maximum number of photos to return. Defaults to 50.
 
         Returns:
-            str: A formatted list of photos in the album.
+            PhotoListResponse: Structured list of photos with metadata.
         """
-        logger.info(f"[get_album_photos] Invoked. Email: '{user_google_email}', Album: {album_id}")
+        logger.info(f"[list_album_photos] Invoked. Email: '{user_google_email}', Album: {album_id}")
 
         try:
             photos_service = await _get_photos_service_with_fallback(user_google_email)
@@ -314,19 +325,41 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             search_request = photos_service.mediaItems().search(body=search_body)
             search_response = await asyncio.to_thread(search_request.execute)
 
-            media_items = search_response.get("mediaItems", [])
-            if not media_items:
-                return f"No photos found in album {album_id} for {user_google_email}."
+            items = search_response.get("mediaItems", [])
+            
+            # Convert to structured format
+            photos: List[PhotoInfo] = []
+            for item in items:
+                metadata = item.get("mediaMetadata", {})
+                photo_metadata = metadata.get("photo", {})
+                
+                photo_info: PhotoInfo = {
+                    "id": item.get("id", ""),
+                    "filename": item.get("filename", "Unknown"),
+                    "mimeType": item.get("mimeType", "Unknown"),
+                    "baseUrl": item.get("baseUrl", ""),
+                    "productUrl": item.get("productUrl"),
+                    "description": item.get("description"),
+                    "creationTime": metadata.get("creationTime", "Unknown"),
+                    "width": metadata.get("width"),
+                    "height": metadata.get("height"),
+                    "cameraMake": photo_metadata.get("cameraMake"),
+                    "cameraModel": photo_metadata.get("cameraModel"),
+                    "focalLength": photo_metadata.get("focalLength"),
+                    "apertureFNumber": photo_metadata.get("apertureFNumber"),
+                    "isoEquivalent": photo_metadata.get("isoEquivalent"),
+                    "exposureTime": photo_metadata.get("exposureTime")
+                }
+                photos.append(photo_info)
 
-            media_list = [_format_media_item(item) for item in media_items]
-
-            text_output = (
-                f"Successfully retrieved {len(media_items)} photos from album {album_id} for {user_google_email}:\n"
-                + "\n".join(media_list)
+            logger.info(f"Successfully retrieved {len(photos)} photos for {user_google_email}.")
+            
+            return PhotoListResponse(
+                photos=photos,
+                count=len(photos),
+                albumId=album_id,
+                userEmail=user_google_email
             )
-
-            logger.info(f"Successfully retrieved {len(media_items)} photos for {user_google_email}.")
-            return text_output
         
         except HttpError as e:
             error_msg = f"❌ Failed to get album photos: {e}"

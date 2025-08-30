@@ -66,7 +66,11 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
         name="Google Chat Spaces Cache",
         description="Cached list of Google Chat spaces for the current user with room details, member counts, and space types - automatically refreshed every 5 minutes for optimal performance",
         mime_type="application/json",
-        tags={"google", "chat", "spaces", "cached", "rooms", "performance", "messaging"}
+        tags={"google", "chat", "spaces", "cached", "rooms", "performance", "messaging"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": False  # Results may vary due to caching
+        }
     )
     async def get_chat_spaces_list(ctx: Context) -> dict:
         """Internal implementation for Google Chat spaces cache resource."""
@@ -143,7 +147,11 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
         name="Recent Google Drive Files Cache",
         description="Cached list of recently modified Google Drive files with metadata including file names, sizes, modification times, and sharing links - updated every 5 minutes for quick access",
         mime_type="application/json",
-        tags={"google", "drive", "files", "cached", "recent", "performance", "storage", "documents"}
+        tags={"google", "drive", "files", "cached", "recent", "performance", "storage", "documents"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": False  # Results may vary due to caching
+        }
     )
     async def get_recent_drive_files(ctx: Context) -> dict:
         """Internal implementation for recent Google Drive files cache resource."""
@@ -214,7 +222,11 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
         name="Recent Gmail Messages Cache",
         description="Cached list of recent Gmail messages from the last 7 days with sender information, subjects, snippets, and thread IDs - refreshed every 5 minutes for efficient email monitoring",
         mime_type="application/json",
-        tags={"google", "gmail", "email", "messages", "cached", "recent", "performance", "inbox"}
+        tags={"google", "gmail", "email", "messages", "cached", "recent", "performance", "inbox"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": False  # Results may vary due to caching
+        }
     )
     async def get_recent_gmail_messages(ctx: Context) -> dict:
         """Internal implementation for recent Gmail messages cache resource."""
@@ -314,7 +326,11 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
         name="Today's Calendar Events Cache",
         description="Cached list of today's calendar events with start/end times, attendees, locations, and meeting links - automatically updated every 5 minutes for current day schedule management",
         mime_type="application/json",
-        tags={"google", "calendar", "events", "today", "cached", "schedule", "meetings", "performance"}
+        tags={"google", "calendar", "events", "today", "cached", "schedule", "meetings", "performance"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": False  # Results may vary due to caching
+        }
     )
     async def get_todays_calendar_events(ctx: Context) -> dict:
         """Internal implementation for today's calendar events cache resource."""
@@ -338,8 +354,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             calendar_service = get_injected_service(calendar_key)
             
             # Get today's events
-            from datetime import datetime, timezone
-            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             today_end = today_start.replace(hour=23, minute=59, second=59)
             
             events_result = calendar_service.events().list(
@@ -406,7 +421,11 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
         name="Tool Output Cache Status",
         description="Comprehensive status of the tool output cache including total entries, valid/expired counts, TTL information, and detailed cache key analysis for performance monitoring",
         mime_type="application/json",
-        tags={"cache", "status", "performance", "monitoring", "ttl", "analytics", "system"}
+        tags={"cache", "status", "performance", "monitoring", "ttl", "analytics", "system"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True  # Status reporting is idempotent
+        }
     )
     async def get_cache_status(ctx: Context) -> dict:
         """Internal implementation for tool output cache status resource."""
@@ -469,7 +488,11 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
         name="Clear Tool Output Cache",
         description="Administrative resource to clear the tool output cache for the current user, forcing fresh API calls and removing stale cached data with detailed operation statistics",
         mime_type="application/json",
-        tags={"cache", "clear", "admin", "reset", "performance", "maintenance", "system"}
+        tags={"cache", "clear", "admin", "reset", "performance", "maintenance", "system"},
+        annotations={
+            "readOnlyHint": False,  # This resource modifies state (clears cache)
+            "idempotentHint": True  # Clearing an already empty cache is safe
+        }
     )
     async def clear_cache(ctx: Context) -> dict:
         """Internal implementation for cache clearing resource."""
@@ -513,13 +536,17 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             }
     
     @mcp.resource(
-        uri="qdrant://collection/info",
-        name="Qdrant Collection Information",
-        description="Vector database collection metadata including schema, vector count, indexing configuration, and collection health status for tool response storage system",
+        uri="qdrant://collection/{collection}/info",
+        name="Qdrant Collection Information by Name",
+        description="Vector database collection metadata including schema, vector count, indexing configuration, and collection health status for a specific collection",
         mime_type="application/json",
-        tags={"qdrant", "vector", "database", "metadata", "collection", "schema", "info", "semantic"}
+        tags={"qdrant", "vector", "database", "metadata", "collection", "schema", "info", "semantic"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True  # Collection info queries are idempotent
+        }
     )
-    async def get_qdrant_collection_info(ctx: Context) -> dict:
+    async def get_qdrant_collection_info_by_name(collection: str, ctx: Context) -> dict:
         """Internal implementation for Qdrant collection information resource."""
         try:
             # Use passed middleware or create new one if not available
@@ -528,10 +555,11 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             else:
                 # Fallback: Import Qdrant middleware to access collection info
                 from middleware.qdrant_unified import QdrantUnifiedMiddleware, QdrantConfig
-                
+
                 # Try to get collection info
-                config = QdrantConfig.from_file()
-                
+                config = QdrantConfig.from_file() if hasattr(QdrantConfig, 'from_file') else QdrantConfig()  # Use configuration loading</search>
+# </search_and_replace>
+
                 # Create a temporary middleware instance to access collection info
                 middleware = QdrantUnifiedMiddleware()
                 await middleware.initialize()
@@ -543,23 +571,23 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                     "timestamp": datetime.now().isoformat()
                 }
             
-            # Get collection information
+            # Get collection information for specific collection
             try:
                 collections = await asyncio.to_thread(middleware.client.get_collections)
                 collection_names = [c.name for c in collections.collections]
-                
+
                 collection_info = None
-                if middleware.config.collection_name in collection_names:
+                if collection in collection_names:
                     collection_info = await asyncio.to_thread(
                         middleware.client.get_collection,
-                        middleware.config.collection_name
+                        collection
                     )
-                
+
                 return {
                     "qdrant_enabled": True,
                     "qdrant_url": middleware.connection_manager.discovered_url,
-                    "collection_name": middleware.config.collection_name,
-                    "collection_exists": middleware.config.collection_name in collection_names,
+                    "requested_collection": collection,
+                    "collection_exists": collection in collection_names,
                     "total_collections": len(collection_names),
                     "all_collections": collection_names,
                     "collection_info": {
@@ -572,7 +600,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                     "config": {
                         "host": config.host,
                         "ports": config.ports,
-                        "collection_name": config.collection_name,
+                        "default_collection": config.collection_name,
                         "vector_size": config.vector_size,
                         "enabled": config.enabled
                     },
@@ -597,13 +625,17 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             }
     
     @mcp.resource(
-        uri="qdrant://collection/responses/recent",
-        name="Recent Tool Responses from Vector Database",
-        description="Access recent tool execution responses stored in Qdrant vector database with semantic embeddings, response metadata, timestamps, and user context for analysis and debugging",
+        uri="qdrant://collection/{collection}/responses/recent",
+        name="Recent Tool Responses from Vector Database by Collection",
+        description="Access recent tool execution responses stored in a specific Qdrant collection with semantic embeddings, response metadata, timestamps, and user context for analysis and debugging",
         mime_type="application/json",
-        tags={"qdrant", "vector", "responses", "recent", "tool", "history", "semantic", "database", "debug"}
+        tags={"qdrant", "vector", "responses", "recent", "tool", "history", "semantic", "database", "debug", "collection"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": False  # Results may change as new responses are added
+        }
     )
-    async def get_qdrant_stored_responses(ctx: Context) -> dict:
+    async def get_qdrant_stored_responses_by_collection(collection: str, ctx: Context) -> dict:
         """Internal implementation for recent tool responses from vector database resource."""
         try:
             # Try to get user email, but allow access without authentication for debugging
@@ -634,26 +666,40 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                     "timestamp": datetime.now().isoformat()
                 }
             
-            # Search for recent responses (last 50)
+            # Check if collection exists
             try:
-                # Get all points with metadata
+                collections_response = await asyncio.to_thread(middleware.client.get_collections)
+                available_collections = [c.name for c in collections_response.collections]
+
+                if collection not in available_collections:
+                    return {
+                        "error": f"Collection '{collection}' not found",
+                        "user_email": user_email,
+                        "collection": collection,
+                        "available_collections": available_collections,
+                        "authenticated": authenticated,
+                        "qdrant_enabled": True,
+                        "timestamp": datetime.now().isoformat()
+                    }
+
+                # Search for recent responses (last 50) in specific collection
                 search_result = await asyncio.to_thread(
                     middleware.client.scroll,
-                    collection_name=middleware.config.collection_name,
+                    collection_name=collection,
                     limit=50,
                     with_payload=True,
                     with_vectors=False  # Don't need vectors, just metadata
                 )
-                
+
                 points = search_result[0] if search_result else []
-                
+
                 # Filter and format responses
                 user_responses = []
                 all_responses = []
-                
+
                 for point in points:
                     payload = point.payload or {}
-                    
+
                     response_data = {
                         "id": str(point.id),
                         "tool_name": payload.get("tool_name", "unknown"),
@@ -664,22 +710,22 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                         "payload_type": payload.get("payload_type", "unknown"),
                         "has_error": "error" in payload.get("response", {}) if isinstance(payload.get("response"), dict) else False
                     }
-                    
+
                     all_responses.append(response_data)
-                    
+
                     # Filter for current user only if authenticated
                     if authenticated and payload.get("user_email") == user_email:
                         user_responses.append(response_data)
-                
+
                 # Sort by timestamp (most recent first)
                 user_responses.sort(key=lambda x: x["timestamp"], reverse=True)
                 all_responses.sort(key=lambda x: x["timestamp"], reverse=True)
-                
+
                 return {
                     "user_email": user_email,
+                    "collection": collection,
                     "authenticated": authenticated,
                     "qdrant_enabled": True,
-                    "collection_name": middleware.config.collection_name,
                     "total_responses": len(all_responses),
                     "user_responses_count": len(user_responses) if authenticated else 0,
                     "user_responses": user_responses[:20] if authenticated else [],  # Last 20 for current user
@@ -706,11 +752,137 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             }
     
     @mcp.resource(
+        uri="qdrant://search/{collection}/{query}",
+        name="Advanced Search Tool Responses by Collection",
+        description="Advanced search across stored tool responses in a specific Qdrant collection with support for: ID lookup (id:xxxxx), filtered search (field:value), combined filters with semantic search (field1:value1 field2:value2 semantic query), and pure natural language queries",
+        mime_type="application/json",
+        tags={"qdrant", "search", "semantic", "vector", "similarity", "tool", "responses", "nlp", "context", "filters", "advanced", "collection"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True  # Same search query returns same results
+        }
+    )
+    async def search_qdrant_responses_by_collection(collection: str, query: str, ctx: Context) -> dict:
+        """Advanced search implementation using unified middleware with query parsing for specific collection."""
+        try:
+            # Try to get user email, but don't require it for search functionality
+            user_email = "anonymous"
+            try:
+                user_email = get_current_user_email_simple()
+            except (ValueError, Exception):
+                # Search works without authentication - this is for debugging/analysis
+                logger.info("Performing Qdrant search without user authentication")
+
+            # Use passed middleware or create new one if not available
+            if qdrant_middleware and qdrant_middleware.client:
+                middleware = qdrant_middleware
+            else:
+                # Fallback: Import Qdrant middleware
+                from middleware.qdrant_unified import QdrantUnifiedMiddleware
+
+                # Create middleware instance for search
+                middleware = QdrantUnifiedMiddleware()
+                await middleware.initialize()
+
+            if not middleware.client or not middleware.embedder:
+                return {
+                    "error": "Qdrant or embedding model not available",
+                    "user_email": user_email,
+                    "collection": collection,
+                    "query": query,
+                    "qdrant_enabled": False,
+                    "timestamp": datetime.now().isoformat()
+                }
+
+            # Check if collection exists
+            try:
+                collections_response = await asyncio.to_thread(middleware.client.get_collections)
+                available_collections = [c.name for c in collections_response.collections]
+
+                if collection not in available_collections:
+                    return {
+                        "error": f"Collection '{collection}' not found",
+                        "user_email": user_email,
+                        "collection": collection,
+                        "query": query,
+                        "available_collections": available_collections,
+                        "qdrant_enabled": True,
+                        "timestamp": datetime.now().isoformat()
+                    }
+
+                # Use the enhanced search method from middleware with specific collection
+                search_results = await middleware.search(
+                    query=query,
+                    collection_name=collection,
+                    limit=10,
+                    score_threshold=0.3
+                )
+
+                # Format results for resource response
+                formatted_results = []
+                for result in search_results:
+                    result_data = {
+                        "id": result.get("id", "unknown"),
+                        "score": result.get("score", 0.0),
+                        "tool_name": result.get("tool_name", "unknown"),
+                        "user_email": result.get("user_email", "unknown"),
+                        "timestamp": result.get("timestamp", "unknown"),
+                        "session_id": result.get("session_id", "unknown"),
+                        "response_preview": str(result.get("response_data", ""))[:200] + "..." if len(str(result.get("response_data", ""))) > 200 else str(result.get("response_data", "")),
+                        "payload_type": result.get("payload_type", "unknown")
+                    }
+
+                    formatted_results.append(result_data)
+
+                return {
+                    "user_email": user_email,
+                    "collection": collection,
+                    "query": query,
+                    "qdrant_enabled": True,
+                    "total_results": len(formatted_results),
+                    "results": formatted_results,
+                    "search_timestamp": datetime.now().isoformat(),
+                    "authenticated": user_email != "anonymous",
+                    "query_examples": [
+                        "id:6e05e913-fbe1-4e24-a205-16cb7fd53c9a",
+                        "user_email:test@gmail.com",
+                        "tool_name:get_tool_analytics",
+                        "user_email:test@gmail.com documents for gardening",
+                        "tool_name:search session_id:123 semantic query text"
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(f"Error performing Qdrant search: {e}")
+                return {
+                    "error": f"Search failed: {str(e)}",
+                    "user_email": user_email,
+                    "collection": collection,
+                    "query": query,
+                    "qdrant_enabled": True,
+                    "timestamp": datetime.now().isoformat()
+                }
+
+        except Exception as e:
+            logger.error(f"Error accessing Qdrant for search: {e}")
+            return {
+                "error": f"Qdrant search error: {str(e)}",
+                "collection": collection,
+                "query": query,
+                "qdrant_enabled": False,
+                "timestamp": datetime.now().isoformat()
+            }
+
+    @mcp.resource(
         uri="qdrant://search/{query}",
         name="Advanced Search Tool Responses",
         description="Advanced search across stored tool responses with support for: ID lookup (id:xxxxx), filtered search (field:value), combined filters with semantic search (field1:value1 field2:value2 semantic query), and pure natural language queries",
         mime_type="application/json",
-        tags={"qdrant", "search", "semantic", "vector", "similarity", "tool", "responses", "nlp", "context", "filters", "advanced"}
+        tags={"qdrant", "search", "semantic", "vector", "similarity", "tool", "responses", "nlp", "context", "filters", "advanced"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True  # Same search query returns same results
+        }
     )
     async def search_qdrant_responses(query: str, ctx: Context) -> dict:
         """Advanced search implementation using unified middleware with query parsing."""
@@ -804,4 +976,95 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 "timestamp": datetime.now().isoformat()
             }
     
+    @mcp.resource(
+        uri="qdrant://collections/list",
+        name="Qdrant Collections List",
+        description="List all available Qdrant collections with metadata including vector counts, indexing status, and collection health information",
+        mime_type="application/json",
+        tags={"qdrant", "vector", "database", "collections", "metadata", "list", "semantic", "admin"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True  # Listing collections is idempotent
+        }
+    )
+    async def list_qdrant_collections(ctx: Context) -> dict:
+        """Internal implementation for listing all Qdrant collections."""
+        try:
+            # Use passed middleware or create new one if not available
+            if qdrant_middleware and qdrant_middleware.client:
+                middleware = qdrant_middleware
+            else:
+                # Fallback: Import Qdrant middleware
+                from middleware.qdrant_unified import QdrantUnifiedMiddleware, QdrantConfig
+
+                # Create middleware instance
+                middleware = QdrantUnifiedMiddleware()
+                await middleware.initialize()
+
+            if not middleware.client:
+                return {
+                    "error": "Qdrant not available",
+                    "qdrant_enabled": False,
+                    "timestamp": datetime.now().isoformat()
+                }
+
+            # Get all collections
+            try:
+                collections_response = await asyncio.to_thread(middleware.client.get_collections)
+                collections = collections_response.collections
+
+                # Get detailed info for each collection
+                collections_info = []
+                for collection in collections:
+                    try:
+                        collection_info = await asyncio.to_thread(
+                            middleware.client.get_collection,
+                            collection.name
+                        )
+
+                        collection_data = {
+                            "name": collection.name,
+                            "vectors_count": collection_info.vectors_count,
+                            "indexed_vectors_count": collection_info.indexed_vectors_count,
+                            "points_count": collection_info.points_count,
+                            "segments_count": collection_info.segments_count,
+                            "status": str(collection_info.status),
+                            "config": {
+                                "vector_size": collection_info.config.params.vectors.size if hasattr(collection_info.config, 'params') and hasattr(collection_info.config.params, 'vectors') else None,
+                                "distance": str(collection_info.config.params.vectors.distance) if hasattr(collection_info.config, 'params') and hasattr(collection_info.config.params, 'vectors') else None
+                            } if hasattr(collection_info, 'config') else None
+                        }
+                        collections_info.append(collection_data)
+
+                    except Exception as e:
+                        logger.warning(f"Error getting info for collection {collection.name}: {e}")
+                        collections_info.append({
+                            "name": collection.name,
+                            "error": f"Failed to get collection info: {str(e)}"
+                        })
+
+                return {
+                    "qdrant_enabled": True,
+                    "qdrant_url": middleware.connection_manager.discovered_url,
+                    "total_collections": len(collections_info),
+                    "collections": collections_info,
+                    "timestamp": datetime.now().isoformat()
+                }
+
+            except Exception as e:
+                logger.error(f"Error listing Qdrant collections: {e}")
+                return {
+                    "error": f"Failed to list collections: {str(e)}",
+                    "qdrant_enabled": True,
+                    "timestamp": datetime.now().isoformat()
+                }
+
+        except Exception as e:
+            logger.error(f"Error accessing Qdrant: {e}")
+            return {
+                "error": f"Qdrant access error: {str(e)}",
+                "qdrant_enabled": False,
+                "timestamp": datetime.now().isoformat()
+            }
+
     logger.info("✅ Tool output resources registered with caching and Qdrant integration")

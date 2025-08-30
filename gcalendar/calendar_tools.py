@@ -16,6 +16,7 @@ from fastmcp import FastMCP
 
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
+from .calendar_types import CalendarListResponse, EventListResponse, CalendarInfo, EventInfo
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             "openWorldHint": True
         }
     )
-    async def list_calendars(user_google_email: str) -> str:
+    async def list_calendars(user_google_email: str) -> CalendarListResponse:
         """
         Retrieves a list of calendars accessible to the authenticated user.
 
@@ -146,7 +147,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             user_google_email (str): The user's Google email address. Required.
 
         Returns:
-            str: A formatted list of the user's calendars (summary, ID, primary status).
+            CalendarListResponse: Structured calendar list with metadata.
         """
         logger.info(f"[list_calendars] Invoked. Email: '{user_google_email}'")
 
@@ -157,19 +158,28 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 lambda: calendar_service.calendarList().list().execute()
             )
             items = calendar_list_response.get("items", [])
-            if not items:
-                return f"No calendars found for {user_google_email}."
-
-            calendars_summary_list = [
-                f"- \"{cal.get('summary', 'No Summary')}\"{' (Primary)' if cal.get('primary') else ''} (ID: {cal['id']})"
-                for cal in items
-            ]
-            text_output = (
-                f"Successfully listed {len(items)} calendars for {user_google_email}:\n"
-                + "\n".join(calendars_summary_list)
+            
+            # Convert to structured format
+            calendars: List[CalendarInfo] = []
+            for cal in items:
+                calendar_info: CalendarInfo = {
+                    "id": cal.get("id", ""),
+                    "summary": cal.get("summary", "No Summary"),
+                    "description": cal.get("description"),
+                    "primary": cal.get("primary", False),
+                    "timeZone": cal.get("timeZone"),
+                    "backgroundColor": cal.get("backgroundColor"),
+                    "foregroundColor": cal.get("foregroundColor")
+                }
+                calendars.append(calendar_info)
+            
+            logger.info(f"Successfully listed {len(calendars)} calendars for {user_google_email}.")
+            
+            return CalendarListResponse(
+                calendars=calendars,
+                count=len(calendars),
+                userEmail=user_google_email
             )
-            logger.info(f"Successfully listed {len(items)} calendars for {user_google_email}.")
-            return text_output
             
         except HttpError as e:
             error_msg = f"❌ Failed to list calendars: {e}"
@@ -181,9 +191,9 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             return error_msg
 
     @mcp.tool(
-        name="get_events",
+        name="list_events",
         description="Retrieves a list of events from a specified Google Calendar within a given time range",
-        tags={"calendar", "events", "get", "google"},
+        tags={"calendar", "events", "get", "google","list"},
         annotations={
             "title": "Get Calendar Events",
             "readOnlyHint": True,
@@ -192,13 +202,13 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             "openWorldHint": True
         }
     )
-    async def get_events(
+    async def list_events(
         user_google_email: str,
         calendar_id: str = "primary",
         time_min: Optional[str] = None,
         time_max: Optional[str] = None,
         max_results: int = 25,
-    ) -> str:
+    ) -> EventListResponse:
         """
         Retrieves a list of events from a specified Google Calendar within a given time range.
 
@@ -210,10 +220,10 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             max_results (int): The maximum number of events to return. Defaults to 25.
 
         Returns:
-            str: A formatted list of events (summary, start and end times, link) within the specified range.
+            EventListResponse: Structured event list with metadata.
         """
         logger.info(
-            f"[get_events] Raw time parameters - time_min: '{time_min}', time_max: '{time_max}'"
+            f"[list_events] Raw time parameters - time_min: '{time_min}', time_max: '{time_max}'"
         )
 
         try:
@@ -240,7 +250,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 )
 
             logger.info(
-                f"[get_events] Final API parameters - calendarId: '{calendar_id}', timeMin: '{effective_time_min}', timeMax: '{effective_time_max}', maxResults: {max_results}"
+                f"[list_events] Final API parameters - calendarId: '{calendar_id}', timeMin: '{effective_time_min}', timeMax: '{effective_time_max}', maxResults: {max_results}"
             )
 
             events_result = await asyncio.to_thread(
@@ -256,35 +266,54 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 .execute()
             )
             items = events_result.get("items", [])
-            if not items:
-                return f"No events found in calendar '{calendar_id}' for {user_google_email} for the specified time range."
-
-            event_details_list = []
+            
+            # Convert to structured format
+            events: List[EventInfo] = []
             for item in items:
-                summary = item.get("summary", "No Title")
-                start_time = item["start"].get("dateTime", item["start"].get("date"))
-                end_time = item["end"].get("dateTime", item["end"].get("date"))
-                link = item.get("htmlLink", "No Link")
-                event_id = item.get("id", "No ID")
-                # Include the start/end date, and event ID in the output so users can copy it for modify/delete operations
-                event_details_list.append(
-                    f'- "{summary}" (Starts: {start_time}, Ends: {end_time}) ID: {event_id} | Link: {link}'
-                )
-
-            text_output = (
-                f"Successfully retrieved {len(items)} events from calendar '{calendar_id}' for {user_google_email}:\n"
-                + "\n".join(event_details_list)
+                # Extract attendee emails
+                attendee_emails = None
+                if "attendees" in item:
+                    attendee_emails = [
+                        attendee.get("email", "")
+                        for attendee in item["attendees"]
+                    ]
+                
+                event_info: EventInfo = {
+                    "id": item.get("id", ""),
+                    "summary": item.get("summary", "No Title"),
+                    "description": item.get("description"),
+                    "start": item["start"].get("dateTime", item["start"].get("date", "")),
+                    "end": item["end"].get("dateTime", item["end"].get("date", "")),
+                    "startTimeZone": item["start"].get("timeZone") if "start" in item else None,
+                    "endTimeZone": item["end"].get("timeZone") if "end" in item else None,
+                    "location": item.get("location"),
+                    "htmlLink": item.get("htmlLink", ""),
+                    "status": item.get("status"),
+                    "creator": item.get("creator", {}).get("email") if "creator" in item else None,
+                    "organizer": item.get("organizer", {}).get("email") if "organizer" in item else None,
+                    "attendees": attendee_emails,
+                    "attachments": item.get("attachments")
+                }
+                events.append(event_info)
+            
+            logger.info(f"Successfully retrieved {len(events)} events for {user_google_email}.")
+            
+            return EventListResponse(
+                events=events,
+                count=len(events),
+                calendarId=calendar_id,
+                timeMin=effective_time_min,
+                timeMax=effective_time_max,
+                userEmail=user_google_email
             )
-            logger.info(f"Successfully retrieved {len(items)} events for {user_google_email}.")
-            return text_output
             
         except HttpError as e:
             error_msg = f"❌ Failed to get events: {e}"
-            logger.error(f"[get_events] HTTP error: {e}")
+            logger.error(f"[list_events] HTTP error: {e}")
             return error_msg
         except Exception as e:
             error_msg = f"❌ Unexpected error: {str(e)}"
-            logger.error(f"[get_events] {error_msg}")
+            logger.error(f"[list_events] {error_msg}")
             return error_msg
 
     @mcp.tool(

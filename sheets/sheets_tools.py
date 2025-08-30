@@ -12,6 +12,7 @@ from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
 
 from auth.service_helpers import request_service, get_injected_service, get_service
+from .sheets_types import SpreadsheetListResponse, SpreadsheetInfo
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -89,7 +90,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
     async def list_spreadsheets(
         user_google_email: str,
         max_results: int = 25
-    ) -> str:
+    ) -> SpreadsheetListResponse:
         """
         Lists spreadsheets from Google Drive that the user has access to.
 
@@ -98,7 +99,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             max_results (int): Maximum number of spreadsheets to return. Defaults to 25.
 
         Returns:
-            str: A formatted list of spreadsheet files (name, ID, modified time).
+            SpreadsheetListResponse: Structured list of spreadsheets with metadata.
         """
         logger.info(f"[list_spreadsheets] Invoked. Email: '{user_google_email}'")
 
@@ -145,21 +146,26 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             )
 
             files = files_response.get("files", [])
-            if not files:
-                return f"No spreadsheets found for {user_google_email}."
+            
+            # Convert to structured format
+            spreadsheets: List[SpreadsheetInfo] = []
+            for file in files:
+                spreadsheet_info: SpreadsheetInfo = {
+                    "id": file.get("id", ""),
+                    "name": file.get("name", "Unknown"),
+                    "modifiedTime": file.get("modifiedTime"),
+                    "webViewLink": file.get("webViewLink"),
+                    "mimeType": "application/vnd.google-apps.spreadsheet"
+                }
+                spreadsheets.append(spreadsheet_info)
 
-            spreadsheets_list = [
-                f"- \"{file['name']}\" (ID: {file['id']}) | Modified: {file.get('modifiedTime', 'Unknown')} | Link: {file.get('webViewLink', 'No link')}"
-                for file in files
-            ]
-
-            text_output = (
-                f"Successfully listed {len(files)} spreadsheets for {user_google_email}:\n"
-                + "\n".join(spreadsheets_list)
+            logger.info(f"Successfully listed {len(spreadsheets)} spreadsheets for {user_google_email}.")
+            
+            return SpreadsheetListResponse(
+                spreadsheets=spreadsheets,
+                count=len(spreadsheets),
+                userEmail=user_google_email
             )
-
-            logger.info(f"Successfully listed {len(files)} spreadsheets for {user_google_email}.")
-            return text_output
         
         except HttpError as e:
             error_msg = f"❌ Failed to list spreadsheets: {e}"

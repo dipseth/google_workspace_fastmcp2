@@ -64,7 +64,7 @@ class TestCalendarTools:
         # Check for all Calendar tools
         expected_tools = [
             "list_calendars",
-            "get_events",
+            "list_events",
             "create_event",
             "modify_event",
             "delete_event",
@@ -92,9 +92,9 @@ class TestCalendarTools:
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
     
     @pytest.mark.asyncio
-    async def test_get_events(self, client):
+    async def test_list_events(self, client):
         """Test getting calendar events."""
-        result = await client.call_tool("get_events", {
+        result = await client.call_tool("list_events", {
             "user_google_email": TEST_EMAIL,
             "calendar_id": "primary",
             "max_results": 10
@@ -111,10 +111,10 @@ class TestCalendarTools:
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
     
     @pytest.mark.asyncio
-    async def test_get_events_with_time_range(self, client):
+    async def test_list_events_with_time_range(self, client):
         """Test getting events with specific time range."""
         # Test date-only format
-        result = await client.call_tool("get_events", {
+        result = await client.call_tool("list_events", {
             "user_google_email": TEST_EMAIL,
             "calendar_id": "primary",
             "time_min": "2024-01-01",
@@ -342,7 +342,7 @@ class TestCalendarTools:
         ]
         
         for time_format in time_formats:
-            result = await client.call_tool("get_events", {
+            result = await client.call_tool("list_events", {
                 "user_google_email": TEST_EMAIL,
                 "time_min": time_format,
                 "max_results": 1
@@ -392,7 +392,7 @@ class TestCalendarIntegration:
     async def test_calendar_error_scenarios(self, client):
         """Test various error scenarios."""
         # Test with invalid calendar ID
-        result = await client.call_tool("get_events", {
+        result = await client.call_tool("list_events", {
             "user_google_email": TEST_EMAIL,
             "calendar_id": "invalid_calendar_id@group.calendar.google.com"
         })

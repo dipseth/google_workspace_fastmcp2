@@ -485,10 +485,10 @@ async def _find_card_template(query_or_id: str, limit: int = 3):
         else:
             query_vector = list(query_embedding)
         
-        # Search in Qdrant
-        search_results = client.search(
+        # Search in Qdrant using query_points (new API)
+        search_results = client.query_points(
             collection_name=_card_templates_collection,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit
         )
         
