@@ -6,7 +6,7 @@ FastMCP2 server.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing_extensions import Any, Dict, Optional
 
 from .tunnel_manager import TunnelManager, initialize as initialize_manager
 from .resource_provider import register_resources

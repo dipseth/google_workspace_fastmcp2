@@ -5,7 +5,7 @@ information, eliminating the need for tools to manually require user_google_emai
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing_extensions import Dict, Any, Optional
 from datetime import datetime
 
 from fastmcp import FastMCP, Context
@@ -55,10 +55,22 @@ def setup_user_resources(mcp: FastMCP) -> None:
     async def get_current_user_profile(ctx: Context) -> dict:
         """Internal implementation for current user profile resource."""
         user_email = get_user_email_context()
+        session_id = get_session_context()
+        
+        # DIAGNOSTIC: Log context state for debugging OAuth vs start_google_auth disconnect
+        logger.info(f"🔍 DEBUG: get_current_user_profile called")
+        logger.info(f"   user_email_context: {user_email}")
+        logger.info(f"   session_context: {session_id}")
+        
         if not user_email:
             return {
                 "error": "No authenticated user found in current session",
-                "authenticated": False
+                "authenticated": False,
+                "debug_info": {
+                    "user_email_context": user_email,
+                    "session_context": session_id,
+                    "issue": "OAuth proxy authentication may not be setting session context"
+                }
             }
         
         # Check credential validity

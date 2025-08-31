@@ -1,0 +1,103 @@
+# ⚡ Quick Email Demo (Simple) - With Real Gmail Resources
+*Request ID: {{ request_id }} | Generated: {{ current_time }}*
+
+## 🎯 Zero-Configuration Demo with Live Gmail Data
+
+### Features
+- **Level**: Simple - No parameters required
+- **Ready**: Instant send capability with real Gmail integration  
+- **Design**: Clean and professional with live resource data
+- **Testing**: Perfect for quick demos using actual Gmail labels
+
+### 📊 **GMAIL RESOURCE INTEGRATION:**
+- **Resource Status**: {{ auth_status }}
+- **Your Email**: `{{ user_email }}` (from `{{user://current/email}}`)
+{% if labels %}
+- **Your Labels**: 
+{% for label in labels[:3] %}
+  - {{ label.name }} ({{ label.id }})
+{% endfor %}
+{% else %}
+- **Labels**: Authentication required - run `start_google_auth('your.email@gmail.com')`
+{% endif %}
+- **System Labels**: {{ system_count }} available
+- **Custom Labels**: {{ user_count }} total
+
+### 🔍 **RESOURCE DATA FROM MCP CONTEXT:**
+
+```xml
+<resource_status>{{ auth_status }}</resource_status>
+<gmail_data source="context.resources">
+  <user_email>{{ user_email }}</user_email>
+  <system_labels count="{{ system_count }}"></system_labels>
+  <user_labels count="{{ user_count }}">
+    {% for label in labels[:5] %}
+    <label id="{{ label.id }}" name="{{ label.name }}"/>
+    {% endfor %}
+  </user_labels>
+</gmail_data>
+{% if not authenticated %}
+<authentication_help>
+  <!-- If you see "Authentication required", run: -->
+  <!-- start_google_auth('your.email@gmail.com') -->  
+</authentication_help>
+{% endif %}
+```
+
+## 📧 Instant Send Example with Real Resource Integration
+
+```xml
+<mcp_tool_call>
+  <tool>send_gmail_message</tool>
+  <params>
+    <user_google_email>{{user://current/email}}</user_google_email>
+    <to>demo@example.com</to>
+    <subject>FastMCP2 Email Demo - {{ current_time[:10] }}</subject>
+    <content_type>mixed</content_type>
+    <body><![CDATA[
+Hello!
+
+This is a demonstration of FastMCP2's email capabilities with live Gmail integration.
+
+🔥 Real Gmail Data:
+{% for label in labels[:5] %}
+• Label: {{ label.name }} (ID: {{ label.id }})
+{% endfor %}
+• System Labels: {{ system_count }} available
+• Custom Labels: {{ user_count }} total  
+• Total Labels: {{ user_count + system_count }} (system + custom)
+
+Key benefits:
+• Zero setup required with real Gmail integration
+• Professional appearance using live label data
+• Instant results with actual user email
+• Cross-platform compatibility with Gmail resources
+
+Best regards,
+FastMCP2 Team with Jinja2 Templates
+    ]]></body>
+  </params>
+</mcp_tool_call>
+```
+
+## 🚀 Simple & Effective with Real Gmail Integration
+
+### Zero Configuration Benefits + Live Data  
+- **Instant Results**: Works immediately with real Gmail data
+- **Professional Look**: Clean design enhanced with actual Gmail information
+- **Perfect Testing**: Ideal for verifying Gmail resource integration  
+- **Zero Config**: No setup required but uses live data
+
+### Real Gmail Resource Integration Features
+- **Live User Email**: Automatically uses `user://current/email` for sender
+- **Actual Labels**: Shows real Gmail labels from `service://gmail/labels`
+- **System Integration**: Displays count of system labels available
+- **Authentication Status**: Real-time authentication validation
+
+{% if not authenticated %}
+### 🔧 Setup Required
+To see your real Gmail data, run: `start_google_auth('your.email@gmail.com')`
+{% endif %}
+
+---
+*Generated with FastMCP2 + Jinja2 templates • No more f-string CSS errors!*

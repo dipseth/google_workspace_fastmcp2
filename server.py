@@ -28,18 +28,18 @@ from gchat.jwt_chat_tools import setup_jwt_chat_tools
 from gchat.chat_app_tools import setup_chat_app_tools
 from gchat.chat_app_prompts import setup_chat_app_prompts
 from prompts.gmail_prompts import setup_gmail_prompts
-from prompts.gmail_showcase_prompts import setup_gmail_showcase_prompts
 from gchat.unified_card_tool import setup_unified_card_tool
-# DEPRECATED: smart_card_tool removed due to formatting issues with Google Chat Cards v2 API
-# from gchat.smart_card_tool import setup_smart_card_tool
 from adapters.module_wrapper_mcp import setup_module_wrapper_middleware
 from sheets.sheets_tools import setup_sheets_tools
 from photos.photos_tools import setup_photos_tools
 from photos.advanced_tools import setup_advanced_photos_tools
 from middleware.qdrant_unified import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools
+from middleware.template_middleware import setup_template_middleware
 from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
+from resources.service_list_resources import setup_service_list_resources
 from tools.enhanced_tools import setup_enhanced_tools
+from tools.enhanced_template_tools import setup_enhanced_template_tools
 from tunnel.tool_provider import setup_tunnel_tools
 
 # Configure logging
@@ -171,8 +171,6 @@ setup_chat_app_prompts(mcp)
 # Register Gmail prompts
 setup_gmail_prompts(mcp)
 
-# Register Gmail showcase prompts
-setup_gmail_showcase_prompts(mcp)
 
 # Register Google Sheets tools
 setup_sheets_tools(mcp)
@@ -195,8 +193,24 @@ setup_user_resources(mcp)
 # Setup tool output resources (cached outputs and Qdrant integration)
 setup_tool_output_resources(mcp, qdrant_middleware)
 
+# Setup service list resources (dynamic discovery of list-based tools)
+setup_service_list_resources(mcp)
+
+# Setup Template Parameter Middleware with Jinja2 support (must be after resources, before tools)
+logger.info("🎭 Setting up Template Parameter Middleware with Jinja2 support...")
+template_middleware = setup_template_middleware(
+    mcp,
+    enable_debug=os.getenv("TEMPLATE_DEBUG", "false").lower() == "true",
+    enable_caching=True,
+    cache_ttl_seconds=300
+)
+logger.info("✅ Template Parameter Middleware with Jinja2 support enabled - automatic resource templating + professional templates active")
+
 # Setup enhanced tools that use resource templating
 setup_enhanced_tools(mcp)
+
+# Setup enhanced template tools (showcase template parameter capabilities)
+setup_enhanced_template_tools(mcp)
 
 # Register Qdrant tools if middleware is available
 try:
@@ -293,7 +307,7 @@ async def health_check() -> str:
             f"- `export_presentation` - Export presentations to various formats\n"
             f"**Calendar Tools:**\n"
             f"- `list_calendars` - List accessible calendars\n"
-            f"- `get_events` - Get events with time range support\n"
+            f"- `list_events` - Get events with time range support\n"
             f"- `create_event` - Create events with attachments and attendees\n"
             f"- `modify_event` - Update existing events\n"
             f"- `delete_event` - Remove events from calendar\n"

@@ -5,7 +5,7 @@ on 401 responses to trigger OAuth discovery flow in MCP clients.
 """
 
 import logging
-from typing import Any
+from typing_extensions import Any
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from config.settings import settings

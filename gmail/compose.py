@@ -13,7 +13,7 @@ import json
 import asyncio
 import html
 from datetime import datetime
-from typing import Optional, List, Union, Literal
+from typing_extensions import Optional, List, Union, Literal
 from dataclasses import dataclass
 
 from fastmcp import FastMCP, Context

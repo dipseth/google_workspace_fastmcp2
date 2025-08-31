@@ -16,7 +16,7 @@ import logging
 import hashlib
 import re
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Union
+from typing_extensions import Dict, List, Any, Optional, Union
 from dataclasses import dataclass, asdict
 
 # Import from existing middleware to leverage centralized Qdrant implementation

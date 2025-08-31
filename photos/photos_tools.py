@@ -7,7 +7,7 @@ Implements optimized patterns for Photos API including rate limiting, caching, a
 
 import logging
 import asyncio
-from typing import List, Optional, Any, Dict, Union
+from typing_extensions import List, Optional, Any, Dict, Union
 from datetime import datetime, date
 
 from fastmcp import FastMCP
@@ -170,17 +170,30 @@ def setup_photos_tools(mcp: FastMCP) -> None:
                 albums=albums,
                 count=len(albums),
                 excludeNonAppCreated=exclude_non_app_created,
-                userEmail=user_google_email
+                userEmail=user_google_email,
+                error=None
             )
         
         except HttpError as e:
-            error_msg = f"❌ Failed to list photo albums: {e}"
+            error_msg = f"Failed to list photo albums: {e}"
             logger.error(error_msg)
-            return error_msg
+            return AlbumListResponse(
+                albums=[],
+                count=0,
+                excludeNonAppCreated=exclude_non_app_created,
+                userEmail=user_google_email,
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error listing photo albums: {str(e)}"
+            error_msg = f"Unexpected error listing photo albums: {str(e)}"
             logger.error(error_msg)
-            return error_msg
+            return AlbumListResponse(
+                albums=[],
+                count=0,
+                excludeNonAppCreated=exclude_non_app_created,
+                userEmail=user_google_email,
+                error=error_msg
+            )
 
     @mcp.tool(
         name="search_photos",
@@ -358,17 +371,30 @@ def setup_photos_tools(mcp: FastMCP) -> None:
                 photos=photos,
                 count=len(photos),
                 albumId=album_id,
-                userEmail=user_google_email
+                userEmail=user_google_email,
+                error=None
             )
         
         except HttpError as e:
-            error_msg = f"❌ Failed to get album photos: {e}"
+            error_msg = f"Failed to get album photos: {e}"
             logger.error(error_msg)
-            return error_msg
+            return PhotoListResponse(
+                photos=[],
+                count=0,
+                albumId=album_id,
+                userEmail=user_google_email,
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error getting album photos: {str(e)}"
+            error_msg = f"Unexpected error getting album photos: {str(e)}"
             logger.error(error_msg)
-            return error_msg
+            return PhotoListResponse(
+                photos=[],
+                count=0,
+                albumId=album_id,
+                userEmail=user_google_email,
+                error=error_msg
+            )
 
     @mcp.tool(
         name="get_photo_details",

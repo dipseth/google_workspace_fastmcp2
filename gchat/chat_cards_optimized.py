@@ -4,7 +4,7 @@ Provides rich card-based messaging capabilities for Google Chat with graceful fa
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Union, cast
+from typing_extensions import Dict, Any, List, Optional, Union, cast
 import json
 
 logger = logging.getLogger(__name__)

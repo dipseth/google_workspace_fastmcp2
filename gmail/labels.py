@@ -21,6 +21,7 @@ from googleapiclient.errors import HttpError
 
 from .service import _get_gmail_service_with_fallback
 from .utils import _validate_gmail_color, _format_label_color_info, GMAIL_LABEL_COLORS
+from .gmail_types import GmailLabelInfo, GmailLabelsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -366,28 +367,23 @@ def _handle_gmail_api_error(error: Exception, operation: str) -> str:
 
 
 
-async def list_gmail_labels(user_google_email: str) -> str:
+async def list_gmail_labels(user_google_email: str) -> GmailLabelsResponse:
     """
-    Lists all labels in the user's Gmail account.
+    Lists all labels in the user's Gmail account with structured output.
 
     Args:
         user_google_email: The user's Google email address
 
     Returns:
-        str: A formatted list of all labels with their IDs, names, and types
+        GmailLabelsResponse: Structured response containing all labels with metadata
 
     Example:
-        >>> await list_gmail_labels("user@example.com")
-        Found 25 labels:
-
-        📂 SYSTEM LABELS:
-          • INBOX (ID: INBOX)
-          • SENT (ID: SENT)
-          • DRAFT (ID: DRAFT)
-
-        🏷️  USER LABELS:
-          • Work (ID: Label_123)
-          • Personal (ID: Label_456)
+        >>> result = await list_gmail_labels("user@example.com")
+        >>> print(f"Found {result['total_count']} labels")
+        >>> for label in result['system_labels']:
+        ...     print(f"System: {label['name']} (ID: {label['id']})")
+        >>> for label in result['user_labels']:
+        ...     print(f"User: {label['name']} (ID: {label['id']})")
     """
     logger.info(f"[list_gmail_labels] Email: '{user_google_email}'")
 
@@ -397,37 +393,59 @@ async def list_gmail_labels(user_google_email: str) -> str:
         response = await asyncio.to_thread(
             gmail_service.users().labels().list(userId="me").execute
         )
-        labels = response.get("labels", [])
+        labels_data = response.get("labels", [])
 
-        if not labels:
-            return "No labels found."
+        # Convert to structured format
+        all_labels: List[GmailLabelInfo] = []
+        system_labels: List[GmailLabelInfo] = []
+        user_labels: List[GmailLabelInfo] = []
 
-        lines = [f"Found {len(labels)} labels:", ""]
-
-        system_labels = []
-        user_labels = []
-
-        for label in labels:
-            if label.get("type") == "system":
-                system_labels.append(label)
+        for label_data in labels_data:
+            # Create GmailLabelInfo structure
+            label_info: GmailLabelInfo = {
+                "id": label_data.get("id", ""),
+                "name": label_data.get("name", ""),
+                "type": label_data.get("type", "user"),
+                "messageListVisibility": label_data.get("messageListVisibility"),
+                "labelListVisibility": label_data.get("labelListVisibility"),
+                "color": label_data.get("color"),
+                "messagesTotal": label_data.get("messagesTotal"),
+                "messagesUnread": label_data.get("messagesUnread"),
+                "threadsTotal": label_data.get("threadsTotal"),
+                "threadsUnread": label_data.get("threadsUnread")
+            }
+            
+            all_labels.append(label_info)
+            
+            if label_info["type"] == "system":
+                system_labels.append(label_info)
             else:
-                user_labels.append(label)
+                user_labels.append(label_info)
 
-        if system_labels:
-            lines.append("📂 SYSTEM LABELS:")
-            for label in system_labels:
-                lines.append(f"  • {label['name']} (ID: {label['id']})")
-            lines.append("")
+        logger.info(f"Found {len(all_labels)} labels for {user_google_email}")
 
-        if user_labels:
-            lines.append("🏷️  USER LABELS:")
-            for label in user_labels:
-                lines.append(f"  • {label['name']} (ID: {label['id']})")
-
-        return "\n".join(lines)
+        return GmailLabelsResponse(
+            labels=all_labels,
+            total_count=len(all_labels),
+            system_labels=system_labels,
+            user_labels=user_labels,
+            error=None  # Explicitly set to None when no error
+        )
 
     except Exception as e:
-        return _handle_gmail_api_error(e, "list_gmail_labels")
+        # Log the error but return an empty structured response with error message
+        logger.error(f"Error in list_gmail_labels: {e}")
+        error_msg = _handle_gmail_api_error(e, "list_gmail_labels")
+        logger.error(error_msg)
+        
+        # Return empty structured response with error message
+        return GmailLabelsResponse(
+            labels=[],
+            total_count=0,
+            system_labels=[],
+            user_labels=[],
+            error=error_msg  # Include the error message
+        )
 
 
 async def manage_gmail_label(
@@ -887,8 +905,8 @@ def setup_label_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="list_gmail_labels",
-        description="List all labels in the user's Gmail account (system and user-created)",
-        tags={"gmail", "labels", "list", "organize"},
+        description="List all labels in the user's Gmail account with structured output (system and user-created)",
+        tags={"gmail", "labels", "list", "organize", "structured"},
         annotations={
             "title": "List Gmail Labels",
             "readOnlyHint": True,
@@ -897,7 +915,20 @@ def setup_label_tools(mcp: FastMCP) -> None:
             "openWorldHint": True
         }
     )
-    async def list_gmail_labels_tool(user_google_email: str) -> str:
+    async def list_gmail_labels_tool(user_google_email: str) -> GmailLabelsResponse:
+        """
+        Lists all Gmail labels with structured output.
+        
+        Returns both:
+        - Traditional content: Human-readable formatted text (automatic via FastMCP)
+        - Structured content: Machine-readable JSON with full label details
+        
+        Args:
+            user_google_email: The user's Google email address
+            
+        Returns:
+            GmailLabelsResponse: Structured response containing all labels with metadata
+        """
         return await list_gmail_labels(user_google_email)
 
     @mcp.tool(

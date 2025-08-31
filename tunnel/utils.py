@@ -8,7 +8,7 @@ import logging
 import os
 import shutil
 import subprocess
-from typing import Dict, Optional, Tuple
+from typing_extensions import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ the FastMCP2 system, eliminating the previous fragmentation across 7+ files.
 """
 
 import logging
-from typing import Dict, List, Optional, Set, Union
+from typing_extensions import Dict, List, Optional, Set, Union
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

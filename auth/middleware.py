@@ -7,7 +7,7 @@ import secrets
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional, Dict
+from typing_extensions import Any, Optional, Dict
 from enum import Enum
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
@@ -73,6 +73,8 @@ class AuthMiddleware(Middleware):
     
     async def on_request(self, context: MiddlewareContext, call_next):
         """Handle incoming requests and set session context."""
+        from .context import store_session_data, get_session_data
+        
         # Try to extract session ID from various possible locations
         session_id = None
         
@@ -93,6 +95,12 @@ class AuthMiddleware(Middleware):
         
         set_session_context(session_id)
         logger.debug(f"Set session context: {session_id}")
+        
+        # Check if we have a stored user email for this session (from OAuth)
+        user_email = get_session_data(session_id, "user_email")
+        if user_email:
+            set_user_email_context(user_email)
+            logger.debug(f"Restored user email context from session: {user_email}")
         
         # Periodic cleanup of expired sessions
         now = datetime.now()
@@ -122,6 +130,8 @@ class AuthMiddleware(Middleware):
             context: MiddlewareContext containing tool call information
             call_next: Function to continue the middleware chain
         """
+        from .context import store_session_data, get_session_data
+        
         tool_name = getattr(context.message, 'name', 'unknown')
         logger.debug(f"Processing tool call: {tool_name}")
         
@@ -134,11 +144,28 @@ class AuthMiddleware(Middleware):
             set_session_context(session_id)
             logger.debug(f"Generated session context for tool {tool_name}: {session_id}")
         
-        # Extract user email from tool arguments for service injection
-        user_email = self._extract_user_email(context)
+        # First try to get user email from session data (OAuth authenticated)
+        user_email = None
+        if session_id:
+            user_email = get_session_data(session_id, "user_email")
+            if user_email:
+                logger.debug(f"Found user email from OAuth session for tool {tool_name}: {user_email}")
+        
+        # If not found in session, extract from tool arguments
+        if not user_email:
+            user_email = self._extract_user_email(context)
+            if user_email:
+                logger.debug(f"Extracted user email from tool arguments for tool {tool_name}: {user_email}")
+                # Store it in session for future use
+                if session_id:
+                    store_session_data(session_id, "user_email", user_email)
+        
+        # Set user email context if found
         if user_email:
             set_user_email_context(user_email)
             logger.debug(f"Set user email context for tool {tool_name}: {user_email}")
+        else:
+            logger.debug(f"No user email available for tool {tool_name}")
         
         # Handle service injection if enabled
         if self._service_injection_enabled:

@@ -22,7 +22,7 @@ import logging
 import asyncio
 import re
 import io
-from typing import List, Optional, Dict, Any
+from typing_extensions import List, Optional, Dict, Any
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -32,6 +32,7 @@ import httpx
 
 from auth.service_helpers import request_service, get_injected_service, get_service
 from auth.context import get_user_email_context
+from .drive_types import DriveItemsResponse, DriveItemInfo
 
 logger = logging.getLogger(__name__)
 
@@ -493,7 +494,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         drive_id: Optional[str] = None,
         include_items_from_all_drives: bool = True,
         corpora: Optional[str] = None,
-    ) -> str:
+    ) -> DriveItemsResponse:
         """
         List files and folders in a Drive directory, supporting shared drives.
         
@@ -506,12 +507,27 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             corpora: Corpus to query ('user', 'drive', 'allDrives')
             
         Returns:
-            str: Formatted list of files/folders in the specified directory
+            DriveItemsResponse: Structured response with drive items list
         """
         logger.info(f"[list_drive_items] Email: '{user_google_email}', Folder ID: '{folder_id}'")
         
         try:
             drive_service = await _get_drive_service_with_fallback(user_google_email)
+            
+            # Try to get folder name if not root
+            folder_name = None
+            if folder_id != 'root':
+                try:
+                    folder_metadata = await asyncio.to_thread(
+                        drive_service.files().get(
+                            fileId=folder_id,
+                            fields="name",
+                            supportsAllDrives=True
+                        ).execute
+                    )
+                    folder_name = folder_metadata.get("name")
+                except:
+                    pass  # Folder name is optional
             
             # Build query for items in folder
             final_query = f"'{folder_id}' in parents and trashed=false"
@@ -529,26 +545,59 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             )
             files = results.get('files', [])
             
-            if not files:
-                return f"No items found in folder '{folder_id}'."
+            # Convert to structured format
+            items: List[DriveItemInfo] = []
+            for file_item in files:
+                item_info: DriveItemInfo = {
+                    "id": file_item.get('id', ''),
+                    "name": file_item.get('name', ''),
+                    "mimeType": file_item.get('mimeType', ''),
+                    "webViewLink": file_item.get('webViewLink', ''),
+                    "iconLink": file_item.get('iconLink'),
+                    "modifiedTime": file_item.get('modifiedTime', ''),
+                    "size": file_item.get('size'),
+                    "isFolder": file_item.get('mimeType', '') == 'application/vnd.google-apps.folder'
+                }
+                items.append(item_info)
             
-            formatted_parts = [f"Found {len(files)} items in folder '{folder_id}' for {user_google_email}:"]
-            for item in files:
-                size_str = f", Size: {item.get('size', 'N/A')}" if 'size' in item else ""
-                formatted_parts.append(
-                    f"- Name: \"{item['name']}\" (ID: {item['id']}, Type: {item['mimeType']}{size_str}, "
-                    f"Modified: {item.get('modifiedTime', 'N/A')}) Link: {item.get('webViewLink', '#')}"
-                )
+            logger.info(f"Successfully retrieved {len(items)} items from folder '{folder_id}' for {user_google_email}")
             
-            return "\n".join(formatted_parts)
+            return DriveItemsResponse(
+                items=items,
+                count=len(items),
+                folderId=folder_id,
+                folderName=folder_name,
+                userEmail=user_google_email,
+                driveId=drive_id,
+                error=None
+            )
                 
         except HttpError as e:
             logger.error(f"Drive API error in list_drive_items: {e}")
-            return f"❌ Drive API error: {e}"
+            error_msg = f"Drive API error: {e}"
+            # Return structured error response
+            return DriveItemsResponse(
+                items=[],
+                count=0,
+                folderId=folder_id,
+                folderName=None,
+                userEmail=user_google_email,
+                driveId=drive_id,
+                error=error_msg
+            )
             
         except Exception as e:
             logger.error(f"Unexpected error in list_drive_items: {e}")
-            return f"❌ Unexpected error: {e}"
+            # Return structured error response
+            return DriveItemsResponse(
+                items=[],
+                count=0,
+                folderId=folder_id,
+                folderName=None,
+                userEmail=user_google_email,
+                driveId=drive_id,
+                error=f"Unexpected error: {e}"
+            )
     
     @mcp.tool(
         name="create_drive_file",

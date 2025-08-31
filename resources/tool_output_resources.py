@@ -6,7 +6,7 @@ making frequently accessed data available as resources for better performance.
 
 import logging
 import asyncio
-from typing import Dict, Any, Optional
+from typing_extensions import Dict, Any, Optional
 from datetime import datetime, timedelta
 import json
 

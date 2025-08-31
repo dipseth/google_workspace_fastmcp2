@@ -4,7 +4,7 @@ import logging
 import secrets
 import json
 import os
-from typing import Optional, Tuple, Any
+from typing_extensions import Optional, Tuple, Any
 from pathlib import Path
 from datetime import datetime
 
@@ -12,6 +12,7 @@ from datetime import datetime
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -38,11 +39,24 @@ def _get_credentials_path(user_email: str) -> Path:
 
 
 def _save_credentials(user_email: str, credentials: Credentials) -> None:
-    """Save credentials to disk."""
+    """Save credentials to disk with proper permissions and validation."""
     creds_path = _get_credentials_path(user_email)
     
-    # Ensure directory exists
+    # Ensure directory exists with proper permissions
     creds_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # Set restrictive permissions on directory
+        creds_path.parent.chmod(0o700)
+    except (OSError, AttributeError) as e:
+        logger.warning(f"Could not set restrictive permissions on credentials directory: {e}")
+    
+    # Validate credentials before saving
+    if not credentials.token:
+        logger.error(f"Cannot save credentials for {user_email}: Missing access token")
+        raise GoogleAuthError("Invalid credentials: Missing access token")
+    
+    if not credentials.refresh_token:
+        logger.warning(f"Saving credentials for {user_email} without refresh token - may not be able to refresh")
     
     # Save credentials
     creds_data = {
@@ -52,26 +66,64 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
         "client_id": credentials.client_id,
         "client_secret": credentials.client_secret,
         "scopes": credentials.scopes,
-        "expiry": credentials.expiry.isoformat() if credentials.expiry else None
+        "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+        "saved_at": datetime.now().isoformat(),
+        "user_email": user_email  # Store email for validation
     }
     
-    with open(creds_path, "w") as f:
-        json.dump(creds_data, f, indent=2)
-    
-    logger.info(f"Saved credentials for {user_email}")
+    try:
+        with open(creds_path, "w") as f:
+            json.dump(creds_data, f, indent=2)
+        
+        # Set restrictive permissions on the credential file (owner read/write only)
+        try:
+            creds_path.chmod(0o600)
+            logger.debug(f"Set restrictive permissions (0o600) on {creds_path}")
+        except (OSError, AttributeError) as e:
+            logger.warning(f"Could not set restrictive permissions on credential file: {e}")
+        
+        logger.info(f"Successfully saved credentials for {user_email} to {creds_path}")
+        
+    except (IOError, OSError) as e:
+        logger.error(f"Failed to save credentials for {user_email}: {e}")
+        raise GoogleAuthError(f"Failed to save credentials: {e}")
 
 
 def _load_credentials(user_email: str) -> Optional[Credentials]:
-    """Load credentials from disk."""
+    """Load credentials from disk with validation and error recovery."""
     creds_path = _get_credentials_path(user_email)
     
     if not creds_path.exists():
-        logger.debug(f"No credentials file found for {user_email}")
+        logger.debug(f"No credentials file found for {user_email} at {creds_path}")
         return None
     
     try:
+        # Check file permissions
+        file_stat = creds_path.stat()
+        file_mode = oct(file_stat.st_mode)[-3:]
+        if file_mode != '600':
+            logger.warning(f"Credential file {creds_path} has loose permissions: {file_mode} (expected 600)")
+        
         with open(creds_path, "r") as f:
             creds_data = json.load(f)
+        
+        # Validate stored email matches requested email
+        stored_email = creds_data.get("user_email")
+        if stored_email and stored_email != user_email:
+            logger.error(f"Credential file mismatch: requested {user_email}, but file contains {stored_email}")
+            return None
+        
+        # Validate required fields
+        required_fields = ["token", "refresh_token"]
+        missing_fields = [field for field in required_fields if not creds_data.get(field)]
+        if missing_fields:
+            logger.error(f"Credential file for {user_email} missing required fields: {missing_fields}")
+            # Try to continue without refresh_token if only that's missing
+            if "token" in missing_fields:
+                logger.error(f"Cannot load credentials without access token for {user_email}")
+                return None
+            else:
+                logger.warning(f"Loading credentials without refresh_token for {user_email} - refresh may fail")
         
         # Get OAuth client configuration from settings
         oauth_config = settings.get_oauth_client_config()
@@ -82,11 +134,15 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
         
         if not client_id or not client_secret:
             logger.error(f"Missing OAuth client configuration for {user_email}")
+            logger.debug(f"Credential file has client_id: {bool(creds_data.get('client_id'))}, "
+                        f"client_secret: {bool(creds_data.get('client_secret'))}")
+            logger.debug(f"OAuth config has client_id: {bool(oauth_config.get('client_id'))}, "
+                        f"client_secret: {bool(oauth_config.get('client_secret'))}")
             return None
         
         credentials = Credentials(
             token=creds_data["token"],
-            refresh_token=creds_data["refresh_token"],
+            refresh_token=creds_data.get("refresh_token"),  # Make refresh_token optional
             token_uri=creds_data.get("token_uri", oauth_config.get("token_uri", "https://oauth2.googleapis.com/token")),
             client_id=client_id,
             client_secret=client_secret,
@@ -94,25 +150,101 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
         )
         
         if creds_data.get("expiry"):
-            credentials.expiry = datetime.fromisoformat(creds_data["expiry"])
+            try:
+                credentials.expiry = datetime.fromisoformat(creds_data["expiry"])
+                logger.debug(f"Credential expiry for {user_email}: {credentials.expiry}")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Invalid expiry format in credentials for {user_email}: {e}")
+                # Continue without expiry - will be treated as expired
         
-        logger.debug(f"Loaded credentials for {user_email} with client_id: {client_id[:10]}...")
+        # Log credential age if saved_at is available
+        if creds_data.get("saved_at"):
+            try:
+                saved_at = datetime.fromisoformat(creds_data["saved_at"])
+                age = datetime.now() - saved_at
+                logger.debug(f"Credentials for {user_email} are {age.days} days old")
+            except (ValueError, TypeError):
+                pass
+        
+        logger.info(f"Successfully loaded credentials for {user_email}")
         return credentials
         
-    except (json.JSONDecodeError, KeyError, ValueError) as e:
-        logger.error(f"Error loading credentials for {user_email}: {e}")
+    except json.JSONDecodeError as e:
+        logger.error(f"Corrupt credential file for {user_email}: Invalid JSON - {e}")
+        # Optionally backup the corrupt file
+        try:
+            backup_path = creds_path.with_suffix('.json.corrupt')
+            creds_path.rename(backup_path)
+            logger.info(f"Backed up corrupt credential file to {backup_path}")
+        except Exception as backup_error:
+            logger.error(f"Failed to backup corrupt file: {backup_error}")
+        return None
+        
+    except (KeyError, ValueError) as e:
+        logger.error(f"Invalid credential file structure for {user_email}: {e}")
+        return None
+        
+    except (IOError, OSError) as e:
+        logger.error(f"Failed to read credential file for {user_email}: {e}")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Unexpected error loading credentials for {user_email}: {e}")
         return None
 
 
 def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentials:
-    """Refresh expired credentials."""
+    """Refresh expired credentials with enhanced error handling."""
+    if not credentials.refresh_token:
+        logger.error(f"Cannot refresh credentials for {user_email}: No refresh token available")
+        raise GoogleAuthError(
+            f"Authentication required: No refresh token available for {user_email}. "
+            f"Please re-authenticate using the start_google_auth tool."
+        )
+    
+    logger.info(f"Attempting to refresh credentials for {user_email}")
+    
     try:
+        # Log token details for debugging
+        logger.debug(f"Token refresh attempt for {user_email}:")
+        logger.debug(f"  - Has refresh_token: {bool(credentials.refresh_token)}")
+        logger.debug(f"  - Token URI: {credentials.token_uri}")
+        logger.debug(f"  - Client ID: {credentials.client_id[:10] if credentials.client_id else 'None'}...")
+        logger.debug(f"  - Expiry: {credentials.expiry}")
+        
         credentials.refresh(Request())
+        
+        # Verify refresh was successful
+        if not credentials.token:
+            raise GoogleAuthError("Token refresh succeeded but no new access token received")
+        
+        # Save the refreshed credentials
         _save_credentials(user_email, credentials)
-        logger.info(f"Refreshed credentials for {user_email}")
+        
+        logger.info(f"Successfully refreshed credentials for {user_email}")
+        logger.debug(f"New token expiry: {credentials.expiry}")
+        
         return credentials
+        
+    except RefreshError as e:
+        error_str = str(e)
+        logger.error(f"Token refresh failed for {user_email}: {error_str}")
+        
+        if 'invalid_grant' in error_str.lower():
+            raise GoogleAuthError(
+                f"Refresh token is invalid or expired for {user_email}. "
+                f"Please re-authenticate using the start_google_auth tool."
+            )
+        elif 'invalid_client' in error_str.lower():
+            raise GoogleAuthError(
+                f"OAuth client configuration is invalid. "
+                f"Please check your GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET settings."
+            )
+        else:
+            raise GoogleAuthError(f"Failed to refresh credentials: {e}")
+            
     except Exception as e:
-        logger.error(f"Failed to refresh credentials for {user_email}: {e}")
+        logger.error(f"Unexpected error refreshing credentials for {user_email}: {e}")
         raise GoogleAuthError(f"Failed to refresh credentials: {e}")
 
 

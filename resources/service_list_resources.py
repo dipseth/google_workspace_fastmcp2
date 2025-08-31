@@ -1,12 +1,14 @@
 """
-Dynamic Service List Resources for FastMCP2.
+Enhanced Dynamic Service List Resources for FastMCP2.
 
 This module provides dynamic resources that expose list-based tools from various Google services
-through a standardized hierarchical resource pattern:
+through a standardized hierarchical resource pattern with comprehensive documentation and defaults.
 
+Resource Hierarchy:
 1. service://{service}/lists - Returns available list types for the service
 2. service://{service}/{list_type} - Returns all IDs/items for that list type  
 3. service://{service}/{list_type}/{id} - Returns detailed data for a specific ID
+4. service://{service}/path/{path*} - Hierarchical path access (wildcard)
 
 Examples:
 - service://forms/lists → ["form_responses"]
@@ -15,88 +17,695 @@ Examples:
 
 Key Features:
 - Automatic discovery of list-based tools across all services
-- Hierarchical resource organization
-- Dynamic parameter extraction and validation
-- Metadata extraction for tool documentation
-- Support for pagination and filtering parameters
-- Proper use of FastMCP's tool transformation with forward()
+- Hierarchical resource organization with smart defaults
+- Dynamic parameter extraction with validation and default values
+- Rich metadata extraction for tool documentation
+- Support for pagination and filtering with sensible defaults
+- Tool transformation support for enhanced documentation
+- Comprehensive error messages with available options
 """
 
 import logging
 import json
 import asyncio
 import inspect
-from typing import Dict, List, Any, Optional, Set, Tuple, Callable, TypedDict
+from typing_extensions import Dict, List, Any, Optional, Set, Tuple, Callable, TypedDict, Union, Literal, Type
+from typing_extensions import Annotated, Doc
+from typing import get_origin, get_args
 from datetime import datetime
+from dataclasses import dataclass, field
+from enum import Enum
+import json
 
+from pydantic import BaseModel, Field, field_validator, ConfigDict, create_model
 from fastmcp import FastMCP, Context
 from fastmcp.tools import Tool
+from fastmcp.tools.tool_transform import ArgTransform
 
 logger = logging.getLogger(__name__)
 
 # Import from our centralized sources of truth
 try:
     from auth.service_helpers import SERVICE_DEFAULTS
-    from auth.scope_registry import ScopeRegistry
+    from auth.scope_registry import ScopeRegistry, ServiceScopeManager
     logger.info("Successfully imported service configuration from auth module")
 except ImportError as e:
     logger.warning(f"Could not import from auth module: {e}, using fallback")
     SERVICE_DEFAULTS = None
     ScopeRegistry = None
 
+# Import authentication context functions
+try:
+    from auth.context import get_user_email_context, get_session_context
+    from auth.google_auth import get_valid_credentials
+    logger.info("Successfully imported authentication context functions")
+except ImportError as e:
+    logger.warning(f"Could not import authentication functions: {e}")
+    get_user_email_context = None
+    get_valid_credentials = None
+
+
+# ============================================================================
+# SERVICE METADATA AND DOCUMENTATION
+# ============================================================================
+
+class ServiceMetadata:
+    """Comprehensive metadata for each Google service."""
+    
+    METADATA = {
+        "gmail": {
+            "display_name": "Gmail",
+            "description": "Email service with powerful search, filtering, and organization features",
+            "icon": "📧",
+            "version": "v1",
+            "categories": ["communication", "productivity"],
+            "default_page_size": 25,
+            "max_page_size": 100,
+            "features": {
+                "filters": "Automatic email filtering rules",
+                "labels": "Organizational labels and categories",
+                "threads": "Conversation threading",
+                "search": "Advanced search capabilities"
+            },
+            "common_use_cases": [
+                "Email automation",
+                "Filter management",
+                "Label organization",
+                "Bulk operations"
+            ]
+        },
+        "drive": {
+            "display_name": "Google Drive",
+            "description": "Cloud storage and file synchronization service",
+            "icon": "📁",
+            "version": "v3",
+            "categories": ["storage", "collaboration"],
+            "default_page_size": 50,
+            "max_page_size": 1000,
+            "features": {
+                "folders": "Hierarchical folder structure",
+                "sharing": "File and folder sharing",
+                "versions": "File version history",
+                "search": "Content and metadata search"
+            },
+            "common_use_cases": [
+                "File organization",
+                "Document collaboration",
+                "Backup and sync",
+                "Media storage"
+            ]
+        },
+        "calendar": {
+            "display_name": "Google Calendar",
+            "description": "Time management and scheduling service",
+            "icon": "📅",
+            "version": "v3",
+            "categories": ["scheduling", "productivity"],
+            "default_page_size": 10,
+            "max_page_size": 250,
+            "features": {
+                "events": "Event creation and management",
+                "calendars": "Multiple calendar support",
+                "reminders": "Event notifications",
+                "sharing": "Calendar sharing and permissions"
+            },
+            "common_use_cases": [
+                "Meeting scheduling",
+                "Event management",
+                "Team coordination",
+                "Availability tracking"
+            ]
+        },
+        "forms": {
+            "display_name": "Google Forms",
+            "description": "Survey and form creation service",
+            "icon": "📝",
+            "version": "v1",
+            "categories": ["data-collection", "survey"],
+            "default_page_size": 20,
+            "max_page_size": 100,
+            "features": {
+                "responses": "Response collection and analysis",
+                "questions": "Various question types",
+                "validation": "Response validation rules",
+                "collaboration": "Multi-user form editing"
+            },
+            "common_use_cases": [
+                "Survey creation",
+                "Data collection",
+                "Event registration",
+                "Feedback forms"
+            ]
+        },
+        "sheets": {
+            "display_name": "Google Sheets",
+            "description": "Spreadsheet and data analysis service",
+            "icon": "📊",
+            "version": "v4",
+            "categories": ["data", "productivity"],
+            "default_page_size": 30,
+            "max_page_size": 200,
+            "features": {
+                "formulas": "Advanced formula support",
+                "charts": "Data visualization",
+                "collaboration": "Real-time collaboration",
+                "automation": "Macro and script support"
+            },
+            "common_use_cases": [
+                "Data analysis",
+                "Budget tracking",
+                "Project management",
+                "Report generation"
+            ]
+        },
+        "docs": {
+            "display_name": "Google Docs",
+            "description": "Document creation and collaboration service",
+            "icon": "📄",
+            "version": "v1",
+            "categories": ["documents", "collaboration"],
+            "default_page_size": 20,
+            "max_page_size": 100,
+            "features": {
+                "editing": "Real-time collaborative editing",
+                "comments": "Commenting and suggestions",
+                "revision": "Version history",
+                "templates": "Document templates"
+            },
+            "common_use_cases": [
+                "Document creation",
+                "Team collaboration",
+                "Report writing",
+                "Content management"
+            ]
+        },
+        "photos": {
+            "display_name": "Google Photos",
+            "description": "Photo and video storage service",
+            "icon": "📷",
+            "version": "v1",
+            "categories": ["media", "storage"],
+            "default_page_size": 50,
+            "max_page_size": 100,
+            "features": {
+                "albums": "Photo album organization",
+                "sharing": "Album and photo sharing",
+                "search": "AI-powered photo search",
+                "editing": "Basic photo editing"
+            },
+            "common_use_cases": [
+                "Photo backup",
+                "Album creation",
+                "Media sharing",
+                "Memory preservation"
+            ]
+        },
+        "chat": {
+            "display_name": "Google Chat",
+            "description": "Team messaging and collaboration platform",
+            "icon": "💬",
+            "version": "v1",
+            "categories": ["communication", "collaboration"],
+            "default_page_size": 20,
+            "max_page_size": 100,
+            "features": {
+                "spaces": "Team spaces and rooms",
+                "messages": "Direct and group messaging",
+                "bots": "Bot integration",
+                "threads": "Threaded conversations"
+            },
+            "common_use_cases": [
+                "Team communication",
+                "Project discussions",
+                "Bot automation",
+                "Information sharing"
+            ]
+        },
+        "slides": {
+            "display_name": "Google Slides",
+            "description": "Presentation creation and sharing service",
+            "icon": "🎯",
+            "version": "v1",
+            "categories": ["presentations", "collaboration"],
+            "default_page_size": 15,
+            "max_page_size": 100,
+            "features": {
+                "themes": "Presentation themes",
+                "animations": "Slide transitions",
+                "collaboration": "Real-time editing",
+                "presenter": "Presenter tools"
+            },
+            "common_use_cases": [
+                "Presentation creation",
+                "Team presentations",
+                "Training materials",
+                "Visual communication"
+            ]
+        }
+    }
+    
+    @classmethod
+    def get_service_info(cls, service: str) -> Dict[str, Any]:
+        """Get comprehensive metadata for a service."""
+        return cls.METADATA.get(service.lower(), {
+            "display_name": service.title(),
+            "description": f"{service.title()} service",
+            "icon": "🔧",
+            "version": "v1",
+            "categories": ["general"],
+            "default_page_size": 25,
+            "max_page_size": 100,
+            "features": {},
+            "common_use_cases": []
+        })
+    
+    @classmethod
+    def get_all_services(cls) -> List[str]:
+        """Get list of all documented services."""
+        return list(cls.METADATA.keys())
+    
+    @classmethod
+    def generate_service_documentation(cls, service: str) -> str:
+        """Generate comprehensive documentation for a service."""
+        info = cls.get_service_info(service)
+        
+        doc = f"""
+# {info['icon']} {info['display_name']} Service
+
+**Description:** {info['description']}  
+**API Version:** {info['version']}  
+**Categories:** {', '.join(info['categories'])}
+
+## Features
+
+"""
+        for feature, description in info['features'].items():
+            doc += f"- **{feature.title()}:** {description}\n"
+        
+        doc += "\n## Common Use Cases\n\n"
+        for use_case in info['common_use_cases']:
+            doc += f"- {use_case}\n"
+        
+        doc += f"""
+
+## Default Settings
+
+- **Default Page Size:** {info['default_page_size']} items
+- **Maximum Page Size:** {info['max_page_size']} items
+"""
+        return doc
+
 
 def _get_valid_services() -> List[str]:
     """
     Dynamically get the list of valid services from SERVICE_DEFAULTS.
-    Falls back to a basic list if SERVICE_DEFAULTS is not available.
+    Falls back to ServiceMetadata if SERVICE_DEFAULTS is not available.
     """
     if SERVICE_DEFAULTS:
         return list(SERVICE_DEFAULTS.keys())
     else:
-        # Fallback if imports fail
-        return ["gmail", "forms", "photos", "calendar", "sheets", "drive", "chat", "docs"]
+        # Fallback to documented services
+        return ServiceMetadata.get_all_services()
 
-# Dynamically generate valid services list
+
+# Dynamic service list with enhanced documentation
 VALID_SERVICES = _get_valid_services()
 
+# Create a type alias for supported services
+# Use str for the type with runtime validation in Pydantic
+SupportedService = str
+
+def get_supported_service_documentation() -> str:
+    """
+    Generate documentation string for supported services.
+    """
+    service_docs = []
+    for service in VALID_SERVICES:
+        info = ServiceMetadata.get_service_info(service)
+        service_docs.append(f"- **{service}** ({info['icon']}): {info['description']}")
+    
+    doc_string = f"""
+Supported Google service identifier.
+
+Available Services:
+{chr(10).join(service_docs)}
+
+Example: 'gmail', 'drive', 'calendar'
+"""
+    return doc_string
+
+
+def get_supported_services() -> List[str]:
+    """Get the list of supported services dynamically from SERVICE_DEFAULTS.
+    
+    Returns:
+        List of supported service names with metadata
+    """
+    return list(VALID_SERVICES)
+
+
+logger.info(f"SupportedService type created for services: {get_supported_services()}")
+
+
+# ============================================================================
+# PYDANTIC MODELS WITH ENHANCED DOCUMENTATION AND DEFAULTS
+# ============================================================================
+
+class ServiceRequest(BaseModel):
+    """Request model for service parameter validation with rich defaults."""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "title": "Service Request",
+            "description": "Request parameters for service operations",
+            "examples": [
+                {"service": "gmail"},
+                {"service": "drive"},
+                {"service": "calendar"}
+            ]
+        }
+    )
+    
+    service: str = Field(
+        ...,
+        description=f"The Google service name. Supported services: {', '.join(get_supported_services())}",
+        json_schema_extra={
+            "example": "gmail",
+            "enum": get_supported_services(),
+            "documentation": get_supported_service_documentation()
+        }
+    )
+    
+    @field_validator('service')
+    @classmethod
+    def validate_service(cls, v: str) -> str:
+        """Validate that the service is supported dynamically."""
+        valid_services = get_supported_services()
+        
+        if v.lower() not in valid_services:
+            available = ', '.join(sorted(valid_services))
+            # Enhanced error message with suggestions
+            suggestions = [s for s in valid_services if s.startswith(v[0].lower())]
+            error_msg = f"Service '{v}' not supported. Available services: {available}"
+            if suggestions:
+                error_msg += f"\nDid you mean: {', '.join(suggestions)}?"
+            raise ValueError(error_msg)
+        return v.lower()
+
+
+class ServiceListRequest(ServiceRequest):
+    """Request model for service list type queries with pagination defaults."""
+    list_type: str = Field(
+        ..., 
+        description="The type of list to retrieve (e.g., 'filters', 'labels', 'albums')",
+        json_schema_extra={"example": "filters"}
+    )
+    
+    # Add pagination with defaults
+    page_size: int = Field(
+        default=None,  # Will use service-specific default
+        description="Number of items to return per page",
+        ge=1,
+        le=1000
+    )
+    
+    page_token: Optional[str] = Field(
+        default=None,
+        description="Token for pagination to get next page of results"
+    )
+    
+    @field_validator('list_type')
+    @classmethod
+    def validate_list_type(cls, v: str) -> str:
+        """Normalize list type to lowercase."""
+        return v.lower().strip()
+    
+    @field_validator('page_size')
+    @classmethod
+    def validate_page_size(cls, v: Optional[int], values) -> int:
+        """Set service-specific default page size if not provided."""
+        if v is None:
+            # Get service from values
+            service = values.data.get('service', 'gmail')
+            info = ServiceMetadata.get_service_info(service)
+            return info['default_page_size']
+        return v
+
+
+class ServiceItemRequest(ServiceListRequest):
+    """Request model for service item detail queries."""
+    item_id: str = Field(
+        ..., 
+        description="The unique identifier for the specific item",
+        json_schema_extra={"example": "filter_123"}
+    )
+    
+    # Add optional fields with defaults
+    include_metadata: bool = Field(
+        default=True,
+        description="Include metadata in response"
+    )
+    
+    include_raw: bool = Field(
+        default=False,
+        description="Include raw API response data"
+    )
+    
+    @field_validator('item_id')
+    @classmethod
+    def validate_item_id(cls, v: str) -> str:
+        """Validate item ID is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Item ID cannot be empty")
+        return v.strip()
+
+
+# ============================================================================
+# ENHANCED RESPONSE MODELS
+# ============================================================================
+
+class ServiceListTypeInfo(TypedDict):
+    """Information about a service list type with enhanced metadata."""
+    name: str
+    description: str
+    has_detail_view: bool
+    supports_pagination: bool
+    default_page_size: int
+    example_ids: List[str]
+    required_scopes: List[str]
+
+
+class ServiceListTypesResponse(TypedDict):
+    """Response for service list types resource with metadata."""
+    service: str
+    service_metadata: Dict[str, Any]
+    list_types: List[ServiceListTypeInfo]
+    documentation_url: str
+    examples: List[str]
+
+
+class ServiceListItemsResponse(TypedDict):
+    """Response for service list items resource with pagination."""
+    service: str
+    list_type: str
+    description: str
+    count: Optional[int]
+    items: Optional[List[Dict[str, Any]]]
+    data: Optional[Any]
+    next_page_token: Optional[str]
+    has_more: bool
+    metadata: Dict[str, Any]
+
+
+class ServiceListItemDetailsResponse(TypedDict):
+    """Response for service list item details resource."""
+    service: str
+    list_type: str
+    item_id: str
+    data: Optional[Any]
+    metadata: Optional[Dict[str, Any]]
+    raw_response: Optional[Dict[str, Any]]
+
+
+class ServiceErrorResponse(TypedDict):
+    """Enhanced error response structure with helpful information."""
+    error: Optional[str] 
+    error_code: Optional[str] 
+    service: Optional[str]
+    list_type: Optional[str]
+    available_services: Optional[List[str]]
+    available_list_types: Optional[List[str]]
+    suggestions: Optional[List[str]]
+    documentation_url: Optional[str]
+
+
+# ============================================================================
+# AUTHENTICATION HELPERS
+# ============================================================================
+
+def _get_authenticated_user_email(ctx: Context) -> Optional[str]:
+    """
+    Get the authenticated user email using multiple fallback methods.
+    
+    This function tries various methods to find the authenticated user:
+    1. Primary: Use centralized auth context from session
+    2. Fallback: Check context metadata
+    3. Last resort: Auto-detect from stored credentials
+    
+    Args:
+        ctx: FastMCP context
+        
+    Returns:
+        User email if found, None otherwise
+    """
+    user_email = None
+    
+    # Method 1: Use the centralized auth context (preferred)
+    if get_user_email_context:
+        try:
+            user_email = get_user_email_context()
+            if user_email:
+                logger.debug(f"Got user email from auth context: {user_email}")
+                return user_email
+        except Exception as e:
+            logger.debug(f"Could not get user email from auth context: {e}")
+    
+    # Method 2: Check context metadata
+    if hasattr(ctx, 'metadata') and ctx.metadata:
+        user_email = ctx.metadata.get("user_email")
+        if user_email:
+            logger.debug(f"Got user email from ctx.metadata: {user_email}")
+            return user_email
+    
+    # Method 3: Check direct context attributes
+    if hasattr(ctx, 'user_email'):
+        user_email = ctx.user_email
+        if user_email:
+            logger.debug(f"Got user email from ctx.user_email: {user_email}")
+            return user_email
+    
+    # Method 4: Check session attributes
+    if hasattr(ctx, 'session') and hasattr(ctx.session, 'user_email'):
+        user_email = ctx.session.user_email
+        if user_email:
+            logger.debug(f"Got user email from ctx.session.user_email: {user_email}")
+            return user_email
+    
+    # Method 5: Auto-detect from stored credentials (last resort)
+    if get_valid_credentials:
+        try:
+            import os
+            creds_dir = os.path.expanduser("~/.fastmcp2/credentials")
+            if os.path.exists(creds_dir):
+                # First, try to find the most recently used credentials
+                credentials_files = []
+                for filename in os.listdir(creds_dir):
+                    if filename.endswith(".json") and "@" in filename:
+                        filepath = os.path.join(creds_dir, filename)
+                        potential_email = filename.replace(".json", "")
+                        credentials_files.append((filepath, potential_email))
+                
+                # Sort by modification time (most recent first)
+                credentials_files.sort(key=lambda x: os.path.getmtime(x[0]), reverse=True)
+                
+                # Try to find a valid, non-expired credential
+                for filepath, potential_email in credentials_files:
+                    try:
+                        credentials = get_valid_credentials(potential_email)
+                        if credentials and not credentials.expired:
+                            logger.info(f"Auto-detected authenticated user from credentials: {potential_email}")
+                            return potential_email
+                    except Exception as e:
+                        logger.debug(f"Could not validate credentials for {potential_email}: {e}")
+                        continue
+        except Exception as e:
+            logger.debug(f"Could not auto-detect authenticated user: {e}")
+    
+    return None
+
+def _create_auth_error_response(service: str, list_type: str = None) -> ServiceErrorResponse:
+    """
+    Create a standardized authentication error response with helpful suggestions.
+    
+    Args:
+        service: The service that was requested
+        list_type: The list type that was requested (optional)
+        
+    Returns:
+        ServiceErrorResponse with helpful suggestions
+    """
+    return ServiceErrorResponse(
+        error="No authenticated user found. Please authenticate first.",
+        error_code="AUTH_REQUIRED",
+        service=service.lower() if service else None,
+        list_type=list_type.lower() if list_type else None,
+        available_services=None,
+        available_list_types=None,
+        suggestions=[
+            "Run: start_google_auth('your.email@gmail.com')",
+            "Check auth status: access user://profile/your.email@gmail.com",
+            "View active sessions: access auth://sessions/list",
+            "Get current user: access user://current/email"
+        ],
+        documentation_url="https://docs.fastmcp2.com/authentication"
+    )
+
+# ============================================================================
+# SERVICE LIST DISCOVERY WITH ENHANCED FEATURES
+# ============================================================================
 
 class ServiceListDiscovery:
     """
-    Discovers and manages list-based tools across all services.
-    Maps tools to hierarchical resource patterns.
+    Enhanced discovery and management of list-based tools across all services.
+    Maps tools to hierarchical resource patterns with rich metadata.
     """
     
-    # Tool configuration mapping - defines which tools are list-based for each service
-    # This is NOT another source of truth for services, just metadata about list tools
+    # Enhanced tool configuration with metadata
     TOOL_CONFIGURATIONS = {
         "gmail": {
             "filters": {
                 "tool": "list_gmail_filters",
-                "id_field": None,  # Returns all filters, no separate ID listing
+                "id_field": None,
                 "detail_tool": "get_gmail_filter",
-                "description": "Gmail filter rules"
+                "description": "Gmail filter rules for automatic email processing",
+                "supports_pagination": True,
+                "default_page_size": 25,
+                "example_ids": ["filter_123", "filter_456"],
+                "required_scopes": ["gmail.settings.basic"]
             },
             "labels": {
-                "tool": "list_gmail_labels", 
+                "tool": "list_gmail_labels",
                 "id_field": None,
-                "detail_tool": None,  # No detail tool for labels
-                "description": "Gmail labels"
+                "detail_tool": None,
+                "description": "Gmail labels for email organization",
+                "supports_pagination": False,
+                "default_page_size": 100,
+                "example_ids": ["INBOX", "SENT", "IMPORTANT"],
+                "required_scopes": ["gmail.labels"],
+                "supports_detail_from_list": True  # Flag to indicate we can extract details from list
             }
         },
         "forms": {
             "form_responses": {
                 "tool": "list_form_responses",
-                "id_field": "form_id",  # Parameter that specifies which form
-                "list_forms_tool": "get_form",  # Tool to list available forms
-                "description": "Form submission responses"
+                "id_field": "form_id",
+                "list_forms_tool": "get_form",
+                "description": "Form submission responses with timestamps and data",
+                "supports_pagination": True,
+                "default_page_size": 20,
+                "example_ids": ["form_abc123", "form_def456"],
+                "required_scopes": ["forms.responses.readonly"]
             }
         },
         "photos": {
             "albums": {
                 "tool": "list_photos_albums",
-                "id_field": None,  # Lists all albums directly
+                "id_field": None,
                 "detail_tool": "list_album_photos",
-                "description": "Photo albums"
+                "description": "Photo albums with cover images and metadata",
+                "supports_pagination": True,
+                "default_page_size": 50,
+                "example_ids": ["album_vacation2023", "album_family"],
+                "required_scopes": ["photos.readonly"]
             }
         },
         "calendar": {
@@ -104,12 +713,20 @@ class ServiceListDiscovery:
                 "tool": "list_calendars",
                 "id_field": None,
                 "detail_tool": None,
-                "description": "Available calendars"
+                "description": "Available calendars with access levels",
+                "supports_pagination": False,
+                "default_page_size": 50,
+                "example_ids": ["primary", "holidays@group.v.calendar.google.com"],
+                "required_scopes": ["calendar.readonly"]
             },
             "events": {
                 "tool": "list_events",
                 "id_field": "calendar_id",
-                "description": "Calendar events"
+                "description": "Calendar events with attendees and details",
+                "supports_pagination": True,
+                "default_page_size": 10,
+                "example_ids": ["event_123abc", "recurring_456def"],
+                "required_scopes": ["calendar.events"]
             }
         },
         "sheets": {
@@ -117,14 +734,22 @@ class ServiceListDiscovery:
                 "tool": "list_spreadsheets",
                 "id_field": None,
                 "detail_tool": "get_spreadsheet_info",
-                "description": "Google Sheets spreadsheets"
+                "description": "Google Sheets spreadsheets with metadata",
+                "supports_pagination": True,
+                "default_page_size": 30,
+                "example_ids": ["1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"],
+                "required_scopes": ["sheets.readonly"]
             }
         },
         "drive": {
             "items": {
                 "tool": "list_drive_items",
                 "id_field": "folder_id",
-                "description": "Drive files and folders"
+                "description": "Drive files and folders with permissions",
+                "supports_pagination": True,
+                "default_page_size": 50,
+                "example_ids": ["root", "folder_abc123"],
+                "required_scopes": ["drive.readonly"]
             }
         },
         "chat": {
@@ -132,7 +757,11 @@ class ServiceListDiscovery:
                 "tool": "list_spaces",
                 "id_field": None,
                 "detail_tool": "list_messages",
-                "description": "Chat spaces and rooms"
+                "description": "Chat spaces and rooms with member lists",
+                "supports_pagination": True,
+                "default_page_size": 20,
+                "example_ids": ["spaces/AAAA1234", "spaces/BBBB5678"],
+                "required_scopes": ["chat.spaces"]
             }
         },
         "docs": {
@@ -140,161 +769,237 @@ class ServiceListDiscovery:
                 "tool": "list_docs_in_folder",
                 "id_field": "folder_id",
                 "detail_tool": "get_doc_content",
-                "description": "Google Docs documents"
+                "description": "Google Docs documents with content preview",
+                "supports_pagination": True,
+                "default_page_size": 20,
+                "example_ids": ["doc_123abc", "template_456def"],
+                "required_scopes": ["docs.readonly"]
             }
         }
     }
     
     def __init__(self, mcp: FastMCP):
-        """
-        Initialize the service discovery system.
-        
-        Args:
-            mcp: FastMCP instance to inspect for tools
-        """
+        """Initialize the enhanced service discovery system."""
         self.mcp = mcp
         self.discovered_tools: Dict[str, Tool] = {}
+        self.tool_list_fields: Dict[str, str] = {}  # Maps tool_name -> list field name
         self._generate_service_mappings()
-        self._discover_tools()
+        # Note: _discover_tools() is now async and must be called from async context
+        # It will be called lazily when needed
+        self._tools_discovered = False
         
     def _generate_service_mappings(self) -> None:
-        """
-        Generate SERVICE_MAPPINGS dynamically from SERVICE_DEFAULTS.
-        Only includes services that have list-based tools configured.
-        """
-        # Start with tool configurations
+        """Generate SERVICE_MAPPINGS dynamically with enhanced metadata."""
         self.SERVICE_MAPPINGS = {}
         
-        # Only include services that are in SERVICE_DEFAULTS and have tool configurations
         if SERVICE_DEFAULTS:
             for service in SERVICE_DEFAULTS.keys():
                 service_lower = service.lower()
-                # Check if we have tool configurations for this service
-                tool_config = getattr(self.__class__, 'TOOL_CONFIGURATIONS', {})
-                if service_lower in tool_config:
-                    self.SERVICE_MAPPINGS[service_lower] = tool_config[service_lower]
-                    logger.debug(f"Added {service_lower} to SERVICE_MAPPINGS from SERVICE_DEFAULTS")
+                tool_config = self.TOOL_CONFIGURATIONS.get(service_lower, {})
+                if tool_config:
+                    # Enhance with service metadata
+                    service_info = ServiceMetadata.get_service_info(service_lower)
+                    for list_type, config in tool_config.items():
+                        config['service_metadata'] = service_info
+                    self.SERVICE_MAPPINGS[service_lower] = tool_config
+                    logger.debug(f"Added {service_lower} to SERVICE_MAPPINGS with metadata")
         else:
-            # Fallback: use all tool configurations if SERVICE_DEFAULTS is not available
-            tool_config = getattr(self.__class__, 'TOOL_CONFIGURATIONS', {})
-            self.SERVICE_MAPPINGS = tool_config.copy()
-            logger.warning("SERVICE_DEFAULTS not available, using all TOOL_CONFIGURATIONS")
+            # Fallback with metadata
+            for service, config in self.TOOL_CONFIGURATIONS.items():
+                service_info = ServiceMetadata.get_service_info(service)
+                for list_type, list_config in config.items():
+                    list_config['service_metadata'] = service_info
+                self.SERVICE_MAPPINGS[service] = config
+            logger.warning("SERVICE_DEFAULTS not available, using TOOL_CONFIGURATIONS with metadata")
         
-        logger.info(f"Generated SERVICE_MAPPINGS for {len(self.SERVICE_MAPPINGS)} services")
+        logger.info(f"Generated SERVICE_MAPPINGS for {len(self.SERVICE_MAPPINGS)} services with metadata")
         
-    def _discover_tools(self) -> None:
-        """Discover and cache all available list tools."""
-        logger.info("Discovering list-based tools across all services...")
+    async def _discover_tools(self) -> None:
+        """Discover and cache all available tools using public FastMCP APIs."""
+        if self._tools_discovered:
+            return  # Already discovered
+            
+        logger.info("Discovering tools from FastMCP instance...")
         
-        # Get tools from the MCP instance
-        # FastMCP stores tools differently - we need to get them properly
         try:
-            # Try to get tools from the MCP instance
+            # Method 1: Try using the public tools property/attribute
             if hasattr(self.mcp, 'tools'):
-                # FastMCP 2.x stores tools in a tools property
-                for tool in self.mcp.tools:
-                    if hasattr(tool, 'name'):
-                        self.discovered_tools[tool.name] = tool
-                        logger.debug(f"Discovered tool via tools property: {tool.name}")
-            elif hasattr(self.mcp, '_tools'):
-                # Fallback to _tools if available
-                for tool_name, tool_info in self.mcp._tools.items():
-                    self.discovered_tools[tool_name] = tool_info
-                    logger.debug(f"Discovered tool via _tools: {tool_name}")
-            else:
-                logger.warning("Could not access tools from MCP instance")
+                # This is the public API for accessing tools
+                tools_list = self.mcp.tools
+                if tools_list:
+                    for tool in tools_list:
+                        if hasattr(tool, 'name'):
+                            self.discovered_tools[tool.name] = tool
+                            logger.debug(f"Discovered tool: {tool.name}")
+                    
+                    logger.info(f"Discovered {len(self.discovered_tools)} tools via public API")
+                    
+                    # Filter for list tools (those tagged with 'list')
+                    list_tools = [
+                        (name, tool) for name, tool in self.discovered_tools.items()
+                        if hasattr(tool, 'tags') and tool.tags and 'list' in tool.tags
+                    ]
+                    logger.info(f"Found {len(list_tools)} tools tagged with 'list'")
+                    self._tools_discovered = True
+                    self._discover_list_field_mappings()
+                    return
+            
+            # Method 2: Try looking for a get_tools() method (if available and async)
+            if hasattr(self.mcp, 'get_tools'):
+                get_tools_func = getattr(self.mcp, 'get_tools')
+                # Check if it's async
+                if asyncio.iscoroutinefunction(get_tools_func):
+                    tools = await get_tools_func()
+                else:
+                    tools = get_tools_func()
+                    
+                if isinstance(tools, dict):
+                    self.discovered_tools = tools
+                    logger.info(f"Discovered {len(self.discovered_tools)} tools via get_tools()")
+                elif isinstance(tools, list):
+                    for tool in tools:
+                        if hasattr(tool, 'name'):
+                            self.discovered_tools[tool.name] = tool
+                    logger.info(f"Discovered {len(self.discovered_tools)} tools via get_tools()")
+                
+                self._tools_discovered = True
+                self._discover_list_field_mappings()
+                return
+            
+            # Method 3: Context-based discovery (if tools are in context)
+            # This would be used if tools are passed through context
+            logger.info("No standard tool discovery method found, tools will be discovered on demand")
+            self._tools_discovered = True
                 
         except Exception as e:
             logger.error(f"Error discovering tools: {e}")
-            
-    def get_service_lists(self, service: str) -> List[str]:
-        """
-        Get available list types for a service.
+            logger.info("Tools will be discovered on demand during resource access")
+            self._tools_discovered = True
+    
+    def _discover_list_field_mappings(self) -> None:
+        """Dynamically discover which field contains the list data for each tool.
         
-        Args:
-            service: Service name (e.g., "forms", "gmail")
-            
-        Returns:
-            List of available list types
+        This uses type introspection to find the list field in each tool's
+        TypedDict return type, creating a dynamic mapping.
         """
-        # Normalize service name to lowercase
+        logger.info("Discovering list field mappings from tool type annotations...")
+        
+        for tool_name, tool in self.discovered_tools.items():
+            # Only process tools that are likely list tools
+            if 'list' in tool_name.lower() or (hasattr(tool, 'tags') and tool.tags and 'list' in tool.tags):
+                list_field = self._get_list_field_from_tool(tool)
+                if list_field:
+                    self.tool_list_fields[tool_name] = list_field
+                    logger.debug(f"Tool '{tool_name}' -> list field '{list_field}'")
+        
+        logger.info(f"Discovered list field mappings for {len(self.tool_list_fields)} tools")
+            
+    def get_service_lists(self, service: str) -> List[ServiceListTypeInfo]:
+        """Get available list types for a service with enhanced metadata."""
         service = service.lower()
         if service not in self.SERVICE_MAPPINGS:
             return []
-        return list(self.SERVICE_MAPPINGS[service].keys())
+        
+        list_types = []
+        for list_type, config in self.SERVICE_MAPPINGS[service].items():
+            # Check if has detail view - now includes supports_detail_from_list
+            has_detail = bool(
+                config.get("detail_tool") or
+                config.get("id_field") or
+                config.get("supports_detail_from_list")
+            )
+            
+            list_types.append(ServiceListTypeInfo(
+                name=list_type,
+                description=config.get("description", ""),
+                has_detail_view=has_detail,
+                supports_pagination=config.get("supports_pagination", False),
+                default_page_size=config.get("default_page_size", 25),
+                example_ids=config.get("example_ids", []),
+                required_scopes=config.get("required_scopes", [])
+            ))
+        
+        return list_types
         
     def get_list_config(self, service: str, list_type: str) -> Optional[Dict[str, Any]]:
-        """
-        Get configuration for a specific list type.
-        
-        Args:
-            service: Service name
-            list_type: List type name
-            
-        Returns:
-            Configuration dictionary or None if not found
-        """
-        # Normalize service name to lowercase
+        """Get enhanced configuration for a specific list type."""
         service = service.lower()
-        # Normalize list_type to lowercase for case-insensitive lookup
         list_type = list_type.lower()
         return self.SERVICE_MAPPINGS.get(service, {}).get(list_type)
         
-    async def get_list_items(self, service: str, list_type: str, user_email: str) -> Any:
-        """
-        Get all items/IDs for a list type.
+    async def get_list_items(self, service: str, list_type: str, user_email: str,
+                            page_size: Optional[int] = None,
+                            page_token: Optional[str] = None) -> Any:
+        """Get all items/IDs for a list type with pagination support."""
+        # Ensure tools are discovered
+        await self._discover_tools()
         
-        Args:
-            service: Service name
-            list_type: List type name
-            user_email: User's Google email
-            
-        Returns:
-            List of items or IDs, or the structured response from the tool
-        """
         config = self.get_list_config(service, list_type)
         if not config:
             return []
             
         tool_name = config["tool"]
         
-        # Check if tool exists in discovered tools
         if tool_name not in self.discovered_tools:
             logger.warning(f"Tool {tool_name} not found in discovered tools")
             return []
             
+        # Apply default page size if not provided
+        if page_size is None:
+            page_size = config.get("default_page_size", 25)
+            
         # For tools that list IDs directly (no id_field), call the tool
         if not config.get("id_field"):
             try:
-                # Get the tool and call it properly
                 tool = self.discovered_tools[tool_name]
                 
-                # Call the tool with basic parameters
-                # Since we're in a resource context, we need to call the tool's function
-                if hasattr(tool, 'function'):
-                    result = await tool.function(user_google_email=user_email)
-                elif callable(tool):
-                    result = await tool(user_google_email=user_email)
-                else:
-                    # Try to extract the callable from the tool object
-                    if isinstance(tool, dict) and 'function' in tool:
-                        result = await tool['function'](user_google_email=user_email)
-                    else:
-                        logger.error(f"Could not determine how to call tool {tool_name}")
-                        return []
+                # Build parameters with pagination support
+                params = {"user_google_email": user_email}
+                if config.get("supports_pagination", False):
+                    params["page_size"] = page_size
+                    if page_token:
+                        params["page_token"] = page_token
                 
-                # Return the structured result directly if it's already a dict/list
-                if isinstance(result, (dict, list)):
-                    return result
-                    
-                # Otherwise parse it as before
+                # Call the tool with enhanced parameters using FastMCP Tool patterns
+                try:
+                    # For FastMCP Tool objects, we need to call them through the MCP framework
+                    # First try using the mcp instance to call the tool
+                    if hasattr(self.mcp, 'call_tool'):
+                        logger.debug(f"Calling tool {tool_name} via mcp.call_tool()")
+                        result = await self.mcp.call_tool(tool_name, **params)
+                    elif hasattr(tool, 'function') and callable(tool.function):
+                        logger.debug(f"Calling tool.function() for {tool_name}")
+                        result = await tool.function(**params)
+                    elif callable(tool):
+                        logger.debug(f"Calling tool() directly for {tool_name}")
+                        result = await tool(**params)
+                    elif hasattr(tool, '__call__'):
+                        logger.debug(f"Tool {tool_name} has __call__, trying direct call")
+                        result = await tool(**params)
+                    elif isinstance(tool, dict) and 'function' in tool:
+                        logger.debug(f"Calling tool['function']() for {tool_name}")
+                        result = await tool['function'](**params)
+                    else:
+                        # Last resort: try to get the actual function from the tool
+                        if hasattr(tool, '_function'):
+                            logger.debug(f"Calling tool._function() for {tool_name}")
+                            result = await tool._function(**params)
+                        else:
+                            raise RuntimeError(f"Could not determine how to call tool {tool_name}")
+                            
+                except Exception as e:
+                    logger.error(f"Error calling tool {tool_name}: {e}")
+                    logger.debug(f"Tool type: {type(tool)}, attributes: {dir(tool) if hasattr(tool, '__dict__') else 'no attributes'}")
+                    return []
+                
+                # Always parse the result to extract list data from TypedDict responses
                 return self._parse_list_result(result, service, list_type)
                 
             except Exception as e:
                 logger.error(f"Error calling {tool_name}: {e}")
                 return []
         else:
-            # For tools that need an ID parameter, we need to list available IDs first
+            # For tools that need an ID parameter
             return await self._get_available_ids(service, list_type, user_email)
             
     async def get_list_item_details(
@@ -302,26 +1007,93 @@ class ServiceListDiscovery:
         service: str,
         list_type: str,
         item_id: str,
-        user_email: str
+        user_email: str,
+        include_metadata: bool = True,
+        include_raw: bool = False
     ) -> Any:
-        """
-        Get detailed data for a specific item.
+        """Get detailed data for a specific item with optional metadata."""
+        # Ensure tools are discovered
+        await self._discover_tools()
         
-        Args:
-            service: Service name
-            list_type: List type name
-            item_id: Item ID
-            user_email: User's Google email
-            
-        Returns:
-            Detailed item data
-        """
         config = self.get_list_config(service, list_type)
         if not config:
             return None
+        
+        # Special handling for Gmail labels which support detail extraction from list
+        if service == "gmail" and list_type == "labels" and config.get("supports_detail_from_list"):
+            # Get all labels and extract the specific one
+            tool_name = config["tool"]
+            if tool_name not in self.discovered_tools:
+                return None
+            
+            tool = self.discovered_tools[tool_name]
+            
+            try:
+                # Call list_gmail_labels to get all labels
+                params = {"user_google_email": user_email}
+                
+                try:
+                    # For FastMCP Tool objects, we need to call them through the MCP framework
+                    if hasattr(self.mcp, 'call_tool'):
+                        logger.debug(f"Calling tool {tool_name} via mcp.call_tool()")
+                        result = await self.mcp.call_tool(tool_name, **params)
+                    elif hasattr(tool, 'function') and callable(tool.function):
+                        logger.debug(f"Calling tool.function() for {tool_name}")
+                        result = await tool.function(**params)
+                    elif callable(tool):
+                        logger.debug(f"Calling tool() directly for {tool_name}")
+                        result = await tool(**params)
+                    elif hasattr(tool, '__call__'):
+                        logger.debug(f"Tool {tool_name} has __call__, trying direct call")
+                        result = await tool(**params)
+                    elif isinstance(tool, dict) and 'function' in tool:
+                        logger.debug(f"Calling tool['function']() for {tool_name}")
+                        result = await tool['function'](**params)
+                    else:
+                        # Last resort: try to get the actual function from the tool
+                        if hasattr(tool, '_function'):
+                            logger.debug(f"Calling tool._function() for {tool_name}")
+                            result = await tool._function(**params)
+                        else:
+                            raise RuntimeError(f"Could not determine how to call tool {tool_name}")
+                            
+                except Exception as e:
+                    logger.error(f"Error calling tool {tool_name}: {e}")
+                    logger.debug(f"Tool type: {type(tool)}, attributes: {dir(tool) if hasattr(tool, '__dict__') else 'no attributes'}")
+                    return None
+                
+                # Parse the result to find the specific label
+                parsed_labels = self._parse_list_result(result, service, list_type)
+                
+                # Find the specific label by ID
+                target_label = None
+                for label in parsed_labels:
+                    if label.get("id") == item_id or label.get("name") == item_id:
+                        target_label = label
+                        break
+                
+                if not target_label:
+                    logger.info(f"Label with ID '{item_id}' not found")
+                    return None
+                
+                # Enhance with metadata if requested
+                if include_metadata:
+                    service_info = ServiceMetadata.get_service_info(service)
+                    target_label['_metadata'] = {
+                        'service_info': service_info,
+                        'list_type': list_type,
+                        'item_id': item_id,
+                        'retrieved_at': datetime.now().isoformat()
+                    }
+                
+                return target_label
+                
+            except Exception as e:
+                logger.error(f"Error getting Gmail label details for '{item_id}': {e}")
+                return None
             
         # If there's an id_field, call the list tool with that ID
-        if config.get("id_field"):
+        elif config.get("id_field"):
             tool_name = config["tool"]
             if tool_name not in self.discovered_tools:
                 return None
@@ -334,17 +1106,51 @@ class ServiceListDiscovery:
                 config["id_field"]: item_id
             }
             
+            # Add optional parameters if supported
+            if include_metadata:
+                params["include_metadata"] = True
+            if include_raw:
+                params["include_raw"] = True
+            
             try:
-                # Call the tool properly
-                if hasattr(tool, 'function'):
-                    result = await tool.function(**params)
-                elif callable(tool):
-                    result = await tool(**params)
-                elif isinstance(tool, dict) and 'function' in tool:
-                    result = await tool['function'](**params)
-                else:
-                    logger.error(f"Could not determine how to call tool {tool_name}")
+                # Call the tool properly using FastMCP patterns
+                try:
+                    if hasattr(self.mcp, 'call_tool'):
+                        logger.debug(f"Calling tool {tool_name} via mcp.call_tool()")
+                        result = await self.mcp.call_tool(tool_name, **params)
+                    elif hasattr(tool, 'function') and callable(tool.function):
+                        logger.debug(f"Calling tool.function() for {tool_name}")
+                        result = await tool.function(**params)
+                    elif callable(tool):
+                        logger.debug(f"Calling tool() directly for {tool_name}")
+                        result = await tool(**params)
+                    elif hasattr(tool, '__call__'):
+                        logger.debug(f"Tool {tool_name} has __call__, trying direct call")
+                        result = await tool(**params)
+                    elif isinstance(tool, dict) and 'function' in tool:
+                        logger.debug(f"Calling tool['function']() for {tool_name}")
+                        result = await tool['function'](**params)
+                    else:
+                        if hasattr(tool, '_function'):
+                            logger.debug(f"Calling tool._function() for {tool_name}")
+                            result = await tool._function(**params)
+                        else:
+                            raise RuntimeError(f"Could not determine how to call tool {tool_name}")
+                            
+                except Exception as e:
+                    logger.error(f"Error calling tool {tool_name}: {e}")
+                    logger.debug(f"Tool type: {type(tool)}, attributes: {dir(tool) if hasattr(tool, '__dict__') else 'no attributes'}")
                     return None
+                
+                # Enhance result with metadata if requested
+                if include_metadata and isinstance(result, dict):
+                    service_info = ServiceMetadata.get_service_info(service)
+                    result['_metadata'] = {
+                        'service_info': service_info,
+                        'list_type': list_type,
+                        'item_id': item_id,
+                        'retrieved_at': datetime.now().isoformat()
+                    }
                     
                 return result
             except Exception as e:
@@ -369,16 +1175,50 @@ class ServiceListDiscovery:
                     id_param_name: item_id
                 }
                 
-                # Call the tool properly
-                if hasattr(tool, 'function'):
-                    result = await tool.function(**params)
-                elif callable(tool):
-                    result = await tool(**params)
-                elif isinstance(tool, dict) and 'function' in tool:
-                    result = await tool['function'](**params)
-                else:
-                    logger.error(f"Could not determine how to call tool {detail_tool_name}")
+                # Add optional parameters if supported
+                if include_metadata:
+                    params["include_metadata"] = True
+                if include_raw:
+                    params["include_raw"] = True
+                
+                # Call the tool properly using FastMCP patterns
+                try:
+                    if hasattr(self.mcp, 'call_tool'):
+                        logger.debug(f"Calling tool {detail_tool_name} via mcp.call_tool()")
+                        result = await self.mcp.call_tool(detail_tool_name, **params)
+                    elif hasattr(tool, 'function') and callable(tool.function):
+                        logger.debug(f"Calling tool.function() for {detail_tool_name}")
+                        result = await tool.function(**params)
+                    elif callable(tool):
+                        logger.debug(f"Calling tool() directly for {detail_tool_name}")
+                        result = await tool(**params)
+                    elif hasattr(tool, '__call__'):
+                        logger.debug(f"Tool {detail_tool_name} has __call__, trying direct call")
+                        result = await tool(**params)
+                    elif isinstance(tool, dict) and 'function' in tool:
+                        logger.debug(f"Calling tool['function']() for {detail_tool_name}")
+                        result = await tool['function'](**params)
+                    else:
+                        if hasattr(tool, '_function'):
+                            logger.debug(f"Calling tool._function() for {detail_tool_name}")
+                            result = await tool._function(**params)
+                        else:
+                            raise RuntimeError(f"Could not determine how to call tool {detail_tool_name}")
+                            
+                except Exception as e:
+                    logger.error(f"Error calling tool {detail_tool_name}: {e}")
+                    logger.debug(f"Tool type: {type(tool)}, attributes: {dir(tool) if hasattr(tool, '__dict__') else 'no attributes'}")
                     return None
+                
+                # Enhance result with metadata if requested
+                if include_metadata and isinstance(result, dict):
+                    service_info = ServiceMetadata.get_service_info(service)
+                    result['_metadata'] = {
+                        'service_info': service_info,
+                        'list_type': list_type,
+                        'item_id': item_id,
+                        'retrieved_at': datetime.now().isoformat()
+                    }
                     
                 return result
             except Exception as e:
@@ -388,269 +1228,715 @@ class ServiceListDiscovery:
         return None
         
     def _parse_list_result(self, result: Any, service: str, list_type: str) -> List[Dict[str, Any]]:
-        """
-        Parse the result from a list tool to extract items.
+        """Parse the result from a list tool dynamically using pre-discovered field mappings.
         
-        Args:
-            result: Raw result from tool (could be string, dict, or structured data)
-            service: Service name
-            list_type: List type name
-            
-        Returns:
-            List of parsed items with IDs or the result itself if already structured
+        This method uses the dynamically discovered field mappings to find the list data
+        in TypedDict responses, without any hardcoding.
         """
-        # If result is already a structured response (dict or list), return it
-        if isinstance(result, dict):
-            # Check if it has a standard structure with items
-            if 'items' in result:
-                return result['items']
-            elif 'data' in result:
-                return result['data']
-            # Return as single item list
-            return [result]
-            
+        # First, try to parse JSON if result is a string
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except json.JSONDecodeError:
+                # Not JSON, return empty list as we can't parse it generically
+                logger.warning(f"Could not parse string result as JSON for {service}/{list_type}")
+                return []
+        
+        # If it's already a list, return it directly
         if isinstance(result, list):
-            return result
+            return self._enhance_items_with_metadata(result, service, list_type)
+        
+        # Handle TypedDict responses
+        if isinstance(result, dict):
+            # Try to get the tool configuration to find the tool name
+            config = self.get_list_config(service, list_type)
+            if config and config.get("tool"):
+                tool_name = config["tool"]
+                
+                # Check if we have a pre-discovered list field for this tool
+                if tool_name in self.tool_list_fields:
+                    list_field = self.tool_list_fields[tool_name]
+                    if list_field in result:
+                        field_value = result[list_field]
+                        if isinstance(field_value, list):
+                            logger.debug(f"Found list data in field '{list_field}' using pre-discovered mapping for {service}/{list_type}")
+                            return self._enhance_items_with_metadata(field_value, service, list_type)
+                
+                # If not in pre-discovered mappings, try real-time introspection
+                tool = self.discovered_tools.get(tool_name)
+                if tool:
+                    list_field = self._get_list_field_from_tool(tool)
+                    if list_field and list_field in result:
+                        field_value = result[list_field]
+                        if isinstance(field_value, list):
+                            # Cache this discovery for future use
+                            self.tool_list_fields[tool_name] = list_field
+                            logger.debug(f"Found list data in field '{list_field}' from real-time introspection for {service}/{list_type}")
+                            return self._enhance_items_with_metadata(field_value, service, list_type)
             
-        # Otherwise, parse string results
-        items = []
-        result_str = str(result)
+            # Fallback: Look for any field that contains a list (prioritize common names)
+            # This handles cases where type introspection fails or is unavailable
+            for field_name, field_value in result.items():
+                if isinstance(field_value, list) and field_name not in ['error', 'errors', 'warnings', 'metadata']:
+                    # Cache this discovery
+                    if config and config.get("tool"):
+                        self.tool_list_fields[config["tool"]] = field_name
+                    logger.debug(f"Found list data in field '{field_name}' for {service}/{list_type}")
+                    return self._enhance_items_with_metadata(field_value, service, list_type)
+            
+            # If no list field found, check if the dict itself is the single item
+            if 'id' in result or 'name' in result:
+                logger.debug(f"Result appears to be a single item for {service}/{list_type}")
+                return self._enhance_items_with_metadata([result], service, list_type)
+            
+            logger.warning(f"Could not find list data in dict result for {service}/{list_type}")
+            return []
         
-        # Service-specific parsing logic for string results
-        if service == "forms" and list_type == "form_responses":
-            # Parse form IDs from the response
-            import re
-            form_ids = re.findall(r'Form ID:\s*([^\s\n]+)', result_str)
-            for form_id in form_ids:
-                items.append({"id": form_id, "type": "form"})
-                
-        elif service == "photos" and list_type == "albums":
-            # Check if it's a structured response first
-            if isinstance(result, dict) and 'albums' in result:
-                return result['albums']
-            # Parse album IDs from string response
-            import re
-            album_matches = re.findall(r'ID:\s*([^\s\)]+)', result_str)
-            for album_id in album_matches:
-                items.append({"id": album_id, "type": "album"})
-                
-        elif service == "sheets" and list_type == "spreadsheets":
-            # Check for structured response
-            if isinstance(result, dict) and 'spreadsheets' in result:
-                return result['spreadsheets']
-            # Parse spreadsheet IDs from string
-            import re
-            sheet_matches = re.findall(r'\(ID:\s*([^\)]+)\)', result_str)
-            for sheet_id in sheet_matches:
-                items.append({"id": sheet_id, "type": "spreadsheet"})
-                
-        elif service == "calendar":
-            if list_type == "calendars" and isinstance(result, dict) and 'calendars' in result:
-                return result['calendars']
-            elif list_type == "events" and isinstance(result, dict) and 'events' in result:
-                return result['events']
-                
-        elif service == "chat" and list_type == "spaces":
-            if isinstance(result, dict) and 'spaces' in result:
-                return result['spaces']
-                
-        # Add more service-specific parsing as needed
+        # If we can't parse the result, return empty list
+        logger.warning(f"Unexpected result type {type(result)} for {service}/{list_type}")
+        return []
+    
+    def _get_list_field_from_tool(self, tool: Any) -> Optional[str]:
+        """Extract the list field name from a tool's return type annotation.
         
-        return items
+        This method inspects the tool's return type to find which field contains
+        the list data in a TypedDict response.
+        """
+        try:
+            # Try different ways to access the function based on tool structure
+            func = None
+            if hasattr(tool, 'function'):
+                func = tool.function
+            elif callable(tool):
+                func = tool
+            elif isinstance(tool, dict) and 'function' in tool:
+                func = tool['function']
+            
+            if not func:
+                return None
+            
+            # Get the return type annotation
+            if hasattr(func, '__annotations__'):
+                return_type = func.__annotations__.get('return')
+                if return_type:
+                    # Check if it's a TypedDict or has __annotations__
+                    if hasattr(return_type, '__annotations__'):
+                        # Look for fields that are List types
+                        for field_name, field_type in return_type.__annotations__.items():
+                            # Check if the field type is a List
+                            origin = getattr(field_type, '__origin__', None)
+                            if origin is list or origin is List:
+                                logger.debug(f"Found list field '{field_name}' from type annotation")
+                                return field_name
+                    
+                    # Check if it's a type with __fields__ (like TypedDict subclasses)
+                    if hasattr(return_type, '__fields__'):
+                        for field_name in return_type.__fields__:
+                            # Get the field type
+                            field_type = return_type.__annotations__.get(field_name)
+                            if field_type:
+                                origin = getattr(field_type, '__origin__', None)
+                                if origin is list or origin is List:
+                                    logger.debug(f"Found list field '{field_name}' from __fields__")
+                                    return field_name
+                    
+                    # Check if it's a Pydantic model
+                    if hasattr(return_type, '__fields__'):
+                        for field_name, field_info in return_type.__fields__.items():
+                            if hasattr(field_info, 'outer_type_'):
+                                origin = getattr(field_info.outer_type_, '__origin__', None)
+                                if origin is list or origin is List:
+                                    logger.debug(f"Found list field '{field_name}' from Pydantic model")
+                                    return field_name
+        except Exception as e:
+            logger.debug(f"Error introspecting tool type: {e}")
+        
+        return None
+    
+    def get_field_mappings_summary(self) -> Dict[str, Any]:
+        """Get a summary of all discovered tool field mappings.
+        
+        Returns a dictionary showing which field contains list data for each tool.
+        This is useful for debugging and understanding the dynamic discovery.
+        """
+        summary = {
+            "total_tools": len(self.discovered_tools),
+            "list_tools": len(self.tool_list_fields),
+            "mappings": self.tool_list_fields,
+            "services": {}
+        }
+        
+        # Group by service
+        for service, config in self.SERVICE_MAPPINGS.items():
+            service_mappings = {}
+            for list_type, type_config in config.items():
+                tool_name = type_config.get("tool")
+                if tool_name and tool_name in self.tool_list_fields:
+                    service_mappings[list_type] = {
+                        "tool": tool_name,
+                        "list_field": self.tool_list_fields[tool_name]
+                    }
+            if service_mappings:
+                summary["services"][service] = service_mappings
+        
+        return summary
+    
+    def _enhance_items_with_metadata(self, items: List[Any], service: str, list_type: str) -> List[Dict[str, Any]]:
+        """Enhance list items with service metadata.
+        
+        Adds service information and ensures consistent structure for all items.
+        """
+        service_info = ServiceMetadata.get_service_info(service)
+        enhanced_items = []
+        
+        for item in items:
+            if isinstance(item, dict):
+                # Copy the item and add service metadata
+                enhanced_item = dict(item)
+                # Only add service metadata if not already present
+                if 'service' not in enhanced_item:
+                    enhanced_item['service'] = service
+                if 'service_icon' not in enhanced_item:
+                    enhanced_item['service_icon'] = service_info['icon']
+                if 'list_type' not in enhanced_item:
+                    enhanced_item['list_type'] = list_type
+                enhanced_items.append(enhanced_item)
+            elif isinstance(item, str):
+                # Handle simple string items (shouldn't happen with TypedDict, but be safe)
+                enhanced_items.append({
+                    'value': item,
+                    'service': service,
+                    'service_icon': service_info['icon'],
+                    'list_type': list_type
+                })
+            else:
+                # Handle other types by converting to string
+                enhanced_items.append({
+                    'value': str(item),
+                    'service': service,
+                    'service_icon': service_info['icon'],
+                    'list_type': list_type
+                })
+        
+        return enhanced_items
+        
         
     async def _get_available_ids(self, service: str, list_type: str, user_email: str) -> List[Dict[str, Any]]:
-        """
-        Get available IDs for services that require an ID parameter.
-        
-        Args:
-            service: Service name
-            list_type: List type name
-            user_email: User's Google email
-            
-        Returns:
-            List of available IDs
-        """
-        # This would need to call appropriate tools to list available items
+        """Get available IDs with enhanced metadata and examples."""
         items = []
+        config = self.get_list_config(service, list_type)
+        service_info = ServiceMetadata.get_service_info(service)
         
-        if service == "forms" and list_type == "form_responses":
-            # We would need a tool to list all forms
-            # For now, return a placeholder
-            items.append({
-                "id": "placeholder", 
-                "description": "Use a specific form ID to get responses"
-            })
-            
-        elif service == "drive" and list_type == "items":
-            # List root folder as default
+        if config:
+            # Add example IDs from configuration with metadata
+            for example_id in config.get("example_ids", []):
+                items.append({
+                    "id": example_id,
+                    "description": f"Example {list_type[:-1]} ID",
+                    "is_example": True,
+                    "service": service,
+                    "service_icon": service_info['icon'],
+                    "service_name": service_info['display_name']
+                })
+        
+        # Add service-specific defaults with enhanced metadata
+        if service == "drive" and list_type == "items":
             items.append({
                 "id": "root",
-                "description": "Root folder"
+                "description": "Root folder - Top level of My Drive",
+                "is_default": True,
+                "service": service,
+                "service_icon": service_info['icon'],
+                "service_name": service_info['display_name'],
+                "usage_hint": "Use this to list files in the root of your Drive"
+            })
+            # Add shared drives hint
+            items.append({
+                "id": "shareddrives",
+                "description": "Shared drives placeholder",
+                "is_placeholder": True,
+                "service": service,
+                "service_icon": service_info['icon'],
+                "note": "Use list_shared_drives tool to get actual shared drive IDs"
             })
             
         elif service == "calendar" and list_type == "events":
-            # Would need to list calendars first
             items.append({
                 "id": "primary",
-                "description": "Primary calendar"
+                "description": "Primary calendar - Your main Google Calendar",
+                "is_default": True,
+                "service": service,
+                "service_icon": service_info['icon'],
+                "service_name": service_info['display_name'],
+                "usage_hint": "Use this to access events in your primary calendar"
+            })
+            # Add holiday calendar hint
+            items.append({
+                "id": "en.usa#holiday@group.v.calendar.google.com",
+                "description": "US Holidays calendar",
+                "is_example": True,
+                "service": service,
+                "service_icon": service_info['icon'],
+                "note": "Public holiday calendar for United States"
             })
             
+        elif service == "forms" and list_type == "form_responses":
+            # Try to get actual form IDs if we have a list forms tool
+            if "get_form" in self.discovered_tools:
+                items.append({
+                    "id": "placeholder_form_id",
+                    "description": "Replace with actual form ID",
+                    "is_placeholder": True,
+                    "service": service,
+                    "service_icon": service_info['icon'],
+                    "service_name": service_info['display_name'],
+                    "usage_hint": "Use search_forms or list_forms to find actual form IDs"
+                })
+            else:
+                # Use example IDs from config
+                for example_id in config.get("example_ids", []):
+                    items.append({
+                        "id": example_id,
+                        "description": f"Example form ID",
+                        "is_example": True,
+                        "service": service,
+                        "service_icon": service_info['icon']
+                    })
+                    
         elif service == "docs" and list_type == "documents":
-            # List root folder as default
             items.append({
                 "id": "root",
-                "description": "Root folder"
+                "description": "Root folder - Top level for searching documents",
+                "is_default": True,
+                "service": service,
+                "service_icon": service_info['icon'],
+                "service_name": service_info['display_name'],
+                "usage_hint": "Use this folder ID to list documents in My Drive root"
+            })
+            
+        elif service == "sheets" and list_type == "spreadsheets":
+            # Add example spreadsheet ID format
+            items.append({
+                "id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+                "description": "Example spreadsheet ID format",
+                "is_example": True,
+                "service": service,
+                "service_icon": service_info['icon'],
+                "note": "This is the format of a Google Sheets ID"
+            })
+            
+        elif service == "photos" and list_type == "albums":
+            # Photos albums don't need IDs for listing
+            items.append({
+                "note": "Use list_photos_albums directly to get all albums",
+                "service": service,
+                "service_icon": service_info['icon'],
+                "service_name": service_info['display_name'],
+                "no_id_required": True
+            })
+            
+        elif service == "chat" and list_type == "spaces":
+            # Chat spaces don't need IDs for listing
+            items.append({
+                "note": "Use list_spaces directly to get all accessible spaces",
+                "service": service,
+                "service_icon": service_info['icon'],
+                "service_name": service_info['display_name'],
+                "no_id_required": True
+            })
+            
+        elif service == "gmail":
+            if list_type == "filters":
+                items.append({
+                    "note": "Use list_gmail_filters directly to get all filters",
+                    "service": service,
+                    "service_icon": service_info['icon'],
+                    "service_name": service_info['display_name'],
+                    "no_id_required": True
+                })
+            elif list_type == "labels":
+                items.append({
+                    "note": "Use list_gmail_labels directly to get all labels",
+                    "service": service,
+                    "service_icon": service_info['icon'],
+                    "service_name": service_info['display_name'],
+                    "no_id_required": True
+                })
+                
+        elif service == "slides" and list_type == "presentations":
+            # Add example presentation ID format
+            items.append({
+                "id": "1EAYk18WDjIG-zp_0vLm3CsfQh_i8eXc67Jo2O9C6Vuc",
+                "description": "Example presentation ID format",
+                "is_example": True,
+                "service": service,
+                "service_icon": service_info['icon'],
+                "note": "This is the format of a Google Slides ID"
+            })
+        
+        # If no specific items added, provide generic guidance
+        if not items:
+            items.append({
+                "note": f"No default IDs available for {service}/{list_type}",
+                "service": service,
+                "service_icon": service_info['icon'],
+                "service_name": service_info['display_name'],
+                "suggestion": f"Use appropriate {service} tools to discover available IDs"
             })
             
         return items
 
 
+# ============================================================================
+# TOOL TRANSFORMATION FOR ENHANCED DOCUMENTATION
+# ============================================================================
+
+def create_enhanced_tool(original_tool: Tool, discovery: ServiceListDiscovery) -> Tool:
+    """
+    Create an enhanced version of a tool with better documentation and defaults.
+    """
+    # Generate comprehensive documentation
+    services_doc = "\n".join([
+        f"- **{s}** ({ServiceMetadata.get_service_info(s)['icon']}): "
+        f"{ServiceMetadata.get_service_info(s)['description']}"
+        for s in get_supported_services()
+    ])
+    
+    enhanced_description = f"""
+Get available list types for a Google service with comprehensive metadata.
+
+This tool provides discovery of all list-based resources available for each service,
+including pagination support, default values, and example IDs.
+
+**Supported Services:**
+{services_doc}
+
+**Response includes:**
+- List type names and descriptions
+- Pagination support information
+- Default page sizes
+- Example IDs for testing
+- Required OAuth scopes
+- Service metadata and documentation
+
+**Examples:**
+- `service: "gmail"` → Returns filters, labels, threads
+- `service: "drive"` → Returns folders, files, shared drives
+- `service: "calendar"` → Returns calendars, events, reminders
+"""
+    
+    # Create transformed tool with enhanced documentation
+    transformed_tool = Tool.from_tool(
+        original_tool,
+        name="get_service_list_types_enhanced",
+        description=enhanced_description,
+        transform_args={
+            "service": ArgTransform(
+                description=f"Google service name. Options: {', '.join(get_supported_services())}\n\n{get_supported_service_documentation()}"
+            )
+        },
+        tags={"service", "discovery", "lists", "metadata", "enhanced"},
+        meta={
+            "version": "2.0",
+            "enhanced": True,
+            "supports_pagination": True,
+            "default_values": True
+        }
+    )
+    
+    return transformed_tool
+
+
+# ============================================================================
+# MAIN SETUP FUNCTION WITH ENHANCEMENTS
+# ============================================================================
+
 def setup_service_list_resources(mcp: FastMCP) -> None:
     """
-    Setup dynamic service list resources.
+    Setup enhanced dynamic service list resources with comprehensive features.
     
     Args:
         mcp: FastMCP instance to register resources with
     """
-    logger.info("Setting up dynamic service list resources...")
+    logger.info("Setting up enhanced dynamic service list resources...")
     
-    # Initialize discovery system
+    # Initialize enhanced discovery system
     discovery = ServiceListDiscovery(mcp)
     
-    # Resource 1: List available list types for a service
+    # Generate dynamic description with accepted service values
+    def generate_resource_description() -> str:
+        """Generate a description that includes all valid service values."""
+        services = get_supported_services()
+        service_lines = []
+        
+        for service in services:
+            info = ServiceMetadata.get_service_info(service)
+            service_lines.append(f"  • {service} ({info['icon']}): {info['description']}")
+        
+        return f"""Get available list types for a Google service with rich metadata.
+
+Accepted service values:
+{chr(10).join(service_lines)}
+
+Returns comprehensive metadata including pagination support, default values, and example IDs."""
+    
+    # Resource 1: Enhanced list types discovery with accepted values in description
     @mcp.resource(
         uri="service://{service}/lists",
-        name="Service List Types",
-        description="Get available list types for a Google service",
+        name="Service List Types (Enhanced)",
+        description=generate_resource_description(),
         mime_type="application/json",
-        tags={"service", "lists", "discovery", "dynamic"},
+        tags={"service", "lists", "discovery", "dynamic", "enhanced"},
         annotations={
             "readOnlyHint": True,
             "idempotentHint": True
+        },
+        meta={
+            "version": "2.0",
+            "category": "discovery",
+            "response_model": "ServiceListTypesResponse",
+            "enhanced": True,
+            "includes_metadata": True,
+            "accepted_values": get_supported_services()
         }
     )
-    async def get_service_list_types(ctx: Context, service: str) -> dict:
-        """Get available list types for a service."""
-        # Normalize service name to lowercase for case-insensitive handling
-        service_lower = service.lower()
+    async def get_service_list_types(
+        ctx: Context,
+        service: str
+    ) -> Union[ServiceListTypesResponse, ServiceErrorResponse]:
+        """Get available list types for a service with enhanced metadata and documentation.
         
-        # Validate service parameter
-        if service_lower not in VALID_SERVICES:
-            return {
-                "error": f"Service '{service}' not found or has no list types",
-                "available_services": list(discovery.SERVICE_MAPPINGS.keys())
-            }
+        This enhanced version provides:
+        - Rich service metadata including icons and descriptions
+        - Pagination information for each list type
+        - Example IDs for testing
+        - Required OAuth scopes
+        - Documentation URLs
+        
+        Args:
+            ctx: FastMCP context containing user information
+            service: The Google service name (with full documentation)
             
+        Returns:
+            ServiceListTypesResponse with comprehensive metadata or ServiceErrorResponse
+        """
+        try:
+            service_request = ServiceRequest(service=service)
+            service_lower = service_request.service
+        except ValueError as e:
+            # Enhanced error response with suggestions
+            suggestions = [s for s in get_supported_services() 
+                         if s.startswith(service[0].lower()) if service]
+            return ServiceErrorResponse(
+                error=str(e),
+                error_code="INVALID_SERVICE",
+                service=service.lower() if isinstance(service, str) else None,
+                list_type=None,
+                available_services=list(discovery.SERVICE_MAPPINGS.keys()),
+                available_list_types=None,
+                suggestions=suggestions,
+                documentation_url=f"https://docs.fastmcp2.com/services/{service.lower()}"
+            )
+        
         list_types = discovery.get_service_lists(service_lower)
         
         if not list_types:
-            return {
-                "error": f"Service '{service}' not found or has no list types",
-                "available_services": list(discovery.SERVICE_MAPPINGS.keys())
-            }
+            return ServiceErrorResponse(
+                error=f"Service '{service}' not found or has no list types",
+                error_code="NO_LIST_TYPES",
+                service=service_lower,
+                list_type=None,
+                available_services=list(discovery.SERVICE_MAPPINGS.keys()),
+                available_list_types=None,
+                suggestions=None,
+                documentation_url=f"https://docs.fastmcp2.com/services/"
+            )
             
-        # Return list types with descriptions
-        result = {
-            "service": service_lower,
-            "list_types": []
-        }
+        # Build enhanced response with metadata
+        service_info = ServiceMetadata.get_service_info(service_lower)
         
-        for list_type in list_types:
-            config = discovery.get_list_config(service_lower, list_type)
-            result["list_types"].append({
-                "name": list_type,
-                "description": config.get("description", ""),
-                "has_detail_view": bool(config.get("detail_tool") or config.get("id_field"))
-            })
-            
-        return result
-        
-    # Resource 2: List all items/IDs for a specific list type
+        return ServiceListTypesResponse(
+            service=service_lower,
+            service_metadata=service_info,
+            list_types=list_types,
+            documentation_url=f"https://docs.fastmcp2.com/services/{service_lower}",
+            examples=[f"service://{service_lower}/{lt['name']}" for lt in list_types[:3]]
+        )
+    
+    # Create enhanced tool transformation for better documentation
+    if hasattr(mcp, 'tools') and mcp.tools:
+        for tool in mcp.tools:
+            if hasattr(tool, 'name') and tool.name == "get_service_list_types":
+                enhanced_tool = create_enhanced_tool(tool, discovery)
+                mcp.add_tool(enhanced_tool)
+                logger.info("Added enhanced tool transformation for get_service_list_types")
+                break
+    
+    # Resource 2: List all items/IDs for a specific list type with accepted values
     @mcp.resource(
         uri="service://{service}/{list_type}",
-        name="Service List Items",
-        description="Get all items/IDs for a specific list type",
+        name="Service List Items (Enhanced)",
+        description=f"""Get all items/IDs for a specific list type with pagination support.
+
+Accepted service values:
+{chr(10).join([f"  • {s} ({ServiceMetadata.get_service_info(s)['icon']})" for s in get_supported_services()])}
+
+Common list types by service:
+  • gmail: filters, labels
+  • drive: items (folders/files)
+  • calendar: calendars, events
+  • photos: albums
+  • forms: form_responses
+  • sheets: spreadsheets
+  • chat: spaces
+  • docs: documents
+
+Returns items with pagination support and metadata.""",
         mime_type="application/json",
-        tags={"service", "lists", "items", "dynamic"},
+        tags={"service", "lists", "items", "dynamic", "enhanced"},
         annotations={
             "readOnlyHint": True,
             "idempotentHint": False  # May change as new items are added
+        },
+        meta={
+            "version": "2.0",
+            "category": "data",
+            "response_model": "ServiceListItemsResponse",
+            "requires_auth": True,
+            "accepted_services": get_supported_services()
         }
     )
-    async def get_service_list_items(ctx: Context, service: str, list_type: str) -> dict:
-        """Get all items for a specific list type."""
-        # Normalize service name to lowercase for case-insensitive handling
-        service_lower = service.lower()
+    async def get_service_list_items(
+        ctx: Context,
+        service: str,
+        list_type: str
+    ) -> Union[ServiceListItemsResponse, ServiceErrorResponse]:
+        """Get all items for a specific list type.
+        
+        Args:
+            ctx: FastMCP context containing user information
+            service: The Google service name (see description for accepted values)
+            list_type: The type of list to retrieve (e.g., 'filters', 'labels', 'albums')
+            
+        Returns:
+            ServiceListItemsResponse with items or ServiceErrorResponse on error
+        """
+        # Validate and normalize inputs using Pydantic model
+        try:
+            list_request = ServiceListRequest(service=service, list_type=list_type)
+            service_lower = list_request.service
+            list_type_lower = list_request.list_type
+        except ValueError as e:
+            return ServiceErrorResponse(
+                error=str(e),
+                error_code="INVALID_SERVICE",
+                service=service.lower() if isinstance(service, str) else None,
+                list_type=list_type.lower() if isinstance(list_type, str) else None,
+                available_services=list(discovery.SERVICE_MAPPINGS.keys()),
+                available_list_types=None,
+                suggestions=[s for s in get_supported_services() if s.startswith(service[0].lower())] if service else [],
+                documentation_url=f"https://docs.fastmcp2.com/services/"
+            )
         
         # Validate service parameter
-        if service_lower not in VALID_SERVICES:
-            return {
-                "error": f"Service '{service}' not found",
-                "available_services": list(discovery.SERVICE_MAPPINGS.keys())
-            }
+        if service_lower not in get_supported_services():
+            return ServiceErrorResponse(
+                error=f"Service '{service}' not found",
+                error_code="SERVICE_NOT_FOUND",
+                service=service_lower,
+                list_type=None,
+                available_services=list(discovery.SERVICE_MAPPINGS.keys()),
+                available_list_types=None,
+                suggestions=None,
+                documentation_url=f"https://docs.fastmcp2.com/services/"
+            )
             
-        # Check if list type is valid BEFORE checking authentication
-        # Normalize list_type for case-insensitive comparison
-        list_type_lower = list_type.lower()
+        # Check if list type is valid
         config = discovery.get_list_config(service_lower, list_type_lower)
         if not config:
-            return {
-                "error": f"List type '{list_type}' not found for service '{service}'",
-                "available_list_types": discovery.get_service_lists(service_lower)
-            }
+            return ServiceErrorResponse(
+                error=f"List type '{list_type}' not found for service '{service}'",
+                error_code="LIST_TYPE_NOT_FOUND",
+                service=service_lower,
+                list_type=list_type_lower,
+                available_services=None,
+                available_list_types=discovery.get_service_lists(service_lower),
+                suggestions=None,
+                documentation_url=f"https://docs.fastmcp2.com/services/{service_lower}"
+            )
             
-        # Now check for user email from context
-        # FastMCP Context might not have metadata attribute, handle gracefully
-        user_email = None
-        if hasattr(ctx, 'metadata') and ctx.metadata:
-            user_email = ctx.metadata.get("user_email")
-        elif hasattr(ctx, 'user_email'):
-            user_email = ctx.user_email
-        elif hasattr(ctx, 'session') and hasattr(ctx.session, 'user_email'):
-            user_email = ctx.session.user_email
-            
+        # Get user email using the unified authentication helper
+        user_email = _get_authenticated_user_email(ctx)
+        
         if not user_email:
-            return {"error": "User email not found in context - authentication required"}
+            return _create_auth_error_response(service_lower, list_type_lower)
             
         items = await discovery.get_list_items(service_lower, list_type_lower, user_email)
         
-        # Handle different response types
+        # Build structured response
         if isinstance(items, dict):
-            # Already structured response
-            return {
-                "service": service_lower,
-                "list_type": list_type_lower,
-                "description": config.get("description", ""),
-                **items  # Include the structured data
-            }
+            response = ServiceListItemsResponse(
+                service=service_lower,
+                list_type=list_type_lower,
+                description=config.get("description", ""),
+                count=None,
+                items=None,
+                data=items,
+                next_page_token=None,
+                has_more=False,
+                metadata=ServiceMetadata.get_service_info(service_lower)
+            )
+            if "items" in items:
+                response["items"] = items["items"]
+                response["count"] = len(items["items"]) if items["items"] else 0
+            return response
         elif isinstance(items, list):
-            # List of items
-            return {
-                "service": service_lower,
-                "list_type": list_type_lower,
-                "description": config.get("description", ""),
-                "count": len(items),
-                "items": items
-            }
+            return ServiceListItemsResponse(
+                service=service_lower,
+                list_type=list_type_lower,
+                description=config.get("description", ""),
+                count=len(items),
+                items=items,
+                data=None,
+                next_page_token=None,
+                has_more=False,
+                metadata=ServiceMetadata.get_service_info(service_lower)
+            )
         else:
-            # Fallback for unexpected types
-            return {
-                "service": service_lower,
-                "list_type": list_type_lower,
-                "description": config.get("description", ""),
-                "data": items
-            }
+            return ServiceListItemsResponse(
+                service=service_lower,
+                list_type=list_type_lower,
+                description=config.get("description", ""),
+                count=None,
+                items=None,
+                data=items,
+                next_page_token=None,
+                has_more=False,
+                metadata=ServiceMetadata.get_service_info(service_lower)
+            )
         
-    # Resource 3: Get detailed data for a specific item
+    # Resource 3: Get detailed data for a specific item with accepted values
     @mcp.resource(
         uri="service://{service}/{list_type}/{item_id}",
-        name="Service List Item Details",
-        description="Get detailed data for a specific item",
+        name="Service List Item Details (Enhanced)",
+        description=f"""Get detailed data for a specific item.
+
+Accepted service values:
+{chr(10).join([f"  • {s} ({ServiceMetadata.get_service_info(s)['icon']})" for s in get_supported_services()])}
+
+Returns detailed item data with optional metadata and raw response.""",
         mime_type="application/json",
-        tags={"service", "lists", "detail", "dynamic"},
+        tags={"service", "lists", "detail", "dynamic", "enhanced"},
         annotations={
             "readOnlyHint": True,
             "idempotentHint": False  # Item details may change
+        },
+        meta={
+            "version": "2.0",
+            "category": "detail",
+            "response_model": "ServiceListItemDetailsResponse",
+            "requires_auth": True,
+            "accepted_services": get_supported_services()
         }
     )
     async def get_service_list_item_details(
@@ -658,71 +1944,101 @@ def setup_service_list_resources(mcp: FastMCP) -> None:
         service: str,
         list_type: str,
         item_id: str
-    ) -> dict:
-        """Get detailed data for a specific item."""
-        # Normalize service name to lowercase for case-insensitive handling
-        service_lower = service.lower()
+    ) -> Union[ServiceListItemDetailsResponse, ServiceErrorResponse]:
+        """Get detailed data for a specific item.
         
-        # Validate service parameter
-        if service_lower not in VALID_SERVICES:
-            return {
-                "error": f"Service '{service}' not found",
-                "available_services": list(discovery.SERVICE_MAPPINGS.keys())
-            }
+        Args:
+            ctx: FastMCP context containing user information
+            service: The Google service name (see description for accepted values)
+            list_type: The type of list the item belongs to (e.g., 'filters', 'albums')
+            item_id: The unique identifier for the specific item
             
-        # Get user email from context
-        # FastMCP Context might not have metadata attribute, handle gracefully
-        user_email = None
-        if hasattr(ctx, 'metadata') and ctx.metadata:
-            user_email = ctx.metadata.get("user_email")
-        elif hasattr(ctx, 'user_email'):
-            user_email = ctx.user_email
-        elif hasattr(ctx, 'session') and hasattr(ctx.session, 'user_email'):
-            user_email = ctx.session.user_email
+        Returns:
+            ServiceListItemDetailsResponse with item details or ServiceErrorResponse on error
+        """
+        # Validate and normalize inputs using Pydantic model
+        try:
+            item_request = ServiceItemRequest(service=service, list_type=list_type, item_id=item_id)
+            service_lower = item_request.service
+            list_type_lower = item_request.list_type
+            normalized_item_id = item_request.item_id
+        except ValueError as e:
+            return ServiceErrorResponse(
+                error=str(e),
+                error_code="INVALID_REQUEST",
+                service=service.lower() if isinstance(service, str) else None,
+                list_type=list_type.lower() if isinstance(list_type, str) else None,
+                available_services=list(discovery.SERVICE_MAPPINGS.keys()),
+                available_list_types=None,
+                suggestions=None,
+                documentation_url=f"https://docs.fastmcp2.com/services/"
+            )
+        
+        # Validate service
+        if service_lower not in get_supported_services():
+            return ServiceErrorResponse(
+                error=f"Service '{service}' not found",
+                error_code="SERVICE_NOT_FOUND",
+                service=service_lower,
+                list_type=None,
+                available_services=list(discovery.SERVICE_MAPPINGS.keys()),
+                available_list_types=None,
+                suggestions=None,
+                documentation_url=f"https://docs.fastmcp2.com/services/"
+            )
             
+        # Get user email using the unified authentication helper
+        user_email = _get_authenticated_user_email(ctx)
+        
         if not user_email:
-            return {"error": "User email not found in context - authentication required"}
+            return _create_auth_error_response(service_lower, list_type_lower)
             
-        # Normalize list_type for case-insensitive comparison
-        list_type_lower = list_type.lower()
+        # Validate list type configuration
         config = discovery.get_list_config(service_lower, list_type_lower)
         if not config:
-            return {
-                "error": f"List type '{list_type}' not found for service '{service}'",
-                "available_list_types": discovery.get_service_lists(service_lower)
-            }
+            return ServiceErrorResponse(
+                error=f"List type '{list_type}' not found for service '{service}'",
+                error_code="LIST_TYPE_NOT_FOUND",
+                service=service_lower,
+                list_type=list_type_lower,
+                available_services=None,
+                available_list_types=discovery.get_service_lists(service_lower),
+                suggestions=None,
+                documentation_url=f"https://docs.fastmcp2.com/services/{service_lower}"
+            )
             
-        details = await discovery.get_list_item_details(service_lower, list_type_lower, item_id, user_email)
+        details = await discovery.get_list_item_details(service_lower, list_type_lower, normalized_item_id, user_email)
         
         if details is None:
-            return {
-                "error": f"Could not retrieve details for item '{item_id}'",
-                "service": service,
-                "list_type": list_type
-            }
+            return ServiceErrorResponse(
+                error=f"Could not retrieve details for item '{normalized_item_id}'",
+                error_code="ITEM_NOT_FOUND",
+                service=service_lower,
+                list_type=list_type_lower,
+                available_services=None,
+                available_list_types=None,
+                suggestions=None,
+                documentation_url=None
+            )
             
         # Return structured response
-        if isinstance(details, dict):
-            return {
-                "service": service_lower,
-                "list_type": list_type_lower,
-                "item_id": item_id,
-                **details  # Include the structured details
-            }
-        else:
-            return {
-                "service": service_lower,
-                "list_type": list_type_lower,
-                "item_id": item_id,
-                "data": details
-            }
-        
-    logger.info(f"✅ Registered services with dynamic list resources")
+        return ServiceListItemDetailsResponse(
+            service=service_lower,
+            list_type=list_type_lower,
+            item_id=normalized_item_id,
+            data=details,
+            metadata=ServiceMetadata.get_service_info(service_lower),
+            raw_response=None
+        )
     
-    # Log discovered services and their list types
-    if hasattr(discovery, 'SERVICE_MAPPINGS'):
-        logger.info(f"  Active services with list resources: {len(discovery.SERVICE_MAPPINGS)}")
-        for service, list_types in discovery.SERVICE_MAPPINGS.items():
-            logger.info(f"  - {service}: {', '.join(list_types.keys())}")
-    else:
-        logger.warning("SERVICE_MAPPINGS not initialized properly")
+    logger.info(f"✅ Registered enhanced services with dynamic list resources")
+    
+    # Generate and log comprehensive documentation
+    for service in discovery.SERVICE_MAPPINGS.keys():
+        doc = ServiceMetadata.generate_service_documentation(service)
+        logger.debug(f"Generated documentation for {service}:\n{doc}")
+    
+    logger.info(f"  Enhanced services with metadata: {len(discovery.SERVICE_MAPPINGS)}")
+    for service, list_types in discovery.SERVICE_MAPPINGS.items():
+        info = ServiceMetadata.get_service_info(service)
+        logger.info(f"  {info['icon']} {service}: {', '.join(list_types.keys())}")

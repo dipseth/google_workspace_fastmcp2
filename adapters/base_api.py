@@ -7,7 +7,7 @@ Adapted for Google Workspace MCP project.
 import inspect
 import json
 from abc import ABC, abstractmethod
-from typing import Dict, List, Type, TypeVar, get_type_hints, Union
+from typing_extensions import Dict, List, Type, TypeVar, get_type_hints, Union
 from typing_extensions import Any, Literal, TypedDict, Optional
 from pydantic import BaseModel, create_model, Field, ConfigDict
 import os

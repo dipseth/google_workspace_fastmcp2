@@ -7,7 +7,7 @@ Includes batch operations, smart caching, and enhanced search capabilities.
 
 import logging
 import asyncio
-from typing import List, Optional, Any, Dict, Union
+from typing_extensions import List, Optional, Any, Dict, Union
 from datetime import datetime, date
 
 from fastmcp import FastMCP

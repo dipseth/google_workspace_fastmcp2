@@ -7,7 +7,7 @@ import hashlib
 import uuid
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, List, Tuple
+from typing_extensions import Any, Dict, Optional, List, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 from pathlib import Path
@@ -455,9 +455,9 @@ class QdrantUnifiedMiddleware(Middleware):
                 
                 # Create point for Qdrant (use proper UUID format)
                 _, qdrant_models = _get_qdrant_imports()
-                point_id = uuid.uuid4()  # Generate proper UUID object
+                point_id = str(uuid.uuid4())  # Generate UUID and convert to string
                 point = qdrant_models['PointStruct'](
-                    id=point_id,  # Use UUID object directly, not string
+                    id=point_id,  # Use UUID string for Qdrant compatibility
                     vector=embedding.tolist(),
                     payload={
                         "tool_name": tool_name,
@@ -543,9 +543,9 @@ class QdrantUnifiedMiddleware(Middleware):
             
             # Create point for Qdrant (use proper UUID format)
             _, qdrant_models = _get_qdrant_imports()
-            point_id = uuid.uuid4()  # Generate proper UUID object
+            point_id = str(uuid.uuid4())  # Generate UUID and convert to string
             point = qdrant_models['PointStruct'](
-                id=point_id,  # Use UUID object directly, not string
+                id=point_id,  # Use UUID string for Qdrant compatibility
                 vector=embedding.tolist(),
                 payload={
                     "tool_name": tool_name,
@@ -573,6 +573,36 @@ class QdrantUnifiedMiddleware(Middleware):
             logger.error(f"❌ Failed to store response with params: {e}")
             raise
     
+    async def _execute_semantic_search(
+        self, 
+        query_embedding, 
+        qdrant_filter=None, 
+        limit=None, 
+        score_threshold=None
+    ):
+        """
+        Execute semantic search using query_points (new Qdrant API).
+        
+        Args:
+            query_embedding: The embedding vector for the query
+            qdrant_filter: Optional Qdrant filter
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
+            
+        Returns:
+            List of ScoredPoint objects from Qdrant
+        """
+        search_response = await asyncio.to_thread(
+            self.client.query_points,
+            collection_name=self.config.collection_name,
+            query=query_embedding.tolist(),
+            query_filter=qdrant_filter,
+            limit=limit or self.config.default_search_limit,
+            score_threshold=score_threshold or self.config.score_threshold,
+            with_payload=True
+        )
+        return search_response.points  # Extract points from response
+
     async def search(self, query: str, limit: int = None, score_threshold: float = None) -> List[Dict]:
         """
         Advanced search with query parsing support.
@@ -680,29 +710,13 @@ class QdrantUnifiedMiddleware(Middleware):
                         parsed_query["semantic_query"]
                     )
                     
-                    # Use query_points instead of deprecated search method
-                    try:
-                        search_results = await asyncio.to_thread(
-                            self.client.query_points,
-                            collection_name=self.config.collection_name,
-                            query=query_embedding.tolist(),
-                            query_filter=qdrant_filter,
-                            limit=limit or self.config.default_search_limit,
-                            score_threshold=score_threshold or self.config.score_threshold,
-                            with_payload=True
-                        )
-                        search_results = search_results.points  # Extract points from response
-                    except AttributeError:
-                        # Fallback to old search method if query_points not available
-                        search_results = await asyncio.to_thread(
-                            self.client.search,
-                            collection_name=self.config.collection_name,
-                            query_vector=query_embedding.tolist(),
-                            query_filter=qdrant_filter,
-                            limit=limit or self.config.default_search_limit,
-                            score_threshold=score_threshold or self.config.score_threshold,
-                            with_payload=True
-                        )
+                    # Use helper method for consistent query_points usage
+                    search_results = await self._execute_semantic_search(
+                        query_embedding=query_embedding,
+                        qdrant_filter=qdrant_filter,
+                        limit=limit,
+                        score_threshold=score_threshold
+                    )
                     
                     logger.debug(f"🎯 Semantic search found {len(search_results)} results")
                 
@@ -735,27 +749,12 @@ class QdrantUnifiedMiddleware(Middleware):
                     # Generate embedding for the entire query
                     query_embedding = await asyncio.to_thread(self.embedder.encode, query)
                     
-                    # Use query_points instead of deprecated search method
-                    try:
-                        search_results = await asyncio.to_thread(
-                            self.client.query_points,
-                            collection_name=self.config.collection_name,
-                            query=query_embedding.tolist(),
-                            limit=limit or self.config.default_search_limit,
-                            score_threshold=score_threshold or self.config.score_threshold,
-                            with_payload=True
-                        )
-                        search_results = search_results.points  # Extract points from response
-                    except AttributeError:
-                        # Fallback to old search method if query_points not available
-                        search_results = await asyncio.to_thread(
-                            self.client.search,
-                            collection_name=self.config.collection_name,
-                            query_vector=query_embedding.tolist(),
-                            limit=limit or self.config.default_search_limit,
-                            score_threshold=score_threshold or self.config.score_threshold,
-                            with_payload=True
-                        )
+                    # Use helper method for consistent query_points usage
+                    search_results = await self._execute_semantic_search(
+                        query_embedding=query_embedding,
+                        limit=limit,
+                        score_threshold=score_threshold
+                    )
                     
                     logger.debug(f"🧠 Pure semantic search found {len(search_results)} results")
             

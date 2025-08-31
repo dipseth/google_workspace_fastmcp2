@@ -7,7 +7,7 @@ Uses service account authentication for app-level operations.
 import logging
 import json
 import os
-from typing import Optional, Dict, Any, List
+from typing_extensions import Optional, Dict, Any, List
 from datetime import datetime
 
 from fastmcp import FastMCP
@@ -256,7 +256,7 @@ Updated to use FastAPI
 import json
 import logging
 from fastapi import FastAPI, Request
-from typing import Dict, Any
+from typing_extensions import Dict, Any
 import uvicorn
 
 # Import existing card framework

@@ -7,12 +7,13 @@ Migrated from decorator-based pattern to FastMCP2 architecture.
 
 import logging
 import asyncio
-from typing import List, Optional, Dict, Any, Union, Tuple
+from typing_extensions import List, Optional, Dict, Any, Union, Tuple
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
 
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
+from .forms_types import FormResponsesListResponse, FormResponseInfo, FormResponseAnswer
 
 logger = logging.getLogger(__name__)
 
@@ -975,7 +976,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         form_id: str,
         page_size: int = 10,
         page_token: Optional[str] = None
-    ) -> str:
+    ) -> FormResponsesListResponse:
         """
         List responses for a form - PAGINATED RESULTS.
 
@@ -989,10 +990,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             page_token (str): Pagination token.
 
         Returns:
-            str: List of responses with summary information.
+            FormResponsesListResponse: Structured response with form responses
         """
-
-
         
         try:
             forms_service = await _get_forms_service_with_fallback(user_google_email)
@@ -1010,53 +1009,97 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                 ).execute
             )
             
-            responses = result.get("responses", [])
+            raw_responses = result.get("responses", [])
             next_page_token = result.get("nextPageToken")
             
-            if not responses:
-                return "No responses found for this form."
-            
-            # Get form metadata
+            # Get form metadata to map questions
             form = await asyncio.to_thread(
                 forms_service.forms().get(formId=form_id).execute
             )
             title = form.get("info", {}).get("title", "Untitled Form")
             
-            # Format response list
-            response_parts = [
-                f"📋 Responses for: {title}",
-                f"Form ID: {form_id}",
-                f"Showing {len(responses)} responses",
-                ""
-            ]
+            # Create a mapping of question IDs to questions
+            items = form.get("items", [])
+            question_map = {}
+            for item in items:
+                if "questionItem" in item:
+                    question_map[item["itemId"]] = item
             
-            for i, response in enumerate(responses, 1):
-                response_id = response.get("responseId", "Unknown")
-                submitted_time = response.get("lastSubmittedTime", "Unknown")
-                respondent = response.get("respondentEmail", "Anonymous")
+            # Convert to structured format
+            responses: List[FormResponseInfo] = []
+            for response in raw_responses:
+                # Format answers with question context
+                structured_answers: List[FormResponseAnswer] = []
+                answers = response.get("answers", {})
                 
-                response_parts.append(
-                    f"{i}. Response {response_id}\n"
-                    f"   Submitted: {submitted_time}\n"
-                    f"   By: {respondent}"
-                )
+                for question_id, answer_data in answers.items():
+                    question = question_map.get(question_id, {})
+                    question_title = question.get("title", f"Question {question_id}")
+                    
+                    text_answers = answer_data.get("textAnswers", {})
+                    answer_text = ""
+                    if text_answers and "answers" in text_answers:
+                        answer_values = [ans.get("value", "") for ans in text_answers["answers"]]
+                        answer_text = ", ".join(answer_values)
+                    else:
+                        answer_text = "[No answer]"
+                    
+                    answer_info: FormResponseAnswer = {
+                        "questionId": question_id,
+                        "questionTitle": question_title,
+                        "answer": answer_text
+                    }
+                    structured_answers.append(answer_info)
+                
+                response_info: FormResponseInfo = {
+                    "responseId": response.get("responseId", ""),
+                    "submittedTime": response.get("lastSubmittedTime", "Unknown"),
+                    "respondentEmail": response.get("respondentEmail"),
+                    "answers": structured_answers
+                }
+                responses.append(response_info)
             
-            if next_page_token:
-                response_parts.append(
-                    f"\n➡️ More responses available. Use page_token: {next_page_token}"
-                )
+            logger.info(f"Successfully retrieved {len(responses)} responses for form {form_id}")
             
-            return "\n".join(response_parts)
+            return FormResponsesListResponse(
+                responses=responses,
+                count=len(responses),
+                formId=form_id,
+                formTitle=title,
+                userEmail=user_google_email,
+                pageToken=page_token,
+                nextPageToken=next_page_token,
+                error=None
+            )
             
         except HttpError as e:
-            error_msg = f"❌ Failed to list responses: {e}"
+            error_msg = f"Failed to list responses: {e}"
             logger.error(f"[list_form_responses] HTTP error: {e}")
-            return error_msg
+            # Return structured error response
+            return FormResponsesListResponse(
+                responses=[],
+                count=0,
+                formId=form_id,
+                formTitle="Unknown",
+                userEmail=user_google_email,
+                pageToken=page_token,
+                nextPageToken=None,
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {str(e)}"
             logger.error(f"[list_form_responses] {error_msg}")
-            return error_msg
-
+            # Return structured error response
+            return FormResponsesListResponse(
+                responses=[],
+                count=0,
+                formId=form_id,
+                formTitle="Unknown",
+                userEmail=user_google_email,
+                pageToken=page_token,
+                nextPageToken=None,
+                error=error_msg
+            )
     @mcp.tool(
         name="update_form_questions",
         description="Update existing questions in a Google Form (modify titles, descriptions, or settings)",

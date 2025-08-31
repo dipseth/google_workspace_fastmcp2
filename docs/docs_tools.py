@@ -30,7 +30,7 @@ Dependencies:
 import logging
 import asyncio
 import io
-from typing import List, Optional
+from typing_extensions import List, Optional, Union
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -40,6 +40,7 @@ from googleapiclient.http import MediaIoBaseDownload
 from auth.service_helpers import request_service, get_injected_service, get_service
 from auth.context import get_user_email_context
 from .utils import extract_office_xml_text
+from .docs_types import DocsListResponse, DocInfo
 
 logger = logging.getLogger(__name__)
 
@@ -344,7 +345,7 @@ async def list_docs_in_folder(
     user_google_email: str,
     folder_id: str = 'root',
     page_size: int = 100
-) -> str:
+) -> DocsListResponse:
     """
     Lists Google Docs within a specific Drive folder.
 
@@ -354,7 +355,7 @@ async def list_docs_in_folder(
         page_size: Maximum number of results to return (default: 100)
 
     Returns:
-        str: A formatted list of Google Docs in the specified folder.
+        DocsListResponse: Structured response with list of Google Docs in the specified folder.
     """
     logger.info(f"[list_docs_in_folder] Email: '{user_google_email}', Folder ID: '{folder_id}'")
 
@@ -380,7 +381,7 @@ async def list_docs_in_folder(
                 
                 # Check for specific credential errors and return user-friendly messages
                 if "no valid credentials found" in error_str.lower():
-                    return (
+                    error_msg = (
                         f"❌ **No Credentials Found**\n\n"
                         f"No authentication credentials found for {user_google_email}.\n\n"
                         f"**To authenticate:**\n"
@@ -390,7 +391,7 @@ async def list_docs_in_folder(
                         f"4. Return here after seeing the success page"
                     )
                 elif "credentials do not contain the necessary fields" in error_str.lower():
-                    return (
+                    error_msg = (
                         f"❌ **Invalid or Corrupted Credentials**\n\n"
                         f"Your stored credentials for {user_google_email} are missing required OAuth fields.\n\n"
                         f"**To fix this:**\n"
@@ -399,7 +400,16 @@ async def list_docs_in_folder(
                         f"3. Try your Docs command again"
                     )
                 else:
-                    return f"❌ Authentication error: {error_str}"
+                    error_msg = f"❌ Authentication error: {error_str}"
+                
+                return DocsListResponse(
+                    docs=[],
+                    count=0,
+                    folderId=folder_id,
+                    folderName=None,
+                    userEmail=user_google_email,
+                    error=error_msg
+                )
         else:
             logger.error(f"[list_docs_in_folder] Unexpected RuntimeError: {e}")
             raise
@@ -413,27 +423,56 @@ async def list_docs_in_folder(
             ).execute
         )
         items = rsp.get('files', [])
-        if not items:
-            return f"No Google Docs found in folder '{folder_id}'."
         
-        out = [f"Found {len(items)} Docs in folder '{folder_id}':"]
-        for f in items:
-            out.append(f"- {f['name']} (ID: {f['id']}) Modified: {f.get('modifiedTime')} Link: {f.get('webViewLink')}")
-        return "\n".join(out)
+        # Build structured response
+        docs: List[DocInfo] = []
+        for file in items:
+            doc_info = DocInfo(
+                id=file.get('id', ''),
+                name=file.get('name', 'Unknown'),
+                modifiedTime=file.get('modifiedTime'),
+                webViewLink=file.get('webViewLink')
+            )
+            docs.append(doc_info)
+        
+        return DocsListResponse(
+            docs=docs,
+            count=len(docs),
+            folderId=folder_id,
+            folderName="root" if folder_id == "root" else None,
+            userEmail=user_google_email
+        )
 
     except HttpError as e:
         logger.error(f"Google API error in list_docs_in_folder: {e}")
+        error_msg = ""
         if e.resp.status == 401:
-            return "❌ Authentication failed. Please check your Google credentials."
+            error_msg = "Authentication failed. Please check your Google credentials."
         elif e.resp.status == 403:
-            return "❌ Permission denied. Make sure you have access to this folder."
+            error_msg = "Permission denied. Make sure you have access to this folder."
         elif e.resp.status == 404:
-            return f"❌ Folder not found: {folder_id}"
+            error_msg = f"Folder not found: {folder_id}"
         else:
-            return f"❌ Error listing docs: {str(e)}"
+            error_msg = f"Error listing docs: {str(e)}"
+        
+        return DocsListResponse(
+            docs=[],
+            count=0,
+            folderId=folder_id,
+            folderName=None,
+            userEmail=user_google_email,
+            error=error_msg
+        )
     except Exception as e:
         logger.error(f"Unexpected error in list_docs_in_folder: {e}", exc_info=True)
-        return f"❌ Unexpected error: {str(e)}"
+        return DocsListResponse(
+            docs=[],
+            count=0,
+            folderId=folder_id,
+            folderName=None,
+            userEmail=user_google_email,
+            error=f"Unexpected error: {str(e)}"
+        )
 
 
 async def create_doc(
@@ -585,7 +624,7 @@ def setup_docs_tools(mcp: FastMCP):
         user_google_email: str,
         folder_id: str = 'root',
         page_size: int = 100
-    ) -> str:
+    ) -> DocsListResponse:
         """List Google Docs within a specific folder."""
         return await list_docs_in_folder(user_google_email, folder_id, page_size)
     

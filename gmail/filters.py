@@ -12,12 +12,13 @@ This module provides tools for:
 import logging
 import asyncio
 import time
-from typing import Optional, Literal, Any, List, Dict, Tuple
+from typing_extensions import Optional, Literal, Any, List, Dict, Tuple
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
 
 from .service import _get_gmail_service_with_fallback
+from .gmail_types import GmailFiltersResponse, FilterInfo, FilterCriteria, FilterAction
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,7 @@ async def apply_filter_to_existing_messages(
 
 
 
-async def list_gmail_filters(user_google_email: str) -> str:
+async def list_gmail_filters(user_google_email: str) -> GmailFiltersResponse:
     """
     Lists all Gmail filters/rules in the user's account.
 
@@ -217,7 +218,7 @@ async def list_gmail_filters(user_google_email: str) -> str:
         user_google_email: The user's Google email address
 
     Returns:
-        str: A formatted list of all filters with their criteria and actions
+        GmailFiltersResponse: Structured response with filter list and metadata
     """
     logger.info(f"[list_gmail_filters] Email: '{user_google_email}'")
 
@@ -227,75 +228,79 @@ async def list_gmail_filters(user_google_email: str) -> str:
         response = await asyncio.to_thread(
             gmail_service.users().settings().filters().list(userId="me").execute
         )
-        filters = response.get("filter", [])
+        filter_items = response.get("filter", [])
 
-        if not filters:
-            return "No Gmail filters found."
-
-        lines = [f"Found {len(filters)} Gmail filters:", ""]
-
-        for i, filter_obj in enumerate(filters, 1):
-            filter_id = filter_obj.get("id", "unknown")
-            criteria = filter_obj.get("criteria", {})
-            action = filter_obj.get("action", {})
-
-            lines.append(f"📋 FILTER {i} (ID: {filter_id})")
-
-            # Display criteria
-            criteria_parts = []
-            if criteria.get("from"):
-                criteria_parts.append(f"From: {criteria['from']}")
-            if criteria.get("to"):
-                criteria_parts.append(f"To: {criteria['to']}")
-            if criteria.get("subject"):
-                criteria_parts.append(f"Subject: {criteria['subject']}")
-            if criteria.get("query"):
-                criteria_parts.append(f"Query: {criteria['query']}")
-            if criteria.get("hasAttachment"):
-                criteria_parts.append("Has attachment: Yes")
-            if criteria.get("excludeChats"):
-                criteria_parts.append("Exclude chats: Yes")
-            if criteria.get("size"):
-                criteria_parts.append(f"Size: {criteria['size']}")
-            if criteria.get("sizeComparison"):
-                criteria_parts.append(f"Size comparison: {criteria['sizeComparison']}")
-
-            lines.append(f"  Criteria: {' | '.join(criteria_parts) if criteria_parts else 'None'}")
-
-            # Display actions
-            action_parts = []
-            if action.get("addLabelIds"):
-                action_parts.append(f"Add labels: {', '.join(action['addLabelIds'])}")
-            if action.get("removeLabelIds"):
-                action_parts.append(f"Remove labels: {', '.join(action['removeLabelIds'])}")
-            if action.get("forward"):
-                action_parts.append(f"Forward to: {action['forward']}")
-            if action.get("markAsSpam"):
-                action_parts.append("Mark as spam")
-            if action.get("markAsImportant"):
-                action_parts.append("Mark as important")
-            if action.get("neverMarkAsSpam"):
-                action_parts.append("Never mark as spam")
-            if action.get("neverMarkAsImportant"):
-                action_parts.append("Never mark as important")
-
-            lines.append(f"  Actions: {' | '.join(action_parts) if action_parts else 'None'}")
-            lines.append("")
-
-        return "\n".join(lines)
+        # Convert to structured format
+        filters: List[FilterInfo] = []
+        for filter_obj in filter_items:
+            # Extract criteria
+            criteria_obj = filter_obj.get("criteria", {})
+            criteria: FilterCriteria = {
+                "from_address": criteria_obj.get("from"),
+                "to_address": criteria_obj.get("to"),
+                "subject": criteria_obj.get("subject"),
+                "query": criteria_obj.get("query"),
+                "hasAttachment": criteria_obj.get("hasAttachment"),
+                "excludeChats": criteria_obj.get("excludeChats"),
+                "size": criteria_obj.get("size"),
+                "sizeComparison": criteria_obj.get("sizeComparison")
+            }
+            
+            # Extract actions
+            action_obj = filter_obj.get("action", {})
+            action: FilterAction = {
+                "addLabelIds": action_obj.get("addLabelIds"),
+                "removeLabelIds": action_obj.get("removeLabelIds"),
+                "forward": action_obj.get("forward"),
+                "markAsSpam": action_obj.get("markAsSpam"),
+                "markAsImportant": action_obj.get("markAsImportant"),
+                "neverMarkAsSpam": action_obj.get("neverMarkAsSpam"),
+                "neverMarkAsImportant": action_obj.get("neverMarkAsImportant")
+            }
+            
+            filter_info: FilterInfo = {
+                "id": filter_obj.get("id", ""),
+                "criteria": criteria,
+                "action": action
+            }
+            filters.append(filter_info)
+        
+        logger.info(f"Successfully retrieved {len(filters)} filters for {user_google_email}")
+        
+        return GmailFiltersResponse(
+            filters=filters,
+            count=len(filters),
+            userEmail=user_google_email,
+            error=None
+        )
 
     except HttpError as e:
         logger.error(f"Gmail API error in list_gmail_filters: {e}")
+        error_msg = None
         if e.resp.status in [401, 403]:
-            return f"❌ Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
+            error_msg = "Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
         elif e.resp.status == 400:
-            return f"❌ Bad request: Unable to list Gmail filters. {e}"
+            error_msg = f"Bad request: Unable to list Gmail filters. {e}"
         else:
-            return f"❌ Gmail API error: {e}"
+            error_msg = f"Gmail API error: {e}"
+        
+        # Return structured error response
+        return GmailFiltersResponse(
+            filters=[],
+            count=0,
+            userEmail=user_google_email,
+            error=error_msg
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error in list_gmail_filters: {e}")
-        return f"❌ Unexpected error: {e}"
+        # Return structured error response
+        return GmailFiltersResponse(
+            filters=[],
+            count=0,
+            userEmail=user_google_email,
+            error=f"Unexpected error: {e}"
+        )
 
 
 async def create_gmail_filter(
@@ -725,7 +730,7 @@ def setup_filter_tools(mcp: FastMCP) -> None:
             "openWorldHint": True
         }
     )
-    async def list_gmail_filters_tool(user_google_email: str) -> str:
+    async def list_gmail_filters_tool(user_google_email: str) -> GmailFiltersResponse:
         return await list_gmail_filters(user_google_email)
 
     @mcp.tool(

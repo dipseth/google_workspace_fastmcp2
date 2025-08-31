@@ -13,7 +13,7 @@ This module contains shared utility functions used across Gmail tools including:
 
 import logging
 import base64
-from typing import Optional, List, Dict, Literal, Any, Union
+from typing_extensions import Optional, List, Dict, Literal, Any, Union
 from pathlib import Path
 
 from email.mime.text import MIMEText

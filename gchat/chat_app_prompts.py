@@ -16,7 +16,7 @@ Author: Enhanced FastMCP Implementation
 Version: 2.0
 """
 
-from typing import Optional, Union
+from typing_extensions import Optional, Union
 from pydantic import Field
 from fastmcp import FastMCP, Context
 from fastmcp.prompts.prompt import Message, PromptMessage, TextContent

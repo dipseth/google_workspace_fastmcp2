@@ -9,7 +9,7 @@ import logging
 import importlib
 import json
 import sys
-from typing import Any, Dict, List
+from typing_extensions import Any, Dict, List
 
 # Import the ModuleWrapper
 from module_wrapper import ModuleWrapper

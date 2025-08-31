@@ -5,7 +5,7 @@ These TypedDict classes define the structure of data returned by Photos tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing import TypedDict, List, Optional
+from typing_extensions import TypedDict, List, Optional
 
 
 class AlbumInfo(TypedDict):
@@ -43,6 +43,7 @@ class AlbumListResponse(TypedDict):
     count: int
     excludeNonAppCreated: bool
     userEmail: str
+    error: Optional[str]  # Optional error message for error responses
 
 
 class PhotoListResponse(TypedDict):
@@ -51,3 +52,4 @@ class PhotoListResponse(TypedDict):
     count: int
     albumId: str
     userEmail: str
+    error: Optional[str]  # Optional error message for error responses

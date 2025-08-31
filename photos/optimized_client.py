@@ -12,7 +12,7 @@ This module provides optimized patterns for Google Photos API usage including:
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Any, Union
+from typing_extensions import Dict, List, Optional, Any, Union
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from dataclasses import dataclass

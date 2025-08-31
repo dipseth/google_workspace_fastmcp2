@@ -5,7 +5,7 @@ Creates adapter instances from API classes or modules
 
 import logging
 import importlib
-from typing import Dict, Any, Optional, Type
+from typing_extensions import Dict, Any, Optional, Type
 from .base_api import BaseAPI, APIMetadata
 from .adapters import APIAdapter, create_api_adapter
 from .discovery_manager import DiscoveryManager

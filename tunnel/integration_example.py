@@ -6,7 +6,7 @@ with the FastMCP2 server.
 """
 
 import logging
-from typing import Dict, Any
+from typing_extensions import Dict, Any
 
 # Import the FastMCP2 server
 # from fastmcp2_drive_upload.server import app, mcp_server

@@ -8,14 +8,17 @@ Migrated from decorator-based pattern to FastMCP2 architecture.
 import logging
 import asyncio
 import json
-from typing import Optional, Dict, Any, List, Union
+from typing_extensions import Optional, Dict, Any, List, Union
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
 
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
 from resources.user_resources import get_current_user_email_simple
-from .chat_types import SpaceListResponse, MessageListResponse, SpaceInfo, MessageInfo
+from .chat_types import (
+    SpaceListResponse, MessageListResponse, SpaceInfo, MessageInfo,
+    CardTypesResponse, CardTypeInfo
+)
 
 # Card Framework integration
 try:
@@ -271,17 +274,30 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 spaces=spaces,
                 count=len(spaces),
                 spaceType=space_type,
-                userEmail=user_email
+                userEmail=user_email,
+                error=None
             )
             
         except HttpError as e:
-            error_msg = f"❌ Failed to list spaces: {e}"
+            error_msg = f"Failed to list spaces: {e}"
             logger.error(f"[list_spaces] HTTP error: {e}")
-            return error_msg
+            return SpaceListResponse(
+                spaces=[],
+                count=0,
+                spaceType=space_type,
+                userEmail=user_google_email or "unknown",
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {str(e)}"
             logger.error(f"[list_spaces] {error_msg}")
-            return error_msg
+            return SpaceListResponse(
+                spaces=[],
+                count=0,
+                spaceType=space_type,
+                userEmail=user_google_email or "unknown",
+                error=error_msg
+            )
 
     @mcp.tool(
         name="list_messages",
@@ -358,17 +374,34 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 spaceId=space_id,
                 spaceName=space_name,
                 orderBy=order_by,
-                userEmail=user_google_email
+                userEmail=user_google_email,
+                error=None
             )
             
         except HttpError as e:
-            error_msg = f"❌ Failed to list messages: {e}"
+            error_msg = f"Failed to list messages: {e}"
             logger.error(f"[list_messages] HTTP error: {e}")
-            return error_msg
+            return MessageListResponse(
+                messages=[],
+                count=0,
+                spaceId=space_id,
+                spaceName="Unknown Space",
+                orderBy=order_by,
+                userEmail=user_google_email,
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {str(e)}"
             logger.error(f"[list_messages] {error_msg}")
-            return error_msg
+            return MessageListResponse(
+                messages=[],
+                count=0,
+                spaceId=space_id,
+                spaceName="Unknown Space",
+                orderBy=order_by,
+                userEmail=user_google_email,
+                error=error_msg
+            )
 
     @mcp.tool(
         name="send_message",
@@ -1178,31 +1211,56 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             "openWorldHint": True
         }
     )
-    async def list_available_card_types() -> str:
+    async def list_available_card_types() -> CardTypesResponse:
         """
         List all available card types and their descriptions.
 
         Returns:
-            str: List of available card types
+            CardTypesResponse: Structured response with available card types
         """
-        card_types = {
-            "simple": "Basic card with title, text, optional subtitle and image",
-            "interactive": "Card with buttons for user interaction",
-            "form": "Card with input fields and submit functionality",
-            "rich": "Advanced card with multiple sections, columns, decorated text, and complex layouts"
-        }
-        
-        output = ["Available Card Types:"]
-        for card_type, description in card_types.items():
-            output.append(f"- {card_type}: {description}")
-        
-        if card_manager:
-            framework_status = card_manager.get_framework_status()
-            output.append(f"\nCard Framework: {'Available' if framework_status['framework_available'] else 'Fallback mode'}")
-        else:
-            output.append("\nCard Framework: Not available")
-        
-        return "\n".join(output)
+        try:
+            card_type_infos: List[CardTypeInfo] = [
+                CardTypeInfo(
+                    type="simple",
+                    description="Basic card with title, text, optional subtitle and image",
+                    supported_features=["title", "text", "subtitle", "image"]
+                ),
+                CardTypeInfo(
+                    type="interactive",
+                    description="Card with buttons for user interaction",
+                    supported_features=["title", "text", "buttons", "actions"]
+                ),
+                CardTypeInfo(
+                    type="form",
+                    description="Card with input fields and submit functionality",
+                    supported_features=["title", "text", "input_fields", "submit_button"]
+                ),
+                CardTypeInfo(
+                    type="rich",
+                    description="Advanced card with multiple sections, columns, decorated text, and complex layouts",
+                    supported_features=["sections", "columns", "decorated_text", "grids", "advanced_widgets"]
+                )
+            ]
+            
+            framework_status = "Not available"
+            if card_manager:
+                status = card_manager.get_framework_status()
+                framework_status = 'Available' if status['framework_available'] else 'Fallback mode'
+            
+            return CardTypesResponse(
+                card_types=card_type_infos,
+                count=len(card_type_infos),
+                framework_status=framework_status,
+                error=None
+            )
+        except Exception as e:
+            logger.error(f"Error in list_available_card_types: {e}")
+            return CardTypesResponse(
+                card_types=[],
+                count=0,
+                framework_status="Error",
+                error=str(e)
+            )
 
     
     @mcp.tool(

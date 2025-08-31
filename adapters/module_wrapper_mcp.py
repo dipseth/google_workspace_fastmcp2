@@ -9,7 +9,7 @@ import logging
 import importlib
 import json
 import inspect
-from typing import Dict, List, Optional, Any, Union
+from typing_extensions import Dict, List, Optional, Any, Union
 import asyncio
 
 # Import MCP-related components
@@ -17,6 +17,14 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 # Import ModuleWrapper
 from .module_wrapper import ModuleWrapper
+
+# Import type definitions
+from .adapter_types import (
+    ModuleComponentInfo,
+    ModuleComponentsResponse,
+    WrappedModuleInfo,
+    WrappedModulesResponse
+)
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +410,7 @@ def setup_module_wrapper_tools(mcp, middleware):
             "openWorldHint": False
         }
     )
-    async def list_module_components(module_name: str) -> str:
+    async def list_module_components(module_name: str) -> ModuleComponentsResponse:
         """
         List all components in a wrapped module.
         
@@ -410,7 +418,7 @@ def setup_module_wrapper_tools(mcp, middleware):
             module_name: Name of the module to list components for
             
         Returns:
-            JSON string with list of components
+            ModuleComponentsResponse: Structured list of module components with metadata
         """
         try:
             # Check if module is wrapped
@@ -418,23 +426,64 @@ def setup_module_wrapper_tools(mcp, middleware):
                 # Try to wrap it
                 success = await middleware.wrap_module(module_name)
                 if not success:
-                    return f"❌ Module not wrapped: {module_name}"
+                    return ModuleComponentsResponse(
+                        components=[],
+                        count=0,
+                        module=module_name,
+                        error=f"Module not wrapped: {module_name}"
+                    )
             
             # Get wrapper
             wrapper = middleware.wrappers[module_name]
             
             # Get components
-            components = wrapper.list_components()
+            raw_components = wrapper.list_components()
             
-            return json.dumps({
-                "module": module_name,
-                "components": components,
-                "count": len(components)
-            }, indent=2)
+            # Convert to structured format
+            components: List[ModuleComponentInfo] = []
+            for comp in raw_components:
+                # Handle both string and dict component formats
+                if isinstance(comp, str):
+                    # Simple string format - parse the path
+                    comp_info: ModuleComponentInfo = {
+                        "name": comp.split('.')[-1] if '.' in comp else comp,
+                        "path": comp,
+                        "type": "unknown",
+                        "score": None,
+                        "docstring": "",
+                        "source": None
+                    }
+                elif isinstance(comp, dict):
+                    # Dictionary format with full metadata
+                    comp_info: ModuleComponentInfo = {
+                        "name": comp.get("name", ""),
+                        "path": comp.get("path", comp.get("full_path", "")),
+                        "type": comp.get("type", "unknown"),
+                        "score": comp.get("score"),
+                        "docstring": comp.get("docstring", ""),
+                        "source": comp.get("source")
+                    }
+                else:
+                    # Skip invalid component formats
+                    continue
+                    
+                components.append(comp_info)
+            
+            return ModuleComponentsResponse(
+                components=components,
+                count=len(components),
+                module=module_name,
+                error=None
+            )
             
         except Exception as e:
             logger.error(f"❌ Failed to list components: {e}")
-            return f"❌ Error listing components: {str(e)}"
+            return ModuleComponentsResponse(
+                components=[],
+                count=0,
+                module=module_name,
+                error=f"Error listing components: {str(e)}"
+            )
     
     @mcp.tool(
         name="list_wrapped_modules",
@@ -448,23 +497,49 @@ def setup_module_wrapper_tools(mcp, middleware):
             "openWorldHint": False
         }
     )
-    async def list_wrapped_modules() -> str:
+    async def list_wrapped_modules() -> WrappedModulesResponse:
         """
         List all modules that have been wrapped for semantic search.
         
         Returns:
-            JSON string with list of wrapped modules
+            WrappedModulesResponse: Structured list of wrapped modules with metadata
         """
         try:
-            modules = await middleware.list_modules()
+            module_names = await middleware.list_modules()
             
-            return json.dumps({
-                "modules": modules,
-                "count": len(modules)
-            }, indent=2)
+            # Convert to structured format
+            modules: List[WrappedModuleInfo] = []
+            for module_name in module_names:
+                # Get wrapper to get component count
+                wrapper = middleware.wrappers.get(module_name)
+                component_count = None
+                if wrapper:
+                    try:
+                        components = wrapper.list_components()
+                        component_count = len(components)
+                    except:
+                        pass  # If we can't get component count, leave as None
+                
+                module_info: WrappedModuleInfo = {
+                    "name": module_name,
+                    "indexed": True,  # If it's in the list, it's been indexed
+                    "component_count": component_count
+                }
+                modules.append(module_info)
+            
+            return WrappedModulesResponse(
+                modules=modules,
+                count=len(modules),
+                error=None
+            )
             
         except Exception as e:
-            return f"❌ Error listing modules: {str(e)}"
+            logger.error(f"❌ Error listing modules: {str(e)}")
+            return WrappedModulesResponse(
+                modules=[],
+                count=0,
+                error=f"Error listing modules: {str(e)}"
+            )
 
 
 # Example setup function

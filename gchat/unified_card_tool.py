@@ -38,7 +38,7 @@ import uuid
 import time
 import hashlib
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Union, Tuple, Callable
+from typing_extensions import Dict, List, Optional, Any, Union, Tuple, Callable
 
 # Import MCP-related components
 from fastmcp import FastMCP
@@ -48,11 +48,21 @@ from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
 from resources.user_resources import get_current_user_email_simple
 
+# Template middleware integration handled at server level - no imports needed here
+
 # Import ModuleWrapper
 from adapters.module_wrapper import ModuleWrapper
 
 # Import enhanced NLP parser
 from .nlp_card_parser import parse_enhanced_natural_language_description
+
+# Import TypedDict response types for structured responses
+from gchat.chat_types import (
+    CardComponentsResponse,
+    CardComponentInfo,
+    CardTemplatesResponse,
+    CardTemplateInfo
+)
 
 # Try to import Card Framework with graceful fallback
 try:
@@ -205,11 +215,11 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
                 skip_standard_library=True,  # Skip standard library modules
                 include_modules=["card_framework", "gchat"],  # Only include relevant modules
                 exclude_modules=["numpy", "pandas", "matplotlib", "scipy"],  # Exclude irrelevant modules
-                force_reindex=True  # Force reindex to populate components dictionary
+                force_reindex=False,  # Don't force reindex if collection has data
+                clear_collection=False  # Set to True to clear duplicates on restart
             )
             
-            # Cache card types and initialize Qdrant
-            _cache_card_types()
+            # Initialize Qdrant (but don't cache card types - defer until first use)
             _get_qdrant_client()
             
             logger.info("✅ ModuleWrapper initialized for card_framework")
@@ -224,36 +234,20 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
     return _card_framework_wrapper
 
 def _cache_card_types():
-    """Cache available card types for quick lookup."""
+    """Cache available card types and setup template parameter support."""
     global _card_types_cache
     
-    if not _card_framework_wrapper:
-        return
+    # Deferred caching approach - cache on first use
+    logger.debug("Card type caching deferred until first use")
     
-    # Search for card types with expanded list
-    card_types = [
-        "simple", "interactive", "form", "rich",
-        "text", "button", "image", "decorated",
-        "header", "section", "widget", "divider",
-        "selection", "chip", "grid", "column"
-    ]
+    # Template parameter support is now available - card tools can use:
+    # - {{template://user_email}} for automatic user email
+    # - {{user://current/profile}} for user context
+    # - {{workspace://content/recent}} for workspace data
+    # - {{gmail://content/suggestions}} for dynamic content
     
-    for card_type in card_types:
-        results = _card_framework_wrapper.search(f"{card_type} card", limit=5)
-        if results:
-            # Store only relevant information from the search results
-            formatted_results = []
-            for result in results:
-                formatted_results.append({
-                    "name": result.get("name"),
-                    "path": result.get("path"),
-                    "type": result.get("type"),
-                    "score": result.get("score"),
-                    "docstring": result.get("docstring", "")[:200]
-                })
-            _card_types_cache[card_type] = formatted_results
-    
-    logger.info(f"✅ Cached {len(_card_types_cache)} card types")
+    logger.info("🎭 Template parameter support enabled for Google Chat cards")
+    return
 
 async def _find_card_component(query: str, limit: int = 5, score_threshold: float = 0.1):
     """
@@ -282,11 +276,40 @@ async def _find_card_component(query: str, limit: int = 5, score_threshold: floa
         logger.info("🔄 Existing wrapper has no components, forcing reinitialization...")
         _initialize_card_framework_wrapper(force_reset=True)
     
-    # Check cached card types first (quick lookup optimization)
-    for card_type, cached_results in _card_types_cache.items():
-        if card_type.lower() in query.lower():
-            logger.info(f"Using cached results for card type: {card_type}")
-            return cached_results
+    # On-demand caching: check if query matches a common card type
+    common_card_types = [
+        "simple", "interactive", "form", "rich",
+        "text", "button", "image", "decorated",
+        "header", "section", "widget", "divider",
+        "selection", "chip", "grid", "column"
+    ]
+    
+    # Check if query matches a card type we might want to cache
+    query_lower = query.lower()
+    for card_type in common_card_types:
+        if card_type in query_lower:
+            # Check if already cached
+            if card_type in _card_types_cache:
+                logger.info(f"Using cached results for card type: {card_type}")
+                return _card_types_cache[card_type]
+            
+            # Not cached yet - search and cache now
+            logger.info(f"On-demand caching for card type: {card_type}")
+            results = _card_framework_wrapper.search(f"{card_type} card", limit=5)
+            if results:
+                # Store only relevant information from the search results
+                formatted_results = []
+                for result in results:
+                    formatted_results.append({
+                        "name": result.get("name"),
+                        "path": result.get("path"),
+                        "type": result.get("type"),
+                        "score": result.get("score"),
+                        "docstring": result.get("docstring", "")[:200]
+                    })
+                _card_types_cache[card_type] = formatted_results
+                logger.info(f"✅ Cached {len(formatted_results)} results for card type: {card_type}")
+                return formatted_results
     
     try:
         # LEVERAGE MODULEWRAPPER: Use existing search functionality
@@ -494,7 +517,7 @@ async def _find_card_template(query_or_id: str, limit: int = 3):
         
         # Process results
         templates = []
-        for result in search_results:
+        for result in search_results.points:
             templates.append({
                 "score": result.score,
                 "template_id": result.payload.get("template_id"),
@@ -1972,7 +1995,7 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
     async def list_available_card_components(
         query: Optional[str] = None,
         limit: int = 10
-    ) -> str:
+    ) -> CardComponentsResponse:
         """
         List available card components that can be used with send_dynamic_card.
         
@@ -1981,7 +2004,7 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
             limit: Maximum number of components to return
             
         Returns:
-            JSON string with available card components
+            CardComponentsResponse: Structured response with available card components
         """
         try:
             # Initialize wrapper if needed
@@ -1989,7 +2012,12 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 _initialize_card_framework_wrapper()
                 
             if not _card_framework_wrapper:
-                return "❌ Card Framework wrapper not available"
+                return CardComponentsResponse(
+                    components=[],
+                    count=0,
+                    query=query or "all",
+                    error="Card Framework wrapper not available"
+                )
             
             # Search for components or list cached types
             if query:
@@ -2008,27 +2036,33 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 # Limit results
                 results = results[:limit]
             
-            # Format results
-            formatted_results = []
+            # Format results as TypedDict
+            components: List[CardComponentInfo] = []
             for result in results:
-                formatted_result = {
-                    "name": result.get("name"),
-                    "path": result.get("path"),
-                    "type": result.get("type"),
-                    "score": result.get("score"),
-                    "docstring": result.get("docstring", "")[:200]  # Truncate long docstrings
-                }
-                formatted_results.append(formatted_result)
+                component = CardComponentInfo(
+                    name=result.get("name", ""),
+                    path=result.get("path", ""),
+                    type=result.get("type", ""),
+                    score=result.get("score"),
+                    docstring=result.get("docstring", "")[:200]  # Truncate long docstrings
+                )
+                components.append(component)
             
-            return json.dumps({
-                "query": query or "cached card types",
-                "results": formatted_results,
-                "count": len(formatted_results)
-            }, indent=2)
+            return CardComponentsResponse(
+                components=components,
+                count=len(components),
+                query=query or "cached card types",
+                error=None
+            )
             
         except Exception as e:
             logger.error(f"❌ Error listing card components: {e}", exc_info=True)
-            return f"❌ Error listing card components: {str(e)}"
+            return CardComponentsResponse(
+                components=[],
+                count=0,
+                query=query or "all",
+                error=str(e)
+            )
     
     @mcp.tool(
         name="list_card_templates",
@@ -2045,7 +2079,7 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
     async def list_card_templates(
         query: Optional[str] = None,
         limit: int = 10
-    ) -> str:
+    ) -> CardTemplatesResponse:
         """
         List available card templates stored in Qdrant.
         
@@ -2054,23 +2088,43 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
             limit: Maximum number of templates to return
             
         Returns:
-            JSON string with available card templates
+            CardTemplatesResponse: Structured response with available card templates
         """
         try:
             client = _get_qdrant_client()
             if not client:
-                return "❌ Qdrant client not available - cannot list templates"
+                return CardTemplatesResponse(
+                    templates=[],
+                    count=0,
+                    query=query or "all templates",
+                    error="Qdrant client not available - cannot list templates"
+                )
             
             # Check if collection exists
             collections = client.get_collections()
             collection_names = [c.name for c in collections.collections]
             
             if _card_templates_collection not in collection_names:
-                return f"❌ Collection {_card_templates_collection} does not exist"
+                return CardTemplatesResponse(
+                    templates=[],
+                    count=0,
+                    query=query or "all templates",
+                    error=f"Collection {_card_templates_collection} does not exist"
+                )
             
             # Search for templates if query is provided
+            template_infos: List[CardTemplateInfo] = []
             if query:
                 templates = await _find_card_template(query_or_id=query)
+                for template in templates:
+                    template_info = CardTemplateInfo(
+                        template_id=template.get("template_id", ""),
+                        name=template.get("name", ""),
+                        description=template.get("description", ""),
+                        created_at=template.get("created_at"),
+                        template=template.get("template")
+                    )
+                    template_infos.append(template_info)
             else:
                 # List all templates
                 try:
@@ -2086,31 +2140,47 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                     )
                     
                     # Process results
-                    templates = []
                     for point in search_results[0]:
-                        templates.append({
-                            "template_id": point.payload.get("template_id"),
-                            "name": point.payload.get("name"),
-                            "description": point.payload.get("description"),
-                            "created_at": point.payload.get("created_at")
-                        })
+                        template_info = CardTemplateInfo(
+                            template_id=point.payload.get("template_id", ""),
+                            name=point.payload.get("name", ""),
+                            description=point.payload.get("description", ""),
+                            created_at=point.payload.get("created_at"),
+                            template=point.payload.get("template")
+                        )
+                        template_infos.append(template_info)
                         
                 except ImportError:
-                    return "❌ Qdrant client models not available"
+                    return CardTemplatesResponse(
+                        templates=[],
+                        count=0,
+                        query=query or "all templates",
+                        error="Qdrant client models not available"
+                    )
                 except Exception as e:
                     logger.error(f"❌ Error listing templates: {e}", exc_info=True)
-                    return f"❌ Error listing templates: {str(e)}"
+                    return CardTemplatesResponse(
+                        templates=[],
+                        count=0,
+                        query=query or "all templates",
+                        error=str(e)
+                    )
             
-            # Format results
-            return json.dumps({
-                "query": query or "all templates",
-                "templates": templates,
-                "count": len(templates)
-            }, indent=2)
+            return CardTemplatesResponse(
+                templates=template_infos,
+                count=len(template_infos),
+                query=query or "all templates",
+                #  error=None
+            )
             
         except Exception as e:
             logger.error(f"❌ Error listing card templates: {e}", exc_info=True)
-            return f"❌ Error listing card templates: {str(e)}"
+            return CardTemplatesResponse(
+                templates=[],
+                count=0,
+                query=query or "all templates",
+                error=str(e)
+            )
     
     @mcp.tool(
         name="get_card_template",

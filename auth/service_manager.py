@@ -1,7 +1,7 @@
 """Generic Google service management for FastMCP2."""
 
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing_extensions import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 
 from google.auth.exceptions import RefreshError

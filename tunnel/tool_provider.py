@@ -6,7 +6,7 @@ Implements the FastMCP2 architecture with decorator-based tool registration.
 """
 
 import logging
-from typing import Dict, Optional, Union, Callable, Any
+from typing_extensions import Dict, Optional, Union, Callable, Any
 
 from fastmcp import FastMCP
 

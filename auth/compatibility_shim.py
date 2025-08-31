@@ -6,7 +6,7 @@ while automatically redirecting to the new centralized scope registry.
 """
 
 import logging
-from typing import Dict, List, Any, Optional, Union
+from typing_extensions import Dict, List, Any, Optional, Union
 from .scope_registry import ScopeRegistry, ServiceScopeManager
 
 logger = logging.getLogger(__name__)

@@ -5,7 +5,7 @@ These TypedDict classes define the structure of data returned by Calendar tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing import TypedDict, List, Optional
+from typing_extensions import TypedDict, List, Optional
 
 
 class CalendarInfo(TypedDict):
@@ -42,6 +42,7 @@ class CalendarListResponse(TypedDict):
     calendars: List[CalendarInfo]
     count: int
     userEmail: str
+    error: Optional[str]  # Optional error message for error responses
 
 
 class EventListResponse(TypedDict):
@@ -52,3 +53,4 @@ class EventListResponse(TypedDict):
     timeMin: Optional[str]
     timeMax: Optional[str]
     userEmail: str
+    error: Optional[str]  # Optional error message for error responses

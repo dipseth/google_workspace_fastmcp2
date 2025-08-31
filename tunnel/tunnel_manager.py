@@ -13,7 +13,7 @@ import os
 import signal
 import sys
 import weakref
-from typing import Dict, Optional, Union
+from typing_extensions import Dict, Optional, Union
 
 from .process_controller import ProcessController
 

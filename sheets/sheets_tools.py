@@ -6,7 +6,7 @@ This module provides MCP tools for interacting with Google Sheets API using the 
 
 import logging
 import asyncio
-from typing import List, Optional, Any
+from typing_extensions import List, Optional, Any
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
@@ -162,7 +162,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             logger.info(f"Successfully listed {len(spreadsheets)} spreadsheets for {user_google_email}.")
             
             return SpreadsheetListResponse(
-                spreadsheets=spreadsheets,
+                items=spreadsheets,  # Changed from 'spreadsheets' to 'items' to match TypedDict
                 count=len(spreadsheets),
                 userEmail=user_google_email
             )

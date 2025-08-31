@@ -447,7 +447,7 @@ await export_presentation(presentation_id="...", format="PDF")
 ```python
 # Event management with timezone support
 await list_calendars(user_email="...", show_hidden=False)
-await get_events(calendar_id="primary", time_min="2025-01-01T00:00:00Z")
+await list_events(calendar_id="primary", time_min="2025-01-01T00:00:00Z")
 await create_event(calendar_id="primary", summary="Meeting", start_time="...")
 await modify_event(calendar_id="primary", event_id="...", summary="Updated")
 await delete_event(calendar_id="primary", event_id="...")

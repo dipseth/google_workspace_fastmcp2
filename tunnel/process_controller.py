@@ -13,7 +13,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from typing import Dict, Optional, Tuple, Union
+from typing_extensions import Dict, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 

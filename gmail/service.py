@@ -10,7 +10,7 @@ This module handles Gmail API service creation with fallback support:
 
 import logging
 import asyncio
-from typing import Any
+from typing_extensions import Any
 
 from fastmcp import FastMCP
 

@@ -4,7 +4,7 @@ Centralized registry for managing adapter instances
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing_extensions import Dict, Any, Optional, List
 from .base_api import BaseAPI, APIMetadata
 from .adapters import APIAdapter
 from .adapter_factory import AdapterFactory

@@ -5,7 +5,7 @@ instead of custom JWT tokens. This enables dynamic client registration with MCP 
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing_extensions import Optional, Dict, Any
 from pathlib import Path
 
 from fastmcp.server.auth import BearerAuthProvider

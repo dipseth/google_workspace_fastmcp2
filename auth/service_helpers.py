@@ -1,7 +1,7 @@
 """Helper functions and utilities for Google service management."""
 
 import logging
-from typing import Any, Optional, Union, List, Dict
+from typing_extensions import Any, Optional, Union, List, Dict
 
 from .service_manager import get_google_service, get_available_services, get_available_scope_groups
 from .context import (

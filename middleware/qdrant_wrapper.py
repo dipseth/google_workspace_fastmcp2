@@ -5,7 +5,7 @@ Simple wrapper for Qdrant middleware to ensure it doesn't block server startup.
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing_extensions import Any, Dict, Optional
 from datetime import datetime
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext

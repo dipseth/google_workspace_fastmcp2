@@ -5,7 +5,7 @@ authenticated user's email from resources instead of requiring it as a parameter
 """
 
 import logging
-from typing import List, Optional
+from typing_extensions import List, Optional
 
 from fastmcp import FastMCP
 from resources.user_resources import get_current_user_email_simple

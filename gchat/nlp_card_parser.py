@@ -17,7 +17,7 @@ Examples:
 
 import re
 import logging
-from typing import Dict, List, Any, Optional, Tuple, Union
+from typing_extensions import Dict, List, Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)

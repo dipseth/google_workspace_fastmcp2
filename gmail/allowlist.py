@@ -12,12 +12,13 @@ and provides a security feature for Gmail sending operations.
 
 import logging
 import re
-from typing import Optional, Union, List
+from typing_extensions import Optional, Union, List
 
 from fastmcp import FastMCP
 
 from config.settings import settings
 from .utils import _parse_email_addresses
+from .gmail_types import GmailAllowListResponse, AllowedEmailInfo
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ async def remove_from_gmail_allow_list(
 
 async def view_gmail_allow_list(
     user_google_email: str
-) -> str:
+) -> GmailAllowListResponse:
     """
     Views the current Gmail allow list configuration.
     Shows which email addresses will skip elicitation confirmation.
@@ -231,7 +232,7 @@ async def view_gmail_allow_list(
         user_google_email: The authenticated user's Google email address (for authorization)
 
     Returns:
-        str: Formatted list of allowed email addresses
+        GmailAllowListResponse: Structured response with allow list information
     """
     logger.info(f"[view_gmail_allow_list] User: '{user_google_email}' viewing allow list")
 
@@ -239,22 +240,11 @@ async def view_gmail_allow_list(
         # Get current allow list
         allow_list = settings.get_gmail_allow_list()
 
-        if not allow_list:
-            return """📋 Gmail Allow List Status
-
-**Currently Empty**
-• No emails are configured to skip elicitation confirmation
-• All recipients will require confirmation before sending
-
-**To add emails to the allow list:**
-Use `add_to_gmail_allow_list` tool with the email address
-
-**Configuration:**
-Set the GMAIL_ALLOW_LIST environment variable with comma-separated emails"""
-
-        # Create masked versions for privacy
-        masked_list = []
+        # Convert to structured format
+        allowed_emails: List[AllowedEmailInfo] = []
+        
         for email in allow_list:
+            # Create masked version for privacy
             if '@' in email:
                 local, domain = email.split('@', 1)
                 if len(local) > 3:
@@ -263,37 +253,35 @@ Set the GMAIL_ALLOW_LIST environment variable with comma-separated emails"""
                     masked = f"***@{domain}"
             else:
                 masked = email[:3] + "***" if len(email) > 3 else "***"
-            masked_list.append(masked)
+            
+            email_info: AllowedEmailInfo = {
+                "email": email,
+                "masked_email": masked
+            }
+            allowed_emails.append(email_info)
 
-        # Build response
-        lines = [
-            "📋 Gmail Allow List Status",
-            "",
-            f"**{len(allow_list)} Email(s) Configured**",
-            "These recipients will skip elicitation confirmation when sending emails:",
-            ""
-        ]
+        logger.info(f"Successfully retrieved {len(allowed_emails)} allowed emails for {user_google_email}")
 
-        for i, (masked, full) in enumerate(zip(masked_list, allow_list), 1):
-            lines.append(f"{i}. {masked}")
-
-        lines.extend([
-            "",
-            "**Management:**",
-            "• Use `add_to_gmail_allow_list` to add new emails",
-            "• Use `remove_from_gmail_allow_list` to remove emails",
-            "",
-            "**Configuration Source:**",
-            "GMAIL_ALLOW_LIST environment variable",
-            "",
-            "**Note:** Full email addresses are hidden for privacy."
-        ])
-
-        return "\n".join(lines)
+        return GmailAllowListResponse(
+            allowed_emails=allowed_emails,
+            count=len(allowed_emails),
+            userEmail=user_google_email,
+            is_configured=len(allowed_emails) > 0,
+            source="GMAIL_ALLOW_LIST environment variable",
+            error=None
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error in view_gmail_allow_list: {e}")
-        return f"❌ Unexpected error: {e}"
+        # Return structured error response
+        return GmailAllowListResponse(
+            allowed_emails=[],
+            count=0,
+            userEmail=user_google_email,
+            is_configured=False,
+            source="GMAIL_ALLOW_LIST environment variable",
+            error=f"Unexpected error: {e}"
+        )
 
 
 def setup_allowlist_tools(mcp: FastMCP) -> None:
@@ -349,5 +337,5 @@ def setup_allowlist_tools(mcp: FastMCP) -> None:
     )
     async def view_gmail_allow_list_tool(
         user_google_email: str
-    ) -> str:
+    ) -> GmailAllowListResponse:
         return await view_gmail_allow_list(user_google_email)

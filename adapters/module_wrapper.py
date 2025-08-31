@@ -10,11 +10,13 @@ import inspect
 import importlib
 import sys
 import uuid
+import hashlib
 import logging
 import json
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable, Type
+from typing_extensions import Any, Dict, List, Optional, Tuple, Union, Callable, Type
 import asyncio
 from pathlib import Path
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +154,8 @@ class ModuleWrapper:
         skip_standard_library: bool = True,  # Whether to skip standard library modules
         include_modules: Optional[List[str]] = None,  # List of module prefixes to include (whitelist)
         exclude_modules: Optional[List[str]] = None,   # List of module prefixes to exclude (blacklist)
-        force_reindex: bool = False  # Force re-indexing even if collection has data
+        force_reindex: bool = False,  # Force re-indexing even if collection has data
+        clear_collection: bool = False  # Clear collection before indexing to ensure clean state
     ):
         """
         Initialize the module wrapper.
@@ -176,6 +179,8 @@ class ModuleWrapper:
                              that start with 'numpy.' or 'pandas.'.
             force_reindex: If True, force re-indexing even if the collection already has data. Useful for
                           updating the index after module changes. Default is False for performance.
+            clear_collection: If True, delete and recreate the collection before indexing. This ensures
+                            a completely clean state and removes all duplicates. Use with caution.
         """
         # Store configuration
         self.qdrant_host = qdrant_host
@@ -189,6 +194,7 @@ class ModuleWrapper:
         self.include_modules = include_modules or []
         self.exclude_modules = exclude_modules or []
         self.force_reindex = force_reindex
+        self.clear_collection = clear_collection
         
         # Initialize state
         self.module = self._resolve_module(module_or_name)
@@ -311,6 +317,13 @@ class ModuleWrapper:
             
             self.collection_needs_indexing = True  # Default to needing indexing
             
+            # Handle clear_collection flag
+            if self.clear_collection and self.collection_name in collection_names:
+                logger.warning(f"🗑️ Clearing collection {self.collection_name} as requested...")
+                self.client.delete_collection(collection_name=self.collection_name)
+                collection_names.remove(self.collection_name)
+                logger.info(f"✅ Collection {self.collection_name} cleared")
+            
             if self.collection_name not in collection_names:
                 # Create collection
                 self.client.create_collection(
@@ -341,12 +354,103 @@ class ModuleWrapper:
             logger.error(f"❌ Failed to ensure collection exists: {e}")
             raise
     
+    def _load_components_from_collection(self):
+        """Load components from existing Qdrant collection into memory."""
+        try:
+            logger.info(f"📥 Loading existing components from collection {self.collection_name}...")
+            
+            # Scroll through all points in the collection
+            offset = None
+            loaded_count = 0
+            
+            while True:
+                # Fetch a batch of points
+                scroll_result = self.client.scroll(
+                    collection_name=self.collection_name,
+                    limit=100,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False  # We don't need vectors for loading
+                )
+                
+                points, next_offset = scroll_result
+                
+                if not points:
+                    break
+                    
+                # Process each point
+                for point in points:
+                    payload = point.payload
+                    if not payload:
+                        continue
+                        
+                    # Extract component information
+                    path = payload.get("full_path")
+                    if not path:
+                        continue
+                        
+                    name = payload.get("name", "")
+                    module_path = payload.get("module_path", self.module_name)
+                    component_type = payload.get("type", "variable")
+                    docstring = payload.get("docstring", "")
+                    source = payload.get("source", "")
+                    
+                    # Try to resolve the actual object from the path
+                    obj = None
+                    try:
+                        # Split path and traverse to get the actual object
+                        parts = path.split(".")
+                        
+                        # Check if first part is the module name
+                        if parts[0] == self.module_name:
+                            parts = parts[1:]
+                        
+                        # Start with the module
+                        obj = self.module
+                        
+                        # Traverse the path
+                        for part in parts:
+                            obj = getattr(obj, part)
+                            
+                    except (AttributeError, IndexError):
+                        # Could not resolve object, it will remain None
+                        logger.debug(f"Could not resolve object for path: {path}")
+                        obj = None
+                    
+                    # Create component object
+                    component = ModuleComponent(
+                        name=name,
+                        obj=obj,  # May be None if couldn't resolve
+                        module_path=module_path,
+                        component_type=component_type,
+                        docstring=docstring,
+                        source=source,
+                        parent=None  # We don't reconstruct parent relationships
+                    )
+                    
+                    # Store in components dictionary
+                    self.components[path] = component
+                    loaded_count += 1
+                
+                # Move to next batch
+                offset = next_offset
+                if offset is None:
+                    break
+            
+            logger.info(f"✅ Loaded {loaded_count} components from collection")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to load components from collection: {e}", exc_info=True)
+            # Don't raise - continue with empty components if loading fails
+    
     def _index_module_components(self):
         """Index all components in the module."""
         try:
             # Check if indexing is needed
             if not getattr(self, 'collection_needs_indexing', True):
                 logger.info(f"⏩ Skipping indexing for module {self.module_name} - collection already has data")
+                # Load existing components from collection instead
+                self._load_components_from_collection()
                 return
                 
             logger.info(f"🔍 Indexing components in module {self.module_name} (max depth: {self.max_depth})...")
@@ -863,13 +967,17 @@ class ModuleWrapper:
             logger.warning(f"Error indexing nested components for {parent.name}: {e}")
     
     def _store_components_in_qdrant(self):
-        """Store all components in Qdrant with optimized batching."""
+        """Store all components in Qdrant with deterministic IDs to prevent duplicates."""
         try:
             component_count = len(self.components)
             logger.info(f"💾 Storing {component_count} components in Qdrant...")
             
             # Get Qdrant imports
             _, qdrant_models = _get_qdrant_imports()
+            
+            # Generate a version identifier for this indexing run
+            # This helps track when components were last indexed
+            index_version = datetime.utcnow().isoformat()
             
             # Use smaller batch size for better performance
             batch_size = 50
@@ -891,22 +999,35 @@ class ModuleWrapper:
                         logger.warning(f"Failed to generate embedding for component: {path}")
                         continue
                     
-                    # Create point with minimal payload
+                    # Create deterministic ID based on collection name and component path
+                    # This ensures the same component always gets the same ID
+                    # Format as a valid UUID v4 (8-4-4-4-12 format with dashes)
+                    id_string = f"{self.collection_name}:{path}"
+                    hash_hex = hashlib.sha256(id_string.encode()).hexdigest()
+                    # Format as UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+                    component_id = f"{hash_hex[:8]}-{hash_hex[8:12]}-{hash_hex[12:16]}-{hash_hex[16:20]}-{hash_hex[20:32]}"
+                    
+                    # Create point with minimal payload and version info
                     # Convert numpy array to list if needed
                     if hasattr(embedding, 'tolist'):
                         vector_list = embedding.tolist()
                     else:
                         vector_list = list(embedding)
                     
+                    # Add version info to payload
+                    payload = component.to_dict()
+                    payload['indexed_at'] = index_version
+                    payload['module_version'] = getattr(self.module, '__version__', 'unknown')
+                    
                     point = qdrant_models['PointStruct'](
-                        id=str(uuid.uuid4()),
+                        id=component_id,  # Use deterministic ID
                         vector=vector_list,
-                        payload=component.to_dict()
+                        payload=payload
                     )
                     
                     points.append(point)
                 
-                # Store this batch in Qdrant
+                # Store this batch in Qdrant (upsert will replace existing points with same ID)
                 self.client.upsert(
                     collection_name=self.collection_name,
                     points=points
@@ -915,7 +1036,7 @@ class ModuleWrapper:
                 processed += len(points)
                 logger.info(f"📦 Stored batch {batch_idx+1} ({processed}/{component_count} components)")
             
-            logger.info(f"✅ Stored {processed} components in Qdrant")
+            logger.info(f"✅ Stored {processed} components in Qdrant (duplicates replaced)")
             
         except Exception as e:
             logger.error(f"❌ Failed to store components in Qdrant: {e}", exc_info=True)

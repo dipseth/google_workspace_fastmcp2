@@ -10,7 +10,7 @@ This module provides tools for:
 
 import logging
 import asyncio
-from typing import List, Literal
+from typing_extensions import List, Literal
 
 from fastmcp import FastMCP, Context
 from googleapiclient.errors import HttpError

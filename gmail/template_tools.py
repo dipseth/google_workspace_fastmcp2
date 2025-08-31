@@ -10,10 +10,11 @@ This module provides tools for:
 
 import json
 import logging
-from typing import Optional, Dict, Any, List
+from typing_extensions import Optional, Dict, Any, List
 from fastmcp import Context
 
 from .templates import EmailTemplateManager, EmailTemplate, TemplateMapping
+from .gmail_types import EmailTemplatesResponse, EmailTemplateInfo
 
 logger = logging.getLogger(__name__)
 
@@ -178,17 +179,19 @@ async def assign_template_to_user(
 
 async def list_email_templates(
     search_query: Optional[str] = None,
-    limit: int = 20
-) -> str:
+    limit: int = 20,
+    user_google_email: str = ""  # Added for consistency with other tools
+) -> EmailTemplatesResponse:
     """
     Lists available email templates with optional search filtering.
     
     Args:
         search_query: Optional search query to filter templates
         limit: Maximum number of templates to return
+        user_google_email: User's email address (for consistency)
         
     Returns:
-        str: JSON list of templates with details
+        EmailTemplatesResponse: Structured response with template list
         
     Examples:
         # List all templates
@@ -214,13 +217,13 @@ async def list_email_templates(
                 limit=limit
             )
         
-        # Format templates for output
-        template_list = []
+        # Format templates for structured output
+        template_list: List[EmailTemplateInfo] = []
         for template in templates:
             # Get user mappings for this template
             mappings = await template_manager.get_template_mappings(template.id)
             
-            template_info = {
+            template_info: EmailTemplateInfo = {
                 "id": template.id,
                 "name": template.name,
                 "description": template.description,
@@ -231,18 +234,26 @@ async def list_email_templates(
             }
             template_list.append(template_info)
         
-        return json.dumps({
-            "success": True,
-            "count": len(template_list),
-            "templates": template_list
-        }, indent=2)
+        logger.info(f"Successfully retrieved {len(template_list)} templates")
+        
+        return EmailTemplatesResponse(
+            templates=template_list,
+            count=len(template_list),
+            userEmail=user_google_email,
+            search_query=search_query,
+            error=None
+        )
         
     except Exception as e:
         logger.error(f"Error listing email templates: {e}")
-        return json.dumps({
-            "success": False,
-            "message": f"❌ Failed to list templates: {str(e)}"
-        })
+        # Return structured error response
+        return EmailTemplatesResponse(
+            templates=[],
+            count=0,
+            userEmail=user_google_email,
+            search_query=search_query,
+            error=f"Failed to list templates: {str(e)}"
+        )
 
 
 async def remove_template_assignment(
@@ -616,9 +627,10 @@ def setup_template_tools(mcp):
     )
     async def list_email_templates_tool(
         search_query: Optional[str] = None,
-        limit: int = 20
-    ) -> str:
-        return await list_email_templates(search_query, limit)
+        limit: int = 20,
+        user_google_email: str = ""  # Added for consistency
+    ) -> EmailTemplatesResponse:
+        return await list_email_templates(search_query, limit, user_google_email)
     
     @mcp.tool(
         name="remove_template_assignment",

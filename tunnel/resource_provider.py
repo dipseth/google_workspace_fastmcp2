@@ -5,7 +5,7 @@ This module provides MCP resources for accessing tunnel information.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing_extensions import Any, Dict, List, Optional
 
 from .tunnel_manager import TunnelManager
 

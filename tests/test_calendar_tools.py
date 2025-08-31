@@ -105,10 +105,57 @@ class TestCalendarTools:
         # Should return error for test user or event list
         valid_responses = [
             "events", "no events found", "requires authentication", "no valid credentials",
-            "❌", "failed to get events", "unexpected error", "successfully retrieved",
+            "failed to get events", "unexpected error", "successfully retrieved",
             "calendar service", "unable to get"
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_list_events_without_timemax(self, client):
+        """Test that list_events properly handles None timeMax parameter (not passing 'None' as string)."""
+        # This test verifies the fix for the bug where timeMax was being passed as the string 'None'
+        result = await client.call_tool("list_events", {
+            "user_google_email": TEST_EMAIL,
+            "calendar_id": "primary",
+            # Explicitly NOT providing time_max to test None handling
+            "max_results": 5
+        })
+        
+        assert len(result) > 0
+        content = result[0].text
+        
+        # The response should NOT contain the specific error about 'None' being invalid
+        assert "timeMax: 'None'" not in content, "Bug detected: timeMax is being passed as string 'None' instead of being omitted"
+        
+        # Should get a valid response (either events or auth error)
+        valid_responses = [
+            "events", "no events found", "requires authentication", "no valid credentials",
+            "failed to get events", "unexpected error", "successfully retrieved",
+            "calendar service", "unable to get"
+        ]
+        assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_list_events_structured_error_response(self, client):
+        """Test that list_events returns structured responses even on errors."""
+        # Use an invalid calendar ID to trigger an error
+        result = await client.call_tool("list_events", {
+            "user_google_email": "nonexistent@invalid.com",
+            "calendar_id": "invalid_calendar_id",
+            "max_results": 5
+        })
+        
+        assert len(result) > 0
+        content = result[0].text
+        
+        # The error should be returned as structured content, not a raw error string
+        # Check that we don't get the old ValueError about structured_content
+        assert "ValueError: structured_content must be a dict or None" not in content, \
+            "Bug detected: Error responses are not being returned as structured EventListResponse"
+        
+        # The response should contain error information
+        assert any(keyword in content.lower() for keyword in ["error", "failed", "unable", "requires authentication"]), \
+            f"Error response not properly formatted: {content}"
     
     @pytest.mark.asyncio
     async def test_list_events_with_time_range(self, client):
@@ -167,7 +214,7 @@ class TestCalendarTools:
         # Check for valid responses (auth errors OR successful creation)
         valid_responses = [
             "event", "created", "requires authentication", "no valid credentials",
-            "❌", "failed to create event", "unexpected error", "successfully created",
+            "failed to create event", "unexpected error", "successfully created",
             "calendar service", "unable to get"
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
@@ -189,7 +236,7 @@ class TestCalendarTools:
         content = result[0].text
         valid_responses = [
             "event", "created", "requires authentication", "no valid credentials",
-            "❌", "failed to create event", "unexpected error", "successfully created",
+            "failed to create event", "unexpected error", "successfully created",
             "calendar service", "unable to get"
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
@@ -210,7 +257,7 @@ class TestCalendarTools:
         content = result[0].text
         valid_responses = [
             "event", "created", "requires authentication", "no valid credentials",
-            "❌", "failed to create event", "unexpected error", "successfully created",
+            "failed to create event", "unexpected error", "successfully created",
             "calendar service", "unable to get"
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
@@ -362,6 +409,26 @@ class TestCalendarTools:
         assert len(result) > 0
         content = result[0].text
         assert "error" in content.lower() or "not found" in content.lower() or "requires authentication" in content.lower()
+    
+    @pytest.mark.asyncio
+    async def test_list_calendars_structured_error_response(self, client):
+        """Test that list_calendars returns structured responses even on errors."""
+        # Use an invalid email to trigger an error
+        result = await client.call_tool("list_calendars", {
+            "user_google_email": "nonexistent@invalid.com"
+        })
+        
+        assert len(result) > 0
+        content = result[0].text
+        
+        # The error should be returned as structured content, not a raw error string
+        # Check that we don't get the old ValueError about structured_content
+        assert "ValueError: structured_content must be a dict or None" not in content, \
+            "Bug detected: Error responses are not being returned as structured CalendarListResponse"
+        
+        # The response should contain error information
+        assert any(keyword in content.lower() for keyword in ["error", "failed", "unable", "requires authentication"]), \
+            f"Error response not properly formatted: {content}"
 
 
 class TestCalendarIntegration:

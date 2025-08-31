@@ -10,7 +10,7 @@ from datetime import timezone
 import logging
 import asyncio
 import re
-from typing import List, Optional, Dict, Any
+from typing_extensions import List, Optional, Dict, Any
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
 
@@ -178,17 +178,30 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             return CalendarListResponse(
                 calendars=calendars,
                 count=len(calendars),
-                userEmail=user_google_email
+                userEmail=user_google_email,
+                error=None
             )
             
         except HttpError as e:
-            error_msg = f"❌ Failed to list calendars: {e}"
+            error_msg = f"Failed to list calendars: {e}"
             logger.error(f"[list_calendars] HTTP error: {e}")
-            return error_msg
+            # Return structured error response
+            return CalendarListResponse(
+                calendars=[],
+                count=0,
+                userEmail=user_google_email,
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {str(e)}"
             logger.error(f"[list_calendars] {error_msg}")
-            return error_msg
+            # Return structured error response
+            return CalendarListResponse(
+                calendars=[],
+                count=0,
+                userEmail=user_google_email,
+                error=error_msg
+            )
 
     @mcp.tool(
         name="list_events",
@@ -243,26 +256,64 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     f"time_min processing: original='{time_min}', formatted='{formatted_time_min}', effective='{effective_time_min}'"
                 )
 
-            effective_time_max = _correct_time_format_for_api(time_max, "time_max")
+            # Smart handling of timeMax with fallback logic
+            effective_time_max = None
             if time_max:
+                effective_time_max = _correct_time_format_for_api(time_max, "time_max")
                 logger.info(
                     f"time_max processing: original='{time_max}', formatted='{effective_time_max}'"
                 )
+            else:
+                # Default to 30 days from timeMin if not specified
+                # This provides a reasonable default window for most use cases
+                try:
+                    if effective_time_min:
+                        # Parse the timeMin to add 30 days
+                        from datetime import datetime, timedelta
+                        # Remove 'Z' and parse ISO format
+                        time_str = effective_time_min.rstrip('Z')
+                        # Handle both date and datetime formats
+                        if 'T' in time_str:
+                            time_min_dt = datetime.fromisoformat(time_str)
+                        else:
+                            # If it's just a date, parse it
+                            time_min_dt = datetime.strptime(time_str, "%Y-%m-%d")
+                        
+                        # Add 30 days
+                        time_max_dt = time_min_dt + timedelta(days=30)
+                        
+                        # Format back to RFC3339
+                        effective_time_max = time_max_dt.isoformat() + 'Z'
+                        logger.info(
+                            f"time_max not provided, defaulting to 30 days from time_min: {effective_time_max}"
+                        )
+                except Exception as e:
+                    logger.info(
+                        f"Could not calculate default time_max (30 days from time_min): {e}. "
+                        f"Omitting time_max to get all future events."
+                    )
+                    effective_time_max = None
 
+            # Build API parameters dynamically to handle None values properly
+            api_params = {
+                "calendarId": calendar_id,
+                "timeMin": effective_time_min,
+                "maxResults": max_results,
+                "singleEvents": True,
+                "orderBy": "startTime"
+            }
+            
+            # Only add timeMax if it has a value (not None)
+            if effective_time_max:
+                api_params["timeMax"] = effective_time_max
+                
             logger.info(
-                f"[list_events] Final API parameters - calendarId: '{calendar_id}', timeMin: '{effective_time_min}', timeMax: '{effective_time_max}', maxResults: {max_results}"
+                f"[list_events] Final API parameters: {api_params}"
             )
 
             events_result = await asyncio.to_thread(
                 lambda: calendar_service.events()
-                .list(
-                    calendarId=calendar_id,
-                    timeMin=effective_time_min,
-                    timeMax=effective_time_max,
-                    maxResults=max_results,
-                    singleEvents=True,
-                    orderBy="startTime",
-                )
+                .list(**api_params)
                 .execute()
             )
             items = events_result.get("items", [])
@@ -304,17 +355,36 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 calendarId=calendar_id,
                 timeMin=effective_time_min,
                 timeMax=effective_time_max,
-                userEmail=user_google_email
+                userEmail=user_google_email,
+                error=None
             )
             
         except HttpError as e:
-            error_msg = f"❌ Failed to get events: {e}"
+            error_msg = f"Failed to get events: {e}"
             logger.error(f"[list_events] HTTP error: {e}")
-            return error_msg
+            # Return structured error response
+            return EventListResponse(
+                events=[],
+                count=0,
+                calendarId=calendar_id,
+                timeMin=effective_time_min if 'effective_time_min' in locals() else None,
+                timeMax=effective_time_max if 'effective_time_max' in locals() else None,
+                userEmail=user_google_email,
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {str(e)}"
             logger.error(f"[list_events] {error_msg}")
-            return error_msg
+            # Return structured error response
+            return EventListResponse(
+                events=[],
+                count=0,
+                calendarId=calendar_id,
+                timeMin=effective_time_min if 'effective_time_min' in locals() else None,
+                timeMax=effective_time_max if 'effective_time_max' in locals() else None,
+                userEmail=user_google_email,
+                error=error_msg
+            )
 
     @mcp.tool(
         name="create_event",

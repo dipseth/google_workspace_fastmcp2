@@ -6,7 +6,7 @@ is extracted from JWT token claims instead of requiring parameters.
 
 import logging
 import asyncio
-from typing import Optional
+from typing_extensions import Optional, List
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
@@ -14,6 +14,9 @@ from googleapiclient.errors import HttpError
 from auth.jwt_auth import get_user_email_from_token
 from auth.service_helpers import get_service
 from resources.user_resources import get_current_user_email_simple
+
+# Import type definitions
+from .chat_types import JWTSpaceInfo, JWTSpacesResponse
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +40,7 @@ def setup_jwt_chat_tools(mcp: FastMCP) -> None:
         user_google_email: Optional[str] = None,
         page_size: int = 100,
         space_type: str = "all"
-    ) -> str:
+    ) -> JWTSpacesResponse:
         """
         Lists Google Chat spaces using multiple authentication methods.
         
@@ -50,7 +53,7 @@ def setup_jwt_chat_tools(mcp: FastMCP) -> None:
             space_type: Filter by space type: "all", "room", or "dm" (default: "all")
             
         Returns:
-            JSON formatted list of Google Chat spaces accessible to the authenticated user
+            JWTSpacesResponse: Structured list of Google Chat spaces accessible to the authenticated user
         """
         try:
             # 🎯 Multi-method email detection
@@ -83,7 +86,14 @@ def setup_jwt_chat_tools(mcp: FastMCP) -> None:
             
             # Final check
             if not user_email:
-                return "❌ Authentication error: Could not determine user email. Please provide user_google_email parameter or ensure proper authentication is set up."
+                return JWTSpacesResponse(
+                    spaces=[],
+                    count=0,
+                    userEmail="",
+                    authMethod="none",
+                    filterApplied=space_type,
+                    error="Authentication error: Could not determine user email. Please provide user_google_email parameter or ensure proper authentication is set up."
+                )
             
             logger.info(f"🎯 [list_spaces_jwt] Using email: {user_email} (method: {auth_method})")
             
@@ -92,7 +102,14 @@ def setup_jwt_chat_tools(mcp: FastMCP) -> None:
             chat_service = await get_service("chat", user_email)
             
             if not chat_service:
-                return f"❌ Failed to create Google Chat service for {user_email}. Please check your credentials and permissions."
+                return JWTSpacesResponse(
+                    spaces=[],
+                    count=0,
+                    userEmail=user_email,
+                    authMethod=auth_method,
+                    filterApplied=space_type,
+                    error=f"Failed to create Google Chat service for {user_email}. Please check your credentials and permissions."
+                )
             
             # Build filter based on space_type
             filter_param = None
@@ -112,16 +129,13 @@ def setup_jwt_chat_tools(mcp: FastMCP) -> None:
                 chat_service.spaces().list(**request_params).execute
             )
             
-            spaces = response.get('spaces', [])
-            logger.info(f"📊 Found {len(spaces)} spaces for {user_email}")
+            items = response.get('spaces', [])
+            logger.info(f"📊 Found {len(items)} spaces for {user_email}")
             
-            if not spaces:
-                return f"✅ No Google Chat spaces found for {user_email} with filter '{space_type}'"
-            
-            # Format results
-            formatted_spaces = []
-            for space in spaces:
-                space_info = {
+            # Convert to structured format
+            spaces: List[JWTSpaceInfo] = []
+            for space in items:
+                space_info: JWTSpaceInfo = {
                     "name": space.get('name', 'Unknown'),
                     "displayName": space.get('displayName', 'No display name'),
                     "type": space.get('type', 'Unknown'),
@@ -130,23 +144,30 @@ def setup_jwt_chat_tools(mcp: FastMCP) -> None:
                     "spaceDetails": space.get('spaceDetails', {}),
                     "memberCount": len(space.get('members', [])) if 'members' in space else None
                 }
-                formatted_spaces.append(space_info)
-            
-            result = {
-                "user_email": user_email,
-                "auth_method": "JWT Bearer Token",
-                "total_spaces": len(spaces),
-                "filter_applied": space_type,
-                "spaces": formatted_spaces
-            }
+                spaces.append(space_info)
             
             logger.info(f"✅ Successfully listed {len(spaces)} spaces for {user_email}")
-            return f"✅ Found {len(spaces)} Google Chat spaces for {user_email}:\n\n{result}"
+            
+            return JWTSpacesResponse(
+                spaces=spaces,
+                count=len(spaces),
+                userEmail=user_email,
+                authMethod=auth_method,
+                filterApplied=space_type,
+                error=None
+            )
             
         except Exception as e:
-            error_msg = f"❌ Error listing Google Chat spaces: {str(e)}"
+            error_msg = f"Error listing Google Chat spaces: {str(e)}"
             logger.error(f"[list_spaces_jwt] {error_msg}")
-            return error_msg
+            return JWTSpacesResponse(
+                spaces=[],
+                count=0,
+                userEmail=user_email if 'user_email' in locals() else "",
+                authMethod=auth_method if 'auth_method' in locals() else "unknown",
+                filterApplied=space_type,
+                error=error_msg
+            )
     
     logger.info("✅ JWT-enhanced Chat tools registered")
 

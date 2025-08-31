@@ -1,7 +1,7 @@
 """Application configuration using Pydantic Settings."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional, List
+from typing_extensions import Optional, List
 import os
 from pathlib import Path
 import logging

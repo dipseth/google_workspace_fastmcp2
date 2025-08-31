@@ -24,7 +24,7 @@ Dependencies:
 
 import logging
 from pathlib import Path
-from typing import Optional, Any
+from typing_extensions import Optional, Any
 from fastmcp import FastMCP
 
 from auth.google_auth import get_drive_service, initiate_oauth_flow, GoogleAuthError
@@ -316,6 +316,15 @@ def setup_oauth_callback_handler(mcp: FastMCP) -> None:
                 authorization_response=str(request.url),
                 state=state
             )
+            
+            # Store user email in session context for future requests
+            from auth.context import get_session_context, store_session_data
+            session_id = get_session_context()
+            if session_id:
+                store_session_data(session_id, "user_email", user_email)
+                logger.info(f"Stored user email {user_email} in session {session_id}")
+            else:
+                logger.warning(f"No session context available to store user email for {user_email}")
             
             return HTMLResponse(_create_success_response(user_email))
             

@@ -10,7 +10,7 @@ import asyncio
 import os
 import re
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Union
+from typing_extensions import List, Optional, Dict, Any, Union
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
 import aiohttp

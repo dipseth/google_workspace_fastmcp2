@@ -8,7 +8,7 @@ import json
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing_extensions import Dict, Any, Optional, List
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
