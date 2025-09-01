@@ -14,7 +14,7 @@ import asyncio
 import time
 from typing_extensions import Optional, Literal, Any, List, Dict, Tuple
 
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 from googleapiclient.errors import HttpError
 
 from .service import _get_gmail_service_with_fallback
@@ -29,7 +29,8 @@ async def apply_filter_to_existing_messages(
     remove_label_ids: Optional[List[str]] = None,
     batch_size: int = 100,
     max_messages: Optional[int] = None,
-    rate_limit_delay: float = 0.1
+    rate_limit_delay: float = 0.1,
+    ctx: Optional[Context] = None
 ) -> str:
     """
     Enhanced retroactive filter application with pagination, batch processing, and comprehensive error handling.
@@ -75,6 +76,10 @@ async def apply_filter_to_existing_messages(
             page_count += 1
             logger.info(f"[apply_filter_to_existing_messages] Fetching page {page_count}")
             
+            # Report progress for page fetching
+            if ctx:
+                await ctx.info(f"Fetching email page {page_count}...")
+            
             # Build list request with pagination
             search_params = {
                 "userId": "me",
@@ -96,6 +101,13 @@ async def apply_filter_to_existing_messages(
                 
             all_message_ids.extend([msg["id"] for msg in page_messages])
             logger.info(f"[apply_filter_to_existing_messages] Page {page_count}: Found {len(page_messages)} messages")
+            
+            # Report progress on total messages found so far
+            if ctx:
+                await ctx.report_progress(
+                    progress=len(all_message_ids),
+                    total=len(all_message_ids) + (500 if next_page_token else 0)  # Estimate
+                )
             
             # Check if we've reached the maximum message limit
             if max_messages and len(all_message_ids) >= max_messages:
@@ -124,7 +136,16 @@ async def apply_filter_to_existing_messages(
             batch_end = min(batch_start + batch_size, len(all_message_ids))
             batch_message_ids = all_message_ids[batch_start:batch_end]
             
-            logger.info(f"[apply_filter_to_existing_messages] Processing batch {batch_start//batch_size + 1}: {len(batch_message_ids)} messages")
+            batch_num = batch_start//batch_size + 1
+            logger.info(f"[apply_filter_to_existing_messages] Processing batch {batch_num}: {len(batch_message_ids)} messages")
+            
+            # Report batch processing progress
+            if ctx:
+                await ctx.report_progress(
+                    progress=batch_start,
+                    total=len(all_message_ids)
+                )
+                await ctx.info(f"Processing batch {batch_num} of {(len(all_message_ids) + batch_size - 1) // batch_size}: {len(batch_message_ids)} messages")
             
             # Try batch modify first (more efficient)
             try:
@@ -146,6 +167,10 @@ async def apply_filter_to_existing_messages(
                     
                     results["processed_count"] += len(batch_message_ids)
                     logger.info(f"[apply_filter_to_existing_messages] Batch processed successfully: {len(batch_message_ids)} messages")
+                    
+                    # Report successful batch completion
+                    if ctx:
+                        await ctx.info(f"✅ Batch {batch_num} completed: {len(batch_message_ids)} messages processed")
                 
                 else:
                     # Single message - use regular modify
@@ -169,7 +194,7 @@ async def apply_filter_to_existing_messages(
                 logger.warning(f"[apply_filter_to_existing_messages] Batch processing failed, falling back to individual calls: {batch_error}")
                 
                 # Fallback: Process messages individually
-                for message_id in batch_message_ids:
+                for idx, message_id in enumerate(batch_message_ids):
                     try:
                         modify_body = {}
                         if add_label_ids:
@@ -184,6 +209,13 @@ async def apply_filter_to_existing_messages(
                         )
                         
                         results["processed_count"] += 1
+                        
+                        # Report individual message progress in fallback mode
+                        if ctx and idx % 10 == 0:  # Report every 10 messages to avoid spam
+                            await ctx.report_progress(
+                                progress=batch_start + idx,
+                                total=len(all_message_ids)
+                            )
                         
                         # Rate limiting for individual calls
                         if rate_limit_delay > 0:
@@ -204,6 +236,14 @@ async def apply_filter_to_existing_messages(
         results["errors"].append(error_detail)
         results["error_count"] += 1
         logger.error(f"[apply_filter_to_existing_messages] Unexpected error: {e}")
+    
+    # Report final completion
+    if ctx:
+        await ctx.report_progress(
+            progress=results['processed_count'],
+            total=results['total_found']
+        )
+        await ctx.info(f"✅ Retroactive filter application completed: {results['processed_count']}/{results['total_found']} messages processed, {results['error_count']} errors")
     
     logger.info(f"[apply_filter_to_existing_messages] Completed - Found: {results['total_found']}, Processed: {results['processed_count']}, Errors: {results['error_count']}")
     return results
@@ -321,7 +361,8 @@ async def create_gmail_filter(
     mark_as_spam: Optional[bool] = None,
     mark_as_important: Optional[bool] = None,
     never_mark_as_spam: Optional[bool] = None,
-    never_mark_as_important: Optional[bool] = None
+    never_mark_as_important: Optional[bool] = None,
+    ctx: Optional[Context] = None
 ) -> str:
     """
     Creates a new Gmail filter/rule with specified criteria and actions.
@@ -501,7 +542,7 @@ async def create_gmail_filter(
                 search_query = " ".join(search_terms)
                 logger.info(f"[create_gmail_filter] Searching for existing emails with query: {search_query}")
 
-                # Use enhanced retroactive application function
+                # Use enhanced retroactive application function with progress reporting
                 retro_result = await apply_filter_to_existing_messages(
                     gmail_service=gmail_service,
                     search_query=search_query,
@@ -509,7 +550,8 @@ async def create_gmail_filter(
                     remove_label_ids=parsed_remove_label_ids,
                     batch_size=100,  # Default batch size
                     max_messages=10000,  # Safety limit, much higher than original 500
-                    rate_limit_delay=0.05  # Small delay for API rate limiting
+                    rate_limit_delay=0.05,  # Small delay for API rate limiting
+                    ctx=ctx  # Pass context for progress reporting
                 )
 
                 # Add the retroactive results to the response
@@ -746,6 +788,7 @@ def setup_filter_tools(mcp: FastMCP) -> None:
         }
     )
     async def create_gmail_filter_tool(
+        ctx: Context,
         user_google_email: str,
         # Criteria parameters
         from_address: Optional[str] = None,
@@ -769,7 +812,7 @@ def setup_filter_tools(mcp: FastMCP) -> None:
             user_google_email, from_address, to_address, subject_contains, query,
             has_attachment, exclude_chats, size, size_comparison, add_label_ids,
             remove_label_ids, forward_to, mark_as_spam, mark_as_important,
-            never_mark_as_spam, never_mark_as_important
+            never_mark_as_spam, never_mark_as_important, ctx
         )
 
     @mcp.tool(

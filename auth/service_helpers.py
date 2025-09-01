@@ -42,7 +42,7 @@ _FALLBACK_SERVICE_DEFAULTS = {
         "description": "Gmail service"
     },
     "calendar": {
-        "default_scopes": ["calendar_read", "calendar_events"],
+        "default_scopes": ["calendar_read", "calendar_events", "calendar_full"],
         "version": "v3",
         "description": "Google Calendar service"
     },

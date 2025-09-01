@@ -20,7 +20,7 @@ SERVER_PORT = os.getenv("MCP_SERVER_PORT", os.getenv("SERVER_PORT", "8002"))
 SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://{SERVER_HOST}:{SERVER_PORT}/mcp/")
 
 # Test email address from environment variable
-TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_user@example.com")
+TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS1", "sethrivers@gmail.com")
 
 
 class TestCalendarTools:
@@ -81,8 +81,17 @@ class TestCalendarTools:
             "user_google_email": TEST_EMAIL
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         # Should return error for test user without auth or list of calendars
         valid_responses = [
             "calendars", "primary", "requires authentication", "no valid credentials",
@@ -100,8 +109,17 @@ class TestCalendarTools:
             "max_results": 10
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         # Should return error for test user or event list
         valid_responses = [
             "events", "no events found", "requires authentication", "no valid credentials",
@@ -121,8 +139,16 @@ class TestCalendarTools:
             "max_results": 5
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
         
         # The response should NOT contain the specific error about 'None' being invalid
         assert "timeMax: 'None'" not in content, "Bug detected: timeMax is being passed as string 'None' instead of being omitted"
@@ -145,8 +171,16 @@ class TestCalendarTools:
             "max_results": 5
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
         
         # The error should be returned as structured content, not a raw error string
         # Check that we don't get the old ValueError about structured_content
@@ -169,8 +203,17 @@ class TestCalendarTools:
             "max_results": 5
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         print(f"DEBUG: Using email address: {TEST_EMAIL}")
         print(f"DEBUG: Actual response content: {repr(content)}")
         # Check for any valid response pattern from calendar tools
@@ -199,8 +242,16 @@ class TestCalendarTools:
             "location": "Virtual Meeting"
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
         
         # Try to extract event ID if creation was successful
         if "successfully created" in content.lower() and "event id:" in content.lower():
@@ -232,8 +283,17 @@ class TestCalendarTools:
             "end_time": day_after
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         valid_responses = [
             "event", "created", "requires authentication", "no valid credentials",
             "failed to create event", "unexpected error", "successfully created",
@@ -253,8 +313,17 @@ class TestCalendarTools:
             "timezone": "America/New_York"
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         valid_responses = [
             "event", "created", "requires authentication", "no valid credentials",
             "failed to create event", "unexpected error", "successfully created",
@@ -273,14 +342,383 @@ class TestCalendarTools:
             "attachments": ["https://drive.google.com/file/d/1234567890/view", "test_file_id_123"]
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         valid_responses = [
             "event", "created", "requires authentication", "no valid credentials",
             "❌", "failed to create event", "unexpected error", "successfully created",
             "calendar service", "unable to get"
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_create_bulk_events(self, client, future_datetime):
+        """Test creating multiple events in bulk using the events parameter as JSON string."""
+        import json
+        
+        # Calculate future datetime strings for multiple events
+        tomorrow = datetime.now() + timedelta(days=1)
+        day_after_tomorrow = datetime.now() + timedelta(days=2)
+        
+        # Add 'Z' suffix for UTC timezone to fix Google Calendar API requirement
+        start_time_1 = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+        end_time_1 = tomorrow.replace(hour=10, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+        start_time_2 = day_after_tomorrow.replace(hour=14, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+        end_time_2 = day_after_tomorrow.replace(hour=15, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+        
+        print(f"\n{'='*80}")
+        print(f"BULK EVENT TEST - Creating events with email: {TEST_EMAIL}")
+        print(f"Event 1: {start_time_1} to {end_time_1}")
+        print(f"Event 2: {start_time_2} to {end_time_2}")
+        print(f"{'='*80}")
+        
+        # Create events list
+        events_list = [
+            {
+                "summary": "🎈 First Bulk Test Event",
+                "start_time": start_time_1,
+                "end_time": end_time_1,
+                "description": "First event created via bulk operation"
+            },
+            {
+                "summary": "🎉 Second Bulk Test Event",
+                "start_time": start_time_2,
+                "end_time": end_time_2,
+                "description": "Second event created via bulk operation",
+                "location": "Virtual Meeting Room"
+            }
+        ]
+        
+        # Convert to JSON string (as MCP client would send it)
+        events_json = json.dumps(events_list)
+        print(f"Sending events as JSON string: {events_json[:100]}...")
+        
+        # Test bulk event creation with events as JSON string
+        result = await client.call_tool("create_event", {
+            "user_google_email": TEST_EMAIL,
+            "calendar_id": "primary",
+            "events": events_json  # Send as JSON string instead of Python list
+        })
+        
+        # Handle CallToolResult object properly and debug print
+        assert result is not None
+        
+        # Debug: Print raw result info
+        print(f"\n--- RAW RESULT DEBUG ---")
+        print(f"Result type: {type(result)}")
+        
+        # Access the content directly from result
+        content_str = ""
+        if hasattr(result, 'content'):
+            # For structured responses
+            if isinstance(result.content, list) and len(result.content) > 0:
+                # Extract text from TextContent object
+                if hasattr(result.content[0], 'text'):
+                    content_str = result.content[0].text
+                else:
+                    content_str = str(result.content[0])
+            else:
+                content_str = str(result.content) if result.content else ""
+            print(f"Result has 'content' attribute")
+            print(f"Content type: {type(result.content)}")
+            # Parse JSON if possible to pretty print
+            try:
+                import json
+                if content_str.startswith('{'):
+                    content_dict = json.loads(content_str)
+                    print(f"\n--- PARSED RESPONSE ---")
+                    print(json.dumps(content_dict, indent=2))
+                    
+                    # Check actual success/failure
+                    if content_dict.get('success'):
+                        print(f"\n✅ SUCCESS: Created {len(content_dict.get('eventsCreated', []))} events successfully!")
+                        for event in content_dict.get('eventsCreated', []):
+                            print(f"  - {event.get('summary', 'Unknown')} (ID: {event.get('eventId', 'N/A')})")
+                    else:
+                        print(f"\n❌ FAILURE: Failed to create events")
+                        print(f"Total processed: {content_dict.get('totalProcessed', 0)}")
+                        print(f"Successfully created: {len(content_dict.get('eventsCreated', []))}")
+                        print(f"Failed: {len(content_dict.get('eventsFailed', []))}")
+                        for event in content_dict.get('eventsFailed', [])[:3]:
+                            print(f"  - {event.get('summary', 'Unknown')}: {event.get('error', 'Unknown error')[:100]}")
+            except:
+                print(f"Content (raw): {content_str[:500]}")
+        elif hasattr(result, '__iter__') and len(result) > 0:
+            # For list-like responses (backward compatibility)
+            content_str = result[0].text if hasattr(result[0], 'text') else str(result[0])
+            print(f"Result is iterable with {len(result)} items")
+        else:
+            # Fallback to string representation
+            content_str = str(result)
+            print(f"Using string representation")
+        
+        print(f"{'='*80}\n")
+        
+        # Check for bulk operation responses
+        valid_responses = [
+            "bulk", "total processed", "successfully created", "failed", "batch",
+            "requires authentication", "no valid credentials", "events created",
+            "❌", "calendar service", "unable to get", "bulk event creation", "success"
+        ]
+        assert any(keyword in content_str.lower() for keyword in valid_responses), f"Response didn't match any expected bulk pattern: {content_str}"
+    
+    @pytest.mark.asyncio
+    async def test_create_bulk_events_comprehensive(self, client):
+        """Test comprehensive bulk event creation with all optional fields."""
+        import json
+        
+        # Create events for the next 3 days
+        base_date = datetime.now() + timedelta(days=1)
+        
+        events = []
+        for i in range(3):
+            event_date = base_date + timedelta(days=i)
+            start_time = event_date.replace(hour=10 + i, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%S")
+            end_time = event_date.replace(hour=11 + i, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%S")
+            
+            events.append({
+                "summary": f"🎯 Bulk Event {i+1}",
+                "start_time": start_time,
+                "end_time": end_time,
+                "description": f"Event {i+1} created via bulk operation with full details",
+                "location": f"Conference Room {i+1}",
+                "attendees": [f"attendee{i+1}@example.com"],
+                "timezone": "America/New_York"
+            })
+        
+        # Convert to JSON string (as MCP client would send it)
+        events_json = json.dumps(events)
+        
+        result = await client.call_tool("create_event", {
+            "user_google_email": TEST_EMAIL,
+            "calendar_id": "primary",
+            "events": events_json  # Send as JSON string
+        })
+        
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Access the content directly from result
+        if hasattr(result, 'content'):
+            # For structured responses
+            content = str(result.content) if result.content else ""
+        elif hasattr(result, '__iter__') and len(result) > 0:
+            # For list-like responses (backward compatibility)
+            content = result[0].text if hasattr(result[0], 'text') else str(result[0])
+        else:
+            # Fallback to string representation
+            content = str(result)
+        
+        # Should handle bulk creation with comprehensive event data
+        valid_responses = [
+            "bulk", "total processed", "3", "events", "created", "failed",
+            "requires authentication", "no valid credentials", "batch",
+            "❌", "calendar service", "unable to get"
+        ]
+        assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected comprehensive bulk pattern: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_create_bulk_events_parameter_validation(self, client):
+        """Test that bulk events parameter validation works correctly."""
+        import json
+        
+        # Test with invalid event structure (missing required fields)
+        invalid_events = json.dumps([
+            {
+                "summary": "Valid Event",
+                # Missing start_time and end_time - should fail validation
+            }
+        ])
+        
+        # This should handle the validation error gracefully
+        result = await client.call_tool("create_event", {
+            "user_google_email": TEST_EMAIL,
+            "events": invalid_events
+        })
+        
+        # Check that we get an error response, not an exception
+        assert result is not None
+        if hasattr(result, 'content'):
+            content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
+        # Should contain error about missing required fields
+        assert any(keyword in content.lower() for keyword in ["error", "failed", "required", "missing", "start_time", "end_time"]), \
+            f"Expected validation error for missing fields, got: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_create_bulk_events_json_string_birthday_reminders(self, client):
+        """Test creating birthday reminder events with JSON string (exact user scenario)."""
+        import json
+        
+        # Create the exact events from the user's example
+        events_data = [
+            {
+                "summary": "Julia Birthday Reminder - Plan Something Special",
+                "start_time": "2025-10-28T09:00:00-05:00",
+                "end_time": "2025-10-28T10:00:00-05:00",
+                "description": "Time to prepare for Julia birthday. Born 1984 in Arlington TX, turning 41. Plan something special for your wife from Texas.",
+                "location": "Birthday Planning Mode"
+            },
+            {
+                "summary": "Theo Birthday Reminder - Big Boy Birthday Coming",
+                "start_time": "2025-11-01T09:00:00-05:00",
+                "end_time": "2025-11-01T10:00:00-05:00",
+                "description": "Time to prepare for Theo birthday. Born 2016 in Chicago IL, turning 9. Plan awesome 9th birthday celebration.",
+                "location": "Party Planning Central"
+            }
+        ]
+        
+        # Convert to JSON string (exactly as MCP client sends it)
+        events_json = json.dumps(events_data)
+        
+        print(f"\n{'='*80}")
+        print(f"BIRTHDAY REMINDER TEST - Testing exact user scenario")
+        print(f"Creating events for: {TEST_EMAIL}")
+        print(f"Events JSON: {events_json[:150]}...")
+        print(f"{'='*80}")
+        
+        # Test creating the events
+        result = await client.call_tool("create_event", {
+            "user_google_email": TEST_EMAIL,
+            "calendar_id": "primary",
+            "events": events_json  # Send as JSON string
+        })
+        
+        # Handle CallToolResult object properly
+        assert result is not None
+        
+        # Extract and analyze content
+        content_str = ""
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                if hasattr(result.content[0], 'text'):
+                    content_str = result.content[0].text
+                else:
+                    content_str = str(result.content[0])
+            else:
+                content_str = str(result.content) if result.content else ""
+        else:
+            content_str = str(result)
+        
+        print(f"\nRESULT: {content_str[:500]}...")
+        
+        # Parse JSON response if possible to check actual results
+        try:
+            import json
+            if content_str.startswith('{'):
+                response_dict = json.loads(content_str)
+                if response_dict.get('success'):
+                    print(f"\n✅ SUCCESS: Birthday reminders created!")
+                    print(f"Created {len(response_dict.get('eventsCreated', []))} events")
+                else:
+                    print(f"\n❌ FAILED: {response_dict.get('error', 'Unknown error')}")
+                    # This should NOT show the JSON parsing error anymore
+                    assert "is not valid under any of the given schemas" not in content_str, \
+                        "Bug still present: JSON string not being parsed correctly"
+        except:
+            pass
+        
+        # Check that we don't get the schema validation error
+        assert "is not valid under any of the given schemas" not in content_str, \
+            "Bug detected: Events JSON string is not being parsed before validation"
+        
+        # Should get either success or auth error (not schema validation error)
+        valid_responses = [
+            "bulk", "total processed", "successfully created", "failed",
+            "requires authentication", "no valid credentials", "events created",
+            "calendar service", "unable to get", "success"
+        ]
+        assert any(keyword in content_str.lower() for keyword in valid_responses), \
+            f"Response didn't match expected patterns: {content_str}"
+    
+    @pytest.mark.asyncio
+    async def test_create_bulk_events_backward_compatibility(self, client, future_datetime):
+        """Test that legacy single event creation still works with bulk implementation."""
+        # This tests backward compatibility - legacy parameters should still work
+        result = await client.call_tool("create_event", {
+            "user_google_email": TEST_EMAIL,
+            "summary": "Legacy Mode Test Event",
+            "start_time": future_datetime["start"],
+            "end_time": future_datetime["end"],
+            "description": "Testing backward compatibility with bulk implementation"
+        })
+        
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Access the content directly from result
+        if hasattr(result, 'content'):
+            # For structured responses
+            content = str(result.content) if result.content else ""
+        elif hasattr(result, '__iter__') and len(result) > 0:
+            # For list-like responses (backward compatibility)
+            content = result[0].text if hasattr(result[0], 'text') else str(result[0])
+        else:
+            # Fallback to string representation
+            content = str(result)
+        
+        # Should work exactly like before (single event response)
+        valid_responses = [
+            "event", "created", "successfully created", "requires authentication",
+            "no valid credentials", "❌", "failed to create event", "unexpected error",
+            "calendar service", "unable to get"
+        ]
+        assert any(keyword in content.lower() for keyword in valid_responses), f"Backward compatibility broken: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_create_bulk_events_parameter_conflict_validation(self, client, future_datetime):
+        """Test that providing both events array and legacy parameters results in proper handling."""
+        import json
+        
+        # Test parameter conflict - should use bulk mode and ignore legacy parameters
+        events_json = json.dumps([
+            {
+                "summary": "Bulk Event",
+                "start_time": future_datetime["start"],
+                "end_time": future_datetime["end"]
+            }
+        ])
+        
+        result = await client.call_tool("create_event", {
+            "user_google_email": TEST_EMAIL,
+            # Bulk mode parameters (as JSON string)
+            "events": events_json,
+            # Legacy parameters (should be ignored)
+            "summary": "Legacy Event",
+            "start_time": future_datetime["start"],
+            "end_time": future_datetime["end"]
+        })
+        
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Access the content directly from result
+        if hasattr(result, 'content'):
+            # For structured responses
+            content = str(result.content) if result.content else ""
+        elif hasattr(result, '__iter__') and len(result) > 0:
+            # For list-like responses (backward compatibility)
+            content = result[0].text if hasattr(result[0], 'text') else str(result[0])
+        else:
+            # Fallback to string representation
+            content = str(result)
+        
+        # Should process as bulk mode, not legacy mode
+        # Either bulk response or authentication error
+        valid_responses = [
+            "bulk", "total processed", "events created", "batch",
+            "requires authentication", "no valid credentials", "❌",
+            "calendar service", "unable to get"
+        ]
+        assert any(keyword in content.lower() for keyword in valid_responses), f"Parameter conflict not handled correctly: {content}"
     
     @pytest.mark.asyncio
     async def test_modify_event(self, client, test_event_id):
@@ -295,8 +733,17 @@ class TestCalendarTools:
             "description": "This event has been modified"
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         valid_responses = [
             "event", "modified", "requires authentication", "no valid credentials",
             "❌", "failed to modify event", "unexpected error", "successfully modified",
@@ -316,8 +763,17 @@ class TestCalendarTools:
             # No fields to modify
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         # Should indicate no fields provided
         assert "no fields provided" in content.lower() or "error" in content.lower()
     
@@ -332,8 +788,17 @@ class TestCalendarTools:
             "event_id": event_id
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         valid_responses = [
             "event", "title", "starts", "event details", "requires authentication", "no valid credentials",
             "❌", "failed to get event", "unexpected error", "successfully retrieved",
@@ -352,8 +817,17 @@ class TestCalendarTools:
             "event_id": event_id
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         valid_responses = [
             "deleted", "not found", "requires authentication", "no valid credentials",
             "❌", "failed to delete event", "unexpected error", "successfully deleted",
@@ -364,18 +838,53 @@ class TestCalendarTools:
     @pytest.mark.asyncio
     async def test_calendar_tools_parameter_validation(self, client):
         """Test parameter validation for Calendar tools."""
-        # Test missing required parameters
-        with pytest.raises(Exception):  # FastMCP should raise an error
-            await client.call_tool("create_event", {
-                "user_google_email": TEST_EMAIL
-                # Missing summary, start_time, end_time
-            })
+        from fastmcp.exceptions import ToolError
         
-        with pytest.raises(Exception):
+        # Test missing required parameters for create_event
+        # Since create_event has conditional requirements (either events array OR summary/start_time/end_time),
+        # it might handle this gracefully with an error response instead of raising an exception
+        result = None
+        error_raised = False
+        try:
+            result = await client.call_tool("create_event", {
+                "user_google_email": TEST_EMAIL
+                # Missing both events array AND legacy parameters
+            })
+        except ToolError as e:
+            error_raised = True
+            # If an error is raised, check it mentions missing required fields
+            error_msg = str(e).lower()
+            assert "validation error" in error_msg or "required" in error_msg or "missing" in error_msg, \
+                f"Expected validation error message, got: {e}"
+        
+        if not error_raised:
+            # If no error was raised, the tool should return an error response
+            assert result is not None
+            # Extract content from result
+            if hasattr(result, 'content'):
+                if isinstance(result.content, list) and len(result.content) > 0:
+                    content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+                else:
+                    content = str(result.content) if result.content else ""
+            else:
+                content = str(result)
+            
+            # Should return an error message about missing parameters
+            assert any(keyword in content.lower() for keyword in ["missing", "required", "error", "failed", "must provide", "need to specify"]), \
+                f"Expected validation error for missing parameters, got: {content}"
+        
+        # Test missing required parameters for get_event
+        # This one should definitely raise a ToolError since event_id is strictly required
+        with pytest.raises(ToolError) as exc_info:
             await client.call_tool("get_event", {
                 "user_google_email": TEST_EMAIL
                 # Missing event_id
             })
+        
+        # Check that the error specifically mentions event_id
+        error_msg = str(exc_info.value).lower()
+        assert "event_id" in error_msg and ("required" in error_msg or "validation" in error_msg), \
+            f"Expected validation error for missing event_id, got: {exc_info.value}"
     
     @pytest.mark.asyncio
     async def test_time_format_handling(self, client):
@@ -395,7 +904,8 @@ class TestCalendarTools:
                 "max_results": 1
             })
             
-            assert len(result) > 0
+            # Handle CallToolResult object properly
+            assert result is not None
             # Should handle all formats without error
     
     @pytest.mark.asyncio
@@ -406,8 +916,17 @@ class TestCalendarTools:
             "event_id": "invalid_event_id_12345"
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         assert "error" in content.lower() or "not found" in content.lower() or "requires authentication" in content.lower()
     
     @pytest.mark.asyncio
@@ -418,8 +937,16 @@ class TestCalendarTools:
             "user_google_email": "nonexistent@invalid.com"
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
         
         # The error should be returned as structured content, not a raw error string
         # Check that we don't get the old ValueError about structured_content
@@ -464,6 +991,15 @@ class TestCalendarIntegration:
             "calendar_id": "invalid_calendar_id@group.calendar.google.com"
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        # Handle CallToolResult object properly
+        assert result is not None
+        # Extract content from result
+        if hasattr(result, 'content'):
+            if isinstance(result.content, list) and len(result.content) > 0:
+                content = result.content[0].text if hasattr(result.content[0], 'text') else str(result.content[0])
+            else:
+                content = str(result.content) if result.content else ""
+        else:
+            content = str(result)
+        
         assert "error" in content.lower() or "requires authentication" in content.lower()

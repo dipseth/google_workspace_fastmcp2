@@ -36,7 +36,7 @@ class SpaceListResponse(TypedDict):
     count: int
     spaceType: str  # Filter type used: 'all', 'room', 'dm'
     userEmail: str
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]   # Optional error message for error responses
 
 
 class MessageListResponse(TypedDict):
@@ -47,7 +47,7 @@ class MessageListResponse(TypedDict):
     spaceName: str
     orderBy: str
     userEmail: str
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]   # Optional error message for error responses
 
 
 class CardTypeInfo(TypedDict):
@@ -62,7 +62,7 @@ class CardTypesResponse(TypedDict):
     card_types: List[CardTypeInfo]
     count: int
     framework_status: str
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]   # Optional error message for error responses
 
 
 class CardComponentInfo(TypedDict):
@@ -79,7 +79,7 @@ class CardComponentsResponse(TypedDict):
     components: List[CardComponentInfo]
     count: int
     query: str
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]   # Optional error message for error responses
 
 
 class CardTemplateInfo(TypedDict):
@@ -118,4 +118,4 @@ class JWTSpacesResponse(TypedDict):
     userEmail: str
     authMethod: str  # 'JWT Bearer Token', 'resource_context', etc.
     filterApplied: str  # 'all', 'room', 'dm'
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]   # Optional error message for error responses

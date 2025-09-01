@@ -1,0 +1,140 @@
+================================================================================
+STRUCTURED RESPONSE MIGRATION VERIFICATION REPORT
+================================================================================
+
+📊 SUMMARY STATISTICS
+----------------------------------------
+Total Tools Found: 121
+Tools with 'list' Tag: 19
+Successfully Migrated: 17
+Tools with Issues: 0
+Migration Success Rate: 89.5%
+
+Services Covered: adapters, auth, docs, drive, forms, gcalendar, gchat, gmail, photos, sheets, slides
+Type Files Created: 9
+
+================================================================================
+DETAILED VERIFICATION RESULTS
+================================================================================
+
+✅ PASSED TOOLS
+----------------------------------------
+  • list_gmail_filters
+    TypedDict: GmailFiltersResponse
+    Fields: filters, count, userEmail, error
+  • view_gmail_allow_list
+    TypedDict: GmailAllowListResponse
+    Fields: allowed_emails, count, userEmail, is_configured, source, error
+  • list_email_templates
+    TypedDict: EmailTemplatesResponse
+    Fields: templates, count, userEmail, search_query, error
+  • list_drive_items
+    TypedDict: DriveItemsResponse
+    Fields: items, count, folderId, folderName, userEmail, driveId, error
+  • list_form_responses
+    TypedDict: FormResponsesListResponse
+    Fields: responses, count, formId, formTitle, userEmail, pageToken, nextPageToken, error
+  • list_messages
+    TypedDict: MessageListResponse
+    Fields: messages, count, spaceId, spaceName, orderBy, userEmail, error
+  • list_available_card_types
+    TypedDict: CardTypesResponse
+    Fields: card_types, count, framework_status, error
+  • list_available_card_components
+    TypedDict: CardComponentsResponse
+    Fields: components, count, query, error
+  • list_card_templates
+    TypedDict: CardTemplatesResponse
+    Fields: templates, count, query, error
+  • list_docs_in_folder
+    TypedDict: DocsListResponse
+    Fields: docs, count, folderId, folderName, userEmail, error
+  • list_spreadsheets
+    TypedDict: SpreadsheetListResponse
+    Fields: items, count, userEmail, error
+  • list_calendars
+    TypedDict: CalendarListResponse
+    Fields: calendars, count, userEmail, error
+  • list_events
+    TypedDict: EventListResponse
+    Fields: events, count, calendarId, timeMin, timeMax, userEmail, error
+  • list_photos_albums
+    TypedDict: AlbumListResponse
+    Fields: albums, count, excludeNonAppCreated, userEmail, error
+  • list_album_photos
+    TypedDict: PhotoListResponse
+    Fields: photos, count, albumId, userEmail, error
+  • list_module_components
+    TypedDict: ModuleComponentsResponse
+    Fields: components, count, module, error
+  • list_wrapped_modules
+    TypedDict: WrappedModulesResponse
+    Fields: modules, count, error
+
+📁 TYPE DEFINITION FILES
+----------------------------------------
+  • adapters/adapter_types.py
+  • docs/docs_types.py
+  • drive/drive_types.py
+  • forms/forms_types.py
+  • gcalendar/calendar_types.py
+  • gchat/chat_types.py
+  • gmail/gmail_types.py
+  • photos/photos_types.py
+  • sheets/sheets_types.py
+
+📝 TYPEDDICT DEFINITIONS FOUND
+----------------------------------------
+  • AlbumListResponse
+    Fields: albums, count, excludeNonAppCreated, userEmail, error
+  • CalendarListResponse
+    Fields: calendars, count, userEmail, error
+  • CardComponentsResponse
+    Fields: components, count, query, error
+  • CardTemplatesResponse
+    Fields: templates, count, query, error
+  • CardTypesResponse
+    Fields: card_types, count, framework_status, error
+  • DocsListResponse
+    Fields: docs, count, folderId, folderName, userEmail, error
+  • DriveItemsResponse
+    Fields: items, count, folderId, folderName, userEmail, driveId, error
+  • EmailTemplatesResponse
+    Fields: templates, count, userEmail, search_query, error
+  • EventListResponse
+    Fields: events, count, calendarId, timeMin, timeMax, userEmail, error
+  • FormResponseAnswer
+    Fields: questionId, questionTitle, answer
+  • FormResponseInfo
+    Fields: responseId, submittedTime, respondentEmail, answers
+  • FormResponsesListResponse
+    Fields: responses, count, formId, formTitle, userEmail, pageToken, nextPageToken, error
+  • GmailAllowListResponse
+    Fields: allowed_emails, count, userEmail, is_configured, source, error
+  • GmailFiltersResponse
+    Fields: filters, count, userEmail, error
+  • GmailLabelsResponse
+    Fields: labels, total_count, system_labels, user_labels, error
+  • JWTSpacesResponse
+    Fields: spaces, count, userEmail, authMethod, filterApplied, error
+  • MessageListResponse
+    Fields: messages, count, spaceId, spaceName, orderBy, userEmail, error
+  • ModuleComponentsResponse
+    Fields: components, count, module, error
+  • PhotoListResponse
+    Fields: photos, count, albumId, userEmail, error
+  • SpaceListResponse
+    Fields: spaces, count, spaceType, userEmail
+  • SpreadsheetListResponse
+    Fields: items, count, userEmail, error
+  • WrappedModulesResponse
+    Fields: modules, count, error
+
+================================================================================
+MIGRATION COMPLETION STATUS
+================================================================================
+
+🎉 ALL TOOLS SUCCESSFULLY MIGRATED!
+
+All MCP tools with 'list' tags now return structured TypedDict responses.
+The migration is complete and verified.

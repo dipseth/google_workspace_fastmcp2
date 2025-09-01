@@ -5,7 +5,7 @@ These TypedDict classes define the structure of data returned by Gmail tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional, Dict, Any
+from typing_extensions import TypedDict, List, Optional, Dict, Any, NotRequired
 
 
 class FilterCriteria(TypedDict):
@@ -43,7 +43,7 @@ class GmailFiltersResponse(TypedDict):
     filters: List[FilterInfo]
     count: int
     userEmail: str
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class AllowedEmailInfo(TypedDict):
@@ -59,7 +59,7 @@ class GmailAllowListResponse(TypedDict):
     userEmail: str
     is_configured: bool
     source: str  # "GMAIL_ALLOW_LIST environment variable"
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class EmailTemplateInfo(TypedDict):
@@ -79,7 +79,7 @@ class EmailTemplatesResponse(TypedDict):
     count: int
     userEmail: str
     search_query: Optional[str]
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class GmailLabelInfo(TypedDict):
@@ -102,4 +102,4 @@ class GmailLabelsResponse(TypedDict):
     total_count: int
     system_labels: List[GmailLabelInfo]
     user_labels: List[GmailLabelInfo]
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses

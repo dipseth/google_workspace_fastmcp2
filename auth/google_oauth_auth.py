@@ -33,6 +33,7 @@ def _get_oauth_metadata_scopes() -> list[str]:
             "https://www.googleapis.com/auth/drive.file",
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar",
             "https://www.googleapis.com/auth/chat.messages.readonly"
         ]
 

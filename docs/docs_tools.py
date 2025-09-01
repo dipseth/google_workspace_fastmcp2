@@ -30,8 +30,10 @@ Dependencies:
 import logging
 import asyncio
 import io
+import re
 from typing_extensions import List, Optional, Union
 from pathlib import Path
+from googleapiclient.http import MediaIoBaseUpload
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
@@ -475,13 +477,95 @@ async def list_docs_in_folder(
         )
 
 
+def detect_content_type(content: str) -> str:
+    """
+    Simple detection of content type based on common patterns.
+    
+    Args:
+        content: The content string to analyze
+        
+    Returns:
+        str: 'markdown', 'html', or 'plain'
+    """
+    # Check for HTML tags
+    if re.search(r'<h[1-6]>|<p>|<div>|<strong>|<em>|<ul>|<ol>|<li>|<table>', content, re.IGNORECASE):
+        return 'html'
+    
+    # Check for markdown patterns
+    if re.search(r'^#{1,6}\s+|\*\*.*?\*\*|\*.*?\*|^-\s+|^\d+\.\s+|\[.*?\]\(.*?\)', content, re.MULTILINE):
+        return 'markdown'
+    
+    return 'plain'
+
+
+def markdown_to_html(markdown_content: str) -> str:
+    """
+    Convert basic markdown to HTML.
+    This is a simple converter for common markdown patterns.
+    
+    Args:
+        markdown_content: Markdown content string
+        
+    Returns:
+        str: HTML content
+    """
+    html = markdown_content
+    
+    # Convert headers
+    html = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
+    html = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+    html = re.sub(r'^# (.+)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
+    
+    # Convert bold and italic
+    html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html)
+    html = re.sub(r'\*(.+?)\*', r'<em>\1</em>', html)
+    
+    # Convert links
+    html = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', html)
+    
+    # Convert bullet lists
+    lines = html.split('\n')
+    in_list = False
+    result_lines = []
+    
+    for line in lines:
+        if re.match(r'^-\s+', line):
+            if not in_list:
+                result_lines.append('<ul>')
+                in_list = True
+            item_text = re.sub(r'^-\s+', '', line)
+            result_lines.append(f'<li>{item_text}</li>')
+        else:
+            if in_list:
+                result_lines.append('</ul>')
+                in_list = False
+            if line.strip():
+                result_lines.append(f'<p>{line}</p>')
+            else:
+                result_lines.append('')
+    
+    if in_list:
+        result_lines.append('</ul>')
+    
+    return '\n'.join(result_lines)
+
+
 async def create_doc(
     user_google_email: str,
     title: str,
     content: str = '',
 ) -> str:
     """
-    Creates a new Google Doc and optionally inserts initial content.
+    Creates a new Google Doc and optionally inserts initial content with rich formatting.
+    
+    This function uses Google Drive API's automatic conversion feature to create properly
+    formatted Google Docs from HTML content. It supports:
+    - Plain text: Inserted directly using Docs API
+    - Markdown: Converted to HTML and then uploaded to Drive for conversion
+    - HTML: Uploaded to Drive for automatic conversion to Google Doc format
+    
+    The conversion approach leverages Google's built-in HTML-to-Docs conversion,
+    which properly handles headings, formatting, lists, tables, and other rich content.
 
     Args:
         user_google_email: The user's Google email address
@@ -493,24 +577,54 @@ async def create_doc(
     """
     logger.info(f"[create_doc] Email: '{user_google_email}', Title='{title}'")
 
-    # Request Docs service through middleware
-    docs_key = request_service("docs")
+    if not content:
+        # For empty documents, create a simple doc using Docs API
+        docs_key = request_service("docs")
+        
+        try:
+            docs_service = get_injected_service(docs_key)
+            logger.info(f"[create_doc] Using injected Docs service for empty doc")
+        except RuntimeError as e:
+            logger.warning(f"[create_doc] Docs middleware injection failed: {e}")
+            if "not yet fulfilled" in str(e).lower() or "service injection" in str(e).lower():
+                docs_service = await get_service("docs", user_google_email)
+                logger.info(f"[create_doc] Using direct Docs service for empty doc")
+            else:
+                raise
+
+        try:
+            doc = await asyncio.to_thread(
+                docs_service.documents().create(body={'title': title}).execute
+            )
+            doc_id = doc.get('documentId')
+            link = f"https://docs.google.com/document/d/{doc_id}/edit"
+            return f"Created empty Google Doc '{title}' (ID: {doc_id}) for {user_google_email}. Link: {link}"
+        except HttpError as e:
+            logger.error(f"Google API error creating empty doc: {e}")
+            if e.resp.status == 401:
+                return "❌ Authentication failed. Please check your Google credentials."
+            elif e.resp.status == 403:
+                return "❌ Permission denied. Make sure you have permission to create documents."
+            else:
+                return f"❌ Error creating document: {str(e)}"
+
+    # For content, use Drive API with conversion
+    drive_key = request_service("drive")
     
     try:
-        docs_service = get_injected_service(docs_key)
-        logger.info(f"[create_doc] Successfully retrieved injected Docs service for {user_google_email}")
+        drive_service = get_injected_service(drive_key)
+        logger.info(f"[create_doc] Using injected Drive service for content conversion")
     except RuntimeError as e:
-        logger.warning(f"[create_doc] Middleware injection failed: {e}")
+        logger.warning(f"[create_doc] Drive middleware injection failed: {e}")
         if "not yet fulfilled" in str(e).lower() or "service injection" in str(e).lower():
-            logger.info("[create_doc] Falling back to direct service creation")
+            logger.info("[create_doc] Falling back to direct drive service creation")
             try:
-                docs_service = await get_service("docs", user_google_email)
-                logger.info(f"[create_doc] Successfully created Docs service directly for {user_google_email}")
+                drive_service = await get_service("drive", user_google_email)
+                logger.info(f"[create_doc] Using direct Drive service for content conversion")
             except Exception as direct_error:
                 error_str = str(direct_error)
-                logger.error(f"[create_doc] Direct service creation also failed: {direct_error}")
+                logger.error(f"[create_doc] Direct drive service creation failed: {direct_error}")
                 
-                # Check for specific credential errors and return user-friendly messages
                 if "no valid credentials found" in error_str.lower():
                     return (
                         f"❌ **No Credentials Found**\n\n"
@@ -518,7 +632,7 @@ async def create_doc(
                         f"**To authenticate:**\n"
                         f"1. Run `start_google_auth` with your email: {user_google_email}\n"
                         f"2. Follow the authentication flow in your browser\n"
-                        f"3. Grant Docs permissions when prompted\n"
+                        f"3. Grant Drive permissions when prompted\n"
                         f"4. Return here after seeing the success page"
                     )
                 elif "credentials do not contain the necessary fields" in error_str.lower():
@@ -537,23 +651,50 @@ async def create_doc(
             raise
 
     try:
-        doc = await asyncio.to_thread(
-            docs_service.documents().create(body={'title': title}).execute
+        # Detect content type and prepare for conversion
+        content_type = detect_content_type(content)
+        logger.info(f"[create_doc] Detected content type: {content_type}")
+        
+        if content_type == 'markdown':
+            # Convert markdown to HTML
+            html_content = markdown_to_html(content)
+            logger.info(f"[create_doc] Converted markdown to HTML")
+        elif content_type == 'html':
+            html_content = content
+        else:
+            # For plain text, wrap in basic HTML
+            html_content = f"<p>{content.replace(chr(10), '</p><p>')}</p>"
+        
+        # Create file metadata for Google Docs conversion
+        file_metadata = {
+            'name': title,
+            'mimeType': 'application/vnd.google-apps.document'  # Target: Google Doc
+        }
+        
+        # Create media upload from HTML content
+        html_bytes = html_content.encode('utf-8')
+        media_body = MediaIoBaseUpload(
+            io.BytesIO(html_bytes),
+            mimetype='text/html',  # Source: HTML
+            resumable=False
         )
-        doc_id = doc.get('documentId')
         
-        if content:
-            requests = [{'insertText': {'location': {'index': 1}, 'text': content}}]
-            await asyncio.to_thread(
-                docs_service.documents().batchUpdate(
-                    documentId=doc_id, 
-                    body={'requests': requests}
-                ).execute
-            )
+        # Upload and convert to Google Doc
+        file = await asyncio.to_thread(
+            drive_service.files().create(
+                body=file_metadata,
+                media_body=media_body,
+                fields='id,name,webViewLink'
+            ).execute
+        )
         
-        link = f"https://docs.google.com/document/d/{doc_id}/edit"
-        msg = f"Created Google Doc '{title}' (ID: {doc_id}) for {user_google_email}. Link: {link}"
-        logger.info(f"Successfully created Google Doc '{title}' (ID: {doc_id}) for {user_google_email}. Link: {link}")
+        doc_id = file.get('id')
+        doc_name = file.get('name')
+        web_link = file.get('webViewLink')
+        
+        content_info = f" with {content_type} formatting"
+        msg = f"Created Google Doc '{doc_name}' (ID: {doc_id}) for {user_google_email}{content_info}. Link: {web_link}"
+        logger.info(f"Successfully created formatted Google Doc using Drive API conversion: {doc_id}")
         return msg
 
     except HttpError as e:
@@ -630,10 +771,10 @@ def setup_docs_tools(mcp: FastMCP):
     
     @mcp.tool(
         name="create_doc",
-        description="Create a new Google Doc with optional initial content",
-        tags={"docs", "create", "google"},
+        description="Create a new Google Doc with optional initial content. Supports plain text, Markdown, and HTML formatting. Content type is automatically detected and converted to proper Google Doc formatting.",
+        tags={"docs", "create", "google", "markdown", "html", "formatting"},
         annotations={
-            "title": "Create Google Doc",
+            "title": "Create Google Doc with Rich Formatting",
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
@@ -645,7 +786,7 @@ def setup_docs_tools(mcp: FastMCP):
         title: str,
         content: str = ''
     ) -> str:
-        """Create a new Google Doc."""
+        """Create a new Google Doc with automatic rich content formatting (supports Markdown and HTML)."""
         return await create_doc(user_google_email, title, content)
     
     logger.info("Google Docs tools registered successfully")

@@ -1,3 +1,5 @@
+> 🚨 **MAJOR UPDATE** (Latest): **Natural Resource URI Syntax** now supported! Use `{{user://current/email.email}}` directly in templates. See [Natural Resource URI Syntax](#-new-natural-resource-uri-syntax-breakthrough-feature) for details.
+
 # Template Parameter Middleware with Jinja2 Integration
 
 ## Overview
@@ -111,6 +113,38 @@ mindmap
 
 ## 🔧 Template Expression Syntax
 
+### 🎯 NEW: Natural Resource URI Syntax (Breakthrough Feature!)
+
+**✨ MAJOR UPDATE**: The middleware now supports **natural resource URI syntax** directly in Jinja2 templates!
+
+```python
+# 🆕 Natural property access - NOW WORKING!
+"{{user://current/email.email}}"           # → "sethrivers@gmail.com"
+"{{user://current/email.name}}"            # → "Seth Rivers"
+"{{workspace://content/recent.total_files}}" # → 42
+
+# 🆕 Complex property paths - FULLY SUPPORTED!
+"{{service://gmail/labels.0.name}}"        # → "Important"
+"{{workspace://content/recent.content_summary.documents}}" # → 10
+
+# 🆕 Use in templates naturally
+"Hello {{user://current/email.name}}!"     # → "Hello Seth Rivers!"
+"User {{user://current/email.email}} says hello" # → "User sethrivers@gmail.com says hello"
+```
+
+**🔧 How It Works (Behind the Scenes):**
+
+1. **Simple Preprocessing**: `{{user://current/email.email}}` → `{{user___current_email_dot_email}}`
+2. **Resource Resolution**: Fetches base URI `user://current/email` once
+3. **Property Extraction**: ResourceUndefined extracts `.email` property 
+4. **Performance**: Only 1 API call instead of separate calls per property
+
+**🎨 Key Benefits:**
+- **Natural syntax**: Write `{{user://current/email.email}}` instead of complex JSON paths
+- **Performance optimized**: Single resource fetch with multiple property access
+- **Jinja2 compatible**: Works seamlessly with all Jinja2 features
+- **Error resilient**: Graceful handling of missing properties
+
 ### Basic Resource Access (Original FastMCP Style)
 
 ```python
@@ -136,11 +170,15 @@ mindmap
 ### 🎨 NEW: Advanced Jinja2 Template Logic
 
 ```python
-# Conditional rendering
-"{% if resources.user_current_email %}Welcome {{resources.user_current_email}}!{% else %}Please log in{% endif %}"
+# 🆕 NATURAL SYNTAX with conditionals - NOW WORKING!
+"Hello {{user://current/email.name}}!"     # → "Hello Seth Rivers!"
+"User {{user://current/email.email}} says hello" # → "User sethrivers@gmail.com says hello"
 
-# Loop through data
-"{% for label in resources.gmail_labels %}{{label.name}}{% if not loop.last %}, {% endif %}{% endfor %}"
+# 🆕 NATURAL SYNTAX in expressions
+"Total files: {{workspace://content/recent.total_files}} | User: {{user://current/email.email}}"
+
+# 🔄 Traditional resource access (still supported)
+"{% if resources.user_current_email %}Welcome {{resources.user_current_email}}!{% else %}Please log in{% endif %}"
 
 # Jinja2 filters
 "{{resources.workspace_recent.content_summary.total_files | default(0)}}"
@@ -346,6 +384,48 @@ mcp.add_middleware(middleware)
 ```
 
 ### Tool with Jinja2 Template Parameters
+
+```python
+### 🆕 Tool with Natural Resource URI Syntax (Latest Update!)
+
+```python
+@mcp.tool()
+async def send_smart_email_with_natural_syntax(
+    recipient: str,
+    # 🆕 Natural syntax - direct property access!
+    user_email: str = "{{user://current/email.email}}",           # → "sethrivers@gmail.com"
+    user_name: str = "{{user://current/email.name}}",             # → "Seth Rivers"
+    total_files: int = "{{workspace://content/recent.total_files}}", # → 42
+    greeting: str = "Hello {{user://current/email.name}}!",       # → "Hello Seth Rivers!"
+    # Mixed syntax - new + traditional
+    summary: str = "User {{user://current/email.email}} has {{workspace://content/recent.total_files}} files"
+) -> str:
+    """NEW: Tool demonstrating natural resource URI syntax - no complex JSON paths needed!"""
+    
+    # All parameters are automatically resolved:
+    # user_email: "sethrivers@gmail.com"
+    # user_name: "Seth Rivers" 
+    # total_files: 42
+    # greeting: "Hello Seth Rivers!"
+    # summary: "User sethrivers@gmail.com has 42 files"
+    
+    return f"""
+    📧 **Smart Email Composed!**
+    
+    **From:** {user_name} ({user_email})
+    **To:** {recipient}
+    **Greeting:** {greeting}
+    **Summary:** {summary}
+    
+    🎯 **Natural Syntax Benefits:**
+    - Simple property access: {{user://current/email.email}} 
+    - Performance optimized: Single API call for multiple properties
+    - Jinja2 compatible: Works in conditionals, loops, and filters
+    - Error resilient: Graceful handling of missing properties
+    """
+```
+
+### Traditional Tool with Jinja2 Template Parameters
 
 ```python
 @mcp.tool()

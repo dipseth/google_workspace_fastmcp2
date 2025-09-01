@@ -92,6 +92,7 @@ class Settings(BaseSettings):
         # Calendar scopes
         "https://www.googleapis.com/auth/calendar.readonly",
         "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar",
         # Google Photos Library API scopes
         "https://www.googleapis.com/auth/photoslibrary.readonly",
         "https://www.googleapis.com/auth/photoslibrary.appendonly",

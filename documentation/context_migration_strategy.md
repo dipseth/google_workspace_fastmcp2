@@ -250,7 +250,7 @@ If issues arise:
 ### Example 1: Context Adapter
 ```python
 # auth/context_adapter.py
-from typing import Any, Optional
+from typing_extensions import Any, Optional
 from fastmcp import Context
 from .context import get_session_context, set_session_context
 

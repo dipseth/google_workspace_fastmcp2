@@ -5,7 +5,7 @@ These TypedDict classes define the structure of data returned by adapter tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional, Any
+from typing_extensions import TypedDict, List, Optional, Any, NotRequired
 
 
 class ModuleComponentInfo(TypedDict):
@@ -23,7 +23,7 @@ class ModuleComponentsResponse(TypedDict):
     components: List[ModuleComponentInfo]
     count: int
     module: str
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class WrappedModuleInfo(TypedDict):
@@ -37,4 +37,4 @@ class WrappedModulesResponse(TypedDict):
     """Response structure for list_wrapped_modules tool."""
     modules: List[WrappedModuleInfo]
     count: int
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses

@@ -5,8 +5,9 @@ information, eliminating the need for tools to manually require user_google_emai
 """
 
 import logging
-from typing_extensions import Dict, Any, Optional
+from typing_extensions import Dict, Any, Optional, Annotated
 from datetime import datetime
+from pydantic import Field
 
 from fastmcp import FastMCP, Context
 from auth.context import (
@@ -97,7 +98,10 @@ def setup_user_resources(mcp: FastMCP) -> None:
         mime_type="application/json",
         tags={"user", "profile", "authentication", "credentials", "email", "lookup"}
     )
-    async def get_user_profile_by_email(email: str, ctx: Context) -> dict:
+    async def get_user_profile_by_email(
+        email: Annotated[str, Field(description="Email address of the user to get profile information for", pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')], 
+        ctx: Context
+    ) -> dict:
         """Internal implementation for user profile by email resource."""
         # Check credential validity for the specified user
         credentials = get_valid_credentials(email)

@@ -5,7 +5,7 @@ These TypedDict classes define the structure of data returned by Forms tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional, Dict, Any
+from typing_extensions import TypedDict, List, Optional, Dict, Any, NotRequired
 
 
 class FormResponseAnswer(TypedDict):
@@ -32,4 +32,4 @@ class FormResponsesListResponse(TypedDict):
     userEmail: str
     pageToken: Optional[str]  # For pagination
     nextPageToken: Optional[str]  # Next page token if more results available
-    error: Optional[str]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses

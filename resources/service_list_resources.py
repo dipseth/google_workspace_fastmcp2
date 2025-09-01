@@ -1,8 +1,14 @@
 """
-Enhanced Dynamic Service List Resources for FastMCP2.
+Enhanced Dynamic Service List Resources for FastMCP2 - Refactored with Tag-Based Discovery.
 
 This module provides dynamic resources that expose list-based tools from various Google services
 through a standardized hierarchical resource pattern with comprehensive documentation and defaults.
+
+Key Changes in this refactored version:
+- Uses tool tags to identify list tools instead of complex type introspection
+- Uses FastMCP's forward() pattern for calling tools
+- Simplified tool configuration relying on tags
+- Removed complex field mapping discovery
 
 Resource Hierarchy:
 1. service://{service}/lists - Returns available list types for the service
@@ -14,33 +20,21 @@ Examples:
 - service://forms/lists → ["form_responses"]
 - service://forms/form_responses → [list of form IDs]
 - service://forms/form_responses/abc123 → [actual form responses for form abc123]
-
-Key Features:
-- Automatic discovery of list-based tools across all services
-- Hierarchical resource organization with smart defaults
-- Dynamic parameter extraction with validation and default values
-- Rich metadata extraction for tool documentation
-- Support for pagination and filtering with sensible defaults
-- Tool transformation support for enhanced documentation
-- Comprehensive error messages with available options
 """
 
 import logging
 import json
 import asyncio
-import inspect
-from typing_extensions import Dict, List, Any, Optional, Set, Tuple, Callable, TypedDict, Union, Literal, Type
-from typing_extensions import Annotated, Doc
-from typing import get_origin, get_args
+from typing import Dict, List, Any, Optional, Set, Tuple, Union
+from typing_extensions import TypedDict, NotRequired
 from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
-import json
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict, create_model
 from fastmcp import FastMCP, Context
 from fastmcp.tools import Tool
-from fastmcp.tools.tool_transform import ArgTransform
+from fastmcp.tools.tool_transform import ArgTransform, forward
 
 logger = logging.getLogger(__name__)
 
@@ -332,7 +326,6 @@ def _get_valid_services() -> List[str]:
 VALID_SERVICES = _get_valid_services()
 
 # Create a type alias for supported services
-# Use str for the type with runtime validation in Pydantic
 SupportedService = str
 
 def get_supported_service_documentation() -> str:
@@ -528,7 +521,7 @@ class ServiceListItemDetailsResponse(TypedDict):
 
 class ServiceErrorResponse(TypedDict):
     """Enhanced error response structure with helpful information."""
-    error: Optional[str] 
+    error: NotRequired[Optional[str]]  
     error_code: Optional[str] 
     service: Optional[str]
     list_type: Optional[str]
@@ -650,30 +643,36 @@ def _create_auth_error_response(service: str, list_type: str = None) -> ServiceE
     )
 
 # ============================================================================
-# SERVICE LIST DISCOVERY WITH ENHANCED FEATURES
+# SERVICE LIST DISCOVERY WITH TAG-BASED APPROACH
 # ============================================================================
 
 class ServiceListDiscovery:
     """
     Enhanced discovery and management of list-based tools across all services.
     Maps tools to hierarchical resource patterns with rich metadata.
+    
+    This refactored version uses tag-based discovery instead of type introspection.
     """
     
     # Enhanced tool configuration with metadata
+    # Tools should be tagged with "list" to be discovered
     TOOL_CONFIGURATIONS = {
         "gmail": {
             "filters": {
                 "tool": "list_gmail_filters",
+                "list_field": "filters",  # Explicit field containing the list
                 "id_field": None,
                 "detail_tool": "get_gmail_filter",
                 "description": "Gmail filter rules for automatic email processing",
                 "supports_pagination": True,
                 "default_page_size": 25,
                 "example_ids": ["filter_123", "filter_456"],
-                "required_scopes": ["gmail.settings.basic"]
+                "required_scopes": ["gmail.settings.basic"],
+                "required_tags": ["list", "gmail", "filters"]  # Tags to look for
             },
             "labels": {
                 "tool": "list_gmail_labels",
+                "list_field": "labels",  # Explicit field containing the list
                 "id_field": None,
                 "detail_tool": None,
                 "description": "Gmail labels for email organization",
@@ -681,7 +680,8 @@ class ServiceListDiscovery:
                 "default_page_size": 100,
                 "example_ids": ["INBOX", "SENT", "IMPORTANT"],
                 "required_scopes": ["gmail.labels"],
-                "supports_detail_from_list": True  # Flag to indicate we can extract details from list
+                "supports_detail_from_list": True,
+                "required_tags": ["list", "gmail", "labels"]
             }
         },
         "forms": {
@@ -693,7 +693,8 @@ class ServiceListDiscovery:
                 "supports_pagination": True,
                 "default_page_size": 20,
                 "example_ids": ["form_abc123", "form_def456"],
-                "required_scopes": ["forms.responses.readonly"]
+                "required_scopes": ["forms.responses.readonly"],
+                "required_tags": ["list", "forms", "responses"]
             }
         },
         "photos": {
@@ -705,7 +706,8 @@ class ServiceListDiscovery:
                 "supports_pagination": True,
                 "default_page_size": 50,
                 "example_ids": ["album_vacation2023", "album_family"],
-                "required_scopes": ["photos.readonly"]
+                "required_scopes": ["photos.readonly"],
+                "required_tags": ["list", "photos", "albums"]
             }
         },
         "calendar": {
@@ -717,7 +719,8 @@ class ServiceListDiscovery:
                 "supports_pagination": False,
                 "default_page_size": 50,
                 "example_ids": ["primary", "holidays@group.v.calendar.google.com"],
-                "required_scopes": ["calendar.readonly"]
+                "required_scopes": ["calendar.readonly"],
+                "required_tags": ["list", "calendar", "calendars"]
             },
             "events": {
                 "tool": "list_events",
@@ -726,7 +729,8 @@ class ServiceListDiscovery:
                 "supports_pagination": True,
                 "default_page_size": 10,
                 "example_ids": ["event_123abc", "recurring_456def"],
-                "required_scopes": ["calendar.events"]
+                "required_scopes": ["calendar.events"],
+                "required_tags": ["list", "calendar", "events"]
             }
         },
         "sheets": {
@@ -738,7 +742,8 @@ class ServiceListDiscovery:
                 "supports_pagination": True,
                 "default_page_size": 30,
                 "example_ids": ["1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"],
-                "required_scopes": ["sheets.readonly"]
+                "required_scopes": ["sheets.readonly"],
+                "required_tags": ["list", "sheets", "spreadsheets"]
             }
         },
         "drive": {
@@ -749,7 +754,8 @@ class ServiceListDiscovery:
                 "supports_pagination": True,
                 "default_page_size": 50,
                 "example_ids": ["root", "folder_abc123"],
-                "required_scopes": ["drive.readonly"]
+                "required_scopes": ["drive.readonly"],
+                "required_tags": ["list", "drive", "items"]
             }
         },
         "chat": {
@@ -761,7 +767,8 @@ class ServiceListDiscovery:
                 "supports_pagination": True,
                 "default_page_size": 20,
                 "example_ids": ["spaces/AAAA1234", "spaces/BBBB5678"],
-                "required_scopes": ["chat.spaces"]
+                "required_scopes": ["chat.spaces"],
+                "required_tags": ["list", "chat", "spaces"]
             }
         },
         "docs": {
@@ -773,7 +780,8 @@ class ServiceListDiscovery:
                 "supports_pagination": True,
                 "default_page_size": 20,
                 "example_ids": ["doc_123abc", "template_456def"],
-                "required_scopes": ["docs.readonly"]
+                "required_scopes": ["docs.readonly"],
+                "required_tags": ["list", "docs", "documents"]
             }
         }
     }
@@ -782,10 +790,7 @@ class ServiceListDiscovery:
         """Initialize the enhanced service discovery system."""
         self.mcp = mcp
         self.discovered_tools: Dict[str, Tool] = {}
-        self.tool_list_fields: Dict[str, str] = {}  # Maps tool_name -> list field name
         self._generate_service_mappings()
-        # Note: _discover_tools() is now async and must be called from async context
-        # It will be called lazily when needed
         self._tools_discovered = False
         
     def _generate_service_mappings(self) -> None:
@@ -815,36 +820,36 @@ class ServiceListDiscovery:
         logger.info(f"Generated SERVICE_MAPPINGS for {len(self.SERVICE_MAPPINGS)} services with metadata")
         
     async def _discover_tools(self) -> None:
-        """Discover and cache all available tools using public FastMCP APIs."""
+        """Discover and cache all available tools using tag-based discovery."""
         if self._tools_discovered:
             return  # Already discovered
             
-        logger.info("Discovering tools from FastMCP instance...")
+        logger.info("Discovering tools from FastMCP instance using tag-based approach...")
         
         try:
-            # Method 1: Try using the public tools property/attribute
+            # Try using the public tools property/attribute
             if hasattr(self.mcp, 'tools'):
-                # This is the public API for accessing tools
                 tools_list = self.mcp.tools
                 if tools_list:
                     for tool in tools_list:
                         if hasattr(tool, 'name'):
                             self.discovered_tools[tool.name] = tool
-                            logger.debug(f"Discovered tool: {tool.name}")
+                            # Log tools with 'list' tag
+                            if hasattr(tool, 'tags') and tool.tags and 'list' in tool.tags:
+                                logger.debug(f"Discovered list tool: {tool.name} with tags: {tool.tags}")
                     
                     logger.info(f"Discovered {len(self.discovered_tools)} tools via public API")
                     
-                    # Filter for list tools (those tagged with 'list')
+                    # Count list tools
                     list_tools = [
                         (name, tool) for name, tool in self.discovered_tools.items()
                         if hasattr(tool, 'tags') and tool.tags and 'list' in tool.tags
                     ]
                     logger.info(f"Found {len(list_tools)} tools tagged with 'list'")
                     self._tools_discovered = True
-                    self._discover_list_field_mappings()
                     return
             
-            # Method 2: Try looking for a get_tools() method (if available and async)
+            # Fallback: Try looking for a get_tools() method
             if hasattr(self.mcp, 'get_tools'):
                 get_tools_func = getattr(self.mcp, 'get_tools')
                 # Check if it's async
@@ -856,6 +861,13 @@ class ServiceListDiscovery:
                 if isinstance(tools, dict):
                     self.discovered_tools = tools
                     logger.info(f"Discovered {len(self.discovered_tools)} tools via get_tools()")
+                    # Log sample tool structure for debugging
+                    if self.discovered_tools:
+                        sample_tool_name = next(iter(self.discovered_tools.keys()))
+                        sample_tool = self.discovered_tools[sample_tool_name]
+                        logger.debug(f"Sample tool '{sample_tool_name}' attributes: {dir(sample_tool)}")
+                        if hasattr(sample_tool, '__dict__'):
+                            logger.debug(f"Sample tool '__dict__': {sample_tool.__dict__}")
                 elif isinstance(tools, list):
                     for tool in tools:
                         if hasattr(tool, 'name'):
@@ -863,11 +875,9 @@ class ServiceListDiscovery:
                     logger.info(f"Discovered {len(self.discovered_tools)} tools via get_tools()")
                 
                 self._tools_discovered = True
-                self._discover_list_field_mappings()
                 return
             
-            # Method 3: Context-based discovery (if tools are in context)
-            # This would be used if tools are passed through context
+            # No standard discovery method found
             logger.info("No standard tool discovery method found, tools will be discovered on demand")
             self._tools_discovered = True
                 
@@ -875,24 +885,6 @@ class ServiceListDiscovery:
             logger.error(f"Error discovering tools: {e}")
             logger.info("Tools will be discovered on demand during resource access")
             self._tools_discovered = True
-    
-    def _discover_list_field_mappings(self) -> None:
-        """Dynamically discover which field contains the list data for each tool.
-        
-        This uses type introspection to find the list field in each tool's
-        TypedDict return type, creating a dynamic mapping.
-        """
-        logger.info("Discovering list field mappings from tool type annotations...")
-        
-        for tool_name, tool in self.discovered_tools.items():
-            # Only process tools that are likely list tools
-            if 'list' in tool_name.lower() or (hasattr(tool, 'tags') and tool.tags and 'list' in tool.tags):
-                list_field = self._get_list_field_from_tool(tool)
-                if list_field:
-                    self.tool_list_fields[tool_name] = list_field
-                    logger.debug(f"Tool '{tool_name}' -> list field '{list_field}'")
-        
-        logger.info(f"Discovered list field mappings for {len(self.tool_list_fields)} tools")
             
     def get_service_lists(self, service: str) -> List[ServiceListTypeInfo]:
         """Get available list types for a service with enhanced metadata."""
@@ -902,7 +894,7 @@ class ServiceListDiscovery:
         
         list_types = []
         for list_type, config in self.SERVICE_MAPPINGS[service].items():
-            # Check if has detail view - now includes supports_detail_from_list
+            # Check if has detail view
             has_detail = bool(
                 config.get("detail_tool") or
                 config.get("id_field") or
@@ -930,7 +922,7 @@ class ServiceListDiscovery:
     async def get_list_items(self, service: str, list_type: str, user_email: str,
                             page_size: Optional[int] = None,
                             page_token: Optional[str] = None) -> Any:
-        """Get all items/IDs for a list type with pagination support."""
+        """Get all items/IDs for a list type using FastMCP forward() pattern."""
         # Ensure tools are discovered
         await self._discover_tools()
         
@@ -948,59 +940,56 @@ class ServiceListDiscovery:
         if page_size is None:
             page_size = config.get("default_page_size", 25)
             
-        # For tools that list IDs directly (no id_field), call the tool
-        if not config.get("id_field"):
-            try:
-                tool = self.discovered_tools[tool_name]
-                
-                # Build parameters with pagination support
-                params = {"user_google_email": user_email}
-                if config.get("supports_pagination", False):
-                    params["page_size"] = page_size
-                    if page_token:
-                        params["page_token"] = page_token
-                
-                # Call the tool with enhanced parameters using FastMCP Tool patterns
-                try:
-                    # For FastMCP Tool objects, we need to call them through the MCP framework
-                    # First try using the mcp instance to call the tool
-                    if hasattr(self.mcp, 'call_tool'):
-                        logger.debug(f"Calling tool {tool_name} via mcp.call_tool()")
-                        result = await self.mcp.call_tool(tool_name, **params)
-                    elif hasattr(tool, 'function') and callable(tool.function):
-                        logger.debug(f"Calling tool.function() for {tool_name}")
-                        result = await tool.function(**params)
-                    elif callable(tool):
-                        logger.debug(f"Calling tool() directly for {tool_name}")
-                        result = await tool(**params)
-                    elif hasattr(tool, '__call__'):
-                        logger.debug(f"Tool {tool_name} has __call__, trying direct call")
-                        result = await tool(**params)
-                    elif isinstance(tool, dict) and 'function' in tool:
-                        logger.debug(f"Calling tool['function']() for {tool_name}")
-                        result = await tool['function'](**params)
-                    else:
-                        # Last resort: try to get the actual function from the tool
-                        if hasattr(tool, '_function'):
-                            logger.debug(f"Calling tool._function() for {tool_name}")
-                            result = await tool._function(**params)
-                        else:
-                            raise RuntimeError(f"Could not determine how to call tool {tool_name}")
-                            
-                except Exception as e:
-                    logger.error(f"Error calling tool {tool_name}: {e}")
-                    logger.debug(f"Tool type: {type(tool)}, attributes: {dir(tool) if hasattr(tool, '__dict__') else 'no attributes'}")
-                    return []
-                
-                # Always parse the result to extract list data from TypedDict responses
-                return self._parse_list_result(result, service, list_type)
-                
-            except Exception as e:
-                logger.error(f"Error calling {tool_name}: {e}")
-                return []
-        else:
-            # For tools that need an ID parameter
+        # Build parameters
+        params = {"user_google_email": user_email}
+        if config.get("id_field"):
+            # For tools that need an ID parameter, we'll handle this separately
             return await self._get_available_ids(service, list_type, user_email)
+        
+        # Add pagination if supported
+        if config.get("supports_pagination", False):
+            params["page_size"] = page_size
+            if page_token:
+                params["page_token"] = page_token
+        
+        try:
+            # Use FastMCP's forward() pattern to call the tool
+            logger.debug(f"Using forward() pattern to call {tool_name} with params: {params}")
+            
+            # The forward() function needs just the tool name and parameters
+            # It handles the tool lookup and execution automatically
+            try:
+                # Try using forward() with the tool name
+                result = await forward(tool_name, **params)
+            except TypeError as te:
+                # If forward() doesn't work, try calling the tool directly from discovered_tools
+                logger.warning(f"forward() failed with TypeError: {te}, trying direct tool call")
+                tool = self.discovered_tools.get(tool_name)
+                if tool:
+                    # Try calling the tool's function directly
+                    if hasattr(tool, 'fn'):
+                        # This is a FunctionTool, call its wrapped function
+                        result = await tool.fn(**params)
+                    elif callable(tool):
+                        # The tool itself is callable
+                        result = await tool(**params)
+                    else:
+                        logger.error(f"Tool {tool_name} is not callable")
+                        return []
+                else:
+                    logger.error(f"Tool {tool_name} not found in discovered tools")
+                    return []
+            
+            logger.debug(f"Got result from {tool_name}: {type(result)}")
+            
+            # Parse the result to extract list data
+            return self._parse_list_result(result, service, list_type)
+            
+        except Exception as e:
+            logger.error(f"Error calling {tool_name}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
             
     async def get_list_item_details(
         self,
@@ -1011,7 +1000,7 @@ class ServiceListDiscovery:
         include_metadata: bool = True,
         include_raw: bool = False
     ) -> Any:
-        """Get detailed data for a specific item with optional metadata."""
+        """Get detailed data for a specific item using FastMCP forward() pattern."""
         # Ensure tools are discovered
         await self._discover_tools()
         
@@ -1026,41 +1015,26 @@ class ServiceListDiscovery:
             if tool_name not in self.discovered_tools:
                 return None
             
-            tool = self.discovered_tools[tool_name]
-            
             try:
                 # Call list_gmail_labels to get all labels
                 params = {"user_google_email": user_email}
                 
+                # Use forward() pattern to call the tool
+                logger.debug(f"Using forward() to call {tool_name} to extract label {item_id}")
+                
                 try:
-                    # For FastMCP Tool objects, we need to call them through the MCP framework
-                    if hasattr(self.mcp, 'call_tool'):
-                        logger.debug(f"Calling tool {tool_name} via mcp.call_tool()")
-                        result = await self.mcp.call_tool(tool_name, **params)
-                    elif hasattr(tool, 'function') and callable(tool.function):
-                        logger.debug(f"Calling tool.function() for {tool_name}")
-                        result = await tool.function(**params)
-                    elif callable(tool):
-                        logger.debug(f"Calling tool() directly for {tool_name}")
+                    result = await forward(tool_name, **params)
+                except TypeError as te:
+                    # If forward() doesn't work, try calling the tool directly
+                    logger.warning(f"forward() failed: {te}, trying direct call")
+                    tool = self.discovered_tools.get(tool_name)
+                    if tool and hasattr(tool, 'fn'):
+                        result = await tool.fn(**params)
+                    elif tool and callable(tool):
                         result = await tool(**params)
-                    elif hasattr(tool, '__call__'):
-                        logger.debug(f"Tool {tool_name} has __call__, trying direct call")
-                        result = await tool(**params)
-                    elif isinstance(tool, dict) and 'function' in tool:
-                        logger.debug(f"Calling tool['function']() for {tool_name}")
-                        result = await tool['function'](**params)
                     else:
-                        # Last resort: try to get the actual function from the tool
-                        if hasattr(tool, '_function'):
-                            logger.debug(f"Calling tool._function() for {tool_name}")
-                            result = await tool._function(**params)
-                        else:
-                            raise RuntimeError(f"Could not determine how to call tool {tool_name}")
-                            
-                except Exception as e:
-                    logger.error(f"Error calling tool {tool_name}: {e}")
-                    logger.debug(f"Tool type: {type(tool)}, attributes: {dir(tool) if hasattr(tool, '__dict__') else 'no attributes'}")
-                    return None
+                        logger.error(f"Tool {tool_name} not found or not callable")
+                        return None
                 
                 # Parse the result to find the specific label
                 parsed_labels = self._parse_list_result(result, service, list_type)
@@ -1097,8 +1071,6 @@ class ServiceListDiscovery:
             tool_name = config["tool"]
             if tool_name not in self.discovered_tools:
                 return None
-                
-            tool = self.discovered_tools[tool_name]
             
             # Build parameters with the ID field
             params = {
@@ -1113,34 +1085,22 @@ class ServiceListDiscovery:
                 params["include_raw"] = True
             
             try:
-                # Call the tool properly using FastMCP patterns
+                # Use forward() pattern to call the tool
+                logger.debug(f"Using forward() to call {tool_name} with ID field")
+                
                 try:
-                    if hasattr(self.mcp, 'call_tool'):
-                        logger.debug(f"Calling tool {tool_name} via mcp.call_tool()")
-                        result = await self.mcp.call_tool(tool_name, **params)
-                    elif hasattr(tool, 'function') and callable(tool.function):
-                        logger.debug(f"Calling tool.function() for {tool_name}")
-                        result = await tool.function(**params)
-                    elif callable(tool):
-                        logger.debug(f"Calling tool() directly for {tool_name}")
+                    result = await forward(tool_name, **params)
+                except TypeError as te:
+                    # If forward() doesn't work, try calling the tool directly
+                    logger.warning(f"forward() failed: {te}, trying direct call")
+                    tool = self.discovered_tools.get(tool_name)
+                    if tool and hasattr(tool, 'fn'):
+                        result = await tool.fn(**params)
+                    elif tool and callable(tool):
                         result = await tool(**params)
-                    elif hasattr(tool, '__call__'):
-                        logger.debug(f"Tool {tool_name} has __call__, trying direct call")
-                        result = await tool(**params)
-                    elif isinstance(tool, dict) and 'function' in tool:
-                        logger.debug(f"Calling tool['function']() for {tool_name}")
-                        result = await tool['function'](**params)
                     else:
-                        if hasattr(tool, '_function'):
-                            logger.debug(f"Calling tool._function() for {tool_name}")
-                            result = await tool._function(**params)
-                        else:
-                            raise RuntimeError(f"Could not determine how to call tool {tool_name}")
-                            
-                except Exception as e:
-                    logger.error(f"Error calling tool {tool_name}: {e}")
-                    logger.debug(f"Tool type: {type(tool)}, attributes: {dir(tool) if hasattr(tool, '__dict__') else 'no attributes'}")
-                    return None
+                        logger.error(f"Tool {tool_name} not found or not callable")
+                        return None
                 
                 # Enhance result with metadata if requested
                 if include_metadata and isinstance(result, dict):
@@ -1162,12 +1122,9 @@ class ServiceListDiscovery:
             detail_tool_name = config["detail_tool"]
             if detail_tool_name not in self.discovered_tools:
                 return None
-                
-            tool = self.discovered_tools[detail_tool_name]
             
             try:
                 # Determine the ID parameter name
-                # For albums -> album_id, for filters -> filter_id, etc.
                 id_param_name = f"{list_type[:-1]}_id" if list_type.endswith('s') else f"{list_type}_id"
                 
                 params = {
@@ -1181,34 +1138,22 @@ class ServiceListDiscovery:
                 if include_raw:
                     params["include_raw"] = True
                 
-                # Call the tool properly using FastMCP patterns
+                # Use forward() pattern to call the detail tool
+                logger.debug(f"Using forward() to call detail tool {detail_tool_name}")
+                
                 try:
-                    if hasattr(self.mcp, 'call_tool'):
-                        logger.debug(f"Calling tool {detail_tool_name} via mcp.call_tool()")
-                        result = await self.mcp.call_tool(detail_tool_name, **params)
-                    elif hasattr(tool, 'function') and callable(tool.function):
-                        logger.debug(f"Calling tool.function() for {detail_tool_name}")
-                        result = await tool.function(**params)
-                    elif callable(tool):
-                        logger.debug(f"Calling tool() directly for {detail_tool_name}")
+                    result = await forward(detail_tool_name, **params)
+                except TypeError as te:
+                    # If forward() doesn't work, try calling the tool directly
+                    logger.warning(f"forward() failed: {te}, trying direct call")
+                    tool = self.discovered_tools.get(detail_tool_name)
+                    if tool and hasattr(tool, 'fn'):
+                        result = await tool.fn(**params)
+                    elif tool and callable(tool):
                         result = await tool(**params)
-                    elif hasattr(tool, '__call__'):
-                        logger.debug(f"Tool {detail_tool_name} has __call__, trying direct call")
-                        result = await tool(**params)
-                    elif isinstance(tool, dict) and 'function' in tool:
-                        logger.debug(f"Calling tool['function']() for {detail_tool_name}")
-                        result = await tool['function'](**params)
                     else:
-                        if hasattr(tool, '_function'):
-                            logger.debug(f"Calling tool._function() for {detail_tool_name}")
-                            result = await tool._function(**params)
-                        else:
-                            raise RuntimeError(f"Could not determine how to call tool {detail_tool_name}")
-                            
-                except Exception as e:
-                    logger.error(f"Error calling tool {detail_tool_name}: {e}")
-                    logger.debug(f"Tool type: {type(tool)}, attributes: {dir(tool) if hasattr(tool, '__dict__') else 'no attributes'}")
-                    return None
+                        logger.error(f"Tool {detail_tool_name} not found or not callable")
+                        return None
                 
                 # Enhance result with metadata if requested
                 if include_metadata and isinstance(result, dict):
@@ -1228,17 +1173,15 @@ class ServiceListDiscovery:
         return None
         
     def _parse_list_result(self, result: Any, service: str, list_type: str) -> List[Dict[str, Any]]:
-        """Parse the result from a list tool dynamically using pre-discovered field mappings.
+        """Parse the result from a list tool - simplified without type introspection.
         
-        This method uses the dynamically discovered field mappings to find the list data
-        in TypedDict responses, without any hardcoding.
+        This method now uses a simpler approach without complex field discovery.
         """
         # First, try to parse JSON if result is a string
         if isinstance(result, str):
             try:
                 result = json.loads(result)
             except json.JSONDecodeError:
-                # Not JSON, return empty list as we can't parse it generically
                 logger.warning(f"Could not parse string result as JSON for {service}/{list_type}")
                 return []
         
@@ -1246,43 +1189,22 @@ class ServiceListDiscovery:
         if isinstance(result, list):
             return self._enhance_items_with_metadata(result, service, list_type)
         
-        # Handle TypedDict responses
+        # Handle TypedDict responses - look for common list field names
         if isinstance(result, dict):
-            # Try to get the tool configuration to find the tool name
-            config = self.get_list_config(service, list_type)
-            if config and config.get("tool"):
-                tool_name = config["tool"]
-                
-                # Check if we have a pre-discovered list field for this tool
-                if tool_name in self.tool_list_fields:
-                    list_field = self.tool_list_fields[tool_name]
-                    if list_field in result:
-                        field_value = result[list_field]
-                        if isinstance(field_value, list):
-                            logger.debug(f"Found list data in field '{list_field}' using pre-discovered mapping for {service}/{list_type}")
-                            return self._enhance_items_with_metadata(field_value, service, list_type)
-                
-                # If not in pre-discovered mappings, try real-time introspection
-                tool = self.discovered_tools.get(tool_name)
-                if tool:
-                    list_field = self._get_list_field_from_tool(tool)
-                    if list_field and list_field in result:
-                        field_value = result[list_field]
-                        if isinstance(field_value, list):
-                            # Cache this discovery for future use
-                            self.tool_list_fields[tool_name] = list_field
-                            logger.debug(f"Found list data in field '{list_field}' from real-time introspection for {service}/{list_type}")
-                            return self._enhance_items_with_metadata(field_value, service, list_type)
+            # Common field names that contain list data
+            list_field_names = [
+                'filters', 'labels', 'items', 'data', 'results', 'entries',
+                'albums', 'photos', 'messages', 'spaces', 'calendars', 'events',
+                'documents', 'spreadsheets', 'forms', 'responses', 'files', 'folders'
+            ]
             
-            # Fallback: Look for any field that contains a list (prioritize common names)
-            # This handles cases where type introspection fails or is unavailable
-            for field_name, field_value in result.items():
-                if isinstance(field_value, list) and field_name not in ['error', 'errors', 'warnings', 'metadata']:
-                    # Cache this discovery
-                    if config and config.get("tool"):
-                        self.tool_list_fields[config["tool"]] = field_name
-                    logger.debug(f"Found list data in field '{field_name}' for {service}/{list_type}")
-                    return self._enhance_items_with_metadata(field_value, service, list_type)
+            # Check each potential list field
+            for field_name in list_field_names:
+                if field_name in result:
+                    field_value = result[field_name]
+                    if isinstance(field_value, list):
+                        logger.info(f"Found list data in field '{field_name}' for {service}/{list_type}")
+                        return self._enhance_items_with_metadata(field_value, service, list_type)
             
             # If no list field found, check if the dict itself is the single item
             if 'id' in result or 'name' in result:
@@ -1295,91 +1217,6 @@ class ServiceListDiscovery:
         # If we can't parse the result, return empty list
         logger.warning(f"Unexpected result type {type(result)} for {service}/{list_type}")
         return []
-    
-    def _get_list_field_from_tool(self, tool: Any) -> Optional[str]:
-        """Extract the list field name from a tool's return type annotation.
-        
-        This method inspects the tool's return type to find which field contains
-        the list data in a TypedDict response.
-        """
-        try:
-            # Try different ways to access the function based on tool structure
-            func = None
-            if hasattr(tool, 'function'):
-                func = tool.function
-            elif callable(tool):
-                func = tool
-            elif isinstance(tool, dict) and 'function' in tool:
-                func = tool['function']
-            
-            if not func:
-                return None
-            
-            # Get the return type annotation
-            if hasattr(func, '__annotations__'):
-                return_type = func.__annotations__.get('return')
-                if return_type:
-                    # Check if it's a TypedDict or has __annotations__
-                    if hasattr(return_type, '__annotations__'):
-                        # Look for fields that are List types
-                        for field_name, field_type in return_type.__annotations__.items():
-                            # Check if the field type is a List
-                            origin = getattr(field_type, '__origin__', None)
-                            if origin is list or origin is List:
-                                logger.debug(f"Found list field '{field_name}' from type annotation")
-                                return field_name
-                    
-                    # Check if it's a type with __fields__ (like TypedDict subclasses)
-                    if hasattr(return_type, '__fields__'):
-                        for field_name in return_type.__fields__:
-                            # Get the field type
-                            field_type = return_type.__annotations__.get(field_name)
-                            if field_type:
-                                origin = getattr(field_type, '__origin__', None)
-                                if origin is list or origin is List:
-                                    logger.debug(f"Found list field '{field_name}' from __fields__")
-                                    return field_name
-                    
-                    # Check if it's a Pydantic model
-                    if hasattr(return_type, '__fields__'):
-                        for field_name, field_info in return_type.__fields__.items():
-                            if hasattr(field_info, 'outer_type_'):
-                                origin = getattr(field_info.outer_type_, '__origin__', None)
-                                if origin is list or origin is List:
-                                    logger.debug(f"Found list field '{field_name}' from Pydantic model")
-                                    return field_name
-        except Exception as e:
-            logger.debug(f"Error introspecting tool type: {e}")
-        
-        return None
-    
-    def get_field_mappings_summary(self) -> Dict[str, Any]:
-        """Get a summary of all discovered tool field mappings.
-        
-        Returns a dictionary showing which field contains list data for each tool.
-        This is useful for debugging and understanding the dynamic discovery.
-        """
-        summary = {
-            "total_tools": len(self.discovered_tools),
-            "list_tools": len(self.tool_list_fields),
-            "mappings": self.tool_list_fields,
-            "services": {}
-        }
-        
-        # Group by service
-        for service, config in self.SERVICE_MAPPINGS.items():
-            service_mappings = {}
-            for list_type, type_config in config.items():
-                tool_name = type_config.get("tool")
-                if tool_name and tool_name in self.tool_list_fields:
-                    service_mappings[list_type] = {
-                        "tool": tool_name,
-                        "list_field": self.tool_list_fields[tool_name]
-                    }
-            if service_mappings:
-                summary["services"][service] = service_mappings
-        
-        return summary
     
     def _enhance_items_with_metadata(self, items: List[Any], service: str, list_type: str) -> List[Dict[str, Any]]:
         """Enhance list items with service metadata.
@@ -1402,7 +1239,7 @@ class ServiceListDiscovery:
                     enhanced_item['list_type'] = list_type
                 enhanced_items.append(enhanced_item)
             elif isinstance(item, str):
-                # Handle simple string items (shouldn't happen with TypedDict, but be safe)
+                # Handle simple string items
                 enhanced_items.append({
                     'value': item,
                     'service': service,
@@ -1419,7 +1256,6 @@ class ServiceListDiscovery:
                 })
         
         return enhanced_items
-        
         
     async def _get_available_ids(self, service: str, list_type: str, user_email: str) -> List[Dict[str, Any]]:
         """Get available IDs with enhanced metadata and examples."""
@@ -1450,15 +1286,6 @@ class ServiceListDiscovery:
                 "service_name": service_info['display_name'],
                 "usage_hint": "Use this to list files in the root of your Drive"
             })
-            # Add shared drives hint
-            items.append({
-                "id": "shareddrives",
-                "description": "Shared drives placeholder",
-                "is_placeholder": True,
-                "service": service,
-                "service_icon": service_info['icon'],
-                "note": "Use list_shared_drives tool to get actual shared drive IDs"
-            })
             
         elif service == "calendar" and list_type == "events":
             items.append({
@@ -1469,80 +1296,6 @@ class ServiceListDiscovery:
                 "service_icon": service_info['icon'],
                 "service_name": service_info['display_name'],
                 "usage_hint": "Use this to access events in your primary calendar"
-            })
-            # Add holiday calendar hint
-            items.append({
-                "id": "en.usa#holiday@group.v.calendar.google.com",
-                "description": "US Holidays calendar",
-                "is_example": True,
-                "service": service,
-                "service_icon": service_info['icon'],
-                "note": "Public holiday calendar for United States"
-            })
-            
-        elif service == "forms" and list_type == "form_responses":
-            # Try to get actual form IDs if we have a list forms tool
-            if "get_form" in self.discovered_tools:
-                items.append({
-                    "id": "placeholder_form_id",
-                    "description": "Replace with actual form ID",
-                    "is_placeholder": True,
-                    "service": service,
-                    "service_icon": service_info['icon'],
-                    "service_name": service_info['display_name'],
-                    "usage_hint": "Use search_forms or list_forms to find actual form IDs"
-                })
-            else:
-                # Use example IDs from config
-                for example_id in config.get("example_ids", []):
-                    items.append({
-                        "id": example_id,
-                        "description": f"Example form ID",
-                        "is_example": True,
-                        "service": service,
-                        "service_icon": service_info['icon']
-                    })
-                    
-        elif service == "docs" and list_type == "documents":
-            items.append({
-                "id": "root",
-                "description": "Root folder - Top level for searching documents",
-                "is_default": True,
-                "service": service,
-                "service_icon": service_info['icon'],
-                "service_name": service_info['display_name'],
-                "usage_hint": "Use this folder ID to list documents in My Drive root"
-            })
-            
-        elif service == "sheets" and list_type == "spreadsheets":
-            # Add example spreadsheet ID format
-            items.append({
-                "id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
-                "description": "Example spreadsheet ID format",
-                "is_example": True,
-                "service": service,
-                "service_icon": service_info['icon'],
-                "note": "This is the format of a Google Sheets ID"
-            })
-            
-        elif service == "photos" and list_type == "albums":
-            # Photos albums don't need IDs for listing
-            items.append({
-                "note": "Use list_photos_albums directly to get all albums",
-                "service": service,
-                "service_icon": service_info['icon'],
-                "service_name": service_info['display_name'],
-                "no_id_required": True
-            })
-            
-        elif service == "chat" and list_type == "spaces":
-            # Chat spaces don't need IDs for listing
-            items.append({
-                "note": "Use list_spaces directly to get all accessible spaces",
-                "service": service,
-                "service_icon": service_info['icon'],
-                "service_name": service_info['display_name'],
-                "no_id_required": True
             })
             
         elif service == "gmail":
@@ -1562,17 +1315,6 @@ class ServiceListDiscovery:
                     "service_name": service_info['display_name'],
                     "no_id_required": True
                 })
-                
-        elif service == "slides" and list_type == "presentations":
-            # Add example presentation ID format
-            items.append({
-                "id": "1EAYk18WDjIG-zp_0vLm3CsfQh_i8eXc67Jo2O9C6Vuc",
-                "description": "Example presentation ID format",
-                "is_example": True,
-                "service": service,
-                "service_icon": service_info['icon'],
-                "note": "This is the format of a Google Slides ID"
-            })
         
         # If no specific items added, provide generic guidance
         if not items:
@@ -1588,66 +1330,6 @@ class ServiceListDiscovery:
 
 
 # ============================================================================
-# TOOL TRANSFORMATION FOR ENHANCED DOCUMENTATION
-# ============================================================================
-
-def create_enhanced_tool(original_tool: Tool, discovery: ServiceListDiscovery) -> Tool:
-    """
-    Create an enhanced version of a tool with better documentation and defaults.
-    """
-    # Generate comprehensive documentation
-    services_doc = "\n".join([
-        f"- **{s}** ({ServiceMetadata.get_service_info(s)['icon']}): "
-        f"{ServiceMetadata.get_service_info(s)['description']}"
-        for s in get_supported_services()
-    ])
-    
-    enhanced_description = f"""
-Get available list types for a Google service with comprehensive metadata.
-
-This tool provides discovery of all list-based resources available for each service,
-including pagination support, default values, and example IDs.
-
-**Supported Services:**
-{services_doc}
-
-**Response includes:**
-- List type names and descriptions
-- Pagination support information
-- Default page sizes
-- Example IDs for testing
-- Required OAuth scopes
-- Service metadata and documentation
-
-**Examples:**
-- `service: "gmail"` → Returns filters, labels, threads
-- `service: "drive"` → Returns folders, files, shared drives
-- `service: "calendar"` → Returns calendars, events, reminders
-"""
-    
-    # Create transformed tool with enhanced documentation
-    transformed_tool = Tool.from_tool(
-        original_tool,
-        name="get_service_list_types_enhanced",
-        description=enhanced_description,
-        transform_args={
-            "service": ArgTransform(
-                description=f"Google service name. Options: {', '.join(get_supported_services())}\n\n{get_supported_service_documentation()}"
-            )
-        },
-        tags={"service", "discovery", "lists", "metadata", "enhanced"},
-        meta={
-            "version": "2.0",
-            "enhanced": True,
-            "supports_pagination": True,
-            "default_values": True
-        }
-    )
-    
-    return transformed_tool
-
-
-# ============================================================================
 # MAIN SETUP FUNCTION WITH ENHANCEMENTS
 # ============================================================================
 
@@ -1658,7 +1340,7 @@ def setup_service_list_resources(mcp: FastMCP) -> None:
     Args:
         mcp: FastMCP instance to register resources with
     """
-    logger.info("Setting up enhanced dynamic service list resources...")
+    logger.info("Setting up enhanced dynamic service list resources with tag-based discovery...")
     
     # Initialize enhanced discovery system
     discovery = ServiceListDiscovery(mcp)
@@ -1704,22 +1386,7 @@ Returns comprehensive metadata including pagination support, default values, and
         ctx: Context,
         service: str
     ) -> Union[ServiceListTypesResponse, ServiceErrorResponse]:
-        """Get available list types for a service with enhanced metadata and documentation.
-        
-        This enhanced version provides:
-        - Rich service metadata including icons and descriptions
-        - Pagination information for each list type
-        - Example IDs for testing
-        - Required OAuth scopes
-        - Documentation URLs
-        
-        Args:
-            ctx: FastMCP context containing user information
-            service: The Google service name (with full documentation)
-            
-        Returns:
-            ServiceListTypesResponse with comprehensive metadata or ServiceErrorResponse
-        """
+        """Get available list types for a service with enhanced metadata and documentation."""
         try:
             service_request = ServiceRequest(service=service)
             service_lower = service_request.service
@@ -1763,15 +1430,6 @@ Returns comprehensive metadata including pagination support, default values, and
             examples=[f"service://{service_lower}/{lt['name']}" for lt in list_types[:3]]
         )
     
-    # Create enhanced tool transformation for better documentation
-    if hasattr(mcp, 'tools') and mcp.tools:
-        for tool in mcp.tools:
-            if hasattr(tool, 'name') and tool.name == "get_service_list_types":
-                enhanced_tool = create_enhanced_tool(tool, discovery)
-                mcp.add_tool(enhanced_tool)
-                logger.info("Added enhanced tool transformation for get_service_list_types")
-                break
-    
     # Resource 2: List all items/IDs for a specific list type with accepted values
     @mcp.resource(
         uri="service://{service}/{list_type}",
@@ -1811,16 +1469,7 @@ Returns items with pagination support and metadata.""",
         service: str,
         list_type: str
     ) -> Union[ServiceListItemsResponse, ServiceErrorResponse]:
-        """Get all items for a specific list type.
-        
-        Args:
-            ctx: FastMCP context containing user information
-            service: The Google service name (see description for accepted values)
-            list_type: The type of list to retrieve (e.g., 'filters', 'labels', 'albums')
-            
-        Returns:
-            ServiceListItemsResponse with items or ServiceErrorResponse on error
-        """
+        """Get all items for a specific list type."""
         # Validate and normalize inputs using Pydantic model
         try:
             list_request = ServiceListRequest(service=service, list_type=list_type)
@@ -1945,17 +1594,7 @@ Returns detailed item data with optional metadata and raw response.""",
         list_type: str,
         item_id: str
     ) -> Union[ServiceListItemDetailsResponse, ServiceErrorResponse]:
-        """Get detailed data for a specific item.
-        
-        Args:
-            ctx: FastMCP context containing user information
-            service: The Google service name (see description for accepted values)
-            list_type: The type of list the item belongs to (e.g., 'filters', 'albums')
-            item_id: The unique identifier for the specific item
-            
-        Returns:
-            ServiceListItemDetailsResponse with item details or ServiceErrorResponse on error
-        """
+        """Get detailed data for a specific item."""
         # Validate and normalize inputs using Pydantic model
         try:
             item_request = ServiceItemRequest(service=service, list_type=list_type, item_id=item_id)
@@ -2031,7 +1670,7 @@ Returns detailed item data with optional metadata and raw response.""",
             raw_response=None
         )
     
-    logger.info(f"✅ Registered enhanced services with dynamic list resources")
+    logger.info(f"✅ Registered enhanced services with dynamic list resources using tag-based discovery")
     
     # Generate and log comprehensive documentation
     for service in discovery.SERVICE_MAPPINGS.keys():

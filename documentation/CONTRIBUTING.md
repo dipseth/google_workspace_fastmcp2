@@ -195,7 +195,7 @@ touch gyourservice/yourservice_tools.py
 
 ```python
 # gyourservice/yourservice_tools.py
-from typing import Optional
+from typing_extensions import Optional
 from fastmcp import mcp
 from auth.service_helpers import request_service, get_injected_service
 import json
@@ -469,7 +469,7 @@ async def process_items(items: list) -> list:
 # Standard library imports
 import json
 import os
-from typing import Optional, List, Dict
+from typing_extensions import Optional, List, Dict
 
 # Third-party imports
 import aiohttp

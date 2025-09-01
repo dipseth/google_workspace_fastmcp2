@@ -102,17 +102,25 @@ class ResourceUndefined(ChainableUndefined):
                         result = self._extract_property_path(resource_data, property_path)
                         return str(result) if result is not None else ""
                     else:
-                        # Return the full resource
-                        if isinstance(resource_data, (dict, list)):
+                        # Return the resource immediately without trying to extract properties
+                        # The LLM will handle indexing into objects if needed
+                        if isinstance(resource_data, str):
+                            return resource_data
+                        elif isinstance(resource_data, (dict, list)):
                             return json.dumps(resource_data)
-                        return str(resource_data) if resource_data is not None else ""
+                        else:
+                            return str(resource_data) if resource_data is not None else ""
             
             # Check direct resource match (fallback)
             if self._undefined_name in resources:
                 data = resources[self._undefined_name]
-                if isinstance(data, (dict, list)):
+                # Return the resource immediately without trying to extract properties
+                if isinstance(data, str):
+                    return data
+                elif isinstance(data, (dict, list)):
                     return json.dumps(data)
-                return str(data) if data is not None else ""
+                else:
+                    return str(data) if data is not None else ""
         
         return ""
     
@@ -121,9 +129,10 @@ class ResourceUndefined(ChainableUndefined):
         Parse a preprocessed name back to resource URI and property path.
         
         Examples:
-        - user___current_email → ('user://current/email', None)
-        - user___current_email_dot_email → ('user://current/email', 'email')
-        - workspace___content_recent_dot_total_files → ('workspace://content/recent', 'total_files')
+        - user___current__SLASH__email → ('user://current/email', None)
+        - user___current__SLASH__email_dot_email → ('user://current/email', 'email')
+        - workspace___content__SLASH__recent_dot_total_files → ('workspace://content/recent', 'total_files')
+        - template___user_email → ('template://user_email', None) - preserves underscores in original URI
         """
         # Check if this has property access (_dot_ pattern)
         if '_dot_' in preprocessed_name:
@@ -132,16 +141,18 @@ class ResourceUndefined(ChainableUndefined):
             uri_part = parts[0]
             property_part = parts[1]
             
-            # Convert URI part: user___current_email → user://current/email
-            resource_uri = uri_part.replace('___', '://', 1).replace('_', '/')
+            # Convert URI part: user___current__SLASH__email → user://current/email
+            # First restore the :// separator, then convert __SLASH__ back to /
+            resource_uri = uri_part.replace('___', '://', 1).replace('__SLASH__', '/')
             
             # Convert property part: nested_property → nested.property
             property_path = property_part.replace('_', '.')
             
             return resource_uri, property_path
         else:
-            # Simple URI without property: user___current_email → user://current/email
-            resource_uri = preprocessed_name.replace('___', '://', 1).replace('_', '/')
+            # Simple URI without property: user___current__SLASH__email → user://current/email
+            # Only convert the special delimiters, preserve original underscores
+            resource_uri = preprocessed_name.replace('___', '://', 1).replace('__SLASH__', '/')
             return resource_uri, None
     
     def _context_name_matches_uri(self, context_name: str, resource_uri: str) -> bool:
@@ -670,14 +681,16 @@ class TemplateParameterMiddleware(Middleware):
     
     def _simple_preprocess(self, template_string: str) -> str:
         """
-        Simple preprocessing: convert user://current/email.email to user___current_email_dot_email
+        Simple preprocessing: convert user://current/email.email to user___current__SLASH__email_dot_email
         
         This converts resource URI syntax to valid Jinja2 variable names that ResourceUndefined can handle.
+        Uses __SLASH__ delimiter to preserve underscores in the original URI.
         
         Examples:
-        - {{user://current/email}} → {{user___current_email}}
-        - {{user://current/email.email}} → {{user___current_email_dot_email}}
-        - {{workspace://content/recent.total_files}} → {{workspace___content_recent_dot_total_files}}
+        - {{user://current/email}} → {{user___current__SLASH__email}}
+        - {{user://current/email.email}} → {{user___current__SLASH__email_dot_email}}
+        - {{workspace://content/recent.total_files}} → {{workspace___content__SLASH__recent_dot_total_files}}
+        - {{template://user_email}} → {{template___user_email}} (preserves underscore)
         """
         # Pattern to match resource URIs: {{scheme://path}} or {{scheme://path.property}}
         resource_pattern = r'\{\{([a-zA-Z][a-zA-Z0-9]*://[^}]+)\}\}'
@@ -689,8 +702,8 @@ class TemplateParameterMiddleware(Middleware):
             # Convert :// to ___
             processed = full_expression.replace('://', '___')
             
-            # Convert / to _
-            processed = processed.replace('/', '_')
+            # Convert / to __SLASH__ (unique delimiter that preserves original underscores)
+            processed = processed.replace('/', '__SLASH__')
             
             # Convert . to _dot_ for property access
             processed = processed.replace('.', '_dot_')

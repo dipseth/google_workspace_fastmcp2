@@ -166,7 +166,7 @@ class ScopeRegistry:
         "drive_full": ["base.userinfo_email", "base.openid", "drive.full"],
         "gmail_basic": ["base.userinfo_email", "base.openid", "gmail.readonly", "gmail.send", "gmail.settings_basic", "gmail.settings_sharing"],
         "gmail_full": ["base.userinfo_email", "base.openid", "gmail.full"],
-        "calendar_basic": ["base.userinfo_email", "base.openid", "calendar.readonly", "calendar.events"],
+        "calendar_basic": ["base.userinfo_email", "base.openid", "calendar.readonly", "calendar.events", "calendar.full"],
         "calendar_full": ["base.userinfo_email", "base.openid", "calendar.full"],
         "docs_basic": ["base.userinfo_email", "base.openid", "docs.readonly", "docs.full"],
         "sheets_basic": ["base.userinfo_email", "base.openid", "sheets.readonly", "sheets.full"],
@@ -193,7 +193,7 @@ class ScopeRegistry:
             "forms.body", "forms.body_readonly", "forms.responses_readonly",
             "slides.full", "slides.readonly",
             "photos.readonly", "photos.full", "photos.sharing",
-            "calendar.readonly", "calendar.events",
+            "calendar.readonly", "calendar.events", "calendar.full",
             "cloud.platform", "cloud.functions", "cloud.pubsub", "cloud.iam"
         ]
     }
