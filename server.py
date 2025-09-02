@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from fastmcp import FastMCP
+from fastmcp.server.auth.providers.google import GoogleProvider  # FastMCP 2.12.0 GoogleProvider
 from config.settings import settings
 from auth.middleware import AuthMiddleware, CredentialStorageMode
 from auth.mcp_auth_middleware import MCPAuthMiddleware
@@ -53,6 +54,20 @@ logger = logging.getLogger(__name__)
 use_google_oauth = os.getenv("USE_GOOGLE_OAUTH", "true").lower() == "true"
 enable_jwt_auth = os.getenv("ENABLE_JWT_AUTH", "false").lower() == "true"
 
+# Phase 1 Feature Flags for gradual rollout (loaded from .env via settings)
+ENABLE_UNIFIED_AUTH = settings.enable_unified_auth
+LEGACY_COMPAT_MODE = settings.legacy_compat_mode
+CREDENTIAL_MIGRATION = settings.credential_migration
+SERVICE_CACHING = settings.service_caching
+ENHANCED_LOGGING = settings.enhanced_logging
+
+logger.info("🚀 Phase 1 OAuth Migration Configuration:")
+logger.info(f"  ENABLE_UNIFIED_AUTH: {ENABLE_UNIFIED_AUTH}")
+logger.info(f"  LEGACY_COMPAT_MODE: {LEGACY_COMPAT_MODE}")
+logger.info(f"  CREDENTIAL_MIGRATION: {CREDENTIAL_MIGRATION}")
+logger.info(f"  SERVICE_CACHING: {SERVICE_CACHING}")
+logger.info(f"  ENHANCED_LOGGING: {ENHANCED_LOGGING}")
+
 # Credential storage configuration
 storage_mode_str = settings.credential_storage_mode.upper()
 try:
@@ -89,13 +104,44 @@ async def lifespan_manager(app: FastMCP):
     
     logger.info("🛑 Shutting down FastMCP server lifespan...")
 
-# Create FastMCP2 instance WITHOUT authentication first (to avoid conflicts with OAuth discovery routes)
+# Configure authentication based on feature flags
+# During Phase 1, we configure GoogleProvider but don't immediately enforce it
+# to maintain dual-flow compatibility
+google_auth_provider = None
+
+if ENABLE_UNIFIED_AUTH and settings.fastmcp_server_auth == "GOOGLE":
+    # Use FastMCP 2.12.0's GoogleProvider with environment variables
+    logger.info("🔑 Configuring FastMCP 2.12.0 GoogleProvider...")
+    try:
+        # GoogleProvider automatically reads from environment variables:
+        # FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID
+        # FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET
+        # FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL
+        google_auth_provider = GoogleProvider()
+        logger.info("✅ FastMCP 2.12.0 GoogleProvider configured from environment variables")
+        logger.info(f"  Client ID: {settings.fastmcp_server_auth_google_client_id[:20] if settings.fastmcp_server_auth_google_client_id else 'Not set'}...")
+        logger.info(f"  Base URL: {settings.fastmcp_server_auth_google_base_url or 'Not set'}")
+        # Phase 1: Don't immediately enforce authentication to maintain backward compatibility
+        logger.info("🔄 Phase 1: GoogleProvider configured but not enforced (dual-flow mode)")
+    except Exception as e:
+        logger.error(f"❌ Failed to configure GoogleProvider: {e}")
+        logger.warning("⚠️ Falling back to legacy OAuth flow")
+        google_auth_provider = None
+
+# Create FastMCP2 instance WITHOUT immediate authentication enforcement during Phase 1
+# This maintains backward compatibility while allowing us to test the new auth system
 mcp = FastMCP(
     name=settings.server_name,
     version="1.0.0",
-    auth=None,  # Will add auth later after custom OAuth routes are registered
+    auth=None,  # Phase 1: Keep auth=None for dual-flow compatibility
     lifespan=lifespan_manager  # Add lifespan manager to properly initialize StreamableHTTPSessionManager
 )
+
+# Log authentication status
+if google_auth_provider:
+    logger.info("🔐 GoogleProvider configured but not enforced (Phase 1 dual-flow mode)")
+else:
+    logger.info("⚠️ FastMCP running without GoogleProvider - using legacy flow only")
 
 # Add authentication middleware with configured storage mode
 auth_middleware = AuthMiddleware(storage_mode=credential_storage_mode)
@@ -221,6 +267,104 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Could not register Qdrant tools: {e}")
 
+async def check_oauth_flows_health() -> str:
+    """Check health of both OAuth flows during migration.
+    
+    Returns:
+        Health status string for OAuth flows
+    """
+    status_lines = []
+    
+    # Check unified auth status
+    if ENABLE_UNIFIED_AUTH:
+        status_lines.append("  **Unified Auth (FastMCP 2.12.0 GoogleProvider):** ✅ ENABLED")
+        
+        # Check if GoogleProvider is configured
+        if google_auth_provider:
+            status_lines.append("    - GoogleProvider: ✅ Configured (Phase 1: not enforced)")
+        else:
+            status_lines.append("    - GoogleProvider: ❌ Not configured")
+        
+        # Check environment variables
+        env_vars = {
+            "FASTMCP_SERVER_AUTH": settings.fastmcp_server_auth,
+            "FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID": bool(settings.fastmcp_server_auth_google_client_id),
+            "FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET": bool(settings.fastmcp_server_auth_google_client_secret),
+            "FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL": settings.fastmcp_server_auth_google_base_url
+        }
+        
+        all_vars_set = all([
+            env_vars["FASTMCP_SERVER_AUTH"] == "GOOGLE",
+            env_vars["FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID"],
+            env_vars["FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET"],
+            env_vars["FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL"]
+        ])
+        
+        if all_vars_set:
+            status_lines.append("    - Environment Variables: ✅ All set")
+        else:
+            status_lines.append("    - Environment Variables: ⚠️ Missing required vars")
+    else:
+        status_lines.append("  **Unified Auth (FastMCP 2.12.0 GoogleProvider):** ⭕ DISABLED")
+    
+    # Check legacy flow status
+    if LEGACY_COMPAT_MODE:
+        status_lines.append("  **Legacy OAuth Flow:** ✅ ACTIVE (backward compatibility)")
+        
+        # Check legacy OAuth configuration
+        if use_google_oauth:
+            status_lines.append("    - Google OAuth: ✅ Enabled")
+        elif enable_jwt_auth:
+            status_lines.append("    - JWT Auth: ✅ Enabled (development)")
+        else:
+            status_lines.append("    - Authentication: ⚠️ Disabled")
+    else:
+        status_lines.append("  **Legacy OAuth Flow:** ⭕ DISABLED")
+    
+    # Check credential migration status
+    if CREDENTIAL_MIGRATION:
+        status_lines.append("  **Credential Migration:** ✅ ENABLED")
+        
+        # Check credential bridge
+        try:
+            from auth.credential_bridge import CredentialBridge
+            bridge = CredentialBridge()
+            migration_status = bridge.get_migration_status()
+            
+            status_lines.append(f"    - Total Credentials: {migration_status['total_credentials']}")
+            status_lines.append(f"    - Format Distribution: {migration_status['format_distribution']}")
+            status_lines.append(f"    - Successful Migrations: {migration_status['successful_migrations']}")
+            status_lines.append(f"    - Failed Migrations: {migration_status['failed_migrations']}")
+        except Exception as e:
+            status_lines.append(f"    - Status: ❌ Error checking migration: {e}")
+    else:
+        status_lines.append("  **Credential Migration:** ⭕ DISABLED")
+    
+    # Check service caching
+    if SERVICE_CACHING:
+        status_lines.append("  **Service Caching:** ✅ ENABLED")
+    else:
+        status_lines.append("  **Service Caching:** ⭕ DISABLED")
+    
+    # Check enhanced logging
+    if ENHANCED_LOGGING:
+        status_lines.append("  **Enhanced Logging:** ✅ ENABLED (verbose migration tracking)")
+    else:
+        status_lines.append("  **Enhanced Logging:** ⭕ DISABLED")
+    
+    # Overall migration phase status
+    status_lines.append("\n  **Migration Phase:** Phase 1 - Environment Setup & Core Components")
+    
+    if ENABLE_UNIFIED_AUTH and LEGACY_COMPAT_MODE:
+        status_lines.append("  **Mode:** 🔄 Dual-flow operation (both flows active)")
+    elif ENABLE_UNIFIED_AUTH:
+        status_lines.append("  **Mode:** 🆕 Unified flow only (legacy disabled)")
+    else:
+        status_lines.append("  **Mode:** 🔙 Legacy flow only (unified not enabled)")
+    
+    return "\n".join(status_lines)
+
+
 # Add health check tool
 @mcp.tool
 async def health_check() -> str:
@@ -242,6 +386,9 @@ async def health_check() -> str:
         from auth.context import get_session_count
         active_sessions = get_session_count()
         
+        # Phase 1 OAuth Migration Health Checks
+        oauth_flow_status = await check_oauth_flows_health()
+        
         status = "✅ Healthy" if (creds_accessible and oauth_configured) else "⚠️ Configuration Issues"
         
         return (
@@ -253,6 +400,8 @@ async def health_check() -> str:
             f"**Credentials Directory:** {'✅' if creds_accessible else '❌'} ({settings.credentials_dir})\n"
             f"**Active Sessions:** {active_sessions}\n"
             f"**Log Level:** {settings.log_level}\n\n"
+            f"**🔄 Phase 1 OAuth Migration Status:**\n"
+            f"{oauth_flow_status}\n\n"
             f"**Available Tools:**\n"
             f"**🆕 Enhanced Tools (Resource Templating):**\n"
             f"- `list_my_drive_files` - List Drive files (no email param needed!)\n"
@@ -638,15 +787,48 @@ async def manage_credentials(
 # Setup OAuth discovery endpoints for MCP Inspector (always available)
 logger.info("🔍 Setting up OAuth discovery endpoints for MCP Inspector...")
 try:
+    # Test imports before setting up endpoints
+    logger.info("🔍 DIAGNOSTIC: Testing OAuth endpoint dependencies...")
+    try:
+        from auth.dynamic_client_registration import handle_client_registration
+        logger.info("✅ DIAGNOSTIC: dynamic_client_registration import successful")
+    except Exception as import_error:
+        logger.error(f"❌ DIAGNOSTIC: dynamic_client_registration import failed: {import_error}")
+        raise
+    
+    try:
+        from auth.oauth_proxy import oauth_proxy
+        logger.info("✅ DIAGNOSTIC: oauth_proxy import successful")
+    except Exception as import_error:
+        logger.error(f"❌ DIAGNOSTIC: oauth_proxy import failed: {import_error}")
+        raise
+    
+    try:
+        from auth.scope_registry import ScopeRegistry
+        logger.info("✅ DIAGNOSTIC: scope_registry import successful")
+    except Exception as import_error:
+        logger.error(f"❌ DIAGNOSTIC: scope_registry import failed: {import_error}")
+        raise
+    
+    logger.info("🔍 DIAGNOSTIC: All dependencies imported successfully, setting up endpoints...")
     setup_oauth_endpoints_fastmcp(mcp)
     logger.info("✅ OAuth discovery endpoints configured via FastMCP custom routes")
     
     logger.info("🔍 MCP Inspector can discover OAuth at:")
-    logger.info(f"  {settings.base_url}/.well-known/oauth-protected-resource")
+    logger.info(f"  {settings.base_url}/.well-known/oauth-protected-resource/mcp")
     logger.info(f"  {settings.base_url}/.well-known/oauth-authorization-server")
     logger.info(f"  {settings.base_url}/oauth/register")
+    
+    # DIAGNOSTIC: Test endpoint registration by accessing MCP routes
+    logger.info("🔍 DIAGNOSTIC: Checking FastMCP route registration...")
+    if hasattr(mcp, '_app') and hasattr(mcp._app, 'routes'):
+        oauth_routes = [str(route) for route in mcp._app.routes if 'oauth' in str(route)]
+        logger.info(f"🔍 DIAGNOSTIC: Found {len(oauth_routes)} OAuth routes: {oauth_routes}")
+    else:
+        logger.warning("⚠️ DIAGNOSTIC: Cannot access MCP routes for verification")
+    
 except Exception as e:
-    logger.error(f"❌ Failed to setup OAuth discovery endpoints: {e}")
+    logger.error(f"❌ Failed to setup OAuth discovery endpoints: {e}", exc_info=True)
 
 # NOW setup authentication AFTER custom routes are registered to avoid conflicts
 logger.info("🔑 Setting up authentication...")

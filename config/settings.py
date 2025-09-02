@@ -52,6 +52,19 @@ class Settings(BaseSettings):
     # Gmail Allow List Configuration
     gmail_allow_list: str = ""  # Comma-separated list of email addresses
     
+    # Phase 1 OAuth Migration Feature Flags
+    enable_unified_auth: bool = False
+    legacy_compat_mode: bool = True
+    credential_migration: bool = False
+    service_caching: bool = False
+    enhanced_logging: bool = False
+    
+    # FastMCP 2.12.0 GoogleProvider Configuration
+    fastmcp_server_auth: str = ""
+    fastmcp_server_auth_google_client_id: str = ""
+    fastmcp_server_auth_google_client_secret: str = ""
+    fastmcp_server_auth_google_base_url: str = ""
+    
     # Legacy OAuth scopes - maintained for backward compatibility
     # These are now managed through the centralized scope registry
     _fallback_drive_scopes: list[str] = [

@@ -134,7 +134,7 @@ class DynamicClientRegistry:
                     "client_id_issued_at": int(proxy_client.created_at.timestamp()),
                     "client_secret_expires_at": 0,
                     "registration_access_token": proxy_client.registration_access_token,
-                    "registration_client_uri": f"http://localhost:8002/oauth/register/{proxy_client.temp_client_id}",
+                    "registration_client_uri": f"{settings.base_url}/oauth/register/{proxy_client.temp_client_id}",
                     **proxy_client.client_metadata
                 }
         

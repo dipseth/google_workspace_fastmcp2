@@ -87,7 +87,7 @@ def get_google_oauth_metadata() -> Dict[str, Any]:
         "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
         "code_challenge_methods_supported": ["S256"],
         # Point to our local Dynamic Client Registration endpoint
-        "registration_endpoint": f"http://{settings.server_host}:{settings.server_port}/oauth/register",
+        "registration_endpoint": f"{settings.base_url}/oauth/register",
         "scopes_supported": _get_oauth_metadata_scopes()
     }
 

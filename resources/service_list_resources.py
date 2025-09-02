@@ -724,7 +724,7 @@ class ServiceListDiscovery:
             },
             "events": {
                 "tool": "list_events",
-                "id_field": "calendar_id",
+                "id_field": None,  # Allow list_events to be called without requiring calendar_id
                 "description": "Calendar events with attendees and details",
                 "supports_pagination": True,
                 "default_page_size": 10,
@@ -919,10 +919,44 @@ class ServiceListDiscovery:
         list_type = list_type.lower()
         return self.SERVICE_MAPPINGS.get(service, {}).get(list_type)
         
+    def _filter_params_for_tool(self, tool: Any, base_params: Dict[str, Any],
+                               page_size: Optional[int], page_token: Optional[str],
+                               config: Dict[str, Any]) -> Dict[str, Any]:
+        """Filter parameters based on what the tool actually supports."""
+        # Start with base parameters (user_google_email)
+        filtered_params = dict(base_params)
+        
+        # Get tool function to inspect its signature
+        tool_func = None
+        if hasattr(tool, 'fn'):
+            tool_func = tool.fn
+        elif callable(tool):
+            tool_func = tool
+            
+        if not tool_func:
+            return filtered_params
+            
+        try:
+            import inspect
+            sig = inspect.signature(tool_func)
+            param_names = set(sig.parameters.keys())
+            
+            # Only add pagination params if the tool accepts them
+            if config.get("supports_pagination", False):
+                if "page_size" in param_names and page_size is not None:
+                    filtered_params["page_size"] = page_size
+                if "page_token" in param_names and page_token is not None:
+                    filtered_params["page_token"] = page_token
+                    
+        except Exception as e:
+            logger.debug(f"Could not inspect tool signature: {e}, using base params only")
+            
+        return filtered_params
+
     async def get_list_items(self, service: str, list_type: str, user_email: str,
                             page_size: Optional[int] = None,
                             page_token: Optional[str] = None) -> Any:
-        """Get all items/IDs for a list type using FastMCP forward() pattern."""
+        """Get all items/IDs for a list type using direct tool calls."""
         # Ensure tools are discovered
         await self._discover_tools()
         
@@ -940,45 +974,35 @@ class ServiceListDiscovery:
         if page_size is None:
             page_size = config.get("default_page_size", 25)
             
-        # Build parameters
-        params = {"user_google_email": user_email}
+        # Build base parameters
+        base_params = {"user_google_email": user_email}
+        
         if config.get("id_field"):
             # For tools that need an ID parameter, we'll handle this separately
             return await self._get_available_ids(service, list_type, user_email)
         
-        # Add pagination if supported
-        if config.get("supports_pagination", False):
-            params["page_size"] = page_size
-            if page_token:
-                params["page_token"] = page_token
+        # Get the actual tool to check its signature
+        tool = self.discovered_tools.get(tool_name)
+        if not tool:
+            logger.error(f"Tool {tool_name} not found in discovered tools")
+            return []
+        
+        # Filter parameters based on tool's actual signature
+        filtered_params = self._filter_params_for_tool(tool, base_params, page_size, page_token, config)
         
         try:
-            # Use FastMCP's forward() pattern to call the tool
-            logger.debug(f"Using forward() pattern to call {tool_name} with params: {params}")
+            logger.debug(f"Calling {tool_name} with filtered params: {filtered_params}")
             
-            # The forward() function needs just the tool name and parameters
-            # It handles the tool lookup and execution automatically
-            try:
-                # Try using forward() with the tool name
-                result = await forward(tool_name, **params)
-            except TypeError as te:
-                # If forward() doesn't work, try calling the tool directly from discovered_tools
-                logger.warning(f"forward() failed with TypeError: {te}, trying direct tool call")
-                tool = self.discovered_tools.get(tool_name)
-                if tool:
-                    # Try calling the tool's function directly
-                    if hasattr(tool, 'fn'):
-                        # This is a FunctionTool, call its wrapped function
-                        result = await tool.fn(**params)
-                    elif callable(tool):
-                        # The tool itself is callable
-                        result = await tool(**params)
-                    else:
-                        logger.error(f"Tool {tool_name} is not callable")
-                        return []
-                else:
-                    logger.error(f"Tool {tool_name} not found in discovered tools")
-                    return []
+            # Call the tool directly (don't use forward() here as we're not in a transform context)
+            if hasattr(tool, 'fn'):
+                # This is a FunctionTool, call its wrapped function
+                result = await tool.fn(**filtered_params)
+            elif callable(tool):
+                # The tool itself is callable
+                result = await tool(**filtered_params)
+            else:
+                logger.error(f"Tool {tool_name} is not callable")
+                return []
             
             logger.debug(f"Got result from {tool_name}: {type(result)}")
             

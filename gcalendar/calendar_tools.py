@@ -692,7 +692,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             # Ensure time_min and time_max are correctly formatted for the API
             formatted_time_min = _correct_time_format_for_api(time_min, "time_min")
             effective_time_min = formatted_time_min or (
-                datetime.datetime.now(timezone.utc).isoformat() + "Z"
+                datetime.datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
             )
             if time_min is None:
                 logger.info(
@@ -728,8 +728,17 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                         # Add 30 days
                         time_max_dt = time_min_dt + timedelta(days=30)
                         
-                        # Format back to RFC3339
-                        effective_time_max = time_max_dt.isoformat() + 'Z'
+                        # Format back to RFC3339 (handle timezone-aware datetimes correctly)
+                        iso_string = time_max_dt.isoformat()
+                        if iso_string.endswith('+00:00'):
+                            # Replace +00:00 with Z for UTC
+                            effective_time_max = iso_string.replace('+00:00', 'Z')
+                        elif 'T' in iso_string and not iso_string.endswith('Z') and '+' not in iso_string and '-' not in iso_string[-6:]:
+                            # No timezone info, assume UTC and add Z
+                            effective_time_max = iso_string + 'Z'
+                        else:
+                            # Already has proper timezone info
+                            effective_time_max = iso_string
                         logger.info(
                             f"time_max not provided, defaulting to 30 days from time_min: {effective_time_max}"
                         )

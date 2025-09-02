@@ -14,6 +14,8 @@ from typing_extensions import Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 import threading
 
+from config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -116,7 +118,7 @@ class OAuthProxy:
                 "client_id_issued_at": int(proxy_client.created_at.timestamp()),
                 "client_secret_expires_at": 0,  # Never expires
                 "registration_access_token": proxy_client.registration_access_token,
-                "registration_client_uri": f"http://localhost:8002/oauth/register/{temp_client_id}",
+                "registration_client_uri": f"{settings.base_url}/oauth/register/{temp_client_id}",
                 **client_metadata
             }
     
@@ -243,7 +245,7 @@ class OAuthProxy:
                 "client_id_issued_at": int(proxy_client.created_at.timestamp()),
                 "client_secret_expires_at": 0,
                 "registration_access_token": proxy_client.registration_access_token,
-                "registration_client_uri": f"http://localhost:8002/oauth/register/{temp_client_id}",
+                "registration_client_uri": f"{settings.base_url}/oauth/register/{temp_client_id}",
                 **proxy_client.client_metadata
             }
     

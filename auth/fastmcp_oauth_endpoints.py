@@ -97,6 +97,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
         
         # Get base server URL with proper protocol
         base_url = settings.base_url
+        mcp_resource_url = f"{base_url}/mcp"
         
         metadata = {
             "issuer": "https://accounts.google.com",
@@ -115,7 +116,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             "id_token_signing_alg_values_supported": ["RS256"],
             # MCP-specific configuration
             "registration_endpoint": f"{base_url}/oauth/register",
-            "resource_server": base_url,
+            "resource_server": mcp_resource_url,  # Should be the full MCP endpoint URL
             "authorization_servers": ["https://accounts.google.com"],
             "bearer_methods_supported": ["header"],
             "resource_documentation": f"{base_url}/docs"
@@ -135,9 +136,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             }
         )
     
-    @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET", "OPTIONS"])
+    @mcp.custom_route("/.well-known/oauth-protected-resource/mcp", methods=["GET", "OPTIONS"])
     async def oauth_protected_resource(request: Any):
-        """OAuth Protected Resource Metadata endpoint.
+        """OAuth Protected Resource Metadata endpoint for MCP Inspector.
         
         Required by MCP Inspector for OAuth server discovery.
         """
@@ -154,11 +155,12 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 }
             )
         
-        # Get base server URL with proper protocol
+        # Get base server URL with proper protocol and MCP path
         base_url = settings.base_url
+        mcp_resource_url = f"{base_url}/mcp"
         
         metadata = {
-            "resource_server": base_url,
+            "resource_server": mcp_resource_url,  # Should be the full MCP endpoint URL
             "authorization_servers": ["https://accounts.google.com"],
             "jwks_uri": "https://www.googleapis.com/oauth2/v3/certs",
             "bearer_methods_supported": ["header"],
@@ -198,9 +200,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             )
         
         # Get base server URL for our local registration endpoint
-        server_host = settings.server_host
-        server_port = settings.server_port
-        base_url = f"http://{server_host}:{server_port}"
+        base_url = settings.base_url
         
         metadata = {
             "issuer": "https://accounts.google.com",

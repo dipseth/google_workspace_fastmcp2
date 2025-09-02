@@ -18,7 +18,7 @@ class MCPAuthMiddleware(Middleware):
     
     def __init__(self):
         """Initialize MCP authentication middleware."""
-        self.resource_metadata_url = f"http://{settings.server_host}:{settings.server_port}/.well-known/oauth-protected-resource"
+        self.resource_metadata_url = f"{settings.base_url}/.well-known/oauth-protected-resource"
         self.www_authenticate_header = f'Bearer realm="MCP", resource_metadata="{self.resource_metadata_url}"'
         logger.info(f"🔐 MCP Auth Middleware initialized with resource metadata: {self.resource_metadata_url}")
     
