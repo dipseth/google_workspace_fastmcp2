@@ -6,6 +6,7 @@ endpoints using FastMCP's native routing system.
 
 import json
 import logging
+from datetime import datetime
 from typing_extensions import Any, Dict
 from config.settings import settings
 
@@ -492,8 +493,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 
                 logger.info(f"✅ Token exchange successful for client: {client_id[:20]}...")
                 
-                # CRITICAL FIX: Set session context after successful OAuth proxy authentication
-                # This bridges the OAuth proxy authentication with the resource system
+                # CRITICAL FIX: Store OAuth authentication data persistently
+                # Since we can't use session context outside of FastMCP request context,
+                # we store the authenticated user email to a file for later retrieval
                 if client_id.startswith("mcp_"):
                     try:
                         # Get the authenticated user email from the OAuth proxy
@@ -502,8 +504,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             # Get user email from Google userinfo API using the new tokens
                             from google.oauth2.credentials import Credentials
                             from googleapiclient.discovery import build
-                            from auth.context import set_user_email_context, set_session_context, get_session_context
                             import uuid
+                            import json
+                            from pathlib import Path
                             
                             # Create credentials from token response
                             credentials = Credentials(
@@ -521,20 +524,45 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             authenticated_email = user_info.get("email")
                             
                             if authenticated_email:
-                                # Generate or get session ID
-                                session_id = get_session_context() or str(uuid.uuid4())
-                                set_session_context(session_id)
-                                set_user_email_context(authenticated_email)
+                                # Store OAuth authentication data to file for persistence
+                                oauth_data_path = Path(settings.credentials_dir) / ".oauth_authentication.json"
+                                oauth_data_path.parent.mkdir(parents=True, exist_ok=True)
                                 
-                                logger.info(f"🔗 OAUTH_CONTEXT_FIX: Set session context for OAuth proxy user: {authenticated_email}")
-                                logger.info(f"   Session ID: {session_id}")
-                                logger.info(f"   User email context: {authenticated_email}")
+                                oauth_data = {
+                                    "authenticated_email": authenticated_email,
+                                    "authenticated_at": datetime.now().isoformat(),
+                                    "client_id": client_id,
+                                    "scopes": token_data.get('scope', '').split() if token_data.get('scope') else []
+                                }
+                                
+                                with open(oauth_data_path, "w") as f:
+                                    json.dump(oauth_data, f, indent=2)
+                                
+                                # Set restrictive permissions
+                                try:
+                                    oauth_data_path.chmod(0o600)
+                                except (OSError, AttributeError):
+                                    pass
+                                
+                                logger.info(f"✅ Stored OAuth authentication data for user: {authenticated_email}")
+                                logger.info(f"   Stored to: {oauth_data_path}")
+                                
+                                # Try to set context if available (won't work outside FastMCP request)
+                                try:
+                                    from auth.context import set_user_email_context, set_session_context, get_session_context
+                                    session_id = get_session_context() or str(uuid.uuid4())
+                                    set_session_context(session_id)
+                                    set_user_email_context(authenticated_email)
+                                    logger.info(f"🔗 Set session context for OAuth proxy user: {authenticated_email}")
+                                except RuntimeError:
+                                    # Expected when not in FastMCP request context
+                                    logger.info(f"📝 OAuth authentication stored for later use (not in FastMCP context)")
                             else:
                                 logger.warning("⚠️ Could not determine user email from OAuth token exchange")
                         else:
                             logger.warning(f"⚠️ Proxy client not found for successful token exchange: {client_id}")
                     except Exception as e:
-                        logger.error(f"❌ Failed to set session context after OAuth proxy authentication: {e}")
+                        logger.error(f"❌ Failed to store OAuth authentication data: {e}")
                         # Don't fail the token exchange - this is a context setup issue, not an auth issue
                 
                 return JSONResponse(

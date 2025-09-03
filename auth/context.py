@@ -26,7 +26,8 @@ def set_session_context(session_id: str) -> None:
         ctx.set_state("session_id", session_id)
         logger.debug(f"Set session context: {session_id}")
     except RuntimeError:
-        logger.warning("Cannot set session context - not in a FastMCP request context")
+        # This is expected when called outside FastMCP request context (e.g., OAuth endpoints)
+        logger.debug("Cannot set session context - not in a FastMCP request context")
 
 
 def get_session_context() -> Optional[str]:
@@ -56,7 +57,8 @@ def set_user_email_context(user_email: str) -> None:
         ctx.set_state("user_email", user_email)
         logger.debug(f"Set user email context: {user_email}")
     except RuntimeError:
-        logger.warning("Cannot set user email context - not in a FastMCP request context")
+        # This is expected when called outside FastMCP request context (e.g., OAuth endpoints)
+        logger.debug("Cannot set user email context - not in a FastMCP request context")
 
 
 def get_user_email_context() -> Optional[str]:

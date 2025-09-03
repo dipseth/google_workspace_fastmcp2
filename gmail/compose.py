@@ -13,7 +13,8 @@ import json
 import asyncio
 import html
 from datetime import datetime
-from typing_extensions import Optional, List, Union, Literal
+from typing_extensions import Optional, Literal, Any, List, Dict, Union,Annotated
+from pydantic import Field
 from dataclasses import dataclass
 
 from fastmcp import FastMCP, Context
@@ -22,7 +23,13 @@ from googleapiclient.errors import HttpError
 from .service import _get_gmail_service_with_fallback
 from .utils import _create_mime_message, _prepare_reply_subject, _quote_original_message, _html_to_plain_text, _extract_headers, _extract_message_body
 from .templates import EmailTemplateManager
+from .gmail_types import (
+    SendGmailMessageResponse, DraftGmailMessageResponse, ReplyGmailMessageResponse, 
+    DraftGmailReplyResponse
+)
 from config.settings import settings
+from tools.common_types import UserGoogleEmail
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +44,15 @@ class EmailAction:
 
 async def send_gmail_message(
     ctx: Context,
-    user_google_email: str,
     to: Union[str, List[str]],
     subject: str,
     body: str,
+    user_google_email: UserGoogleEmail = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
     cc: Optional[Union[str, List[str]]] = None,
     bcc: Optional[Union[str, List[str]]] = None
-) -> str:
+) -> SendGmailMessageResponse:
     """
     Sends an email using the user's Gmail account with support for HTML formatting and multiple recipients.
 
@@ -55,13 +62,13 @@ async def send_gmail_message(
 
     Args:
         ctx: FastMCP context for elicitation support
-        user_google_email: The user's Google email address
         to: Recipient email address(es) - can be a single string or list of strings
         subject: Email subject
         body: Email body content. Usage depends on content_type:
             - content_type="plain": Contains plain text only
             - content_type="html": Contains HTML content (plain text auto-generated for Gmail)
             - content_type="mixed": Contains plain text (HTML goes in html_body parameter)
+        user_google_email: The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).
         content_type: Content type - controls how body and html_body are used:
             - "plain": Plain text email (backward compatible)
             - "html": HTML email - put HTML content in 'body' parameter
@@ -75,36 +82,63 @@ async def send_gmail_message(
 
     Examples:
         # Plain text (backward compatible)
-        send_gmail_message(ctx, user_email, "user@example.com", "Subject", "Plain text body")
+        send_gmail_message(ctx, "user@example.com", "Subject", "Plain text body")
 
         # HTML email (HTML content goes in 'body' parameter)
-        send_gmail_message(ctx, user_email, "user@example.com", "Subject", "<h1>HTML content</h1>", content_type="html")
+        send_gmail_message(ctx, "user@example.com", "Subject", "<h1>HTML content</h1>", content_type="html")
 
         # Mixed content (separate plain and HTML versions)
-        send_gmail_message(ctx, user_email, "user@example.com", "Subject", "Plain version",
+        send_gmail_message(ctx, "user@example.com", "Subject", "Plain version",
                           content_type="mixed", html_body="<h1>HTML version</h1>")
 
         # Multiple recipients with HTML
-        send_gmail_message(ctx, user_email, ["user1@example.com", "user2@example.com"],
+        send_gmail_message(ctx, ["user1@example.com", "user2@example.com"],
                           "Subject", "<p>HTML for everyone!</p>", content_type="html",
                           cc="manager@example.com")
+
+        # Auto-injected user (middleware handles user_google_email)
+        send_gmail_message(ctx, "user@example.com", "Subject", "Body content")
     """
     # Parameter validation and helpful error messages
     if content_type == "html" and html_body and not body.strip().startswith('<'):
-        return f"❌ **Parameter Usage Error for content_type='html'**\n\n" \
-               f"When using content_type='html':\n" \
-               f"• Put your HTML content in the 'body' parameter\n" \
-               f"• The 'html_body' parameter is ignored\n\n" \
-               f"**For your case, try one of these:**\n" \
-               f"1. Use content_type='mixed' (uses both body and html_body)\n" \
-               f"2. Put HTML in 'body' parameter and remove 'html_body'\n\n" \
-               f"**Example:** body='<h1>Your HTML here</h1>', content_type='html'"
+        error_msg = (
+            "❌ **Parameter Usage Error for content_type='html'**\n\n"
+            "When using content_type='html':\n"
+            "• Put your HTML content in the 'body' parameter\n"
+            "• The 'html_body' parameter is ignored\n\n"
+            "**For your case, try one of these:**\n"
+            "1. Use content_type='mixed' (uses both body and html_body)\n"
+            "2. Put HTML in 'body' parameter and remove 'html_body'\n\n"
+            "**Example:** body='<h1>Your HTML here</h1>', content_type='html'"
+        )
+        return SendGmailMessageResponse(
+            success=False,
+            message=error_msg,
+            messageId=None,
+            threadId=None,
+            recipientCount=0,
+            contentType=content_type,
+            templateApplied=False,
+            error="Parameter validation error: incorrect content_type usage"
+        )
 
     if content_type == "mixed" and not html_body:
-        return f"❌ **Missing HTML Content for content_type='mixed'**\n\n" \
-               f"When using content_type='mixed', you must provide:\n" \
-               f"• Plain text in 'body' parameter\n" \
-               f"• HTML content in 'html_body' parameter"
+        error_msg = (
+            "❌ **Missing HTML Content for content_type='mixed'**\n\n"
+            "When using content_type='mixed', you must provide:\n"
+            "• Plain text in 'body' parameter\n"
+            "• HTML content in 'html_body' parameter"
+        )
+        return SendGmailMessageResponse(
+            success=False,
+            message=error_msg,
+            messageId=None,
+            threadId=None,
+            recipientCount=0,
+            contentType=content_type,
+            templateApplied=False,
+            error="Parameter validation error: missing html_body for mixed content"
+        )
 
     # Format recipients for logging
     to_str = to if isinstance(to, str) else f"{len(to)} recipients"
@@ -200,31 +234,52 @@ async def send_gmail_message(
                 )
             except asyncio.TimeoutError:
                 logger.info("Elicitation timed out after 60 seconds")
-                return json.dumps({
-                    "success": False,
-                    "message": "Email operation timed out - no response received within 60 seconds",
-                    "recipients_not_on_allow_list": recipients_not_allowed
-                })
+                return SendGmailMessageResponse(
+                    success=False,
+                    message="Email operation timed out - no response received within 60 seconds",
+                    messageId=None,
+                    threadId=None,
+                    recipientCount=0,
+                    contentType=content_type,
+                    templateApplied=False,
+                    error="Elicitation timeout",
+                    elicitationRequired=True,
+                    recipientsNotAllowed=recipients_not_allowed
+                )
 
             # Handle standard elicitation response structure
             if response.action == "decline" or response.action == "cancel":
                 logger.info(f"User {response.action}d email operation")
-                return json.dumps({
-                    "success": False,
-                    "message": f"Email operation {response.action}d by user",
-                    "recipients_not_on_allow_list": recipients_not_allowed
-                })
+                return SendGmailMessageResponse(
+                    success=False,
+                    message=f"Email operation {response.action}d by user",
+                    messageId=None,
+                    threadId=None,
+                    recipientCount=0,
+                    contentType=content_type,
+                    templateApplied=False,
+                    error=f"User {response.action}d",
+                    elicitationRequired=True,
+                    recipientsNotAllowed=recipients_not_allowed
+                )
             elif response.action == "accept":
                 # Get the user's choice from the data field
                 user_choice = response.data.action
                 
                 if user_choice == "cancel":
                     logger.info("User chose to cancel email operation")
-                    return json.dumps({
-                        "success": False,
-                        "message": "Email operation cancelled by user",
-                        "recipients_not_on_allow_list": recipients_not_allowed
-                    })
+                    return SendGmailMessageResponse(
+                        success=False,
+                        message="Email operation cancelled by user",
+                        messageId=None,
+                        threadId=None,
+                        recipientCount=0,
+                        contentType=content_type,
+                        templateApplied=False,
+                        error="User cancelled",
+                        elicitationRequired=True,
+                        recipientsNotAllowed=recipients_not_allowed
+                    )
                 elif user_choice == "save_draft":
                     logger.info("User chose to save email as draft")
                     # Create draft instead of sending
@@ -238,31 +293,54 @@ async def send_gmail_message(
                         cc=cc,
                         bcc=bcc
                     )
-                    return json.dumps({
-                        "success": True,
-                        "message": f"Email saved as draft instead of sending. {draft_result}",
-                        "action": "saved_draft",
-                        "recipients_not_on_allow_list": recipients_not_allowed
-                    })
+                    # Return as send response with draft info
+                    return SendGmailMessageResponse(
+                        success=True,
+                        message=f"Email saved as draft instead of sending. Draft ID: {draft_result.draftId}",
+                        messageId=None,
+                        threadId=None,
+                        draftId=draft_result.draftId,  # Include draft ID
+                        recipientCount=draft_result.recipientCount,
+                        contentType=content_type,
+                        templateApplied=False,
+                        error=None,
+                        elicitationRequired=True,
+                        recipientsNotAllowed=recipients_not_allowed,
+                        action="saved_draft"
+                    )
                 elif user_choice == "send":
                     # Continue with sending
                     logger.info("User chose to send email")
                 else:
                     # Unexpected choice
                     logger.error(f"Unexpected user choice: {user_choice}")
-                    return json.dumps({
-                        "success": False,
-                        "message": f"Unexpected choice: {user_choice}",
-                        "recipients_not_on_allow_list": recipients_not_allowed
-                    })
+                    return SendGmailMessageResponse(
+                        success=False,
+                        message=f"Unexpected choice: {user_choice}",
+                        messageId=None,
+                        threadId=None,
+                        recipientCount=0,
+                        contentType=content_type,
+                        templateApplied=False,
+                        error=f"Unexpected choice: {user_choice}",
+                        elicitationRequired=True,
+                        recipientsNotAllowed=recipients_not_allowed
+                    )
             else:
                 # Unexpected elicitation action
                 logger.error(f"Unexpected elicitation action: {response.action}")
-                return json.dumps({
-                    "success": False,
-                    "message": f"Unexpected elicitation response: {response.action}",
-                    "recipients_not_on_allow_list": recipients_not_allowed
-                })
+                return SendGmailMessageResponse(
+                    success=False,
+                    message=f"Unexpected elicitation response: {response.action}",
+                    messageId=None,
+                    threadId=None,
+                    recipientCount=0,
+                    contentType=content_type,
+                    templateApplied=False,
+                    error=f"Unexpected elicitation response: {response.action}",
+                    elicitationRequired=True,
+                    recipientsNotAllowed=recipients_not_allowed
+                )
         else:
             # All recipients are on allow list
             logger.info(f"All {len(all_recipients)} recipient(s) are on allow list - sending without elicitation")
@@ -383,41 +461,70 @@ async def send_gmail_message(
                           (len(cc) if isinstance(cc, list) else (1 if cc else 0)) + \
                           (len(bcc) if isinstance(bcc, list) else (1 if bcc else 0))
 
-        template_info = ""
-        if template_applied:
-            template_info = f" | Template '{template.name}' applied"
+        # Get thread ID from the sent message
+        thread_id = sent_message.get("threadId")
 
-        return f"✅ Email sent to {total_recipients} recipient(s)! Message ID: {message_id} (Content type: {final_content_type}){template_info}"
+        return SendGmailMessageResponse(
+            success=True,
+            message=f"✅ Email sent to {total_recipients} recipient(s)! Message ID: {message_id}",
+            messageId=message_id,
+            threadId=thread_id,
+            recipientCount=total_recipients,
+            contentType=final_content_type,
+            templateApplied=template_applied,
+            templateName=template.name if template_applied and template else None,
+            error=None,
+            elicitationRequired=bool(recipients_not_allowed) if allow_list else False,
+            recipientsNotAllowed=recipients_not_allowed if allow_list else []
+        )
 
     except HttpError as e:
         logger.error(f"Gmail API error in send_gmail_message: {e}")
-        return f"❌ Gmail API error: {e}"
+        return SendGmailMessageResponse(
+            success=False,
+            message=f"❌ Gmail API error: {e}",
+            messageId=None,
+            threadId=None,
+            recipientCount=0,
+            contentType=content_type,
+            templateApplied=False,
+            error=str(e)
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error in send_gmail_message: {e}")
-        return f"❌ Unexpected error: {e}"
+        return SendGmailMessageResponse(
+            success=False,
+            message=f"❌ Unexpected error: {e}",
+            messageId=None,
+            threadId=None,
+            recipientCount=0,
+            contentType=content_type,
+            templateApplied=False,
+            error=str(e)
+        )
 
 
 async def draft_gmail_message(
-    user_google_email: str,
     subject: str,
     body: str,
+    user_google_email: UserGoogleEmail = None,
     to: Optional[Union[str, List[str]]] = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
     cc: Optional[Union[str, List[str]]] = None,
     bcc: Optional[Union[str, List[str]]] = None
-) -> str:
+) -> DraftGmailMessageResponse:
     """
     Creates a draft email in the user's Gmail account with support for HTML formatting and multiple recipients.
 
     Args:
-        user_google_email: The user's Google email address
         subject: Email subject
         body: Email body content. Usage depends on content_type:
             - content_type="plain": Contains plain text only
             - content_type="html": Contains HTML content (plain text auto-generated for Gmail)
             - content_type="mixed": Contains plain text (HTML goes in html_body parameter)
+        user_google_email: The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).
         to: Optional recipient email address(es) - can be a single string, list of strings, or None for drafts
         content_type: Content type - controls how body and html_body are used:
             - "plain": Plain text draft (backward compatible)
@@ -432,31 +539,60 @@ async def draft_gmail_message(
 
     Examples:
         # Plain text draft
-        draft_gmail_message(user_email, "Subject", "Plain text body")
+        draft_gmail_message("Subject", "Plain text body")
 
         # HTML draft (HTML content goes in 'body' parameter)
-        draft_gmail_message(user_email, "Subject", "<h1>HTML content</h1>", content_type="html")
+        draft_gmail_message("Subject", "<h1>HTML content</h1>", content_type="html")
 
         # Mixed content draft
-        draft_gmail_message(user_email, "Subject", "Plain version",
+        draft_gmail_message("Subject", "Plain version",
                           content_type="mixed", html_body="<h1>HTML version</h1>")
+
+        # Auto-injected user (middleware handles user_google_email)
+        draft_gmail_message("Subject", "Body content")
     """
     # Parameter validation and helpful error messages (same as send_gmail_message)
     if content_type == "html" and html_body and not body.strip().startswith('<'):
-        return f"❌ **Parameter Usage Error for content_type='html'**\n\n" \
-               f"When using content_type='html':\n" \
-               f"• Put your HTML content in the 'body' parameter\n" \
-               f"• The 'html_body' parameter is ignored\n\n" \
-               f"**For your case, try one of these:**\n" \
-               f"1. Use content_type='mixed' (uses both body and html_body)\n" \
-               f"2. Put HTML in 'body' parameter and remove 'html_body'\n\n" \
-               f"**Example:** body='<h1>Your HTML here</h1>', content_type='html'"
+        error_msg = (
+            "❌ **Parameter Usage Error for content_type='html'**\n\n"
+            "When using content_type='html':\n"
+            "• Put your HTML content in the 'body' parameter\n"
+            "• The 'html_body' parameter is ignored\n\n"
+            "**For your case, try one of these:**\n"
+            "1. Use content_type='mixed' (uses both body and html_body)\n"
+            "2. Put HTML in 'body' parameter and remove 'html_body'\n\n"
+            "**Example:** body='<h1>Your HTML here</h1>', content_type='html'"
+        )
+        return DraftGmailMessageResponse(
+            success=False,
+            message=error_msg,
+            draftId=None,
+            messageId=None,
+            threadId=None,
+            recipientCount=0,
+            contentType=content_type,
+            subject=subject,
+            error="Parameter validation error: incorrect content_type usage"
+        )
 
     if content_type == "mixed" and not html_body:
-        return f"❌ **Missing HTML Content for content_type='mixed'**\n\n" \
-               f"When using content_type='mixed', you must provide:\n" \
-               f"• Plain text in 'body' parameter\n" \
-               f"• HTML content in 'html_body' parameter"
+        error_msg = (
+            "❌ **Missing HTML Content for content_type='mixed'**\n\n"
+            "When using content_type='mixed', you must provide:\n"
+            "• Plain text in 'body' parameter\n"
+            "• HTML content in 'html_body' parameter"
+        )
+        return DraftGmailMessageResponse(
+            success=False,
+            message=error_msg,
+            draftId=None,
+            messageId=None,
+            threadId=None,
+            recipientCount=0,
+            contentType=content_type,
+            subject=subject,
+            error="Parameter validation error: missing html_body for mixed content"
+        )
 
     # Format recipients for logging
     to_str = "no recipients" if not to else (to if isinstance(to, str) else f"{len(to)} recipients")
@@ -498,31 +634,54 @@ async def draft_gmail_message(
         if bcc:
             total_recipients += len(bcc) if isinstance(bcc, list) else 1
 
-        recipient_info = f" ({total_recipients} recipient(s))" if total_recipients > 0 else " (no recipients)"
-        return f"✅ Draft created{recipient_info}! Draft ID: {draft_id} (Content type: {content_type})"
+        # Get message ID from the draft
+        message_id = created_draft.get("message", {}).get("id")
+        thread_id = created_draft.get("message", {}).get("threadId")
+
+        return DraftGmailMessageResponse(
+            success=True,
+            message=f"✅ Draft created! Draft ID: {draft_id}",
+            draftId=draft_id,
+            messageId=message_id,
+            threadId=thread_id,
+            recipientCount=total_recipients,
+            contentType=content_type,
+            subject=subject,
+            error=None
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error in draft_gmail_message: {e}")
-        return f"❌ Unexpected error: {e}"
+        return DraftGmailMessageResponse(
+            success=False,
+            message=f"❌ Unexpected error: {e}",
+            draftId=None,
+            messageId=None,
+            threadId=None,
+            recipientCount=0,
+            contentType=content_type,
+            subject=subject,
+            error=str(e)
+        )
 
 
 async def reply_to_gmail_message(
-    user_google_email: str,
     message_id: str,
     body: str,
+    user_google_email: UserGoogleEmail = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None
-) -> str:
+) -> ReplyGmailMessageResponse:
     """
     Sends a reply to a specific Gmail message with support for HTML formatting.
 
     Args:
-        user_google_email: The user's Google email address
         message_id: The ID of the message to reply to
         body: Reply body content. Usage depends on content_type:
             - content_type="plain": Contains plain text only
             - content_type="html": Contains HTML content (plain text auto-generated for Gmail)
             - content_type="mixed": Contains plain text (HTML goes in html_body parameter)
+        user_google_email: The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).
         content_type: Content type - controls how body and html_body are used:
             - "plain": Plain text reply (backward compatible)
             - "html": HTML reply - put HTML content in 'body' parameter
@@ -534,14 +693,17 @@ async def reply_to_gmail_message(
 
     Examples:
         # Plain text reply
-        reply_to_gmail_message(user_email, "msg_123", "Thanks for your message!")
+        reply_to_gmail_message("msg_123", "Thanks for your message!")
 
         # HTML reply (HTML content goes in 'body' parameter)
-        reply_to_gmail_message(user_email, "msg_123", "<p>Thanks for your <b>message</b>!</p>", content_type="html")
+        reply_to_gmail_message("msg_123", "<p>Thanks for your <b>message</b>!</p>", content_type="html")
 
         # Mixed content reply
-        reply_to_gmail_message(user_email, "msg_123", "Thanks for your message!",
+        reply_to_gmail_message("msg_123", "Thanks for your message!",
                               content_type="mixed", html_body="<p>Thanks for your <b>message</b>!</p>")
+
+        # Auto-injected user (middleware handles user_google_email)
+        reply_to_gmail_message("msg_123", "Thanks for your message!")
     """
     logger.info(f"[reply_to_gmail_message] Email: '{user_google_email}', Replying to Message ID: '{message_id}', content_type: {content_type}")
 
@@ -594,30 +756,52 @@ async def reply_to_gmail_message(
             gmail_service.users().messages().send(userId="me", body=send_body).execute
         )
         sent_message_id = sent_message.get("id")
-        return f"✅ Reply sent! Message ID: {sent_message_id} (Content type: {content_type})"
+        thread_id = sent_message.get("threadId")
+        
+        return ReplyGmailMessageResponse(
+            success=True,
+            message=f"✅ Reply sent! Message ID: {sent_message_id}",
+            messageId=sent_message_id,
+            threadId=thread_id,
+            originalMessageId=message_id,
+            recipientEmail=original_from,
+            contentType=content_type,
+            subject=reply_subject,
+            error=None
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error in reply_to_gmail_message: {e}")
-        return f"❌ Unexpected error: {e}"
+        return ReplyGmailMessageResponse(
+            success=False,
+            message=f"❌ Unexpected error: {e}",
+            messageId=None,
+            threadId=None,
+            originalMessageId=message_id,
+            recipientEmail=None,
+            contentType=content_type,
+            subject=None,
+            error=str(e)
+        )
 
 
 async def draft_gmail_reply(
-    user_google_email: str,
     message_id: str,
     body: str,
+    user_google_email: UserGoogleEmail = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None
-) -> str:
+) -> DraftGmailReplyResponse:
     """
     Creates a draft reply to a specific Gmail message with support for HTML formatting.
 
     Args:
-        user_google_email: The user's Google email address
         message_id: The ID of the message to draft a reply for
         body: Reply body content. Usage depends on content_type:
             - content_type="plain": Contains plain text only
             - content_type="html": Contains HTML content (plain text auto-generated for Gmail)
             - content_type="mixed": Contains plain text (HTML goes in html_body parameter)
+        user_google_email: The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).
         content_type: Content type - controls how body and html_body are used:
             - "plain": Plain text draft reply (backward compatible)
             - "html": HTML draft reply - put HTML content in 'body' parameter
@@ -629,14 +813,17 @@ async def draft_gmail_reply(
 
     Examples:
         # Plain text draft reply
-        draft_gmail_reply(user_email, "msg_123", "Thanks for your message!")
+        draft_gmail_reply("msg_123", "Thanks for your message!")
 
         # HTML draft reply (HTML content goes in 'body' parameter)
-        draft_gmail_reply(user_email, "msg_123", "<p>Thanks for your <b>message</b>!</p>", content_type="html")
+        draft_gmail_reply("msg_123", "<p>Thanks for your <b>message</b>!</p>", content_type="html")
 
         # Mixed content draft reply
-        draft_gmail_reply(user_email, "msg_123", "Thanks for your message!",
+        draft_gmail_reply("msg_123", "Thanks for your message!",
                          content_type="mixed", html_body="<p>Thanks for your <b>message</b>!</p>")
+
+        # Auto-injected user (middleware handles user_google_email)
+        draft_gmail_reply("msg_123", "Thanks for your message!")
     """
     logger.info(f"[draft_gmail_reply] Email: '{user_google_email}', Drafting reply to Message ID: '{message_id}', content_type: {content_type}")
 
@@ -689,11 +876,36 @@ async def draft_gmail_reply(
             gmail_service.users().drafts().create(userId="me", body=draft_body).execute
         )
         draft_id = created_draft.get("id")
-        return f"✅ Draft reply created! Draft ID: {draft_id} (Content type: {content_type})"
+        message_id_from_draft = created_draft.get("message", {}).get("id")
+        thread_id = created_draft.get("message", {}).get("threadId")
+        
+        return DraftGmailReplyResponse(
+            success=True,
+            message=f"✅ Draft reply created! Draft ID: {draft_id}",
+            draftId=draft_id,
+            messageId=message_id_from_draft,
+            threadId=thread_id,
+            originalMessageId=message_id,
+            recipientEmail=original_from,
+            contentType=content_type,
+            subject=reply_subject,
+            error=None
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error in draft_gmail_reply: {e}")
-        return f"❌ Unexpected error: {e}"
+        return DraftGmailReplyResponse(
+            success=False,
+            message=f"❌ Unexpected error: {e}",
+            draftId=None,
+            messageId=None,
+            threadId=None,
+            originalMessageId=message_id,
+            recipientEmail=None,
+            contentType=content_type,
+            subject=None,
+            error=str(e)
+        )
 
 
 def setup_compose_tools(mcp: FastMCP) -> None:
@@ -701,8 +913,8 @@ def setup_compose_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="send_gmail_message",
-        description="Send an email using the user's Gmail account",
-        tags={"gmail", "send", "email", "compose"},
+        description="Send an email using the user's Gmail account with elicitation support for untrusted recipients",
+        tags={"gmail", "send", "email", "compose", "html", "templates", "elicitation"},
         annotations={
             "title": "Send Gmail Message",
             "readOnlyHint": False,  # Sends emails, modifies state
@@ -712,22 +924,50 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         }
     )
     async def send_gmail_message_tool(
-        ctx: Context,
-        user_google_email: str,
-        to: Union[str, List[str]],
-        subject: str,
-        body: str,
-        content_type: Literal["plain", "html", "mixed"] = "mixed",
-        html_body: Optional[str] = None,
-        cc: Optional[Union[str, List[str]]] = None,
-        bcc: Optional[Union[str, List[str]]] = None
-    ) -> str:
-        return await send_gmail_message(ctx, user_google_email, to, subject, body, content_type, html_body, cc, bcc)
+        ctx: Annotated[Context, Field(description="FastMCP context for elicitation support and user interaction")],
+        to: Annotated[Union[str, List[str]], Field(description="Recipient email address(es). Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")],
+        subject: Annotated[str, Field(description="Email subject line")],
+        body: Annotated[str, Field(description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)")],
+        user_google_email: UserGoogleEmail = None,
+        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)")] = "mixed",
+        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. Ignored for 'plain' and 'html' types")] = None,
+        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s). Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
+        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s). Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None
+    ) -> SendGmailMessageResponse:
+        """
+        Send Gmail message with structured output and elicitation support.
+        
+        Returns both:
+        - Traditional content: Human-readable confirmation message (automatic via FastMCP)
+        - Structured content: Machine-readable JSON with detailed send results
+        
+        Features:
+        - HTML and plain text support with automatic conversion
+        - Multiple recipients (to, cc, bcc)
+        - Email template auto-application based on recipients
+        - Elicitation for recipients not on allow list
+        - Auto-injection of user context via middleware
+        
+        Args:
+            ctx: FastMCP context for user interactions and elicitation
+            to: Recipient email address(es)
+            subject: Email subject line
+            body: Email body content (usage varies by content_type)
+            user_google_email: User's email address (auto-injected if None)
+            content_type: How to handle body/html_body content
+            html_body: HTML content for mixed-type emails
+            cc: CC recipients (optional)
+            bcc: BCC recipients (optional)
+            
+        Returns:
+        SendGmailMessageResponse: Structured response with send status and details
+        """
+        return await send_gmail_message(ctx, to, subject, body, user_google_email, content_type, html_body, cc, bcc)
 
     @mcp.tool(
         name="draft_gmail_message",
-        description="Create a draft email in the user's Gmail account",
-        tags={"gmail", "draft", "email", "compose"},
+        description="Create a draft email in the user's Gmail account with HTML support and multiple recipients",
+        tags={"gmail", "draft", "email", "compose", "html", "save"},
         annotations={
             "title": "Draft Gmail Message",
             "readOnlyHint": False,
@@ -737,21 +977,47 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         }
     )
     async def draft_gmail_message_tool(
-        user_google_email: str,
-        subject: str,
-        body: str,
-        to: Optional[Union[str, List[str]]] = None,
-        content_type: Literal["plain", "html", "mixed"] = "mixed",
-        html_body: Optional[str] = None,
-        cc: Optional[Union[str, List[str]]] = None,
-        bcc: Optional[Union[str, List[str]]] = None
-    ) -> str:
-        return await draft_gmail_message(user_google_email, subject, body, to, content_type, html_body, cc, bcc)
+        subject: Annotated[str, Field(description="Email subject line for the draft")],
+        body: Annotated[str, Field(description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)")],
+        user_google_email: UserGoogleEmail = None,
+        to: Annotated[Optional[Union[str, List[str]]], Field(description="Optional recipient email address(es). Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']. Can be None for recipient-less drafts")] = None,
+        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)")] = "mixed",
+        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. Ignored for 'plain' and 'html' types")] = None,
+        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s). Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
+        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s). Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None
+    ) -> DraftGmailMessageResponse:
+        """
+        Create Gmail draft with structured output.
+        
+        Returns both:
+        - Traditional content: Human-readable confirmation message (automatic via FastMCP)
+        - Structured content: Machine-readable JSON with draft creation details
+        
+        Features:
+        - HTML and plain text support with automatic conversion
+        - Multiple recipients (to, cc, bcc) or recipient-less drafts
+        - Auto-injection of user context via middleware
+        - Flexible content type handling
+        
+        Args:
+            subject: Email subject line
+            body: Email body content (usage varies by content_type)
+            user_google_email: User's email address (auto-injected if None)
+            to: Optional recipient email address(es)
+            content_type: How to handle body/html_body content
+            html_body: HTML content for mixed-type emails
+            cc: CC recipients (optional)
+            bcc: BCC recipients (optional)
+            
+        Returns:
+        DraftGmailMessageResponse: Structured response with draft creation details
+        """
+        return await draft_gmail_message(subject, body, user_google_email, to, content_type, html_body, cc, bcc)
 
     @mcp.tool(
         name="reply_to_gmail_message",
-        description="Send a reply to a specific Gmail message with proper threading",
-        tags={"gmail", "reply", "send", "thread", "email"},
+        description="Send a reply to a specific Gmail message with proper threading and HTML support",
+        tags={"gmail", "reply", "send", "thread", "email", "html", "conversation"},
         annotations={
             "title": "Reply to Gmail Message",
             "readOnlyHint": False,
@@ -761,18 +1027,42 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         }
     )
     async def reply_to_gmail_message_tool(
-        user_google_email: str,
-        message_id: str,
-        body: str,
-        content_type: Literal["plain", "html", "mixed"] = "mixed",
-        html_body: Optional[str] = None
-    ) -> str:
-        return await reply_to_gmail_message(user_google_email, message_id, body, content_type, html_body)
+        message_id: Annotated[str, Field(description="The ID of the original Gmail message to reply to. This maintains proper email threading")],
+        body: Annotated[str, Field(description="Reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted")],
+        user_google_email: UserGoogleEmail = None,
+        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)")] = "mixed",
+        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types")] = None
+    ) -> ReplyGmailMessageResponse:
+        """
+        Reply to Gmail message with structured output and proper threading.
+        
+        Returns both:
+        - Traditional content: Human-readable confirmation message (automatic via FastMCP)
+        - Structured content: Machine-readable JSON with reply details and threading info
+        
+        Features:
+        - Automatic email threading (maintains conversation)
+        - Original message quoting in reply
+        - HTML and plain text support
+        - Auto-extraction of reply-to address and subject
+        - Auto-injection of user context via middleware
+        
+        Args:
+            message_id: ID of the original message to reply to
+            body: Reply body content (original message auto-quoted)
+            user_google_email: User's email address (auto-injected if None)
+            content_type: How to handle body/html_body content
+            html_body: HTML content for mixed-type replies
+            
+        Returns:
+        ReplyGmailMessageResponse: Structured response with reply status and threading info
+        """
+        return await reply_to_gmail_message(message_id, body, user_google_email, content_type, html_body)
 
     @mcp.tool(
         name="draft_gmail_reply",
-        description="Create a draft reply to a specific Gmail message with proper threading",
-        tags={"gmail", "draft", "reply", "thread", "email"},
+        description="Create a draft reply to a specific Gmail message with proper threading and HTML support",
+        tags={"gmail", "draft", "reply", "thread", "email", "html", "conversation", "save"},
         annotations={
             "title": "Draft Gmail Reply",
             "readOnlyHint": False,
@@ -782,10 +1072,34 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         }
     )
     async def draft_gmail_reply_tool(
-        user_google_email: str,
-        message_id: str,
-        body: str,
-        content_type: Literal["plain", "html", "mixed"] = "mixed",
-        html_body: Optional[str] = None
-    ) -> str:
-        return await draft_gmail_reply(user_google_email, message_id, body, content_type, html_body)
+        message_id: Annotated[str, Field(description="The ID of the original Gmail message to draft a reply for. This maintains proper email threading in the draft")],
+        body: Annotated[str, Field(description="Draft reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted")],
+        user_google_email: UserGoogleEmail = None,
+        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)")] = "mixed",
+        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types")] = None
+    ) -> DraftGmailReplyResponse:
+        """
+        Create Gmail draft reply with structured output and proper threading.
+        
+        Returns both:
+        - Traditional content: Human-readable confirmation message (automatic via FastMCP)
+        - Structured content: Machine-readable JSON with draft creation and threading info
+        
+        Features:
+        - Automatic email threading (maintains conversation in draft)
+        - Original message quoting in draft
+        - HTML and plain text support
+        - Auto-extraction of reply-to address and subject
+        - Auto-injection of user context via middleware
+        
+        Args:
+            message_id: ID of the original message to draft reply for
+            body: Draft reply body content (original message auto-quoted)
+            user_google_email: User's email address (auto-injected if None)
+            content_type: How to handle body/html_body content
+            html_body: HTML content for mixed-type draft replies
+            
+        Returns:
+        DraftGmailReplyResponse: Structured response with draft creation and threading info
+        """
+        return await draft_gmail_reply(message_id, body, user_google_email, content_type, html_body)

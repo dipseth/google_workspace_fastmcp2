@@ -11,8 +11,20 @@ from typing_extensions import List, Optional, Any
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
 
+# Import our custom type for consistent parameter definition
+from tools.common_types import UserGoogleEmailSheets
+
 from auth.service_helpers import request_service, get_injected_service, get_service
-from .sheets_types import SpreadsheetListResponse, SpreadsheetInfo
+from .sheets_types import (
+    SpreadsheetListResponse,
+    SpreadsheetInfo,
+    SpreadsheetDetailsResponse,
+    SheetInfo,
+    SheetValuesResponse,
+    SheetModifyResponse,
+    CreateSpreadsheetResponse,
+    CreateSheetResponse
+)
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -88,7 +100,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_spreadsheets(
-        user_google_email: str,
+        user_google_email: UserGoogleEmailSheets = None,
         max_results: int = 25
     ) -> SpreadsheetListResponse:
         """
@@ -96,12 +108,20 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
 
         Args:
             user_google_email (str): The user's Google email address. Required.
-            max_results (int): Maximum number of spreadsheets to return. Defaults to 25.
+            max_results (int): Maximum number of spreadsheets to return. Must be between 1 and 1000. Defaults to 25.
 
         Returns:
             SpreadsheetListResponse: Structured list of spreadsheets with metadata.
         """
-        logger.info(f"[list_spreadsheets] Invoked. Email: '{user_google_email}'")
+        logger.info(f"[list_spreadsheets] Invoked. Email: '{user_google_email}', max_results: {max_results}")
+        
+        # Validate max_results parameter
+        if max_results < 1:
+            max_results = 1
+            logger.warning(f"max_results was less than 1, setting to 1")
+        elif max_results > 1000:
+            max_results = 1000
+            logger.warning(f"max_results was greater than 1000, setting to 1000")
 
         try:
             # Get Drive service (spreadsheets are stored in Drive)
@@ -124,15 +144,30 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                         
                     except Exception as direct_error:
                         logger.error(f"Direct Drive service creation failed for {user_google_email}: {direct_error}")
-                        return f"❌ Failed to create Google Drive service for {user_google_email}. Please check your credentials and permissions."
+                        return SpreadsheetListResponse(
+                            items=[],
+                            count=0,
+                            userEmail=user_google_email,
+                            error=f"Failed to create Google Drive service. Please check your credentials and permissions."
+                        )
                 else:
                     # Different type of RuntimeError, log and fail
                     logger.error(f"Drive service injection error for {user_google_email}: {e}")
-                    return f"❌ Drive service injection error for {user_google_email}: {e}"
+                    return SpreadsheetListResponse(
+                        items=[],
+                        count=0,
+                        userEmail=user_google_email,
+                        error=f"Drive service injection error: {e}"
+                    )
                     
             except Exception as e:
                 logger.error(f"Unexpected error getting Drive service for {user_google_email}: {e}")
-                return f"❌ Unexpected error getting Drive service for {user_google_email}: {e}"
+                return SpreadsheetListResponse(
+                    items=[],
+                    count=0,
+                    userEmail=user_google_email,
+                    error=f"Unexpected error getting Drive service: {e}"
+                )
 
             files_response = await asyncio.to_thread(
                 drive_service.files()
@@ -168,16 +203,26 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             )
         
         except HttpError as e:
-            error_msg = f"❌ Failed to list spreadsheets: {e}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Failed to list spreadsheets: {e}"
+            logger.error(f"❌ {error_msg}")
+            return SpreadsheetListResponse(
+                items=[],
+                count=0,
+                userEmail=user_google_email,
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error listing spreadsheets: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Unexpected error listing spreadsheets: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return SpreadsheetListResponse(
+                items=[],
+                count=0,
+                userEmail=user_google_email,
+                error=error_msg
+            )
 
     @mcp.tool(
-        name="get_spreadsheet_info", 
+        name="get_spreadsheet_info",
         description="Get information about a specific spreadsheet including its sheets",
         tags={"sheets", "info", "metadata", "google"},
         annotations={
@@ -189,9 +234,9 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_spreadsheet_info(
-        user_google_email: str,
-        spreadsheet_id: str
-    ) -> str:
+        spreadsheet_id: str,
+        user_google_email: UserGoogleEmailSheets = None
+    ) -> SpreadsheetDetailsResponse:
         """
         Gets information about a specific spreadsheet including its sheets.
 
@@ -200,7 +245,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             spreadsheet_id (str): The ID of the spreadsheet to get info for. Required.
 
         Returns:
-            str: Formatted spreadsheet information including title and sheets list.
+            SpreadsheetDetailsResponse: Structured spreadsheet information including title and sheets list.
         """
         logger.info(f"[get_spreadsheet_info] Invoked. Email: '{user_google_email}', Spreadsheet ID: {spreadsheet_id}")
 
@@ -213,37 +258,50 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
 
             title = spreadsheet.get("properties", {}).get("title", "Unknown")
             sheets = spreadsheet.get("sheets", [])
+            spreadsheet_url = spreadsheet.get("spreadsheetUrl")
 
-            sheets_info = []
+            sheets_info: List[SheetInfo] = []
             for sheet in sheets:
                 sheet_props = sheet.get("properties", {})
-                sheet_name = sheet_props.get("title", "Unknown")
-                sheet_id = sheet_props.get("sheetId", "Unknown")
-                grid_props = sheet_props.get("gridProperties", {})
-                rows = grid_props.get("rowCount", "Unknown")
-                cols = grid_props.get("columnCount", "Unknown")
-
-                sheets_info.append(
-                    f"  - \"{sheet_name}\" (ID: {sheet_id}) | Size: {rows}x{cols}"
-                )
-
-            text_output = (
-                f"Spreadsheet: \"{title}\" (ID: {spreadsheet_id})\n"
-                f"Sheets ({len(sheets)}):\n"
-                + "\n".join(sheets_info) if sheets_info else "  No sheets found"
-            )
+                sheet_info: SheetInfo = {
+                    "sheetId": sheet_props.get("sheetId", 0),
+                    "title": sheet_props.get("title", "Unknown"),
+                    "index": sheet_props.get("index", 0),
+                    "rowCount": sheet_props.get("gridProperties", {}).get("rowCount", 0),
+                    "columnCount": sheet_props.get("gridProperties", {}).get("columnCount", 0)
+                }
+                sheets_info.append(sheet_info)
 
             logger.info(f"Successfully retrieved info for spreadsheet {spreadsheet_id} for {user_google_email}.")
-            return text_output
+            
+            return SpreadsheetDetailsResponse(
+                spreadsheetId=spreadsheet_id,
+                title=title,
+                sheets=sheets_info,
+                sheetCount=len(sheets),
+                spreadsheetUrl=spreadsheet_url
+            )
         
         except HttpError as e:
-            error_msg = f"❌ Failed to get spreadsheet info: {e}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Failed to get spreadsheet info: {e}"
+            logger.error(f"❌ {error_msg}")
+            return SpreadsheetDetailsResponse(
+                spreadsheetId=spreadsheet_id,
+                title="",
+                sheets=[],
+                sheetCount=0,
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error getting spreadsheet info: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Unexpected error getting spreadsheet info: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return SpreadsheetDetailsResponse(
+                spreadsheetId=spreadsheet_id,
+                title="",
+                sheets=[],
+                sheetCount=0,
+                error=error_msg
+            )
 
     @mcp.tool(
         name="read_sheet_values",
@@ -258,10 +316,10 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         }
     )
     async def read_sheet_values(
-        user_google_email: str,
         spreadsheet_id: str,
+        user_google_email: UserGoogleEmailSheets = None,
         range_name: str = "A1:Z1000"
-    ) -> str:
+    ) -> SheetValuesResponse:
         """
         Reads values from a specific range in a Google Sheet.
 
@@ -271,7 +329,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             range_name (str): The range to read (e.g., "Sheet1!A1:D10", "A1:D10"). Defaults to "A1:Z1000".
 
         Returns:
-            str: The formatted values from the specified range.
+            SheetValuesResponse: Structured response with the values from the specified range.
         """
         logger.info(f"[read_sheet_values] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Range: {range_name}")
 
@@ -286,33 +344,43 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             )
 
             values = result.get("values", [])
-            if not values:
-                return f"No data found in range '{range_name}' for {user_google_email}."
-
-            # Format the output as a readable table
-            formatted_rows = []
-            for i, row in enumerate(values, 1):
-                # Pad row with empty strings to show structure
-                padded_row = row + [""] * max(0, len(values[0]) - len(row)) if values else row
-                formatted_rows.append(f"Row {i:2d}: {padded_row}")
-
-            text_output = (
-                f"Successfully read {len(values)} rows from range '{range_name}' in spreadsheet {spreadsheet_id} for {user_google_email}:\n"
-                + "\n".join(formatted_rows[:50])  # Limit to first 50 rows for readability
-                + (f"\n... and {len(values) - 50} more rows" if len(values) > 50 else "")
+            
+            # Calculate row and column counts
+            row_count = len(values)
+            column_count = max(len(row) for row in values) if values else 0
+            
+            logger.info(f"Successfully read {row_count} rows from range '{range_name}' for {user_google_email}.")
+            
+            return SheetValuesResponse(
+                spreadsheetId=spreadsheet_id,
+                range=range_name,
+                values=values,
+                rowCount=row_count,
+                columnCount=column_count
             )
-
-            logger.info(f"Successfully read {len(values)} rows for {user_google_email}.")
-            return text_output
         
         except HttpError as e:
-            error_msg = f"❌ Failed to read sheet values: {e}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Failed to read sheet values: {e}"
+            logger.error(f"❌ {error_msg}")
+            return SheetValuesResponse(
+                spreadsheetId=spreadsheet_id,
+                range=range_name,
+                values=[],
+                rowCount=0,
+                columnCount=0,
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error reading sheet values: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Unexpected error reading sheet values: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return SheetValuesResponse(
+                spreadsheetId=spreadsheet_id,
+                range=range_name,
+                values=[],
+                rowCount=0,
+                columnCount=0,
+                error=error_msg
+            )
 
     @mcp.tool(
         name="modify_sheet_values",
@@ -327,13 +395,13 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         }
     )
     async def modify_sheet_values(
-        user_google_email: str,
         spreadsheet_id: str,
         range_name: str,
+        user_google_email: UserGoogleEmailSheets = None,
         values: Optional[List[List[str]]] = None,
         value_input_option: str = "USER_ENTERED",
         clear_values: bool = False
-    ) -> str:
+    ) -> SheetModifyResponse:
         """
         Modifies values in a specific range of a Google Sheet - can write, update, or clear values.
 
@@ -346,14 +414,21 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             clear_values (bool): If True, clears the range instead of writing values. Defaults to False.
 
         Returns:
-            str: Confirmation message of the successful modification operation.
+            SheetModifyResponse: Structured response with details of the modification operation.
         """
         operation = "clear" if clear_values else "write"
         logger.info(f"[modify_sheet_values] Invoked. Operation: {operation}, Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Range: {range_name}")
 
         try:
             if not clear_values and not values:
-                return "❌ Either 'values' must be provided or 'clear_values' must be True."
+                return SheetModifyResponse(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_name,
+                    operation="error",
+                    success=False,
+                    message="",
+                    error="Either 'values' must be provided or 'clear_values' must be True."
+                )
 
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
 
@@ -366,8 +441,16 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 )
 
                 cleared_range = result.get("clearedRange", range_name)
-                text_output = f"✅ Successfully cleared range '{cleared_range}' in spreadsheet {spreadsheet_id} for {user_google_email}."
                 logger.info(f"Successfully cleared range '{cleared_range}' for {user_google_email}.")
+                
+                return SheetModifyResponse(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_name,
+                    operation="clear",
+                    clearedRange=cleared_range,
+                    success=True,
+                    message=f"Successfully cleared range '{cleared_range}' in spreadsheet {spreadsheet_id}."
+                )
             else:
                 body = {"values": values}
 
@@ -387,22 +470,41 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 updated_rows = result.get("updatedRows", 0)
                 updated_columns = result.get("updatedColumns", 0)
 
-                text_output = (
-                    f"✅ Successfully updated range '{range_name}' in spreadsheet {spreadsheet_id} for {user_google_email}. "
-                    f"Updated: {updated_cells} cells, {updated_rows} rows, {updated_columns} columns."
-                )
                 logger.info(f"Successfully updated {updated_cells} cells for {user_google_email}.")
-
-            return text_output
+                
+                return SheetModifyResponse(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_name,
+                    operation="update",
+                    updatedCells=updated_cells,
+                    updatedRows=updated_rows,
+                    updatedColumns=updated_columns,
+                    success=True,
+                    message=f"Successfully updated range '{range_name}' in spreadsheet {spreadsheet_id}. Updated: {updated_cells} cells, {updated_rows} rows, {updated_columns} columns."
+                )
         
         except HttpError as e:
-            error_msg = f"❌ Failed to modify sheet values: {e}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Failed to modify sheet values: {e}"
+            logger.error(f"❌ {error_msg}")
+            return SheetModifyResponse(
+                spreadsheetId=spreadsheet_id,
+                range=range_name,
+                operation="clear" if clear_values else "update",
+                success=False,
+                message="",
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error modifying sheet values: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Unexpected error modifying sheet values: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return SheetModifyResponse(
+                spreadsheetId=spreadsheet_id,
+                range=range_name,
+                operation="clear" if clear_values else "update",
+                success=False,
+                message="",
+                error=error_msg
+            )
 
     @mcp.tool(
         name="create_spreadsheet",
@@ -417,10 +519,10 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         }
     )
     async def create_spreadsheet(
-        user_google_email: str,
         title: str,
+        user_google_email: UserGoogleEmailSheets = None,
         sheet_names: Optional[List[str]] = None
-    ) -> str:
+    ) -> CreateSpreadsheetResponse:
         """
         Creates a new Google Spreadsheet.
 
@@ -430,7 +532,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             sheet_names (Optional[List[str]]): List of sheet names to create. If not provided, creates one sheet with default name.
 
         Returns:
-            str: Information about the newly created spreadsheet including ID and URL.
+            CreateSpreadsheetResponse: Structured response with information about the newly created spreadsheet.
         """
         logger.info(f"[create_spreadsheet] Invoked. Email: '{user_google_email}', Title: {title}")
 
@@ -455,22 +557,41 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             spreadsheet_id = spreadsheet.get("spreadsheetId")
             spreadsheet_url = spreadsheet.get("spreadsheetUrl")
 
-            text_output = (
-                f"✅ Successfully created spreadsheet '{title}' for {user_google_email}. "
-                f"ID: {spreadsheet_id} | URL: {spreadsheet_url}"
-            )
-
             logger.info(f"Successfully created spreadsheet for {user_google_email}. ID: {spreadsheet_id}")
-            return text_output
+            
+            return CreateSpreadsheetResponse(
+                spreadsheetId=spreadsheet_id,
+                spreadsheetUrl=spreadsheet_url,
+                title=title,
+                sheets=sheet_names,
+                success=True,
+                message=f"Successfully created spreadsheet '{title}' for {user_google_email}. ID: {spreadsheet_id}"
+            )
         
         except HttpError as e:
-            error_msg = f"❌ Failed to create spreadsheet: {e}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Failed to create spreadsheet: {e}"
+            logger.error(f"❌ {error_msg}")
+            return CreateSpreadsheetResponse(
+                spreadsheetId="",
+                spreadsheetUrl="",
+                title=title,
+                sheets=sheet_names,
+                success=False,
+                message="",
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error creating spreadsheet: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Unexpected error creating spreadsheet: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return CreateSpreadsheetResponse(
+                spreadsheetId="",
+                spreadsheetUrl="",
+                title=title,
+                sheets=sheet_names,
+                success=False,
+                message="",
+                error=error_msg
+            )
 
     @mcp.tool(
         name="create_sheet",
@@ -485,10 +606,10 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         }
     )
     async def create_sheet(
-        user_google_email: str,
         spreadsheet_id: str,
-        sheet_name: str
-    ) -> str:
+        sheet_name: str,
+        user_google_email: UserGoogleEmailSheets = None
+    ) -> CreateSheetResponse:
         """
         Creates a new sheet within an existing spreadsheet.
 
@@ -498,7 +619,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             sheet_name (str): The name of the new sheet. Required.
 
         Returns:
-            str: Confirmation message of the successful sheet creation.
+            CreateSheetResponse: Structured response with confirmation of the sheet creation.
         """
         logger.info(f"[create_sheet] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Sheet: {sheet_name}")
 
@@ -525,20 +646,37 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
 
             sheet_id = response["replies"][0]["addSheet"]["properties"]["sheetId"]
 
-            text_output = (
-                f"✅ Successfully created sheet '{sheet_name}' (ID: {sheet_id}) in spreadsheet {spreadsheet_id} for {user_google_email}."
-            )
-
             logger.info(f"Successfully created sheet for {user_google_email}. Sheet ID: {sheet_id}")
-            return text_output
+            
+            return CreateSheetResponse(
+                spreadsheetId=spreadsheet_id,
+                sheetId=sheet_id,
+                sheetName=sheet_name,
+                success=True,
+                message=f"Successfully created sheet '{sheet_name}' (ID: {sheet_id}) in spreadsheet {spreadsheet_id}."
+            )
         
         except HttpError as e:
-            error_msg = f"❌ Failed to create sheet: {e}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Failed to create sheet: {e}"
+            logger.error(f"❌ {error_msg}")
+            return CreateSheetResponse(
+                spreadsheetId=spreadsheet_id,
+                sheetId=0,
+                sheetName=sheet_name,
+                success=False,
+                message="",
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error creating sheet: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            error_msg = f"Unexpected error creating sheet: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return CreateSheetResponse(
+                spreadsheetId=spreadsheet_id,
+                sheetId=0,
+                sheetName=sheet_name,
+                success=False,
+                message="",
+                error=error_msg
+            )
 
     logger.info("✅ Google Sheets tools setup complete")

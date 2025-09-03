@@ -16,6 +16,9 @@ from typing_extensions import Optional, Union, List
 
 from fastmcp import FastMCP
 
+# Import our custom type for consistent parameter definition
+from tools.common_types import UserGoogleEmail
+
 from config.settings import settings
 from .utils import _parse_email_addresses
 from .gmail_types import GmailAllowListResponse, AllowedEmailInfo
@@ -24,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 async def add_to_gmail_allow_list(
-    user_google_email: str,
-    email: Union[str, List[str]]
+    email: Union[str, List[str]],
+    user_google_email: UserGoogleEmail = None
 ) -> str:
     """
     Adds one or more email addresses to the Gmail allow list.
@@ -129,8 +132,8 @@ async def add_to_gmail_allow_list(
 
 
 async def remove_from_gmail_allow_list(
-    user_google_email: str,
-    email: Union[str, List[str]]
+    email: Union[str, List[str]],
+    user_google_email: UserGoogleEmail = None
 ) -> str:
     """
     Removes one or more email addresses from the Gmail allow list.
@@ -222,7 +225,7 @@ async def remove_from_gmail_allow_list(
 
 
 async def view_gmail_allow_list(
-    user_google_email: str
+    user_google_email: UserGoogleEmail = None
 ) -> GmailAllowListResponse:
     """
     Views the current Gmail allow list configuration.
@@ -300,10 +303,10 @@ def setup_allowlist_tools(mcp: FastMCP) -> None:
         }
     )
     async def add_to_gmail_allow_list_tool(
-        user_google_email: str,
-        email: Union[str, List[str]]
+        email: Union[str, List[str]],
+        user_google_email: UserGoogleEmail = None
     ) -> str:
-        return await add_to_gmail_allow_list(user_google_email, email)
+        return await add_to_gmail_allow_list(email, user_google_email)
 
     @mcp.tool(
         name="remove_from_gmail_allow_list",
@@ -318,10 +321,10 @@ def setup_allowlist_tools(mcp: FastMCP) -> None:
         }
     )
     async def remove_from_gmail_allow_list_tool(
-        user_google_email: str,
-        email: Union[str, List[str]]
+        email: Union[str, List[str]],
+        user_google_email: UserGoogleEmail = None
     ) -> str:
-        return await remove_from_gmail_allow_list(user_google_email, email)
+        return await remove_from_gmail_allow_list(email, user_google_email)
 
     @mcp.tool(
         name="view_gmail_allow_list",
@@ -336,6 +339,6 @@ def setup_allowlist_tools(mcp: FastMCP) -> None:
         }
     )
     async def view_gmail_allow_list_tool(
-        user_google_email: str
+        user_google_email: UserGoogleEmail = None
     ) -> GmailAllowListResponse:
         return await view_gmail_allow_list(user_google_email)

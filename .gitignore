@@ -83,3 +83,5 @@ gchat/serverless_chat_bot/cloud_function_processor/local_test.py
 gchat/serverless_chat_bot/cloud_function_processor/main_debug.py
 gchat/serverless_chat_bot/cloud_function_processor/main.py
 gchat/serverless_chat_bot/cloud_function_processor/requirements.txt
+localhost+2-key.pem
+localhost+2.pem

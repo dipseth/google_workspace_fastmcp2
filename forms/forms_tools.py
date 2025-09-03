@@ -11,6 +11,9 @@ from typing_extensions import List, Optional, Dict, Any, Union, Tuple
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
 
+# Import our custom type for consistent parameter definition
+from tools.common_types import UserGoogleEmailForms
+
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
 from .forms_types import FormResponsesListResponse, FormResponseInfo, FormResponseAnswer
@@ -441,8 +444,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def create_form(
-        user_google_email: str,
         title: str,
+        user_google_email: UserGoogleEmailForms = None,
         description: Optional[str] = None,
         document_title: Optional[str] = None,
     ) -> str:
@@ -521,9 +524,9 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def add_questions_to_form(
-        user_google_email: str,
         form_id: str,
-        questions: List[Dict[str, Any]]
+        questions: List[Dict[str, Any]],
+        user_google_email: UserGoogleEmailForms = None
     ) -> str:
         """
         Add multiple questions to an existing Google Form - BATCH OPERATIONS.
@@ -611,8 +614,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_form(
-        user_google_email: str,
-        form_id: str
+        form_id: str,
+        user_google_email: UserGoogleEmailForms = None
     ) -> str:
         """
         Get details of a Google Form - COMPREHENSIVE INFO.
@@ -692,8 +695,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def set_form_publish_state(
-        user_google_email: str,
         form_id: str,
+        user_google_email: UserGoogleEmailForms = None,
         accepting_responses: bool = True
     ) -> str:
         """
@@ -779,8 +782,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def publish_form_publicly(
-        user_google_email: str,
         form_id: str,
+        user_google_email: UserGoogleEmailForms = None,
         anyone_can_respond: bool = True,
         share_with_emails: Optional[List[str]] = None
     ) -> str:
@@ -895,9 +898,9 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_form_response(
-        user_google_email: str,
         form_id: str,
-        response_id: str
+        response_id: str,
+        user_google_email: UserGoogleEmailForms = None
     ) -> str:
         """
         Get a specific response from a form - RESPONSE DETAILS.
@@ -972,8 +975,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_form_responses(
-        user_google_email: str,
         form_id: str,
+        user_google_email: UserGoogleEmailForms = None,
         page_size: int = 10,
         page_token: Optional[str] = None
     ) -> FormResponsesListResponse:
@@ -1113,9 +1116,9 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def update_form_questions(
-        user_google_email: str,
         form_id: str,
-        questions_to_update: List[Dict[str, Any]]
+        questions_to_update: List[Dict[str, Any]],
+        user_google_email: UserGoogleEmailForms = None
     ) -> str:
         """
         Update existing questions in a form - BATCH UPDATES.

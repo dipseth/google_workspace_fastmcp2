@@ -25,9 +25,9 @@ from forms.forms_tools import setup_forms_tools
 from slides.slides_tools import setup_slides_tools
 from gcalendar.calendar_tools import setup_calendar_tools
 from gchat.chat_tools import setup_chat_tools
-from gchat.jwt_chat_tools import setup_jwt_chat_tools
+# from delete_later.jwt_chat_tools import setup_jwt_chat_tools
 from gchat.chat_app_tools import setup_chat_app_tools
-from gchat.chat_app_prompts import setup_chat_app_prompts
+from prompts.chat_app_prompts import setup_chat_app_prompts
 from prompts.gmail_prompts import setup_gmail_prompts
 from gchat.unified_card_tool import setup_unified_card_tool
 from adapters.module_wrapper_mcp import setup_module_wrapper_middleware
@@ -39,9 +39,10 @@ from middleware.template_middleware import setup_template_middleware
 from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
 from resources.service_list_resources import setup_service_list_resources
+from resources.service_recent_resources import setup_service_recent_resources
 from tools.enhanced_tools import setup_enhanced_tools
 from tools.enhanced_template_tools import setup_enhanced_template_tools
-from tunnel.tool_provider import setup_tunnel_tools
+
 
 # Configure logging
 logging.basicConfig(
@@ -143,8 +144,12 @@ if google_auth_provider:
 else:
     logger.info("⚠️ FastMCP running without GoogleProvider - using legacy flow only")
 
-# Add authentication middleware with configured storage mode
-auth_middleware = AuthMiddleware(storage_mode=credential_storage_mode)
+# Add enhanced authentication middleware with GoogleProvider integration
+from auth.middleware import create_enhanced_auth_middleware
+auth_middleware = create_enhanced_auth_middleware(
+    storage_mode=credential_storage_mode,
+    google_provider=google_auth_provider  # Pass the GoogleProvider instance
+)
 mcp.add_middleware(auth_middleware)
 
 # Register the AuthMiddleware instance in context for tool access
@@ -206,7 +211,7 @@ if "card_framework.v2" in middleware.wrappers:
 logger.info("✅ ModuleWrapper middleware initialized")
 
 # Register JWT-enhanced Chat tools (demonstration)
-setup_jwt_chat_tools(mcp)
+# setup_jwt_chat_tools(mcp)
 
 # Register Google Chat App Development tools
 setup_chat_app_tools(mcp)
@@ -227,9 +232,6 @@ setup_photos_tools(mcp)
 # Register Advanced Google Photos tools with optimization
 setup_advanced_photos_tools(mcp)
 
-# Register Cloudflare Tunnel tools
-setup_tunnel_tools(mcp)
-
 # Setup OAuth callback handler
 setup_oauth_callback_handler(mcp)
 
@@ -241,6 +243,9 @@ setup_tool_output_resources(mcp, qdrant_middleware)
 
 # Setup service list resources (dynamic discovery of list-based tools)
 setup_service_list_resources(mcp)
+
+# Setup service recent resources (recent files from Drive-based services)
+setup_service_recent_resources(mcp)
 
 # Setup Template Parameter Middleware with Jinja2 support (must be after resources, before tools)
 logger.info("🎭 Setting up Template Parameter Middleware with Jinja2 support...")
@@ -264,6 +269,12 @@ try:
         logger.info("📊 Registering Qdrant search tools...")
         setup_enhanced_qdrant_tools(mcp, qdrant_middleware)
         logger.info("✅ Qdrant search tools registered")
+        
+        # Register diagnostic tools
+        logger.info("🔍 Registering Qdrant diagnostic tools...")
+        from tools.qdrant_diagnostics import setup_qdrant_diagnostic_tools
+        setup_qdrant_diagnostic_tools(mcp, qdrant_middleware)
+        logger.info("✅ Qdrant diagnostic tools registered")
 except Exception as e:
     logger.warning(f"⚠️ Could not register Qdrant tools: {e}")
 

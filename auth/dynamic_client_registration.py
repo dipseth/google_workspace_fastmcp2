@@ -210,10 +210,17 @@ class DynamicClientRegistry:
     def _validate_client_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and set defaults for client metadata"""
         
+        # Default redirect URIs for common MCP clients
+        default_redirect_uris = [
+            "http://localhost:3000/auth/callback",  # MCP Inspector
+            "https://claude.ai/api/mcp/auth_callback",  # Claude.ai current
+            "https://claude.com/api/mcp/auth_callback",  # Claude.ai future
+        ]
+        
         # Set defaults
         validated = {
-            "client_name": metadata.get("client_name", "MCP Inspector Client"),
-            "redirect_uris": metadata.get("redirect_uris", ["http://localhost:3000/auth/callback"]),
+            "client_name": metadata.get("client_name", "MCP Client"),
+            "redirect_uris": metadata.get("redirect_uris", default_redirect_uris),
             "grant_types": metadata.get("grant_types", ["authorization_code", "refresh_token"]),
             "response_types": metadata.get("response_types", ["code"]),
             "token_endpoint_auth_method": metadata.get("token_endpoint_auth_method", "client_secret_basic"),

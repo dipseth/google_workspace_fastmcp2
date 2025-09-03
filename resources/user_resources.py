@@ -10,6 +10,7 @@ from datetime import datetime
 from pydantic import Field
 
 from fastmcp import FastMCP, Context
+from fastmcp.tools.tool_transform import ArgTransform, forward
 from auth.context import (
     get_user_email_context,
     get_session_context,
@@ -193,7 +194,10 @@ def setup_user_resources(mcp: FastMCP) -> None:
         mime_type="application/json",
         tags={"authentication", "credentials", "status", "oauth", "tokens", "security", "user"}
     )
-    async def get_credential_status(email: str, ctx: Context) -> dict:
+    async def get_credential_status(
+        email: Annotated[str, Field(description="Email address to check credential status for", pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')],
+        ctx: Context
+    ) -> dict:
         """Internal implementation for credential status resource."""
         try:
             credentials = get_valid_credentials(email)
@@ -262,7 +266,10 @@ def setup_user_resources(mcp: FastMCP) -> None:
         mime_type="application/json",
         tags={"google", "services", "scopes", "oauth", "api", "configuration", "workspace"}
     )
-    async def get_service_scopes(service: str, ctx: Context) -> dict:
+    async def get_service_scopes(
+        service: Annotated[str, Field(description="Google service name to get scope information for")],
+        ctx: Context
+    ) -> dict:
         """Internal implementation for Google service scopes resource."""
         # Import here to avoid circular imports
         from auth.service_helpers import SERVICE_DEFAULTS
@@ -509,21 +516,18 @@ def setup_user_resources(mcp: FastMCP) -> None:
             }
         
         try:
-            # Import here to avoid circular imports
-            from drive.drive_tools import search_drive_files
-            from docs.docs_tools import search_docs
-            from sheets.sheets_tools import get_spreadsheets
-            
-            # Get recent Drive files (last 30 days)
-            recent_files = await search_drive_files(
+            # Get recent Drive files (last 30 days) using forward() pattern
+            recent_files = await forward(
+                "search_drive_files",
                 user_google_email=user_email,
                 query="modifiedTime > '2025-01-01' and trashed=false",
                 page_size=20
             )
             
-            # Get recent Docs (if available)
+            # Get recent Docs (if available) using forward() pattern
             try:
-                recent_docs = await search_docs(
+                recent_docs = await forward(
+                    "search_docs",
                     user_google_email=user_email,
                     query="modified last month",
                     max_results=10
@@ -598,7 +602,10 @@ def setup_user_resources(mcp: FastMCP) -> None:
         mime_type="application/json",
         tags={"workspace", "search", "drive", "docs", "sheets", "content", "gmail", "dynamic"}
     )
-    async def search_workspace_content(query: str, ctx: Context) -> dict:
+    async def search_workspace_content(
+        query: Annotated[str, Field(description="Search query to find relevant workspace content")],
+        ctx: Context
+    ) -> dict:
         """Search Google Workspace content for email composition."""
         user_email = get_user_email_context()
         if not user_email:
@@ -608,11 +615,9 @@ def setup_user_resources(mcp: FastMCP) -> None:
             }
         
         try:
-            # Import here to avoid circular imports
-            from drive.drive_tools import search_drive_files
-            
-            # Search Drive files
-            search_results = await search_drive_files(
+            # Search Drive files using forward() pattern
+            search_results = await forward(
+                "search_drive_files",
                 user_google_email=user_email,
                 query=f"name contains '{query}' or fullText contains '{query}'",
                 page_size=15

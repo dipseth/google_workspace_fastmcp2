@@ -26,7 +26,7 @@ import logging
 import json
 import asyncio
 from typing import Dict, List, Any, Optional, Set, Tuple, Union
-from typing_extensions import TypedDict, NotRequired
+from typing_extensions import TypedDict, NotRequired, Annotated
 from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,6 +35,9 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict, create_model
 from fastmcp import FastMCP, Context
 from fastmcp.tools import Tool
 from fastmcp.tools.tool_transform import ArgTransform, forward
+
+# Import our custom types for consistent parameter definitions
+from tools.common_types import ServiceTypeAnnotated
 
 logger = logging.getLogger(__name__)
 
@@ -824,21 +827,36 @@ class ServiceListDiscovery:
         if self._tools_discovered:
             return  # Already discovered
             
-        logger.info("Discovering tools from FastMCP instance using tag-based approach...")
+        logger.info("🔍 DIAGNOSTIC: Discovering tools from FastMCP instance using tag-based approach...")
+        logger.info(f"🔍 DIAGNOSTIC: MCP instance type: {type(self.mcp)}")
+        logger.info(f"🔍 DIAGNOSTIC: MCP instance attributes: {dir(self.mcp)}")
         
         try:
             # Try using the public tools property/attribute
             if hasattr(self.mcp, 'tools'):
                 tools_list = self.mcp.tools
+                logger.info(f"🔍 DIAGNOSTIC: Found mcp.tools, type: {type(tools_list)}, length: {len(tools_list) if tools_list else 'None'}")
                 if tools_list:
                     for tool in tools_list:
+                        logger.debug(f"🔍 DIAGNOSTIC: Examining tool: {type(tool)}, attributes: {dir(tool)}")
                         if hasattr(tool, 'name'):
-                            self.discovered_tools[tool.name] = tool
+                            tool_name = tool.name
+                            self.discovered_tools[tool_name] = tool
+                            logger.info(f"🔍 DIAGNOSTIC: Registered tool '{tool_name}'")
+                            # Log detailed tool structure
+                            if hasattr(tool, 'tags'):
+                                logger.info(f"🔍 DIAGNOSTIC: Tool '{tool_name}' has tags: {tool.tags}")
+                            if hasattr(tool, 'fn'):
+                                logger.info(f"🔍 DIAGNOSTIC: Tool '{tool_name}' has fn attribute: {type(tool.fn)}")
+                            if callable(tool):
+                                logger.info(f"🔍 DIAGNOSTIC: Tool '{tool_name}' is callable")
                             # Log tools with 'list' tag
                             if hasattr(tool, 'tags') and tool.tags and 'list' in tool.tags:
-                                logger.debug(f"Discovered list tool: {tool.name} with tags: {tool.tags}")
+                                logger.info(f"🔍 DIAGNOSTIC: Found list tool: {tool.name} with tags: {tool.tags}")
+                        else:
+                            logger.warning(f"🔍 DIAGNOSTIC: Tool {tool} has no 'name' attribute")
                     
-                    logger.info(f"Discovered {len(self.discovered_tools)} tools via public API")
+                    logger.info(f"🔍 DIAGNOSTIC: Discovered {len(self.discovered_tools)} tools via public API")
                     
                     # Count list tools
                     list_tools = [
@@ -956,20 +974,14 @@ class ServiceListDiscovery:
     async def get_list_items(self, service: str, list_type: str, user_email: str,
                             page_size: Optional[int] = None,
                             page_token: Optional[str] = None) -> Any:
-        """Get all items/IDs for a list type using direct tool calls."""
-        # Ensure tools are discovered
-        await self._discover_tools()
-        
+        """Get all items/IDs for a list type using more reliable direct import approach."""
         config = self.get_list_config(service, list_type)
         if not config:
+            logger.warning(f"No configuration found for {service}/{list_type}")
             return []
             
         tool_name = config["tool"]
         
-        if tool_name not in self.discovered_tools:
-            logger.warning(f"Tool {tool_name} not found in discovered tools")
-            return []
-            
         # Apply default page size if not provided
         if page_size is None:
             page_size = config.get("default_page_size", 25)
@@ -981,36 +993,62 @@ class ServiceListDiscovery:
             # For tools that need an ID parameter, we'll handle this separately
             return await self._get_available_ids(service, list_type, user_email)
         
-        # Get the actual tool to check its signature
-        tool = self.discovered_tools.get(tool_name)
-        if not tool:
-            logger.error(f"Tool {tool_name} not found in discovered tools")
-            return []
-        
-        # Filter parameters based on tool's actual signature
-        filtered_params = self._filter_params_for_tool(tool, base_params, page_size, page_token, config)
-        
+        # Use reliable direct import approach instead of complex discovery
         try:
-            logger.debug(f"Calling {tool_name} with filtered params: {filtered_params}")
+            logger.info(f"🔍 DIAGNOSTIC: Attempting direct import and call for {tool_name}")
             
-            # Call the tool directly (don't use forward() here as we're not in a transform context)
-            if hasattr(tool, 'fn'):
-                # This is a FunctionTool, call its wrapped function
-                result = await tool.fn(**filtered_params)
-            elif callable(tool):
-                # The tool itself is callable
-                result = await tool(**filtered_params)
+            # Import based on service - this is more reliable than discovery
+            if service == "gmail":
+                if "filter" in tool_name:
+                    from gmail.filters import list_gmail_filters as target_tool
+                elif "label" in tool_name:
+                    from gmail.labels import list_gmail_labels as target_tool
+                else:
+                    logger.error(f"Unknown Gmail tool: {tool_name}")
+                    return []
+            elif service == "drive":
+                from drive.drive_tools import list_drive_items as target_tool
+            elif service == "forms":
+                from forms.forms_tools import list_form_responses as target_tool
+            elif service == "calendar":
+                if "calendar" in tool_name:
+                    from gcalendar.calendar_tools import list_calendars as target_tool
+                elif "event" in tool_name:
+                    from gcalendar.calendar_tools import list_events as target_tool
+                else:
+                    logger.error(f"Unknown Calendar tool: {tool_name}")
+                    return []
+            elif service == "photos":
+                from photos.photos_tools import list_photos_albums as target_tool
+            elif service == "sheets":
+                from sheets.sheets_tools import list_spreadsheets as target_tool
+            elif service == "docs":
+                from docs.docs_tools import list_docs_in_folder as target_tool
+            elif service == "chat":
+                from chat.chat_tools import list_spaces as target_tool
             else:
-                logger.error(f"Tool {tool_name} is not callable")
+                logger.error(f"Unknown service: {service}")
                 return []
             
-            logger.debug(f"Got result from {tool_name}: {type(result)}")
+            # Filter parameters based on what the tool likely accepts
+            filtered_params = dict(base_params)
+            if config.get("supports_pagination", False):
+                filtered_params["page_size"] = page_size
+                if page_token:
+                    filtered_params["page_token"] = page_token
+            
+            logger.info(f"🔍 DIAGNOSTIC: Calling {tool_name} directly with params: {filtered_params}")
+            result = await target_tool(**filtered_params)
+            logger.info(f"🔍 DIAGNOSTIC: Direct call succeeded for {tool_name}, result type: {type(result)}")
             
             # Parse the result to extract list data
             return self._parse_list_result(result, service, list_type)
             
+        except ImportError as e:
+            logger.error(f"🔍 DIAGNOSTIC: Import error for {tool_name}: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Error calling {tool_name}: {e}")
+            logger.error(f"🔍 DIAGNOSTIC: Error calling {tool_name}: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return []
@@ -1408,7 +1446,7 @@ Returns comprehensive metadata including pagination support, default values, and
     )
     async def get_service_list_types(
         ctx: Context,
-        service: str
+        service: ServiceTypeAnnotated
     ) -> Union[ServiceListTypesResponse, ServiceErrorResponse]:
         """Get available list types for a service with enhanced metadata and documentation."""
         try:
@@ -1490,8 +1528,8 @@ Returns items with pagination support and metadata.""",
     )
     async def get_service_list_items(
         ctx: Context,
-        service: str,
-        list_type: str
+        service: ServiceTypeAnnotated,
+        list_type: Annotated[str, Field(description="Type of list to retrieve (e.g., 'filters', 'labels', 'albums')")]
     ) -> Union[ServiceListItemsResponse, ServiceErrorResponse]:
         """Get all items for a specific list type."""
         # Validate and normalize inputs using Pydantic model
@@ -1614,9 +1652,9 @@ Returns detailed item data with optional metadata and raw response.""",
     )
     async def get_service_list_item_details(
         ctx: Context,
-        service: str,
-        list_type: str,
-        item_id: str
+        service: ServiceTypeAnnotated,
+        list_type: Annotated[str, Field(description="Type of list containing the item")],
+        item_id: Annotated[str, Field(description="Unique identifier for the specific item")]
     ) -> Union[ServiceListItemDetailsResponse, ServiceErrorResponse]:
         """Get detailed data for a specific item."""
         # Validate and normalize inputs using Pydantic model

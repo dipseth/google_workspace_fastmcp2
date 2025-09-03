@@ -1,0 +1,352 @@
+"""
+Service Recent Resources for FastMCP2 Google Workspace Platform.
+
+This module provides resources for accessing recent files from Google Drive-based services
+including Drive, Docs, Sheets, Slides, and Forms using a unified Drive query approach.
+
+All Google Workspace documents are stored in Drive, so we use search_drive_files with
+simple type: syntax queries to get recent items for each service.
+
+Updated to use the newer, simpler Google Drive search syntax:
+- type:docs (instead of complex MIME type filters)
+- type:sheets
+- type:slides
+- type:forms
+"""
+
+import logging
+from typing_extensions import Dict, Any, Optional, Annotated, List, Literal
+from datetime import datetime, timedelta
+from pydantic import Field
+
+from fastmcp import FastMCP, Context
+from auth.context import get_user_email_context
+
+# Import the search_drive_files tool function directly
+# Resources call tools directly as async functions, not using forward()
+# (forward() is only for creating transformed tools)
+from drive.drive_tools import search_drive_files
+from drive.drive_search_types import DriveSearchResponse
+from drive.drive_enums import MimeTypeFilter
+
+logger = logging.getLogger(__name__)
+
+# Type definition for supported services (shows as dropdown in inspector)
+SupportedService = Literal["drive", "docs", "sheets", "slides", "forms"]
+
+
+# Service metadata for recent resources - Now using MimeTypeFilter enum
+SERVICE_INFO = {
+    "drive": {
+        "name": "Google Drive",
+        "icon": "📁",
+        "description": "Recent files from Google Drive (all types)",
+        "mime_filter": None,  # No specific MIME filter for all files
+        "exclude_folders": True  # But we typically want to exclude folders
+    },
+    "docs": {
+        "name": "Google Docs",
+        "icon": "📄",
+        "description": "Recent Google Docs documents",
+        "mime_filter": MimeTypeFilter.GOOGLE_DOCS
+    },
+    "sheets": {
+        "name": "Google Sheets",
+        "icon": "📊",
+        "description": "Recent Google Sheets spreadsheets",
+        "mime_filter": MimeTypeFilter.GOOGLE_SHEETS
+    },
+    "slides": {
+        "name": "Google Slides",
+        "icon": "🎯",
+        "description": "Recent Google Slides presentations",
+        "mime_filter": MimeTypeFilter.GOOGLE_SLIDES
+    },
+    "forms": {
+        "name": "Google Forms",
+        "icon": "📝",
+        "description": "Recent Google Forms",
+        "mime_filter": MimeTypeFilter.GOOGLE_FORMS
+    }
+}
+
+
+def _get_authenticated_user_email(ctx: Context) -> Optional[str]:
+    """Get authenticated user email from context."""
+    return get_user_email_context()
+
+
+def _create_auth_error_response(service: str) -> Dict[str, Any]:
+    """Create standardized auth error response."""
+    return {
+        "error": "No authenticated user found in current session",
+        "service": service,
+        "suggestion": "Use start_google_auth tool to authenticate first",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+def _generate_date_query(days_back: int = 30) -> str:
+    """Generate date string for Drive queries."""
+    cutoff_date = datetime.now() - timedelta(days=days_back)
+    return cutoff_date.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+async def _get_recent_items(service: str, user_email: str, days_back: int = 30, page_size: int = 20) -> Dict[str, Any]:
+    """
+    Unified function to get recent items for any Drive-based service.
+    
+    This function calls the search_drive_files tool directly and processes its structured response.
+    Note: Resources call tools as regular async functions - forward() is only used when creating
+    transformed tools, not when resources need to use existing tools.
+    
+    Args:
+        service: Service name (drive, docs, sheets, slides, forms)
+        user_email: Authenticated user email
+        days_back: Number of days back to search (default: 30)
+        page_size: Number of items to return (default: 20)
+        
+    Returns:
+        Dictionary with recent items and metadata from the tool's structured response
+    """
+    if service not in SERVICE_INFO:
+        return {
+            "error": f"Unsupported service: {service}",
+            "supported_services": list(SERVICE_INFO.keys())
+        }
+    
+    service_info = SERVICE_INFO[service]
+    date_str = _generate_date_query(days_back)
+    
+    # Build the date filter query
+    date_query = f"modifiedTime > '{date_str}'"
+    
+    # Get the MIME type filter for the service
+    mime_filter = service_info.get("mime_filter")
+    
+    # Special handling for drive service
+    if service == "drive" and service_info.get("exclude_folders"):
+        mime_filter = MimeTypeFilter.EXCLUDE_FOLDERS
+    
+    logger.info(f"📊 Searching {service} with MIME filter: {mime_filter}, date query: {date_query}")
+    
+    try:
+        # IMPORTANT: Resources call tools directly as async functions
+        # We're not using forward() here because:
+        # 1. forward() is only for creating transformed tools (Tool.from_tool)
+        # 2. Resources aren't tools - they're data providers that USE tools
+        # 3. This is the correct pattern: resources import and call tool functions directly
+        
+        # Call the search_drive_files tool with the new enum-based approach
+        # Using both mime_type parameter for type filtering and query for date filtering
+        result: DriveSearchResponse = await search_drive_files(
+            user_google_email=user_email,
+            query=date_query,  # Just the date filter, no complex MIME type strings
+            mime_type=mime_filter,  # Clean enum-based type filtering
+            page_size=page_size
+        )
+        
+        # Handle the structured response - it's a TypedDict (returns dict, not object)
+        logger.info(f"✅ Tool returned {result.get('resultCount', 0)} results for {service}")
+        
+        # Check for errors in the structured response
+        if result.get("error"):
+            return {
+                "error": result["error"],
+                "service": service,
+                "query_used": date_query,
+                "mime_filter_used": mime_filter.value if mime_filter else None,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Extract files from the structured response
+        files = result.get("results", [])
+            
+        # Enhance each file with service metadata
+        enhanced_files = []
+        for file_info in files:
+            # Convert from DriveFileInfo to our enhanced format
+            enhanced_file = {
+                "id": file_info.get("id"),
+                "name": file_info.get("name"),
+                "mimeType": file_info.get("mimeType"),
+                "size": file_info.get("size"),
+                "webViewLink": file_info.get("webViewLink"),
+                "modifiedTime": file_info.get("modifiedTime"),
+                "createdTime": file_info.get("createdTime"),
+                "service": service,
+                "service_name": service_info["name"],
+                "service_icon": service_info["icon"],
+                "retrieved_at": datetime.now().isoformat()
+            }
+            enhanced_files.append(enhanced_file)
+            
+        return {
+            "service": service,
+            "service_name": service_info["name"],
+            "service_icon": service_info["icon"],
+            "description": service_info["description"],
+            "query_used": result.get("processedQuery", date_query),
+            "query_type": result.get("queryType", "structured"),
+            "mime_filter": mime_filter.value if mime_filter else None,
+            "days_back": days_back,
+            "total_count": len(enhanced_files),
+            "files": enhanced_files,
+            "metadata": {
+                "user_email": user_email,
+                "search_date_from": date_str,
+                "search_date_to": datetime.now().isoformat(),
+                "type_filter": service,
+                "search_scope": result.get("searchScope", "user"),
+                "next_page_token": result.get("nextPageToken")
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting recent {service} items: {e}")
+        return {
+            "error": f"Failed to retrieve recent {service} items: {str(e)}",
+            "service": service,
+            "query_used": date_query,
+            "mime_filter": mime_filter.value if mime_filter else None,
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+def setup_service_recent_resources(mcp: FastMCP) -> None:
+    """
+    Setup service recent resources for all Drive-based services.
+    
+    These resources call the search_drive_files tool directly to get recent items.
+    Resources are data providers that USE tools - they don't transform them.
+    """
+    
+    logger.info("🔧 SETUP: Setting up service recent resources that call search_drive_files tool")
+    
+    @mcp.resource(
+        uri="recent://{service}",
+        name="Recent Service Items",
+        description=f"""Get recent items from Google Drive-based services.
+
+Supported services:
+  • drive (📁): All recent Drive files
+  • docs (📄): Recent Google Docs documents
+  • sheets (📊): Recent Google Sheets spreadsheets
+  • slides (🎯): Recent Google Slides presentations
+  • forms (📝): Recent Google Forms
+
+Uses Google Drive search with service-specific MIME type filters.
+Returns items modified within the last 30 days by default.""",
+        mime_type="application/json",
+        tags={"service", "recent", "drive", "dynamic", "unified"}
+    )
+    async def get_service_recent_items(
+        ctx: Context,
+        service: Annotated[SupportedService, Field(description="Service name: drive, docs, sheets, slides, or forms")]
+    ) -> Dict[str, Any]:
+        """Get recent items for a specific Drive-based service."""
+        
+        # Validate service parameter
+        if service.lower() not in SERVICE_INFO:
+            return {
+                "error": f"Unsupported service: {service}",
+                "supported_services": list(SERVICE_INFO.keys()),
+                "suggestion": "Use one of: drive, docs, sheets, slides, forms",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Get authenticated user
+        user_email = _get_authenticated_user_email(ctx)
+        if not user_email:
+            return _create_auth_error_response(service.lower())
+        
+        # Get recent items using unified function
+        return await _get_recent_items(service.lower(), user_email)
+    
+    @mcp.resource(
+        uri="recent://{service}/{days}",
+        name="Recent Service Items (Custom Days)",
+        description=f"""Get recent items from Google Drive-based services with custom day range.
+
+Supported services: drive, docs, sheets, slides, forms
+
+Specify number of days back to search (1-90 days).""",
+        mime_type="application/json",
+        tags={"service", "recent", "drive", "dynamic", "custom-range"}
+    )
+    async def get_service_recent_items_custom_days(
+        ctx: Context,
+        service: Annotated[SupportedService, Field(description="Service name: drive, docs, sheets, slides, or forms")],
+        days: Annotated[int, Field(description="Number of days back to search (1-90)", ge=1, le=90)]
+    ) -> Dict[str, Any]:
+        """Get recent items for a specific service with custom day range."""
+        
+        # Validate service parameter
+        if service.lower() not in SERVICE_INFO:
+            return {
+                "error": f"Unsupported service: {service}",
+                "supported_services": list(SERVICE_INFO.keys()),
+                "suggestion": "Use one of: drive, docs, sheets, slides, forms",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Get authenticated user
+        user_email = _get_authenticated_user_email(ctx)
+        if not user_email:
+            return _create_auth_error_response(service.lower())
+        
+        # Get recent items with custom day range
+        return await _get_recent_items(service.lower(), user_email, days_back=days)
+    
+    @mcp.resource(
+        uri="recent://all",
+        name="All Recent Workspace Items",
+        description="Get recent items from all Google Workspace services (Drive, Docs, Sheets, Slides, Forms) in a unified view.",
+        mime_type="application/json",
+        tags={"service", "recent", "all", "workspace", "unified"}
+    )
+    async def get_all_recent_workspace_items(ctx: Context) -> Dict[str, Any]:
+        """Get recent items from all supported Drive-based services."""
+        
+        # Get authenticated user
+        user_email = _get_authenticated_user_email(ctx)
+        if not user_email:
+            return _create_auth_error_response("all")
+        
+        # Get recent items from all services
+        all_results = {}
+        total_items = 0
+        
+        for service in SERVICE_INFO.keys():
+            try:
+                service_result = await _get_recent_items(service, user_email, days_back=30, page_size=10)
+                all_results[service] = service_result
+                if "files" in service_result:
+                    total_items += len(service_result["files"])
+            except Exception as e:
+                logger.error(f"Error getting recent items for {service}: {e}")
+                all_results[service] = {
+                    "error": f"Failed to get {service} items: {str(e)}",
+                    "service": service
+                }
+        
+        return {
+            "user_email": user_email,
+            "total_items_across_services": total_items,
+            "services": all_results,
+            "summary": {
+                service: {
+                    "count": len(result.get("files", [])),
+                    "service_name": result.get("service_name", service.title()),
+                    "icon": result.get("service_icon", "📁")
+                }
+                for service, result in all_results.items()
+                if not result.get("error")
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    logger.info("✅ Service recent resources registered for Drive-based services")
+    logger.info(f"  Available services: {', '.join(SERVICE_INFO.keys())}")
+    logger.info("  Resources call search_drive_files tool directly and return structured results")

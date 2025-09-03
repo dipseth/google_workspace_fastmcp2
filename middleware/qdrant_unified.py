@@ -383,6 +383,330 @@ class QdrantUnifiedMiddleware(Middleware):
         
         return response
     
+    async def on_read_resource(self, context: MiddlewareContext, call_next):
+        """
+        FastMCP2 middleware hook for intercepting resource reads.
+        Handle Qdrant-specific resources directly in the middleware.
+        """
+        # Check if this is a Qdrant resource
+        # Convert AnyUrl to string before using string methods
+        uri = str(context.message.uri) if context.message.uri else ""
+        
+        if not uri.startswith("qdrant://"):
+            # Not a Qdrant resource, let other handlers deal with it
+            return await call_next(context)
+        
+        # Handle Qdrant resources directly
+        try:
+            return await self._handle_qdrant_resource(uri, context)
+        except Exception as e:
+            logger.error(f"❌ Failed to handle Qdrant resource {uri}: {e}")
+            # Return error response in proper format
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "error": f"Failed to handle Qdrant resource: {str(e)}",
+                        "uri": uri,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                }]
+            }
+    
+    async def _handle_qdrant_resource(self, uri: str, context: MiddlewareContext):
+        """Handle Qdrant-specific resource requests."""
+        # Ensure middleware is initialized
+        if not self.client or not self.embedder:
+            await self.initialize()
+        
+        if not self.client:
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json", 
+                    "text": json.dumps({
+                        "error": "Qdrant not available - client not initialized",
+                        "qdrant_enabled": False,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                }]
+            }
+        
+        # Parse the URI to determine the resource type
+        parts = uri.replace("qdrant://", "").split("/")
+        
+        if not parts:
+            return self._error_response(uri, "Invalid Qdrant URI format")
+        
+        resource_type = parts[0]
+        
+        if resource_type == "collections" and len(parts) == 2 and parts[1] == "list":
+            # qdrant://collections/list
+            return await self._handle_collections_list(uri)
+            
+        elif resource_type == "collection" and len(parts) >= 3:
+            collection_name = parts[1]
+            
+            if parts[2] == "info":
+                # qdrant://collection/{collection}/info
+                return await self._handle_collection_info(uri, collection_name)
+                
+            elif parts[2] == "responses" and len(parts) == 4 and parts[3] == "recent":
+                # qdrant://collection/{collection}/responses/recent
+                return await self._handle_collection_responses(uri, collection_name)
+                
+        elif resource_type == "search":
+            if len(parts) == 3:
+                # qdrant://search/{collection}/{query}
+                collection_name = parts[1]
+                query = parts[2]
+                return await self._handle_collection_search(uri, collection_name, query)
+            elif len(parts) == 2:
+                # qdrant://search/{query}
+                query = parts[1]
+                return await self._handle_global_search(uri, query)
+        
+        return self._error_response(uri, f"Unknown Qdrant resource type: {resource_type}")
+    
+    def _error_response(self, uri: str, error_message: str):
+        """Create a standard error response for resources."""
+        return {
+            "contents": [{
+                "uri": uri,
+                "mimeType": "application/json",
+                "text": json.dumps({
+                    "error": error_message,
+                    "uri": uri,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+            }]
+        }
+    
+    async def _handle_collections_list(self, uri: str):
+        """Handle qdrant://collections/list resource."""
+        try:
+            collections = await asyncio.to_thread(self.client.get_collections)
+            
+            collections_info = []
+            for collection in collections.collections:
+                try:
+                    info = await asyncio.to_thread(self.client.get_collection, collection.name)
+                    collections_info.append({
+                        "name": collection.name,
+                        "points_count": info.points_count,
+                        "vectors_count": getattr(info, 'vectors_count', 0),
+                        "indexed_vectors_count": getattr(info, 'indexed_vectors_count', 0),
+                        "segments_count": getattr(info, 'segments_count', 0),
+                        "status": str(info.status) if hasattr(info, 'status') else 'unknown'
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to get info for collection {collection.name}: {e}")
+                    collections_info.append({
+                        "name": collection.name,
+                        "error": str(e)
+                    })
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "qdrant_url": self.discovered_url,
+                        "total_collections": len(collections_info),
+                        "collections": collections_info,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error listing Qdrant collections: {e}")
+            return self._error_response(uri, f"Failed to list collections: {str(e)}")
+    
+    async def _handle_collection_info(self, uri: str, collection_name: str):
+        """Handle qdrant://collection/{collection}/info resource."""
+        try:
+            collections = await asyncio.to_thread(self.client.get_collections)
+            collection_names = [c.name for c in collections.collections]
+            
+            collection_info = None
+            if collection_name in collection_names:
+                collection_info = await asyncio.to_thread(
+                    self.client.get_collection,
+                    collection_name
+                )
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "qdrant_url": self.discovered_url,
+                        "requested_collection": collection_name,
+                        "collection_exists": collection_name in collection_names,
+                        "total_collections": len(collection_names),
+                        "all_collections": collection_names,
+                        "collection_info": {
+                            "vectors_count": getattr(collection_info, 'vectors_count', 0),
+                            "indexed_vectors_count": getattr(collection_info, 'indexed_vectors_count', 0),
+                            "points_count": collection_info.points_count if collection_info else 0,
+                            "segments_count": getattr(collection_info, 'segments_count', 0),
+                            "status": str(collection_info.status) if collection_info and hasattr(collection_info, 'status') else "unknown"
+                        } if collection_info else None,
+                        "config": {
+                            "host": self.config.host,
+                            "ports": self.config.ports,
+                            "default_collection": self.config.collection_name,
+                            "vector_size": self.config.vector_size,
+                            "enabled": self.config.enabled
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting collection info: {e}")
+            return self._error_response(uri, f"Failed to get collection info: {str(e)}")
+    
+    async def _handle_collection_responses(self, uri: str, collection_name: str):
+        """Handle qdrant://collection/{collection}/responses/recent resource."""
+        try:
+            # Check if collection exists
+            collections_response = await asyncio.to_thread(self.client.get_collections)
+            available_collections = [c.name for c in collections_response.collections]
+            
+            if collection_name not in available_collections:
+                return {
+                    "contents": [{
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps({
+                            "error": f"Collection '{collection_name}' not found",
+                            "available_collections": available_collections,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                    }]
+                }
+            
+            # Get recent responses from the collection
+            scroll_result = await asyncio.to_thread(
+                self.client.scroll,
+                collection_name=collection_name,
+                limit=50,
+                with_payload=True,
+                with_vector=False
+            )
+            
+            points = scroll_result[0] if scroll_result else []
+            
+            responses = []
+            for point in points[:20]:  # Limit to 20 most recent
+                payload = point.payload or {}
+                
+                # Decompress data if needed
+                data = payload.get("data", "{}")
+                if payload.get("compressed", False) and payload.get("compressed_data"):
+                    try:
+                        data = self._decompress_data(payload["compressed_data"])
+                    except Exception as e:
+                        logger.warning(f"Failed to decompress data for point {point.id}: {e}")
+                
+                # Parse response data
+                try:
+                    response_data = json.loads(data)
+                except json.JSONDecodeError:
+                    response_data = {"error": "Failed to parse stored data", "raw_data": data}
+                
+                responses.append({
+                    "id": str(point.id),
+                    "tool_name": payload.get("tool_name", "unknown"),
+                    "timestamp": payload.get("timestamp", "unknown"),
+                    "user_id": payload.get("user_id", "unknown"),
+                    "user_email": payload.get("user_email", "unknown"),
+                    "session_id": payload.get("session_id", "unknown"),
+                    "payload_type": payload.get("payload_type", "unknown"),
+                    "compressed": payload.get("compressed", False),
+                    "response_data": response_data
+                })
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "collection_name": collection_name,
+                        "total_points": len(points),
+                        "responses_shown": len(responses),
+                        "responses": responses,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting collection responses: {e}")
+            return self._error_response(uri, f"Failed to get collection responses: {str(e)}")
+    
+    async def _handle_collection_search(self, uri: str, collection_name: str, query: str):
+        """Handle qdrant://search/{collection}/{query} resource."""
+        try:
+            # Use the existing search method but limit to specific collection
+            results = await self.search(query, limit=10)
+            
+            # Filter results to only include those from the specified collection
+            # Note: This is a simplified approach - ideally we'd search within the collection directly
+            filtered_results = []
+            for result in results:
+                # Check if result is from the correct collection (this would need collection tracking)
+                filtered_results.append(result)
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "collection": collection_name,
+                        "query": query,
+                        "total_results": len(filtered_results),
+                        "results": filtered_results,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error searching collection: {e}")
+            return self._error_response(uri, f"Failed to search collection: {str(e)}")
+    
+    async def _handle_global_search(self, uri: str, query: str):
+        """Handle qdrant://search/{query} resource."""
+        try:
+            results = await self.search(query, limit=10)
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "query": query,
+                        "total_results": len(results),
+                        "results": results,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in global search: {e}")
+            return self._error_response(uri, f"Failed to search: {str(e)}")
+    
     async def _store_response(self, context=None, response=None, **kwargs):
         """
         Store tool response in Qdrant with embedding.

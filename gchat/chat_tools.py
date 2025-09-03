@@ -17,7 +17,9 @@ from auth.context import get_injected_service
 from resources.user_resources import get_current_user_email_simple
 from .chat_types import (
     SpaceListResponse, MessageListResponse, SpaceInfo, MessageInfo,
-    CardTypesResponse, CardTypeInfo
+    CardTypesResponse, CardTypeInfo, SendMessageResponse, SearchMessagesResponse,
+    SearchMessageResult, SendCardMessageResponse, SendSimpleCardResponse,
+    SendInteractiveCardResponse, SendFormCardResponse, SendRichCardResponse
 )
 
 # Card Framework integration
@@ -420,7 +422,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         space_id: str,
         message_text: str,
         thread_key: Optional[str] = None
-    ) -> str:
+    ) -> SendMessageResponse:
         """
         Sends a message to a Google Chat space.
 
@@ -431,10 +433,83 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             thread_key (Optional[str]): Thread key for threaded replies.
 
         Returns:
-            str: Confirmation message with sent message details.
+            SendMessageResponse: Structured response with sent message details.
         """
         logger.info(f"[send_message] Email: '{user_google_email}', Space: '{space_id}'")
-        return await _send_text_message_helper(user_google_email, space_id, message_text, thread_key)
+        
+        try:
+            chat_service = await _get_chat_service_with_fallback(user_google_email)
+            
+            if chat_service is None:
+                return SendMessageResponse(
+                    success=False,
+                    messageId=None,
+                    spaceId=space_id,
+                    messageText=message_text,
+                    threadKey=thread_key,
+                    createTime=None,
+                    userEmail=user_google_email,
+                    message="Failed to create Google Chat service. Please check your credentials and permissions.",
+                    error="Service unavailable"
+                )
+            
+            message_body = {
+                'text': message_text
+            }
+
+            # Add thread key if provided (for threaded replies)
+            request_params = {
+                'parent': space_id,
+                'body': message_body
+            }
+            if thread_key:
+                request_params['threadKey'] = thread_key
+
+            message = await asyncio.to_thread(
+                chat_service.spaces().messages().create(**request_params).execute
+            )
+
+            message_name = message.get('name', '')
+            create_time = message.get('createTime', '')
+
+            return SendMessageResponse(
+                success=True,
+                messageId=message_name,
+                spaceId=space_id,
+                messageText=message_text,
+                threadKey=thread_key,
+                createTime=create_time,
+                userEmail=user_google_email,
+                message=f"Message sent to space '{space_id}' by {user_google_email}. Message ID: {message_name}",
+                error=None
+            )
+            
+        except HttpError as e:
+            logger.error(f"[send_message] HTTP error: {e}")
+            return SendMessageResponse(
+                success=False,
+                messageId=None,
+                spaceId=space_id,
+                messageText=message_text,
+                threadKey=thread_key,
+                createTime=None,
+                userEmail=user_google_email,
+                message=f"Failed to send message: {e}",
+                error=str(e)
+            )
+        except Exception as e:
+            logger.error(f"[send_message] {str(e)}")
+            return SendMessageResponse(
+                success=False,
+                messageId=None,
+                spaceId=space_id,
+                messageText=message_text,
+                threadKey=thread_key,
+                createTime=None,
+                userEmail=user_google_email,
+                message=f"Unexpected error: {str(e)}",
+                error=str(e)
+            )
 
     @mcp.tool(
         name="search_messages",
@@ -453,7 +528,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         query: str,
         space_id: Optional[str] = None,
         page_size: int = 25
-    ) -> str:
+    ) -> SearchMessagesResponse:
         """
         Searches for messages in Google Chat spaces by text content.
 
@@ -464,12 +539,27 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             page_size (int): Number of results per space (default: 25).
 
         Returns:
-            str: A formatted list of messages matching the search query.
+            SearchMessagesResponse: Structured response with search results.
         """
         logger.info(f"[search_messages] Email={user_google_email}, Query='{query}'")
 
         try:
             chat_service = await _get_chat_service_with_fallback(user_google_email)
+            
+            if chat_service is None:
+                return SearchMessagesResponse(
+                    success=False,
+                    query=query,
+                    results=[],
+                    totalResults=0,
+                    searchScope="unknown",
+                    spaceId=space_id,
+                    userEmail=user_google_email,
+                    message="Failed to create Google Chat service. Please check your credentials and permissions.",
+                    error="Service unavailable"
+                )
+            
+            search_results: List[SearchMessageResult] = []
             
             # If specific space provided, search within that space
             if space_id:
@@ -481,16 +571,26 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     ).execute
                 )
                 messages = response.get('messages', [])
-                context = f"space '{space_id}'"
+                search_scope = "specific_space"
+                
+                for msg in messages:
+                    result = SearchMessageResult(
+                        messageId=msg.get('name', ''),
+                        text=msg.get('text', 'No text content'),
+                        senderName=msg.get('sender', {}).get('displayName', 'Unknown Sender'),
+                        createTime=msg.get('createTime', 'Unknown Time'),
+                        spaceName='Current Space',  # We don't have space name in this context
+                        spaceId=space_id
+                    )
+                    search_results.append(result)
             else:
-                # Search across all accessible spaces (this may require iterating through spaces)
-                # For simplicity, we'll search the user's spaces first
+                # Search across all accessible spaces
                 spaces_response = await asyncio.to_thread(
                     chat_service.spaces().list(pageSize=100).execute
                 )
                 spaces = spaces_response.get('spaces', [])
+                search_scope = "all_spaces"
 
-                messages = []
                 for space in spaces[:10]:  # Limit to first 10 spaces to avoid timeout
                     try:
                         space_messages = await asyncio.to_thread(
@@ -501,39 +601,59 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                             ).execute
                         )
                         space_msgs = space_messages.get('messages', [])
+                        space_name = space.get('displayName', 'Unknown Space')
+                        
                         for msg in space_msgs:
-                            msg['_space_name'] = space.get('displayName', 'Unknown')
-                        messages.extend(space_msgs)
+                            result = SearchMessageResult(
+                                messageId=msg.get('name', ''),
+                                text=msg.get('text', 'No text content'),
+                                senderName=msg.get('sender', {}).get('displayName', 'Unknown Sender'),
+                                createTime=msg.get('createTime', 'Unknown Time'),
+                                spaceName=space_name,
+                                spaceId=space.get('name', '')
+                            )
+                            search_results.append(result)
                     except HttpError:
                         continue  # Skip spaces we can't access
-                context = "all accessible spaces"
 
-            if not messages:
-                return f"No messages found matching '{query}' in {context}."
-
-            output = [f"Found {len(messages)} messages matching '{query}' in {context}:"]
-            for msg in messages:
-                sender = msg.get('sender', {}).get('displayName', 'Unknown Sender')
-                create_time = msg.get('createTime', 'Unknown Time')
-                text_content = msg.get('text', 'No text content')
-                space_name = msg.get('_space_name', 'Unknown Space')
-
-                # Truncate long messages
-                if len(text_content) > 100:
-                    text_content = text_content[:100] + "..."
-
-                output.append(f"- [{create_time}] {sender} in '{space_name}': {text_content}")
-
-            return "\n".join(output)
+            return SearchMessagesResponse(
+                success=True,
+                query=query,
+                results=search_results,
+                totalResults=len(search_results),
+                searchScope=search_scope,
+                spaceId=space_id,
+                userEmail=user_google_email,
+                message=f"Found {len(search_results)} messages matching '{query}' in {search_scope.replace('_', ' ')}",
+                error=None
+            )
             
         except HttpError as e:
-            error_msg = f"❌ Failed to search messages: {e}"
             logger.error(f"[search_messages] HTTP error: {e}")
-            return error_msg
+            return SearchMessagesResponse(
+                success=False,
+                query=query,
+                results=[],
+                totalResults=0,
+                searchScope="unknown",
+                spaceId=space_id,
+                userEmail=user_google_email,
+                message=f"Failed to search messages: {e}",
+                error=str(e)
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
-            logger.error(f"[search_messages] {error_msg}")
-            return error_msg
+            logger.error(f"[search_messages] {str(e)}")
+            return SearchMessagesResponse(
+                success=False,
+                query=query,
+                results=[],
+                totalResults=0,
+                searchScope="unknown",
+                spaceId=space_id,
+                userEmail=user_google_email,
+                message=f"Unexpected error: {str(e)}",
+                error=str(e)
+            )
 
     @mcp.tool(
         name="send_card_message",
@@ -560,7 +680,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         submit_action: Optional[Dict[str, Any]] = None,
         thread_key: Optional[str] = None,
         webhook_url: Optional[str] = None
-    ) -> str:
+    ) -> SendCardMessageResponse:
         """
         Sends a rich card message to a Google Chat space using Card Framework.
         Falls back to REST API format if Card Framework is not available.
@@ -580,14 +700,27 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
 
         Returns:
-            str: Confirmation message with sent message details
+            SendCardMessageResponse: Structured response with sent message details
         """
         logger.info(f"[send_card_message] Email: '{user_google_email}', Space: '{space_id}', Type: '{card_type}'")
 
         if not card_manager:
             # Fallback to text message if card manager is not available
             fallback_text = f"{title}\n{subtitle or ''}\n{text}".strip()
-            return await _send_text_message_helper(user_google_email, space_id, fallback_text, thread_key)
+            return SendCardMessageResponse(
+                success=False,
+                messageId=None,
+                spaceId=space_id,
+                cardType=card_type,
+                title=title,
+                deliveryMethod="fallback",
+                threadKey=thread_key,
+                createTime=None,
+                webhookUrl=webhook_url,
+                userEmail=user_google_email,
+                message="Card Framework not available. Used text fallback.",
+                error="Card manager unavailable"
+            )
 
         try:
             chat_service = await _get_chat_service_with_fallback(user_google_email)
@@ -733,9 +866,35 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     
                     logger.info(f"Webhook response status: {response.status_code}")
                     if response.status_code == 200:
-                        return f"✅ Card message sent successfully via webhook! Status: {response.status_code}, Card Type: {card_type}"
+                        return SendCardMessageResponse(
+                            success=True,
+                            messageId=None,  # Webhook doesn't return message ID
+                            spaceId=space_id,
+                            cardType=card_type,
+                            title=title,
+                            deliveryMethod="webhook",
+                            threadKey=thread_key,
+                            createTime=None,
+                            webhookUrl=webhook_url,
+                            userEmail=user_google_email,
+                            message=f"Card message sent successfully via webhook! Status: {response.status_code}, Card Type: {card_type}",
+                            error=None
+                        )
                     else:
-                        return f"❌ Webhook delivery failed. Status: {response.status_code}, Response: {response.text}"
+                        return SendCardMessageResponse(
+                            success=False,
+                            messageId=None,
+                            spaceId=space_id,
+                            cardType=card_type,
+                            title=title,
+                            deliveryMethod="webhook",
+                            threadKey=thread_key,
+                            createTime=None,
+                            webhookUrl=webhook_url,
+                            userEmail=user_google_email,
+                            message=f"Webhook delivery failed. Status: {response.status_code}",
+                            error=f"Webhook delivery failed: {response.text}"
+                        )
                 except Exception as e:
                     logger.error(f"Error sending card message via webhook: {e}", exc_info=True)
                     # Fallback to text message
@@ -762,9 +921,20 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     message_name = message.get('name', '')
                     create_time = message.get('createTime', '')
 
-                    msg = f"Card message sent to space '{space_id}' by {user_google_email}. Message ID: {message_name}, Time: {create_time}, Card Type: {card_type}"
-                    logger.info(f"Successfully sent card message to space '{space_id}' by {user_google_email}")
-                    return msg
+                    return SendCardMessageResponse(
+                        success=True,
+                        messageId=message_name,
+                        spaceId=space_id,
+                        cardType=card_type,
+                        title=title,
+                        deliveryMethod="api",
+                        threadKey=thread_key,
+                        createTime=create_time,
+                        webhookUrl=None,
+                        userEmail=user_google_email,
+                        message=f"Card message sent to space '{space_id}' by {user_google_email}. Message ID: {message_name}, Card Type: {card_type}",
+                        error=None
+                    )
 
                 except Exception as e:
                     logger.error(f"Error sending card message: {e}", exc_info=True)
@@ -773,13 +943,37 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     return await send_message(user_google_email=user_google_email, space_id=space_id, message_text=fallback_text, thread_key=thread_key)
                 
         except HttpError as e:
-            error_msg = f"❌ Failed to send card message: {e}"
             logger.error(f"[send_card_message] HTTP error: {e}")
-            return error_msg
+            return SendCardMessageResponse(
+                success=False,
+                messageId=None,
+                spaceId=space_id,
+                cardType=card_type,
+                title=title,
+                deliveryMethod="api",
+                threadKey=thread_key,
+                createTime=None,
+                webhookUrl=webhook_url,
+                userEmail=user_google_email,
+                message=f"Failed to send card message: {e}",
+                error=str(e)
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
-            logger.error(f"[send_card_message] {error_msg}")
-            return error_msg
+            logger.error(f"[send_card_message] {str(e)}")
+            return SendCardMessageResponse(
+                success=False,
+                messageId=None,
+                spaceId=space_id,
+                cardType=card_type,
+                title=title,
+                deliveryMethod="unknown",
+                threadKey=thread_key,
+                createTime=None,
+                webhookUrl=webhook_url,
+                userEmail=user_google_email,
+                message=f"Unexpected error: {str(e)}",
+                error=str(e)
+            )
 
     @mcp.tool(
         name="send_simple_card",
@@ -802,7 +996,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         image_url: Optional[str] = None,
         thread_key: Optional[str] = None,
         webhook_url: Optional[str] = None
-    ) -> str:
+    ) -> SendSimpleCardResponse:
         """
         Sends a simple card message to a Google Chat space.
 
@@ -817,13 +1011,23 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
 
         Returns:
-            str: Confirmation message with sent message details
+            SendSimpleCardResponse: Structured response with sent message details
         """
         if webhook_url:
             # Use webhook delivery like send_rich_card
             try:
                 if not card_manager:
-                    return "Card Framework not available. Cannot send simple cards via webhook."
+                    return SendSimpleCardResponse(
+                        success=False,
+                        messageId=None,
+                        spaceId=space_id,
+                        title=title,
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message="Card Framework not available. Cannot send simple cards via webhook.",
+                        error="Card Framework not available"
+                    )
                 
                 # Create simple card using Card Framework
                 card = card_manager.create_simple_card(title, subtitle, text, image_url)
@@ -844,15 +1048,54 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 )
                 
                 if response.status_code == 200:
-                    return f"✅ Simple card sent successfully via webhook! Status: {response.status_code}"
+                    return SendSimpleCardResponse(
+                        success=True,
+                        messageId=None,  # Webhook doesn't return message ID
+                        spaceId=space_id,
+                        title=title,
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message=f"Simple card sent successfully via webhook! Status: {response.status_code}",
+                        error=None
+                    )
                 else:
-                    return f"❌ Webhook delivery failed. Status: {response.status_code}, Response: {response.text}"
+                    return SendSimpleCardResponse(
+                        success=False,
+                        messageId=None,
+                        spaceId=space_id,
+                        title=title,
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message=f"Webhook delivery failed. Status: {response.status_code}",
+                        error=f"Webhook delivery failed: {response.text}"
+                    )
             except Exception as e:
-                return f"Failed to send simple card via webhook: {str(e)}"
+                return SendSimpleCardResponse(
+                    success=False,
+                    messageId=None,
+                    spaceId=space_id,
+                    title=title,
+                    deliveryMethod="webhook",
+                    webhookUrl=webhook_url,
+                    userEmail=user_google_email,
+                    message=f"Failed to send simple card via webhook: {str(e)}",
+                    error=str(e)
+                )
         else:
             # Fallback to text message since we don't have service parameter
-            fallback_text = f"{title}\n{subtitle or ''}\n{text}".strip()
-            return f"Simple card fallback (no webhook provided): {fallback_text}"
+            return SendSimpleCardResponse(
+                success=False,
+                messageId=None,
+                spaceId=space_id,
+                title=title,
+                deliveryMethod="fallback",
+                webhookUrl=None,
+                userEmail=user_google_email,
+                message="Simple card fallback (no webhook provided): Cannot send cards without webhook URL",
+                error="No webhook URL provided"
+            )
 
     @mcp.tool(
         name="send_interactive_card",
@@ -874,7 +1117,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         buttons: List[Dict[str, Any]],
         thread_key: Optional[str] = None,
         webhook_url: Optional[str] = None
-    ) -> str:
+    ) -> SendInteractiveCardResponse:
         """
         Sends an interactive card with buttons to a Google Chat space.
 
@@ -918,13 +1161,24 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
 
         Returns:
-            str: Confirmation message with sent message details
+            SendInteractiveCardResponse: Structured response with sent message details
         """
         if webhook_url:
             # Use webhook delivery like send_rich_card
             try:
                 if not card_manager:
-                    return "Card Framework not available. Cannot send interactive cards via webhook."
+                    return SendInteractiveCardResponse(
+                        success=False,
+                        messageId=None,
+                        spaceId=space_id,
+                        title=title,
+                        buttonCount=len(buttons),
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message="Card Framework not available. Cannot send interactive cards via webhook.",
+                        error="Card Framework not available"
+                    )
                 
                 # Create interactive card manually (Card Framework has button format issues)
                 # Convert buttons to Google Chat format
@@ -981,15 +1235,58 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 )
                 
                 if response.status_code == 200:
-                    return f"✅ Interactive card sent successfully via webhook! Status: {response.status_code}"
+                    return SendInteractiveCardResponse(
+                        success=True,
+                        messageId=None,  # Webhook doesn't return message ID
+                        spaceId=space_id,
+                        title=title,
+                        buttonCount=len(buttons),
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message=f"Interactive card sent successfully via webhook! Status: {response.status_code}",
+                        error=None
+                    )
                 else:
-                    return f"❌ Webhook delivery failed. Status: {response.status_code}, Response: {response.text}"
+                    return SendInteractiveCardResponse(
+                        success=False,
+                        messageId=None,
+                        spaceId=space_id,
+                        title=title,
+                        buttonCount=len(buttons),
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message=f"Webhook delivery failed. Status: {response.status_code}",
+                        error=f"Webhook delivery failed: {response.text}"
+                    )
             except Exception as e:
-                return f"Failed to send interactive card via webhook: {str(e)}"
+                return SendInteractiveCardResponse(
+                    success=False,
+                    messageId=None,
+                    spaceId=space_id,
+                    title=title,
+                    buttonCount=len(buttons),
+                    deliveryMethod="webhook",
+                    webhookUrl=webhook_url,
+                    userEmail=user_google_email,
+                    message=f"Failed to send interactive card via webhook: {str(e)}",
+                    error=str(e)
+                )
         else:
             # Fallback to text message since we don't have service parameter
-            fallback_text = f"{title}\n{text}\nButtons: {', '.join([btn.get('text', 'Button') for btn in buttons])}"
-            return f"Interactive card fallback (no webhook provided): {fallback_text}"
+            return SendInteractiveCardResponse(
+                success=False,
+                messageId=None,
+                spaceId=space_id,
+                title=title,
+                buttonCount=len(buttons),
+                deliveryMethod="fallback",
+                webhookUrl=None,
+                userEmail=user_google_email,
+                message="Interactive card fallback (no webhook provided): Cannot send cards without webhook URL",
+                error="No webhook URL provided"
+            )
 
     @mcp.tool(
         name="send_form_card",
@@ -1011,7 +1308,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         submit_action: Dict[str, Any],
         thread_key: Optional[str] = None,
         webhook_url: Optional[str] = None
-    ) -> str:
+    ) -> SendFormCardResponse:
         """
         Sends a form card to a Google Chat space.
 
@@ -1059,13 +1356,24 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
 
         Returns:
-            str: Confirmation message with sent message details
+            SendFormCardResponse: Structured response with sent message details
         """
         if webhook_url:
             # Use webhook delivery like send_rich_card
             try:
                 if not card_manager:
-                    return "Card Framework not available. Cannot send form cards via webhook."
+                    return SendFormCardResponse(
+                        success=False,
+                        messageId=None,
+                        spaceId=space_id,
+                        title=title,
+                        fieldCount=len(fields),
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message="Card Framework not available. Cannot send form cards via webhook.",
+                        error="Card Framework not available"
+                    )
                 
                 # Create form card manually (Card Framework has form format issues)
                 # Convert fields to Google Chat format
@@ -1130,16 +1438,58 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 )
                 
                 if response.status_code == 200:
-                    return f"✅ Form card sent successfully via webhook! Status: {response.status_code}"
+                    return SendFormCardResponse(
+                        success=True,
+                        messageId=None,  # Webhook doesn't return message ID
+                        spaceId=space_id,
+                        title=title,
+                        fieldCount=len(fields),
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message=f"Form card sent successfully via webhook! Status: {response.status_code}",
+                        error=None
+                    )
                 else:
-                    return f"❌ Webhook delivery failed. Status: {response.status_code}, Response: {response.text}"
+                    return SendFormCardResponse(
+                        success=False,
+                        messageId=None,
+                        spaceId=space_id,
+                        title=title,
+                        fieldCount=len(fields),
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message=f"Webhook delivery failed. Status: {response.status_code}",
+                        error=f"Webhook delivery failed: {response.text}"
+                    )
             except Exception as e:
-                return f"Failed to send form card via webhook: {str(e)}"
+                return SendFormCardResponse(
+                    success=False,
+                    messageId=None,
+                    spaceId=space_id,
+                    title=title,
+                    fieldCount=len(fields),
+                    deliveryMethod="webhook",
+                    webhookUrl=webhook_url,
+                    userEmail=user_google_email,
+                    message=f"Failed to send form card via webhook: {str(e)}",
+                    error=str(e)
+                )
         else:
             # Fallback to text message since we don't have service parameter
-            field_names = ', '.join([field.get('name', 'Field') for field in fields])
-            fallback_text = f"{title}\nForm fields: {field_names}"
-            return f"Form card fallback (no webhook provided): {fallback_text}"
+            return SendFormCardResponse(
+                success=False,
+                messageId=None,
+                spaceId=space_id,
+                title=title,
+                fieldCount=len(fields),
+                deliveryMethod="fallback",
+                webhookUrl=None,
+                userEmail=user_google_email,
+                message="Form card fallback (no webhook provided): Cannot send cards without webhook URL",
+                error="No webhook URL provided"
+            )
 
     @mcp.tool(
         name="get_card_framework_status",
@@ -1284,7 +1634,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         sections: Optional[List[Any]] = None,
         thread_key: Optional[str] = None,
         webhook_url: Optional[str] = None
-    ) -> str:
+    ) -> SendRichCardResponse:
         """
         Sends a rich card message to a Google Chat space with advanced formatting.
         
@@ -1304,7 +1654,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
 
         Returns:
-            str: Confirmation message with sent message details
+            SendRichCardResponse: Structured response with sent message details
         """
         try:
             logger.info(f"=== RICH CARD CREATION START ===")
@@ -1322,7 +1672,18 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                         logger.info(f"  Section {i}: type={section_type}")
             
             if not card_manager:
-                return "Card Framework not available. Cannot send rich cards."
+                return SendRichCardResponse(
+                    success=False,
+                    messageId=None,
+                    spaceId=space_id,
+                    title=title,
+                    sectionCount=len(sections) if sections else 0,
+                    deliveryMethod="fallback",
+                    webhookUrl=webhook_url,
+                    userEmail=user_google_email,
+                    message="Card Framework not available. Cannot send rich cards.",
+                    error="Card Framework not available"
+                )
             
             # Create rich card using Card Framework
             logger.info("Creating rich card with Card Framework...")
@@ -1400,10 +1761,32 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 logger.info(f"Webhook response status: {response.status_code}")
                 if response.status_code == 200:
                     logger.info(f"=== RICH CARD WEBHOOK SUCCESS ===")
-                    return f"✅ Rich card sent successfully via webhook! Status: {response.status_code}"
+                    return SendRichCardResponse(
+                        success=True,
+                        messageId=None,  # Webhook doesn't return message ID
+                        spaceId=space_id,
+                        title=title,
+                        sectionCount=len(sections) if sections else 0,
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message=f"Rich card sent successfully via webhook! Status: {response.status_code}",
+                        error=None
+                    )
                 else:
                     logger.error(f"Webhook failed: {response.text}")
-                    return f"❌ Webhook delivery failed. Status: {response.status_code}, Response: {response.text}"
+                    return SendRichCardResponse(
+                        success=False,
+                        messageId=None,
+                        spaceId=space_id,
+                        title=title,
+                        sectionCount=len(sections) if sections else 0,
+                        deliveryMethod="webhook",
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        message=f"Webhook delivery failed. Status: {response.status_code}",
+                        error=f"Webhook delivery failed: {response.text}"
+                    )
             else:
                 # Use Google Chat API (will fail for cards with human credentials)
                 logger.info("Sending via Google Chat API...")
@@ -1412,7 +1795,18 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 # Get service with fallback
                 service = await _get_chat_service_with_fallback(user_google_email)
                 if not service:
-                    return "❌ Unable to get Google Chat service"
+                    return SendRichCardResponse(
+                        success=False,
+                        messageId=None,
+                        spaceId=space_id,
+                        title=title,
+                        sectionCount=len(sections) if sections else 0,
+                        deliveryMethod="api",
+                        webhookUrl=None,
+                        userEmail=user_google_email,
+                        message="Unable to get Google Chat service",
+                        error="Unable to get Google Chat service"
+                    )
                 
                 # Handle space_id format - ensure it starts with "spaces/"
                 if not space_id.startswith("spaces/"):
@@ -1427,11 +1821,33 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 ).execute()
                 
                 logger.info(f"=== RICH CARD API SUCCESS ===")
-                return f"Rich card sent successfully via API! Message ID: {result.get('name', 'Unknown')}"
+                return SendRichCardResponse(
+                    success=True,
+                    messageId=result.get('name'),
+                    spaceId=space_id,
+                    title=title,
+                    sectionCount=len(sections) if sections else 0,
+                    deliveryMethod="api",
+                    webhookUrl=None,
+                    userEmail=user_google_email,
+                    message=f"Rich card sent successfully via API! Message ID: {result.get('name', 'Unknown')}",
+                    error=None
+                )
             
         except Exception as e:
             logger.error(f"=== RICH CARD TEST FAILED ===")
             logger.error(f"Error sending rich card: {e}", exc_info=True)
-            return f"Failed to send rich card: {str(e)}"
+            return SendRichCardResponse(
+                success=False,
+                messageId=None,
+                spaceId=space_id,
+                title=title,
+                sectionCount=len(sections) if sections else 0,
+                deliveryMethod="api",
+                webhookUrl=webhook_url,
+                userEmail=user_google_email,
+                message=f"Failed to send rich card: {str(e)}",
+                error=str(e)
+            )
 
     logger.info("✅ Google Chat tools setup complete")

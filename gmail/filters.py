@@ -12,13 +12,21 @@ This module provides tools for:
 import logging
 import asyncio
 import time
+from typing import Annotated
 from typing_extensions import Optional, Literal, Any, List, Dict, Tuple
+from pydantic import Field
 
 from fastmcp import FastMCP, Context
 from googleapiclient.errors import HttpError
 
+# Import our custom type for consistent parameter definition
+from tools.common_types import UserGoogleEmail
+
 from .service import _get_gmail_service_with_fallback
-from .gmail_types import GmailFiltersResponse, FilterInfo, FilterCriteria, FilterAction
+from .gmail_types import (
+    GmailFiltersResponse, FilterInfo, FilterCriteria, FilterAction,
+    CreateGmailFilterResponse, GetGmailFilterResponse, DeleteGmailFilterResponse, RetroactiveResults
+)
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +258,9 @@ async def apply_filter_to_existing_messages(
 
 
 
-async def list_gmail_filters(user_google_email: str) -> GmailFiltersResponse:
+async def list_gmail_filters(
+    user_google_email: UserGoogleEmail = None
+) -> GmailFiltersResponse:
     """
     Lists all Gmail filters/rules in the user's account.
 
@@ -343,27 +353,50 @@ async def list_gmail_filters(user_google_email: str) -> GmailFiltersResponse:
         )
 
 
+def parse_string_boolean(value: Any) -> Optional[bool]:
+    """
+    Parse boolean values that may come as strings from MCP clients.
+    
+    Args:
+        value: The value to parse (could be bool, string, or None)
+    
+    Returns:
+        Optional[bool]: The parsed boolean value or None
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lower_value = value.lower().strip()
+        if lower_value in ('true', '1', 'yes', 'on'):
+            return True
+        elif lower_value in ('false', '0', 'no', 'off'):
+            return False
+    return None
+
+
 async def create_gmail_filter(
-    user_google_email: str,
+    user_google_email: UserGoogleEmail = None,
     # Criteria parameters
-    from_address: Optional[str] = None,
-    to_address: Optional[str] = None,
-    subject_contains: Optional[str] = None,
-    query: Optional[str] = None,
-    has_attachment: Optional[bool] = None,
-    exclude_chats: Optional[bool] = None,
-    size: Optional[int] = None,
-    size_comparison: Optional[Literal["larger", "smaller"]] = None,
+    from_address: Annotated[Optional[str], Field(description="Filter messages from this email address")] = None,
+    to_address: Annotated[Optional[str], Field(description="Filter messages to this email address")] = None,
+    subject_contains: Annotated[Optional[str], Field(description="Filter messages with this text in the subject line")] = None,
+    query: Annotated[Optional[str], Field(description="Gmail search query for advanced filtering criteria")] = None,
+    has_attachment: Annotated[Optional[bool], Field(description="Filter messages that have (True) or don't have (False) attachments")] = None,
+    exclude_chats: Annotated[Optional[bool], Field(description="Whether to exclude chat messages from the filter")] = None,
+    size: Annotated[Optional[int], Field(description="Size threshold in bytes for filtering messages", ge=0)] = None,
+    size_comparison: Annotated[Optional[Literal["larger", "smaller"]], Field(description="Whether size should be 'larger' or 'smaller' than the threshold")] = None,
     # Action parameters
-    add_label_ids: Optional[Any] = None,
-    remove_label_ids: Optional[Any] = None,
-    forward_to: Optional[str] = None,
-    mark_as_spam: Optional[bool] = None,
-    mark_as_important: Optional[bool] = None,
-    never_mark_as_spam: Optional[bool] = None,
-    never_mark_as_important: Optional[bool] = None,
+    add_label_ids: Annotated[Optional[Any], Field(description="List of label IDs to add to matching messages (can be list or JSON string)")] = None,
+    remove_label_ids: Annotated[Optional[Any], Field(description="List of label IDs to remove from matching messages (can be list or JSON string)")] = None,
+    forward_to: Annotated[Optional[str], Field(description="Email address to forward matching messages to")] = None,
+    mark_as_spam: Annotated[Optional[bool], Field(description="Whether to mark matching messages as spam")] = None,
+    mark_as_important: Annotated[Optional[bool], Field(description="Whether to mark matching messages as important")] = None,
+    never_mark_as_spam: Annotated[Optional[bool], Field(description="Whether to never mark matching messages as spam")] = None,
+    never_mark_as_important: Annotated[Optional[bool], Field(description="Whether to never mark matching messages as important")] = None,
     ctx: Optional[Context] = None
-) -> str:
+) -> CreateGmailFilterResponse:
     """
     Creates a new Gmail filter/rule with specified criteria and actions.
 
@@ -386,13 +419,23 @@ async def create_gmail_filter(
         never_mark_as_important: Whether to never mark matching messages as important
 
     Returns:
-        str: Confirmation message with the created filter's ID
+        CreateGmailFilterResponse: Structured response with filter creation details and retroactive results
     """
     import json
 
     logger.info(f"[create_gmail_filter] Email: '{user_google_email}'")
     logger.info(f"[create_gmail_filter] Raw add_label_ids: {add_label_ids} (type: {type(add_label_ids)})")
     logger.info(f"[create_gmail_filter] Raw remove_label_ids: {remove_label_ids} (type: {type(remove_label_ids)})")
+
+    # Parse boolean values (handle string booleans from MCP clients)
+    has_attachment = parse_string_boolean(has_attachment)
+    exclude_chats = parse_string_boolean(exclude_chats)
+    mark_as_spam = parse_string_boolean(mark_as_spam)
+    mark_as_important = parse_string_boolean(mark_as_important)
+    never_mark_as_spam = parse_string_boolean(never_mark_as_spam)
+    never_mark_as_important = parse_string_boolean(never_mark_as_important)
+
+    logger.info(f"[create_gmail_filter] Parsed booleans - has_attachment: {has_attachment}, exclude_chats: {exclude_chats}, mark_as_spam: {mark_as_spam}, mark_as_important: {mark_as_important}, never_mark_as_spam: {never_mark_as_spam}, never_mark_as_important: {never_mark_as_important}")
 
     # Helper function to parse label IDs (reuse from modify_gmail_message_labels)
     def parse_label_ids(label_ids: Any) -> Optional[List[str]]:
@@ -462,9 +505,15 @@ async def create_gmail_filter(
 
     # Validate that we have at least one criteria and one action
     if not criteria:
-        return "❌ At least one filter criteria must be specified."
+        return CreateGmailFilterResponse(
+            success=False,
+            error="At least one filter criteria must be specified."
+        )
     if not action:
-        return "❌ At least one filter action must be specified."
+        return CreateGmailFilterResponse(
+            success=False,
+            error="At least one filter action must be specified."
+        )
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
@@ -480,7 +529,7 @@ async def create_gmail_filter(
 
         filter_id = created_filter.get("id")
 
-        # Format response with details
+        # Build criteria summary
         criteria_summary = []
         if from_address:
             criteria_summary.append(f"From: {from_address}")
@@ -491,6 +540,7 @@ async def create_gmail_filter(
         if query:
             criteria_summary.append(f"Query: {query}")
 
+        # Build actions summary
         action_summary = []
         if parsed_add_label_ids:
             action_summary.append(f"Add labels: {', '.join(parsed_add_label_ids)}")
@@ -503,12 +553,13 @@ async def create_gmail_filter(
         if mark_as_important:
             action_summary.append("Mark as important")
 
-        response_lines = [
-            "✅ Gmail filter created successfully!",
-            f"Filter ID: {filter_id}",
-            f"Criteria: {' | '.join(criteria_summary)}",
-            f"Actions: {' | '.join(action_summary)}"
-        ]
+        # Initialize response object
+        response = CreateGmailFilterResponse(
+            success=True,
+            filter_id=filter_id,
+            criteria_summary=" | ".join(criteria_summary),
+            actions_summary=" | ".join(action_summary)
+        )
 
         # Apply filter to existing emails retroactively (always enabled for label actions)
         if parsed_add_label_ids or parsed_remove_label_ids:
@@ -535,74 +586,68 @@ async def create_gmail_filter(
                     else:  # smaller
                         search_terms.append(f"smaller:{size}")
 
-                if not search_terms:
-                    response_lines.append("\n⚠️ Cannot apply to existing emails: no searchable criteria specified")
-                    return "\n".join(response_lines)
+                if search_terms:
+                    search_query = " ".join(search_terms)
+                    logger.info(f"[create_gmail_filter] Searching for existing emails with query: {search_query}")
 
-                search_query = " ".join(search_terms)
-                logger.info(f"[create_gmail_filter] Searching for existing emails with query: {search_query}")
+                    # Use enhanced retroactive application function with progress reporting
+                    retro_result = await apply_filter_to_existing_messages(
+                        gmail_service=gmail_service,
+                        search_query=search_query,
+                        add_label_ids=parsed_add_label_ids,
+                        remove_label_ids=parsed_remove_label_ids,
+                        batch_size=100,  # Default batch size
+                        max_messages=10000,  # Safety limit, much higher than original 500
+                        rate_limit_delay=0.05,  # Small delay for API rate limiting
+                        ctx=ctx  # Pass context for progress reporting
+                    )
 
-                # Use enhanced retroactive application function with progress reporting
-                retro_result = await apply_filter_to_existing_messages(
-                    gmail_service=gmail_service,
-                    search_query=search_query,
-                    add_label_ids=parsed_add_label_ids,
-                    remove_label_ids=parsed_remove_label_ids,
-                    batch_size=100,  # Default batch size
-                    max_messages=10000,  # Safety limit, much higher than original 500
-                    rate_limit_delay=0.05,  # Small delay for API rate limiting
-                    ctx=ctx  # Pass context for progress reporting
-                )
-
-                # Add the retroactive results to the response
-                if isinstance(retro_result, dict):
-                    total_found = retro_result.get('total_found', 0)
-                    processed_count = retro_result.get('processed_count', 0)
-                    error_count = retro_result.get('error_count', 0)
-                    truncated = retro_result.get('truncated', False)
-                    
-                    response_lines.append(f"\n📊 RETROACTIVE APPLICATION RESULTS:")
-                    response_lines.append(f"  Messages found: {total_found}")
-                    response_lines.append(f"  Messages processed: {processed_count}")
-                    response_lines.append(f"  Errors: {error_count}")
-                    if truncated:
-                        response_lines.append(f"  ⚠️ Processing limited to 10000 messages")
-                else:
-                    # Fallback for string results
-                    response_lines.append(f"\n{retro_result}")
+                    # Add the retroactive results to the response
+                    if isinstance(retro_result, dict):
+                        response["retroactive_results"] = RetroactiveResults(
+                            total_found=retro_result.get('total_found', 0),
+                            processed_count=retro_result.get('processed_count', 0),
+                            error_count=retro_result.get('error_count', 0),
+                            errors=retro_result.get('errors', []),
+                            truncated=retro_result.get('truncated', False)
+                        )
 
             except Exception as retro_error:
                 logger.error(f"[create_gmail_filter] Error during retroactive application: {retro_error}")
-                response_lines.append(f"\n⚠️ Filter created but retroactive application failed: {retro_error}")
+                # Filter was created successfully, but retroactive application failed
+                # This is still a partial success
 
-        return "\n".join(response_lines)
+        return response
 
     except HttpError as e:
         logger.error(f"Gmail API error in create_gmail_filter: {e}")
+        error_msg = ""
         if e.resp.status in [401, 403]:
-            return f"❌ Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
+            error_msg = "Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
         elif e.resp.status == 400:
             error_details = str(e)
             if "already exists" in error_details.lower():
-                return f"❌ Filter already exists: A filter with similar criteria already exists in your Gmail account."
+                error_msg = "Filter already exists: A filter with similar criteria already exists in your Gmail account."
             elif "label" in error_details.lower() and ("not found" in error_details.lower() or "invalid" in error_details.lower()):
-                return f"❌ Invalid label: One or more specified label IDs do not exist in your Gmail account. Please check your label IDs and try again."
+                error_msg = "Invalid label: One or more specified label IDs do not exist in your Gmail account. Please check your label IDs and try again."
             else:
-                return f"❌ Bad request: Unable to create Gmail filter. {e}"
+                error_msg = f"Bad request: Unable to create Gmail filter. {e}"
         elif e.resp.status == 409:
-            return f"❌ Conflict: Unable to create filter due to a conflict with existing filters or settings."
+            error_msg = "Conflict: Unable to create filter due to a conflict with existing filters or settings."
         else:
-            return f"❌ Gmail API error: {e}"
+            error_msg = f"Gmail API error: {e}"
+
+        return CreateGmailFilterResponse(success=False, error=error_msg)
 
     except Exception as e:
         logger.error(f"Unexpected error in create_gmail_filter: {e}")
-        return f"❌ Unexpected error: {e}"
+        return CreateGmailFilterResponse(success=False, error=f"Unexpected error: {e}")
 
 
 async def get_gmail_filter(
-    user_google_email: str,
-    filter_id: str
-) -> str:
+    filter_id: Annotated[str, Field(description="The unique ID of the Gmail filter to retrieve")],
+    user_google_email: UserGoogleEmail = None
+) -> GetGmailFilterResponse:
     """
     Gets details of a specific Gmail filter by ID.
 
@@ -611,7 +656,7 @@ async def get_gmail_filter(
         filter_id: The ID of the filter to retrieve
 
     Returns:
-        str: Detailed information about the filter including criteria and actions
+        GetGmailFilterResponse: Structured response with filter details
     """
     logger.info(f"[get_gmail_filter] Email: '{user_google_email}', Filter ID: '{filter_id}'")
 
@@ -622,82 +667,78 @@ async def get_gmail_filter(
             gmail_service.users().settings().filters().get(userId="me", id=filter_id).execute
         )
 
-        criteria = filter_obj.get("criteria", {})
-        action = filter_obj.get("action", {})
+        criteria_obj = filter_obj.get("criteria", {})
+        action_obj = filter_obj.get("action", {})
 
-        lines = [
-            f"Gmail Filter Details (ID: {filter_id})",
-            "",
-            "📋 CRITERIA:"
-        ]
+        # Convert to structured format
+        criteria: FilterCriteria = {
+            "from_address": criteria_obj.get("from"),
+            "to_address": criteria_obj.get("to"),
+            "subject": criteria_obj.get("subject"),
+            "query": criteria_obj.get("query"),
+            "hasAttachment": criteria_obj.get("hasAttachment"),
+            "excludeChats": criteria_obj.get("excludeChats"),
+            "size": criteria_obj.get("size"),
+            "sizeComparison": criteria_obj.get("sizeComparison")
+        }
+        
+        # Convert actions to structured format
+        action: FilterAction = {
+            "addLabelIds": action_obj.get("addLabelIds"),
+            "removeLabelIds": action_obj.get("removeLabelIds"),
+            "forward": action_obj.get("forward"),
+            "markAsSpam": action_obj.get("markAsSpam"),
+            "markAsImportant": action_obj.get("markAsImportant"),
+            "neverMarkAsSpam": action_obj.get("neverMarkAsSpam"),
+            "neverMarkAsImportant": action_obj.get("neverMarkAsImportant")
+        }
 
-        # Display criteria
-        if criteria.get("from"):
-            lines.append(f"  From: {criteria['from']}")
-        if criteria.get("to"):
-            lines.append(f"  To: {criteria['to']}")
-        if criteria.get("subject"):
-            lines.append(f"  Subject contains: {criteria['subject']}")
-        if criteria.get("query"):
-            lines.append(f"  Query: {criteria['query']}")
-        if criteria.get("hasAttachment"):
-            lines.append(f"  Has attachment: {criteria['hasAttachment']}")
-        if criteria.get("excludeChats"):
-            lines.append(f"  Exclude chats: {criteria['excludeChats']}")
-        if criteria.get("size"):
-            lines.append(f"  Size: {criteria['size']} bytes")
-        if criteria.get("sizeComparison"):
-            lines.append(f"  Size comparison: {criteria['sizeComparison']}")
+        filter_info: FilterInfo = {
+            "id": filter_obj.get("id", ""),
+            "criteria": criteria,
+            "action": action
+        }
 
-        if not any(criteria.values()):
-            lines.append("  None specified")
-
-        lines.extend([
-            "",
-            "⚡ ACTIONS:"
-        ])
-
-        # Display actions
-        if action.get("addLabelIds"):
-            lines.append(f"  Add labels: {', '.join(action['addLabelIds'])}")
-        if action.get("removeLabelIds"):
-            lines.append(f"  Remove labels: {', '.join(action['removeLabelIds'])}")
-        if action.get("forward"):
-            lines.append(f"  Forward to: {action['forward']}")
-        if action.get("markAsSpam"):
-            lines.append(f"  Mark as spam: {action['markAsSpam']}")
-        if action.get("markAsImportant"):
-            lines.append(f"  Mark as important: {action['markAsImportant']}")
-        if action.get("neverMarkAsSpam"):
-            lines.append(f"  Never mark as spam: {action['neverMarkAsSpam']}")
-        if action.get("neverMarkAsImportant"):
-            lines.append(f"  Never mark as important: {action['neverMarkAsImportant']}")
-
-        if not any(action.values()):
-            lines.append("  None specified")
-
-        return "\n".join(lines)
+        return GetGmailFilterResponse(
+            success=True,
+            filter_info=filter_info,
+            filter_id=filter_id,
+            userEmail=user_google_email
+        )
 
     except HttpError as e:
         logger.error(f"Gmail API error in get_gmail_filter: {e}")
+        error_msg = ""
         if e.resp.status in [401, 403]:
-            return f"❌ Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
+            error_msg = "Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
         elif e.resp.status == 400:
-            return f"❌ Bad request: Unable to retrieve Gmail filter details. {e}"
+            error_msg = f"Bad request: Unable to retrieve Gmail filter details. {e}"
         elif e.resp.status == 404:
-            return f"❌ Filter not found: The specified filter ID '{filter_id}' does not exist in your Gmail account."
+            error_msg = f"Filter not found: The specified filter ID '{filter_id}' does not exist in your Gmail account."
         else:
-            return f"❌ Gmail API error: {e}"
+            error_msg = f"Gmail API error: {e}"
+
+        return GetGmailFilterResponse(
+            success=False,
+            filter_id=filter_id,
+            userEmail=user_google_email,
+            error=error_msg
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error in get_gmail_filter: {e}")
-        return f"❌ Unexpected error: {e}"
+        return GetGmailFilterResponse(
+            success=False,
+            filter_id=filter_id,
+            userEmail=user_google_email,
+            error=f"Unexpected error: {e}"
+        )
 
 
 async def delete_gmail_filter(
-    user_google_email: str,
-    filter_id: str
-) -> str:
+    filter_id: Annotated[str, Field(description="The unique ID of the Gmail filter to delete")],
+    user_google_email: UserGoogleEmail = None
+) -> DeleteGmailFilterResponse:
     """
     Deletes a Gmail filter by ID.
 
@@ -706,7 +747,7 @@ async def delete_gmail_filter(
         filter_id: The ID of the filter to delete
 
     Returns:
-        str: Confirmation message of the filter deletion
+        DeleteGmailFilterResponse: Structured response with deletion confirmation
     """
     logger.info(f"[delete_gmail_filter] Email: '{user_google_email}', Filter ID: '{filter_id}'")
 
@@ -714,47 +755,66 @@ async def delete_gmail_filter(
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
         # Get filter details before deletion for confirmation
+        criteria_summary = None
         try:
             filter_obj = await asyncio.to_thread(
                 gmail_service.users().settings().filters().get(userId="me", id=filter_id).execute
             )
             criteria = filter_obj.get("criteria", {})
-            criteria_summary = []
+            criteria_parts = []
             if criteria.get("from"):
-                criteria_summary.append(f"From: {criteria['from']}")
+                criteria_parts.append(f"From: {criteria['from']}")
             if criteria.get("to"):
-                criteria_summary.append(f"To: {criteria['to']}")
+                criteria_parts.append(f"To: {criteria['to']}")
             if criteria.get("subject"):
-                criteria_summary.append(f"Subject: {criteria['subject']}")
+                criteria_parts.append(f"Subject: {criteria['subject']}")
             if criteria.get("query"):
-                criteria_summary.append(f"Query: {criteria['query']}")
+                criteria_parts.append(f"Query: {criteria['query']}")
 
-            criteria_text = " | ".join(criteria_summary) if criteria_summary else "No criteria found"
+            criteria_summary = " | ".join(criteria_parts) if criteria_parts else "No criteria found"
 
         except Exception:
-            criteria_text = "Could not retrieve criteria"
+            criteria_summary = "Could not retrieve criteria"
 
         # Delete the filter
         await asyncio.to_thread(
             gmail_service.users().settings().filters().delete(userId="me", id=filter_id).execute
         )
 
-        return f"✅ Gmail filter deleted successfully!\nFilter ID: {filter_id}\nCriteria was: {criteria_text}"
+        return DeleteGmailFilterResponse(
+            success=True,
+            filter_id=filter_id,
+            criteria_summary=criteria_summary,
+            userEmail=user_google_email
+        )
 
     except HttpError as e:
         logger.error(f"Gmail API error in delete_gmail_filter: {e}")
+        error_msg = ""
         if e.resp.status in [401, 403]:
-            return f"❌ Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
+            error_msg = "Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
         elif e.resp.status == 400:
-            return f"❌ Bad request: Unable to delete Gmail filter. {e}"
+            error_msg = f"Bad request: Unable to delete Gmail filter. {e}"
         elif e.resp.status == 404:
-            return f"❌ Filter not found: The specified filter ID '{filter_id}' does not exist in your Gmail account."
+            error_msg = f"Filter not found: The specified filter ID '{filter_id}' does not exist in your Gmail account."
         else:
-            return f"❌ Gmail API error: {e}"
+            error_msg = f"Gmail API error: {e}"
+
+        return DeleteGmailFilterResponse(
+            success=False,
+            filter_id=filter_id,
+            userEmail=user_google_email,
+            error=error_msg
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error in delete_gmail_filter: {e}")
-        return f"❌ Unexpected error: {e}"
+        return DeleteGmailFilterResponse(
+            success=False,
+            filter_id=filter_id,
+            userEmail=user_google_email,
+            error=f"Unexpected error: {e}"
+        )
 
 
 def setup_filter_tools(mcp: FastMCP) -> None:
@@ -772,7 +832,9 @@ def setup_filter_tools(mcp: FastMCP) -> None:
             "openWorldHint": True
         }
     )
-    async def list_gmail_filters_tool(user_google_email: str) -> GmailFiltersResponse:
+    async def list_gmail_filters_tool(
+        user_google_email: UserGoogleEmail = None
+    ) -> GmailFiltersResponse:
         return await list_gmail_filters(user_google_email)
 
     @mcp.tool(
@@ -789,25 +851,25 @@ def setup_filter_tools(mcp: FastMCP) -> None:
     )
     async def create_gmail_filter_tool(
         ctx: Context,
-        user_google_email: str,
+        user_google_email: UserGoogleEmail = None,
         # Criteria parameters
-        from_address: Optional[str] = None,
-        to_address: Optional[str] = None,
-        subject_contains: Optional[str] = None,
-        query: Optional[str] = None,
-        has_attachment: Optional[bool] = None,
-        exclude_chats: Optional[bool] = None,
-        size: Optional[int] = None,
-        size_comparison: Optional[Literal["larger", "smaller"]] = None,
+        from_address: Annotated[Optional[str], Field(description="Filter messages from this email address")] = None,
+        to_address: Annotated[Optional[str], Field(description="Filter messages to this email address")] = None,
+        subject_contains: Annotated[Optional[str], Field(description="Filter messages with this text in the subject line")] = None,
+        query: Annotated[Optional[str], Field(description="Gmail search query for advanced filtering criteria")] = None,
+        has_attachment: Annotated[Optional[bool], Field(description="Filter messages that have (True) or don't have (False) attachments")] = None,
+        exclude_chats: Annotated[Optional[bool], Field(description="Whether to exclude chat messages from the filter")] = None,
+        size: Annotated[Optional[int], Field(description="Size threshold in bytes for filtering messages", ge=0)] = None,
+        size_comparison: Annotated[Optional[Literal["larger", "smaller"]], Field(description="Whether size should be 'larger' or 'smaller' than the threshold")] = None,
         # Action parameters
-        add_label_ids: Optional[Any] = None,
-        remove_label_ids: Optional[Any] = None,
-        forward_to: Optional[str] = None,
-        mark_as_spam: Optional[bool] = None,
-        mark_as_important: Optional[bool] = None,
-        never_mark_as_spam: Optional[bool] = None,
-        never_mark_as_important: Optional[bool] = None
-    ) -> str:
+        add_label_ids: Annotated[Optional[Any], Field(description="List of label IDs to add to matching messages (can be list or JSON string)")] = None,
+        remove_label_ids: Annotated[Optional[Any], Field(description="List of label IDs to remove from matching messages (can be list or JSON string)")] = None,
+        forward_to: Annotated[Optional[str], Field(description="Email address to forward matching messages to")] = None,
+        mark_as_spam: Annotated[Optional[bool], Field(description="Whether to mark matching messages as spam")] = None,
+        mark_as_important: Annotated[Optional[bool], Field(description="Whether to mark matching messages as important")] = None,
+        never_mark_as_spam: Annotated[Optional[bool], Field(description="Whether to never mark matching messages as spam")] = None,
+        never_mark_as_important: Annotated[Optional[bool], Field(description="Whether to never mark matching messages as important")] = None
+    ) -> CreateGmailFilterResponse:
         return await create_gmail_filter(
             user_google_email, from_address, to_address, subject_contains, query,
             has_attachment, exclude_chats, size, size_comparison, add_label_ids,
@@ -828,10 +890,10 @@ def setup_filter_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_gmail_filter_tool(
-        user_google_email: str,
-        filter_id: str
-    ) -> str:
-        return await get_gmail_filter(user_google_email, filter_id)
+        filter_id: Annotated[str, Field(description="The unique ID of the Gmail filter to retrieve")],
+        user_google_email: UserGoogleEmail = None
+    ) -> GetGmailFilterResponse:
+        return await get_gmail_filter(filter_id, user_google_email)
 
     @mcp.tool(
         name="delete_gmail_filter",
@@ -846,7 +908,7 @@ def setup_filter_tools(mcp: FastMCP) -> None:
         }
     )
     async def delete_gmail_filter_tool(
-        user_google_email: str,
-        filter_id: str
-    ) -> str:
-        return await delete_gmail_filter(user_google_email, filter_id)
+        filter_id: Annotated[str, Field(description="The unique ID of the Gmail filter to delete")],
+        user_google_email: UserGoogleEmail = None
+    ) -> DeleteGmailFilterResponse:
+        return await delete_gmail_filter(filter_id, user_google_email)

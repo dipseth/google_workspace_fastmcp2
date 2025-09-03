@@ -240,7 +240,7 @@ async def test_oauth_proxy_server_integration():
         print("   Set GOOGLE_CLIENT_SECRETS_FILE or GOOGLE_CLIENT_ID/SECRET")
         return False
     
-    base_url = f"http://{settings.server_host}:{settings.server_port}"
+    base_url = settings.base_url
     
     async with aiohttp.ClientSession() as session:
         try:
@@ -438,7 +438,7 @@ async def run_integration_tests():
     
     # Check if server is already running
     server_running = False
-    base_url = f"http://{settings.server_host}:{settings.server_port}"
+    base_url = settings.base_url
     
     try:
         async with aiohttp.ClientSession() as session:

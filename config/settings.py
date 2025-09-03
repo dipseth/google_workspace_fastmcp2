@@ -18,22 +18,22 @@ class Settings(BaseSettings):
     google_client_secrets_file: str = ""  # Path to client_secret.json file
     google_client_id: str = ""
     google_client_secret: str = ""
-    oauth_redirect_uri: str = "http://localhost:8000/oauth2callback"
+    oauth_redirect_uri: str = "http://localhost:8002/oauth2callback"
     
     # Server Configuration
-    server_port: int = 8000
+    server_port: int = 8002
     server_host: str = "localhost"
     server_name: str = "Google Drive Upload Server"
     
     # HTTPS/SSL Configuration
-    enable_https: bool = False
-    ssl_cert_file: str = "cert.pem"
-    ssl_key_file: str = "key.pem"
+    enable_https: bool = True
+    ssl_cert_file: str = str(Path(__file__).parent.parent / "localhost+2.pem")
+    ssl_key_file: str = str(Path(__file__).parent.parent / "localhost+2-key.pem") 
     ssl_ca_file: str = ""  # Optional CA file for client certificate verification
     
     # Storage Configuration
-    credentials_dir: str = "./credentials"
-    credential_storage_mode: str = "FILE_PLAINTEXT"
+    credentials_dir: str = str(Path(__file__).parent.parent / "credentials")
+    credential_storage_mode: str = "FILE_ENCRYPTED"
     chat_service_account_file: str = ""
     
     # Qdrant Configuration
@@ -53,11 +53,11 @@ class Settings(BaseSettings):
     gmail_allow_list: str = ""  # Comma-separated list of email addresses
     
     # Phase 1 OAuth Migration Feature Flags
-    enable_unified_auth: bool = False
+    enable_unified_auth: bool = True
     legacy_compat_mode: bool = True
-    credential_migration: bool = False
-    service_caching: bool = False
-    enhanced_logging: bool = False
+    credential_migration: bool = True
+    service_caching: bool = True
+    enhanced_logging: bool = True
     
     # FastMCP 2.12.0 GoogleProvider Configuration
     fastmcp_server_auth: str = ""
@@ -172,7 +172,7 @@ class Settings(BaseSettings):
             return self._fallback_drive_scopes
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file= str(Path(__file__).parent.parent / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"  # Ignore extra fields like TEST_EMAIL_ADDRESS

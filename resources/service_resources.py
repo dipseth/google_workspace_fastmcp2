@@ -2,10 +2,14 @@ import logging
 import json
 from datetime import datetime
 from pathlib import Path
-from typing_extensions import Any, Dict, List, Optional, Set
+from typing_extensions import Any, Dict, List, Optional, Set, Annotated
 
 from fastmcp import FastMCP, Context
 from jsonschema import validate, ValidationError
+from pydantic import Field
+
+# Import our custom types for consistent parameter definitions
+from tools.common_types import ServiceTypeAnnotated
 
 # Import SupportedService type and validation utilities
 from resources.service_list_resources import SupportedService, get_supported_services
@@ -65,8 +69,8 @@ def validate_service_config(config_data: Dict[str, Any]):
 
 async def get_service_config(
     ctx: Context,
-    service_type: SupportedService,
-    api_version: Optional[str] = None
+    service_type: ServiceTypeAnnotated,
+    api_version: Annotated[Optional[str], Field(description="Optional specific API version (e.g., 'v1', 'v3')", pattern=r"^v\d+$")] = None
 ) -> Dict[str, Any]:
     """
     Retrieves the configuration for a specified Google service.
@@ -227,8 +231,8 @@ def _get_default_api_version(service: str) -> str:
 
 async def get_service_scopes_by_group(
     ctx: Context,
-    service_type: SupportedService,
-    scope_group: str
+    service_type: ServiceTypeAnnotated,
+    scope_group: Annotated[str, Field(description="Scope group name (e.g., 'basic', 'full', 'readonly')")]
 ) -> Dict[str, Any]:
     """
     Retrieves OAuth scopes for a specified Google service and scope group.
@@ -264,7 +268,7 @@ async def get_service_scopes_by_group(
 
 async def get_service_versions(
     ctx: Context,
-    service_type: SupportedService
+    service_type: ServiceTypeAnnotated
 ) -> Dict[str, Any]:
     """
     Retrieves available API versions for a specified Google service.
@@ -311,7 +315,7 @@ async def get_service_versions(
 
 async def get_service_quota(
     ctx: Context,
-    service_type: SupportedService
+    service_type: ServiceTypeAnnotated
 ) -> Dict[str, Any]:
     """
     Retrieves quota information for a specified Google service.
@@ -387,7 +391,7 @@ async def get_service_quota(
 
 async def get_service_endpoints(
     ctx: Context,
-    service_type: SupportedService
+    service_type: ServiceTypeAnnotated
 ) -> Dict[str, Any]:
     """
     Retrieves API endpoints for a specified Google service.

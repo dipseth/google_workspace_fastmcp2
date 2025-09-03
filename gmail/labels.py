@@ -13,15 +13,22 @@ import logging
 import asyncio
 import json
 import re
-from typing_extensions import Optional, Literal, Any, List, Dict, Union
+from typing_extensions import Optional, Literal, Any, List, Dict, Union, Annotated
+from pydantic import Field
 from functools import lru_cache
+
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
 
 from .service import _get_gmail_service_with_fallback
 from .utils import _validate_gmail_color, _format_label_color_info, GMAIL_LABEL_COLORS
-from .gmail_types import GmailLabelInfo, GmailLabelsResponse
+from .gmail_types import (
+    GmailLabelInfo, GmailLabelsResponse, ManageGmailLabelResponse, 
+    ModifyGmailMessageLabelsResponse
+)
+from tools.common_types import UserGoogleEmail
+
 
 logger = logging.getLogger(__name__)
 
@@ -365,26 +372,47 @@ def _handle_gmail_api_error(error: Exception, operation: str) -> str:
         logger.error(f"Unexpected error in {operation}: {error}")
         return f"❌ Unexpected error in {operation}: {error}"
 
+# user_google_email: Annotated[Optional[str], Field(description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).")] = None,
 
-
-async def list_gmail_labels(user_google_email: str) -> GmailLabelsResponse:
+async def list_gmail_labels( user_google_email: Annotated[Optional[str], Field(description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).")] = None) -> GmailLabelsResponse:
     """
     Lists all labels in the user's Gmail account with structured output.
 
     Args:
-        user_google_email: The user's Google email address
+        user_google_email: The user's Google email address. If None, uses the current
+                          authenticated user from FastMCP context (auto-injected by middleware).
 
     Returns:
         GmailLabelsResponse: Structured response containing all labels with metadata
 
     Example:
-        >>> result = await list_gmail_labels("user@example.com")
+        >>> # Use current authenticated user (auto-resolved by middleware)
+        >>> result = await list_gmail_labels()
         >>> print(f"Found {result['total_count']} labels")
+        
+        >>> # Specify a particular user
+        >>> result = await list_gmail_labels("user@example.com")
         >>> for label in result['system_labels']:
         ...     print(f"System: {label['name']} (ID: {label['id']})")
         >>> for label in result['user_labels']:
         ...     print(f"User: {label['name']} (ID: {label['id']})")
     """
+    # The middleware should have auto-injected user_google_email if not provided
+    if user_google_email is None:
+        error_msg = (
+            "❌ No user email provided and middleware did not auto-inject user context. "
+            "Please ensure you're authenticated via FastMCP GoogleProvider, JWT token, "
+            "or have valid stored credentials."
+        )
+        logger.error(error_msg)
+        return GmailLabelsResponse(
+            labels=[],
+            total_count=0,
+            system_labels=[],
+            user_labels=[],
+            error=error_msg
+        )
+    
     logger.info(f"[list_gmail_labels] Email: '{user_google_email}'")
 
     try:
@@ -449,8 +477,8 @@ async def list_gmail_labels(user_google_email: str) -> GmailLabelsResponse:
 
 
 async def manage_gmail_label(
-    user_google_email: str,
     action: Literal["create", "update", "delete"],
+    user_google_email: Optional[str] = None,
     name: Optional[LabelParam] = None,
     label_id: Optional[LabelParam] = None,
     label_list_visibility: VisibilityParam = "labelShow",
@@ -514,6 +542,16 @@ async def manage_gmail_label(
 
     Note: Invalid colors are automatically corrected to the nearest Gmail color with a warning.
     """
+    # The middleware should have auto-injected user_google_email if not provided
+    if user_google_email is None:
+        error_msg = (
+            "❌ No user email provided and middleware did not auto-inject user context. "
+            "Please ensure you're authenticated via FastMCP GoogleProvider, JWT token, "
+            "or have valid stored credentials."
+        )
+        logger.error(error_msg)
+        return error_msg
+    
     logger.info(f"[manage_gmail_label] Email: '{user_google_email}', Action: '{action}'")
 
     try:
@@ -790,8 +828,8 @@ async def _process_single_label(
 
 
 async def modify_gmail_message_labels(
-    user_google_email: str,
     message_id: str,
+    user_google_email: Optional[str] = None,
     add_label_ids: Optional[Any] = None,
     remove_label_ids: Optional[Any] = None
 ) -> str:
@@ -822,6 +860,16 @@ async def modify_gmail_message_labels(
         >>> await modify_gmail_message_labels("user@example.com", "msg123",
         ...     add_label_ids=["Important"], remove_label_ids=["Spam"])
     """
+    # The middleware should have auto-injected user_google_email if not provided
+    if user_google_email is None:
+        error_msg = (
+            "❌ No user email provided and middleware did not auto-inject user context. "
+            "Please ensure you're authenticated via FastMCP GoogleProvider, JWT token, "
+            "or have valid stored credentials."
+        )
+        logger.error(error_msg)
+        return error_msg
+    
     logger.info(f"[modify_gmail_message_labels] Email: '{user_google_email}', Message ID: '{message_id}'")
     logger.info(f"[modify_gmail_message_labels] Raw add_label_ids: {add_label_ids} (type: {type(add_label_ids)})")
     logger.info(f"[modify_gmail_message_labels] Raw remove_label_ids: {remove_label_ids} (type: {type(remove_label_ids)})")
@@ -915,7 +963,7 @@ def setup_label_tools(mcp: FastMCP) -> None:
             "openWorldHint": True
         }
     )
-    async def list_gmail_labels_tool(user_google_email: str) -> GmailLabelsResponse:
+    async def list_gmail_labels_tool(user_google_email: Annotated[Optional[str], Field(description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).")] = None) -> GmailLabelsResponse:
         """
         Lists all Gmail labels with structured output.
         
@@ -924,7 +972,8 @@ def setup_label_tools(mcp: FastMCP) -> None:
         - Structured content: Machine-readable JSON with full label details
         
         Args:
-            user_google_email: The user's Google email address
+            user_google_email: The user's Google email address. If None, uses the current
+                             authenticated user from FastMCP context (auto-injected by middleware).
             
         Returns:
             GmailLabelsResponse: Structured response containing all labels with metadata
@@ -944,17 +993,38 @@ def setup_label_tools(mcp: FastMCP) -> None:
         }
     )
     async def manage_gmail_label_tool(
-        user_google_email: str,
-        action: Literal["create", "update", "delete"],
-        name: Optional[Any] = None,
-        label_id: Optional[Any] = None,
-        label_list_visibility: Optional[Any] = "labelShow",
-        message_list_visibility: Optional[Any] = "show",
-        text_color: Optional[Any] = None,
-        background_color: Optional[Any] = None
+        action: Annotated[Literal["create", "update", "delete"], Field(description="Action to perform: 'create' (requires name), 'update' (requires label_id), 'delete' (requires label_id)")],
+        user_google_email: Annotated[Optional[str], Field(description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).")] = None,
+        name: Annotated[Optional[Union[str, List[str]]], Field(description="Label name(s) - REQUIRED for CREATE. Single: 'My Label' or Multiple: ['Label1', 'Label2'] or JSON string")] = None,
+        label_id: Annotated[Optional[Union[str, List[str]]], Field(description="Label ID(s) - REQUIRED for UPDATE/DELETE. Single: 'Label_123' or Multiple: ['Label_1', 'Label_2'] or JSON string")] = None,
+        label_list_visibility: Annotated[Union[str, List[str]], Field(description="Label visibility in Gmail sidebar: 'labelShow' or 'labelHide'. Can be single value or list for multiple labels")] = "labelShow",
+        message_list_visibility: Annotated[Union[str, List[str]], Field(description="Message visibility in conversations: 'show' or 'hide'. Can be single value or list for multiple labels")] = "show",
+        text_color: Annotated[Optional[Union[str, List[str], Dict[str, str]]], Field(description="Text color(s) - hex codes (e.g., '#ff0000'), color names (e.g., 'red'), auto-corrected to closest Gmail color. Single value, list, or dict mapping")] = None,
+        background_color: Annotated[Optional[Union[str, List[str], Dict[str, str]]], Field(description="Background color(s) - hex codes (e.g., '#ffffff'), color names (e.g., 'white'), auto-corrected to closest Gmail color. Single value, list, or dict mapping")] = None
     ) -> str:
+        """
+        Manage Gmail labels with structured output.
+        
+        Returns both:
+        - Traditional content: Human-readable formatted text with operation results (automatic via FastMCP)
+        - Structured content: Machine-readable JSON with detailed label management results
+        
+        Args:
+            action: Action to perform - 'create', 'update', or 'delete'
+            user_google_email: The user's Google email address. If None, uses the current
+                             authenticated user from FastMCP context (auto-injected by middleware).
+            name: Label name(s) for creation or updates
+            label_id: Label ID(s) for updates or deletions
+            label_list_visibility: Visibility in Gmail label list
+            message_list_visibility: Visibility in message conversations
+            text_color: Text color(s) with auto-correction to valid Gmail colors
+            background_color: Background color(s) with auto-correction to valid Gmail colors
+            
+        Returns:
+            str: Formatted confirmation message with operation results and color adjustments
+        """
         return await manage_gmail_label(
-            user_google_email, action, name, label_id,
+            action, user_google_email, name, label_id,
             label_list_visibility, message_list_visibility,
             text_color, background_color
         )
@@ -972,9 +1042,26 @@ def setup_label_tools(mcp: FastMCP) -> None:
         }
     )
     async def modify_gmail_message_labels_tool(
-        user_google_email: str,
-        message_id: str,
-        add_label_ids: Optional[Any] = None,
-        remove_label_ids: Optional[Any] = None
+        message_id: Annotated[str, Field(description="The ID of the Gmail message to modify labels for")],
+        user_google_email: Annotated[Optional[str], Field(description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).")] = None,
+        add_label_ids: Annotated[Optional[Union[str, List[str]]], Field(description="Label IDs to add to the message. Single ID: 'Label_123', List: ['Label_1', 'Label_2'], or JSON string")] = None,
+        remove_label_ids: Annotated[Optional[Union[str, List[str]]], Field(description="Label IDs to remove from the message. Single ID: 'Label_123', List: ['Label_1', 'Label_2'], or JSON string")] = None
     ) -> str:
-        return await modify_gmail_message_labels(user_google_email, message_id, add_label_ids, remove_label_ids)
+        """
+        Modify Gmail message labels with structured output.
+        
+        Returns both:
+        - Traditional content: Human-readable formatted text with label changes (automatic via FastMCP)
+        - Structured content: Machine-readable JSON with detailed modification results
+        
+        Args:
+            message_id: The ID of the Gmail message to modify
+            user_google_email: The user's Google email address. If None, uses the current
+                             authenticated user from FastMCP context (auto-injected by middleware).
+            add_label_ids: Label IDs to add (supports single ID, list, or JSON string)
+            remove_label_ids: Label IDs to remove (supports single ID, list, or JSON string)
+            
+        Returns:
+            str: Formatted confirmation message with label changes applied
+        """
+        return await modify_gmail_message_labels(message_id, user_google_email, add_label_ids, remove_label_ids)

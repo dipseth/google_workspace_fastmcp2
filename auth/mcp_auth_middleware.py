@@ -44,6 +44,29 @@ class MCPAuthMiddleware(Middleware):
             logger.error(f"Error in MCP auth middleware: {e}")
             raise
     
+    async def on_read_resource(self, context: MiddlewareContext, call_next):
+        """Handle resource read requests with proper type conversion."""
+        try:
+            # Check if we have a URI in the message
+            if hasattr(context.message, 'uri'):
+                uri = context.message.uri
+                
+                # Convert AnyUrl to string for any string operations
+                uri_str = str(uri) if uri else ""
+                
+                # Check if it's a protected resource pattern that needs authentication
+                if uri_str.startswith("user://") or uri_str.startswith("oauth://"):
+                    logger.debug(f"Protected resource detected: {uri_str}")
+                    # Here we could add authentication checks if needed
+            
+            # Continue with the normal flow
+            result = await call_next(context)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in on_read_resource: {e}", exc_info=True)
+            raise
+    
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         """Handle tool calls and ensure proper authentication flow."""
         try:

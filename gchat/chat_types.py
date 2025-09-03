@@ -119,3 +119,110 @@ class JWTSpacesResponse(TypedDict):
     authMethod: str  # 'JWT Bearer Token', 'resource_context', etc.
     filterApplied: str  # 'all', 'room', 'dm'
     error: NotRequired[Optional[str]]   # Optional error message for error responses
+
+
+class SendMessageResponse(TypedDict):
+    """Response structure for send_message tool."""
+    success: bool
+    messageId: Optional[str]
+    spaceId: str
+    messageText: str
+    threadKey: Optional[str]
+    createTime: Optional[str]
+    userEmail: str
+    message: str
+    error: NotRequired[Optional[str]]
+
+
+class SearchMessageResult(TypedDict):
+    """Structure for individual search message result."""
+    messageId: str
+    text: str
+    senderName: str
+    createTime: str
+    spaceName: str
+    spaceId: str
+
+
+class SearchMessagesResponse(TypedDict):
+    """Response structure for search_messages tool."""
+    success: bool
+    query: str
+    results: List[SearchMessageResult]
+    totalResults: int
+    searchScope: str  # 'specific_space' or 'all_spaces'
+    spaceId: Optional[str]  # If searching within specific space
+    userEmail: str
+    message: str
+    error: NotRequired[Optional[str]]
+
+
+class SendCardMessageResponse(TypedDict):
+    """Response structure for send_card_message tool."""
+    success: bool
+    messageId: Optional[str]
+    spaceId: str
+    cardType: str
+    title: str
+    deliveryMethod: str  # 'api' or 'webhook'
+    threadKey: Optional[str]
+    createTime: Optional[str]
+    webhookUrl: Optional[str]
+    userEmail: str
+    message: str
+    error: NotRequired[Optional[str]]
+
+
+class SendSimpleCardResponse(TypedDict):
+    """Response structure for send_simple_card tool."""
+    success: bool
+    messageId: Optional[str]
+    spaceId: str
+    title: str
+    deliveryMethod: str  # 'api' or 'webhook'
+    webhookUrl: Optional[str]
+    userEmail: str
+    message: str
+    error: NotRequired[Optional[str]]
+
+
+class SendInteractiveCardResponse(TypedDict):
+    """Response structure for send_interactive_card tool."""
+    success: bool
+    messageId: Optional[str]
+    spaceId: str
+    title: str
+    buttonCount: int
+    deliveryMethod: str  # 'api' or 'webhook'
+    webhookUrl: Optional[str]
+    userEmail: str
+    message: str
+    error: NotRequired[Optional[str]]
+
+
+class SendFormCardResponse(TypedDict):
+    """Response structure for send_form_card tool."""
+    success: bool
+    messageId: Optional[str]
+    spaceId: str
+    title: str
+    fieldCount: int
+    deliveryMethod: str  # 'api' or 'webhook'
+    webhookUrl: Optional[str]
+    userEmail: str
+    message: str
+    error: NotRequired[Optional[str]]
+
+
+class SendRichCardResponse(TypedDict):
+    """Response structure for send_rich_card tool."""
+    success: bool
+    messageId: Optional[str]
+    spaceId: str
+    title: str
+    sectionCount: int
+    deliveryMethod: str  # 'api' or 'webhook'
+    webhookUrl: Optional[str]
+    userEmail: str
+    message: str
+    error: NotRequired[Optional[str]]
