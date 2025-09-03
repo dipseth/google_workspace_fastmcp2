@@ -149,9 +149,35 @@ def _get_qdrant_client():
         try:
             from qdrant_client import QdrantClient
             from qdrant_client.models import Distance, VectorParams
+            # Import settings to get proper Qdrant configuration
+            from config.settings import settings
             
             logger.info("🔗 Initializing Qdrant client...")
-            _qdrant_client = QdrantClient(host="localhost", port=6333)
+            logger.info(f"📊 SETTINGS DEBUG - Using Qdrant config: URL={settings.qdrant_url}, Host={settings.qdrant_host}, Port={settings.qdrant_port}, API Key={'***' if settings.qdrant_api_key else 'None'}")
+            
+            # Use settings-based configuration instead of hardcoded localhost
+            if settings.qdrant_url:
+                # Use URL-based initialization for cloud instances
+                if settings.qdrant_api_key:
+                    _qdrant_client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+                    logger.info(f"🌐 Connected to Qdrant cloud: {settings.qdrant_url} (API Key: ***)")
+                else:
+                    _qdrant_client = QdrantClient(url=settings.qdrant_url)
+                    logger.info(f"🌐 Connected to Qdrant: {settings.qdrant_url} (No API Key)")
+            else:
+                # Fallback to host/port configuration
+                if settings.qdrant_api_key:
+                    _qdrant_client = QdrantClient(
+                        host=settings.qdrant_host or "localhost",
+                        port=settings.qdrant_port or 6333,
+                        api_key=settings.qdrant_api_key
+                    )
+                else:
+                    _qdrant_client = QdrantClient(
+                        host=settings.qdrant_host or "localhost",
+                        port=settings.qdrant_port or 6333
+                    )
+                logger.info(f"🌐 Connected to Qdrant: {settings.qdrant_host}:{settings.qdrant_port} (API Key: {'***' if settings.qdrant_api_key else 'None'})")
             
             # Ensure card templates collection exists
             collections = _qdrant_client.get_collections()
@@ -205,9 +231,15 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
             
             logger.info("🔍 Initializing ModuleWrapper for card_framework...")
             
+            # Import settings to pass Qdrant configuration
+            from config.settings import settings
+            
             # Create wrapper with optimized settings - use FastEmbed-compatible collection
+            # Pass Qdrant configuration from settings to ensure cloud connection
             _card_framework_wrapper = ModuleWrapper(
                 module_or_name="card_framework.v2",
+                qdrant_url=settings.qdrant_url,  # Pass cloud URL from settings
+                qdrant_api_key=settings.qdrant_api_key,  # Pass API key from settings
                 collection_name="card_framework_components_fastembed",
                 index_nested=True,  # Index methods within classes
                 index_private=False,  # Skip private components
@@ -218,6 +250,8 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
                 force_reindex=False,  # Don't force reindex if collection has data
                 clear_collection=False  # Set to True to clear duplicates on restart
             )
+            
+            logger.info(f"✅ ModuleWrapper configured with Qdrant: {settings.qdrant_url or f'{settings.qdrant_host}:{settings.qdrant_port}'}")
             
             # Initialize Qdrant (but don't cache card types - defer until first use)
             _get_qdrant_client()

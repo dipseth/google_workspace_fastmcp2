@@ -13,12 +13,127 @@ import uuid
 import hashlib
 import logging
 import json
+import os
 from typing_extensions import Any, Dict, List, Optional, Tuple, Union, Callable, Type
 import asyncio
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+def parse_qdrant_url(url: str) -> Dict[str, Union[str, int, bool]]:
+    """
+    Parse a Qdrant URL into components.
+    
+    Args:
+        url: Qdrant URL (e.g., "https://host:port" or "http://host:port")
+        
+    Returns:
+        Dictionary with host, port, use_https, and url components
+    """
+    if not url:
+        return {
+            "host": "localhost",
+            "port": 6333,
+            "use_https": False,
+            "url": None
+        }
+    
+    try:
+        parsed = urlparse(url)
+        
+        # Extract host (remove protocol prefix if it exists)
+        host = parsed.hostname or parsed.netloc.split(':')[0] if ':' in parsed.netloc else parsed.netloc
+        if not host and url.startswith(('http://', 'https://')):
+            # If parsing failed but URL has protocol, try to extract manually
+            no_protocol = url.split('://', 1)[1] if '://' in url else url
+            if ':' in no_protocol:
+                host, port_str = no_protocol.split(':', 1)
+                try:
+                    port = int(port_str)
+                except ValueError:
+                    port = 6333
+            else:
+                host = no_protocol
+                port = 6333
+        else:
+            # Use parsed port or default
+            port = parsed.port or 6333
+        
+        # Determine if HTTPS should be used
+        use_https = parsed.scheme == 'https' or (parsed.scheme == '' and 'https://' in url)
+        
+        return {
+            "host": host or "localhost",
+            "port": port,
+            "use_https": use_https,
+            "url": url
+        }
+    except Exception as e:
+        logger.warning(f"Failed to parse Qdrant URL '{url}': {e}. Using defaults.")
+        return {
+            "host": "localhost",
+            "port": 6333,
+            "use_https": False,
+            "url": url
+        }
+
+def get_qdrant_config_from_env() -> Dict[str, Union[str, int, bool, None]]:
+    """
+    Get Qdrant configuration from centralized settings (which reads environment variables).
+    
+    Returns:
+        Dictionary with Qdrant configuration from centralized settings
+    """
+    try:
+        # Import settings to get centralized configuration
+        # Use try/except to avoid circular imports in some contexts
+        from config.settings import settings
+        
+        config = {
+            "host": settings.qdrant_host,
+            "port": settings.qdrant_port,
+            "use_https": settings.qdrant_url and settings.qdrant_url.startswith("https://"),
+            "api_key": settings.qdrant_api_key,
+            "url": settings.qdrant_url
+        }
+        
+        if settings.qdrant_url:
+            logger.info(f"Using Qdrant config from settings (env): {settings.qdrant_url} (API Key: {'***' if settings.qdrant_api_key else 'None'})")
+        else:
+            logger.info(f"Using Qdrant config from settings: {settings.qdrant_host}:{settings.qdrant_port} (HTTPS: {config['use_https']}, API Key: {'***' if settings.qdrant_api_key else 'None'})")
+        
+        return config
+        
+    except ImportError:
+        # Fallback to direct environment variable reading if settings can't be imported
+        logger.warning("Could not import settings, falling back to direct environment variable reading")
+        
+        qdrant_url = os.getenv("QDRANT_URL")
+        qdrant_key = os.getenv("QDRANT_KEY") or os.getenv("QDRANT_API_KEY")
+        
+        if qdrant_url:
+            # Parse URL for host, port, https
+            config = parse_qdrant_url(qdrant_url)
+            config["api_key"] = qdrant_key
+            logger.info(f"Using Qdrant config from QDRANT_URL: {config['host']}:{config['port']} (HTTPS: {config['use_https']}, API Key: {'***' if qdrant_key else 'None'})")
+            return config
+        else:
+            # Fall back to individual environment variables or defaults
+            host = os.getenv("QDRANT_HOST", "localhost")
+            port = int(os.getenv("QDRANT_PORT", "6333"))
+            use_https = os.getenv("QDRANT_USE_HTTPS", "false").lower() == "true"
+            
+            config = {
+                "host": host,
+                "port": port,
+                "use_https": use_https,
+                "api_key": qdrant_key,
+                "url": None
+            }
+            logger.info(f"Using Qdrant config from individual env vars: {host}:{port} (HTTPS: {use_https}, API Key: {'***' if qdrant_key else 'None'})")
+            return config
 
 # Global variables for lazy-loaded imports
 _qdrant_client = None
@@ -143,8 +258,10 @@ class ModuleWrapper:
     def __init__(
         self,
         module_or_name: Union[str, Any],
-        qdrant_host: str = "localhost",
-        qdrant_port: int = 6333,
+        qdrant_host: Optional[str] = None,
+        qdrant_port: Optional[int] = None,
+        qdrant_url: Optional[str] = None,
+        qdrant_api_key: Optional[str] = None,
         collection_name: str = "module_components",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         index_nested: bool = True,
@@ -162,8 +279,10 @@ class ModuleWrapper:
         
         Args:
             module_or_name: The module object or its name (string)
-            qdrant_host: Qdrant server hostname
-            qdrant_port: Qdrant server port
+            qdrant_host: Qdrant server hostname (overrides environment variables)
+            qdrant_port: Qdrant server port (overrides environment variables)
+            qdrant_url: Full Qdrant URL (e.g., https://cluster-url:6333) - if provided, overrides host/port
+            qdrant_api_key: API key for Qdrant authentication (for cloud instances)
             collection_name: Name of the Qdrant collection to use
             embedding_model: Model to use for generating embeddings
             index_nested: Whether to index nested components (e.g., methods in classes)
@@ -182,9 +301,28 @@ class ModuleWrapper:
             clear_collection: If True, delete and recreate the collection before indexing. This ensures
                             a completely clean state and removes all duplicates. Use with caution.
         """
-        # Store configuration
-        self.qdrant_host = qdrant_host
-        self.qdrant_port = qdrant_port
+        # Get Qdrant configuration from environment variables first
+        env_config = get_qdrant_config_from_env()
+        
+        # Override with any explicitly provided parameters
+        if qdrant_url:
+            # Parse provided URL
+            url_config = parse_qdrant_url(qdrant_url)
+            self.qdrant_host = url_config["host"]
+            self.qdrant_port = url_config["port"]
+            self.qdrant_use_https = url_config["use_https"]
+            self.qdrant_url = qdrant_url
+        else:
+            # Use explicit host/port if provided, otherwise use environment config
+            self.qdrant_host = qdrant_host if qdrant_host is not None else env_config["host"]
+            self.qdrant_port = qdrant_port if qdrant_port is not None else env_config["port"]
+            self.qdrant_use_https = env_config.get("use_https", False)
+            self.qdrant_url = env_config.get("url")
+        
+        # API key: use explicit parameter first, then environment
+        self.qdrant_api_key = qdrant_api_key if qdrant_api_key is not None else env_config.get("api_key")
+        
+        # Store other configuration
         self.collection_name = collection_name
         self.embedding_model_name = embedding_model
         self.index_nested = index_nested
@@ -273,11 +411,46 @@ class ModuleWrapper:
             raise
     
     def _initialize_qdrant(self):
-        """Initialize Qdrant client."""
+        """Initialize Qdrant client with support for HTTPS and API key authentication."""
         try:
             QdrantClient, _ = _get_qdrant_imports()
-            self.client = QdrantClient(host=self.qdrant_host, port=self.qdrant_port)
-            logger.info(f"✅ Connected to Qdrant at {self.qdrant_host}:{self.qdrant_port}")
+            
+            # Prepare client arguments
+            client_args = {}
+            
+            if self.qdrant_url:
+                # Use URL-based initialization for cloud instances
+                client_args['url'] = self.qdrant_url
+                if self.qdrant_api_key:
+                    client_args['api_key'] = self.qdrant_api_key
+                
+                logger.info(f"🌐 Connecting to Qdrant using URL: {self.qdrant_url} (API Key: {'***' if self.qdrant_api_key else 'None'})")
+            else:
+                # Use host/port initialization for local instances or when URL is not available
+                client_args['host'] = self.qdrant_host
+                client_args['port'] = self.qdrant_port
+                
+                # Add HTTPS support
+                if self.qdrant_use_https:
+                    client_args['https'] = True
+                
+                # Add API key if provided
+                if self.qdrant_api_key:
+                    client_args['api_key'] = self.qdrant_api_key
+                
+                protocol = "https" if self.qdrant_use_https else "http"
+                logger.info(f"🌐 Connecting to Qdrant at {protocol}://{self.qdrant_host}:{self.qdrant_port} (API Key: {'***' if self.qdrant_api_key else 'None'})")
+            
+            # Create the client
+            self.client = QdrantClient(**client_args)
+            
+            # Test the connection
+            try:
+                collections = self.client.get_collections()
+                logger.info(f"✅ Connected to Qdrant successfully - found {len(collections.collections)} collections")
+            except Exception as test_e:
+                logger.warning(f"⚠️ Qdrant connection established but test failed: {test_e}")
+            
         except Exception as e:
             logger.error(f"❌ Failed to initialize Qdrant client: {e}")
             raise

@@ -180,6 +180,14 @@ class Settings(BaseSettings):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        
+        # DEBUG: Log environment variable loading
+        import os
+        env_qdrant_url = os.getenv("QDRANT_URL")
+        env_qdrant_key = os.getenv("QDRANT_KEY")
+        logging.info(f"🔧 SETTINGS DEBUG - Environment variables: QDRANT_URL='{env_qdrant_url}', QDRANT_KEY={'***' if env_qdrant_key else 'None'}")
+        logging.info(f"🔧 SETTINGS DEBUG - Settings fields: qdrant_url='{self.qdrant_url}', qdrant_key={'***' if self.qdrant_key and self.qdrant_key != 'NONE' else 'None'}")
+        
         # Ensure credentials directory exists
         Path(self.credentials_dir).mkdir(parents=True, exist_ok=True)
         
@@ -189,6 +197,9 @@ class Settings(BaseSettings):
         self.qdrant_port = parsed_url.port or 6333
         # If QDRANT_KEY is "NONE" or empty, treat as no authentication
         self.qdrant_api_key = None if self.qdrant_key in ["NONE", "", None] else self.qdrant_key
+        
+        # DEBUG: Log final parsed values
+        logging.info(f"🔧 SETTINGS DEBUG - Parsed values: host='{self.qdrant_host}', port={self.qdrant_port}, api_key={'***' if self.qdrant_api_key else 'None'}")
     
     def get_gmail_allow_list(self) -> List[str]:
         """

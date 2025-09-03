@@ -38,8 +38,10 @@ class ModuleWrapperMiddleware(Middleware):
     
     def __init__(
         self,
-        qdrant_host: str = "localhost",
-        qdrant_port: int = 6333,
+        qdrant_host: Optional[str] = None,
+        qdrant_port: Optional[int] = None,
+        qdrant_url: Optional[str] = None,
+        qdrant_api_key: Optional[str] = None,
         collection_prefix: str = "mcp_module_",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         auto_discovery: bool = True,
@@ -49,15 +51,36 @@ class ModuleWrapperMiddleware(Middleware):
         Initialize the ModuleWrapper middleware.
         
         Args:
-            qdrant_host: Qdrant server hostname
-            qdrant_port: Qdrant server port
+            qdrant_host: Qdrant server hostname (overrides environment variables)
+            qdrant_port: Qdrant server port (overrides environment variables)
+            qdrant_url: Full Qdrant URL (overrides host/port, reads from QDRANT_URL env var if not provided)
+            qdrant_api_key: API key for Qdrant authentication (reads from QDRANT_KEY env var if not provided)
             collection_prefix: Prefix for Qdrant collections
             embedding_model: Model to use for generating embeddings
             auto_discovery: Whether to auto-discover modules
             modules_to_wrap: List of module names to wrap
         """
-        self.qdrant_host = qdrant_host
-        self.qdrant_port = qdrant_port
+        # Import here to avoid circular imports
+        from .module_wrapper import get_qdrant_config_from_env
+        
+        # Get environment configuration
+        env_config = get_qdrant_config_from_env()
+        
+        # Use provided parameters or fall back to environment
+        if qdrant_url:
+            from .module_wrapper import parse_qdrant_url
+            url_config = parse_qdrant_url(qdrant_url)
+            self.qdrant_host = url_config["host"]
+            self.qdrant_port = url_config["port"]
+            self.qdrant_url = qdrant_url
+            self.qdrant_use_https = url_config["use_https"]
+        else:
+            self.qdrant_host = qdrant_host if qdrant_host is not None else env_config["host"]
+            self.qdrant_port = qdrant_port if qdrant_port is not None else env_config["port"]
+            self.qdrant_url = env_config.get("url")
+            self.qdrant_use_https = env_config.get("use_https", False)
+        
+        self.qdrant_api_key = qdrant_api_key if qdrant_api_key is not None else env_config.get("api_key")
         self.collection_prefix = collection_prefix
         self.embedding_model = embedding_model
         self.auto_discovery = auto_discovery
@@ -83,6 +106,8 @@ class ModuleWrapperMiddleware(Middleware):
                     module_or_name=module,
                     qdrant_host=self.qdrant_host,
                     qdrant_port=self.qdrant_port,
+                    qdrant_url=self.qdrant_url,
+                    qdrant_api_key=self.qdrant_api_key,
                     collection_name=collection_name,
                     embedding_model=self.embedding_model,
                     auto_initialize=True
@@ -130,6 +155,8 @@ class ModuleWrapperMiddleware(Middleware):
                     module_or_name=module,
                     qdrant_host=self.qdrant_host,
                     qdrant_port=self.qdrant_port,
+                    qdrant_url=self.qdrant_url,
+                    qdrant_api_key=self.qdrant_api_key,
                     collection_name=collection_name,
                     embedding_model=self.embedding_model,
                     auto_initialize=True
