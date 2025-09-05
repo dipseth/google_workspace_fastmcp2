@@ -445,9 +445,9 @@ def setup_forms_tools(mcp: FastMCP) -> None:
     )
     async def create_form(
         title: str,
-        user_google_email: UserGoogleEmailForms = None,
         description: Optional[str] = None,
         document_title: Optional[str] = None,
+        user_google_email: UserGoogleEmailForms = None
     ) -> str:
         """
         Create a new Google Form - UPDATED WITH API BEST PRACTICES.
@@ -783,9 +783,9 @@ def setup_forms_tools(mcp: FastMCP) -> None:
     )
     async def publish_form_publicly(
         form_id: str,
-        user_google_email: UserGoogleEmailForms = None,
         anyone_can_respond: bool = True,
-        share_with_emails: Optional[List[str]] = None
+        share_with_emails: Optional[List[str]] = None,
+        user_google_email: UserGoogleEmailForms = None
     ) -> str:
         """
         Make a form publicly accessible - MULTI-SERVICE OPERATION.
@@ -976,9 +976,9 @@ def setup_forms_tools(mcp: FastMCP) -> None:
     )
     async def list_form_responses(
         form_id: str,
-        user_google_email: UserGoogleEmailForms = None,
         page_size: int = 10,
-        page_token: Optional[str] = None
+        page_token: Optional[str] = None,
+        user_google_email: UserGoogleEmailForms = None
     ) -> FormResponsesListResponse:
         """
         List responses for a form - PAGINATED RESULTS.

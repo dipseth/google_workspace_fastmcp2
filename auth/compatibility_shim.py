@@ -104,18 +104,14 @@ class CompatibilityShim:
             "slides": ScopeRegistry.GOOGLE_API_SCOPES["slides"]["full"],
             "slides_read": ScopeRegistry.GOOGLE_API_SCOPES["slides"]["readonly"],
             
-            # Photos legacy names
+            # Photos legacy names (using only valid scopes)
             "photos_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly"],
-            "photos_write": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["full"],
-            "photos_full": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["full"],
             "photos_append": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["appendonly"],
-            "photos_sharing": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["sharing"],
             "photos_readonly_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly_appcreated"],
             "photos_edit_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["edit_appcreated"],
             # PhotosLibrary legacy names (for backwards compatibility)
             "photoslibrary_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly"],
             "photoslibrary_append": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["appendonly"],
-            "photoslibrary_full": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["full"],
             "photoslibrary_readonly_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly_appcreated"],
             "photoslibrary_edit_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["edit_appcreated"],
             
@@ -134,8 +130,6 @@ class CompatibilityShim:
             "userinfo_email": ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_email"],
             "tasks_read": ScopeRegistry.GOOGLE_API_SCOPES["tasks"]["readonly"],
             "tasks_full": ScopeRegistry.GOOGLE_API_SCOPES["tasks"]["full"],
-            "keep_read": ScopeRegistry.GOOGLE_API_SCOPES["keep"]["readonly"],
-            "keep_full": ScopeRegistry.GOOGLE_API_SCOPES["keep"]["full"],
             "youtube_read": ScopeRegistry.GOOGLE_API_SCOPES["youtube"]["readonly"],
             "youtube_upload": ScopeRegistry.GOOGLE_API_SCOPES["youtube"]["upload"],
             "youtube_full": ScopeRegistry.GOOGLE_API_SCOPES["youtube"]["full"],
@@ -210,14 +204,19 @@ class CompatibilityShim:
                 "description": "Google Slides service"
             },
             "photos": {
-                "default_scopes": ["photos_read", "photos_write", "photos_append"],
+                "default_scopes": ["photos_read", "photos_append"],
                 "version": "v1",
                 "description": "Google Photos service"
             },
             "photoslibrary": {
-                "default_scopes": ["photos_read", "photos_write", "photos_append"],
+                "default_scopes": ["photos_read", "photos_append"],
                 "version": "v1",
                 "description": "Google Photos Library API service"
+            },
+            "tasks": {
+                "default_scopes": ["tasks_read", "tasks_full"],
+                "version": "v1",
+                "description": "Google Tasks API service"
             }
         }
         
@@ -234,24 +233,21 @@ class CompatibilityShim:
         """
         Provide legacy drive_scopes format for settings.py
         
-        This method provides the comprehensive OAuth scopes list that was
-        previously defined in settings.py drive_scopes.
+        This method provides the comprehensive OAuth scopes list using
+        oauth_comprehensive as the single source of truth.
         """
         if cls._legacy_drive_scopes_cache is not None:
             return cls._legacy_drive_scopes_cache
         
-        logger.info("COMPATIBILITY: Generating legacy drive_scopes format from registry")
+        logger.info("COMPATIBILITY: Generating legacy drive_scopes from oauth_comprehensive group")
         
-        # Get comprehensive OAuth scopes for multiple services (matching the original settings.py)
-        # Now includes "photos" for Google Photos Library API access
-        oauth_scopes = ScopeRegistry.get_oauth_scopes([
-            "drive", "gmail", "calendar", "docs", "sheets", "chat", "forms", "slides", "photos"
-        ])
+        # Use oauth_comprehensive as the single source of truth
+        oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
         
         # Cache the result
         cls._legacy_drive_scopes_cache = oauth_scopes
         
-        logger.info(f"COMPATIBILITY: Generated {len(oauth_scopes)} legacy drive_scopes")
+        logger.info(f"COMPATIBILITY: Generated {len(oauth_scopes)} legacy drive_scopes from oauth_comprehensive")
         return oauth_scopes
     
     @classmethod
@@ -259,24 +255,12 @@ class CompatibilityShim:
         """
         Provide legacy scope format for OAuth endpoints
         
-        Returns the basic scopes used in fastmcp_oauth_endpoints.py
+        Returns scopes for OAuth endpoints - now uses oauth_comprehensive as single source of truth
         """
-        logger.info("COMPATIBILITY: Generating legacy OAuth endpoint scopes")
+        logger.info("COMPATIBILITY: Generating OAuth endpoint scopes from oauth_comprehensive")
         
-        # Return the basic scopes that were hardcoded in OAuth endpoints
-        basic_scopes = [
-            ScopeRegistry.GOOGLE_API_SCOPES["base"]["openid"],
-            ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_email"],
-            ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_profile"],
-            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["file"],
-            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["readonly"],
-            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["readonly"],
-            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_basic"],
-            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_sharing"],
-            ScopeRegistry.GOOGLE_API_SCOPES["calendar"]["readonly"]
-        ]
-        
-        return basic_scopes
+        # Use oauth_comprehensive as the single source of truth
+        return ScopeRegistry.resolve_scope_group("oauth_comprehensive")
     
     @classmethod
     def get_legacy_dcr_scope_defaults(cls) -> str:

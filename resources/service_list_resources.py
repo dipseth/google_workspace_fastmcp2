@@ -1025,7 +1025,7 @@ class ServiceListDiscovery:
             elif service == "docs":
                 from docs.docs_tools import list_docs_in_folder as target_tool
             elif service == "chat":
-                from chat.chat_tools import list_spaces as target_tool
+                from gchat.chat_tools import list_spaces as target_tool
             else:
                 logger.error(f"Unknown service: {service}")
                 return []

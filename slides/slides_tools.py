@@ -562,9 +562,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
     )
     async def add_slide(
         presentation_id: str,
-        user_google_email: UserGoogleEmailSlides = None,
         layout_id: Optional[str] = None,
-        index: Optional[int] = None
+        index: Optional[int] = None,
+        user_google_email: UserGoogleEmailSlides = None
     ) -> AddSlideResponse:
         """
         Add a new slide to an existing presentation using batch update.
@@ -878,9 +878,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
     )
     async def get_presentation_file(
         presentation_id: str,
-        user_google_email: UserGoogleEmailSlides = None,
         export_format: str = "PDF",
-        download_directory: str = "./downloads/presentations"
+        download_directory: str = "./downloads/presentations",
+        user_google_email: UserGoogleEmailSlides = None
     ) -> GetPresentationFileResponse:
         """
         Download a Google Slides presentation file to local storage.

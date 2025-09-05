@@ -32,7 +32,7 @@ except ImportError:
 
 # Adapter system integration
 try:
-    from adapters import AdapterFactory, AdapterRegistry, DiscoveryManager
+    from adapters import AdapterFactory, AdapterRegistry
     ADAPTERS_AVAILABLE = True
 except ImportError:
     ADAPTERS_AVAILABLE = False
@@ -47,29 +47,6 @@ else:
     card_manager = None
     logger.warning("Card Manager not available - cards will use fallback format")
 
-# Initialize adapter system if available
-if ADAPTERS_AVAILABLE:
-    try:
-        discovery_manager = DiscoveryManager()
-        adapter_factory = AdapterFactory(discovery_manager)
-        adapter_registry = AdapterRegistry(adapter_factory)
-        
-        # Properly register card manager with adapter system
-        if card_manager and hasattr(adapter_registry, 'register_adapter'):
-            adapter_registry.register_adapter('chat_cards', card_manager)
-            logger.info("Card manager registered with adapter system")
-        
-        logger.info("Adapter system initialized for Google Chat")
-    except Exception as e:
-        logger.error(f"Error initializing adapter system: {e}")
-        discovery_manager = None
-        adapter_factory = None
-        adapter_registry = None
-else:
-    discovery_manager = None
-    adapter_factory = None
-    adapter_registry = None
-    logger.warning("Adapter system not available")
 
 
 

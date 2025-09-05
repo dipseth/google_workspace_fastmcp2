@@ -130,7 +130,7 @@ def create_example_templates():
 <pre><code>&lt;mcp_tool_call&gt;
   &lt;tool&gt;send_gmail_message&lt;/tool&gt;
   &lt;params&gt;
-    &lt;user_google_email&gt;{{ resources.user_current_email or 'sethrivers@gmail.com' }}&lt;/user_google_email&gt;
+    &lt;user_google_email&gt;{{ resources.user_current_email or 'test_example@gmail.com' }}&lt;/user_google_email&gt;
     &lt;to&gt;demo@example.com&lt;/to&gt;
     &lt;subject&gt;FastMCP2 Jinja2 Demo - {{ utc_now().strftime("%Y-%m-%d") }}&lt;/subject&gt;
     &lt;body&gt;&lt;![CDATA[

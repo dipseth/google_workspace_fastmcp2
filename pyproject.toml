@@ -25,6 +25,9 @@ dependencies = [
     "pyjwt>=2.8.0",
     "fastapi>=0.115.14",
     "fastembed>=0.7.2",
+    # Enhanced logging dependencies
+    "rich>=13.0.0",
+    "colorama>=0.4.6",
 ]
 
 [project.optional-dependencies]

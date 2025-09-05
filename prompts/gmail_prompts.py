@@ -188,7 +188,7 @@ Run: `start_google_auth('your.email@gmail.com')`
         try:
             # Try to read Gmail resources
             gmail_labels = None
-            user_email = "sethrivers@gmail.com"  # fallback
+            user_email = "test_example@gmail.com"  # fallback
             
             # Check for resources in context (implementation depends on your context structure)
             if hasattr(context, 'read_resource'):
@@ -261,7 +261,7 @@ Run: `start_google_auth('your.email@gmail.com')`
             return {
                 'authenticated': False,
                 'auth_status': f"⚠️ Resource error: {str(e)}",
-                'user_email': 'sethrivers@gmail.com',
+                'user_email': 'test_example@gmail.com',
                 'labels': [],
                 'system_count': 0,
                 'user_count': 0
@@ -306,7 +306,7 @@ Run: `start_google_auth('your.email@gmail.com')`
 <mcp_tool_call>
   <tool>send_gmail_message</tool>
   <params>
-    <user_google_email>sethrivers@gmail.com</user_google_email>
+    <user_google_email>test_example@gmail.com</user_google_email>
     <to>demo@example.com</to>
     <subject>FastMCP2 Email Demo</subject>
     <body>Hello! This is a basic email demo.</body>

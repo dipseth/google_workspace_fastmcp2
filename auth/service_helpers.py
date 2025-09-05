@@ -75,6 +75,11 @@ _FALLBACK_SERVICE_DEFAULTS = {
         "default_scopes": ["photos_read", "photos_append"],
         "version": "v1",
         "description": "Google Photos service"
+    },
+    "tasks": {
+        "default_scopes": ["tasks_read", "tasks_full"],
+        "version": "v1",
+        "description": "Google Tasks service"
     }
 }
 
@@ -413,3 +418,14 @@ async def get_photos_service(user_email: str, scopes: Union[str, List[str]] = No
 def request_photos_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Photos service through middleware - convenience alias."""
     return request_service("photos", scopes)
+
+
+
+async def get_tasks_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Tasks service - convenience alias."""
+    return await get_service("tasks", user_email, scopes)
+
+
+def request_tasks_service(scopes: Union[str, List[str]] = None) -> str:
+    """Request Tasks service through middleware - convenience alias."""
+    return request_service("tasks", scopes)

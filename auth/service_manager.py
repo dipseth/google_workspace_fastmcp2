@@ -40,7 +40,6 @@ SERVICE_CONFIGS = {
     "people": {"service": "people", "version": "v1"},
     "youtube": {"service": "youtube", "version": "v3"},
     "tasks": {"service": "tasks", "version": "v1"},
-    "keep": {"service": "keep", "version": "v1"},
     "script": {"service": "script", "version": "v1"}, # Google Apps Script
     "vault": {"service": "vault", "version": "v1"}, # Google Vault
     "groupssettings": {"service": "groupssettings", "version": "v1"}, # Google Groups Settings
@@ -143,8 +142,6 @@ _FALLBACK_SCOPE_GROUPS = {
     "openid": "openid",
     "tasks_read": "https://www.googleapis.com/auth/tasks.readonly",
     "tasks_full": "https://www.googleapis.com/auth/tasks",
-    "keep_read": "https://www.googleapis.com/auth/keep.readonly",
-    "keep_full": "https://www.googleapis.com/auth/keep",
     "youtube_read": "https://www.googleapis.com/auth/youtube.readonly",
     "youtube_upload": "https://www.googleapis.com/auth/youtube.upload",
     "youtube_full": "https://www.googleapis.com/auth/youtube",

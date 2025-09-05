@@ -114,7 +114,6 @@ GoogleServiceType = Literal[
     "admin",     # Admin Directory API
     "cloud",     # Google Cloud Platform
     "tasks",     # Google Tasks
-    "keep",      # Google Keep
     "youtube",   # YouTube
     "script"     # Google Apps Script
 ]

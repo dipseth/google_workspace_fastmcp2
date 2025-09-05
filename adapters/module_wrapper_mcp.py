@@ -1,8 +1,11 @@
 """
 MCP Integration for ModuleWrapper
 
-This module provides MCP tools for the ModuleWrapper, allowing it to be used
+This module provides MCP middleware for the ModuleWrapper, allowing it to be used
 within the FastMCP2 framework for module discovery and semantic search.
+
+This middleware follows the FastMCP pattern with proper hooks for request handling,
+tool execution, and resource access, similar to the auth middleware.
 """
 
 import logging
@@ -14,6 +17,7 @@ import asyncio
 
 # Import MCP-related components
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.server.dependencies import get_context
 
 # Import ModuleWrapper
 from .module_wrapper import ModuleWrapper
@@ -30,10 +34,11 @@ logger = logging.getLogger(__name__)
 
 class ModuleWrapperMiddleware(Middleware):
     """
-    Middleware for integrating ModuleWrapper with MCP.
+    Middleware for integrating ModuleWrapper with MCP using proper hooks.
     
-    This middleware manages ModuleWrapper instances and provides
-    tools for searching and retrieving module components.
+    This middleware manages ModuleWrapper instances and provides context
+    for module discovery and semantic search operations. It follows the
+    FastMCP middleware pattern with on_request, on_call_tool, and on_read_resource hooks.
     """
     
     def __init__(
@@ -122,10 +127,42 @@ class ModuleWrapperMiddleware(Middleware):
             except Exception as e:
                 logger.error(f"❌ Failed to initialize wrapper for {module_name}: {e}")
     
-    async def initialize(self):
-        """Initialize the middleware asynchronously."""
-        # Nothing to do here if wrappers are already initialized
-        pass
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
+        """
+        Handle tool execution for module wrapper operations.
+        
+        This middleware provides module wrapping functionality by:
+        1. Checking if the tool is a module wrapper tool
+        2. Providing access to module wrapper functionality through context
+        3. Handling module-specific operations
+        """
+        tool_name = getattr(context.message, 'name', 'unknown')
+        
+        # Check if this is a module wrapper tool
+        module_wrapper_tools = {
+            'wrap_module', 'search_module', 'get_module_component',
+            'list_module_components', 'list_wrapped_modules'
+        }
+        
+        if tool_name in module_wrapper_tools:
+            logger.debug(f"ModuleWrapperMiddleware: Processing module wrapper tool: {tool_name}")
+            
+            # Make module wrapper functionality available through FastMCP context
+            if context.fastmcp_context:
+                # Store a reference to this middleware's functionality
+                context.fastmcp_context.set_state("module_wrapper_instance", self)
+        
+        try:
+            result = await call_next(context)
+            
+            if tool_name in module_wrapper_tools:
+                logger.debug(f"Module wrapper tool {tool_name} executed successfully")
+            
+            return result
+        except Exception as e:
+            if tool_name in module_wrapper_tools:
+                logger.error(f"Error executing module wrapper tool {tool_name}: {e}")
+            raise
     
     async def wrap_module(self, module_name: str) -> bool:
         """
@@ -258,8 +295,17 @@ class ModuleWrapperMiddleware(Middleware):
         return list(self.wrappers.keys())
 
 
-def setup_module_wrapper_tools(mcp, middleware):
-    """Setup MCP tools for ModuleWrapper."""
+def setup_module_wrapper_tools(mcp):
+    """Setup MCP tools for ModuleWrapper using FastMCP context pattern."""
+    
+    def get_module_wrapper() -> Optional[ModuleWrapperMiddleware]:
+        """Get the ModuleWrapper middleware from FastMCP context."""
+        try:
+            ctx = get_context()
+            return ctx.get_state("module_wrapper_instance")
+        except Exception as e:
+            logger.error(f"Failed to get module wrapper from context: {e}")
+            return None
     
     @mcp.tool(
         name="wrap_module",
@@ -285,6 +331,11 @@ def setup_module_wrapper_tools(mcp, middleware):
             Result message
         """
         try:
+            # Get middleware from FastMCP context
+            middleware = get_module_wrapper()
+            if not middleware:
+                return "❌ Error: ModuleWrapper middleware not available"
+            
             logger.info(f"Attempting to wrap module: {module_name}")
             success = await middleware.wrap_module(module_name)
             logger.info(f"Wrap module result: success={success}")
@@ -334,8 +385,17 @@ def setup_module_wrapper_tools(mcp, middleware):
                 "query": query,
                 "error": f"Invalid limit value: {limit}. Limit must be a positive integer."
             }, indent=2)
-            
+        
         try:
+            # Get middleware from FastMCP context
+            middleware = get_module_wrapper()
+            if not middleware:
+                return json.dumps({
+                    "module": module_name,
+                    "query": query,
+                    "error": "ModuleWrapper middleware not available"
+                }, indent=2)
+            
             results = await middleware.search_module(module_name, query, limit)
             
             # Format results
@@ -398,6 +458,13 @@ def setup_module_wrapper_tools(mcp, middleware):
             JSON string with component information
         """
         try:
+            # Get middleware from FastMCP context
+            middleware = get_module_wrapper()
+            if not middleware:
+                return json.dumps({
+                    "error": "ModuleWrapper middleware not available"
+                }, indent=2)
+            
             info = await middleware.get_component(module_name, component_path)
             
             if not info:
@@ -448,6 +515,16 @@ def setup_module_wrapper_tools(mcp, middleware):
             ModuleComponentsResponse: Structured list of module components with metadata
         """
         try:
+            # Get middleware from FastMCP context
+            middleware = get_module_wrapper()
+            if not middleware:
+                return ModuleComponentsResponse(
+                    components=[],
+                    count=0,
+                    module=module_name,
+                    error="ModuleWrapper middleware not available"
+                )
+            
             # Check if module is wrapped
             if module_name not in middleware.wrappers:
                 # Try to wrap it
@@ -532,6 +609,15 @@ def setup_module_wrapper_tools(mcp, middleware):
             WrappedModulesResponse: Structured list of wrapped modules with metadata
         """
         try:
+            # Get middleware from FastMCP context
+            middleware = get_module_wrapper()
+            if not middleware:
+                return WrappedModulesResponse(
+                    modules=[],
+                    count=0,
+                    error="ModuleWrapper middleware not available"
+                )
+            
             module_names = await middleware.list_modules()
             
             # Convert to structured format
@@ -569,10 +655,9 @@ def setup_module_wrapper_tools(mcp, middleware):
             )
 
 
-# Example setup function
 def setup_module_wrapper_middleware(mcp, modules_to_wrap=None):
     """
-    Set up the ModuleWrapper middleware and tools.
+    Set up the ModuleWrapper middleware and tools using proper middleware hooks.
     
     Args:
         mcp: MCP server instance
@@ -586,10 +671,10 @@ def setup_module_wrapper_middleware(mcp, modules_to_wrap=None):
         modules_to_wrap=modules_to_wrap or []
     )
     
-    # Register middleware
+    # Register middleware - this will enable the hooks (on_call_tool)
     mcp.add_middleware(middleware)
     
-    # Set up tools
-    setup_module_wrapper_tools(mcp, middleware)
+    # Set up tools - no middleware parameter needed, tools get it from context
+    setup_module_wrapper_tools(mcp)
     
     return middleware

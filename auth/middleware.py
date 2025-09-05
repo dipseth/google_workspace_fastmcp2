@@ -36,6 +36,7 @@ from .context import (
 )
 from .service_manager import get_google_service, GoogleServiceError
 from config.settings import settings
+from .dual_auth_bridge import get_dual_auth_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class AuthMiddleware(Middleware):
     """Enhanced middleware for secure credential management, session context, service injection, and FastMCP GoogleProvider integration."""
     
     def __init__(self,
-                 storage_mode: CredentialStorageMode = CredentialStorageMode.FILE_PLAINTEXT,
+                 storage_mode: CredentialStorageMode = CredentialStorageMode.FILE_ENCRYPTED,
                  encryption_key: Optional[str] = None,
                  google_provider: Optional['GoogleProvider'] = None):
         """
@@ -76,6 +77,9 @@ class AuthMiddleware(Middleware):
         self._google_provider = google_provider
         self._unified_auth_enabled = bool(google_provider and settings.enable_unified_auth)
         
+        # Initialize dual auth bridge
+        self._dual_auth_bridge = get_dual_auth_bridge()
+        
         # Initialize encryption if needed
         if storage_mode in [CredentialStorageMode.FILE_ENCRYPTED, CredentialStorageMode.MEMORY_WITH_BACKUP]:
             self._setup_encryption()
@@ -85,6 +89,7 @@ class AuthMiddleware(Middleware):
         if self._unified_auth_enabled:
             logger.info("✅ Unified authentication enabled (FastMCP GoogleProvider integration)")
             logger.info("🔄 GoogleProvider ↔ Legacy Tool Bridge active")
+            logger.info("🌉 Dual Auth Bridge initialized for multi-account support")
         else:
             logger.info("⭕ Unified authentication disabled (no GoogleProvider or enable_unified_auth=False)")
         
@@ -211,6 +216,8 @@ class AuthMiddleware(Middleware):
         user_email = self._extract_user_from_jwt_token()
         if user_email:
             logger.info(f"🎫 Extracted user from JWT token for tool {tool_name}: {user_email}")
+            # Register as primary account in dual auth bridge
+            self._dual_auth_bridge.set_primary_account(user_email)
             # Store in session for future use
             if session_id:
                 store_session_data(session_id, "user_email", user_email)
@@ -253,6 +260,8 @@ class AuthMiddleware(Middleware):
             user_email = self._load_oauth_authentication_data()
             if user_email:
                 logger.info(f"✅ Retrieved user email from OAuth authentication file for tool {tool_name}: {user_email}")
+                # Register as secondary account in dual auth bridge
+                self._dual_auth_bridge.add_secondary_account(user_email)
                 # Store in session for future use
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
@@ -268,6 +277,10 @@ class AuthMiddleware(Middleware):
             user_email = self._extract_user_email(context)
             if user_email:
                 logger.info(f"🔍 DEBUG: Extracted user email from tool arguments for tool {tool_name}: {user_email}")
+                # Check if this is a known account or register as secondary
+                if not (self._dual_auth_bridge.is_primary_account(user_email) or
+                        self._dual_auth_bridge.is_secondary_account(user_email)):
+                    self._dual_auth_bridge.add_secondary_account(user_email)
                 # Store it in session for future use
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
@@ -872,26 +885,12 @@ class AuthMiddleware(Middleware):
             if settings.credential_migration:
                 logger.info(f"🔄 Bridging GoogleProvider credentials to legacy system for {user_email}")
                 
-                # TODO: Extract token from GoogleProvider and bridge to legacy credentials
-                # This would need to be implemented based on actual GoogleProvider API
-                # For now, we'll log the intent and create a placeholder
-                logger.debug(f"🔄 TODO: Implement credential bridging for {user_email}")
-                
-                # The bridging would involve:
-                # 1. Extract access/refresh tokens from GoogleProvider
-                # 2. Create Credentials object compatible with legacy system  
-                # 3. Save using existing _save_credentials function
-                
-                # Example implementation (would need actual GoogleProvider API):
-                # try:
-                #     google_token = await self._google_provider.get_token_for_user(user_email)
-                #     if google_token:
-                #         legacy_credentials = self._convert_google_provider_token_to_legacy(google_token)
-                #         from .google_auth import _save_credentials
-                #         _save_credentials(user_email, legacy_credentials)
-                #         logger.info(f"✅ Successfully bridged credentials for {user_email}")
-                # except Exception as bridge_error:
-                #     logger.warning(f"⚠️ Could not bridge credentials for {user_email}: {bridge_error}")
+                # Use dual auth bridge for credential bridging
+                bridged_credentials = self._dual_auth_bridge.bridge_credentials(user_email, "memory")
+                if bridged_credentials:
+                    logger.info(f"✅ Successfully bridged credentials for {user_email}")
+                else:
+                    logger.debug(f"⚠️ Could not bridge credentials for {user_email}")
             
         except Exception as e:
             logger.warning(f"⚠️ Could not bridge credentials for {user_email}: {e}")

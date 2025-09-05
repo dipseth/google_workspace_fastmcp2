@@ -1,6 +1,8 @@
 # Gmail Elicitation System Test Suite
 
-This directory contains comprehensive tests for the Gmail elicitation system implemented in the FastMCP2 Google Workspace Platform.
+> **📋 Note**: Most Gmail-specific tests have been moved to [`tests/client/`](client/) and use the standardized FastMCP Client SDK testing framework. This documentation covers the elicitation system specifically.
+
+This directory contains tests for the Gmail elicitation system implemented in the FastMCP2 Google Workspace Platform.
 
 ## Overview
 
@@ -13,9 +15,11 @@ The Gmail elicitation system provides a security layer for email sending operati
 
 ## Test Structure
 
-### `test_gmail_elicitation_system.py`
+### Gmail Elicitation Testing
 
-Comprehensive test suite using FastMCP Client SDK to test against a running MCP server.
+> **Important**: Core Gmail elicitation functionality is now tested as part of the comprehensive client test suite in [`tests/client/test_enhanced_gmail_filters.py`](client/test_enhanced_gmail_filters.py) and other Gmail-related client tests.
+
+This documentation covers elicitation system testing patterns.
 
 #### Test Categories
 
@@ -101,19 +105,25 @@ start_google_auth your.test@gmail.com
 
 ## Running the Tests
 
-### Option 1: Run All Gmail Elicitation Tests
+### Gmail Elicitation Testing (via Client Tests)
 ```bash
-cd /path/to/project
-python -m pytest tests/test_gmail_elicitation_system.py -v --asyncio-mode=auto
+# Run comprehensive Gmail tests including elicitation functionality
+uv run pytest tests/client/test_enhanced_gmail_filters.py -v
+
+# Run all Gmail-related client tests
+uv run pytest tests/client/ -k "gmail" -v
 ```
 
-### Option 2: Run Specific Test Categories
+### Specific Gmail Functionality Testing
 ```bash
-# Run only allow list configuration tests
-python -m pytest tests/test_gmail_elicitation_system.py::TestGmailElicitationSystem::test_view_gmail_allow_list_empty -v
+# Run Gmail filter and elicitation tests
+uv run pytest tests/client/test_enhanced_gmail_filters.py -v
 
-# Run only elicitation flow tests
-python -m pytest tests/test_gmail_elicitation_system.py -k "elicitation" -v
+# Run Gmail tools tests
+uv run pytest tests/client/test_gmail_tools.py -v
+
+# Test specific elicitation functionality
+uv run pytest tests/client/ -k "elicitation or allow_list or filter" -v
 ```
 
 ### Option 3: Run with Custom Server Configuration

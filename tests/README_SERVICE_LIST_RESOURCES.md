@@ -1,5 +1,7 @@
 # Service List Resources Testing Documentation
 
+> **📋 Note**: Service list resource testing has been moved to [`tests/client/`](client/) as part of the comprehensive client testing framework. The specific tests are integrated into service-specific test files like [`test_sheets_tools.py`](client/test_sheets_tools.py), [`test_gmail_tools.py`](client/test_gmail_tools.py), etc.
+
 ## Overview
 
 The Service List Resources feature provides a hierarchical, dynamic resource system that exposes list-based tools from various Google services through standardized MCP resources. This enables MCP clients to discover and access list data without needing to know the specific tool names or parameters.
@@ -36,41 +38,35 @@ The system provides three levels of resources:
 | **Chat** | `spaces` | `spaces` → `list_messages` | Shows messages in space |
 | **Docs** | `documents` | Via `folder_id`, detail via `get_doc_content` | Lists docs in folder |
 
-## Test Files
+## Test Files (Now in Client Framework)
 
-### 1. `test_service_list_resources.py`
-Main test file covering:
-- Resource template registration
-- Service discovery for all 8 services
-- List type enumeration
-- Error handling for invalid services/types
-- Hierarchical navigation
-- Resource metadata and tags
-- Consistency checks
+> **Moved to Client Tests**: Service list resource testing is now integrated into the comprehensive client testing framework:
 
-### 2. `test_service_list_integration.py`
-Integration tests covering:
-- Tool-to-resource mapping verification
-- Structured response format validation
-- Service discovery completeness
-- Hierarchical navigation flow
-- Error handling consistency
-- Metadata presence validation
+### Client Test Integration
+- **Service Discovery**: Tested in individual service test files (e.g., [`test_sheets_tools.py`](client/test_sheets_tools.py))
+- **Resource Template Registration**: Validated in [`test_service_list_resources.py`](../delete_later/tests/test_enhanced_service_list_resources.py) (moved to delete_later)
+- **Tool-Resource Mapping**: Covered by client service integration tests
+- **Structured Response Validation**: Built into client test framework assertions
 
-## Running Tests
+### Original Test Files (Archived)
+- `test_service_list_resources.py` → Moved to [`delete_later/tests/`](../delete_later/tests/) (functionality covered by client tests)
+- `test_service_list_integration.py` → Integrated into client service tests
+
+## Running Tests (Updated)
+
+Service list resource functionality is now tested through the client testing framework:
 
 ```bash
-# Run all service list resource tests
-pytest tests/test_service_list_resources.py -v
+# Run all client tests (includes service list resource validation)
+uv run pytest tests/client/ -v
 
-# Run integration tests
-pytest tests/test_service_list_integration.py -v
+# Test specific services with list resource functionality
+uv run pytest tests/client/test_sheets_tools.py -v         # Spreadsheets list resources
+uv run pytest tests/client/test_gmail_tools.py -v          # Gmail filters/labels resources
+uv run pytest tests/client/test_chat_tools.py -v           # Chat spaces resources
 
-# Run specific test class
-pytest tests/test_service_list_resources.py::TestServiceListResources -v
-
-# Run with coverage
-pytest tests/test_service_list_*.py --cov=resources.service_list_resources
+# Run comprehensive service resource testing
+uv run pytest tests/client/ -k "list" -v
 ```
 
 ## Test Coverage

@@ -40,6 +40,18 @@ def _get_credentials_path(user_email: str) -> Path:
 
 def _save_credentials(user_email: str, credentials: Credentials) -> None:
     """Save credentials to disk with proper permissions and validation."""
+    # Check if AuthMiddleware is available for encrypted storage
+    try:
+        from .context import get_auth_middleware
+        auth_middleware = get_auth_middleware()
+        if auth_middleware:
+            logger.info(f"Using AuthMiddleware for credential storage (mode: {auth_middleware._storage_mode.value})")
+            auth_middleware.save_credentials(user_email, credentials)
+            return
+    except Exception as e:
+        logger.debug(f"AuthMiddleware not available, using fallback: {e}")
+    
+    # Fallback to plaintext storage if middleware not available
     creds_path = _get_credentials_path(user_email)
     
     # Ensure directory exists with proper permissions
@@ -82,7 +94,7 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
         except (OSError, AttributeError) as e:
             logger.warning(f"Could not set restrictive permissions on credential file: {e}")
         
-        logger.info(f"Successfully saved credentials for {user_email} to {creds_path}")
+        logger.info(f"Successfully saved plaintext credentials for {user_email} to {creds_path}")
         
     except (IOError, OSError) as e:
         logger.error(f"Failed to save credentials for {user_email}: {e}")
@@ -91,10 +103,23 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
 
 def _load_credentials(user_email: str) -> Optional[Credentials]:
     """Load credentials from disk with validation and error recovery."""
+    # Check if AuthMiddleware is available for encrypted storage
+    try:
+        from .context import get_auth_middleware
+        auth_middleware = get_auth_middleware()
+        if auth_middleware:
+            creds = auth_middleware.load_credentials(user_email)
+            if creds:
+                logger.info(f"Successfully loaded credentials via AuthMiddleware for {user_email}")
+                return creds
+    except Exception as e:
+        logger.debug(f"AuthMiddleware not available for loading, using fallback: {e}")
+    
+    # Fallback to plaintext storage if middleware not available or has no credentials
     creds_path = _get_credentials_path(user_email)
     
     if not creds_path.exists():
-        logger.debug(f"No credentials file found for {user_email} at {creds_path}")
+        logger.debug(f"No plaintext credentials file found for {user_email} at {creds_path}")
         return None
     
     try:
@@ -308,12 +333,28 @@ async def initiate_oauth_flow(user_email: str, service_name: str = "Google Drive
     # Get OAuth client configuration
     oauth_config = settings.get_oauth_client_config()
     
+    # Use centralized scope registry as single source of truth
+    from .scope_registry import ScopeRegistry
+    oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
+    logger.info(f"Using oauth_comprehensive scopes: {len(oauth_scopes)} scopes")
+    
+    # Verify no problematic scopes are included
+    problematic_patterns = ['photoslibrary.sharing', 'cloud-platform', 'cloudfunctions', 'pubsub', 'iam']
+    problematic_scopes = [scope for scope in oauth_scopes if any(bad in scope for bad in problematic_patterns)]
+    
+    if problematic_scopes:
+        logger.error(f"Found {len(problematic_scopes)} problematic scopes in oauth_comprehensive")
+        for scope in problematic_scopes:
+            logger.error(f"Problematic scope: {scope}")
+    else:
+        logger.info("✅ No problematic scopes found in oauth_comprehensive")
+    
     # Create OAuth flow
     flow = Flow.from_client_config(
         {
             "web": oauth_config
         },
-        scopes=settings.drive_scopes
+        scopes=oauth_scopes  # Use centralized scopes instead of settings.drive_scopes
     )
     
     flow.redirect_uri = settings.dynamic_oauth_redirect_uri
@@ -367,6 +408,10 @@ async def handle_oauth_callback(
     # Create OAuth flow with same configuration used for authorization URL
     oauth_config = settings.get_oauth_client_config()
     
+    # Use centralized scope registry as single source of truth (same as initiate_oauth_flow)
+    from .scope_registry import ScopeRegistry
+    oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
+    
     # DIAGNOSTIC LOG: OAuth client_secret debugging - callback phase
     logger.info(f"🔍 CALLBACK_DEBUG: Creating OAuth flow for token exchange")
     logger.info(f"🔍 CALLBACK_DEBUG: - oauth_config keys: {list(oauth_config.keys())}")
@@ -374,14 +419,12 @@ async def handle_oauth_callback(
     logger.info(f"🔍 CALLBACK_DEBUG: - client_secret: {'PRESENT' if oauth_config.get('client_secret') else 'MISSING'} (length: {len(oauth_config.get('client_secret', '')) if oauth_config.get('client_secret') else 0})")
     logger.info(f"🔍 CALLBACK_DEBUG: - token_uri: {oauth_config.get('token_uri')}")
     
-    # DIAGNOSTIC LOG: OAuth scope inconsistency debugging
-    logger.info(f"OAUTH_SCOPE_DEBUG: Starting OAuth flow with scopes: {settings.drive_scopes}")
-    logger.info(f"OAUTH_SCOPE_DEBUG: Total scope count: {len(settings.drive_scopes)}")
-    logger.info(f"OAUTH_SCOPE_DEBUG: Scopes sorted: {sorted(settings.drive_scopes)}")
-    
+    # DIAGNOSTIC LOG: OAuth scope consistency debugging
+    logger.info(f"OAUTH_SCOPE_DEBUG: Starting OAuth callback with oauth_comprehensive scopes: {len(oauth_scopes)} total")
+
     flow = Flow.from_client_config(
         {"web": oauth_config},
-        scopes=settings.drive_scopes,
+        scopes=oauth_scopes,  # Use centralized scopes instead of settings.drive_scopes
         state=state
     )
     
@@ -418,7 +461,7 @@ async def handle_oauth_callback(
         # DIAGNOSTIC LOG: Check final granted scopes vs requested
         logger.info(f"OAUTH_SCOPE_DEBUG: OAuth callback successful")
         logger.info(f"OAUTH_SCOPE_DEBUG: Granted scopes: {getattr(credentials, 'scopes', 'Not available')}")
-        logger.info(f"OAUTH_SCOPE_DEBUG: Expected scopes: {sorted(settings.drive_scopes)}")
+        logger.info(f"OAUTH_SCOPE_DEBUG: Expected scopes: {sorted(oauth_scopes)}")  # Use centralized scopes
         
         # Verify the authenticated user email matches expected
         userinfo_service = build("oauth2", "v2", credentials=credentials)

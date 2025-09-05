@@ -251,23 +251,30 @@ class ModifyGmailMessageLabelsResponse(TypedDict):
 class SendGmailMessageResponse(TypedDict):
     """Response structure for send_gmail_message tool."""
     success: bool
-    message_id: str
-    to_recipients: List[str]
+    message_id: NotRequired[Optional[str]]  # Optional when saved as draft instead of sent
+    to_recipients: NotRequired[List[str]]  # Optional when blocked or draft
     cc_recipients: NotRequired[List[str]]
     bcc_recipients: NotRequired[List[str]]
-    subject: str
-    content_type: str
+    subject: NotRequired[str]  # Optional when blocked
+    content_type: NotRequired[str]  # Optional when blocked
     template_applied: NotRequired[bool]
     template_name: NotRequired[Optional[str]]
     elicitation_triggered: NotRequired[bool]
-    userEmail: str
+    userEmail: NotRequired[str]  # Optional when user context unavailable
     error: NotRequired[Optional[str]]
+    # Draft-specific fields for when email is saved as draft
+    draftId: NotRequired[Optional[str]]
+    recipientCount: NotRequired[int]
+    action: NotRequired[str]  # "sent", "saved_draft", "blocked", etc.
+    elicitationRequired: NotRequired[bool]
+    elicitationNotSupported: NotRequired[bool]
+    recipientsNotAllowed: NotRequired[List[str]]
 
 
 class DraftGmailMessageResponse(TypedDict):
     """Response structure for draft_gmail_message tool."""
     success: bool
-    draft_id: str
+    draft_id: NotRequired[Optional[str]]  # Optional when there's an error
     subject: str
     content_type: str
     has_recipients: bool
@@ -279,11 +286,11 @@ class DraftGmailMessageResponse(TypedDict):
 class ReplyGmailMessageResponse(TypedDict):
     """Response structure for reply_to_gmail_message tool."""
     success: bool
-    reply_message_id: str
+    reply_message_id: NotRequired[Optional[str]]  # Optional when there's an error
     original_message_id: str
-    thread_id: str
-    replied_to: str
-    subject: str
+    thread_id: NotRequired[Optional[str]]  # Optional when there's an error
+    replied_to: NotRequired[Optional[str]]  # Optional when there's an error
+    subject: NotRequired[Optional[str]]  # Optional when there's an error
     content_type: str
     userEmail: str
     error: NotRequired[Optional[str]]
@@ -292,11 +299,11 @@ class ReplyGmailMessageResponse(TypedDict):
 class DraftGmailReplyResponse(TypedDict):
     """Response structure for draft_gmail_reply tool."""
     success: bool
-    draft_id: str
+    draft_id: NotRequired[Optional[str]]  # Optional when there's an error
     original_message_id: str
-    thread_id: str
-    replied_to: str
-    subject: str
+    thread_id: NotRequired[Optional[str]]  # Optional when there's an error
+    replied_to: NotRequired[Optional[str]]  # Optional when there's an error
+    subject: NotRequired[Optional[str]]  # Optional when there's an error
     content_type: str
     userEmail: str
     error: NotRequired[Optional[str]]

@@ -397,10 +397,10 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
     async def modify_sheet_values(
         spreadsheet_id: str,
         range_name: str,
-        user_google_email: UserGoogleEmailSheets = None,
         values: Optional[List[List[str]]] = None,
         value_input_option: str = "USER_ENTERED",
-        clear_values: bool = False
+        clear_values: bool = False,
+        user_google_email: UserGoogleEmailSheets = None
     ) -> SheetModifyResponse:
         """
         Modifies values in a specific range of a Google Sheet - can write, update, or clear values.

@@ -185,7 +185,6 @@ def _get_service_endpoint(service: str, api_version: Optional[str] = None) -> st
         "photoslibrary": "https://photoslibrary.googleapis.com/",
         "admin": f"https://admin.googleapis.com/admin/directory/{api_version or 'v1'}/",
         "tasks": f"https://tasks.googleapis.com/tasks/{api_version or 'v1'}/",
-        "keep": f"https://keep.googleapis.com/{api_version or 'v1'}/",
         "youtube": f"https://www.googleapis.com/youtube/{api_version or 'v3'}/",
         "script": f"https://script.googleapis.com/{api_version or 'v1'}/"
     }
@@ -220,7 +219,6 @@ def _get_default_api_version(service: str) -> str:
         "photoslibrary": "v1",
         "admin": "v1",
         "tasks": "v1",
-        "keep": "v1",
         "youtube": "v3",
         "script": "v1"
     }
@@ -301,7 +299,6 @@ async def get_service_versions(
         "photoslibrary": ["v1"],
         "admin": ["v1"],
         "tasks": ["v1"],
-        "keep": ["v1"],
         "youtube": ["v3"],
         "script": ["v1"]
     }

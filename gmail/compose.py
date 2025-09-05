@@ -42,6 +42,105 @@ class EmailAction:
     action: Literal["send", "save_draft", "cancel"]
 
 
+async def _handle_elicitation_fallback(
+    fallback_mode: str,
+    to: Union[str, List[str]],
+    subject: str,
+    body: str,
+    user_google_email: str,
+    content_type: str,
+    html_body: Optional[str],
+    cc: Optional[Union[str, List[str]]],
+    bcc: Optional[Union[str, List[str]]],
+    recipients_not_allowed: List[str]
+) -> Optional[SendGmailMessageResponse]:
+    """
+    Handle elicitation fallback when client doesn't support elicitation.
+    
+    Args:
+        fallback_mode: "block", "allow", or "draft"
+        Other args: Same as send_gmail_message
+        recipients_not_allowed: List of recipients not on allow list
+        
+    Returns:
+        Optional[SendGmailMessageResponse]: Result based on fallback mode, or None to continue sending
+    """
+    if fallback_mode == "allow":
+        # Proceed with sending (allow untrusted recipients)
+        logger.info("Fallback mode 'allow' - proceeding with send despite untrusted recipients")
+        return None  # Return None to continue with normal send flow
+        
+    elif fallback_mode == "draft":
+        # Save as draft instead of sending
+        logger.info("Fallback mode 'draft' - saving as draft due to untrusted recipients")
+        draft_result = await draft_gmail_message(
+            subject=subject,
+            body=body,
+            user_google_email=user_google_email,
+            to=to,
+            content_type=content_type,
+            html_body=html_body,
+            cc=cc,
+            bcc=bcc
+        )
+        return SendGmailMessageResponse(
+            success=True,
+            message=f"""📝 **EMAIL SAVED AS DRAFT** (not sent)
+
+✅ **Action:** Saved to Gmail Drafts folder
+📧 **Draft ID:** {draft_result['draft_id']}
+📬 **Recipients:** {draft_result['recipient_count']} (not notified)
+
+⚠️ **Why draft:** Recipients not on allow list: {', '.join(recipients_not_allowed)}
+📱 **Cause:** Your MCP client doesn't support elicitation
+
+🔧 **Next steps:**
+   • Review draft in Gmail and send manually
+   • OR add recipients to allow list for auto-sending""",
+            messageId=None,
+            threadId=None,
+            draftId=draft_result['draft_id'],
+            recipientCount=draft_result['recipient_count'],
+            contentType=content_type,
+            templateApplied=False,
+            error=None,
+            elicitationRequired=False,
+            elicitationNotSupported=True,
+            action="saved_draft"
+        )
+    else:  # fallback_mode == "block" (default)
+        # Block the send and inform user
+        logger.info("Fallback mode 'block' - blocking send due to untrusted recipients")
+        return SendGmailMessageResponse(
+            success=False,
+            message=f"""🚫 **EMAIL BLOCKED** (not sent)
+
+❌ **Action:** Send operation blocked for security
+📧 **Subject:** {subject}
+📬 **Recipients:** {to if isinstance(to, str) else ', '.join(to)} ({len(recipients_not_allowed)} not verified)
+
+🚨 **Issue:** Recipients not on your allow list
+📱 **Cause:** MCP client doesn't support interactive confirmation
+
+🔧 **Solutions:**
+   1. Add recipients to allow list: `add_to_gmail_allow_list`
+   2. Save as draft instead: `draft_gmail_message`
+   3. Set GMAIL_ELICITATION_FALLBACK=allow to send anyway
+   4. Set GMAIL_ELICITATION_FALLBACK=draft to auto-save drafts
+
+⚠️ **NO EMAIL SENT** - Review and take manual action""",
+            messageId=None,
+            threadId=None,
+            recipientCount=0,
+            contentType=content_type,
+            templateApplied=False,
+            error="Recipients not on allow list and elicitation not supported",
+            elicitationRequired=True,
+            elicitationNotSupported=True,
+            recipientsNotAllowed=recipients_not_allowed
+        )
+
+
 async def send_gmail_message(
     ctx: Context,
     to: Union[str, List[str]],
@@ -187,6 +286,14 @@ async def send_gmail_message(
         ]
 
         if recipients_not_allowed:
+            # Check if elicitation is enabled in settings
+            if not settings.gmail_enable_elicitation:
+                logger.info(f"Elicitation disabled in settings - applying fallback: {settings.gmail_elicitation_fallback}")
+                return await _handle_elicitation_fallback(
+                    settings.gmail_elicitation_fallback, to, subject, body, user_google_email,
+                    content_type, html_body, cc, bcc, recipients_not_allowed
+                )
+
             # Log elicitation trigger
             logger.info(f"Elicitation triggered for {len(recipients_not_allowed)} recipient(s) not on allow list")
 
@@ -200,7 +307,7 @@ async def send_gmail_message(
 
             elicitation_message = f"""📧 **Email Confirmation Required**
 
-⏰ **Auto-timeout:** 60 seconds
+⏰ **Auto-timeout:** 300 seconds
 
 📬 **Recipients:**
    • To: {to_display}{cc_display}{bcc_display}
@@ -223,7 +330,7 @@ async def send_gmail_message(
    
 ⏰ Auto-cancels in 300 seconds if no response"""
 
-            # Trigger elicitation with 60-second timeout
+            # Trigger elicitation with graceful fallback for unsupported clients
             try:
                 response = await asyncio.wait_for(
                     ctx.elicit(
@@ -233,10 +340,10 @@ async def send_gmail_message(
                     timeout=300.0
                 )
             except asyncio.TimeoutError:
-                logger.info("Elicitation timed out after 60 seconds")
+                logger.info("Elicitation timed out after 300 seconds")
                 return SendGmailMessageResponse(
                     success=False,
-                    message="Email operation timed out - no response received within 60 seconds",
+                    message="Email operation timed out - no response received within 300 seconds",
                     messageId=None,
                     threadId=None,
                     recipientCount=0,
@@ -246,13 +353,48 @@ async def send_gmail_message(
                     elicitationRequired=True,
                     recipientsNotAllowed=recipients_not_allowed
                 )
+            except Exception as elicit_error:
+                # Handle clients that don't support elicitation
+                error_msg = str(elicit_error).lower()
+                if ("method not found" in error_msg or "not found" in error_msg or
+                    "not supported" in error_msg or "unsupported" in error_msg):
+                    
+                    logger.warning(f"Client doesn't support elicitation - applying fallback: {settings.gmail_elicitation_fallback}")
+                    fallback_result = await _handle_elicitation_fallback(
+                        settings.gmail_elicitation_fallback, to, subject, body, user_google_email,
+                        content_type, html_body, cc, bcc, recipients_not_allowed
+                    )
+                    if fallback_result is not None:
+                        return fallback_result
+                    # If fallback_result is None (allow mode), continue with normal sending
+                else:
+                    # Other elicitation errors
+                    logger.error(f"Elicitation failed: {elicit_error}")
+                    return SendGmailMessageResponse(
+                        success=False,
+                        message=f"❌ Email confirmation failed: {elicit_error}",
+                        messageId=None,
+                        threadId=None,
+                        recipientCount=0,
+                        contentType=content_type,
+                        templateApplied=False,
+                        error=f"Elicitation error: {elicit_error}",
+                        elicitationRequired=True,
+                        recipientsNotAllowed=recipients_not_allowed
+                    )
 
             # Handle standard elicitation response structure
             if response.action == "decline" or response.action == "cancel":
                 logger.info(f"User {response.action}d email operation")
                 return SendGmailMessageResponse(
                     success=False,
-                    message=f"Email operation {response.action}d by user",
+                    message=f"""🚫 **EMAIL CANCELLED** (not sent)
+
+❌ **Action:** User {response.action}d the send operation
+📧 **Subject:** {subject}
+📬 **Recipients:** No one notified
+
+ℹ️ **User choice:** {response.action.title()} via elicitation prompt""",
                     messageId=None,
                     threadId=None,
                     recipientCount=0,
@@ -270,7 +412,13 @@ async def send_gmail_message(
                     logger.info("User chose to cancel email operation")
                     return SendGmailMessageResponse(
                         success=False,
-                        message="Email operation cancelled by user",
+                        message=f"""🚫 **EMAIL CANCELLED** (not sent)
+
+❌ **Action:** User chose to cancel
+📧 **Subject:** {subject}
+📬 **Recipients:** No one notified
+
+ℹ️ **User choice:** Cancel via elicitation prompt""",
                         messageId=None,
                         threadId=None,
                         recipientCount=0,
@@ -296,11 +444,18 @@ async def send_gmail_message(
                     # Return as send response with draft info
                     return SendGmailMessageResponse(
                         success=True,
-                        message=f"Email saved as draft instead of sending. Draft ID: {draft_result.draftId}",
+                        message=f"""📝 **EMAIL SAVED AS DRAFT** (not sent)
+
+✅ **Action:** User chose to save as draft
+📧 **Draft ID:** {draft_result['draft_id']}
+📬 **Recipients:** {draft_result['recipient_count']} (not notified)
+
+ℹ️ **User choice:** Save as draft via elicitation prompt
+🔧 **Next step:** Review draft in Gmail and send manually""",
                         messageId=None,
                         threadId=None,
-                        draftId=draft_result.draftId,  # Include draft ID
-                        recipientCount=draft_result.recipientCount,
+                        draftId=draft_result['draft_id'],  # Include draft ID
+                        recipientCount=draft_result['recipient_count'],
                         contentType=content_type,
                         templateApplied=False,
                         error=None,
@@ -368,10 +523,11 @@ async def send_gmail_message(
         elif isinstance(to, list) and to:
             primary_recipient = to[0]
         
-        if primary_recipient:
+        # TEMPORARILY DISABLED: Skip Gmail template processing to allow Template Parameter Middleware to work
+        if False and primary_recipient:
             try:
                 # Try to get template for this recipient
-                template = await template_manager.get_template_for_user(primary_recipient)
+                template = await template_manager.get_template_for_recipient(primary_recipient)
                 
                 if template:
                     logger.info(f"Applying template '{template.name}' for recipient {primary_recipient}")
@@ -565,13 +721,12 @@ async def draft_gmail_message(
         )
         return DraftGmailMessageResponse(
             success=False,
-            message=error_msg,
-            draftId=None,
-            messageId=None,
-            threadId=None,
-            recipientCount=0,
-            contentType=content_type,
+            draft_id="",
             subject=subject,
+            content_type=content_type,
+            has_recipients=bool(to),
+            recipient_count=0,
+            userEmail=user_google_email or "",
             error="Parameter validation error: incorrect content_type usage"
         )
 
@@ -584,13 +739,11 @@ async def draft_gmail_message(
         )
         return DraftGmailMessageResponse(
             success=False,
-            message=error_msg,
-            draftId=None,
-            messageId=None,
-            threadId=None,
-            recipientCount=0,
-            contentType=content_type,
             subject=subject,
+            content_type=content_type,
+            has_recipients=bool(to),
+            recipient_count=0,
+            userEmail=user_google_email or "",
             error="Parameter validation error: missing html_body for mixed content"
         )
 
@@ -640,13 +793,12 @@ async def draft_gmail_message(
 
         return DraftGmailMessageResponse(
             success=True,
-            message=f"✅ Draft created! Draft ID: {draft_id}",
-            draftId=draft_id,
-            messageId=message_id,
-            threadId=thread_id,
-            recipientCount=total_recipients,
-            contentType=content_type,
+            draft_id=draft_id,
             subject=subject,
+            content_type=content_type,
+            has_recipients=bool(to),
+            recipient_count=total_recipients,
+            userEmail=user_google_email or "",
             error=None
         )
 
@@ -654,13 +806,12 @@ async def draft_gmail_message(
         logger.error(f"Unexpected error in draft_gmail_message: {e}")
         return DraftGmailMessageResponse(
             success=False,
-            message=f"❌ Unexpected error: {e}",
-            draftId=None,
-            messageId=None,
-            threadId=None,
-            recipientCount=0,
-            contentType=content_type,
+            draft_id="",
             subject=subject,
+            content_type=content_type,
+            has_recipients=bool(to),
+            recipient_count=0,
+            userEmail=user_google_email or "",
             error=str(e)
         )
 
@@ -760,13 +911,13 @@ async def reply_to_gmail_message(
         
         return ReplyGmailMessageResponse(
             success=True,
-            message=f"✅ Reply sent! Message ID: {sent_message_id}",
-            messageId=sent_message_id,
-            threadId=thread_id,
-            originalMessageId=message_id,
-            recipientEmail=original_from,
-            contentType=content_type,
+            reply_message_id=sent_message_id,
+            original_message_id=message_id,
+            thread_id=thread_id or "",
+            replied_to=original_from,
             subject=reply_subject,
+            content_type=content_type,
+            userEmail=user_google_email or "",
             error=None
         )
 
@@ -774,13 +925,13 @@ async def reply_to_gmail_message(
         logger.error(f"Unexpected error in reply_to_gmail_message: {e}")
         return ReplyGmailMessageResponse(
             success=False,
-            message=f"❌ Unexpected error: {e}",
-            messageId=None,
-            threadId=None,
-            originalMessageId=message_id,
-            recipientEmail=None,
-            contentType=content_type,
-            subject=None,
+            reply_message_id="",
+            original_message_id=message_id,
+            thread_id="",
+            replied_to="",
+            subject="",
+            content_type=content_type,
+            userEmail=user_google_email or "",
             error=str(e)
         )
 
@@ -881,14 +1032,13 @@ async def draft_gmail_reply(
         
         return DraftGmailReplyResponse(
             success=True,
-            message=f"✅ Draft reply created! Draft ID: {draft_id}",
-            draftId=draft_id,
-            messageId=message_id_from_draft,
-            threadId=thread_id,
-            originalMessageId=message_id,
-            recipientEmail=original_from,
-            contentType=content_type,
+            draft_id=draft_id,
+            original_message_id=message_id,
+            thread_id=thread_id or "",
+            replied_to=original_from,
             subject=reply_subject,
+            content_type=content_type,
+            userEmail=user_google_email or "",
             error=None
         )
 
@@ -896,14 +1046,13 @@ async def draft_gmail_reply(
         logger.error(f"Unexpected error in draft_gmail_reply: {e}")
         return DraftGmailReplyResponse(
             success=False,
-            message=f"❌ Unexpected error: {e}",
-            draftId=None,
-            messageId=None,
-            threadId=None,
-            originalMessageId=message_id,
-            recipientEmail=None,
-            contentType=content_type,
-            subject=None,
+            draft_id="",
+            original_message_id=message_id,
+            thread_id="",
+            replied_to="",
+            subject="",
+            content_type=content_type,
+            userEmail=user_google_email or "",
             error=str(e)
         )
 

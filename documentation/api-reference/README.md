@@ -8,7 +8,7 @@ This comprehensive API reference provides detailed documentation for all 60+ too
 - [Google Drive](./drive/README.md) - 9 tools for file management, upload, search, and sharing
 - [Gmail](./gmail/README.md) - 15 tools for email operations, labels, filters, and threading  
 - [Google Calendar](./calendar/README.md) - 6 tools for event management and calendar operations
-- [Google Docs](./docs/README.md) - 4 tools for document creation and content management
+- [Google Docs](./google_docs/README.md) - 4 tools for document creation and content management
 - [Google Forms](./forms/README.md) - 8 tools for form creation, questions, and response handling
 - [Google Sheets](./sheets/README.md) - 6 tools for spreadsheet operations and data manipulation
 - [Google Slides](./slides/README.md) - 6 tools for presentation creation and management

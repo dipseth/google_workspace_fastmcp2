@@ -537,8 +537,8 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_drive_file_content(
-        user_google_email: str,
         file_id: str,
+        user_google_email: UserGoogleEmail = None
     ) -> str:
         """
         Retrieve the content of a specific Google Drive file by ID.
@@ -721,10 +721,9 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                     folderId=folder_id,
                     folderName=folder_name,
                     items=[],
-                    itemCount=0,
-                    hasMore=False,
-                    nextPageToken=None,
+                    count=0,
                     userEmail=user_google_email,
+                    driveId=None,
                     error=None
                 )
             elif not include_subfolders:
@@ -780,11 +779,9 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 folderId=folder_id,
                 folderName=folder_name,
                 items=structured_items,
-                itemCount=len(structured_items),
-                totalItems=None,  # Unknown without counting
-                hasMore=bool(results.get('nextPageToken')),
-                nextPageToken=results.get('nextPageToken'),
+                count=len(structured_items),
                 userEmail=user_google_email,
+                driveId=None,
                 error=None
             )
                 
@@ -794,11 +791,9 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 folderId=folder_id,
                 folderName="Unknown",
                 items=[],
-                itemCount=0,
-                totalItems=None,
-                hasMore=False,
-                nextPageToken=None,
+                count=0,
                 userEmail=user_google_email,
+                driveId=None,
                 error=f"Drive API error: {str(e)}"
             )
             
@@ -808,11 +803,9 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 folderId=folder_id,
                 folderName="Unknown",
                 items=[],
-                itemCount=0,
-                totalItems=None,
-                hasMore=False,
-                nextPageToken=None,
+                count=0,
                 userEmail=user_google_email,
+                driveId=None,
                 error=f"Unexpected error: {str(e)}"
             )
     
@@ -829,12 +822,12 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         }
     )
     async def create_drive_file(
-        user_google_email: str,
         file_name: str,
         content: Optional[str] = None,
         folder_id: str = 'root',
         mime_type: str = 'text/plain',
         fileUrl: Optional[str] = None,
+        user_google_email: UserGoogleEmail = None,
     ) -> CreateDriveFileResponse:
         """
         Create a new file in Google Drive, supporting creation within shared drives.
@@ -962,12 +955,10 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         }
     )
     async def share_drive_files(
-        user_google_email: str,
-        file_ids: List[str],
-        email_addresses: List[str],
-        role: str = "reader",
-        send_notification: bool = True,
-        message: Optional[str] = None,
+        role: Annotated[str, Field(description="Permission role: 'reader' (view only), 'writer' (edit), 'commenter' (comment only)")] = "reader",
+        send_notification: Annotated[bool, Field(description="Whether to send email notifications to shared users")] = True,
+        message: Annotated[Optional[str], Field(description="Optional message to include in the sharing notification email")] = None,
+        user_google_email: UserGoogleEmail = None,
     ) -> ShareDriveFilesResponse:
         """
         Share Google Drive files with specific people via email addresses.
@@ -1172,10 +1163,10 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         }
     )
     async def make_drive_files_public(
-        user_google_email: str,
         file_ids: List[str],
         public: bool = True,
         role: str = "reader",
+        user_google_email: UserGoogleEmail = None,
     ) -> MakeDriveFilesPublicResponse:
         """
         Make Google Drive files publicly accessible or remove public access.

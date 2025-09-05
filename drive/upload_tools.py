@@ -2,9 +2,20 @@
 Google Drive upload tools for FastMCP2.
 
 This module provides comprehensive Google Drive integration tools for FastMCP2 servers,
-including file upload capabilities, OAuth2 authentication management, and status verification.
-
-Key Features:
+including file upload capabilities, OAuth2 authentication management, and status veri        
+        Upload a local file or folder to Google Drive with unified authentication support.
+        
+        This tool demonstrates the unified OAuth architecture where user_google_email
+        is automatically injected by the middleware when authenticated via GoogleProvider.
+        
+        Args:
+            path: Local filesystem path to the file or folder to upload (supports ~ expansion)
+            folder_id: Google Drive folder ID destination (defaults to "root" folder)
+            filename: Optional custom name for uploaded file/folder (preserves original if not provided)
+            user_google_email: User's Google email (auto-injected by unified auth middleware)
+        
+        Returns:
+            UploadFileResponse: Structured response with upload results including file metadata Features:
 - Secure file upload to Google Drive with folder management
 - OAuth2 authentication flow initiation and management
 - Authentication status verification and error handling
@@ -212,9 +223,9 @@ def setup_drive_tools(mcp: FastMCP) -> None:
     )
     async def upload_to_drive(
         path: Annotated[str, Field(description="Local filesystem path to the file or folder to upload (supports ~ expansion)")],
-        drive_folder_id: Annotated[str, Field(description="Google Drive folder ID destination (defaults to 'root' folder)")] = "root",
-        custom_name: Annotated[Optional[str], Field(description="Optional custom name for uploaded file/folder (preserves original if not provided)")] = None,
-        user_google_email: Annotated[Optional[str], Field(description="User's Google email (auto-injected by unified auth middleware)")] = None
+        folder_id: Annotated[str, Field(description="Google Drive folder ID where file will be uploaded (default: 'root' for root folder)")] = 'root',
+        filename: Annotated[Optional[str], Field(description="Custom filename for the uploaded file (optional - uses original filename if not provided)")] = None,
+        user_google_email: UserGoogleEmailDrive = None
     ) -> UploadFileResponse:
         """
         Upload a local file or folder to Google Drive with unified authentication support.
@@ -224,8 +235,8 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         
         Args:
             path: Local filesystem path to the file or folder to upload (supports ~ expansion)
-            drive_folder_id: Google Drive folder ID destination (defaults to "root" folder)
-            custom_name: Optional custom name for uploaded file/folder (preserves original if not provided)
+            folder_id: Google Drive folder ID destination (defaults to "root" folder)
+            filename: Optional custom name for uploaded file/folder (preserves original if not provided)
             user_google_email: User's Google email (auto-injected by unified auth middleware)
         
         Returns:
@@ -255,7 +266,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 )
             logger.info(f"🔑 Using authenticated user from unified context: {user_google_email}")
         
-        logger.info(f"Upload request: {path} -> Drive folder {drive_folder_id} for {user_google_email}")
+        logger.info(f"Upload request: {path} -> Drive folder {folder_id} for {user_google_email}")
         
         try:
             # Validate and convert path
@@ -272,8 +283,8 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 return await _upload_folder_to_drive(
                     drive_service=drive_service,
                     folder_path=local_path,
-                    parent_folder_id=drive_folder_id,
-                    custom_folder_name=custom_name,
+                    parent_folder_id=folder_id,
+                    custom_folder_name=filename,
                     user_email=user_google_email
                 )
             else:
@@ -281,8 +292,8 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 result = await upload_file_to_drive_api(
                     service=drive_service,
                     file_path=local_path,
-                    folder_id=drive_folder_id,
-                    custom_filename=custom_name
+                    folder_id=folder_id,
+                    custom_filename=filename
                 )
                 
                 # Build file info
@@ -292,7 +303,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "filePath": str(local_path),
                     "fileSize": local_path.stat().st_size,
                     "mimeType": result.get('mimeType', 'application/octet-stream'),
-                    "folderId": drive_folder_id,
+                    "folderId": folder_id,
                     "driveUrl": f"https://drive.google.com/file/d/{result['id']}/view",
                     "webViewLink": result.get('webViewLink', f"https://drive.google.com/file/d/{result['id']}/view")
                 }

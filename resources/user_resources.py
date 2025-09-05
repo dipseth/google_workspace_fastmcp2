@@ -5,7 +5,7 @@ information, eliminating the need for tools to manually require user_google_emai
 """
 
 import logging
-from typing_extensions import Dict, Any, Optional, Annotated
+from typing_extensions import Dict, Any, Optional, Annotated, TypedDict, NotRequired, List
 from datetime import datetime
 from pydantic import Field
 
@@ -22,6 +22,215 @@ from auth.google_auth import get_valid_credentials
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# TYPED DICT RESPONSE MODELS FOR USER RESOURCES
+# ============================================================================
+
+class AuthenticationStatus(TypedDict):
+    """Authentication status information."""
+    authenticated: bool
+    credentials_valid: bool
+    has_refresh_token: bool
+    scopes: List[str]
+    expires_at: Optional[str]
+
+
+class UserEmailResponse(TypedDict):
+    """Response for current user email resource."""
+    email: NotRequired[Optional[str]]
+    session_id: NotRequired[Optional[str]]
+    timestamp: str
+    authenticated: bool
+    error: NotRequired[Optional[str]]
+    suggestion: NotRequired[Optional[str]]
+
+
+class UserProfileResponse(TypedDict):
+    """Response for user profile resources."""
+    email: NotRequired[Optional[str]]
+    session_id: NotRequired[Optional[str]]
+    auth_status: NotRequired[AuthenticationStatus]
+    timestamp: str
+    authenticated: NotRequired[bool]
+    is_current_user: NotRequired[bool]
+    error: NotRequired[Optional[str]]
+    debug_info: NotRequired[Optional[Dict[str, Any]]]
+
+
+class SessionInfoResponse(TypedDict):
+    """Response for session information resources."""
+    session_id: NotRequired[Optional[str]]
+    user_email: NotRequired[Optional[str]]
+    session_active: bool
+    timestamp: str
+    created_at: NotRequired[Optional[str]]
+    last_accessed: NotRequired[Optional[str]]
+    error: NotRequired[Optional[str]]
+
+
+class SessionListResponse(TypedDict):
+    """Response for active sessions list resource."""
+    active_sessions: List[Dict[str, Any]]
+    count: int
+    current_session: NotRequired[Optional[str]]
+    timestamp: str
+    error: NotRequired[Optional[str]]
+
+
+class CredentialStatusResponse(TypedDict):
+    """Response for credential status resources."""
+    email: str
+    authenticated: bool
+    credentials_valid: NotRequired[bool]
+    expired: NotRequired[bool]
+    has_refresh_token: NotRequired[bool]
+    scopes: NotRequired[List[str]]
+    client_id: NotRequired[Optional[str]]
+    token_uri: NotRequired[Optional[str]]
+    expires_at: NotRequired[Optional[str]]
+    timestamp: str
+    status: NotRequired[str]
+    error: NotRequired[Optional[str]]
+    time_until_expiry: NotRequired[Optional[str]]
+    refresh_recommended: NotRequired[bool]
+
+
+class ServiceScopesResponse(TypedDict):
+    """Response for Google service scopes resource."""
+    service: str
+    default_scopes: List[str]
+    version: str
+    description: str
+    timestamp: str
+    error: NotRequired[Optional[str]]
+    available_services: NotRequired[List[str]]
+
+
+class ToolInfo(TypedDict):
+    """Information about a single tool."""
+    name: str
+    description: str
+    parameters: List[str]
+    example: NotRequired[str]
+
+
+class ToolParameterInfo(TypedDict):
+    """Parameter information for a tool."""
+    query: NotRequired[str]
+    page_size: NotRequired[str]
+    max_results: NotRequired[str]
+    summary: NotRequired[str]
+    start_time: NotRequired[str]
+    end_time: NotRequired[str]
+    description: NotRequired[str]
+    attendees: NotRequired[str]
+    calendar_id: NotRequired[str]
+
+
+class EnhancedToolInfo(TypedDict):
+    """Enhanced tool information with detailed parameters."""
+    name: str
+    description: str
+    parameters: Dict[str, str]
+    example: str
+
+
+class EnhancedToolsResponse(TypedDict):
+    """Response for enhanced tools collection."""
+    enhanced_tools: List[EnhancedToolInfo]
+    count: int
+    benefit: str
+    timestamp: str
+
+
+class ToolCategoryInfo(TypedDict):
+    """Information about a tool category."""
+    description: str
+    tool_count: int
+    requires_email: NotRequired[bool]
+    tools: NotRequired[List[ToolInfo]]
+
+
+class ToolsDirectoryResponse(TypedDict):
+    """Response for complete tools directory resource."""
+    total_tools: int
+    total_categories: int
+    enhanced_tools_count: int
+    tools_by_category: Dict[str, Any]
+    timestamp: str
+    resource_templating_available: bool
+    migration_status: str
+    error: NotRequired[Optional[str]]
+
+
+class WorkflowExample(TypedDict):
+    """Example workflow information."""
+    drive: str
+    gmail: str
+    calendar: str
+    status: str
+
+
+class ToolUsageGuideResponse(TypedDict):
+    """Response for tools usage guide resource."""
+    quick_start: Dict[str, str]
+    enhanced_tools_workflow: Dict[str, Any]
+    legacy_tools_workflow: Dict[str, Any]
+    migration_guide: Dict[str, str]
+    error_handling: Dict[str, str]
+    timestamp: str
+
+
+class WorkspaceContentItem(TypedDict):
+    """Individual workspace content item."""
+    id: str
+    name: str
+    type: str
+    modified_time: str
+    web_view_link: str
+    mime_type: NotRequired[str]
+
+
+class WorkspaceContentResponse(TypedDict):
+    """Response for workspace content resources."""
+    user_email: str
+    content_items: List[WorkspaceContentItem]
+    count: int
+    timestamp: str
+    source: str
+    error: NotRequired[Optional[str]]
+
+
+class ContentSuggestion(TypedDict):
+    """Content suggestion item."""
+    type: str
+    title: str
+    description: str
+    action: str
+    priority: int
+
+
+class GmailContentSuggestionsResponse(TypedDict):
+    """Response for Gmail content suggestions resource."""
+    user_email: str
+    suggestions: List[ContentSuggestion]
+    count: int
+    categories: List[str]
+    timestamp: str
+    error: NotRequired[Optional[str]]
+
+
+class GmailAllowListResponse(TypedDict):
+    """Response for Gmail allow list resource."""
+    user_email: str
+    allow_list: List[str]
+    count: int
+    description: str
+    last_updated: str
+    timestamp: str
+    error: NotRequired[Optional[str]]
+
+
 def setup_user_resources(mcp: FastMCP) -> None:
     """Setup all user and authentication resources."""
     
@@ -30,31 +239,46 @@ def setup_user_resources(mcp: FastMCP) -> None:
         name="Current User Email",
         description="Get the currently authenticated user's email address for session-based authentication",
         mime_type="application/json",
-        tags={"authentication", "user", "email", "session"}
+        tags={"authentication", "user", "email", "session", "template"},
+        enabled=True,
+        meta={
+            "template_accessible": True, 
+            "property_paths": ["email", "session_id", "timestamp"],
+            "response_model": "UserEmailResponse",
+            "enhanced": True
+        }
     )
-    async def get_current_user_email(ctx: Context) -> dict:
+    async def get_current_user_email(ctx: Context) -> UserEmailResponse:
         """Internal implementation for current user email resource."""
         user_email = get_user_email_context()
         if not user_email:
-            return {
-                "error": "No authenticated user found in current session",
-                "suggestion": "Use start_google_auth tool to authenticate first"
-            }
+            return UserEmailResponse(
+                error="No authenticated user found in current session",
+                suggestion="Use start_google_auth tool to authenticate first",
+                authenticated=False,
+                timestamp=datetime.now().isoformat()
+            )
         
-        return {
-            "email": user_email,
-            "session_id": get_session_context(),
-            "timestamp": datetime.now().isoformat()
-        }
+        return UserEmailResponse(
+            email=user_email,
+            session_id=get_session_context(),
+            timestamp=datetime.now().isoformat(),
+            authenticated=True
+        )
     
     @mcp.resource(
         uri="user://current/profile",
         name="Current User Profile",
         description="Comprehensive profile information including authentication status, credential validity, and available Google services for the current session user",
         mime_type="application/json",
-        tags={"authentication", "user", "profile", "credentials", "session", "google"}
+        tags={"authentication", "user", "profile", "credentials", "session", "google"},
+        meta={
+            "response_model": "UserProfileResponse",
+            "enhanced": True,
+            "includes_debug": True
+        }
     )
-    async def get_current_user_profile(ctx: Context) -> dict:
+    async def get_current_user_profile(ctx: Context) -> UserProfileResponse:
         """Internal implementation for current user profile resource."""
         user_email = get_user_email_context()
         session_id = get_session_context()
@@ -65,87 +289,99 @@ def setup_user_resources(mcp: FastMCP) -> None:
         logger.info(f"   session_context: {session_id}")
         
         if not user_email:
-            return {
-                "error": "No authenticated user found in current session",
-                "authenticated": False,
-                "debug_info": {
+            return UserProfileResponse(
+                error="No authenticated user found in current session",
+                authenticated=False,
+                timestamp=datetime.now().isoformat(),
+                debug_info={
                     "user_email_context": user_email,
                     "session_context": session_id,
                     "issue": "OAuth proxy authentication may not be setting session context"
                 }
-            }
+            )
         
         # Check credential validity
         credentials = get_valid_credentials(user_email)
-        auth_status = {
-            "authenticated": credentials is not None,
-            "credentials_valid": credentials is not None and not credentials.expired,
-            "has_refresh_token": credentials is not None and credentials.refresh_token is not None,
-            "scopes": credentials.scopes if credentials else [],
-            "expires_at": credentials.expiry.isoformat() if credentials and credentials.expiry else None
-        }
+        auth_status = AuthenticationStatus(
+            authenticated=credentials is not None,
+            credentials_valid=credentials is not None and not credentials.expired,
+            has_refresh_token=credentials is not None and credentials.refresh_token is not None,
+            scopes=credentials.scopes if credentials else [],
+            expires_at=credentials.expiry.isoformat() if credentials and credentials.expiry else None
+        )
         
-        return {
-            "email": user_email,
-            "session_id": get_session_context(),
-            "auth_status": auth_status,
-            "timestamp": datetime.now().isoformat()
-        }
+        return UserProfileResponse(
+            email=user_email,
+            session_id=get_session_context(),
+            auth_status=auth_status,
+            timestamp=datetime.now().isoformat()
+        )
     
     @mcp.resource(
         uri="user://profile/{email}",
         name="User Profile by Email",
         description="Get detailed profile information for a specific user email including authentication status, credential validity, and comparison with current session user",
         mime_type="application/json",
-        tags={"user", "profile", "authentication", "credentials", "email", "lookup"}
+        tags={"user", "profile", "authentication", "credentials", "email", "lookup"},
+        meta={
+            "response_model": "UserProfileResponse",
+            "enhanced": True,
+            "supports_lookup": True
+        }
     )
     async def get_user_profile_by_email(
         email: Annotated[str, Field(description="Email address of the user to get profile information for", pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')], 
         ctx: Context
-    ) -> dict:
+    ) -> UserProfileResponse:
         """Internal implementation for user profile by email resource."""
         # Check credential validity for the specified user
         credentials = get_valid_credentials(email)
-        auth_status = {
-            "authenticated": credentials is not None,
-            "credentials_valid": credentials is not None and not credentials.expired,
-            "has_refresh_token": credentials is not None and credentials.refresh_token is not None,
-            "scopes": credentials.scopes if credentials else [],
-            "expires_at": credentials.expiry.isoformat() if credentials and credentials.expiry else None
-        }
+        auth_status = AuthenticationStatus(
+            authenticated=credentials is not None,
+            credentials_valid=credentials is not None and not credentials.expired,
+            has_refresh_token=credentials is not None and credentials.refresh_token is not None,
+            scopes=credentials.scopes if credentials else [],
+            expires_at=credentials.expiry.isoformat() if credentials and credentials.expiry else None
+        )
         
-        return {
-            "email": email,
-            "auth_status": auth_status,
-            "is_current_user": email == get_user_email_context(),
-            "timestamp": datetime.now().isoformat()
-        }
+        return UserProfileResponse(
+            email=email,
+            auth_status=auth_status,
+            is_current_user=email == get_user_email_context(),
+            timestamp=datetime.now().isoformat()
+        )
     
     @mcp.resource(
         uri="auth://session/current",
         name="Current Authentication Session",
         description="Detailed information about the current authentication session including token status, expiration times, and granted scopes",
         mime_type="application/json",
-        tags={"authentication", "session", "oauth", "token", "security"}
+        tags={"authentication", "session", "oauth", "token", "security"},
+        meta={
+            "response_model": "SessionInfoResponse",
+            "enhanced": True,
+            "includes_metadata": True
+        }
     )
-    async def get_current_session_info(ctx: Context) -> dict:
+    async def get_current_session_info(ctx: Context) -> SessionInfoResponse:
         """Internal implementation for current session info resource."""
         session_id = get_session_context()
         user_email = get_user_email_context()
         
         if not session_id:
-            return {
-                "error": "No active session found",
-                "session_active": False
-            }
+            return SessionInfoResponse(
+                error="No active session found",
+                session_active=False,
+                timestamp=datetime.now().isoformat()
+            )
         
         # Get session metadata if available
-        session_data = {
-            "session_id": session_id,
-            "user_email": user_email,
-            "session_active": True,
-            "timestamp": datetime.now().isoformat()
-        }
+        session_data = SessionInfoResponse(
+            session_id=session_id,
+            user_email=user_email,
+            session_active=True,
+            timestamp=datetime.now().isoformat()
+        )
         
         # Add any additional session data stored
         try:
@@ -166,81 +402,97 @@ def setup_user_resources(mcp: FastMCP) -> None:
         name="Active Authentication Sessions",
         description="Administrative view of all active authentication sessions with session details, user information, and expiration status for multi-user session management",
         mime_type="application/json",
-        tags={"authentication", "sessions", "admin", "multi-user", "management", "security"}
+        tags={"authentication", "sessions", "admin", "multi-user", "management", "security"},
+        meta={
+            "response_model": "SessionListResponse",
+            "enhanced": True,
+            "administrative": True
+        }
     )
-    async def list_active_sessions(ctx: Context) -> dict:
+    async def list_active_sessions(ctx: Context) -> SessionListResponse:
         """Internal implementation for active sessions list resource."""
         try:
             active_sessions = list_sessions()
             
-            return {
-                "active_sessions": active_sessions,
-                "count": len(active_sessions),
-                "current_session": get_session_context(),
-                "timestamp": datetime.now().isoformat()
-            }
+            return SessionListResponse(
+                active_sessions=active_sessions,
+                count=len(active_sessions),
+                current_session=get_session_context(),
+                timestamp=datetime.now().isoformat()
+            )
         except Exception as e:
             logger.error(f"Error listing sessions: {e}")
-            return {
-                "error": f"Failed to list sessions: {str(e)}",
-                "active_sessions": [],
-                "count": 0
-            }
+            return SessionListResponse(
+                error=f"Failed to list sessions: {str(e)}",
+                active_sessions=[],
+                count=0,
+                timestamp=datetime.now().isoformat()
+            )
     
     @mcp.resource(
         uri="auth://credentials/{email}/status",
         name="User Credential Status",
         description="Detailed credential status for a specific user including validity, expiration, refresh token availability, and granted scopes for authentication management",
         mime_type="application/json",
-        tags={"authentication", "credentials", "status", "oauth", "tokens", "security", "user"}
+        tags={"authentication", "credentials", "status", "oauth", "tokens", "security", "user"},
+        meta={
+            "response_model": "CredentialStatusResponse",
+            "enhanced": True,
+            "supports_lookup": True
+        }
     )
     async def get_credential_status(
         email: Annotated[str, Field(description="Email address to check credential status for", pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')],
         ctx: Context
-    ) -> dict:
+    ) -> CredentialStatusResponse:
         """Internal implementation for credential status resource."""
         try:
             credentials = get_valid_credentials(email)
             
             if not credentials:
-                return {
-                    "email": email,
-                    "status": "no_credentials",
-                    "authenticated": False,
-                    "message": "No stored credentials found for this user"
-                }
+                return CredentialStatusResponse(
+                    email=email,
+                    status="no_credentials",
+                    authenticated=False,
+                    timestamp=datetime.now().isoformat(),
+                    error="No stored credentials found for this user"
+                )
             
-            status_info = {
-                "email": email,
-                "authenticated": True,
-                "credentials_valid": not credentials.expired,
-                "expired": credentials.expired,
-                "has_refresh_token": credentials.refresh_token is not None,
-                "scopes": credentials.scopes or [],
-                "client_id": credentials.client_id[:10] + "..." if credentials.client_id else None,
-                "token_uri": credentials.token_uri,
-                "expires_at": credentials.expiry.isoformat() if credentials.expiry else None,
-                "timestamp": datetime.now().isoformat()
-            }
+            status_info = CredentialStatusResponse(
+                email=email,
+                authenticated=True,
+                credentials_valid=not credentials.expired,
+                expired=credentials.expired,
+                has_refresh_token=credentials.refresh_token is not None,
+                scopes=credentials.scopes or [],
+                client_id=credentials.client_id[:10] + "..." if credentials.client_id else None,
+                token_uri=credentials.token_uri,
+                expires_at=credentials.expiry.isoformat() if credentials.expiry else None,
+                timestamp=datetime.now().isoformat()
+            )
             
             if credentials.expired:
                 status_info["status"] = "expired"
-                status_info["message"] = "Credentials are expired but can be refreshed"
+                status_info["time_until_expiry"] = "Already expired"
+                status_info["refresh_recommended"] = True
             else:
                 status_info["status"] = "valid"
-                status_info["message"] = "Credentials are valid and active"
+                if credentials.expiry:
+                    time_remaining = credentials.expiry - datetime.now()
+                    status_info["time_until_expiry"] = str(time_remaining)
+                    status_info["refresh_recommended"] = time_remaining.total_seconds() < 3600  # < 1 hour
             
             return status_info
             
         except Exception as e:
             logger.error(f"Error checking credentials for {email}: {e}")
-            return {
-                "email": email,
-                "status": "error",
-                "authenticated": False,
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
+            return CredentialStatusResponse(
+                email=email,
+                status="error",
+                authenticated=False,
+                error=str(e),
+                timestamp=datetime.now().isoformat()
+            )
     
     @mcp.resource(
         uri="template://user_email",
@@ -264,211 +516,510 @@ def setup_user_resources(mcp: FastMCP) -> None:
         name="Google Service Scopes",
         description="Get the required OAuth scopes, API version, and configuration details for a specific Google service including Drive, Gmail, Calendar, and other Workspace APIs",
         mime_type="application/json",
-        tags={"google", "services", "scopes", "oauth", "api", "configuration", "workspace"}
+        tags={"google", "services", "scopes", "oauth", "api", "configuration", "workspace"},
+        meta={
+            "response_model": "ServiceScopesResponse",
+            "enhanced": True,
+            "supports_lookup": True
+        }
     )
     async def get_service_scopes(
         service: Annotated[str, Field(description="Google service name to get scope information for")],
         ctx: Context
-    ) -> dict:
+    ) -> ServiceScopesResponse:
         """Internal implementation for Google service scopes resource."""
         # Import here to avoid circular imports
         from auth.service_helpers import SERVICE_DEFAULTS
         
         service_info = SERVICE_DEFAULTS.get(service.lower())
         if not service_info:
-            return {
-                "error": f"Unknown Google service: {service}",
-                "available_services": list(SERVICE_DEFAULTS.keys())
-            }
+            return ServiceScopesResponse(
+                service=service,
+                error=f"Unknown Google service: {service}",
+                available_services=list(SERVICE_DEFAULTS.keys()),
+                default_scopes=[],
+                version="unknown",
+                description="Service not found",
+                timestamp=datetime.now().isoformat()
+            )
         
-        return {
-            "service": service,
-            "default_scopes": service_info.get("default_scopes", []),
-            "version": service_info.get("version", "v1"),
-            "description": service_info.get("description", f"Google {service.title()} API"),
-            "timestamp": datetime.now().isoformat()
-        }
+        return ServiceScopesResponse(
+            service=service,
+            default_scopes=service_info.get("default_scopes", []),
+            version=service_info.get("version", "v1"),
+            description=service_info.get("description", f"Google {service.title()} API"),
+            timestamp=datetime.now().isoformat()
+        )
     
     @mcp.resource(
         uri="tools://list/all",
         name="Complete Tools Directory",
-        description="Comprehensive catalog of all 60+ available tools organized by category including Drive, Gmail, Calendar, Chat, Forms, Docs, Sheets, and authentication tools with detailed capability descriptions",
+        description="Comprehensive catalog of all available tools organized by category including Drive, Gmail, Calendar, Chat, Forms, Docs, Sheets, and authentication tools with detailed capability descriptions",
         mime_type="application/json",
-        tags={"tools", "directory", "catalog", "discovery", "google", "workspace", "enhanced", "legacy"}
+        tags={"tools", "directory", "catalog", "discovery", "google", "workspace", "enhanced", "legacy"},
+        meta={
+            "response_model": "ToolsDirectoryResponse",
+            "enhanced": True,
+            "comprehensive": True,
+            "dynamic": True
+        }
     )
-    async def get_all_tools_list(ctx: Context) -> dict:
-        """Internal implementation for complete tools directory resource."""
+    async def get_all_tools_list(ctx: Context) -> ToolsDirectoryResponse:
+        """Internal implementation for complete tools directory resource - dynamically discovers tools from FastMCP server."""
         try:
-            tools_info = {
+            # Access the FastMCP server instance through context
+            fastmcp_server = ctx.fastmcp
+            
+            # Log FastMCP server structure for debugging
+            await ctx.debug(f"FastMCP server type: {type(fastmcp_server)}")
+            await ctx.debug(f"FastMCP server attributes: {dir(fastmcp_server)}")
+            
+            # Try to access tools via the documented fastmcp.tools attribute
+            tools_list = None
+            registered_tools = {}
+            
+            if hasattr(fastmcp_server, 'tools'):
+                tools_list = fastmcp_server.tools
+                await ctx.info(f"✅ Found fastmcp.tools attribute: {type(tools_list)}")
+                await ctx.debug(f"Tools list length: {len(tools_list) if hasattr(tools_list, '__len__') else 'unknown'}")
+                
+                # Convert tools list to dictionary if it's a list
+                if isinstance(tools_list, list):
+                    for tool in tools_list:
+                        if hasattr(tool, 'name'):
+                            registered_tools[tool.name] = tool
+                        else:
+                            await ctx.warning(f"Tool in list has no name attribute: {tool}")
+                elif hasattr(tools_list, 'items'):
+                    # It's already a dict-like object
+                    registered_tools = dict(tools_list.items())
+                else:
+                    await ctx.warning(f"Tools attribute is not list or dict: {type(tools_list)}")
+            
+            # Fallback to tool manager if tools attribute doesn't work
+            if not registered_tools and hasattr(fastmcp_server, '_tool_manager'):
+                await ctx.info("Falling back to _tool_manager")
+                if hasattr(fastmcp_server._tool_manager, '_tools'):
+                    registered_tools = fastmcp_server._tool_manager._tools
+                    await ctx.info(f"✅ Found {len(registered_tools)} tools via _tool_manager")
+                elif hasattr(fastmcp_server._tool_manager, 'tools'):
+                    registered_tools = fastmcp_server._tool_manager.tools
+                    await ctx.info(f"✅ Found {len(registered_tools)} tools via _tool_manager.tools")
+            
+            if not registered_tools:
+                await ctx.warning("Could not access tools from FastMCP server - trying alternative methods")
+                # Try other common attributes
+                for attr_name in ['_tools', 'tool_registry', 'registry']:
+                    if hasattr(fastmcp_server, attr_name):
+                        attr_value = getattr(fastmcp_server, attr_name)
+                        await ctx.debug(f"Found attribute {attr_name}: {type(attr_value)}")
+                        if hasattr(attr_value, 'items'):
+                            registered_tools = dict(attr_value.items())
+                            break
+                        elif hasattr(attr_value, '__len__') and len(attr_value) > 0:
+                            # Convert list to dict
+                            for item in attr_value:
+                                if hasattr(item, 'name'):
+                                    registered_tools[item.name] = item
+                            break
+            
+            await ctx.info(f"🔍 Final tool count: {len(registered_tools)}")
+            
+            # Categorize tools dynamically based on their names and tags
+            categories = {
                 "enhanced_tools": {
                     "description": "New tools that use resource templating (no email params needed)",
-                    "tools": [
-                        {
-                            "name": "list_my_drive_files",
-                            "description": "List Drive files (no email param needed!)",
-                            "parameters": ["query", "page_size"]
-                        },
-                        {
-                            "name": "search_my_gmail",
-                            "description": "Search Gmail messages (auto-authenticated)",
-                            "parameters": ["query", "max_results"]
-                        },
-                        {
-                            "name": "create_my_calendar_event",
-                            "description": "Create calendar events (seamless auth)",
-                            "parameters": ["summary", "start_time", "end_time", "description", "attendees", "calendar_id"]
-                        },
-                        {
-                            "name": "get_my_auth_status",
-                            "description": "Check authentication status",
-                            "parameters": []
-                        }
-                    ]
+                    "tools": [],
+                    "tool_count": 0,
+                    "requires_email": False
                 },
                 "drive_tools": {
                     "description": "Google Drive file management tools",
-                    "tool_count": 5,
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": True
                 },
                 "gmail_tools": {
-                    "description": "Gmail email management tools",
-                    "tool_count": 11,
+                    "description": "Gmail email management tools", 
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": True
                 },
                 "docs_tools": {
                     "description": "Google Docs document management tools",
-                    "tool_count": 4,
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": True
                 },
                 "forms_tools": {
                     "description": "Google Forms creation and management tools",
-                    "tool_count": 8,
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": True
                 },
                 "calendar_tools": {
                     "description": "Google Calendar event management tools",
-                    "tool_count": 6,
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": True
                 },
                 "slides_tools": {
                     "description": "Google Slides presentation tools",
-                    "tool_count": 6,
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": True
                 },
                 "sheets_tools": {
                     "description": "Google Sheets spreadsheet tools",
-                    "tool_count": 6,
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": True
                 },
                 "chat_tools": {
                     "description": "Google Chat messaging tools",
-                    "tool_count": 12,
+                    "tools": [],
+                    "tool_count": 0,
+                    "requires_email": True
+                },
+                "photos_tools": {
+                    "description": "Google Photos tools",
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": True
                 },
                 "auth_tools": {
                     "description": "Authentication and system tools",
-                    "tool_count": 4,
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": "mixed"
                 },
                 "qdrant_tools": {
                     "description": "Qdrant search and analytics tools",
-                    "tool_count": 3,
+                    "tools": [],
+                    "tool_count": 0,
                     "requires_email": False
+                },
+                "module_tools": {
+                    "description": "Module wrapper and introspection tools",
+                    "tools": [],
+                    "tool_count": 0,
+                    "requires_email": False
+                },
+                "other_tools": {
+                    "description": "Other utility and system tools",
+                    "tools": [],
+                    "tool_count": 0,
+                    "requires_email": "mixed"
                 }
             }
             
-            # Calculate total tools (59 from original + 4 enhanced)
-            total_tools = 63
+            # Categorize each tool
+            for tool_name, tool_instance in registered_tools.items():
+                await ctx.debug(f"Processing tool: {tool_name}")
+                
+                # Get tool metadata - be more defensive about accessing attributes
+                tool_info = {
+                    "name": tool_name,
+                    "description": "No description available",
+                    "tags": [],
+                    "parameters": [],
+                    "enhanced": False
+                }
+                
+                # Safely get description
+                if hasattr(tool_instance, 'description') and tool_instance.description:
+                    tool_info["description"] = tool_instance.description
+                elif hasattr(tool_instance, 'doc') and tool_instance.doc:
+                    tool_info["description"] = tool_instance.doc
+                
+                # Safely get tags
+                if hasattr(tool_instance, 'tags') and tool_instance.tags:
+                    if isinstance(tool_instance.tags, (set, list, tuple)):
+                        tool_info["tags"] = list(tool_instance.tags)
+                    else:
+                        tool_info["tags"] = [str(tool_instance.tags)]
+                
+                # Extract parameters from tool schema if available
+                parameter_names = []
+                if hasattr(tool_instance, 'schema') and tool_instance.schema:
+                    schema = tool_instance.schema
+                    if isinstance(schema, dict) and 'parameters' in schema:
+                        params = schema['parameters']
+                        if isinstance(params, dict) and 'properties' in params:
+                            parameter_names = list(params['properties'].keys())
+                            tool_info["parameters"] = parameter_names
+                elif hasattr(tool_instance, 'parameters'):
+                    # Some tools might have a direct parameters attribute
+                    if hasattr(tool_instance.parameters, 'keys'):
+                        parameter_names = list(tool_instance.parameters.keys())
+                        tool_info["parameters"] = parameter_names
+                
+                # Check if it's an enhanced tool (no user_google_email parameter)
+                is_enhanced = 'user_google_email' not in parameter_names
+                tool_info["enhanced"] = is_enhanced
+                
+                # Categorize based on name patterns and tags
+                categorized = False
+                
+                # Enhanced tools (no email parameter)
+                if is_enhanced and any(keyword in tool_name for keyword in ['my_', '_my', 'get_my_']):
+                    categories["enhanced_tools"]["tools"].append(tool_info)
+                    categories["enhanced_tools"]["tool_count"] += 1
+                    categorized = True
+                
+                # Service-specific tools
+                elif any(keyword in tool_name for keyword in ['drive', 'file']):
+                    categories["drive_tools"]["tools"].append(tool_info)
+                    categories["drive_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['gmail', 'email', 'message', 'draft']):
+                    categories["gmail_tools"]["tools"].append(tool_info)
+                    categories["gmail_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['doc', 'document']):
+                    categories["docs_tools"]["tools"].append(tool_info)
+                    categories["docs_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['form', 'response']):
+                    categories["forms_tools"]["tools"].append(tool_info)
+                    categories["forms_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['calendar', 'event']):
+                    categories["calendar_tools"]["tools"].append(tool_info)
+                    categories["calendar_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['slide', 'presentation']):
+                    categories["slides_tools"]["tools"].append(tool_info)
+                    categories["slides_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['sheet', 'spreadsheet']):
+                    categories["sheets_tools"]["tools"].append(tool_info)
+                    categories["sheets_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['chat', 'space', 'card']):
+                    categories["chat_tools"]["tools"].append(tool_info)
+                    categories["chat_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['photo', 'album']):
+                    categories["photos_tools"]["tools"].append(tool_info)
+                    categories["photos_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['auth', 'credential', 'session', 'oauth']):
+                    categories["auth_tools"]["tools"].append(tool_info)
+                    categories["auth_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['qdrant', 'search', 'vector', 'embed']):
+                    categories["qdrant_tools"]["tools"].append(tool_info)
+                    categories["qdrant_tools"]["tool_count"] += 1
+                    categorized = True
+                elif any(keyword in tool_name for keyword in ['module', 'wrap', 'component']):
+                    categories["module_tools"]["tools"].append(tool_info)
+                    categories["module_tools"]["tool_count"] += 1
+                    categorized = True
+                
+                # Uncategorized tools go to "other"
+                if not categorized:
+                    categories["other_tools"]["tools"].append(tool_info)
+                    categories["other_tools"]["tool_count"] += 1
             
-            return {
-                "total_tools": total_tools,
-                "total_categories": len(tools_info),
-                "enhanced_tools_count": len(tools_info["enhanced_tools"]["tools"]),
-                "tools_by_category": tools_info,
-                "timestamp": datetime.now().isoformat(),
-                "resource_templating_available": True,
-                "migration_status": "✅ Resource templating implemented - enhanced tools available!"
-            }
+            # Calculate totals
+            total_tools = len(registered_tools)
+            enhanced_tools_count = categories["enhanced_tools"]["tool_count"]
+            
+            # Log discovery results
+            await ctx.info(f"🔍 Dynamic tool discovery: Found {total_tools} tools, {enhanced_tools_count} enhanced")
+            
+            return ToolsDirectoryResponse(
+                total_tools=total_tools,
+                total_categories=len([cat for cat in categories.values() if cat["tool_count"] > 0]),
+                enhanced_tools_count=enhanced_tools_count,
+                tools_by_category=categories,
+                timestamp=datetime.now().isoformat(),
+                resource_templating_available=True,
+                migration_status="✅ Resource templating implemented - enhanced tools available!"
+            )
+            
+        except Exception as e:
+            await ctx.error(f"Error during dynamic tool discovery: {e}")
+            # Fallback to minimal response
+            return ToolsDirectoryResponse(
+                total_tools=0,
+                total_categories=0,
+                enhanced_tools_count=0,
+                tools_by_category={},
+                timestamp=datetime.now().isoformat(),
+                resource_templating_available=False,
+                migration_status="❌ Error during tool discovery",
+                error=str(e)
+            )
             
         except Exception as e:
             logger.error(f"Error generating tools list: {e}")
-            return {
-                "error": f"Failed to generate tools list: {str(e)}",
-                "timestamp": datetime.now().isoformat()
-            }
+            return ToolsDirectoryResponse(
+                total_tools=0,
+                total_categories=0,
+                enhanced_tools_count=0,
+                tools_by_category={},
+                timestamp=datetime.now().isoformat(),
+                resource_templating_available=False,
+                migration_status="❌ Error generating tools list",
+                error=f"Failed to generate tools list: {str(e)}"
+            )
     
     @mcp.resource(
         uri="tools://enhanced/list",
         name="Enhanced Tools Collection",
         description="Curated list of enhanced tools that use automatic resource templating - no user_google_email parameters required, seamless authentication through OAuth session context",
         mime_type="application/json",
-        tags={"tools", "enhanced", "templating", "oauth", "seamless", "modern", "no-email"}
-    )
-    async def get_enhanced_tools_only(ctx: Context) -> dict:
-        """Internal implementation for enhanced tools collection resource."""
-        enhanced_tools = [
-            {
-                "name": "list_my_drive_files",
-                "description": "List files in your Google Drive without needing to specify email",
-                "parameters": {
-                    "query": "Google Drive query string (optional, default: list all)",
-                    "page_size": "Number of files to return (optional, default: 25)"
-                },
-                "example": "list_my_drive_files('name contains \"report\"', 10)"
-            },
-            {
-                "name": "search_my_gmail",
-                "description": "Search your Gmail messages with automatic authentication",
-                "parameters": {
-                    "query": "Gmail search query (required)",
-                    "max_results": "Maximum results to return (optional, default: 10)"
-                },
-                "example": "search_my_gmail('from:boss@company.com', 5)"
-            },
-            {
-                "name": "create_my_calendar_event",
-                "description": "Create calendar event with seamless authentication",
-                "parameters": {
-                    "summary": "Event title (required)",
-                    "start_time": "Start time in RFC3339 format (required)",
-                    "end_time": "End time in RFC3339 format (required)",
-                    "description": "Event description (optional)",
-                    "attendees": "List of attendee emails (optional)",
-                    "calendar_id": "Calendar ID (optional, default: 'primary')"
-                },
-                "example": "create_my_calendar_event('Team Meeting', '2025-02-01T10:00:00Z', '2025-02-01T11:00:00Z')"
-            },
-            {
-                "name": "get_my_auth_status",
-                "description": "Check your authentication status across all Google services",
-                "parameters": {},
-                "example": "get_my_auth_status()"
-            }
-        ]
-        
-        return {
-            "enhanced_tools": enhanced_tools,
-            "count": len(enhanced_tools),
-            "benefit": "No user_google_email parameter required - uses OAuth session automatically",
-            "timestamp": datetime.now().isoformat()
+        tags={"tools", "enhanced", "templating", "oauth", "seamless", "modern", "no-email"},
+        meta={
+            "response_model": "EnhancedToolsResponse",
+            "enhanced": True,
+            "oauth_enabled": True
         }
+    )
+    async def get_enhanced_tools_only(ctx: Context) -> EnhancedToolsResponse:
+        """Internal implementation for enhanced tools collection resource - dynamically discovers enhanced tools."""
+        try:
+            # Access the FastMCP server instance through context
+            fastmcp_server = ctx.fastmcp
+            
+            # Try to access tools via the documented fastmcp.tools attribute first
+            tools_list = None
+            registered_tools = {}
+            
+            if hasattr(fastmcp_server, 'tools'):
+                tools_list = fastmcp_server.tools
+                await ctx.debug(f"Found fastmcp.tools: {type(tools_list)}")
+                
+                # Convert tools list to dictionary if it's a list
+                if isinstance(tools_list, list):
+                    for tool in tools_list:
+                        if hasattr(tool, 'name'):
+                            registered_tools[tool.name] = tool
+                elif hasattr(tools_list, 'items'):
+                    # It's already a dict-like object
+                    registered_tools = dict(tools_list.items())
+            
+            # Fallback to tool manager if tools attribute doesn't work
+            if not registered_tools and hasattr(fastmcp_server, '_tool_manager'):
+                if hasattr(fastmcp_server._tool_manager, '_tools'):
+                    registered_tools = fastmcp_server._tool_manager._tools
+                elif hasattr(fastmcp_server._tool_manager, 'tools'):
+                    registered_tools = fastmcp_server._tool_manager.tools
+            
+            if not registered_tools:
+                await ctx.warning("Could not access tools from FastMCP server")
+                return EnhancedToolsResponse(
+                    enhanced_tools=[],
+                    count=0,
+                    benefit="No user_google_email parameter required - uses OAuth session automatically",
+                    timestamp=datetime.now().isoformat()
+                )
+            
+            # Find enhanced tools (tools without user_google_email parameter)
+            enhanced_tools = []
+            
+            for tool_name, tool_instance in registered_tools.items():
+                # Get tool parameters safely
+                parameters = {}
+                parameter_names = []
+                
+                # Try to get parameters from schema
+                if hasattr(tool_instance, 'schema') and tool_instance.schema:
+                    schema = tool_instance.schema
+                    if isinstance(schema, dict) and 'parameters' in schema:
+                        params = schema['parameters']
+                        if isinstance(params, dict) and 'properties' in params:
+                            parameter_names = list(params['properties'].keys())
+                            # Build parameter descriptions
+                            for param_name, param_info in params['properties'].items():
+                                if isinstance(param_info, dict):
+                                    parameters[param_name] = param_info.get('description', f'{param_name} parameter')
+                                else:
+                                    parameters[param_name] = f'{param_name} parameter'
+                
+                # Check if it's an enhanced tool (no user_google_email parameter)
+                is_enhanced = 'user_google_email' not in parameter_names
+                
+                # Include tools that are clearly "enhanced" based on naming or characteristics
+                if is_enhanced and (
+                    any(keyword in tool_name for keyword in ['my_', '_my', 'get_my_']) or
+                    ('template' in getattr(tool_instance, 'tags', set())) or
+                    ('enhanced' in getattr(tool_instance, 'tags', set()))
+                ):
+                    # Safely get description
+                    description = "Enhanced tool with automatic authentication"
+                    if hasattr(tool_instance, 'description') and tool_instance.description:
+                        description = tool_instance.description
+                    
+                    # Create a more meaningful example
+                    example = f"{tool_name}()"
+                    if parameters:
+                        # Create a basic example with parameter names
+                        param_examples = []
+                        for param_name in list(parameters.keys())[:3]:  # First 3 params
+                            if 'query' in param_name:
+                                param_examples.append(f'{param_name}="search term"')
+                            elif 'summary' in param_name or 'title' in param_name:
+                                param_examples.append(f'{param_name}="Example Title"')
+                            elif 'time' in param_name:
+                                param_examples.append(f'{param_name}="2025-02-01T10:00:00Z"')
+                            else:
+                                param_examples.append(f'{param_name}="value"')
+                        
+                        if param_examples:
+                            example = f"{tool_name}({', '.join(param_examples)})"
+                    
+                    enhanced_tool = EnhancedToolInfo(
+                        name=tool_name,
+                        description=description,
+                        parameters=parameters,
+                        example=example
+                    )
+                    enhanced_tools.append(enhanced_tool)
+            
+            # Log discovery results
+            await ctx.info(f"🔍 Enhanced tool discovery: Found {len(enhanced_tools)} enhanced tools out of {len(registered_tools)} total")
+            
+            return EnhancedToolsResponse(
+                enhanced_tools=enhanced_tools,
+                count=len(enhanced_tools),
+                benefit="No user_google_email parameter required - uses OAuth session automatically",
+                timestamp=datetime.now().isoformat()
+            )
+            
+        except Exception as e:
+            await ctx.error(f"Error during enhanced tool discovery: {e}")
+            # Fallback to empty response
+            return EnhancedToolsResponse(
+                enhanced_tools=[],
+                count=0,
+                benefit="No user_google_email parameter required - uses OAuth session automatically",
+                timestamp=datetime.now().isoformat()
+            )
     
     @mcp.resource(
         uri="tools://usage/guide",
         name="Comprehensive Tools Usage Guide",
         description="Complete usage guide with examples, workflows, and best practices for both enhanced and legacy tools including authentication flows, migration examples, and error handling patterns",
         mime_type="application/json",
-        tags={"tools", "guide", "usage", "examples", "workflows", "migration", "authentication", "best-practices"}
+        tags={"tools", "guide", "usage", "examples", "workflows", "migration", "authentication", "best-practices"},
+        meta={
+            "response_model": "ToolUsageGuideResponse",
+            "enhanced": True,
+            "comprehensive": True
+        }
     )
-    async def get_tool_usage_guide(ctx: Context) -> dict:
+    async def get_tool_usage_guide(ctx: Context) -> ToolUsageGuideResponse:
         """Internal implementation for comprehensive tools usage guide resource."""
-        return {
-            "quick_start": {
+        return ToolUsageGuideResponse(
+            quick_start={
                 "step_1": "Authenticate with: start_google_auth('your.email@gmail.com')",
                 "step_2": "Check status with: get_my_auth_status() (enhanced tool - no email needed!)",
                 "step_3": "Use tools: list_my_drive_files() or search_my_gmail('your query')"
             },
-            "enhanced_tools_workflow": {
+            enhanced_tools_workflow={
                 "description": "New tools that don't require email parameters",
                 "authentication": "Automatic from OAuth session",
                 "examples": {
@@ -478,7 +1029,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                     "status": "get_my_auth_status()"
                 }
             },
-            "legacy_tools_workflow": {
+            legacy_tools_workflow={
                 "description": "Original tools that require email parameters",
                 "authentication": "Manual email parameter required",
                 "examples": {
@@ -487,26 +1038,31 @@ def setup_user_resources(mcp: FastMCP) -> None:
                     "docs": "search_docs('user@gmail.com', 'meeting notes')"
                 }
             },
-            "migration_guide": {
+            migration_guide={
                 "from": "search_drive_files('user@gmail.com', 'query')",
                 "to": "list_my_drive_files('query')",
                 "benefit": "No need to remember or type your email address"
             },
-            "error_handling": {
+            error_handling={
                 "no_auth": "Enhanced tools will show: '❌ Authentication error: No authenticated user found'",
                 "solution": "Run start_google_auth('your.email@gmail.com') first"
             },
-            "timestamp": datetime.now().isoformat()
-        }
+            timestamp=datetime.now().isoformat()
+        )
     
     @mcp.resource(
         uri="workspace://content/recent",
         name="Recent Google Workspace Content",
         description="List of recently accessed Google Docs, Sheets, Drive files, and other Workspace content for dynamic email composition and content linking",
         mime_type="application/json",
-        tags={"workspace", "content", "drive", "docs", "sheets", "recent", "gmail", "email"}
+        tags={"workspace", "content", "drive", "docs", "sheets", "recent", "gmail", "email"},
+        meta={
+            "response_model": "WorkspaceContentResponse",
+            "enhanced": True,
+            "requires_auth": True
+        }
     )
-    async def get_recent_workspace_content(ctx: Context) -> dict:
+    async def get_recent_workspace_content(ctx: Context) -> WorkspaceContentResponse:
         """Get recent Google Workspace content for email composition."""
         user_email = get_user_email_context()
         if not user_email:
@@ -809,19 +1365,28 @@ def setup_user_resources(mcp: FastMCP) -> None:
         name="Gmail Allow List",
         description="Get the configured Gmail allow list for send_gmail_message tool - recipients on this list skip elicitation confirmation",
         mime_type="application/json",
-        tags={"gmail", "allow-list", "security", "elicitation", "trusted", "recipients"}
+        tags={"gmail", "allow-list", "security", "elicitation", "trusted", "recipients"},
+        meta={
+            "response_model": "GmailAllowListResponse",
+            "enhanced": True,
+            "security_related": True
+        }
     )
-    async def get_gmail_allow_list_resource(ctx: Context) -> dict:
+    async def get_gmail_allow_list_resource(ctx: Context) -> GmailAllowListResponse:
         """Internal implementation for Gmail allow list resource."""
         from config.settings import settings
         
         user_email = get_user_email_context()
         if not user_email:
-            return {
-                "error": "No authenticated user found in current session",
-                "authenticated": False,
-                "allow_list": []
-            }
+            return GmailAllowListResponse(
+                error="No authenticated user found in current session",
+                user_email="",
+                allow_list=[],
+                count=0,
+                description="Authentication required",
+                last_updated="unknown",
+                timestamp=datetime.now().isoformat()
+            )
         
         try:
             # Get the allow list from settings
@@ -831,40 +1396,26 @@ def setup_user_resources(mcp: FastMCP) -> None:
             raw_value = settings.gmail_allow_list
             is_configured = bool(raw_value and raw_value.strip())
             
-            # Mask emails for privacy in the response
-            masked_list = []
-            if allow_list:
-                for email in allow_list:
-                    if '@' in email:
-                        local, domain = email.split('@', 1)
-                        if len(local) > 3:
-                            masked = f"{local[:2]}***@{domain}"
-                        else:
-                            masked = f"***@{domain}"
-                    else:
-                        masked = email[:3] + "***" if len(email) > 3 else "***"
-                    masked_list.append(masked)
-            
-            return {
-                "authenticated_user": user_email,
-                "is_configured": is_configured,
-                "environment_variable": "GMAIL_ALLOW_LIST",
-                "allow_list_count": len(allow_list),
-                "allow_list": allow_list,  # Full list for internal use
-                "masked_list": masked_list,  # Privacy-protected list for display
-                "timestamp": datetime.now().isoformat(),
-                "description": "Recipients in this list will skip elicitation confirmation when sending emails",
-                "configuration_format": "Comma-separated email addresses in GMAIL_ALLOW_LIST environment variable"
-            }
+            return GmailAllowListResponse(
+                user_email=user_email,
+                allow_list=allow_list,
+                count=len(allow_list),
+                description="Recipients in this list will skip elicitation confirmation when sending emails",
+                last_updated=datetime.now().isoformat(),
+                timestamp=datetime.now().isoformat()
+            )
             
         except Exception as e:
             logger.error(f"Error retrieving Gmail allow list: {e}")
-            return {
-                "error": f"Failed to retrieve Gmail allow list: {str(e)}",
-                "authenticated_user": user_email,
-                "allow_list": [],
-                "timestamp": datetime.now().isoformat()
-            }
+            return GmailAllowListResponse(
+                error=f"Failed to retrieve Gmail allow list: {str(e)}",
+                user_email=user_email,
+                allow_list=[],
+                count=0,
+                description="Error occurred",
+                last_updated="unknown",
+                timestamp=datetime.now().isoformat()
+            )
     
     logger.info("✅ User and authentication resources registered")
 

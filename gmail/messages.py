@@ -544,7 +544,7 @@ def setup_message_tools(mcp: FastMCP) -> None:
     )
     async def get_gmail_message_content_tool(
         message_id: Annotated[str, Field(description="The unique Gmail message ID to retrieve content from")],
-        user_google_email: Annotated[Optional[str], Field(description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).")] = None
+        user_google_email: UserGoogleEmail = None
     ) -> GetGmailMessageContentResponse:
         return await get_gmail_message_content(message_id, user_google_email)
 
@@ -562,7 +562,7 @@ def setup_message_tools(mcp: FastMCP) -> None:
     )
     async def get_gmail_messages_content_batch_tool(
         message_ids: Annotated[List[str], Field(description="List of Gmail message IDs to retrieve content from (maximum 100 messages per request)")],
-        user_google_email: Annotated[Optional[str], Field(description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).")] = None,
+        user_google_email: UserGoogleEmail = None,
         format: Annotated[Literal["full", "metadata"], Field(description="Message format - 'full' includes message body, 'metadata' only includes headers")] = "full"
     ) -> GetGmailMessagesBatchResponse:
         return await get_gmail_messages_content_batch(message_ids, user_google_email, format)
@@ -581,6 +581,6 @@ def setup_message_tools(mcp: FastMCP) -> None:
     )
     async def get_gmail_thread_content_tool(
         thread_id: Annotated[str, Field(description="The unique Gmail thread ID to retrieve the complete conversation")],
-        user_google_email: Annotated[Optional[str], Field(description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).")] = None
+        user_google_email: UserGoogleEmail = None
     ) -> GetGmailThreadContentResponse:
         return await get_gmail_thread_content(thread_id, user_google_email)

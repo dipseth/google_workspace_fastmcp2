@@ -13,10 +13,12 @@ A **MCP server** that provides **universal Google service integration** with OAu
 
 ## 🎉 Latest Platform Achievements
 
-### ✅ Gmail Tools - Production Ready with Advanced HTML
+### ✅ Gmail Tools - Production Ready with Advanced HTML & Elicitation
 - **Gmail HTML Email Mastery**: Full CSS3 support including gradients, animations, and responsive design
 - **Fixed `draft_gmail_message`**: Resolved parameter validation and MIME encoding issues for HTML content
 - **Content Type Flexibility**: Perfect `plain`, `html`, and `mixed` email composition support
+- **Elicitation Fallback System**: Graceful handling for MCP clients that don't support elicitation (most clients)
+- **Universal Client Compatibility**: Works with any MCP client regardless of elicitation support
 - **Production Verified**: Advanced HTML features tested and confirmed working in Gmail interface
 
 ### ⚡ Revolutionary Performance Optimization
@@ -486,7 +488,7 @@ await list_available_card_types()
 
 ### 📚 Comprehensive API Reference
 
-**[View Complete API Documentation →](docs/api-reference/README.md)**
+**[View Complete API Documentation →](documentation/api-reference/README.md)**
 
 Access detailed documentation for all 60+ tools including:
 - Complete parameter specifications with types and defaults

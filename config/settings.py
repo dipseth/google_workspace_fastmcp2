@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # Gmail Allow List Configuration
     gmail_allow_list: str = ""  # Comma-separated list of email addresses
     
+    # Gmail Elicitation Configuration (for MCP client compatibility)
+    gmail_enable_elicitation: bool = True  # Enable elicitation for untrusted recipients
+    gmail_elicitation_fallback: str = "block"  # What to do if elicitation fails: "block", "allow", "draft"
+    
     # Phase 1 OAuth Migration Feature Flags
     enable_unified_auth: bool = True
     legacy_compat_mode: bool = True
@@ -125,50 +129,56 @@ class Settings(BaseSettings):
         """
         Get OAuth scopes for Google services.
         
-        This property now uses the centralized scope registry through the
-        compatibility shim, ensuring consistency across the application.
-        Falls back to the original hardcoded scopes if the registry is unavailable.
+        This property uses the centralized scope registry as the single source of truth,
+        ensuring consistency across the application and avoiding problematic scopes.
         
         Returns:
-            List of OAuth scope URLs
+            List of OAuth scope URLs from oauth_comprehensive group
         """
-        global _COMPATIBILITY_AVAILABLE
-        
-        # Lazy import to avoid circular dependency issues
-        if _COMPATIBILITY_AVAILABLE is None:
-            try:
-                from ..auth.compatibility_shim import CompatibilityShim
-                _COMPATIBILITY_AVAILABLE = True
-                logging.info("SCOPE_DEBUG: Successfully imported compatibility shim")
-            except ImportError as e:
-                _COMPATIBILITY_AVAILABLE = False
-                logging.warning(f"SCOPE_DEBUG: Compatibility shim not available, using fallback scopes: {e}")
-        
-        if _COMPATIBILITY_AVAILABLE:
-            try:
-                from ..auth.compatibility_shim import CompatibilityShim
-                scopes = CompatibilityShim.get_legacy_drive_scopes()
-                logging.info(f"SCOPE_DEBUG: Retrieved {len(scopes)} scopes from compatibility shim")
-                # Check if Gmail settings scopes are included
-                gmail_settings_basic = "https://www.googleapis.com/auth/gmail.settings.basic"
-                gmail_settings_sharing = "https://www.googleapis.com/auth/gmail.settings.sharing"
-                has_settings_basic = gmail_settings_basic in scopes
-                has_settings_sharing = gmail_settings_sharing in scopes
-                logging.info(f"SCOPE_DEBUG: Gmail settings.basic included: {has_settings_basic}")
-                logging.info(f"SCOPE_DEBUG: Gmail settings.sharing included: {has_settings_sharing}")
-                return scopes
-            except Exception as e:
-                logging.error(f"SCOPE_DEBUG: Error getting scopes from registry, using fallback: {e}")
-                return self._fallback_drive_scopes
-        else:
-            logging.info("SCOPE_DEBUG: Using fallback drive scopes (compatibility shim unavailable)")
-            # Check if fallback includes Gmail settings scopes
+        try:
+            # Use the scope registry directly as single source of truth
+            from auth.scope_registry import ScopeRegistry
+            scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
+            logging.info(f"SCOPE_DEBUG: Retrieved {len(scopes)} scopes from oauth_comprehensive group")
+            
+            # Verify no problematic scopes are included
+            problematic_patterns = ['photoslibrary.sharing', 'cloud-platform', 'cloudfunctions', 'pubsub', 'iam']
+            problematic_scopes = [scope for scope in scopes if any(bad in scope for bad in problematic_patterns)]
+            
+            if problematic_scopes:
+                logging.error(f"SCOPE_DEBUG: Found {len(problematic_scopes)} problematic scopes in oauth_comprehensive")
+                for scope in problematic_scopes:
+                    logging.error(f"SCOPE_DEBUG: Problematic scope: {scope}")
+            else:
+                logging.info("SCOPE_DEBUG: No problematic scopes found - using clean oauth_comprehensive group")
+            
+            # Check if Gmail settings scopes are included
             gmail_settings_basic = "https://www.googleapis.com/auth/gmail.settings.basic"
             gmail_settings_sharing = "https://www.googleapis.com/auth/gmail.settings.sharing"
-            has_settings_basic = gmail_settings_basic in self._fallback_drive_scopes
-            has_settings_sharing = gmail_settings_sharing in self._fallback_drive_scopes
-            logging.warning(f"SCOPE_DEBUG: Fallback Gmail settings.basic included: {has_settings_basic}")
-            logging.warning(f"SCOPE_DEBUG: Fallback Gmail settings.sharing included: {has_settings_sharing}")
+            has_settings_basic = gmail_settings_basic in scopes
+            has_settings_sharing = gmail_settings_sharing in scopes
+            logging.info(f"SCOPE_DEBUG: Gmail settings.basic included: {has_settings_basic}")
+            logging.info(f"SCOPE_DEBUG: Gmail settings.sharing included: {has_settings_sharing}")
+            
+            return scopes
+            
+        except Exception as e:
+            logging.error(f"SCOPE_DEBUG: Error getting scopes from registry, using minimal fallback: {e}")
+            # Use a minimal fallback that excludes problematic scopes
+            minimal_scopes = [
+                "https://www.googleapis.com/auth/userinfo.email",
+                "https://www.googleapis.com/auth/userinfo.profile",
+                "openid",
+                "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.send",
+                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/documents",
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/presentations"
+            ]
+            logging.warning(f"SCOPE_DEBUG: Using minimal fallback with {len(minimal_scopes)} scopes")
+            return minimal_scopes
             return self._fallback_drive_scopes
     
     model_config = SettingsConfigDict(

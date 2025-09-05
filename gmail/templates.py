@@ -21,6 +21,7 @@ from dataclasses import dataclass, asdict
 
 # Import from existing middleware to leverage centralized Qdrant implementation
 from middleware.qdrant_unified import QdrantUnifiedMiddleware
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +88,15 @@ class EmailTemplateManager:
         if self.qdrant_middleware is None:
             try:
                 logger.info("🔗 Initializing Qdrant middleware for EmailTemplateManager...")
+                logger.info(f"🔧 Using Qdrant settings: host={settings.qdrant_host}, port={settings.qdrant_port}, url={settings.qdrant_url}, api_key={'***' if settings.qdrant_api_key else 'None'}")
                 self.qdrant_middleware = QdrantUnifiedMiddleware(
-                    collection_name=self.collection_name
+                    qdrant_host=settings.qdrant_host,
+                    qdrant_port=settings.qdrant_port,
+                    qdrant_api_key=settings.qdrant_api_key,
+                    qdrant_url=settings.qdrant_url,
+                    collection_name=self.collection_name,
+                    auto_discovery=True,  # Enable auto-discovery to find available Qdrant instances
+                    ports=[settings.qdrant_port, 6333, 6335, 6334]  # Try configured port first, then fallback
                 )
                 logger.info("✅ Qdrant middleware initialized")
             except Exception as e:
