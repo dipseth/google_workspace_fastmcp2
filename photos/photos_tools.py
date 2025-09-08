@@ -14,6 +14,7 @@ from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
 
 from auth.service_helpers import request_service, get_injected_service, get_service
+from tools.common_types import UserGoogleEmailPhotos
 from .photos_types import AlbumListResponse, PhotoListResponse, AlbumInfo, PhotoInfo
 
 # Configure module logger
@@ -122,7 +123,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_photos_albums(
-        user_google_email: str,
+        user_google_email: UserGoogleEmailPhotos = None,
         max_results: int = 25,
         exclude_non_app_created: bool = False
     ) -> AlbumListResponse:
@@ -208,7 +209,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
         }
     )
     async def search_photos(
-        user_google_email: str,
+        user_google_email: UserGoogleEmailPhotos,
         album_id: Optional[str] = None,
         content_categories: Optional[List[str]] = None,
         date_start: Optional[str] = None,

@@ -42,7 +42,9 @@ from sheets.sheets_tools import setup_sheets_tools
 from photos.photos_tools import setup_photos_tools
 from photos.advanced_tools import setup_advanced_photos_tools
 from middleware.qdrant_unified import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools
-from middleware.template_middleware import setup_template_middleware
+# from middleware.template_middleware import setup_template_middleware
+from middleware.template_middleware import setup_streamlined_template_middleware as setup_template_middleware
+from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
 from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
 from resources.service_list_resources import setup_service_list_resources
@@ -174,6 +176,11 @@ qdrant_middleware = QdrantUnifiedMiddleware()
 mcp.add_middleware(qdrant_middleware)
 logger.info("✅ Qdrant unified middleware enabled - will initialize on first use")
 
+# Add TagBasedResourceMiddleware for service list resource handling
+logger.info("🏷️ Setting up TagBasedResourceMiddleware for service:// resource handling...")
+tag_based_middleware = TagBasedResourceMiddleware(enable_debug_logging=True)
+mcp.add_middleware(tag_based_middleware)
+logger.info("✅ TagBasedResourceMiddleware enabled - service:// URIs will be handled via tag-based tool discovery")
 
 # Register drive upload tools
 setup_drive_tools(mcp)
@@ -254,7 +261,10 @@ setup_user_resources(mcp)
 setup_tool_output_resources(mcp, qdrant_middleware)
 
 # Setup service list resources (dynamic discovery of list-based tools)
+# These resources define the URI patterns and documentation
+# TagBasedResourceMiddleware intercepts and handles the actual requests
 setup_service_list_resources(mcp)
+logger.info("✅ Service list resources registered - URIs handled by TagBasedResourceMiddleware")
 
 # Setup service recent resources (recent files from Drive-based services)
 setup_service_recent_resources(mcp)

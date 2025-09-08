@@ -1,13 +1,14 @@
 """Test suite for Google Chat App Development tools using FastMCP Client SDK."""
 
 import pytest
+import pytest_asyncio
 import asyncio
 from fastmcp import Client
 from typing import Any, Dict, List
 import os
 import json
 from dotenv import load_dotenv
-from test_auth_utils import get_client_auth_config
+from ..test_auth_utils import get_client_auth_config
 
 # Load environment variables from .env file
 load_dotenv()
@@ -26,15 +27,7 @@ CHAT_SERVICE_ACCOUNT_FILE = os.getenv("CHAT_SERVICE_ACCOUNT_FILE", "")
 
 class TestChatAppTools:
     """Test Google Chat App Development tools using the FastMCP Client."""
-    
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        # Get JWT token for authentication if enabled
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        async with client:
-            yield client
+    # Using the global client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_chat_app_tools_available(self, client):
@@ -57,8 +50,8 @@ class TestChatAppTools:
         """Test initializing the Google Chat App Manager."""
         result = await client.call_tool("initialize_chat_app_manager", {})
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         # Should either succeed or return configuration error
         valid_responses = [
             "successfully initialized", "manager initialized", "service account", 
@@ -80,8 +73,8 @@ class TestChatAppTools:
             "publishing_state": "DRAFT"
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         # Should either succeed or return configuration/authentication error
         valid_responses = [
             "successfully created", "manifest created", "app manifest", "draft", 
@@ -100,8 +93,8 @@ class TestChatAppTools:
             "port": 3000
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         # Should return webhook template code or configuration
         valid_responses = [
             "webhook template", "generated", "template", "handler", "flask", "fastapi",
@@ -118,8 +111,8 @@ class TestChatAppTools:
             "use_card_framework": False
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         # Should return minimal webhook template
         valid_responses = [
             "webhook template", "generated", "template", "handler", "minimal",
@@ -133,8 +126,8 @@ class TestChatAppTools:
         """Test listing available Chat App Development resources."""
         result = await client.call_tool("list_chat_app_resources", {})
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         # Should return list of resources and documentation
         valid_responses = [
             "resources", "documentation", "examples", "templates", "guides", 
@@ -147,22 +140,14 @@ class TestChatAppTools:
 
 class TestChatAppToolsIntegration:
     """Integration tests for Chat App Development tools."""
-    
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        # Get JWT token for authentication if enabled
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        async with client:
-            yield client
+    # Using the global client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_complete_app_creation_workflow(self, client):
         """Test the complete workflow of creating a Chat app."""
         # Step 1: Initialize the manager
         init_result = await client.call_tool("initialize_chat_app_manager", {})
-        assert len(init_result) > 0
+        assert init_result is not None
         
         # Step 2: Generate webhook template
         template_result = await client.call_tool("generate_webhook_template", {
@@ -170,7 +155,7 @@ class TestChatAppToolsIntegration:
             "use_card_framework": True,
             "port": 8080
         })
-        assert len(template_result) > 0
+        assert template_result is not None
         
         # Step 3: Create app manifest
         manifest_result = await client.call_tool("create_chat_app_manifest", {
@@ -179,15 +164,15 @@ class TestChatAppToolsIntegration:
             "bot_endpoint": "https://example.com/webhook",
             "publishing_state": "DRAFT"
         })
-        assert len(manifest_result) > 0
+        assert manifest_result is not None
         
         # Step 4: List available resources
         resources_result = await client.call_tool("list_chat_app_resources", {})
-        assert len(resources_result) > 0
+        assert resources_result is not None
         
         # Verify all steps completed without fatal errors
         for result in [init_result, template_result, manifest_result, resources_result]:
-            content = result[0].text
+            content = result.content[0].text
             # Should not contain fatal error indicators
             fatal_errors = ["fatal error", "critical failure", "system crash", "unable to proceed"]
             assert not any(error in content.lower() for error in fatal_errors), f"Fatal error detected: {content}"
@@ -199,8 +184,8 @@ class TestChatAppToolsIntegration:
         # Test initialization with real service account
         result = await client.call_tool("initialize_chat_app_manager", {})
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         
         # With real service account, expect success or specific auth errors
         success_indicators = ["successfully initialized", "manager initialized", "ready", "credentials valid"]
@@ -217,8 +202,8 @@ class TestChatAppToolsIntegration:
         # This test ensures graceful handling when CHAT_SERVICE_ACCOUNT_FILE is not set
         result = await client.call_tool("initialize_chat_app_manager", {})
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         
         # Should gracefully handle missing configuration
         expected_patterns = [
@@ -230,23 +215,15 @@ class TestChatAppToolsIntegration:
 
 class TestChatAppAuthentication:
     """Test authentication aspects of Chat App Development tools."""
-    
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        # Get JWT token for authentication if enabled
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        async with client:
-            yield client
+    # Using the global client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_service_account_validation(self, client):
         """Test service account credential validation."""
         result = await client.call_tool("initialize_chat_app_manager", {})
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         
         # Should validate service account properly
         validation_indicators = [
@@ -260,8 +237,8 @@ class TestChatAppAuthentication:
         """Test that proper scopes are documented/validated."""
         result = await client.call_tool("list_chat_app_resources", {})
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         
         # Should mention required scopes for Chat API
         scope_indicators = [
@@ -279,8 +256,8 @@ class TestChatAppAuthentication:
             "bot_endpoint": "https://secure-endpoint.example.com/webhook"
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         
         # Should mention security-related configurations
         security_indicators = [
@@ -293,15 +270,7 @@ class TestChatAppAuthentication:
 # Performance and reliability tests
 class TestChatAppToolsPerformance:
     """Test performance and reliability of Chat App Development tools."""
-    
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        # Get JWT token for authentication if enabled
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        async with client:
-            yield client
+    # Using the global client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_multiple_template_generations(self, client):
@@ -315,8 +284,8 @@ class TestChatAppToolsPerformance:
                 "port": 8000 + len(app_name)  # Different ports
             })
             
-            assert len(result) > 0
-            content = result[0].text
+            assert result is not None
+            content = result.content[0].text
             
             # Each template should be generated successfully
             success_indicators = ["template", "generated", "webhook", "handler", app_name.lower()]
@@ -339,8 +308,8 @@ class TestChatAppToolsPerformance:
             if isinstance(result, Exception):
                 pytest.fail(f"Concurrent request {i} failed with exception: {result}")
             
-            assert len(result) > 0, f"Concurrent request {i} returned empty result"
-            content = result[0].text
+            assert result is not None, f"Concurrent request {i} returned empty result"
+            content = result.content[0].text
             
             # Should contain resource information
             resource_indicators = ["resources", "documentation", "examples", "guides", "tools"]
@@ -366,8 +335,8 @@ class TestChatAppToolsPerformance:
         
         result = await client.call_tool("create_chat_app_manifest", comprehensive_manifest)
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        content = result.content[0].text
         
         # Should handle large manifest creation
         handling_indicators = [

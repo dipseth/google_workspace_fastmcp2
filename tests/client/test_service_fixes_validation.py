@@ -20,7 +20,7 @@ import httpx
 from typing import Any, Dict, List
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
-from test_auth_utils import get_client_auth_config
+from ..test_auth_utils import get_client_auth_config
 
 
 # Server configuration - Updated for HTTPS

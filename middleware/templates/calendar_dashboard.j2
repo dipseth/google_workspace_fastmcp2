@@ -1,0 +1,212 @@
+{% macro render_calendar_dashboard(calendars_data, title="Google Calendars", show_stats=true) %}
+{#
+    Google Calendar Dashboard Macro
+    Accepts: Multiple data formats:
+      - service://calendar/calendars.result.calendars data
+      - service://calendar/calendars.calendars data
+      - service://calendar/calendars.items data
+      - Direct calendars list data
+    Returns: Complete HTML visualization with calendar cards, statistics, and access role categorization
+    
+    Parameters:
+    - calendars_data: The calendar data object (from service://calendar/calendars)
+    - title: Dashboard title (default: "Google Calendars")
+    - show_stats: Whether to show statistics section (default: true)
+    
+    Usage Examples:
+    {{ render_calendar_dashboard(service://calendar/calendars, "My Calendar Dashboard") }}
+    {{ render_calendar_dashboard(calendar_data, "Team Calendars", false) }}
+#}
+
+{# 1) Process the data - handle different possible data structures #}
+{% if calendars_data %}
+    {% if calendars_data.result is defined and calendars_data.result.calendars is defined %}
+        {% set all_calendars = calendars_data.result.calendars | list %}
+    {% elif calendars_data.calendars is defined %}
+        {% set all_calendars = calendars_data.calendars | list %}
+    {% elif calendars_data.items is defined and calendars_data.items is not callable %}
+        {% set all_calendars = calendars_data.items | list %}
+    {% elif calendars_data["items"] is defined %}
+        {% set all_calendars = calendars_data["items"] | list %}
+    {% elif calendars_data is iterable and calendars_data is not string %}
+        {% set all_calendars = calendars_data | list %}
+    {% else %}
+        {% set all_calendars = [] %}
+    {% endif %}
+{% else %}
+    {% set all_calendars = [] %}
+{% endif %}
+
+{# 2) Categorize calendars by type and access #}
+{% set primary_calendars = all_calendars | selectattr('primary', 'equalto', true) | list %}
+{% set owned_calendars = all_calendars | selectattr('accessRole', 'equalto', 'owner') | list %}
+{% set writer_calendars = all_calendars | selectattr('accessRole', 'equalto', 'writer') | list %}
+{% set reader_calendars = all_calendars | selectattr('accessRole', 'equalto', 'reader') | list %}
+{% set shared_calendars = all_calendars | rejectattr('accessRole', 'equalto', 'owner') | list %}
+
+<!-- Google Calendar Dashboard -->
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,sans-serif; line-height:1.45; color:#1f2937; background:linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); padding:40px 20px; margin:0;">
+    <div style="max-width:1200px; margin:0 auto;">
+        
+        {# Header Section #}
+        <div style="text-align:center; margin-bottom:32px;">
+            <h1 style="margin:0 0 8px 0; color:#ffffff; font-size:32px; font-weight:900; text-shadow:0 2px 8px rgba(0,0,0,0.3);">
+                📅 {{ title }}
+            </h1>
+            <h2 style="margin:0 0 16px 0; color:#dbeafe; font-size:18px; font-weight:600;">
+                Calendar Management Dashboard
+            </h2>
+            <div style="background:rgba(255,255,255,0.2); border-radius:12px; padding:12px 20px; display:inline-block;">
+                <span style="color:#ffffff; font-size:14px; font-weight:600;">
+                    📊 {{ all_calendars|length }} Total • 🌟 {{ primary_calendars|length }} Primary • 👤 {{ owned_calendars|length }} Owned • 🤝 {{ shared_calendars|length }} Shared
+                </span>
+            </div>
+        </div>
+
+        {% if show_stats and all_calendars|length > 0 %}
+            {# Statistics Dashboard #}
+            <div style="background:rgba(255,255,255,0.95); border-radius:16px; padding:24px; margin-bottom:24px; box-shadow:0 8px 24px rgba(0,0,0,0.1);">
+                <h2 style="margin:0 0 20px 0; color:#1f2937; font-size:20px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                    📊 Calendar Statistics
+                </h2>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:16px;">
+                    <div style="text-align:center; padding:16px; background:#ecfdf5; border-radius:8px; border-left:4px solid #10b981;">
+                        <div style="font-size:28px; font-weight:800; color:#047857;">{{ all_calendars|length }}</div>
+                        <div style="font-size:12px; color:#374151; font-weight:600;">Total Calendars</div>
+                    </div>
+                    <div style="text-align:center; padding:16px; background:#fef3c7; border-radius:8px; border-left:4px solid #f59e0b;">
+                        <div style="font-size:28px; font-weight:800; color:#92400e;">{{ primary_calendars|length }}</div>
+                        <div style="font-size:12px; color:#374151; font-weight:600;">Primary</div>
+                    </div>
+                    <div style="text-align:center; padding:16px; background:#dbeafe; border-radius:8px; border-left:4px solid #3b82f6;">
+                        <div style="font-size:28px; font-weight:800; color:#1e40af;">{{ owned_calendars|length }}</div>
+                        <div style="font-size:12px; color:#374151; font-weight:600;">Owned</div>
+                    </div>
+                    <div style="text-align:center; padding:16px; background:#f3e8ff; border-radius:8px; border-left:4px solid #8b5cf6;">
+                        <div style="font-size:28px; font-weight:800; color:#7c3aed;">{{ writer_calendars|length }}</div>
+                        <div style="font-size:12px; color:#374151; font-weight:600;">Write Access</div>
+                    </div>
+                    <div style="text-align:center; padding:16px; background:#fef2f2; border-radius:8px; border-left:4px solid #ef4444;">
+                        <div style="font-size:28px; font-weight:800; color:#dc2626;">{{ reader_calendars|length }}</div>
+                        <div style="font-size:12px; color:#374151; font-weight:600;">Read Only</div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+
+        {% if all_calendars|length > 0 %}
+            {# Primary Calendars Section #}
+            {% if primary_calendars|length > 0 %}
+                <div style="background:rgba(255,255,255,0.95); border-radius:16px; padding:24px; margin-bottom:24px; box-shadow:0 8px 24px rgba(0,0,0,0.1);">
+                    <h2 style="margin:0 0 20px 0; color:#1f2937; font-size:20px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                        🌟 Primary Calendars
+                        <span style="background:#fef3c7; color:#92400e; padding:4px 8px; border-radius:4px; font-size:12px; font-weight:600;">MAIN</span>
+                    </h2>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px;">
+                        {% for calendar in primary_calendars %}
+                            <div style="background:linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%); border:2px solid #f59e0b; border-radius:12px; padding:18px; position:relative; box-shadow:0 4px 12px rgba(245,158,11,0.2);">
+                                <div style="position:absolute; top:12px; right:12px; background:#f59e0b; color:white; padding:4px 8px; border-radius:6px; font-size:10px; font-weight:700; box-shadow:0 2px 4px rgba(0,0,0,0.2);">PRIMARY</div>
+                                <h3 style="margin:0 0 8px 0; color:#92400e; font-size:16px; font-weight:700; padding-right:60px;">{{ calendar.summary or 'Unnamed Calendar' }}</h3>
+                                {% if calendar.description %}
+                                    <p style="margin:0 0 12px 0; color:#6b7280; font-size:13px; line-height:1.4;">{{ calendar.description[:120] }}{% if calendar.description|length > 120 %}...{% endif %}</p>
+                                {% endif %}
+                                <div style="background:rgba(255,255,255,0.7); border-radius:6px; padding:8px; font-size:11px; color:#6b7280;">
+                                    <div style="margin-bottom:2px;">🆔 <strong>ID:</strong> {{ calendar.id[:35] }}...</div>
+                                    {% if calendar.timeZone %}<div style="margin-bottom:2px;">🌍 <strong>Timezone:</strong> {{ calendar.timeZone }}</div>{% endif %}
+                                    {% if calendar.accessRole %}<div>🔐 <strong>Access:</strong> {{ calendar.accessRole | title }}</div>{% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
+            {# Owned Calendars Section #}
+            {% set non_primary_owned = owned_calendars | rejectattr('primary', 'equalto', true) | list %}
+            {% if non_primary_owned|length > 0 %}
+                <div style="background:rgba(255,255,255,0.95); border-radius:16px; padding:24px; margin-bottom:24px; box-shadow:0 8px 24px rgba(0,0,0,0.1);">
+                    <h2 style="margin:0 0 20px 0; color:#1f2937; font-size:20px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                        👤 My Calendars
+                        <span style="background:#ecfdf5; color:#047857; padding:4px 8px; border-radius:4px; font-size:12px; font-weight:600;">OWNED</span>
+                    </h2>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px;">
+                        {% for calendar in non_primary_owned %}
+                            <div style="background:#ecfdf5; border:1px solid #d1fae5; border-radius:8px; padding:16px; transition:all 0.3s ease; box-shadow:0 2px 4px rgba(16,185,129,0.1);">
+                                <h3 style="margin:0 0 8px 0; color:#047857; font-size:15px; font-weight:600;">{{ calendar.summary or 'Unnamed Calendar' }}</h3>
+                                {% if calendar.description %}
+                                    <p style="margin:0 0 8px 0; color:#6b7280; font-size:12px; line-height:1.4;">{{ calendar.description[:90] }}{% if calendar.description|length > 90 %}...{% endif %}</p>
+                                {% endif %}
+                                <div style="background:rgba(255,255,255,0.7); border-radius:4px; padding:6px; font-size:10px; color:#6b7280;">
+                                    {% if calendar.timeZone %}🌍 {{ calendar.timeZone }}{% endif %}
+                                    {% if calendar.accessRole %} • 🔐 {{ calendar.accessRole | title }}{% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
+            {# Shared Calendars Section #}
+            {% if shared_calendars|length > 0 %}
+                <div style="background:rgba(255,255,255,0.95); border-radius:16px; padding:24px; margin-bottom:24px; box-shadow:0 8px 24px rgba(0,0,0,0.1);">
+                    <h2 style="margin:0 0 20px 0; color:#1f2937; font-size:20px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                        🤝 Shared Calendars
+                        <span style="background:#f0f9ff; color:#1e40af; padding:4px 8px; border-radius:4px; font-size:12px; font-weight:600;">COLLABORATIVE</span>
+                    </h2>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px;">
+                        {% for calendar in shared_calendars %}
+                            {% set is_writer = calendar.accessRole == 'writer' %}
+                            <div style="background:{% if is_writer %}#f3e8ff{% else %}#f0f9ff{% endif %}; border:1px solid {% if is_writer %}#d8b4fe{% else %}#bfdbfe{% endif %}; border-radius:8px; padding:16px; transition:all 0.3s ease;">
+                                <div style="display:flex; justify-content:between; align-items:start; margin-bottom:8px;">
+                                    <h3 style="margin:0; color:{% if is_writer %}#7c3aed{% else %}#1e40af{% endif %}; font-size:15px; font-weight:600; flex:1;">{{ calendar.summary or 'Unnamed Calendar' }}</h3>
+                                    <span style="background:{% if is_writer %}#8b5cf6{% else %}#3b82f6{% endif %}; color:white; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:600; margin-left:8px;">
+                                        {% if is_writer %}WRITE{% else %}READ{% endif %}
+                                    </span>
+                                </div>
+                                {% if calendar.description %}
+                                    <p style="margin:0 0 8px 0; color:#6b7280; font-size:12px; line-height:1.4;">{{ calendar.description[:90] }}{% if calendar.description|length > 90 %}...{% endif %}</p>
+                                {% endif %}
+                                <div style="background:rgba(255,255,255,0.7); border-radius:4px; padding:6px; font-size:10px; color:#6b7280;">
+                                    🔐 {{ calendar.accessRole | title if calendar.accessRole else 'Reader' }}
+                                    {% if calendar.timeZone %} • 🌍 {{ calendar.timeZone }}{% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% else %}
+            {# No Calendars Message #}
+            <div style="background:rgba(255,255,255,0.95); border-radius:16px; padding:40px; text-align:center; box-shadow:0 8px 24px rgba(0,0,0,0.1);">
+                <div style="font-size:64px; margin-bottom:16px; opacity:0.5;">📅</div>
+                <h2 style="margin:0 0 8px 0; color:#6b7280; font-size:24px; font-weight:600;">No Calendars Found</h2>
+                <p style="margin:0; color:#9ca3af; font-size:16px; max-width:400px; margin:0 auto;">
+                    No Google Calendar data is currently available. Please check your account permissions or try again later.
+                </p>
+            </div>
+        {% endif %}
+
+        {# Footer with Metadata #}
+        <div style="margin-top:24px; text-align:center;">
+            <div style="background:rgba(255,255,255,0.1); border-radius:8px; padding:12px; color:rgba(255,255,255,0.9); font-size:13px;">
+                🤖 <strong>Calendar Dashboard Macro</strong> • {{ all_calendars|length }} calendars • 📅 Google Calendar Integration • September 2025
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Add responsive styles #}
+<style>
+    @media (max-width: 768px) {
+        .calendar-grid { grid-template-columns: 1fr !important; }
+        .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    }
+    @media (max-width: 480px) {
+        .stats-grid { grid-template-columns: 1fr !important; }
+    }
+    .calendar-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.15) !important;
+    }
+</style>
+{% endmacro %}

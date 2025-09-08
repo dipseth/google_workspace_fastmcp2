@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 import os
 from datetime import datetime
 from dotenv import load_dotenv
-from test_auth_utils import get_client_auth_config
+from ..test_auth_utils import get_client_auth_config
 
 from fastmcp import Client
 

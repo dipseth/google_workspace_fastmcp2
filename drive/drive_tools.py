@@ -39,7 +39,7 @@ from .drive_types import (
 )
 from .drive_search_types import DriveSearchResponse, DriveFileInfo, DriveSearchError
 from .drive_enums import MimeTypeFilter
-from tools.common_types import UserGoogleEmail
+from tools.common_types import UserGoogleEmail, UserGoogleEmailDrive
 
 
 logger = logging.getLogger(__name__)
@@ -271,9 +271,6 @@ async def _get_drive_service_with_fallback(user_google_email: str) -> Any:
 
 # Define search_drive_files at module level so it can be imported
 async def search_drive_files(
-    user_google_email: Annotated[str, Field(
-        description="User's Google email address for Drive authentication"
-    )],
     query: Annotated[str, Field(
         description="Search query - can be free text (e.g. 'quarterly report') or Google Drive query syntax (e.g. 'name contains \"budget\"'). Leave empty to search all files when using mime_type filter."
     )] = "",
@@ -294,6 +291,7 @@ async def search_drive_files(
     corpora: Annotated[Optional[str], Field(
         description="Bodies of items to query: 'user' (personal drive), 'domain' (domain shared), 'drive' (specific drive), 'allDrives' (all accessible drives)"
     )] = None,
+    user_google_email: UserGoogleEmailDrive = None,
 ) -> DriveSearchResponse:
     """
     Search for files in Google Drive with easy file type filtering.

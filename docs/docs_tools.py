@@ -1,13 +1,25 @@
 """
 Google Docs tools for FastMCP2 with middleware-based service injection and fallback support.
 
-This module provides comprehensive Google Docs integration tools for FastMCP2 servers,
+This module provides comprehensive Google Docs integrationasync def get_doc_content(
+    document_id: str,
+    user_google_email: UserGoogleEmail = None
+) -> str:ls for FastMCP2 servers,
 using the new middleware-dependent pattern for Google service authentication with
 fallback to direct service creation when middleware injection is unavailable.
 
-Key Features:
-- Search for Google Docs by name using Drive API
-- Retrieve content from Google Docs and Drive files
+    async def list_docs_in_folder_tool(
+        folder_id: str = 'root',
+        page_size: int = 100,
+        user_google_email: UserGoogleEmail = None
+    ) -> str:eatures:
+- Search for Google Docs by name using Dasync def create_doc(
+    title: str,
+    content: str = "",
+    user_google_email: UserGoogleEmail = None
+) -> str:API
+- R        ""List Google Docs within a specific Drive folder.""
+        return await list_docs_in_folder(folder_id, page_size, user_google_email)rieve content from Google Docs and Drive files
 - List Google Docs within specific folders
 - Create new Google Docs with initial content
 - Support for both native Google Docs and Office files
@@ -15,7 +27,11 @@ Key Features:
 - Fallback to direct service creation when middleware unavailable
 
 Architecture:
-- Primary: Uses middleware-based service injection (no decorators)
+- Primary: Uses middleware-based servic    async def create_doc_tool(
+        title: str,
+        content: str = "",
+        user_google_email: UserGoogleEmail = None
+    ) -> str:ection (no decorators)
 - Fallback: Direct service creation when middleware unavailable
 - Automatic Google service authentication and caching
 - Consistent error handling and token refresh
@@ -41,6 +57,7 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from auth.service_helpers import request_service, get_injected_service, get_service
 from auth.context import get_user_email_context
+from tools.common_types import UserGoogleEmail
 from .utils import extract_office_xml_text
 from .docs_types import DocsListResponse, DocInfo
 
@@ -48,9 +65,9 @@ logger = logging.getLogger(__name__)
 
 
 async def search_docs(
-    user_google_email: str,
     query: str,
     page_size: int = 10,
+    user_google_email: UserGoogleEmail = None
 ) -> str:
     """
     Searches for Google Docs by name using Drive API (mimeType filter).
@@ -146,7 +163,7 @@ async def search_docs(
 
 
 async def get_doc_content(
-    user_google_email: str,
+    user_google_email: UserGoogleEmail,
     document_id: str,
 ) -> str:
     """
@@ -344,9 +361,9 @@ async def get_doc_content(
 
 
 async def list_docs_in_folder(
-    user_google_email: str,
     folder_id: str = 'root',
-    page_size: int = 100
+    page_size: int = 100,
+    user_google_email: UserGoogleEmail = None
 ) -> DocsListResponse:
     """
     Lists Google Docs within a specific Drive folder.
@@ -551,7 +568,7 @@ def markdown_to_html(markdown_content: str) -> str:
 
 
 async def create_doc(
-    user_google_email: str,
+    user_google_email: UserGoogleEmail,
     title: str,
     content: str = '',
 ) -> str:
@@ -723,12 +740,12 @@ def setup_docs_tools(mcp: FastMCP):
         description="Search for Google Docs by name using Drive API"
     )
     async def search_docs_tool(
-        user_google_email: str,
         query: str,
-        page_size: int = 10
+        page_size: int = 10,
+        user_google_email: UserGoogleEmail = None
     ) -> str:
         """Search for Google Docs by name."""
-        return await search_docs(user_google_email, query, page_size)
+        return await search_docs(query, page_size, user_google_email)
     
     @mcp.tool(
         name="get_doc_content",
@@ -743,11 +760,11 @@ def setup_docs_tools(mcp: FastMCP):
         }
     )
     async def get_doc_content_tool(
-        user_google_email: str,
-        document_id: str
+        document_id: str,
+        user_google_email: UserGoogleEmail = None
     ) -> str:
         """Get content of a Google Doc or Drive file."""
-        return await get_doc_content(user_google_email, document_id)
+        return await get_doc_content(document_id, user_google_email)
     
     @mcp.tool(
         name="list_docs_in_folder",
@@ -762,12 +779,12 @@ def setup_docs_tools(mcp: FastMCP):
         }
     )
     async def list_docs_in_folder_tool(
-        user_google_email: str,
         folder_id: str = 'root',
-        page_size: int = 100
+        page_size: int = 100,
+        user_google_email: UserGoogleEmail = None
     ) -> DocsListResponse:
         """List Google Docs within a specific folder."""
-        return await list_docs_in_folder(user_google_email, folder_id, page_size)
+        return await list_docs_in_folder(folder_id, page_size, user_google_email)
     
     @mcp.tool(
         name="create_doc",
@@ -782,10 +799,12 @@ def setup_docs_tools(mcp: FastMCP):
         }
     )
     async def create_doc_tool(
-        user_google_email: str,
         title: str,
-        content: str = ''
+        content: str = '',
+        user_google_email: UserGoogleEmail = None
     ) -> str:
+        """Create a new Google Doc with optional initial content."""
+        return await create_doc(title, content, user_google_email)
         """Create a new Google Doc with automatic rich content formatting (supports Markdown and HTML)."""
         return await create_doc(user_google_email, title, content)
     

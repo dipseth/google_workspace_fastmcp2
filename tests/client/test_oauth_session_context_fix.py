@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import os
 import json
 from dotenv import load_dotenv
-from test_auth_utils import get_client_auth_config
+from ..test_auth_utils import get_client_auth_config
 
 # Load environment variables from .env file
 load_dotenv()

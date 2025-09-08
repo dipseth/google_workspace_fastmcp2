@@ -14,6 +14,7 @@ from fastmcp import FastMCP
 
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
+from tools.common_types import UserGoogleEmailChat
 from resources.user_resources import get_current_user_email_simple
 from .chat_types import (
     SpaceListResponse, MessageListResponse, SpaceInfo, MessageInfo,
@@ -166,7 +167,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_spaces(
-        user_google_email: Optional[str] = None,
+        user_google_email: UserGoogleEmailChat = None,
         page_size: int = 100,
         space_type: str = "all"  # "all", "room", "dm"
     ) -> SpaceListResponse:

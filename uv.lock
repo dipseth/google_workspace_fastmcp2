@@ -522,6 +522,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
+    { name = "colorama" },
     { name = "fastapi" },
     { name = "fastembed" },
     { name = "fastmcp" },
@@ -535,6 +536,7 @@ dependencies = [
     { name = "python-card-framework" },
     { name = "python-dotenv" },
     { name = "qdrant-client" },
+    { name = "rich" },
     { name = "sentence-transformers" },
 ]
 
@@ -559,6 +561,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=23.0.0" },
     { name = "aiohttp", specifier = ">=3.8.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0.0" },
+    { name = "colorama", specifier = ">=0.4.6" },
     { name = "fastapi", specifier = ">=0.115.14" },
     { name = "fastembed", specifier = ">=0.7.2" },
     { name = "fastmcp", specifier = ">=2.9.0" },
@@ -575,6 +578,7 @@ requires-dist = [
     { name = "python-card-framework", specifier = ">=2.2.5" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "qdrant-client", specifier = ">=1.7.0" },
+    { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "sentence-transformers", specifier = ">=2.2.0" },
 ]

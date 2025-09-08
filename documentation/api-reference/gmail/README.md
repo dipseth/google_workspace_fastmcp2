@@ -10,10 +10,14 @@ Complete API documentation for all Gmail tools in the FastMCP2 platform.
 - **Draft Creation Fixed**: Resolved `draft_gmail_message` parameter validation issues with MIME encoding
 - **Performance Optimized**: 30x faster startup time (3+ seconds → ~100ms) with optimized module loading
 
-### 🔧 Recent Fixes
+### 🔧 Recent Critical Fixes
 - **Fixed `draft_gmail_message`**: Resolved parameter validation causing MIME encoding issues for HTML content
 - **Enhanced HTML Rendering**: Verified advanced HTML features work correctly in Gmail interface
 - **Improved Error Handling**: Better validation and error messages for content type parameters
+- **Fixed Elicitation Compatibility**: Added graceful fallback for MCP clients that don't support elicitation
+- **Resolved Schema Validation**: Fixed `structured_content must be a dict or None` errors
+- **Universal Client Support**: Email tools now work with any MCP client (elicitation-supporting or not)
+- **Fixed Field Name Consistency**: Resolved TypedDict field access issues (`draftId` vs `draft_id`)
 
 ## Available Tools
 
@@ -282,14 +286,37 @@ Send an email using the user's Gmail account.
 
 ### Returns
 
+**Success (Email Sent):**
 ```json
 {
-  "id": "18d4a5b6c7e8f9",
-  "threadId": "18d4a5b6c7e8f9",
-  "labelIds": ["SENT"],
-  "message": "Message sent successfully",
-  "to": ["recipient@example.com"],
-  "subject": "Meeting Tomorrow"
+  "success": true,
+  "message_id": "18d4a5b6c7e8f9",
+  "message": "✅ Email sent to 1 recipient(s)! Message ID: 18d4a5b6c7e8f9",
+  "recipientCount": 1,
+  "contentType": "mixed",
+  "action": "sent"
+}
+```
+
+**Elicitation Fallback (Draft Mode):**
+```json
+{
+  "success": true,
+  "message": "📝 EMAIL SAVED AS DRAFT (not sent)...",
+  "draftId": "r-927097057353781341",
+  "recipientCount": 1,
+  "action": "saved_draft",
+  "elicitationNotSupported": true
+}
+```
+
+**Blocked (Security):**
+```json
+{
+  "success": false,
+  "message": "🚫 EMAIL BLOCKED (not sent)...",
+  "action": "blocked",
+  "recipientsNotAllowed": ["untrusted@example.com"]
 }
 ```
 
@@ -334,6 +361,82 @@ result = await send_gmail_message(
     content_type="html"
 )
 ```
+
+### 🛡️ Email Security & Elicitation System
+
+FastMCP2 includes a sophisticated email security system that protects against sending emails to untrusted recipients. When attempting to send to recipients not on the allow list, the system provides user control through elicitation prompts.
+
+#### How It Works
+
+1. **Allow List Check**: System checks if recipients are on the trusted allow list
+2. **Elicitation Prompt**: If untrusted recipients detected, user gets confirmation dialog
+3. **Safe Actions**: User can choose to send, save as draft, or cancel
+4. **Structured Response**: Detailed JSON response includes security status
+
+#### Elicitation Example
+
+When sending to an untrusted recipient like `test@example.com`:
+
+![Elicitation System Demo](../../../image-1756953129691.png)
+
+The elicitation prompt provides:
+- **Security Notice**: Clear indication recipient is not trusted
+- **Email Preview**: Subject, content type, and body preview  
+- **Action Options**: Send immediately, save as draft, or cancel
+- **Auto-timeout**: Automatic cancellation after 300 seconds
+- **Structured Response**: Machine-readable JSON with security details
+
+#### Response Structure for Elicitation
+
+```json
+{
+  "success": true,
+  "message": "📝 **EMAIL SAVED AS DRAFT** (not sent)",
+  "messageId": null,
+  "threadId": null,
+  "draftId": "r-5949208333949694620", 
+  "recipientCount": 1,
+  "contentType": "mixed",
+  "templateApplied": false,
+  "error": null,
+  "elicitationRequired": true,
+  "recipientsNotAllowed": ["test@example.com"],
+  "action": "saved_draft"
+}
+```
+
+#### Managing the Allow List
+
+View current allow list:
+```python
+# Check current trusted recipients
+allow_list = await view_gmail_allow_list(
+    user_google_email="user@gmail.com"
+)
+```
+
+Add trusted recipients:
+```python
+# Add single email to allow list
+result = await add_to_gmail_allow_list(
+    email="trusted@example.com",
+    user_google_email="user@gmail.com"
+)
+
+# Add multiple emails
+result = await add_to_gmail_allow_list(
+    email=["colleague1@company.com", "colleague2@company.com"],
+    user_google_email="user@gmail.com"
+)
+```
+
+#### Security Benefits
+
+- **Prevents Accidental Emails**: No more sending to wrong recipients
+- **User Control**: Always get confirmation for untrusted contacts  
+- **Audit Trail**: Structured responses log all security decisions
+- **Flexible Actions**: Save drafts for manual review or send immediately
+- **No False Blocks**: Trusted contacts always work seamlessly
 
 ### HTML Content Type Guide
 

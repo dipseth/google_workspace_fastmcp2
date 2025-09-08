@@ -182,6 +182,8 @@ class QdrantUnifiedMiddleware(Middleware):
         self,
         qdrant_host: str = "localhost",
         qdrant_port: int = 6333,
+        qdrant_api_key: Optional[str] = None,
+        qdrant_url: Optional[str] = None,
         collection_name: str = "mcp_tool_responses",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         summary_max_tokens: int = 500,
@@ -197,6 +199,8 @@ class QdrantUnifiedMiddleware(Middleware):
         Args:
             qdrant_host: Qdrant server hostname
             qdrant_port: Primary Qdrant server port
+            qdrant_api_key: API key for cloud Qdrant authentication
+            qdrant_url: Full Qdrant URL (if provided, overrides host/port)
             collection_name: Name of the collection to store responses
             embedding_model: Model to use for generating embeddings
             summary_max_tokens: Maximum tokens in summarized response
@@ -206,10 +210,27 @@ class QdrantUnifiedMiddleware(Middleware):
             auto_discovery: Whether to auto-discover Qdrant ports
             ports: List of ports to try for auto-discovery
         """
+        # Parse URL if provided
+        if qdrant_url:
+            from urllib.parse import urlparse
+            parsed = urlparse(qdrant_url)
+            self.qdrant_host = parsed.hostname or qdrant_host
+            self.qdrant_port = parsed.port or qdrant_port
+            self.qdrant_url = qdrant_url
+            self.qdrant_use_https = parsed.scheme == 'https'
+            logger.info(f"🔧 Parsed Qdrant URL: {qdrant_url} -> host={self.qdrant_host}, port={self.qdrant_port}, https={self.qdrant_use_https}")
+        else:
+            self.qdrant_host = qdrant_host
+            self.qdrant_port = qdrant_port
+            self.qdrant_url = None
+            self.qdrant_use_https = False
+        
+        self.qdrant_api_key = qdrant_api_key
+        
         # Create configuration
         self.config = QdrantConfig(
-            host=qdrant_host,
-            ports=ports or [qdrant_port, 6333, 6335, 6334],
+            host=self.qdrant_host,
+            ports=ports or [self.qdrant_port, 6333, 6335, 6334],
             collection_name=collection_name,
             embedding_model=embedding_model,
             summary_max_tokens=summary_max_tokens,
@@ -241,11 +262,22 @@ class QdrantUnifiedMiddleware(Middleware):
             else:
                 # Direct connection mode
                 QdrantClient, _ = _get_qdrant_imports()
-                self.client = QdrantClient(
-                    host=self.config.host,
-                    port=self.config.ports[0]
-                )
-                logger.info(f"✅ Connected to Qdrant at {self.config.host}:{self.config.ports[0]}")
+                
+                # Use URL if provided, otherwise use host/port
+                if self.qdrant_url:
+                    logger.info(f"🔗 Connecting to Qdrant using URL: {self.qdrant_url}")
+                    self.client = QdrantClient(
+                        url=self.qdrant_url,
+                        api_key=self.qdrant_api_key
+                    )
+                else:
+                    logger.info(f"🔗 Connecting to Qdrant at {self.config.host}:{self.config.ports[0]}")
+                    self.client = QdrantClient(
+                        host=self.config.host,
+                        port=self.config.ports[0],
+                        api_key=self.qdrant_api_key
+                    )
+                logger.info(f"✅ Connected to Qdrant")
                 
             self._initialized = True
             
@@ -282,12 +314,13 @@ class QdrantUnifiedMiddleware(Middleware):
             
         QdrantClient, _ = _get_qdrant_imports()
         
-        for port in self.config.ports:
+        # If we have a full URL, try that first
+        if self.qdrant_url:
             try:
-                logger.info(f"🔍 Trying Qdrant at {self.config.host}:{port}")
+                logger.info(f"🔍 Trying Qdrant at URL: {self.qdrant_url}")
                 client = QdrantClient(
-                    host=self.config.host,
-                    port=port,
+                    url=self.qdrant_url,
+                    api_key=self.qdrant_api_key,
                     timeout=self.config.connection_timeout/1000
                 )
                 
@@ -295,7 +328,31 @@ class QdrantUnifiedMiddleware(Middleware):
                 await asyncio.to_thread(client.get_collections)
                 
                 self.client = client
-                self.discovered_url = f"http://{self.config.host}:{port}"
+                self.discovered_url = self.qdrant_url
+                logger.info(f"✅ Connected to Qdrant at {self.discovered_url}")
+                return
+                
+            except Exception as e:
+                logger.warning(f"❌ Failed to connect to URL {self.qdrant_url}: {e}")
+                # Fall through to try host/port discovery
+        
+        # Try different ports on the configured host
+        for port in self.config.ports:
+            try:
+                logger.info(f"🔍 Trying Qdrant at {self.config.host}:{port}")
+                client = QdrantClient(
+                    host=self.config.host,
+                    port=port,
+                    api_key=self.qdrant_api_key,
+                    timeout=self.config.connection_timeout/1000
+                )
+                
+                # Test connection
+                await asyncio.to_thread(client.get_collections)
+                
+                self.client = client
+                protocol = "https" if self.qdrant_use_https else "http"
+                self.discovered_url = f"{protocol}://{self.config.host}:{port}"
                 logger.info(f"✅ Discovered Qdrant at {self.discovered_url}")
                 return
                 

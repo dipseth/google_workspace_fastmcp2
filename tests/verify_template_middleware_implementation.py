@@ -16,7 +16,7 @@ from unittest.mock import Mock, AsyncMock
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from middleware.template_middleware import TemplateParameterMiddleware
+from delete_later.template_middleware import TemplateParameterMiddleware
 from fastmcp.server.middleware import MiddlewareContext
 
 

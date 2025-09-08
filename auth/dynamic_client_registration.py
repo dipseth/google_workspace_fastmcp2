@@ -14,38 +14,30 @@ from typing_extensions import Dict, Any, Optional
 # Import OAuth Proxy for secure credential management
 from .oauth_proxy import oauth_proxy
 
-# Import compatibility shim for OAuth scope management
-try:
-    from .compatibility_shim import CompatibilityShim
-    _COMPATIBILITY_AVAILABLE = True
-except ImportError:
-    # Fallback for development/testing
-    _COMPATIBILITY_AVAILABLE = False
-    logging.warning("Compatibility shim not available, using fallback scopes")
+# Import centralized scope registry
+from .scope_registry import ScopeRegistry
 
-# Fallback default scope string for DCR
-_FALLBACK_DCR_SCOPE = "openid email profile https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file"
+# No more hardcoded scopes - use scope_registry
+_FALLBACK_DCR_SCOPE = ""  # Empty fallback
 
 
 def _get_dcr_default_scope() -> str:
     """
-    Get default scope string for Dynamic Client Registration.
+    Get default scope string for Dynamic Client Registration from scope registry.
     
-    This function provides backward compatibility for legacy hardcoded scopes
-    while automatically redirecting to the new centralized scope registry.
-    Falls back to the original hardcoded scope string if the registry is unavailable.
+    This function uses the centralized scope registry to build DCR scope strings.
     
     Returns:
-        Default scope string for DCR
+        Default scope string for DCR from scope registry
     """
-    if _COMPATIBILITY_AVAILABLE:
-        try:
-            return CompatibilityShim.get_legacy_dcr_scope_defaults()
-        except Exception as e:
-            logger.warning(f"Error getting DCR scope defaults from registry, using fallback: {e}")
-            return _FALLBACK_DCR_SCOPE
-    else:
-        return _FALLBACK_DCR_SCOPE
+    try:
+        # Use oauth_comprehensive from scope registry
+        scopes = ScopeRegistry.get_oauth_scopes([])  # Services list ignored - uses comprehensive
+        return " ".join(scopes)
+    except Exception as e:
+        logger.warning(f"Error getting DCR scope defaults from registry: {e}")
+        # Minimal fallback scopes
+        return "openid email profile"
 
 logger = logging.getLogger(__name__)
 

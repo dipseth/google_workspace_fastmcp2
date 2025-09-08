@@ -1072,18 +1072,20 @@ def setup_user_resources(mcp: FastMCP) -> None:
             }
         
         try:
-            # Get recent Drive files (last 30 days) using forward() pattern
-            recent_files = await forward(
-                "search_drive_files",
+            # Import and call tools directly (not using forward())
+            from drive.drive_tools import search_drive_files
+            
+            # Get recent Drive files (last 30 days) using direct tool call
+            recent_files = await search_drive_files(
                 user_google_email=user_email,
                 query="modifiedTime > '2025-01-01' and trashed=false",
                 page_size=20
             )
             
-            # Get recent Docs (if available) using forward() pattern
+            # Get recent Docs (if available) using direct tool call
             try:
-                recent_docs = await forward(
-                    "search_docs",
+                from docs.docs_tools import search_docs
+                recent_docs = await search_docs(
                     user_google_email=user_email,
                     query="modified last month",
                     max_results=10
@@ -1171,9 +1173,11 @@ def setup_user_resources(mcp: FastMCP) -> None:
             }
         
         try:
-            # Search Drive files using forward() pattern
-            search_results = await forward(
-                "search_drive_files",
+            # Import and call tools directly (not using forward())
+            from drive.drive_tools import search_drive_files
+            
+            # Search Drive files using direct tool call
+            search_results = await search_drive_files(
                 user_google_email=user_email,
                 query=f"name contains '{query}' or fullText contains '{query}'",
                 page_size=15

@@ -20,6 +20,7 @@ from functools import lru_cache
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
+from googleapiclient.http import BatchHttpRequest
 
 from .service import _get_gmail_service_with_fallback
 from .utils import _validate_gmail_color, _format_label_color_info, GMAIL_LABEL_COLORS
@@ -418,30 +419,107 @@ async def list_gmail_labels( user_google_email: UserGoogleEmail = None,) -> Gmai
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
+        # First, get the basic list of labels
         response = await asyncio.to_thread(
             gmail_service.users().labels().list(userId="me").execute
         )
         labels_data = response.get("labels", [])
 
-        # Convert to structured format
+        # Use batch requests to efficiently get detailed info for all labels
+        # Reduced batch size to avoid rate limiting (Gmail has concurrent request limits)
+        BATCH_SIZE = 50  # Reduced from 100 to avoid rate limits
+        
+        # Store label details indexed by ID for fast lookup
+        label_details = {}
+        failed_count = 0
+        
+        # Helper function to handle batch responses
+        def batch_callback(request_id, response, exception):
+            """Callback for batch request responses."""
+            nonlocal failed_count
+            if exception is not None:
+                logger.warning(f"Failed to get details for label {request_id}: {exception}")
+                failed_count += 1
+            else:
+                label_details[request_id] = response
+        
+        # Process labels in batches with delays to avoid rate limiting
+        for i in range(0, len(labels_data), BATCH_SIZE):
+            batch = gmail_service.new_batch_http_request()
+            batch_labels = labels_data[i:i + BATCH_SIZE]
+            
+            # Reset failed count for this batch
+            failed_count = 0
+            
+            for label_data in batch_labels:
+                label_id = label_data.get("id", "")
+                if label_id:
+                    # Add label get request to batch
+                    request = gmail_service.users().labels().get(userId="me", id=label_id)
+                    batch.add(request, callback=batch_callback, request_id=label_id)
+            
+            # Execute the batch request
+            try:
+                await asyncio.to_thread(batch.execute)
+                logger.info(f"Batch request completed for {len(batch_labels)} labels ({failed_count} failed)")
+                
+                # Add delay between batches to avoid rate limiting
+                # Use adaptive delay: longer if we had failures, shorter if all succeeded
+                if i + BATCH_SIZE < len(labels_data):  # Don't delay after the last batch
+                    if failed_count > 0:
+                        # Longer delay if we had failures (100ms per failure, max 500ms)
+                        delay = min(0.1 * failed_count, 0.5)
+                        logger.debug(f"Adding {delay:.3f}s delay due to {failed_count} failures")
+                    else:
+                        # Standard 50ms delay between successful batches
+                        delay = 0.05
+                        logger.debug(f"Adding standard {delay:.3f}s delay between batches")
+                    await asyncio.sleep(delay)
+                    
+            except Exception as batch_error:
+                logger.error(f"Batch request error: {batch_error}")
+                # Continue processing even if batch partially fails
+                # Add longer delay after error
+                if i + BATCH_SIZE < len(labels_data):
+                    await asyncio.sleep(0.5)  # 500ms delay after error
+        
+        # Convert to structured format with detailed info from batch responses
         all_labels: List[GmailLabelInfo] = []
         system_labels: List[GmailLabelInfo] = []
         user_labels: List[GmailLabelInfo] = []
 
         for label_data in labels_data:
-            # Create GmailLabelInfo structure
-            label_info: GmailLabelInfo = {
-                "id": label_data.get("id", ""),
-                "name": label_data.get("name", ""),
-                "type": label_data.get("type", "user"),
-                "messageListVisibility": label_data.get("messageListVisibility"),
-                "labelListVisibility": label_data.get("labelListVisibility"),
-                "color": label_data.get("color"),
-                "messagesTotal": label_data.get("messagesTotal"),
-                "messagesUnread": label_data.get("messagesUnread"),
-                "threadsTotal": label_data.get("threadsTotal"),
-                "threadsUnread": label_data.get("threadsUnread")
-            }
+            label_id = label_data.get("id", "")
+            
+            # Use detailed data from batch response if available, otherwise use basic data
+            if label_id in label_details:
+                detailed_label = label_details[label_id]
+                label_info: GmailLabelInfo = {
+                    "id": detailed_label.get("id", ""),
+                    "name": detailed_label.get("name", ""),
+                    "type": detailed_label.get("type", "user"),
+                    "messageListVisibility": detailed_label.get("messageListVisibility"),
+                    "labelListVisibility": detailed_label.get("labelListVisibility"),
+                    "color": detailed_label.get("color"),
+                    "messagesTotal": detailed_label.get("messagesTotal"),
+                    "messagesUnread": detailed_label.get("messagesUnread"),
+                    "threadsTotal": detailed_label.get("threadsTotal"),
+                    "threadsUnread": detailed_label.get("threadsUnread")
+                }
+            else:
+                # Fallback to basic info if batch request failed for this label
+                label_info: GmailLabelInfo = {
+                    "id": label_id,
+                    "name": label_data.get("name", ""),
+                    "type": label_data.get("type", "user"),
+                    "messageListVisibility": label_data.get("messageListVisibility"),
+                    "labelListVisibility": label_data.get("labelListVisibility"),
+                    "color": label_data.get("color"),
+                    "messagesTotal": None,  # Not available without detailed info
+                    "messagesUnread": None,  # Not available without detailed info
+                    "threadsTotal": None,  # Not available without detailed info
+                    "threadsUnread": None  # Not available without detailed info
+                }
             
             all_labels.append(label_info)
             
@@ -450,7 +528,7 @@ async def list_gmail_labels( user_google_email: UserGoogleEmail = None,) -> Gmai
             else:
                 user_labels.append(label_info)
 
-        logger.info(f"Found {len(all_labels)} labels for {user_google_email}")
+        logger.info(f"Found {len(all_labels)} labels for {user_google_email} (with unread counts for {len(label_details)} labels)")
 
         return GmailLabelsResponse(
             labels=all_labels,

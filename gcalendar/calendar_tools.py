@@ -21,6 +21,7 @@ from functools import wraps
 
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
+from tools.common_types import UserGoogleEmailCalendar
 from .calendar_types import (
     CalendarListResponse, EventListResponse, CalendarInfo, EventInfo,
     CreateEventResponse, ModifyEventResponse, DeleteEventResponse,
@@ -30,6 +31,21 @@ from .calendar_types import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Export tools at module level for import compatibility
+__all__ = [
+    'list_calendars',
+    'list_events',
+    'create_event',
+    'modify_event',
+    'delete_event',
+    'get_event',
+    'create_calendar',
+    'bulk_calendar_operations',
+    'move_events_between_calendars',
+    'setup_calendar_tools'
+]
 
 
 # ============================================================================
@@ -409,6 +425,75 @@ async def _batch_create_events(
 # ============================================================================
 # MAIN TOOL FUNCTIONS
 # ============================================================================
+# ============================================================================
+# MODULE-LEVEL TOOL FUNCTIONS (Import-Compatible)
+# ============================================================================
+
+async def list_calendars(user_google_email: UserGoogleEmailCalendar) -> CalendarListResponse:
+    """
+    Retrieves a list of calendars accessible to the authenticated user.
+
+    Args:
+        user_google_email (str): The user's Google email address. Required.
+
+    Returns:
+        CalendarListResponse: Structured calendar list with metadata.
+    """
+    logger.info(f"[list_calendars] Invoked. Email: '{user_google_email}'")
+
+    try:
+        calendar_service = await _get_calendar_service_with_fallback(user_google_email)
+        
+        calendar_list_response = await asyncio.to_thread(
+            lambda: calendar_service.calendarList().list().execute()
+        )
+        items = calendar_list_response.get("items", [])
+        
+        # Convert to structured format
+        calendars: List[CalendarInfo] = []
+        for cal in items:
+            calendar_info: CalendarInfo = {
+                "id": cal.get("id", ""),
+                "summary": cal.get("summary", "No Summary"),
+                "description": cal.get("description"),
+                "primary": cal.get("primary", False),
+                "timeZone": cal.get("timeZone"),
+                "backgroundColor": cal.get("backgroundColor"),
+                "foregroundColor": cal.get("foregroundColor")
+            }
+            calendars.append(calendar_info)
+        
+        logger.info(f"Successfully listed {len(calendars)} calendars for {user_google_email}.")
+        
+        return CalendarListResponse(
+            calendars=calendars,
+            count=len(calendars),
+            userEmail=user_google_email,
+            error=None
+        )
+        
+    except HttpError as e:
+        error_msg = f"Failed to list calendars: {e}"
+        logger.error(f"[list_calendars] HTTP error: {e}")
+        # Return structured error response
+        return CalendarListResponse(
+            calendars=[],
+            count=0,
+            userEmail=user_google_email,
+            error=error_msg
+        )
+    except Exception as e:
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[list_calendars] {error_msg}")
+        # Return structured error response
+        return CalendarListResponse(
+            calendars=[],
+            count=0,
+            userEmail=user_google_email,
+            error=error_msg
+        )
+
+
 
 
 def setup_calendar_tools(mcp: FastMCP) -> None:
@@ -432,71 +517,11 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             "openWorldHint": True
         }
     )
-    async def list_calendars(
-        user_google_email: Annotated[str, "The user's Google email address for authentication"]
+    async def list_calendars_wrapper(
+        user_google_email: UserGoogleEmailCalendar
     ) -> CalendarListResponse:
-        """
-        Retrieves a list of calendars accessible to the authenticated user.
-
-        Args:
-            user_google_email (str): The user's Google email address. Required.
-
-        Returns:
-            CalendarListResponse: Structured calendar list with metadata.
-        """
-        logger.info(f"[list_calendars] Invoked. Email: '{user_google_email}'")
-
-        try:
-            calendar_service = await _get_calendar_service_with_fallback(user_google_email)
-            
-            calendar_list_response = await asyncio.to_thread(
-                lambda: calendar_service.calendarList().list().execute()
-            )
-            items = calendar_list_response.get("items", [])
-            
-            # Convert to structured format
-            calendars: List[CalendarInfo] = []
-            for cal in items:
-                calendar_info: CalendarInfo = {
-                    "id": cal.get("id", ""),
-                    "summary": cal.get("summary", "No Summary"),
-                    "description": cal.get("description"),
-                    "primary": cal.get("primary", False),
-                    "timeZone": cal.get("timeZone"),
-                    "backgroundColor": cal.get("backgroundColor"),
-                    "foregroundColor": cal.get("foregroundColor")
-                }
-                calendars.append(calendar_info)
-            
-            logger.info(f"Successfully listed {len(calendars)} calendars for {user_google_email}.")
-            
-            return CalendarListResponse(
-                calendars=calendars,
-                count=len(calendars),
-                userEmail=user_google_email,
-                error=None
-            )
-            
-        except HttpError as e:
-            error_msg = f"Failed to list calendars: {e}"
-            logger.error(f"[list_calendars] HTTP error: {e}")
-            # Return structured error response
-            return CalendarListResponse(
-                calendars=[],
-                count=0,
-                userEmail=user_google_email,
-                error=error_msg
-            )
-        except Exception as e:
-            error_msg = f"Unexpected error: {str(e)}"
-            logger.error(f"[list_calendars] {error_msg}")
-            # Return structured error response
-            return CalendarListResponse(
-                calendars=[],
-                count=0,
-                userEmail=user_google_email,
-                error=error_msg
-            )
+        """Wrapper for the module-level list_calendars function."""
+        return await list_calendars(user_google_email)
 
     @mcp.tool(
         name="create_calendar",
@@ -511,7 +536,6 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         }
     )
     async def create_calendar(
-        user_google_email: Annotated[str, "The user's Google email address for authentication"],
         summary: Annotated[str, Field(description="The name/title of the calendar", min_length=1, max_length=255)],
         description: Annotated[
             Optional[str],
@@ -536,6 +560,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 max_length=255
             )
         ] = None,
+        user_google_email: UserGoogleEmailCalendar = None
     ) -> CreateCalendarResponse:
         """
         Creates a new Google Calendar with specified properties.
@@ -626,10 +651,10 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="list_events",
-        description="Retrieves a list of events from a specified Google Calendar within a given time range",
-        tags={"calendar", "events", "get", "google","list"},
+        description="Retrieves a list of events from a specified Google Calendar within a given time range. By default, looks for events in the next 10 days starting from the current time.",
+        tags={"calendar", "events", "get", "google", "list"},
         annotations={
-            "title": "Get Calendar Events",
+            "title": "List Calendar Events",
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
@@ -637,7 +662,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_events(
-        user_google_email: Annotated[str, "The user's Google email address for authentication"],
+        user_google_email: UserGoogleEmailCalendar = None,
         calendar_id: Annotated[
             str,
             Field(
@@ -656,7 +681,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             Optional[str],
             Field(
                 default=None,
-                description="The end of the time range (exclusive) in RFC3339 format. If omitted, events starting from `time_min` onwards are considered (up to `max_results`)"
+                description="The end of the time range (exclusive) in RFC3339 format. If omitted, defaults to 10 days from the start time"
             )
         ] = None,
         max_results: Annotated[
@@ -671,12 +696,13 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
     ) -> EventListResponse:
         """
         Retrieves a list of events from a specified Google Calendar within a given time range.
+        By default, searches for events in the next 10 days starting from the current time.
 
         Args:
             user_google_email (str): The user's Google email address. Required.
             calendar_id (str): The ID of the calendar to query. Use 'primary' for the user's primary calendar. Defaults to 'primary'. Calendar IDs can be obtained using `list_calendars`.
             time_min (Optional[str]): The start of the time range (inclusive) in RFC3339 format (e.g., '2024-05-12T10:00:00Z' or '2024-05-12'). If omitted, defaults to the current time.
-            time_max (Optional[str]): The end of the time range (exclusive) in RFC3339 format. If omitted, events starting from `time_min` onwards are considered (up to `max_results`).
+            time_max (Optional[str]): The end of the time range (exclusive) in RFC3339 format. If omitted, defaults to 10 days from the start time.
             max_results (int): The maximum number of events to return. Defaults to 25.
 
         Returns:
@@ -711,11 +737,11 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     f"time_max processing: original='{time_max}', formatted='{effective_time_max}'"
                 )
             else:
-                # Default to 30 days from timeMin if not specified
-                # This provides a reasonable default window for most use cases
+                # Default to 10 days from timeMin if not specified
+                # This provides a reasonable default window for upcoming events
                 try:
                     if effective_time_min:
-                        # Parse the timeMin to add 30 days
+                        # Parse the timeMin to add 10 days
                         # Remove 'Z' and parse ISO format
                         time_str = effective_time_min.rstrip('Z')
                         # Handle both date and datetime formats
@@ -725,8 +751,8 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                             # If it's just a date, parse it
                             time_min_dt = datetime.datetime.strptime(time_str, "%Y-%m-%d")
                         
-                        # Add 30 days
-                        time_max_dt = time_min_dt + timedelta(days=30)
+                        # Add 10 days
+                        time_max_dt = time_min_dt + timedelta(days=10)
                         
                         # Format back to RFC3339 (handle timezone-aware datetimes correctly)
                         iso_string = time_max_dt.isoformat()
@@ -740,11 +766,11 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                             # Already has proper timezone info
                             effective_time_max = iso_string
                         logger.info(
-                            f"time_max not provided, defaulting to 30 days from time_min: {effective_time_max}"
+                            f"time_max not provided, defaulting to 10 days from time_min: {effective_time_max}"
                         )
                 except Exception as e:
                     logger.info(
-                        f"Could not calculate default time_max (30 days from time_min): {e}. "
+                        f"Could not calculate default time_max (10 days from time_min): {e}. "
                         f"Omitting time_max to get all future events."
                     )
                     effective_time_max = None
@@ -855,7 +881,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
     )
     async def create_event(
         ctx: Context,
-        user_google_email: Annotated[str, "The user's Google email address for authentication"],
+        user_google_email: UserGoogleEmailCalendar = None,
         calendar_id: Annotated[
             str,
             Field(default="primary", description="Calendar ID where events will be created. Use 'primary' for the user's main calendar")
@@ -1286,12 +1312,12 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         }
     )
     async def modify_event(
-        user_google_email: Annotated[str, "The user's Google email address for authentication"],
         event_id: Annotated[str, "The ID of the event to modify"],
         calendar_id: Annotated[
             str,
             Field(default="primary", description="Calendar ID where the event is located")
         ] = "primary",
+        user_google_email: UserGoogleEmailCalendar = None,
         summary: Annotated[
             Optional[str],
             Field(default=None, description="New event title/summary")
@@ -1520,7 +1546,6 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         }
     )
     async def delete_event(
-        user_google_email: Annotated[str, "The user's Google email address for authentication"],
         event_id: Annotated[
             Union[str, List[str]],
             Field(description="Single event ID, comma-separated string of IDs (e.g., 'id1,id2,id3'), JSON array string (e.g., '[\"id1\",\"id2\"]'), or list of event IDs")
@@ -1528,7 +1553,8 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         calendar_id: Annotated[
             str,
             Field(default="primary", description="Calendar ID from which to delete events")
-        ] = "primary"
+        ] = "primary",
+        user_google_email: UserGoogleEmailCalendar = None
     ) -> DeleteEventResponse:
         """
         Deletes one or more events from Google Calendar.
@@ -1743,7 +1769,6 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         }
     )
     async def bulk_calendar_operations(
-        user_google_email: Annotated[str, "The user's Google email address for authentication"],
         operation: Annotated[
             str,
             Field(
@@ -1787,7 +1812,8 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         dry_run: Annotated[
             bool,
             Field(default=True, description="If True, only preview what would be affected without making changes")
-        ] = True
+        ] = True,
+        user_google_email: UserGoogleEmailCalendar = None
     ) -> BulkOperationsResponse:
         """
         Perform bulk operations on calendar events with various filters.
@@ -1984,7 +2010,6 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         }
     )
     async def move_events_between_calendars(
-        user_google_email: Annotated[str, "The user's Google email address for authentication"],
         source_calendar_id: Annotated[str, "Source calendar ID to move events from"],
         target_calendar_id: Annotated[str, "Target calendar ID to move events to"],
         time_min: Annotated[
@@ -2011,7 +2036,8 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         delete_from_source: Annotated[
             bool,
             Field(default=False, description="If True, delete events from source after copying (move). If False, only copy events (duplicate)")
-        ] = False
+        ] = False,
+        user_google_email: UserGoogleEmailCalendar = None
     ) -> MoveEventsResponse:
         """
         Move or copy events from one calendar to another.
@@ -2208,12 +2234,12 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_event(
-        user_google_email: Annotated[str, "The user's Google email address for authentication"],
         event_id: Annotated[str, "The ID of the event to retrieve"],
         calendar_id: Annotated[
             str,
             Field(default="primary", description="The ID of the calendar containing the event")
-        ] = "primary"
+        ] = "primary",
+        user_google_email: UserGoogleEmailCalendar = None
     ) -> GetEventResponse:
         """
         Retrieves the details of a single event by its ID from a specified Google Calendar.

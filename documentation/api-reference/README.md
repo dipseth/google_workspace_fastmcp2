@@ -28,7 +28,6 @@ Tools that automatically use the authenticated user's context without requiring 
 - `list_my_drive_files` - List Drive files with automatic authentication
 - `search_my_gmail` - Search Gmail messages seamlessly
 - `create_my_calendar_event` - Create calendar events without email parameter
-- `get_my_auth_status` - Check authentication status
 
 ### 📁 Drive Tools (9 tools)
 File management, upload, search, content retrieval, and sharing capabilities.
@@ -146,12 +145,34 @@ Tools use standardized annotations for behavior hints:
 - Resource templating for enhanced tools
 - Qdrant semantic search integration
 
+## Testing Framework
+
+The platform includes a comprehensive testing framework with 100% reliability:
+
+- **✅ 45 passed, 0 failed**: Complete test suite validation across all Google services
+- **🔧 Standardized Framework**: Consistent patterns for testing all 60+ tools
+- **🌐 Environment Configuration**: Configurable test resources via `.env` variables
+- **📋 Full Documentation**: See [`../tests/client/TESTING_FRAMEWORK.md`](../tests/client/TESTING_FRAMEWORK.md)
+
+### Test Environment Configuration
+
+Add these to your `.env` file for complete testing:
+
+```env
+# Test Resources (prevents resource creation during tests)
+TEST_EMAIL_ADDRESS=your.test@gmail.com
+GOOGLE_SLIDE_PRESENTATION_ID=1RGLViw2eUBJfl84jsVlFuuLbauGvcxyfs1YWmpmFCSw
+TEST_CHAT_WEBHOOK=https://chat.googleapis.com/v1/spaces/YOUR_SPACE/messages
+PHOTO_TEST_EMAIL_ADDRESS=your-photo-test@example.com
+```
+
 ## Getting Started
 
 1. Review the [Authentication Guide](./auth/README.md) to set up OAuth
 2. Explore service-specific documentation for your use case
 3. Check [Enhanced Tools](./enhanced/README.md) for simplified authentication
 4. See [Examples](./examples/README.md) for common workflows
+5. Review [Testing Framework](../tests/client/TESTING_FRAMEWORK.md) for validation
 
 ---
 

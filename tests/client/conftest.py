@@ -42,8 +42,15 @@ async def client():
     # Create client directly in fixture to avoid double context management
     auth_config = get_client_auth_config(TEST_EMAIL)
     client_obj = Client(SERVER_URL, auth=auth_config)
-    async with client_obj:
+    
+    # Start the client connection
+    await client_obj.__aenter__()
+    
+    try:
         yield client_obj
+    finally:
+        # Ensure client is properly closed
+        await client_obj.__aexit__(None, None, None)
 
 
 @pytest.fixture

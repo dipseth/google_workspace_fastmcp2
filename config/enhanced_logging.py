@@ -40,6 +40,29 @@ MAX_MSG_LENGTH = 3000
 _root_logger_initialized = False
 
 
+def get_log_directory():
+    """
+    Get the log directory from environment variable or fall back to system temp.
+    This ensures we have a writable location even in restricted environments.
+    """
+    # Try environment variable first
+    log_path = os.getenv("LOG_PATH")
+    if log_path:
+        return Path(log_path)
+    
+    # Try user's home directory
+    try:
+        home_logs = Path.home() / "logs" / "fastmcp"
+        return home_logs
+    except:
+        pass
+    
+    # Fall back to system temp directory
+    import tempfile
+    temp_logs = Path(tempfile.gettempdir()) / "fastmcp_logs"
+    return temp_logs
+
+
 class ColoredLogRecord(logging.LogRecord):
     """Enhanced LogRecord with colored components and path information."""
 
@@ -130,15 +153,28 @@ def setup_logger(level=None):
     # Override standard LogRecord factory with our enhanced version
     logging.setLogRecordFactory(ColoredLogRecord)
 
-    # Create log directory structure
-    log_dir = Path("logs")
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    daily_log_dir = log_dir / today
-    daily_log_dir.mkdir(parents=True, exist_ok=True)
+    # Get log directory (with fallback for restricted environments)
+    log_dir = get_log_directory()
+    
+    # Create log directory structure with error handling
+    try:
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        daily_log_dir = log_dir / today
+        daily_log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create timestamped log file
-    timestamp = datetime.datetime.now().strftime("%H-%M-%S")
-    log_file = daily_log_dir / f"app_log_{timestamp}.log"
+        # Create timestamped log file
+        timestamp = datetime.datetime.now().strftime("%H-%M-%S")
+        log_file = daily_log_dir / f"app_log_{timestamp}.log"
+        
+        # Test if we can write to the directory
+        test_file = daily_log_dir / "test_write.tmp"
+        test_file.touch()
+        test_file.unlink()
+        
+    except (OSError, PermissionError) as e:
+        # If we can't create files, fall back to console-only logging
+        print(f"Warning: Cannot create log files ({e}). Using console logging only.", file=sys.stderr)
+        log_file = None
 
     # Define log format with colors
     console_format = (
@@ -152,18 +188,6 @@ def setup_logger(level=None):
     # Plain format for file logs (no colors)
     file_format = "%(asctime)s %(directory)s/%(filename)s:%(lineno)d [%(levelname).1s] %(message)s"
 
-    # Configure file handler
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(level)
-    file_formatter = logging.Formatter(file_format, datefmt="%Y-%m-%d %H:%M:%S")
-    file_handler.setFormatter(file_formatter)
-
-    # Configure console handler with colors
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(level)
-    console_formatter = ColoredFormatter(console_format, datefmt="%Y-%m-%d %H:%M:%S")
-    console_handler.setFormatter(console_formatter)
-
     # Get the root logger and configure it
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
@@ -172,8 +196,22 @@ def setup_logger(level=None):
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
-    # Add the handlers
-    root_logger.addHandler(file_handler)
+    # Configure file handler (only if we can write files)
+    if log_file:
+        try:
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setLevel(level)
+            file_formatter = logging.Formatter(file_format, datefmt="%Y-%m-%d %H:%M:%S")
+            file_handler.setFormatter(file_formatter)
+            root_logger.addHandler(file_handler)
+        except (OSError, PermissionError):
+            print("Warning: Cannot create file handler. Using console logging only.", file=sys.stderr)
+
+    # Configure console handler with colors
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(level)
+    console_formatter = ColoredFormatter(console_format, datefmt="%Y-%m-%d %H:%M:%S")
+    console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
 
     # Mark as initialized

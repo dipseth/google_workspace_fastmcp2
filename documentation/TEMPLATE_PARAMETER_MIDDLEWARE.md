@@ -119,7 +119,7 @@ mindmap
 
 ```python
 # 🆕 Natural property access - NOW WORKING!
-"{{user://current/email.email}}"           # → "sethrivers@gmail.com"
+"{{user://current/email.email}}"           # → "test_example@gmail.com"
 "{{user://current/email.name}}"            # → "Seth Rivers"
 "{{workspace://content/recent.total_files}}" # → 42
 
@@ -129,7 +129,7 @@ mindmap
 
 # 🆕 Use in templates naturally
 "Hello {{user://current/email.name}}!"     # → "Hello Seth Rivers!"
-"User {{user://current/email.email}} says hello" # → "User sethrivers@gmail.com says hello"
+"User {{user://current/email.email}} says hello" # → "User test_example@gmail.com says hello"
 ```
 
 **🔧 How It Works (Behind the Scenes):**
@@ -172,7 +172,7 @@ mindmap
 ```python
 # 🆕 NATURAL SYNTAX with conditionals - NOW WORKING!
 "Hello {{user://current/email.name}}!"     # → "Hello Seth Rivers!"
-"User {{user://current/email.email}} says hello" # → "User sethrivers@gmail.com says hello"
+"User {{user://current/email.email}} says hello" # → "User test_example@gmail.com says hello"
 
 # 🆕 NATURAL SYNTAX in expressions
 "Total files: {{workspace://content/recent.total_files}} | User: {{user://current/email.email}}"
@@ -393,7 +393,7 @@ mcp.add_middleware(middleware)
 async def send_smart_email_with_natural_syntax(
     recipient: str,
     # 🆕 Natural syntax - direct property access!
-    user_email: str = "{{user://current/email.email}}",           # → "sethrivers@gmail.com"
+    user_email: str = "{{user://current/email.email}}",           # → "test_example@gmail.com"
     user_name: str = "{{user://current/email.name}}",             # → "Seth Rivers"
     total_files: int = "{{workspace://content/recent.total_files}}", # → 42
     greeting: str = "Hello {{user://current/email.name}}!",       # → "Hello Seth Rivers!"
@@ -403,11 +403,11 @@ async def send_smart_email_with_natural_syntax(
     """NEW: Tool demonstrating natural resource URI syntax - no complex JSON paths needed!"""
     
     # All parameters are automatically resolved:
-    # user_email: "sethrivers@gmail.com"
+    # user_email: "test_example@gmail.com"
     # user_name: "Seth Rivers" 
     # total_files: 42
     # greeting: "Hello Seth Rivers!"
-    # summary: "User sethrivers@gmail.com has 42 files"
+    # summary: "User test_example@gmail.com has 42 files"
     
     return f"""
     📧 **Smart Email Composed!**
@@ -1178,4 +1178,332 @@ journey
 4. **📊 Monitor**: Watch performance and debug logs
 5. **🎯 Optimize**: Tune cache settings and add template files
 
-> **🎭 The enhanced Template Parameter Middleware with Jinja2 integration transforms your FastMCP platform into a professional, template-driven system that eliminates f-string parsing errors while providing powerful templating capabilities!** ✨🚀
+## 📚 API Documentation
+
+### Core Classes
+
+#### EnhancedTemplateMiddleware
+
+The main middleware class that provides hybrid template resolution capabilities.
+
+**Class Attributes:**
+- `SIMPLE_TEMPLATE_PATTERN`: Regex pattern for detecting simple {{resource://uri}} templates
+- `RESOURCE_URI_PATTERN`: Enhanced regex for resource URIs with property access
+- `JINJA2_DETECTION_PATTERNS`: List of patterns for detecting Jinja2 syntax
+
+**Instance Attributes:**
+- `enable_caching`: Boolean flag for resource caching
+- `cache_ttl_seconds`: Cache time-to-live configuration
+- `enable_debug_logging`: Debug logging control
+- `templates_dir`: Path to template files directory
+- `jinja2_env`: Configured Jinja2 Environment (if available)
+
+#### Key Methods
+
+##### `__init__(enable_caching=True, cache_ttl_seconds=300, enable_debug_logging=False, jinja2_options=None, templates_dir=None)`
+
+Initialize the enhanced template middleware with comprehensive configuration options.
+
+**Parameters:**
+- `enable_caching` (bool): Enable TTL-based resource caching for performance
+- `cache_ttl_seconds` (int): Cache expiration time in seconds (default: 300)
+- `enable_debug_logging` (bool): Enable detailed logging for development
+- `jinja2_options` (Dict[str, Any]): Advanced Jinja2 Environment options
+- `templates_dir` (str): Path to .j2 template files directory
+
+**Key Features:**
+- Automatic Jinja2 detection and fallback to simple templating
+- Custom template loaders (FileSystem + Dynamic)
+- Resource caching with configurable TTL
+- Comprehensive error handling and logging
+
+##### `async on_call_tool(context, call_next)`
+
+Main middleware hook for intercepting and processing tool calls.
+
+**Parameters:**
+- `context` (MiddlewareContext): FastMCP middleware context
+- `call_next`: Continuation function for middleware chain
+
+**Returns:**
+- Result from original tool execution after template resolution
+
+**Processing Flow:**
+1. Extract tool name and arguments
+2. Validate FastMCP context availability
+3. Recursively resolve template expressions
+4. Update context with resolved values
+5. Continue with tool execution
+
+##### `clear_cache()`
+
+Clear all cached resources and reset cache statistics.
+
+**Use Cases:**
+- Development: Force fresh data when resources change
+- Testing: Ensure clean state between tests
+- Memory management: Free cache memory
+- Runtime: Force refresh of potentially stale data
+
+##### `get_cache_stats()`
+
+Get detailed cache statistics for monitoring and debugging.
+
+**Returns:**
+```python
+{
+    "enabled": bool,           # Caching configuration status
+    "jinja2_available": bool,  # Jinja2 package availability
+    "total_entries": int,      # Total cache entries
+    "valid_entries": int,      # Non-expired entries
+    "expired_entries": int,    # Expired but not cleaned
+    "ttl_seconds": int,        # Configured TTL
+    "cached_uris": List[str]   # List of cached resource URIs
+}
+```
+
+### Exception Classes
+
+#### TemplateResolutionError
+
+Raised when template parameter resolution fails.
+
+**Attributes:**
+- `message`: Human-readable error description
+- `resource_uri`: The resource URI that failed (optional)
+- `template_text`: The template text that caused the error (optional)
+
+**Common Causes:**
+- Resource URI cannot be fetched from FastMCP context
+- Invalid Jinja2 template syntax
+- Property extraction failures
+- Authentication/permission issues
+
+#### SilentUndefined
+
+Custom Jinja2 Undefined class for graceful template variable handling.
+
+**Behavior:**
+- Missing variables resolve to empty string ('')
+- Boolean evaluation returns False
+- Prevents UndefinedError exceptions
+- Enables progressive template enhancement
+
+### Setup Functions
+
+#### `setup_enhanced_template_middleware(mcp, **kwargs)`
+
+Primary setup function for integrating template middleware into FastMCP servers.
+
+**Parameters:**
+- `mcp`: FastMCP server instance
+- `enable_caching` (bool): Enable resource caching (default: True)
+- `cache_ttl_seconds` (int): Cache TTL in seconds (default: 300)
+- `enable_debug` (bool): Enable debug logging (default: False)
+- `jinja2_options` (Dict): Advanced Jinja2 configuration
+- `templates_dir` (str): Template files directory path
+
+**Returns:**
+- `EnhancedTemplateMiddleware`: Configured middleware instance
+
+**Example:**
+```python
+from middleware.template_middleware import setup_enhanced_template_middleware
+
+# Basic setup
+middleware = setup_enhanced_template_middleware(mcp)
+
+# Production configuration
+middleware = setup_enhanced_template_middleware(
+    mcp,
+    enable_caching=True,
+    cache_ttl_seconds=600,  # 10 minutes
+    enable_debug=False,
+    jinja2_options={'autoescape': True}
+)
+
+# Development configuration
+middleware = setup_enhanced_template_middleware(
+    mcp,
+    enable_debug=True,
+    cache_ttl_seconds=60,  # Short TTL for development
+    templates_dir='./custom_templates'
+)
+```
+
+### Custom Filters and Functions
+
+The middleware provides specialized Jinja2 filters for FastMCP integration:
+
+#### Global Functions
+- `now()`: Returns current UTC datetime
+- `utcnow()`: Alias for now() for compatibility
+
+#### Custom Filters
+- `extract(data, path)`: Extract nested properties using dot notation
+- `safe_get(data, key, default='')`: Safely access dict/object properties
+- `format_date(date_input, format='%Y-%m-%d %H:%M')`: Format datetime objects
+- `json_pretty(data, indent=2)`: Pretty-print JSON with indentation
+- `strftime(date_input, format='%Y-%m-%d %H:%M:%S')`: Format dates with strftime
+- `map_list(items, attribute=None)`: Map object attributes to list values
+- `map_attr(items, attribute)`: Alias for map_list
+
+#### Filter Usage Examples
+```jinja2
+{# Extract nested properties #}
+{{ user_data | extract('profile.settings.theme') }}
+
+{# Safe property access with defaults #}
+{{ user | safe_get('name', 'Anonymous User') }}
+
+{# Format dates and timestamps #}
+{{ created_at | format_date('%B %d, %Y') }}
+{{ timestamp | strftime('%H:%M:%S') }}
+
+{# Pretty-print JSON data #}
+{{ api_response | json_pretty(4) }}
+
+{# Map object attributes to lists #}
+{{ documents | map_list('title') }}
+{{ users | map_attr('email') }}
+```
+
+## 🔧 Integration Patterns
+
+### Middleware Chain Integration
+
+The template middleware works seamlessly with existing FastMCP middleware:
+
+```python
+from fastmcp import FastMCP
+from auth.middleware import AuthMiddleware
+from middleware.template_middleware import setup_enhanced_template_middleware
+
+# Create server
+mcp = FastMCP("MyServer")
+
+# Add middleware in correct order
+mcp.add_middleware(AuthMiddleware())  # Authentication first
+template_middleware = setup_enhanced_template_middleware(mcp)  # Templates second
+
+# Templates can now access authenticated user context
+@mcp.tool()
+async def personalized_greeting(
+    user_name: str = "{{user://current/profile.name}}",
+    user_email: str = "{{user://current/email}}"
+) -> str:
+    return f"Hello {user_name} ({user_email})!"
+```
+
+### Resource Provider Integration
+
+Custom resource providers can be used with the template middleware:
+
+```python
+# Custom resource provider
+@mcp.resource("custom://data/{key}")
+async def custom_data_resource(key: str) -> str:
+    # Fetch data from custom source
+    data = await fetch_custom_data(key)
+    return json.dumps(data)
+
+# Use in templates
+@mcp.tool()
+async def process_custom_data(
+    data: str = "{{custom://data/user_preferences}}"
+) -> str:
+    # data is automatically resolved from custom resource
+    return f"Processing: {data}"
+```
+
+### Template File Organization
+
+Organize complex templates in dedicated files:
+
+```
+templates/
+├── email/
+│   ├── welcome.j2
+│   ├── notification.j2
+│   └── signature.j2
+├── reports/
+│   ├── daily_summary.j2
+│   └── weekly_stats.j2
+└── macros/
+    ├── common.j2
+    └── formatting.j2
+```
+
+```python
+# templates/macros/common.j2
+{% macro user_greeting(formal=False) %}
+{% if formal %}
+Dear {{ user.name | default('Valued User') }}
+{% else %}
+Hi {{ user.name | default('there') }}
+{% endif %}
+{% endmacro %}
+
+# templates/email/welcome.j2
+{% from 'macros/common.j2' import user_greeting %}
+
+Subject: Welcome to Our Platform!
+
+{{ user_greeting(formal=True) }},
+
+Welcome to our platform! Here's what you can do:
+
+{% for feature in features %}
+• {{ feature.name }}: {{ feature.description }}
+{% endfor %}
+
+Best regards,
+The Team
+```
+
+### Performance Optimization
+
+#### Caching Strategy
+```python
+# Production: Longer TTL for stable resources
+middleware = setup_enhanced_template_middleware(
+    mcp,
+    enable_caching=True,
+    cache_ttl_seconds=3600  # 1 hour for user profiles
+)
+
+# Development: Shorter TTL for changing data
+middleware = setup_enhanced_template_middleware(
+    mcp,
+    enable_caching=True,
+    cache_ttl_seconds=60  # 1 minute for development
+)
+
+# Monitor cache performance
+stats = middleware.get_cache_stats()
+print(f"Cache hit rate: {stats['valid_entries']/stats['total_entries']*100:.1f}%")
+```
+
+#### Template Optimization
+```python
+# Efficient: Pre-resolve common resources
+@mcp.tool()
+async def efficient_template(
+    user_email: str = "{{user://current/email}}",  # Cached
+    workspace_files: int = "{{workspace://content/recent.total_files}}"  # Cached
+) -> str:
+    return f"User {user_email} has {workspace_files} files"
+
+# Less efficient: Multiple resource calls
+@mcp.tool()
+async def inefficient_template(
+    content: str = """
+    User: {{user://current/email}}
+    Profile: {{user://current/profile.name}}
+    Settings: {{user://current/profile.settings}}
+    """  # Multiple calls to user resources
+) -> str:
+    return content
+```
+
+> 🚀 **The enhanced Template Parameter Middleware with comprehensive API documentation transforms your FastMCP platform into a professional, well-documented system that's easy to understand, integrate, and extend!** ✨�

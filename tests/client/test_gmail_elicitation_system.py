@@ -16,6 +16,7 @@ Tests are designed to run against a running MCP server instance.
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import json
 from fastmcp import Client
@@ -23,11 +24,12 @@ from typing import Any, Dict, List
 import os
 
 # Import test utilities
-from test_auth_utils import get_client_auth_config
+from ..test_auth_utils import get_client_auth_config
 
 # Server configuration from environment variables with defaults
 SERVER_HOST = os.getenv("MCP_SERVER_HOST", "localhost")
 SERVER_PORT = os.getenv("MCP_SERVER_PORT", os.getenv("SERVER_PORT", "8002"))
+# Force HTTP for now as server is running on HTTP
 SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://{SERVER_HOST}:{SERVER_PORT}/mcp/")
 
 # Test email address from environment variable
@@ -36,15 +38,7 @@ TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_user@example.com")
 
 class TestGmailElicitationSystem:
     """Comprehensive test suite for Gmail elicitation system using FastMCP Client."""
-
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        # Get JWT token for authentication if enabled
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        async with client:
-            yield client
+    # Using the global client fixture from conftest.py
 
     @pytest.mark.asyncio
     async def test_gmail_tools_available(self, client):
@@ -218,7 +212,8 @@ class TestGmailElicitationSystem:
         content_types = ["plain", "html", "mixed"]
 
         for content_type in content_types:
-            with self.subTest(content_type=content_type):
+            # Note: pytest doesn't have subTest, so we'll just test all content types
+            try:
                 result = await client.call_tool("send_gmail_message", {
                     "user_google_email": TEST_EMAIL,
                     "to": ["test@example.com"],
@@ -236,6 +231,9 @@ class TestGmailElicitationSystem:
                         "email sent" in content.lower() or
                         "authentication" in content.lower() or
                         "credentials" in content.lower())
+            except AssertionError as e:
+                print(f"Failed for content_type={content_type}: {e}")
+                raise
 
     # ============================================================================
     # D. INTEGRATION TEST SCENARIOS

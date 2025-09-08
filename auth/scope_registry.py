@@ -28,8 +28,23 @@ class ValidationResult:
             self.warnings = []
 
 
+@dataclass
+class ServiceMetadata:
+    """Comprehensive service metadata"""
+    name: str
+    description: str
+    icon: str
+    version: str
+    scopes: Dict[str, str]
+    default_scope_group: str
+    features: List[str]
+    api_endpoint: str
+    documentation_url: str
+    service_config: Dict[str, str]
+
+
 class ScopeRegistry:
-    """Central registry for all Google API scopes"""
+    """Central registry for all Google API scopes and service metadata"""
     
     # Core scope registry - Single Source of Truth
     GOOGLE_API_SCOPES = {
@@ -153,6 +168,139 @@ class ScopeRegistry:
         }
     }
     
+    # Comprehensive service metadata registry
+    SERVICE_METADATA = {
+        "drive": ServiceMetadata(
+            name="Google Drive",
+            description="Cloud storage and file synchronization service",
+            icon="📁",
+            version="v3",
+            scopes=GOOGLE_API_SCOPES["drive"],
+            default_scope_group="drive_basic",
+            features=["file_storage", "sharing", "collaboration", "version_control"],
+            api_endpoint="https://www.googleapis.com/drive/v3",
+            documentation_url="https://developers.google.com/drive/api/v3/reference",
+            service_config={"service": "drive", "version": "v3"}
+        ),
+        
+        "gmail": ServiceMetadata(
+            name="Gmail",
+            description="Email service with powerful search, filtering, and organization features",
+            icon="📧",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["gmail"],
+            default_scope_group="gmail_basic",
+            features=["email", "search", "labels", "filters", "templates", "batch_operations"],
+            api_endpoint="https://www.googleapis.com/gmail/v1",
+            documentation_url="https://developers.google.com/gmail/api/reference",
+            service_config={"service": "gmail", "version": "v1"}
+        ),
+        
+        "calendar": ServiceMetadata(
+            name="Google Calendar",
+            description="Time management and scheduling service",
+            icon="📅",
+            version="v3",
+            scopes=GOOGLE_API_SCOPES["calendar"],
+            default_scope_group="calendar_basic",
+            features=["events", "scheduling", "reminders", "sharing", "bulk_operations"],
+            api_endpoint="https://www.googleapis.com/calendar/v3",
+            documentation_url="https://developers.google.com/calendar/api/v3/reference",
+            service_config={"service": "calendar", "version": "v3"}
+        ),
+        
+        "docs": ServiceMetadata(
+            name="Google Docs",
+            description="Document creation and collaboration service",
+            icon="📄",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["docs"],
+            default_scope_group="docs_basic",
+            features=["document_creation", "rich_formatting", "collaboration", "templates"],
+            api_endpoint="https://docs.googleapis.com/v1",
+            documentation_url="https://developers.google.com/docs/api/reference",
+            service_config={"service": "docs", "version": "v1"}
+        ),
+        
+        "sheets": ServiceMetadata(
+            name="Google Sheets",
+            description="Spreadsheet and data analysis service",
+            icon="📊",
+            version="v4",
+            scopes=GOOGLE_API_SCOPES["sheets"],
+            default_scope_group="sheets_basic",
+            features=["spreadsheets", "data_analysis", "formulas", "charts", "collaboration"],
+            api_endpoint="https://sheets.googleapis.com/v4",
+            documentation_url="https://developers.google.com/sheets/api/reference",
+            service_config={"service": "sheets", "version": "v4"}
+        ),
+        
+        "chat": ServiceMetadata(
+            name="Google Chat",
+            description="Team messaging and collaboration platform",
+            icon="💬",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["chat"],
+            default_scope_group="chat_basic",
+            features=["messaging", "spaces", "cards", "bots", "webhooks"],
+            api_endpoint="https://chat.googleapis.com/v1",
+            documentation_url="https://developers.google.com/chat/api/reference",
+            service_config={"service": "chat", "version": "v1"}
+        ),
+        
+        "forms": ServiceMetadata(
+            name="Google Forms",
+            description="Survey and form creation service",
+            icon="📝",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["forms"],
+            default_scope_group="forms_basic",
+            features=["form_creation", "responses", "validation", "analysis"],
+            api_endpoint="https://forms.googleapis.com/v1",
+            documentation_url="https://developers.google.com/forms/api/reference",
+            service_config={"service": "forms", "version": "v1"}
+        ),
+        
+        "slides": ServiceMetadata(
+            name="Google Slides",
+            description="Presentation creation and sharing service",
+            icon="🎯",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["slides"],
+            default_scope_group="slides_basic",
+            features=["presentations", "templates", "animations", "collaboration"],
+            api_endpoint="https://slides.googleapis.com/v1",
+            documentation_url="https://developers.google.com/slides/api/reference",
+            service_config={"service": "slides", "version": "v1"}
+        ),
+        
+        "photos": ServiceMetadata(
+            name="Google Photos",
+            description="Photo and video storage service",
+            icon="📷",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["photos"],
+            default_scope_group="photos_basic",
+            features=["photo_storage", "albums", "sharing", "search", "metadata"],
+            api_endpoint="https://photoslibrary.googleapis.com/v1",
+            documentation_url="https://developers.google.com/photos/library/reference",
+            service_config={"service": "photoslibrary", "version": "v1"}
+        ),
+        
+        "tasks": ServiceMetadata(
+            name="Google Tasks",
+            description="Task management service",
+            icon="✅",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["tasks"],
+            default_scope_group="tasks_basic",
+            features=["task_lists", "due_dates", "notes", "completion_tracking"],
+            api_endpoint="https://tasks.googleapis.com/tasks/v1",
+            documentation_url="https://developers.google.com/tasks/reference",
+            service_config={"service": "tasks", "version": "v1"}
+        )
+    }
+    
     # Predefined service scope groups for common use cases
     SERVICE_SCOPE_GROUPS = {
         # Basic service combinations
@@ -178,7 +326,6 @@ class ScopeRegistry:
         "admin_suite": ["base.userinfo_email", "base.openid", "admin.users", "admin.groups", "admin.roles"],
         
         # Comprehensive access for OAuth flows (validated scopes only)
-        # Comprehensive access for OAuth flows (validated scopes only)
         "oauth_comprehensive": [
             "base.userinfo_email", "base.userinfo_profile", "base.openid",
             "drive.full", "drive.readonly", "drive.file",
@@ -194,6 +341,37 @@ class ScopeRegistry:
             "tasks.readonly", "tasks.full"
         ]
     }
+    
+    # Convenient access to individual service scope groups
+    DRIVE_SCOPES = GOOGLE_API_SCOPES["drive"]
+    GMAIL_SCOPES = GOOGLE_API_SCOPES["gmail"]
+    CALENDAR_SCOPES = GOOGLE_API_SCOPES["calendar"]
+    DOCS_SCOPES = GOOGLE_API_SCOPES["docs"]
+    SHEETS_SCOPES = GOOGLE_API_SCOPES["sheets"]
+    CHAT_SCOPES = GOOGLE_API_SCOPES["chat"]
+    FORMS_SCOPES = GOOGLE_API_SCOPES["forms"]
+    SLIDES_SCOPES = GOOGLE_API_SCOPES["slides"]
+    PHOTOS_SCOPES = GOOGLE_API_SCOPES["photos"]
+    TASKS_SCOPES = GOOGLE_API_SCOPES["tasks"]
+    BASE_SCOPES = GOOGLE_API_SCOPES["base"]
+    
+    @classmethod
+    def get_service_metadata(cls, service: str) -> Optional[ServiceMetadata]:
+        """
+        Get comprehensive metadata for a service.
+        
+        Args:
+            service: Service name
+            
+        Returns:
+            ServiceMetadata object or None if service not found
+        """
+        return cls.SERVICE_METADATA.get(service)
+    
+    @classmethod
+    def get_all_services(cls) -> List[str]:
+        """Get list of all available services."""
+        return list(cls.SERVICE_METADATA.keys())
     
     @classmethod
     def get_service_scopes(cls, service: str, access_level: str = "basic") -> List[str]:

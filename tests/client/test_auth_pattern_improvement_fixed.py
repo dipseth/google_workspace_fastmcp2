@@ -1,6 +1,7 @@
 """Test suite for improved authentication pattern using FastMCP Client SDK."""
 
 import pytest
+import pytest_asyncio
 import asyncio
 import json
 import os
@@ -11,7 +12,7 @@ from fastmcp import Client
 from typing import Any, Dict, List
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from test_auth_utils import get_client_auth_config
+from ..test_auth_utils import get_client_auth_config
 
 # Load environment variables from .env file
 load_dotenv()
@@ -156,13 +157,7 @@ Environment variables to check:
 
 class TestImprovedAuthPattern:
     """Test the improved authentication pattern with optional user_google_email parameter."""
-    
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server with protocol auto-detection."""
-        client = await create_test_client(TEST_EMAIL)
-        async with client:
-            yield client
+    # Using the global client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_list_gmail_labels_tool_available(self, client):
@@ -373,13 +368,7 @@ class TestImprovedAuthPattern:
 
 class TestBackwardCompatibility:
     """Test that the improved pattern maintains backward compatibility."""
-    
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server with protocol auto-detection."""
-        client = await create_test_client(TEST_EMAIL)
-        async with client:
-            yield client
+    # Using the global client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_existing_tools_still_work(self, client):
@@ -455,13 +444,7 @@ class TestBackwardCompatibility:
 
 class TestMiddlewareEnhancements:
     """Test the specific middleware enhancements we implemented."""
-    
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server with protocol auto-detection."""
-        client = await create_test_client(TEST_EMAIL)
-        async with client:
-            yield client
+    # Using the global client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_auth_priority_documentation(self, client):

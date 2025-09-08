@@ -20,68 +20,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Legacy service defaults - now managed through centralized registry
-# Maintained for backward compatibility through compatibility shim
-_FALLBACK_SERVICE_DEFAULTS = {
-    "drive": {
-        "default_scopes": ["drive_file", "drive_read"],
-        "version": "v3",
-        "description": "Google Drive service"
-    },
-    "gmail": {
-        "default_scopes": [
-            "gmail_read",
-            "gmail_send",
-            "gmail_compose",
-            "gmail_modify",
-            "gmail_labels",
-            "gmail_settings_basic",
-            "gmail_settings_sharing"
-        ],
-        "version": "v1",
-        "description": "Gmail service"
-    },
-    "calendar": {
-        "default_scopes": ["calendar_read", "calendar_events", "calendar_full"],
-        "version": "v3",
-        "description": "Google Calendar service"
-    },
-    "docs": {
-        "default_scopes": ["docs_read", "docs_write"],
-        "version": "v1",
-        "description": "Google Docs service"
-    },
-    "sheets": {
-        "default_scopes": ["sheets_read", "sheets_write"],
-        "version": "v4",
-        "description": "Google Sheets service"
-    },
-    "chat": {
-        "default_scopes": ["chat_read", "chat_write"],
-        "version": "v1",
-        "description": "Google Chat service"
-    },
-    "forms": {
-        "default_scopes": ["forms", "forms_read", "forms_responses_read"],
-        "version": "v1",
-        "description": "Google Forms service"
-    },
-    "slides": {
-        "default_scopes": ["slides", "slides_read"],
-        "version": "v1",
-        "description": "Google Slides service"
-    },
-    "photos": {
-        "default_scopes": ["photos_read", "photos_append"],
-        "version": "v1",
-        "description": "Google Photos service"
-    },
-    "tasks": {
-        "default_scopes": ["tasks_read", "tasks_full"],
-        "version": "v1",
-        "description": "Google Tasks service"
-    }
-}
+# Import centralized scope registry
+from .scope_registry import ScopeRegistry
+
+# Legacy fallback for compatibility - now redirects to scope_registry
+_FALLBACK_SERVICE_DEFAULTS = {}  # Empty - now uses ScopeRegistry
 
 
 def _get_service_defaults() -> Dict[str, Dict]:
@@ -97,27 +40,22 @@ def _get_service_defaults() -> Dict[str, Dict]:
     """
     if _COMPATIBILITY_AVAILABLE:
         try:
-            # Ensure we pick up the latest registry/group changes each call
-            try:
-                CompatibilityShim.clear_cache()
-            except Exception as _clear_e:
-                logger.debug(f"CompatibilityShim.clear_cache() skipped: {_clear_e}")
-            defaults = CompatibilityShim.get_legacy_service_defaults()
-            # Ensure Gmail defaults include settings scopes required for filters/forwarding
-            try:
-                gmail_defaults = defaults.get("gmail")
-                if gmail_defaults and isinstance(gmail_defaults.get("default_scopes"), list):
-                    for scope_name in ["gmail_settings_basic", "gmail_settings_sharing"]:
-                        if scope_name not in gmail_defaults["default_scopes"]:
-                            gmail_defaults["default_scopes"].append(scope_name)
-            except Exception as _scope_e:
-                logger.warning(f"Failed to augment Gmail default scopes with settings scopes: {_scope_e}")
-            return defaults
+            # Build service defaults from scope registry
+            service_defaults = {}
+            
+            for service_name, service_metadata in ScopeRegistry.SERVICE_METADATA.items():
+                service_defaults[service_name] = {
+                    "default_scopes": ScopeRegistry.get_service_scopes(service_name, "basic"),
+                    "version": service_metadata.version,
+                    "description": service_metadata.description
+                }
+            
+            return service_defaults
         except Exception as e:
             logger.warning(f"Error getting service defaults from registry, using fallback: {e}")
-            return _FALLBACK_SERVICE_DEFAULTS
+            return {}
     else:
-        return _FALLBACK_SERVICE_DEFAULTS
+        return {}
 
 
 # Create a dynamic SERVICE_DEFAULTS that uses the compatibility shim

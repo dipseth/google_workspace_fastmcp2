@@ -15,7 +15,7 @@ from datetime import datetime
 from fastmcp import Client
 from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
-from test_auth_utils import get_client_auth_config
+from ..test_auth_utils import get_client_auth_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
