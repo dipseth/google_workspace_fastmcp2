@@ -66,6 +66,9 @@ See documentation/TEMPLATE_PARAMETER_MIDDLEWARE.md for complete usage guide.
 import re
 import json
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import types
 import os
 from pathlib import Path
@@ -310,7 +313,7 @@ class EnhancedTemplateMiddleware(Middleware):
         self,
         enable_caching: bool = True,
         cache_ttl_seconds: int = 300,
-        enable_debug_logging: bool = False,
+        enable_debug_logging: bool = True,
         jinja2_options: Optional[Dict[str, Any]] = None,
         templates_dir: Optional[str] = None
     ) -> None:
@@ -629,6 +632,7 @@ class EnhancedTemplateMiddleware(Middleware):
             'strftime': self._strftime_filter,
             'map_list': self._map_list_filter,
             'map_attr': self._map_attribute_filter,
+            'format_drive_image_url': self._format_drive_image_url_filter,
         })
     
     def _extract_filter(self, data: Any, path: str):
@@ -718,6 +722,53 @@ class EnhancedTemplateMiddleware(Middleware):
         """Map items to attribute values (alias for map_list)."""
         return self._map_list_filter(items, attribute)
     
+    def _format_drive_image_url_filter(self, url: str) -> str:
+        """
+        Format Google Drive URLs for image embedding.
+        
+        Converts various Drive URL formats to the proper uc?export=view format
+        that can be embedded in HTML img tags.
+        
+        Supported input formats:
+        - https://drive.google.com/file/d/FILE_ID/view
+        - https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+        - https://drive.google.com/uc?id=FILE_ID
+        - FILE_ID (just the ID)
+        
+        Args:
+            url: Drive URL or file ID to format
+            
+        Returns:
+            Formatted URL: https://drive.google.com/uc?export=view&id=FILE_ID
+        """
+        if not url or not isinstance(url, str):
+            return url
+        
+        import re
+        
+        # Pattern 1: https://drive.google.com/file/d/FILE_ID/view
+        match = re.search(r'/file/d/([a-zA-Z0-9-_]+)', url)
+        if match:
+            file_id = match.group(1)
+            return f"https://drive.google.com/uc?export=view&id={file_id}"
+        
+        # Pattern 2: https://drive.google.com/uc?id=FILE_ID
+        match = re.search(r'[?&]id=([a-zA-Z0-9-_]+)', url)
+        if match:
+            file_id = match.group(1)
+            return f"https://drive.google.com/uc?export=view&id={file_id}"
+        
+        # Pattern 3: Just the ID itself (25+ characters, alphanumeric + hyphens/underscores)
+        if re.match(r'^[a-zA-Z0-9-_]{25,}$', url):
+            return f"https://drive.google.com/uc?export=view&id={url}"
+        
+        # Pattern 4: Already in correct format
+        if 'drive.google.com/uc?export=view' in url:
+            return url
+            
+        # Return original if no pattern matches
+        return url
+    
     async def on_call_tool(self, context: MiddlewareContext, call_next) -> Any:
         """
         Middleware hook to intercept and process tool calls with template resolution.
@@ -786,6 +837,9 @@ class EnhancedTemplateMiddleware(Middleware):
             return await call_next(context)
         
         try:
+            # Track if templates were applied
+            template_applied = False
+            
             # Get the tool arguments
             original_args = getattr(context.message, 'arguments', {})
             
@@ -800,11 +854,27 @@ class EnhancedTemplateMiddleware(Middleware):
                 # Update the message arguments if anything was resolved
                 if resolved_args != original_args:
                     context.message.arguments = resolved_args
+                    template_applied = True  # Templates were successfully applied!
                     if self.enable_debug_logging:
                         logger.debug(f"✅ Resolved templates for tool: {tool_name}")
             
-            # Continue with the tool execution
-            return await call_next(context)
+            # Execute the tool and get the result
+            result = await call_next(context)
+            
+            # TEMPLATE TRACKING FIX: Inject into structured_content
+            if template_applied and result:
+                try:
+                    result.structured_content["templateApplied"] = True
+                    # result.structured_content["templateName"] = "calendar_dashboard"  # Simple fallback name
+                    if self.enable_debug_logging:
+                        logger.debug(f"✅ Injected templateApplied=True into {tool_name} structured_content")
+                except Exception as e:
+                    if self.enable_debug_logging:
+                        logger.debug(f"⚠️ Failed to inject template tracking into structured_content: {e}")
+            elif result:
+                result.structured_content["templateApplied"] = False
+            
+            return result
             
         except Exception as e:
             logger.error(f"❌ Template resolution failed for tool {tool_name}: {e}")
@@ -1158,18 +1228,37 @@ class EnhancedTemplateMiddleware(Middleware):
                     if property_path:
                         logger.debug(f"   Property path: {property_path}")
 
-                # Resolve the resource
-                resolved_data = await self._fetch_resource(uri, fastmcp_context)
+                # Resolve the resource with improved error handling
+                try:
+                    resolved_data = await self._fetch_resource(uri, fastmcp_context)
+                except TemplateResolutionError:
+                    # If resource resolution fails, try to extract from existing context
+                    state_key = f"resource_cache_{uri}"
+                    resolved_data = fastmcp_context.get_state(state_key)
+                    if not resolved_data:
+                        # Final fallback - use empty data structure
+                        if uri.endswith('/email'):
+                            resolved_data = {"email": ""}
+                        else:
+                            resolved_data = {}
+                        if self.enable_debug_logging:
+                            logger.debug(f"🔄 Using fallback empty data for {uri}")
 
                 # Convert dictionary to SimpleNamespace for dot notation support
                 resolved_data = convert_to_namespace(resolved_data)
 
                 # Generate a meaningful variable name from URI
-                # Convert service://gmail/labels → service_gmail_labels (avoid double underscores)
+                # Convert user://current/email → user_current_email
                 var_name = uri.replace('://', '_').replace('/', '_').replace(':', '').replace('.', '_')
 
-                # Add to context
+                # Add to context - ensure the resolved data is properly accessible
                 resource_context[var_name] = resolved_data
+
+                # Also add direct email value if this is an email resource
+                if uri.endswith('/email') and hasattr(resolved_data, 'email'):
+                    resource_context[f"{var_name}_value"] = getattr(resolved_data, 'email', '')
+                elif uri.endswith('/email') and isinstance(resolved_data, dict) and 'email' in resolved_data:
+                    resource_context[f"{var_name}_value"] = resolved_data['email']
 
                 # Replace URI with variable name in template
                 replacement = var_name
@@ -1182,6 +1271,9 @@ class EnhancedTemplateMiddleware(Middleware):
 
                 if self.enable_debug_logging:
                     logger.debug(f"✅ Replaced {uri}{property_path or ''} with {replacement}")
+                    logger.debug(f"📦 Added to context: {var_name} = {type(resolved_data)}")
+                    if f"{var_name}_value" in resource_context:
+                        logger.debug(f"📧 Also added direct value: {var_name}_value = {resource_context[f'{var_name}_value']}")
 
             except Exception as e:
                 logger.error(f"⚠️ Failed to resolve resource URI {uri}: {e}")
@@ -1226,6 +1318,7 @@ class EnhancedTemplateMiddleware(Middleware):
             # Custom utilities
             'json': json,
             'datetime': datetime,
+            'timedelta': timedelta,  # Added to fix timedelta undefined error
         }
         
         # Pre-resolve common resources synchronously for template context
@@ -1393,7 +1486,7 @@ class EnhancedTemplateMiddleware(Middleware):
     
     # All the existing v2 methods for resource handling (unchanged)
     async def _fetch_resource(self, resource_uri: str, fastmcp_context) -> Any:
-        """Fetch a resource, with caching support."""
+        """Fetch a resource using FastMCP resource system with comprehensive fallback support."""
         # Ensure URI doesn't include property path (strip after first dot)
         if '://' in resource_uri:
             scheme_end = resource_uri.index('://')
@@ -1411,42 +1504,85 @@ class EnhancedTemplateMiddleware(Middleware):
                     logger.debug(f"📦 Using cached resource: {resource_uri}")
                 return cached
 
-        try:
+        # Check if resource is already resolved in context state
+        state_key = f"resource_cache_{resource_uri}"
+        cached_data = fastmcp_context.get_state(state_key)
+        if cached_data:
             if self.enable_debug_logging:
-                logger.debug(f"🔍 Fetching resource: {resource_uri}")
-            
-            # Try different methods to access the resource
-            if hasattr(fastmcp_context, 'read_resource'):
-                resource_result = await fastmcp_context.read_resource(resource_uri)
-            elif hasattr(fastmcp_context, 'fastmcp') and hasattr(fastmcp_context.fastmcp, 'read_resource'):
-                from fastmcp.server.dependencies import get_context
-                try:
-                    active_ctx = get_context()
-                    resource_result = await fastmcp_context.fastmcp.read_resource(resource_uri, active_ctx)
-                except RuntimeError:
-                    resource_result = await fastmcp_context.fastmcp.read_resource(resource_uri, fastmcp_context)
-            else:
-                raise TemplateResolutionError(f"Cannot access resources via FastMCP context")
-            
-            # Handle case where result is a list of ReadResourceContents
-            if isinstance(resource_result, list) and len(resource_result) > 0:
-                resource_result = resource_result[0]
-            
-            # Extract data from the resource response structure
+                logger.debug(f"📦 Found resource in context state: {resource_uri}")
+            if self.enable_caching:
+                self._cache_resource(resource_uri, cached_data)
+            return cached_data
+
+        # Try common URI fallbacks FIRST for reliability
+        resource_data = None
+        if resource_uri == 'user://current/email':
+            from auth.context import get_user_email_context
+            user_email = get_user_email_context()
+            resource_data = {"email": user_email or ""}
             if self.enable_debug_logging:
-                logger.debug(f"📦 Raw resource type: {type(resource_result).__name__}")
+                logger.debug(f"✅ Resolved user email from auth context: {user_email}")
+                
+        elif resource_uri == 'user://current/profile':
+            from auth.context import get_user_email_context
+            user_email = get_user_email_context()
+            resource_data = {
+                "email": user_email or "",
+                "name": "",
+                "authenticated": bool(user_email)
+            }
             
-            resource_data = self._extract_resource_data(resource_result)
-            
-            if self.enable_debug_logging:
-                logger.debug(f"📄 Extracted data type: {type(resource_data).__name__}")
-            
-            # Cache the result
+        elif resource_uri == 'auth://session/current':
+            from auth.context import get_user_email_context
+            user_email = get_user_email_context()
+            resource_data = {
+                "authenticated": bool(user_email),
+                "user_email": user_email or "",
+                "session_active": True,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        # If we resolved via fallback, cache and return
+        if resource_data is not None:
+            # Store in context state
+            fastmcp_context.set_state(state_key, resource_data)
+            # Cache locally
             if self.enable_caching:
                 self._cache_resource(resource_uri, resource_data)
-            
             return resource_data
+
+        # Otherwise, try the FastMCP resource system
+        try:
+            if self.enable_debug_logging:
+                logger.debug(f"🔍 Fetching resource via FastMCP: {resource_uri}")
             
+            # Use the proper FastMCP resource access pattern
+            content_list = await fastmcp_context.read_resource(resource_uri)
+            
+            if content_list and len(content_list) > 0:
+                resource_result = content_list[0]
+                
+                # Extract data from the resource response structure
+                if self.enable_debug_logging:
+                    logger.debug(f"📦 Raw resource type: {type(resource_result).__name__}")
+                
+                resource_data = self._extract_resource_data(resource_result)
+                
+                if self.enable_debug_logging:
+                    logger.debug(f"📄 Extracted data type: {type(resource_data).__name__}")
+                
+                # Store in context state and cache
+                fastmcp_context.set_state(state_key, resource_data)
+                if self.enable_caching:
+                    self._cache_resource(resource_uri, resource_data)
+                
+                return resource_data
+            else:
+                # No content returned
+                if self.enable_debug_logging:
+                    logger.debug(f"❌ No content returned from FastMCP for: {resource_uri}")
+                raise TemplateResolutionError(f"No content returned for resource: {resource_uri}")
+                
         except Exception as e:
             logger.error(f"❌ Failed to fetch resource '{resource_uri}': {e}")
             raise TemplateResolutionError(f"Failed to fetch resource '{resource_uri}': {e}")
@@ -1696,6 +1832,9 @@ class EnhancedTemplateMiddleware(Middleware):
             "ttl_seconds": self.cache_ttl_seconds,
             "cached_uris": list(self._resource_cache.keys())
         }
+    
+
+    
 
 
 def setup_enhanced_template_middleware(

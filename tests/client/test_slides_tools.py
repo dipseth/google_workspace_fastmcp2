@@ -14,7 +14,29 @@ from ..test_auth_utils import get_client_auth_config
 # Class-level storage for shared presentation ID
 @pytest.mark.service("slides")
 class TestSlidesTools:
-    """Test Google Slides tools using the FastMCP Client."""
+    """Test Slides tools using standardized framework.
+
+🔧 MCP Tools Used:
+- create_presentation: Create new Google Slides presentations
+- get_presentation_info: Retrieve presentation metadata
+- add_slide: Add new slides to presentations
+- update_slide_content: Modify slide content using batch operations
+
+🧪 What's Being Tested:
+- Presentation creation and configuration
+- Slide management (add, update, organize)
+- Content manipulation (text, images, layouts)
+- Template and layout handling
+- Presentation sharing and collaboration
+- Export functionality for different formats
+- Authentication patterns for all Slides operations
+
+🔍 Potential Duplications:
+- Presentation sharing overlaps with Drive and other Google Workspace sharing
+- Content manipulation might have patterns similar to Docs content operations
+- File creation patterns might be similar to other document creation tests
+- Export functionality might overlap with other format conversion tests
+"""
     
     # Class variable to store the shared presentation ID
     _shared_presentation_id = None

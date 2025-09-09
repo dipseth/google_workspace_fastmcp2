@@ -1,6 +1,9 @@
 """Generic Google service management for FastMCP2."""
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 from typing_extensions import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 

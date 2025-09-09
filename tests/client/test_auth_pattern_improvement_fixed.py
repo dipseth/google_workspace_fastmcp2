@@ -1,4 +1,22 @@
-"""Test suite for improved authentication pattern using FastMCP Client SDK."""
+"""Fixed authentication pattern tests for Google Workspace MCP tools.
+
+🔧 MCP Tools Used:
+- Various Google Workspace tools (Gmail, Drive, Calendar, etc.) for auth pattern validation
+
+🧪 What's Being Tested:
+- Dual authentication patterns: explicit email parameter vs middleware injection
+- Backward compatibility with user_google_email parameter
+- Middleware authentication handling without explicit email
+- Protocol detection (HTTP/HTTPS) and connection fallback
+- Response validation for both successful operations and auth errors
+- Client connection reliability and error handling
+
+🔍 Potential Duplications:
+- This test focuses on authentication patterns rather than specific tool functionality
+- May overlap with individual service tests that also test auth, but provides comprehensive
+  cross-service auth validation that service-specific tests don't cover
+- Serves as the foundational pattern that other tests should follow
+"""
 
 import pytest
 import pytest_asyncio

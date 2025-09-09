@@ -1,5 +1,29 @@
 """Tests for the resource templating and user authentication system using FastMCP Client."""
 
+"""Test resource templating functionality for dynamic resource generation.
+
+🔧 MCP Tools Used:
+- Resource templating engine: Generate dynamic resources from templates
+- Template-based resources: Create resources using template patterns
+- Resource validation: Validate generated resources
+- Dynamic content generation: Generate content based on templates
+
+🧪 What's Being Tested:
+- Resource template engine functionality
+- Dynamic resource generation from templates
+- Template parameter substitution and validation
+- Resource lifecycle management with templates
+- Template inheritance and composition
+- Error handling for invalid templates or parameters
+- Performance of template-based resource generation
+
+🔍 Potential Duplications:
+- Template functionality overlaps with middleware template tests
+- Resource management might overlap with service resource tests
+- Dynamic generation patterns similar to other template-based tools
+- Validation logic might be similar to other resource validation tests
+"""
+
 import pytest
 import asyncio
 import logging

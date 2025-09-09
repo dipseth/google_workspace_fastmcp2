@@ -14,7 +14,33 @@ load_dotenv()
 
 @pytest.mark.service("calendar")
 class TestCalendarTools:
-    """Test Google Calendar tools using the FastMCP Client."""
+    """Test Calendar tools using standardized framework.
+
+🔧 MCP Tools Used:
+- create_event: Create single or multiple calendar events
+- list_events: Retrieve events from calendars with filtering
+- get_event: Get detailed event information by ID
+- list_calendars: List accessible calendars
+- create_calendar: Create new calendars
+- move_events_between_calendars: Transfer events between calendars
+
+🧪 What's Being Tested:
+- Event creation (single and bulk operations)
+- Event retrieval with time range filtering
+- Calendar management (creation, listing)
+- Event migration between calendars
+- Timezone handling and RFC3339 date parsing
+- Attendee management and invitations
+- Attachment handling with Drive files
+- Recurring event patterns
+- Authentication patterns for all Calendar operations
+
+🔍 Potential Duplications:
+- Event attachments overlap with Drive file sharing functionality
+- Bulk event creation might have patterns similar to other bulk operations
+- Time zone handling might be tested in multiple contexts
+- Calendar sharing might overlap with general Google Workspace sharing patterns
+"""
     
     # Class variable to store created event ID for reuse across tests
     _created_event_id = None

@@ -5,6 +5,9 @@ both new FastMCP 2.12.0 format and legacy credential formats during migration.
 """
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import json
 import os
 from pathlib import Path

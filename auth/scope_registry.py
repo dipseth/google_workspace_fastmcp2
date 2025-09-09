@@ -6,6 +6,9 @@ the FastMCP2 system, eliminating the previous fragmentation across 7+ files.
 """
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 from typing_extensions import Dict, List, Optional, Set, Union
 from dataclasses import dataclass
 
@@ -126,10 +129,11 @@ class ScopeRegistry:
         # Google Photos scopes
         "photos": {
             "readonly": "https://www.googleapis.com/auth/photoslibrary.readonly",
-            "appendonly": "https://www.googleapis.com/auth/photoslibrary.appendonly",
+            "appendonly": "https://www.googleapis.com/auth/photoslibrary.appendonly", 
+            "full": "https://www.googleapis.com/auth/photoslibrary",
             "readonly_appcreated": "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
             "edit_appcreated": "https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata"
-            # Note: Removed 'full' and 'sharing' scopes - may require special approval
+            # Note: Added back 'full' scope - needed for album listing and search operations
         },
         
         # Admin scopes
@@ -316,7 +320,7 @@ class ScopeRegistry:
         "forms_basic": ["base.userinfo_email", "base.openid", "forms.body", "forms.responses_readonly"],
         "slides_basic": ["base.userinfo_email", "base.openid", "slides.full", "slides.readonly"],
         "photos_basic": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly"],
-        "photos_full": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly"],
+        "photos_full": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly", "photos.full", "photos.full"],
         "tasks_basic": ["base.userinfo_email", "base.openid", "tasks.readonly", "tasks.full"],
         "tasks_full": ["base.userinfo_email", "base.openid", "tasks.full"],
         
@@ -336,7 +340,7 @@ class ScopeRegistry:
             "sheets.readonly", "sheets.full",
             "forms.body", "forms.body_readonly", "forms.responses_readonly",
             "slides.full", "slides.readonly",
-            "photos.readonly", "photos.appendonly",
+            "photos.readonly", "photos.appendonly", "photos.full",
             "calendar.readonly", "calendar.events", "calendar.full",
             "tasks.readonly", "tasks.full"
         ]

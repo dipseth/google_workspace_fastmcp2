@@ -7,6 +7,9 @@ import os
 import json
 import yaml
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 from typing_extensions import Dict, Any, Optional, List
 from pathlib import Path
 

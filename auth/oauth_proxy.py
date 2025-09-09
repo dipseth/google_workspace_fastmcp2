@@ -7,6 +7,9 @@ to real Google OAuth credentials, ensuring the real credentials are never expose
 
 import json
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import secrets
 import time
 from datetime import datetime, timedelta, timezone

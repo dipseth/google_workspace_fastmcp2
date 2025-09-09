@@ -6,6 +6,9 @@ Google service objects as needed.
 """
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import os
 from typing import Optional, Dict, Any, Union
 from datetime import datetime, timedelta

@@ -6,6 +6,30 @@ send_dynamic_card tool by verifying that various natural language descriptions
 are properly parsed and converted into correct card parameters.
 """
 
+"""Test NLP-based card parsing and generation functionality.
+
+🔧 MCP Tools Used:
+- send_dynamic_card: Generate cards from natural language descriptions
+- NLP parsing utilities: Parse user descriptions into card components
+- Card component validation: Validate generated card structures
+- Template rendering: Apply templates to parsed card data
+
+🧪 What's Being Tested:
+- Natural language processing for card generation
+- User description parsing into structured card components
+- Intent recognition for different card types
+- Parameter extraction from natural language
+- Card structure validation and error handling
+- Template matching and application logic
+- Generated card quality and accuracy
+
+🔍 Potential Duplications:
+- Card generation overlaps with test_chat_app_tools.py and test_send_dynamic_card.py
+- NLP parsing might have similar patterns to other AI-powered tools
+- Template rendering overlaps with template middleware tests
+- Validation logic might be similar to other input validation tests
+"""
+
 import pytest
 import asyncio
 import json

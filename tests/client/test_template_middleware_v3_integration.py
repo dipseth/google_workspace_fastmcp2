@@ -168,25 +168,84 @@ Mixed complete."""
             return False
     
     @pytest.mark.asyncio
+    async def test_template_tracking_flag(self, client):
+        """Test that templateApplied flag is correctly set to true when templates are processed."""
+        from .base_test_config import TEST_EMAIL
+        
+        print(f"\n🏷️ Testing template tracking flag functionality...")
+        
+        runner = ToolTestRunner(client, TEST_EMAIL)
+        
+        # Test with templates in multiple places (matching your exact working example)
+        result = await runner.test_tool_with_explicit_email("send_gmail_message", {
+            "to": TEST_EMAIL,
+            "subject": "{{service://gmail/labels.result.total_count}} labels",
+            "body": "ok where\n{{service://gmail/labels.result.total_count}} labels\n\n\n\n\n\n\n\n\n\n\n\n\n",
+            "html_body": "{{ render_calendar_dashboard(service://calendar/calendars, service://calendar/events, 'Test Dashboard') }}",
+            "content_type": "mixed"
+        })
+        
+        print(f"\n📊 Template tracking flag test result:")
+        print(f"   Success: {result['success']}")
+        
+        if result["success"]:
+            content = result.get("content")
+            
+            # Parse JSON string response 
+            if isinstance(content, str):
+                try:
+                    import json
+                    structured_content = json.loads(content)
+                except json.JSONDecodeError:
+                    print(f"❌ Failed to parse JSON: {content[:200]}...")
+                    return False
+            elif isinstance(content, dict):
+                structured_content = content
+            else:
+                print(f"❌ Unexpected content type: {type(content)}")
+                return False
+                
+            template_applied = structured_content.get('templateApplied', False)
+            template_name = structured_content.get('templateName', None)
+            
+            print(f"   templateApplied: {template_applied}")
+            print(f"   templateName: {template_name}")
+            print(f"   Content type: {type(content)}")
+            
+            if template_applied:
+                print("✅ Template tracking flag is working correctly!")
+                if template_name:
+                    print(f"✅ Template name is properly set: {template_name}")
+                return True
+            else:
+                print("❌ templateApplied flag is false")
+                return False
+        else:
+            print(f"❌ Template tracking test failed: {result['error_message']}")
+            return False
+    
+    @pytest.mark.asyncio
     async def test_template_middleware_comprehensive(self, client):
         """Comprehensive test of all template middleware v3 features."""
         from .base_test_config import TEST_EMAIL
         
         print(f"\n🚀 Running comprehensive template middleware test...")
         
-        # Test all three scenarios
+        # Test all four scenarios now
         v2_result = await self.test_template_middleware_working(client)
         jinja2_result = await self.test_jinja2_processing(client)
         mixed_result = await self.test_mixed_template_syntax(client)
+        tracking_result = await self.test_template_tracking_flag(client)
         
         print(f"\n📋 Template Middleware v3 Test Summary:")
         print(f"   v2 Templates: {'✅ Working' if v2_result else '❌ Failed'}")
         print(f"   Jinja2 Templates: {'✅ Working' if jinja2_result else '❌ Failed'}")
         print(f"   Mixed Templates: {'✅ Working' if mixed_result else '❌ Failed'}")
+        print(f"   Template Tracking: {'✅ Working' if tracking_result else '❌ Failed'}")
         
-        if all([v2_result, jinja2_result, mixed_result]):
+        if all([v2_result, jinja2_result, mixed_result, tracking_result]):
             print("\n🎉 Template Middleware v3 is FULLY WORKING!")
-        elif any([v2_result, jinja2_result, mixed_result]):
+        elif any([v2_result, jinja2_result, mixed_result, tracking_result]):
             print(f"\n⚠️ Template Middleware v3 is PARTIALLY working")
         else:
             print(f"\n❌ Template Middleware v3 is NOT working")

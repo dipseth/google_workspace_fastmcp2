@@ -32,7 +32,7 @@ AFTER (~100 lines):
 
 The old approach required:
 - 655-line ServiceListDiscovery class (lines 655-1309)
-- 128-line TOOL_CONFIGURATIONS mapping (lines 665-793)  
+- 128-line TOOL_CONFIGURATIONS mapping (lines 665-793)
 - Complex authentication helpers (lines 544-649)
 - Multiple response models and validation (lines 372-540)
 
@@ -42,12 +42,12 @@ which uses tool tags for discovery and provides unified handling.
 ## Resource Hierarchy
 
 1. service://{service}/lists - Returns available list types for the service
-2. service://{service}/{list_type} - Returns all IDs/items for that list type  
+2. service://{service}/{list_type} - Returns all IDs/items for that list type
 3. service://{service}/{list_type}/{id} - Returns detailed data for a specific ID
 
 Examples:
 - service://gmail/lists → Available list types (filters, labels)
-- service://gmail/filters → All Gmail filters  
+- service://gmail/filters → All Gmail filters
 - service://gmail/filters/123 → Specific filter details
 """
 
@@ -57,6 +57,7 @@ from fastmcp import FastMCP, Context
 from pydantic import Field
 from typing_extensions import Annotated
 from middleware.service_list_response import ServiceListResponse, ServiceListsResponse, ServiceItemDetailsResponse
+from auth.context import get_user_email_context
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ logger = logging.getLogger(__name__)
 def get_supported_services() -> List[str]:
     """
     Get the list of supported Google services.
-    
+
     This list matches what's configured in TagBasedResourceMiddleware.
     """
     return [
@@ -77,7 +78,7 @@ def generate_service_documentation() -> str:
     """Generate documentation string with all supported services."""
     services = get_supported_services()
     service_docs = []
-    
+
     # Service icons mapping
     service_icons = {
         "gmail": "📧",
@@ -90,30 +91,30 @@ def generate_service_documentation() -> str:
         "slides": "🎯",
         "photos": "📷"
     }
-    
+
     for service in services:
         icon = service_icons.get(service, "🔧")
         service_docs.append(f"  • {service} ({icon})")
-    
+
     return "\n".join(service_docs)
 
 
 def register_service_resources(mcp: FastMCP) -> None:
     """
     Register simplified service list resources that will be handled by TagBasedResourceMiddleware.
-    
+
     This function only registers the resource patterns with FastMCP. The actual implementation
     is handled by TagBasedResourceMiddleware which intercepts these URIs before they reach
     the handlers below.
-    
+
     Args:
         mcp: FastMCP instance to register resources with
     """
     logger.info("Registering simplified service list resources (handled by TagBasedResourceMiddleware)...")
-    
+
     supported_services = get_supported_services()
     service_list_str = ", ".join(supported_services)
-    
+
     @mcp.resource(
         uri="service://{service}/lists",
         name="Service List Types",
@@ -162,17 +163,17 @@ This resource is handled by TagBasedResourceMiddleware.""",
     ) -> ServiceListsResponse:
         """
         Handler for service list types that retrieves cached results from middleware.
-        
+
         TagBasedResourceMiddleware processes the request and stores the result
         in FastMCP context state. This handler retrieves and returns that result.
-        
+
         Returns:
             ServiceListsResponse containing available list types with metadata
         """
         # Try to get the cached result from FastMCP context state
         cache_key = f"service_lists_response_{service}"
         cached_result = ctx.get_state(cache_key)
-        
+
         if cached_result is None:
             # Fallback - middleware didn't cache result (shouldn't happen in normal operation)
             logger.warning(f"No cached ServiceListsResponse found for {service} - middleware may not have processed this request")
@@ -185,11 +186,11 @@ This resource is handled by TagBasedResourceMiddleware.""",
                 },
                 list_types={}
             )
-        
+
         # Return the cached ServiceListsResponse
         logger.info(f"📦 Retrieved cached ServiceListsResponse for {service} from FastMCP context state")
         return cached_result
-    
+
     @mcp.resource(
         uri="service://{service}/{list_type}",
         name="Service List Items",
@@ -255,17 +256,18 @@ This resource is handled by TagBasedResourceMiddleware.""",
     ) -> ServiceListResponse:
         """
         Handler for service list items that retrieves cached results from middleware.
-        
+
         TagBasedResourceMiddleware processes the request and stores the result
         in FastMCP context state. This handler retrieves and returns that result.
-        
+
         Returns:
             ServiceListResponse containing the cached tool result with metadata
         """
         # Try to get the cached result from FastMCP context state
-        cache_key = f"service_list_response_{service}_{list_type}"
+        user_email = get_user_email_context()
+        cache_key = f"service_list_response_{service}_{list_type}_{user_email}"
         cached_result = ctx.get_state(cache_key)
-        
+
         if cached_result is None:
             # Fallback - middleware didn't cache result (shouldn't happen in normal operation)
             logger.warning(f"No cached result found for {service}/{list_type} - middleware may not have processed this request")
@@ -278,13 +280,13 @@ This resource is handled by TagBasedResourceMiddleware.""",
                 service=service,
                 list_type=list_type,
                 tool_called="CACHE_FALLBACK",
-                user_email="unknown@example.com"
+                user_email=user_email or "unknown@example.com"
             )
-        
+
         # Return the cached ServiceListResponse
         logger.info(f"📦 Retrieved cached result for {service}/{list_type} from FastMCP context state")
         return cached_result
-    
+
     @mcp.resource(
         uri="service://{service}/{list_type}/{item_id}",
         name="Service List Item Details",
@@ -356,17 +358,18 @@ This resource is handled by TagBasedResourceMiddleware.""",
     ) -> ServiceItemDetailsResponse:
         """
         Handler for service item details that retrieves cached results from middleware.
-        
+
         TagBasedResourceMiddleware processes the request and stores the result
         in FastMCP context state. This handler retrieves and returns that result.
-        
+
         Returns:
             ServiceItemDetailsResponse containing the specific item details
         """
         # Try to get the cached result from FastMCP context state
-        cache_key = f"service_item_details_{service}_{list_type}_{item_id}"
+        user_email = get_user_email_context()
+        cache_key = f"service_item_details_{service}_{list_type}_{item_id}_{user_email}"
         cached_result = ctx.get_state(cache_key)
-        
+
         if cached_result is None:
             # Fallback - middleware didn't cache result (shouldn't happen in normal operation)
             logger.warning(f"No cached ServiceItemDetailsResponse found for {service}/{list_type}/{item_id} - middleware may not have processed this request")
@@ -375,18 +378,18 @@ This resource is handled by TagBasedResourceMiddleware.""",
                 list_type=list_type,
                 item_id=item_id,
                 tool_called="CACHE_FALLBACK",
-                user_email="unknown@example.com",
+                user_email=user_email or "unknown@example.com",
                 parameters={},
                 result={
                     "message": "No cached result found - middleware may not have processed this request",
                     "middleware_status": "CACHE_MISS"
                 }
             )
-        
+
         # Return the cached ServiceItemDetailsResponse
         logger.info(f"📦 Retrieved cached ServiceItemDetailsResponse for {service}/{list_type}/{item_id} from FastMCP context state")
         return cached_result
-    
+
     logger.info("✅ Registered 3 enhanced service resources (all handled by TagBasedResourceMiddleware)")
     logger.info("   1. service://{service}/lists - Get available list types with metadata")
     logger.info("   2. service://{service}/{list_type} - Get all items with pagination")
@@ -406,7 +409,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
 def setup_service_list_resources(mcp: FastMCP) -> None:
     """
     Legacy setup function name for backward compatibility.
-    
+
     This simply calls register_service_resources() with the new simplified approach.
     """
     register_service_resources(mcp)
@@ -420,7 +423,7 @@ def setup_service_list_resources(mcp: FastMCP) -> None:
 # TagBasedResourceMiddleware in middleware/tag_based_resource_middleware.py:
 #
 # ❌ ServiceListDiscovery class (655 lines) - Lines 655-1309
-# ❌ TOOL_CONFIGURATIONS mapping (128 lines) - Lines 665-793  
+# ❌ TOOL_CONFIGURATIONS mapping (128 lines) - Lines 665-793
 # ❌ Complex authentication helpers (105 lines) - Lines 544-649
 # ❌ ServiceMetadata class (316 lines) - Lines 72-388
 # ❌ Pydantic response models (168 lines) - Lines 372-540
@@ -429,12 +432,12 @@ def setup_service_list_resources(mcp: FastMCP) -> None:
 # ❌ Authentication detection (78 lines) - Lines 544-622
 #
 # Total removed: ~1615 lines of complex logic
-# 
+#
 # All this functionality is now provided by TagBasedResourceMiddleware:
-# ✅ Tool discovery via tags instead of introspection  
+# ✅ Tool discovery via tags instead of introspection
 # ✅ Authentication via AuthMiddleware context
 # ✅ Unified parameter handling and filtering
-# ✅ Consistent response formatting 
+# ✅ Consistent response formatting
 # ✅ Error handling with helpful suggestions
 # ✅ Service metadata and documentation
 # ✅ Pagination support where applicable

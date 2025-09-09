@@ -209,7 +209,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
         }
     )
     async def search_photos(
-        user_google_email: UserGoogleEmailPhotos,
+        user_google_email: UserGoogleEmailPhotos = None,
         album_id: Optional[str] = None,
         content_categories: Optional[List[str]] = None,
         date_start: Optional[str] = None,

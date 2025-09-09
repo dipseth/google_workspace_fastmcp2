@@ -17,7 +17,28 @@ load_dotenv()
 
 @pytest.mark.service("gmail")
 class TestGmailPrompts:
-    """Test Gmail prompts using the FastMCP Client."""
+    """Test Gmail prompts with real client interactions.
+
+🔧 MCP Tools Used:
+- send_gmail_message: Send emails using prompt-generated content
+- draft_gmail_message: Create drafts from prompt templates
+- Template rendering tools: Generate email content from prompts
+- Gmail search tools: Find emails for prompt context
+
+🧪 What's Being Tested:
+- Real-world Gmail operations with AI-generated content
+- Prompt-to-email conversion workflows
+- Template rendering and email composition
+- Client-server interaction patterns for complex operations
+- Error handling in real Gmail API scenarios
+- Performance validation with actual Gmail service calls
+
+🔍 Potential Duplications:
+- Basic Gmail operations overlap with standard Gmail tests
+- Template rendering overlaps with template middleware tests
+- Real client testing patterns might be similar to other integration tests
+- Email composition logic similar to other Gmail content generation tests
+"""
     
     @pytest.mark.asyncio
     async def test_server_connectivity(self, client):

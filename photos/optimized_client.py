@@ -12,6 +12,9 @@ This module provides optimized patterns for Google Photos API usage including:
 import asyncio
 import logging
 import time
+import os
+import mimetypes
+from pathlib import Path
 from typing_extensions import Dict, List, Optional, Any, Union
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
@@ -19,6 +22,7 @@ from dataclasses import dataclass
 from functools import wraps
 import hashlib
 import json
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +347,245 @@ class OptimizedPhotosClient:
         
         if keys_to_remove:
             logger.debug(f"Cleared {len(keys_to_remove)} album cache entries")
+    
+    async def upload_photo(self, file_path: str, description: str = "") -> Dict[str, Any]:
+        """Upload a single photo to Google Photos."""
+        logger.info(f"Uploading photo: {file_path}")
+        
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        # Check if file is an image
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type or not mime_type.startswith('image/'):
+            raise ValueError(f"File is not an image: {file_path} (MIME: {mime_type})")
+        
+        # Step 1: Upload the media content
+        upload_token = await self._upload_media_content(file_path)
+        
+        # Step 2: Create the media item
+        filename = os.path.basename(file_path)
+        media_item = await self._create_media_item(upload_token, filename, description)
+        
+        logger.info(f"Successfully uploaded photo: {media_item.get('id')}")
+        return media_item
+    
+    async def upload_photos_batch(self, file_paths: List[str], album_id: Optional[str] = None) -> Dict[str, Any]:
+        """Upload multiple photos in a batch operation."""
+        logger.info(f"Batch uploading {len(file_paths)} photos")
+        
+        results = {
+            "successful": [],
+            "failed": [],
+            "total": len(file_paths)
+        }
+        
+        # Process in batches of 50 (API limit)
+        for i in range(0, len(file_paths), self.batch_size):
+            batch_files = file_paths[i:i + self.batch_size]
+            batch_results = await self._upload_batch_chunk(batch_files, album_id)
+            
+            results["successful"].extend(batch_results["successful"])
+            results["failed"].extend(batch_results["failed"])
+        
+        logger.info(f"Batch upload completed: {len(results['successful'])} successful, {len(results['failed'])} failed")
+        return results
+    
+    async def upload_folder(self, folder_path: str, recursive: bool = True, album_name: Optional[str] = None) -> Dict[str, Any]:
+        """Upload all photos from a folder."""
+        logger.info(f"Uploading photos from folder: {folder_path}")
+        
+        folder_path = Path(folder_path)
+        if not folder_path.exists() or not folder_path.is_dir():
+            raise FileNotFoundError(f"Folder not found: {folder_path}")
+        
+        # Find all image files
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic', '.raw'}
+        image_files = []
+        
+        if recursive:
+            for ext in image_extensions:
+                image_files.extend(folder_path.rglob(f"*{ext}"))
+                image_files.extend(folder_path.rglob(f"*{ext.upper()}"))
+        else:
+            for ext in image_extensions:
+                image_files.extend(folder_path.glob(f"*{ext}"))
+                image_files.extend(folder_path.glob(f"*{ext.upper()}"))
+        
+        image_paths = [str(f) for f in image_files]
+        logger.info(f"Found {len(image_paths)} image files in folder")
+        
+        if not image_paths:
+            return {"successful": [], "failed": [], "total": 0, "album_id": None}
+        
+        # Create album if requested
+        album_id = None
+        if album_name:
+            try:
+                album_response = await self.create_album(album_name)
+                album_id = album_response.get('id')
+                logger.info(f"Created album: {album_name} ({album_id})")
+            except Exception as e:
+                logger.warning(f"Failed to create album {album_name}: {e}")
+        
+        # Upload all photos
+        results = await self.upload_photos_batch(image_paths, album_id)
+        results["album_id"] = album_id
+        
+        return results
+    
+    async def _upload_media_content(self, file_path: str) -> str:
+        """Upload media content and return upload token."""
+        await self.rate_limiter.acquire()
+        
+        # Google Photos upload endpoint
+        upload_url = "https://photoslibrary.googleapis.com/v1/uploads"
+        
+        # Get access token from the service
+        credentials = self.photos_service._http.credentials
+        access_token = credentials.token
+        
+        # Refresh token if needed
+        if credentials.expired:
+            credentials.refresh(requests.Request())
+            access_token = credentials.token
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/octet-stream",
+            "X-Goog-Upload-File-Name": os.path.basename(file_path),
+            "X-Goog-Upload-Protocol": "raw"
+        }
+        
+        # Read and upload file content
+        with open(file_path, 'rb') as f:
+            file_content = f.read()
+        
+        response = requests.post(upload_url, headers=headers, data=file_content)
+        
+        if response.status_code != 200:
+            raise Exception(f"Upload failed: {response.status_code} - {response.text}")
+        
+        upload_token = response.text
+        logger.debug(f"Upload token received for {file_path}")
+        return upload_token
+    
+    async def _create_media_item(self, upload_token: str, filename: str, description: str = "") -> Dict[str, Any]:
+        """Create media item from upload token."""
+        new_media_item = {
+            "description": description,
+            "simpleMediaItem": {
+                "fileName": filename,
+                "uploadToken": upload_token
+            }
+        }
+        
+        batch_create_body = {
+            "newMediaItems": [new_media_item]
+        }
+        
+        request = self.photos_service.mediaItems().batchCreate(body=batch_create_body)
+        response = await self._make_request(request.execute)
+        
+        results = response.get('newMediaItemResults', [])
+        if not results:
+            raise Exception("No media item results returned")
+        
+        result = results[0]
+        if 'status' in result and result['status'].get('code') != 0:
+            raise Exception(f"Media item creation failed: {result['status']}")
+        
+        return result.get('mediaItem', {})
+    
+    async def _upload_batch_chunk(self, file_paths: List[str], album_id: Optional[str] = None) -> Dict[str, Any]:
+        """Upload a chunk of files in batch."""
+        results = {"successful": [], "failed": []}
+        
+        # Step 1: Upload all media content and get tokens
+        upload_tasks = []
+        for file_path in file_paths:
+            try:
+                # Validate file before adding to batch
+                if not os.path.exists(file_path):
+                    results["failed"].append({"file": file_path, "error": "File not found"})
+                    continue
+                
+                mime_type, _ = mimetypes.guess_type(file_path)
+                if not mime_type or not mime_type.startswith('image/'):
+                    results["failed"].append({"file": file_path, "error": "Not an image file"})
+                    continue
+                
+                upload_tasks.append(self._upload_media_content(file_path))
+            except Exception as e:
+                results["failed"].append({"file": file_path, "error": str(e)})
+        
+        if not upload_tasks:
+            return results
+        
+        # Wait for all uploads to complete
+        try:
+            upload_tokens = await asyncio.gather(*upload_tasks, return_exceptions=True)
+        except Exception as e:
+            # Handle case where some uploads failed
+            logger.error(f"Batch upload error: {e}")
+            for file_path in file_paths:
+                results["failed"].append({"file": file_path, "error": str(e)})
+            return results
+        
+        # Step 2: Create media items from successful uploads
+        new_media_items = []
+        for i, (file_path, token_or_error) in enumerate(zip(file_paths, upload_tokens)):
+            if isinstance(token_or_error, Exception):
+                results["failed"].append({"file": file_path, "error": str(token_or_error)})
+                continue
+            
+            new_media_items.append({
+                "description": f"Uploaded from {os.path.basename(file_path)}",
+                "simpleMediaItem": {
+                    "fileName": os.path.basename(file_path),
+                    "uploadToken": token_or_error
+                }
+            })
+        
+        if not new_media_items:
+            return results
+        
+        # Batch create media items
+        batch_create_body = {
+            "newMediaItems": new_media_items
+        }
+        
+        if album_id:
+            batch_create_body["albumId"] = album_id
+        
+        try:
+            request = self.photos_service.mediaItems().batchCreate(body=batch_create_body)
+            response = await self._make_request(request.execute)
+            
+            # Process results
+            media_results = response.get('newMediaItemResults', [])
+            for i, result in enumerate(media_results):
+                file_path = file_paths[i] if i < len(file_paths) else "unknown"
+                
+                if 'status' in result and result['status'].get('code') != 0:
+                    results["failed"].append({
+                        "file": file_path,
+                        "error": result['status'].get('message', 'Unknown error')
+                    })
+                else:
+                    media_item = result.get('mediaItem', {})
+                    results["successful"].append({
+                        "file": file_path,
+                        "media_item_id": media_item.get('id'),
+                        "filename": media_item.get('filename')
+                    })
+        
+        except Exception as e:
+            logger.error(f"Batch create failed: {e}")
+            for file_path in file_paths:
+                results["failed"].append({"file": file_path, "error": str(e)})
+        
+        return results
     
     async def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""

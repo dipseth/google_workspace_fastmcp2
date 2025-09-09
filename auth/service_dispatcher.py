@@ -6,6 +6,9 @@ with confidence scoring and intelligent fallbacks.
 """
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 from typing import Dict, List, Optional, Any, Union
 from fastmcp import FastMCP
 from middleware.routing_helper import ServiceRouter, ServiceRoutingDecision, RoutingConfidence

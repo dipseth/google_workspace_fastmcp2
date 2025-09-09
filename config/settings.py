@@ -5,6 +5,9 @@ from typing_extensions import Optional, List
 import os
 from pathlib import Path
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 from urllib.parse import urlparse
 
 # Lazy import for compatibility shim to avoid circular imports

@@ -1,6 +1,9 @@
 """Google OAuth 2.0 authentication implementation for FastMCP2."""
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import secrets
 import json
 import os

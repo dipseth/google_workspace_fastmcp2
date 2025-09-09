@@ -24,7 +24,6 @@ from auth.fastmcp_oauth_endpoints import setup_oauth_endpoints_fastmcp
 from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
 from drive.drive_tools import setup_drive_comprehensive_tools
 from gmail.gmail_tools import setup_gmail_tools
-from gmail.template_tools import setup_template_tools
 from docs.docs_tools import setup_docs_tools
 from forms.forms_tools import setup_forms_tools
 from slides.slides_tools import setup_slides_tools
@@ -37,7 +36,6 @@ from prompts.gmail_prompts import setup_gmail_prompts
 from prompts.structured_response_demo_prompts import setup_structured_response_demo_prompts
 from gchat.unified_card_tool import setup_unified_card_tool
 from adapters.module_wrapper_mcp import setup_module_wrapper_middleware
-from middleware.structured_response_middleware import setup_structured_response_middleware
 from sheets.sheets_tools import setup_sheets_tools
 from photos.photos_tools import setup_photos_tools
 from photos.advanced_tools import setup_advanced_photos_tools
@@ -172,9 +170,19 @@ logger.info("✅ Template Parameter Middleware with Jinja2 support enabled - aut
 
 # Initialize Qdrant unified middleware (completely non-blocking)
 logger.info("🔄 Initializing Qdrant unified middleware...")
-qdrant_middleware = QdrantUnifiedMiddleware()
+qdrant_middleware = QdrantUnifiedMiddleware(
+    qdrant_host=settings.qdrant_host,
+    qdrant_port=settings.qdrant_port,
+    qdrant_api_key=settings.qdrant_api_key,
+    qdrant_url=settings.qdrant_url,
+    collection_name="mcp_tool_responses",
+    auto_discovery=True,  # Enable auto-discovery to find available Qdrant instances
+    ports=[settings.qdrant_port, 6333, 6335, 6334]  # Try configured port first, then fallback
+)
 mcp.add_middleware(qdrant_middleware)
-logger.info("✅ Qdrant unified middleware enabled - will initialize on first use")
+logger.info("✅ Qdrant unified middleware enabled - configured for cloud instance")
+logger.info(f"🔧 Qdrant URL: {settings.qdrant_url}")
+logger.info(f"🔧 API Key configured: {bool(settings.qdrant_api_key)}")
 
 # Add TagBasedResourceMiddleware for service list resource handling
 logger.info("🏷️ Setting up TagBasedResourceMiddleware for service:// resource handling...")
@@ -192,7 +200,7 @@ setup_drive_comprehensive_tools(mcp)
 setup_gmail_tools(mcp)
 
 # Register Email Template tools
-setup_template_tools(mcp)
+# setup_template_tools(mcp)
 
 # Register Google Docs tools
 setup_docs_tools(mcp)
@@ -274,16 +282,6 @@ logger.info("🔧 Registering server management tools...")
 setup_server_tools(mcp)
 logger.info("✅ Server management tools registered")
 
-
-# Setup Structured Response Middleware (transforms existing tools to provide structured JSON responses)
-logger.info("🔄 Setting up Structured Response Middleware...")
-structured_middleware = setup_structured_response_middleware(
-    mcp,
-    enable_auto_transform=True,  # Automatically transform eligible tools
-    preserve_originals=True,     # Keep original tools alongside structured variants
-    generate_report=True         # Log transformation report
-)
-logger.info("✅ Structured Response Middleware enabled - tools now have structured JSON variants!")
 
 # Register Qdrant tools if middleware is available
 try:

@@ -5,6 +5,9 @@ both FastMCP 2.12.0 GoogleProvider and legacy OAuth flows.
 """
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import time
 from typing import Optional, Dict, Any, Union
 from datetime import datetime, timedelta

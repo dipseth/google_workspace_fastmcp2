@@ -1,5 +1,29 @@
 """Test Sampling Middleware Integration using FastMCP Client SDK."""
 
+"""Test sampling middleware for request/response monitoring and analysis.
+
+🔧 MCP Tools Used:
+- Sampling middleware: Monitor and sample MCP requests/responses
+- Data collection: Capture tool usage patterns and metrics
+- Performance monitoring: Track tool execution times and patterns
+- Usage analytics: Analyze tool usage statistics
+
+🧪 What's Being Tested:
+- Request/response sampling functionality
+- Data collection accuracy and completeness
+- Performance impact of sampling middleware
+- Statistical analysis of tool usage patterns
+- Sampling rate configuration and optimization
+- Data storage and retrieval mechanisms
+- Privacy and security considerations for sampled data
+
+🔍 Potential Duplications:
+- Performance monitoring overlaps with other performance tests
+- Middleware testing patterns similar to template middleware tests
+- Data collection might overlap with analytics and logging functionality
+- Usage tracking might be similar to other monitoring systems
+"""
+
 import pytest
 import logging
 import json

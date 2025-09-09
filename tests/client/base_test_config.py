@@ -1,4 +1,24 @@
-"""Base test configuration for all client tests."""
+"""Base configuration for standardized client testing framework.
+
+🔧 MCP Tools Used:
+- N/A (Configuration module - no direct MCP tool usage)
+- Enables testing of all MCP tools through client connection management
+
+🧪 What's Being Tested:
+- Server connection reliability (HTTP/HTTPS protocol detection)
+- SSL certificate handling and bypass for testing
+- Environment variable configuration
+- Client initialization and connection fallback
+- Protocol detection and automatic switching
+- Error handling for connection failures
+
+🔍 Potential Duplications:
+- No duplications - this is the foundational configuration used by all other tests
+- Provides shared connection logic to eliminate duplication across test files
+- Centralizes environment configuration to avoid repetition
+
+Note: This is a framework support file used by all client tests.
+"""
 
 import os
 import ssl

@@ -9,6 +9,9 @@ tool execution, and resource access, similar to the auth middleware.
 """
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import importlib
 import json
 import inspect

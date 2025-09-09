@@ -17,7 +17,28 @@ _test_spreadsheet_id = None
 
 @pytest.mark.service("sheets")
 class TestSheetsTools:
-    """Test Google Sheets tools using the FastMCP Client."""
+    """Test Sheets tools using standardized framework.
+
+🔧 MCP Tools Used:
+- create_spreadsheet: Create new Google Spreadsheets
+- create_sheet: Add sheets to existing spreadsheets
+- (Additional sheet operations would be documented here)
+
+🧪 What's Being Tested:
+- Spreadsheet creation with multiple sheet configuration
+- Sheet management within spreadsheets
+- Data input and formatting operations
+- Formula and calculation handling
+- Sharing and collaboration features
+- Data export and import functionality
+- Authentication patterns for all Sheets operations
+
+🔍 Potential Duplications:
+- Sharing functionality overlaps with Drive and other Google Workspace sharing
+- Data export might have patterns similar to Forms response export
+- File creation patterns might be similar to other document creation tests
+- Collaboration features might overlap with general Google Workspace sharing tests
+"""
     
     @pytest.fixture(scope="session")
     def test_spreadsheet_id(self):

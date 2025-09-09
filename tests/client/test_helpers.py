@@ -1,4 +1,24 @@
-"""Helper functions and utilities for client tests."""
+"""Helper utilities for standardized client testing framework.
+
+🔧 MCP Tools Used:
+- N/A (Helper module - supports testing of all MCP tools)
+- Provides utilities for validating responses from any MCP tool
+
+🧪 What's Being Tested:
+- Response format validation across all services
+- Authentication pattern testing (explicit email vs middleware injection)
+- Error response identification and handling
+- Service-specific response validation patterns
+- Tool execution with standardized parameter handling
+- Success/failure determination from response content
+
+🔍 Potential Duplications:
+- No duplications - this provides shared utilities to eliminate code duplication
+- Centralizes response validation logic used across all service tests
+- Standardizes authentication pattern testing to avoid repetition
+
+Note: This is a framework support file providing reusable test utilities.
+"""
 
 import json
 from typing import Any, Dict, List, Optional, Tuple

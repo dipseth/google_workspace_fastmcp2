@@ -5,6 +5,30 @@ This module specifically tests the send_dynamic_card tool with different
 variations of card types and parameters.
 """
 
+"""Test dynamic card sending functionality with AI-powered generation.
+
+🔧 MCP Tools Used:
+- send_dynamic_card: Send AI-generated cards from natural language descriptions
+- Card generation pipeline: Convert descriptions to structured cards
+- Parameter extraction: Extract card parameters from user input
+- Card validation: Validate generated card structures
+
+🧪 What's Being Tested:
+- Dynamic card generation from user descriptions
+- AI-powered card component selection and configuration
+- Parameter parsing and validation
+- Card sending workflow integration
+- Error handling for invalid descriptions
+- Generated card quality and user experience
+- Integration with Chat spaces and threading
+
+🔍 Potential Duplications:
+- Overlaps significantly with test_nlp_card_parser.py (both test NLP card generation)
+- Card sending overlaps with basic Chat tools tests
+- AI generation patterns might be similar to other AI-powered tools
+- Parameter extraction might overlap with other input parsing tests
+"""
+
 import pytest
 import asyncio
 import json

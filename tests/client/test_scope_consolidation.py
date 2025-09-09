@@ -10,7 +10,29 @@ from .base_test_config import TEST_EMAIL
 @pytest.mark.service("oauth")
 @pytest.mark.auth_required
 class TestScopeConsolidation:
-    """Test OAuth scope consolidation implementation using the FastMCP Client."""
+    """Test scope consolidation for optimized authentication and authorization.
+
+🔧 MCP Tools Used:
+- Scope management tools: Consolidate and optimize OAuth scopes
+- Authentication optimization: Reduce scope redundancy and conflicts
+- Permission validation: Validate consolidated scope permissions
+- Scope analytics: Analyze scope usage and optimization opportunities
+
+🧪 What's Being Tested:
+- OAuth scope consolidation and optimization
+- Reduced authentication overhead through scope management
+- Permission validation with consolidated scopes
+- Scope conflict detection and resolution
+- Performance improvements from scope optimization
+- Backwards compatibility with existing scope configurations
+- Security validation of consolidated authentication patterns
+
+🔍 Potential Duplications:
+- Authentication patterns overlap with OAuth session context and auth pattern tests
+- Scope management might overlap with service authentication tests
+- Optimization patterns similar to other performance optimization tests
+- Permission validation might overlap with authorization tests in other components
+"""
     
     @pytest.fixture
     def scope_registry(self):

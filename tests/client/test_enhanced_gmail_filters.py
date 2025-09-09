@@ -14,7 +14,29 @@ from ..test_auth_utils import get_client_auth_config
 
 @pytest.mark.service("gmail")
 class TestEnhancedGmailFilters:
-    """Test enhanced Gmail filter functionality and elicitation compatibility through MCP server."""
+    """Test enhanced Gmail filter functionality with comprehensive validation.
+
+🔧 MCP Tools Used:
+- create_gmail_filter: Create email filtering rules with criteria and actions
+- get_gmail_filter: Retrieve details of specific filters by ID
+- list_gmail_filters: List all user's Gmail filters (if available)
+- manage_gmail_label: Create/update labels used in filter actions
+- list_gmail_labels: List available labels for filter configuration
+
+🧪 What's Being Tested:
+- Gmail filter creation with complex criteria (from, to, subject, size, attachments)
+- Filter action configuration (labels, forwarding, spam marking, importance)
+- Filter validation and error handling for invalid criteria
+- Label integration with filter actions
+- Filter retrieval and metadata validation
+- Enhanced filter functionality beyond basic operations
+
+🔍 Potential Duplications:
+- Basic filter operations overlap with standard Gmail tools tests
+- Label management overlaps with general Gmail label tests
+- Filter criteria validation might have similar patterns to search operations
+- Email routing logic similar to other Gmail automation tests
+"""
     
     @pytest.mark.asyncio
     async def test_gmail_filter_tools_available(self, client):

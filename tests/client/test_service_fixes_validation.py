@@ -33,7 +33,29 @@ TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_user@example.com")
 
 
 class TestServiceListResourceFixes:
-    """Test that our specific fixes for service list resources work correctly."""
+    """Test service fixes and validation improvements across Google Workspace services.
+
+🔧 MCP Tools Used:
+- Service validation tools: Validate service functionality after fixes
+- Cross-service testing: Test interactions between different services
+- Error recovery: Test improved error handling and recovery mechanisms
+- Service health checks: Validate service availability and performance
+
+🧪 What's Being Tested:
+- Service bug fixes and regression prevention
+- Improved error handling and user experience
+- Service reliability and stability improvements
+- Cross-service compatibility and integration
+- Performance optimizations and efficiency gains
+- Validation of service API compliance
+- Error recovery and graceful degradation
+
+🔍 Potential Duplications:
+- Service testing overlaps with individual service test files
+- Validation patterns similar to other validation and compliance tests
+- Error handling might overlap with other error handling tests
+- Cross-service testing similar to integration tests
+"""
     
     @pytest.fixture
     async def client(self):

@@ -12,6 +12,9 @@ import sys
 import uuid
 import hashlib
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import json
 import os
 from typing_extensions import Any, Dict, List, Optional, Tuple, Union, Callable, Type

@@ -9,6 +9,7 @@ removes problematic rate limiting tests.
 import os
 import re
 import json
+import glob
 import asyncio
 import pytest
 import logging
@@ -31,14 +32,85 @@ load_dotenv()
 # Use specific email for Photos testing with actual photos data
 PHOTO_TEST_EMAIL = os.getenv("PHOTO_TEST_EMAIL_ADDRESS", TEST_EMAIL)
 
+# Test photo path pattern from environment variable
+PHOTO_TEST_PATH_PATTERN = os.getenv("PHOTO_TEST_PATH_PATTERN", "/Users/srivers/Pictures/*.png")
+
+
+def print_tool_result(tool_name: str, result: Any, extra_info: Optional[Dict] = None):
+    """Helper function to print tool results in a consistent, visible format."""
+    # Extract content from result
+    if hasattr(result, 'content'):
+        content = result.content[0].text if result.content else str(result)
+    elif hasattr(result, '__iter__') and not isinstance(result, str):
+        content = str(result[0]) if result else "No result"
+    else:
+        content = str(result)
+    
+    # Print formatted output
+    print(f"\n{'='*70}")
+    print(f"🛠️  TOOL EXECUTION: {tool_name}")
+    print(f"{'='*70}")
+    
+    # Print any extra information
+    if extra_info:
+        for key, value in extra_info.items():
+            print(f"📌 {key}: {value}")
+        print(f"{'-'*70}")
+    
+    # Print the result (truncate if too long)
+    if len(content) > 1000:
+        print(f"📄 Result (truncated to 1000 chars):")
+        print(f"{content[:1000]}...")
+    else:
+        print(f"📄 Result:")
+        print(content)
+    
+    print(f"{'='*70}\n")
+    
+    return content
+
+
+def find_test_images():
+    """Find test images for upload testing."""
+    # Try the environment variable pattern first
+    test_images = glob.glob(PHOTO_TEST_PATH_PATTERN)
+    
+    if not test_images:
+        # Try specific known paths as fallback
+        fallback_paths = [
+            "/Users/srivers/Pictures/poor_air_quality.png",
+            "/Users/srivers/Pictures/*.png",
+            "/Users/srivers/Pictures/*.jpg",
+            "/Users/srivers/Pictures/*.jpeg",
+            os.path.expanduser("~/Pictures/*.png"),
+            os.path.expanduser("~/Pictures/*.jpg"),
+        ]
+        
+        for pattern in fallback_paths:
+            test_images = glob.glob(pattern) if '*' in pattern else ([pattern] if os.path.exists(pattern) else [])
+            if test_images:
+                break
+    
+    # Filter to only valid image files
+    valid_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.heic', '.heif'}
+    test_images = [img for img in test_images if os.path.splitext(img.lower())[1] in valid_extensions]
+    
+    return test_images
+
 
 @pytest.mark.service("photos")
 class TestPhotosTools:
-    """Test all Google Photos MCP tools with comprehensive coverage."""
+    """Test both standard and advanced Google Photos MCP tools with comprehensive coverage."""
+    
+    # Class attributes to share data between tests
+    created_album_id = None
+    created_album_name = None
+    found_media_item_ids = []
 
     @pytest.mark.asyncio
+    @pytest.mark.order(1)
     async def test_photos_tools_available(self, client):
-        """Test that all Google Photos tools are available."""
+        """Test that both standard and advanced Google Photos tools are available."""
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
 
@@ -46,37 +118,45 @@ class TestPhotosTools:
         expected_standard_tools = [
             "list_photos_albums",
             "search_photos",
-            "get_album_photos",
+            "list_album_photos",  # Note: this is the actual tool name, not get_album_photos
             "get_photo_details",
-            "create_photos_album",
+            "create_photos_album", 
             "get_photos_library_info"
         ]
 
-        # Advanced Photos tools - using actual tool names from the server
+        # Advanced Photos tools
         expected_advanced_tools = [
-            "photos_smart_search",  # Was: batch_search_photos
-            "photos_batch_details",  # Was: bulk_photo_details
+            "photos_smart_search",
+            "photos_batch_details", 
             "photos_performance_stats",
-            "photos_optimized_album_sync"
+            "photos_optimized_album_sync",
+            "upload_photos",
+            "upload_folder_photos"
         ]
 
         all_expected_tools = expected_standard_tools + expected_advanced_tools
 
         missing_tools = []
+        found_tools = []
+        
         for tool_name in all_expected_tools:
             if tool_name not in tool_names:
                 missing_tools.append(tool_name)
+            else:
+                found_tools.append(tool_name)
 
         if missing_tools:
             logger.warning(f"Missing Photos tools: {missing_tools}")
             logger.info(f"Available tools: {sorted(tool_names)}")
 
-        # At least verify that some Photos tools are present
-        photos_tools_found = [tool for tool in tool_names if "photos" in tool or "album" in tool]
-        assert len(photos_tools_found) > 0, f"No Photos-related tools found in: {tool_names}"
-        logger.info(f"Found {len(photos_tools_found)} Photos-related tools: {photos_tools_found}")
+        # Verify that we found at least some Photos tools
+        assert len(found_tools) > 0, f"No Photos tools found in: {tool_names}"
+        logger.info(f"Found {len(found_tools)}/{len(all_expected_tools)} Photos tools: {found_tools}")
+        
+        print_tool_result("test_photos_tools_available", f"Found {len(found_tools)} tools: Standard={len([t for t in found_tools if t in expected_standard_tools])}, Advanced={len([t for t in found_tools if t in expected_advanced_tools])}")
 
     @pytest.mark.asyncio
+    @pytest.mark.order(2)
     async def test_list_photos_albums(self, client):
         """Test listing photo albums."""
         try:
@@ -85,16 +165,8 @@ class TestPhotosTools:
                 "max_results": 10
             })
 
-            # Handle both old list format and new CallToolResult format
-            if hasattr(result, 'content'):
-                content = result.content[0].text if result.content else str(result)
-            elif hasattr(result, '__iter__') and not isinstance(result, str):
-                content = str(result[0]) if result else "No result"
-            else:
-                content = str(result)
-
-            logger.info(f"list_photos_albums result: {content}")
-
+            content = print_tool_result("list_photos_albums", result)
+            
             # Should either succeed with albums or show appropriate message
             success_indicators = [
                 "albums found", "album", "total", "items",
@@ -114,35 +186,37 @@ class TestPhotosTools:
                 pytest.skip(f"Skipping due to auth issue: {content}")
             else:
                 assert is_success or is_error, f"Unexpected response format: {content}"
+                
+                # If successful, try to extract album info for later tests
+                if is_success and "albums" in content.lower():
+                    import re
+                    # Try to extract first album ID
+                    album_id_match = re.search(r'"id":\s*"([^"]+)"', content)
+                    if not album_id_match:
+                        album_id_match = re.search(r'ID:\s*([A-Za-z0-9_-]+)', content)
+                    if album_id_match:
+                        TestPhotosTools.created_album_id = album_id_match.group(1)
+                        print(f"✅ Found existing album ID for other tests: {TestPhotosTools.created_album_id}")
 
         except Exception as e:
             if "permission" in str(e).lower() or "scope" in str(e).lower():
                 pytest.skip(f"Skipping due to permissions: {e}")
             else:
                 logger.error(f"list_photos_albums failed: {e}")
-                # Don't fail the test completely, log the error
                 assert False, f"Tool execution failed: {e}"
 
     @pytest.mark.asyncio
+    @pytest.mark.order(3)
     async def test_search_photos(self, client):
         """Test searching for photos."""
         try:
-            # Search for recent photos
             result = await client.call_tool("search_photos", {
                 "user_google_email": PHOTO_TEST_EMAIL,
                 "content_categories": ["PEOPLE", "LANDSCAPES"],
                 "max_results": 5
             })
 
-            # Handle both old list format and new CallToolResult format
-            if hasattr(result, 'content'):
-                content = result.content[0].text if result.content else str(result)
-            elif hasattr(result, '__iter__') and not isinstance(result, str):
-                content = str(result[0]) if result else "No result"
-            else:
-                content = str(result)
-
-            logger.info(f"search_photos result: {content}")
+            content = print_tool_result("search_photos", result)
 
             # Should either succeed with photos or show appropriate message
             success_indicators = [
@@ -160,6 +234,14 @@ class TestPhotosTools:
                 pytest.skip(f"Skipping due to scope/permission issue: {content}")
             else:
                 assert is_success or is_error, f"Unexpected response format: {content}"
+                
+                # Extract media IDs for later tests  
+                if is_success:
+                    import re
+                    media_ids = re.findall(r'"id":\s*"([^"]+)"', content)
+                    if media_ids:
+                        TestPhotosTools.found_media_item_ids = media_ids[:5]
+                        print(f"✅ Stored {len(TestPhotosTools.found_media_item_ids)} media item IDs for other tests")
 
         except Exception as e:
             if "permission" in str(e).lower() or "scope" in str(e).lower():
@@ -169,6 +251,7 @@ class TestPhotosTools:
                 assert False, f"Tool execution failed: {e}"
 
     @pytest.mark.asyncio
+    @pytest.mark.order(4)
     async def test_get_photos_library_info(self, client):
         """Test getting library information."""
         try:
@@ -176,15 +259,7 @@ class TestPhotosTools:
                 "user_google_email": PHOTO_TEST_EMAIL
             })
 
-            # Handle both old list format and new CallToolResult format
-            if hasattr(result, 'content'):
-                content = result.content[0].text if result.content else str(result)
-            elif hasattr(result, '__iter__') and not isinstance(result, str):
-                content = str(result[0]) if result else "No result"
-            else:
-                content = str(result)
-
-            logger.info(f"get_photos_library_info result: {content}")
+            content = print_tool_result("get_photos_library_info", result)
 
             # Should either succeed with library info or show appropriate message
             success_indicators = [
@@ -211,6 +286,7 @@ class TestPhotosTools:
                 assert False, f"Tool execution failed: {e}"
 
     @pytest.mark.asyncio
+    @pytest.mark.order(5)
     async def test_create_photos_album(self, client):
         """Test creating a photo album."""
         try:
@@ -223,15 +299,9 @@ class TestPhotosTools:
                 "title": album_title
             })
 
-            # Handle both old list format and new CallToolResult format
-            if hasattr(result, 'content'):
-                content = result.content[0].text if result.content else str(result)
-            elif hasattr(result, '__iter__') and not isinstance(result, str):
-                content = str(result[0]) if result else "No result"
-            else:
-                content = str(result)
-
-            logger.info(f"create_photos_album result: {content}")
+            content = print_tool_result("create_photos_album", result, {
+                "Album Title": album_title
+            })
 
             # Should either succeed with album creation or show appropriate message
             success_indicators = [
@@ -249,6 +319,18 @@ class TestPhotosTools:
                 pytest.skip(f"Skipping due to scope/permission issue: {content}")
             else:
                 assert is_success or is_error, f"Unexpected response format: {content}"
+                
+                # If successful, extract and store the album ID for use in other tests
+                if is_success:
+                    import re
+                    album_id_match = re.search(r'ID:\s*([A-Za-z0-9_-]+)', content)
+                    if not album_id_match:
+                        album_id_match = re.search(r'"id":\s*"([^"]+)"', content)
+                    
+                    if album_id_match:
+                        TestPhotosTools.created_album_id = album_id_match.group(1)
+                        TestPhotosTools.created_album_name = album_title
+                        print(f"✅ Stored album ID for other tests: {TestPhotosTools.created_album_id}")
 
             # Add pause to prevent rate limiting
             await asyncio.sleep(1)
@@ -261,50 +343,22 @@ class TestPhotosTools:
                 assert False, f"Tool execution failed: {e}"
 
     @pytest.mark.asyncio
-    async def test_get_album_photos(self, client):
+    @pytest.mark.order(6)
+    async def test_list_album_photos(self, client):
         """Test getting photos from an album."""
         try:
-            # First, try to get any album ID by listing albums
-            albums_result = await client.call_tool("list_photos_albums", {
-                "user_google_email": PHOTO_TEST_EMAIL,
-                "max_results": 5
-            })
-
-            # Handle response format
-            if hasattr(albums_result, 'content'):
-                albums_content = albums_result.content[0].text if albums_result.content else str(albums_result)
-            elif hasattr(albums_result, '__iter__') and not isinstance(albums_result, str):
-                albums_content = str(albums_result[0]) if albums_result else "No result"
-            else:
-                albums_content = str(albums_result)
-
-            logger.info(f"Albums for get_album_photos test: {albums_content}")
-
-            # Extract album ID if possible - look for multiple patterns
-            # Try JSON format first
-            album_id_match = re.search(r'"id":\s*"([^"]+)"', albums_content)
-            # Also try "ID: xxx" format
-            if not album_id_match:
-                album_id_match = re.search(r'ID:\s*([A-Za-z0-9_-]+)', albums_content)
-            if album_id_match:
-                album_id = album_id_match.group(1)
-
-                # Now test getting photos from this album
-                result = await client.call_tool("get_album_photos", {
+            album_id = TestPhotosTools.created_album_id
+            
+            if album_id:
+                result = await client.call_tool("list_album_photos", {
                     "user_google_email": PHOTO_TEST_EMAIL,
                     "album_id": album_id,
                     "max_results": 5
                 })
 
-                # Handle response format
-                if hasattr(result, 'content'):
-                    content = result.content[0].text if result.content else str(result)
-                elif hasattr(result, '__iter__') and not isinstance(result, str):
-                    content = str(result[0]) if result else "No result"
-                else:
-                    content = str(result)
-
-                logger.info(f"get_album_photos result: {content}")
+                content = print_tool_result("list_album_photos", result, {
+                    "Album ID": album_id
+                })
 
                 # Should either succeed with photos or show appropriate message
                 success_indicators = [
@@ -323,59 +377,47 @@ class TestPhotosTools:
                 else:
                     assert is_success or is_error, f"Unexpected response format: {content}"
             else:
-                pytest.skip("No album ID found to test get_album_photos")
+                pytest.skip("No album ID available to test list_album_photos")
 
         except Exception as e:
             if "permission" in str(e).lower() or "scope" in str(e).lower():
                 pytest.skip(f"Skipping due to permissions: {e}")
             else:
-                logger.error(f"get_album_photos failed: {e}")
+                logger.error(f"list_album_photos failed: {e}")
                 assert False, f"Tool execution failed: {e}"
 
     @pytest.mark.asyncio
+    @pytest.mark.order(7)
     async def test_get_photo_details(self, client):
         """Test getting details of a specific photo."""
         try:
-            # First, try to get any media item ID by searching
-            search_result = await client.call_tool("search_photos", {
-                "user_google_email": PHOTO_TEST_EMAIL,
-                "max_results": 1
-            })
-
-            # Handle response format
-            if hasattr(search_result, 'content'):
-                search_content = search_result.content[0].text if search_result.content else str(search_result)
-            elif hasattr(search_result, '__iter__') and not isinstance(search_result, str):
-                search_content = str(search_result[0]) if search_result else "No result"
+            # Use media IDs from previous tests if available
+            if TestPhotosTools.found_media_item_ids:
+                media_item_id = TestPhotosTools.found_media_item_ids[0]
+                print(f"📌 Using media ID from previous tests: {media_item_id}")
             else:
-                search_content = str(search_result)
-
-            logger.info(f"Search for get_photo_details test: {search_content}")
-
-            # Extract media item ID if possible - look for multiple patterns
-            # Try JSON format first
-            media_id_match = re.search(r'"id":\s*"([^"]+)"', search_content)
-            # Also try other formats
-            if not media_id_match:
-                media_id_match = re.search(r'ID:\s*([A-Za-z0-9_-]+)', search_content)
-            if media_id_match:
-                media_item_id = media_id_match.group(1)
-
-                # Now test getting details of this photo
+                # Try to get some media IDs via search
+                search_result = await client.call_tool("search_photos", {
+                    "user_google_email": PHOTO_TEST_EMAIL,
+                    "max_results": 1
+                })
+                
+                search_content = print_tool_result("search_photos", search_result)
+                
+                # Extract media item ID
+                import re
+                media_ids = re.findall(r'"id":\s*"([^"]+)"', search_content)
+                media_item_id = media_ids[0] if media_ids else None
+            
+            if media_item_id:
                 result = await client.call_tool("get_photo_details", {
                     "user_google_email": PHOTO_TEST_EMAIL,
                     "media_item_id": media_item_id
                 })
 
-                # Handle response format
-                if hasattr(result, 'content'):
-                    content = result.content[0].text if result.content else str(result)
-                elif hasattr(result, '__iter__') and not isinstance(result, str):
-                    content = str(result[0]) if result else "No result"
-                else:
-                    content = str(result)
-
-                logger.info(f"get_photo_details result: {content}")
+                content = print_tool_result("get_photo_details", result, {
+                    "Media Item ID": media_item_id
+                })
 
                 # Should either succeed with photo details or show appropriate message
                 success_indicators = [
@@ -403,35 +445,30 @@ class TestPhotosTools:
                 logger.error(f"get_photo_details failed: {e}")
                 assert False, f"Tool execution failed: {e}"
 
-
-@pytest.mark.service("photos")
-class TestAdvancedPhotosTools:
-    """Test advanced/optimized Google Photos tools."""
-
     @pytest.mark.asyncio
+    @pytest.mark.order(8)
     async def test_photos_smart_search(self, client):
-        """Test smart search for photos with multiple criteria."""
+        """Test smart photo search with filtering."""
         try:
-            # Test smart search with correct parameters
             result = await client.call_tool("photos_smart_search", {
                 "user_google_email": PHOTO_TEST_EMAIL,
-                "content_categories": ["PEOPLE", "LANDSCAPES"],
                 "include_photos": True,
                 "include_videos": False,
                 "max_results": 10
             })
 
-            # Handle response format
-            if hasattr(result, 'content'):
-                content = result.content[0].text if result.content else str(result)
-            elif hasattr(result, '__iter__') and not isinstance(result, str):
-                content = str(result[0]) if result else "No result"
-            else:
-                content = str(result)
+            content = print_tool_result("photos_smart_search", result)
+            
+            # Store found media items for later tests
+            if "media_items" in content or "id" in content:
+                # Extract media item IDs using regex
+                import re
+                media_ids = re.findall(r'"id":\s*"([^"]+)"', content)
+                if media_ids:
+                    TestPhotosTools.found_media_item_ids = media_ids[:5]  # Store up to 5 IDs
+                    print(f"✅ Stored {len(TestPhotosTools.found_media_item_ids)} media item IDs for batch test")
 
-            logger.info(f"photos_smart_search result: {content}")
-
-            # Should either succeed with smart search results or show appropriate message
+            # Check for success indicators
             success_indicators = [
                 "smart search", "results", "found", "photos", "videos",
                 "performance", "cache", "search time", "successfully", "completed"
@@ -456,95 +493,39 @@ class TestAdvancedPhotosTools:
                 assert False, f"Tool execution failed: {e}"
 
     @pytest.mark.asyncio
-    async def test_photos_optimized_album_sync(self, client):
-        """Test optimized album sync functionality."""
-        pytest.skip("Skipping photos_optimized_album_sync - requires album_id")
-        # This test would require a valid album ID
-        # The following code is commented out as it requires a valid album_id
-        # try:
-        #     result = await client.call_tool("photos_optimized_album_sync", {
-        #         "user_google_email": TEST_EMAIL,
-        #         "album_id": "VALID_ALBUM_ID_HERE",
-        #         "analyze_metadata": True,
-        #         "max_items": 100
-        #     })
-        #
-        #     # Handle response format
-        #     if hasattr(result, 'content'):
-        #         content = result.content[0].text if result.content else str(result)
-        #     elif hasattr(result, '__iter__') and not isinstance(result, str):
-        #         content = str(result[0]) if result else "No result"
-        #     else:
-        #     #     content = str(result)
-        #
-        #     logger.info(f"photos_optimized_album_sync result: {content}")
-        #
-        #     # Should either succeed with sync results or show appropriate message
-        #     success_indicators = [
-        #         "sync", "optimized", "album", "analyzed", "metadata",
-        #         "results", "successfully", "items"
-        #     ]
-        #     error_indicators = [
-        #         "error", "failed", "unauthorized", "permission", "scope"
-        #     ]
-        #
-        #     is_success = any(indicator in content.lower() for indicator in success_indicators)
-        #     is_error = any(indicator in content.lower() for indicator in error_indicators)
-        #
-        #     if is_error and ("scope" in content.lower() or "unauthorized" in content.lower()):
-        #         pytest.skip(f"Skipping due to scope/permission issue: {content}")
-        #     else:
-        #         assert is_success or is_error, f"Unexpected response format: {content}"
-        #
-        # except Exception as e:
-        #     if "permission" in str(e).lower() or "scope" in str(e).lower():
-        #         pytest.skip(f"Skipping due to permissions: {e}")
-        #     else:
-        #         logger.error(f"photos_optimized_album_sync failed: {e}")
-        #         assert False, f"Tool execution failed: {e}"
-
-    @pytest.mark.asyncio
+    @pytest.mark.order(9)
     async def test_photos_batch_details(self, client):
         """Test getting batch photo details with optimization."""
         try:
-            # First get some media item IDs
-            search_result = await client.call_tool("search_photos", {
-                "user_google_email": PHOTO_TEST_EMAIL,
-                "max_results": 3
-            })
-
-            # Handle response format
-            if hasattr(search_result, 'content'):
-                search_content = search_result.content[0].text if search_result.content else str(search_result)
-            elif hasattr(search_result, '__iter__') and not isinstance(search_result, str):
-                search_content = str(search_result[0]) if search_result else "No result"
+            # Use media IDs from previous test if available
+            if TestPhotosTools.found_media_item_ids:
+                test_ids = TestPhotosTools.found_media_item_ids[:3]
+                print(f"📌 Using media IDs from previous tests: {test_ids}")
             else:
-                search_content = str(search_result)
-
-            logger.info(f"Search for bulk_photo_details test: {search_content}")
-
-            # Extract media item IDs if possible
-            media_ids = re.findall(r'"id":\s*"([^"]+)"', search_content)
-            if media_ids:
-                # Use first few IDs for bulk test
-                test_ids = media_ids[:3]
-
+                # If no stored IDs, try to get some via smart search
+                search_result = await client.call_tool("photos_smart_search", {
+                    "user_google_email": PHOTO_TEST_EMAIL,
+                    "max_results": 3
+                })
+                
+                search_content = print_tool_result("photos_smart_search", search_result)
+                
+                # Extract media item IDs
+                import re
+                media_ids = re.findall(r'"id":\s*"([^"]+)"', search_content)
+                test_ids = media_ids[:3] if media_ids else None
+            
+            if test_ids:
                 result = await client.call_tool("photos_batch_details", {
                     "user_google_email": PHOTO_TEST_EMAIL,
                     "media_item_ids": test_ids
                 })
 
-                # Handle response format
-                if hasattr(result, 'content'):
-                    content = result.content[0].text if result.content else str(result)
-                elif hasattr(result, '__iter__') and not isinstance(result, str):
-                    content = str(result[0]) if result else "No result"
-                else:
-                    content = str(result)
+                content = print_tool_result("photos_batch_details", result, {
+                    "Media IDs": test_ids
+                })
 
-                logger.info(f"bulk_photo_details result: {content}")
-
-                # Should either succeed with bulk details or show appropriate message
+                # Check for success indicators
                 success_indicators = [
                     "bulk", "details", "media items", "batch", "processed",
                     "successfully", "metadata", "retrieved"
@@ -561,16 +542,17 @@ class TestAdvancedPhotosTools:
                 else:
                     assert is_success or is_error, f"Unexpected response format: {content}"
             else:
-                pytest.skip("No media item IDs found to test bulk_photo_details")
+                pytest.skip("No media item IDs found to test photos_batch_details")
 
         except Exception as e:
             if "permission" in str(e).lower() or "scope" in str(e).lower():
                 pytest.skip(f"Skipping due to permissions: {e}")
             else:
-                logger.error(f"bulk_photo_details failed: {e}")
+                logger.error(f"photos_batch_details failed: {e}")
                 assert False, f"Tool execution failed: {e}"
 
     @pytest.mark.asyncio
+    @pytest.mark.order(10)
     async def test_photos_performance_stats(self, client):
         """Test getting performance statistics for Photos API usage."""
         try:
@@ -579,15 +561,7 @@ class TestAdvancedPhotosTools:
                 "clear_cache": False
             })
 
-            # Handle response format
-            if hasattr(result, 'content'):
-                content = result.content[0].text if result.content else str(result)
-            elif hasattr(result, '__iter__') and not isinstance(result, str):
-                content = str(result[0]) if result else "No result"
-            else:
-                content = str(result)
-
-            logger.info(f"advanced_photo_search result: {content}")
+            content = print_tool_result("photos_performance_stats", result)
 
             # Should either succeed with performance stats or show appropriate message
             success_indicators = [
@@ -610,8 +584,235 @@ class TestAdvancedPhotosTools:
             if "permission" in str(e).lower() or "scope" in str(e).lower():
                 pytest.skip(f"Skipping due to permissions: {e}")
             else:
-                logger.error(f"advanced_photo_search failed: {e}")
+                logger.error(f"photos_performance_stats failed: {e}")
                 assert False, f"Tool execution failed: {e}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.order(11)
+    async def test_upload_photos_with_album_creation(self, client):
+        """Test uploading photos and creating an album simultaneously."""
+        try:
+            # Find test images using helper function
+            test_images = find_test_images()
+            
+            if not test_images:
+                pytest.skip(f"No test images found at {PHOTO_TEST_PATH_PATTERN}")
+            
+            # Create timestamp for unique album name
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            album_name = f"Test Album {timestamp}"
+            
+            # Use first available image
+            test_image = test_images[0]
+            
+            result = await client.call_tool("upload_photos", {
+                "user_google_email": PHOTO_TEST_EMAIL,
+                "file_paths": test_image,
+                "create_album": album_name,
+                "description": "Test photo upload with album creation"
+            })
+
+            content = print_tool_result("upload_photos", result, {
+                "Album Name": album_name,
+                "File": os.path.basename(test_image)
+            })
+
+            # Check for success indicators
+            success_indicators = [
+                "successful", "uploaded", "photo upload", "album created",
+                "media_item_id", "google photos id", "✅", "📸"
+            ]
+            error_indicators = [
+                "error", "failed", "unauthorized", "permission", "scope"
+            ]
+
+            is_success = any(indicator in content.lower() for indicator in success_indicators)
+            is_error = any(indicator in content.lower() for indicator in error_indicators)
+
+            if is_error and ("scope" in content.lower() or "unauthorized" in content.lower()):
+                pytest.skip(f"Skipping due to scope/permission issue: {content}")
+            else:
+                assert is_success or is_error, f"Unexpected response format: {content}"
+                
+                # If successful, try to extract album ID for other tests
+                if is_success:
+                    # Try to extract album ID from response
+                    import re
+                    album_id_match = re.search(r'album.*?id["\']?\s*[:=]\s*["\']?([A-Za-z0-9_-]+)', content, re.IGNORECASE)
+                    if album_id_match:
+                        TestPhotosTools.created_album_id = album_id_match.group(1)
+                        TestPhotosTools.created_album_name = album_name
+                        print(f"✅ Stored album ID for other tests: {TestPhotosTools.created_album_id}")
+
+            # Add pause to prevent rate limiting
+            await asyncio.sleep(1)
+
+        except FileNotFoundError as e:
+            pytest.skip(f"Test images not found: {e}")
+        except Exception as e:
+            if "permission" in str(e).lower() or "scope" in str(e).lower():
+                pytest.skip(f"Skipping due to permissions: {e}")
+            else:
+                logger.error(f"upload_photos_with_album_creation failed: {e}")
+                assert False, f"Tool execution failed: {e}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.order(12)  # Run after album creation
+    async def test_photos_optimized_album_sync(self, client):
+        """Test optimized album sync functionality."""
+        try:
+            # Use album ID from previous test if available
+            if TestPhotosTools.created_album_id:
+                album_id = TestPhotosTools.created_album_id
+                print(f"📌 Using album ID from previous test: {album_id}")
+                
+                result = await client.call_tool("photos_optimized_album_sync", {
+                    "user_google_email": PHOTO_TEST_EMAIL,
+                    "album_id": album_id,
+                    "analyze_metadata": True,
+                    "max_items": 100
+                })
+                
+                content = print_tool_result("photos_optimized_album_sync", result, {
+                    "Album ID": album_id
+                })
+                
+                # Should either succeed with sync results or show appropriate message
+                success_indicators = [
+                    "sync", "optimized", "album", "analyzed", "metadata",
+                    "results", "successfully", "items"
+                ]
+                error_indicators = [
+                    "error", "failed", "unauthorized", "permission", "scope"
+                ]
+                
+                is_success = any(indicator in content.lower() for indicator in success_indicators)
+                is_error = any(indicator in content.lower() for indicator in error_indicators)
+                
+                if is_error and ("scope" in content.lower() or "unauthorized" in content.lower()):
+                    pytest.skip(f"Skipping due to scope/permission issue: {content}")
+                else:
+                    assert is_success or is_error, f"Unexpected response format: {content}"
+                    
+            else:
+                pytest.skip("Skipping photos_optimized_album_sync - no album_id available from previous tests")
+
+        except Exception as e:
+            if "permission" in str(e).lower() or "scope" in str(e).lower():
+                pytest.skip(f"Skipping due to permissions: {e}")
+            else:
+                logger.error(f"photos_optimized_album_sync failed: {e}")
+                assert False, f"Tool execution failed: {e}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.order(13)
+    async def test_upload_photos(self, client):
+        """Test uploading photos to Google Photos."""
+        try:
+            # Find test images using helper function
+            test_images = find_test_images()
+            
+            if not test_images:
+                pytest.skip(f"No test images found at {PHOTO_TEST_PATH_PATTERN}")
+            
+            # Test single photo upload
+            single_image = test_images[0]
+            
+            result = await client.call_tool("upload_photos", {
+                "user_google_email": PHOTO_TEST_EMAIL,
+                "file_paths": single_image,
+                "description": "Test single photo upload from pytest"
+            })
+            
+            content = print_tool_result("upload_photos", result, {
+                "File": os.path.basename(single_image)
+            })
+            
+            # Check for success indicators
+            success_indicators = [
+                "successful", "uploaded", "photo upload", "media_item_id",
+                "google photos id", "✅", "📸"
+            ]
+            error_indicators = [
+                "error", "failed", "unauthorized", "permission", "scope"
+            ]
+            
+            is_success = any(indicator in content.lower() for indicator in success_indicators)
+            is_error = any(indicator in content.lower() for indicator in error_indicators)
+            
+            if is_error and ("scope" in content.lower() or "unauthorized" in content.lower()):
+                pytest.skip(f"Skipping due to scope/permission issue: {content}")
+            else:
+                assert is_success or is_error, f"Unexpected response format: {content}"
+
+        except FileNotFoundError as e:
+            pytest.skip(f"Test images not found: {e}")
+        except Exception as e:
+            if "permission" in str(e).lower() or "scope" in str(e).lower():
+                pytest.skip(f"Skipping due to permissions: {e}")
+            else:
+                logger.error(f"upload_photos failed: {e}")
+                assert False, f"Tool execution failed: {e}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.order(14)
+    async def test_upload_folder_photos(self, client):
+        """Test uploading all photos from a folder."""
+        try:
+            # Get the folder path from the pattern
+            folder_path = os.path.dirname(PHOTO_TEST_PATH_PATTERN.rstrip("/*"))
+            
+            if not os.path.exists(folder_path):
+                pytest.skip(f"Test folder not found: {folder_path}")
+            
+            # Create a unique album name for this test
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            album_name = f"Folder Upload Test {timestamp}"
+            
+            result = await client.call_tool("upload_folder_photos", {
+                "user_google_email": PHOTO_TEST_EMAIL,
+                "folder_path": folder_path,
+                "recursive": False,  # Don't recurse for test
+                "create_album": album_name
+            })
+            
+            content = print_tool_result("upload_folder_photos", result, {
+                "Folder": folder_path,
+                "Album": album_name
+            })
+            
+            # Check for success indicators
+            success_indicators = [
+                "folder photo upload", "successfully uploaded", "total photos",
+                "success rate", "✅", "📁", "summary"
+            ]
+            error_indicators = [
+                "error", "failed", "unauthorized", "permission", "scope",
+                "no image files found"
+            ]
+            
+            is_success = any(indicator in content.lower() for indicator in success_indicators)
+            is_error = any(indicator in content.lower() for indicator in error_indicators)
+            
+            if is_error and ("scope" in content.lower() or "unauthorized" in content.lower()):
+                pytest.skip(f"Skipping due to scope/permission issue: {content}")
+            elif "no image files found" in content.lower():
+                pytest.skip(f"No images found in folder: {content}")
+            else:
+                # Either success or acceptable error
+                assert is_success or is_error, f"Unexpected response format: {content}"
+            
+        except FileNotFoundError as e:
+            pytest.skip(f"Test folder not found: {e}")
+        except Exception as e:
+            if "permission" in str(e).lower() or "scope" in str(e).lower():
+                pytest.skip(f"Skipping due to permissions: {e}")
+            else:
+                logger.error(f"upload_folder_photos failed: {e}")
+                assert False, f"Tool execution failed: {e}"
+
+
+
 
 
 @pytest.mark.asyncio
@@ -626,9 +827,10 @@ async def test_debug_single_photo_tool():
     client = await create_test_client(PHOTO_TEST_EMAIL)
 
     async with client:
-        # Test get_photos_library_info as it's the simplest
+        # Test photos_performance_stats as it's the simplest advanced tool
         test_payload = {
-            "user_google_email": PHOTO_TEST_EMAIL
+            "user_google_email": PHOTO_TEST_EMAIL,
+            "clear_cache": False
         }
 
         print(f"📧 Test Email: {PHOTO_TEST_EMAIL}")
@@ -640,13 +842,13 @@ async def test_debug_single_photo_tool():
             # Get list of available tools first
             tools = await client.list_tools()
             tool_names = [tool.name for tool in tools]
-            photos_tools = [tool for tool in tool_names if "photos" in tool or "album" in tool]
+            photos_tools = [tool for tool in tool_names if "photos" in tool or "album" in tool or "upload" in tool]
 
             print(f"📚 Available Photos-related tools: {photos_tools}")
 
-            if "get_photos_library_info" in tool_names:
-                print(f"\n🎯 Testing get_photos_library_info...")
-                result = await client.call_tool("get_photos_library_info", test_payload)
+            if "photos_performance_stats" in tool_names:
+                print(f"\n🎯 Testing photos_performance_stats...")
+                result = await client.call_tool("photos_performance_stats", test_payload)
 
                 # Extract content from result
                 if hasattr(result, 'content'):
@@ -656,11 +858,16 @@ async def test_debug_single_photo_tool():
                 else:
                     content = str(result)
 
-                print(f"\n=== PHOTOS TOOL DEBUG RESPONSE ===")
+                print(f"\n{'='*60}")
+                print(f"🔧 DEBUG: photos_performance_stats")
+                print(f"{'='*60}")
                 print(f"Response type: {type(result)}")
-                print(f"Response content: '{content}'")
                 print(f"Content length: {len(content)} chars")
-                print(f"=== END DEBUG RESPONSE ===\n")
+                print(f"{'='*60}")
+                print(f"Full Response:")
+                print(f"{'-'*60}")
+                print(content)
+                print(f"{'='*60}\n")
 
                 # Basic validation
                 assert content is not None, "Response content should not be None"
@@ -668,7 +875,7 @@ async def test_debug_single_photo_tool():
 
                 logger.info(f"Debug Photos tool result: {content}")
             else:
-                print(f"❌ get_photos_library_info not found in available tools")
+                print(f"❌ photos_performance_stats not found in available tools")
                 print(f"📋 All available tools: {sorted(tool_names)}")
 
         except Exception as e:

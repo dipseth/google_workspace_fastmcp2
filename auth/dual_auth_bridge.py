@@ -10,6 +10,9 @@ shared between authentication methods when needed.
 """
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 from typing import Optional, Dict, Any, Tuple
 from pathlib import Path
 import json

@@ -1,6 +1,9 @@
 """Helper functions and utilities for Google service management."""
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 from typing_extensions import Any, Optional, Union, List, Dict
 
 from .service_manager import get_google_service, get_available_services, get_available_scope_groups

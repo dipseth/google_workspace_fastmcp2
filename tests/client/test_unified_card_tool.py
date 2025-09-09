@@ -6,6 +6,30 @@ which provides a dynamic card creation and sending capability using
 the ModuleWrapper adapter.
 """
 
+"""Test unified card tool providing consolidated card functionality.
+
+🔧 MCP Tools Used:
+- Unified card interface: Single tool for all card types
+- Card type detection: Automatically detect appropriate card type
+- Multi-format support: Support various input formats for card generation
+- Card conversion: Convert between different card formats
+
+🧪 What's Being Tested:
+- Unified interface for all card generation workflows
+- Automatic card type detection and selection
+- Multi-format input handling (JSON, natural language, templates)
+- Card format conversion and compatibility
+- Simplified API for complex card operations
+- Backward compatibility with existing card tools
+- Performance optimization through unified processing
+
+🔍 Potential Duplications:
+- Consolidates functionality from multiple other card tests
+- Very high overlap with test_send_dynamic_card.py, test_smart_card_tool.py
+- Unified approach may duplicate patterns from test_chat_app_tools.py
+- Format conversion might overlap with general data transformation tests
+"""
+
 import pytest
 import asyncio
 import json

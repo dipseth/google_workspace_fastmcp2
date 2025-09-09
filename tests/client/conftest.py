@@ -1,4 +1,23 @@
-"""Pytest configuration and shared fixtures for all client tests."""
+"""Pytest configuration and fixtures for standardized client testing.
+
+🔧 MCP Tools Used:
+- N/A (Pytest configuration - enables testing of all MCP tools)
+- Provides client fixture used by all MCP tool tests
+
+🧪 What's Being Tested:
+- Pytest fixture configuration for client testing
+- Global test markers and categories
+- Client instance management and reuse
+- Test session configuration and cleanup
+- Integration with base_test_config for connection management
+
+🔍 Potential Duplications:
+- No duplications - this is the central pytest configuration
+- Eliminates fixture duplication across individual test files
+- Provides shared client instance to avoid connection overhead
+
+Note: This is the pytest framework configuration file.
+"""
 
 import pytest
 import pytest_asyncio

@@ -73,7 +73,7 @@ class TestEnhancedTemplateMiddleware:
         simple_templates = [
             "{{user://current/email.email}}",
             "Hello {{user://current/email.email}}!",
-            "{{service://gmail/labels.count}} labels"
+            "{{service://gmail/labels.result.total_count}} labels"
         ]
         
         for template in simple_templates:

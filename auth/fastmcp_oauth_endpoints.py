@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing_extensions import Any, Dict
 from config.settings import settings
-
+from auth.context import set_user_email_context, set_session_context, get_session_context
 # Import OAuth proxy at module level to ensure singleton behavior
 from auth.oauth_proxy import oauth_proxy, handle_token_exchange, refresh_access_token
 
@@ -549,7 +549,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                                 
                                 # Try to set context if available (won't work outside FastMCP request)
                                 try:
-                                    from auth.context import set_user_email_context, set_session_context, get_session_context
+                                    
                                     session_id = get_session_context() or str(uuid.uuid4())
                                     set_session_context(session_id)
                                     set_user_email_context(authenticated_email)

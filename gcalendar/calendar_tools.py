@@ -429,7 +429,7 @@ async def _batch_create_events(
 # MODULE-LEVEL TOOL FUNCTIONS (Import-Compatible)
 # ============================================================================
 
-async def list_calendars(user_google_email: UserGoogleEmailCalendar) -> CalendarListResponse:
+async def list_calendars(user_google_email: UserGoogleEmailCalendar=None) -> CalendarListResponse:
     """
     Retrieves a list of calendars accessible to the authenticated user.
 
@@ -440,6 +440,17 @@ async def list_calendars(user_google_email: UserGoogleEmailCalendar) -> Calendar
         CalendarListResponse: Structured calendar list with metadata.
     """
     logger.info(f"[list_calendars] Invoked. Email: '{user_google_email}'")
+
+    # Check for None/empty email
+    if not user_google_email:
+        error_msg = "user_google_email is required but was not provided (received None or empty string)"
+        logger.error(f"[list_calendars] {error_msg}")
+        return CalendarListResponse(
+            calendars=[],
+            count=0,
+            userEmail=user_google_email or "",
+            error=error_msg
+        )
 
     try:
         calendar_service = await _get_calendar_service_with_fallback(user_google_email)
@@ -479,7 +490,7 @@ async def list_calendars(user_google_email: UserGoogleEmailCalendar) -> Calendar
         return CalendarListResponse(
             calendars=[],
             count=0,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=error_msg
         )
     except Exception as e:
@@ -489,7 +500,7 @@ async def list_calendars(user_google_email: UserGoogleEmailCalendar) -> Calendar
         return CalendarListResponse(
             calendars=[],
             count=0,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=error_msg
         )
 
@@ -518,7 +529,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_calendars_wrapper(
-        user_google_email: UserGoogleEmailCalendar
+        user_google_email: UserGoogleEmailCalendar=None
     ) -> CalendarListResponse:
         """Wrapper for the module-level list_calendars function."""
         return await list_calendars(user_google_email)
@@ -576,6 +587,23 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             CreateCalendarResponse: Structured response with created calendar details and status.
         """
         logger.info(f"[create_calendar] Creating calendar '{summary}' for {user_google_email}")
+
+        # Check for None/empty email
+        if not user_google_email:
+            error_msg = "user_google_email is required but was not provided (received None or empty string)"
+            logger.error(f"[create_calendar] {error_msg}")
+            return CreateCalendarResponse(
+                success=False,
+                calendarId=None,
+                summary=summary,
+                description=description,
+                timeZone=time_zone,
+                location=location,
+                htmlLink=None,
+                userEmail=user_google_email or "",
+                message=f"❌ {error_msg}",
+                error=error_msg
+            )
 
         try:
             calendar_service = await _get_calendar_service_with_fallback(user_google_email)
@@ -711,6 +739,20 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         logger.info(
             f"[list_events] Raw time parameters - time_min: '{time_min}', time_max: '{time_max}'"
         )
+
+        # Check for None/empty email
+        if not user_google_email:
+            error_msg = "user_google_email is required but was not provided (received None or empty string)"
+            logger.error(f"[list_events] {error_msg}")
+            return EventListResponse(
+                events=[],
+                count=0,
+                calendarId=calendar_id,
+                timeMin=None,
+                timeMax=None,
+                userEmail=user_google_email or "",
+                error=error_msg
+            )
 
         try:
             calendar_service = await _get_calendar_service_with_fallback(user_google_email)
@@ -979,6 +1021,23 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         Returns:
             Union[CreateEventResponse, BulkCreateEventResponse]: Single event response or bulk operation response.
         """
+        # Check for None/empty email
+        if not user_google_email:
+            error_msg = "user_google_email is required but was not provided (received None or empty string)"
+            logger.error(f"[create_event] {error_msg}")
+            return CreateEventResponse(
+                success=False,
+                eventId=None,
+                summary=None,
+                htmlLink=None,
+                start=None,
+                end=None,
+                calendarId=calendar_id,
+                userEmail=user_google_email or "",
+                message=f"❌ {error_msg}",
+                error=error_msg
+            )
+
         # Parse events if it's a JSON string
         if events is not None and isinstance(events, str):
             try:
@@ -1375,6 +1434,22 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             f"[modify_event] Invoked. Email: '{user_google_email}', Event ID: {event_id}"
         )
 
+        # Check for None/empty email
+        if not user_google_email:
+            error_msg = "user_google_email is required but was not provided (received None or empty string)"
+            logger.error(f"[modify_event] {error_msg}")
+            return ModifyEventResponse(
+                success=False,
+                eventId=event_id,
+                summary=summary,
+                htmlLink=None,
+                calendarId=calendar_id,
+                userEmail=user_google_email or "",
+                fieldsModified=[],
+                message=f"❌ {error_msg}",
+                error=error_msg
+            )
+
         try:
             calendar_service = await _get_calendar_service_with_fallback(user_google_email)
             
@@ -1616,6 +1691,21 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             f"[delete_event] Invoked. Email: '{user_google_email}', Event count: {len(event_ids)}"
         )
 
+        # Check for None/empty email
+        if not user_google_email:
+            error_msg = "user_google_email is required but was not provided (received None or empty string)"
+            logger.error(f"[delete_event] {error_msg}")
+            return DeleteEventResponse(
+                success=False,
+                eventsDeleted=[],
+                eventsFailed=[],
+                totalProcessed=0,
+                calendarId=calendar_id,
+                userEmail=user_google_email or "",
+                message=f"❌ {error_msg}",
+                error=error_msg
+            )
+
         try:
             calendar_service = await _get_calendar_service_with_fallback(user_google_email)
             
@@ -1836,6 +1926,31 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
         logger.info(
             f"[bulk_calendar_operations] Operation: {operation}, Dry run: {dry_run}"
         )
+
+        # Check for None/empty email
+        if not user_google_email:
+            error_msg = "user_google_email is required but was not provided (received None or empty string)"
+            logger.error(f"[bulk_calendar_operations] {error_msg}")
+            return BulkOperationsResponse(
+                success=False,
+                operation=operation,
+                calendarId=calendar_id,
+                userEmail=user_google_email or "",
+                totalFound=0,
+                totalMatched=0,
+                totalProcessed=0,
+                results=[],
+                filters={
+                    "timeMin": None,
+                    "timeMax": None,
+                    "titlePattern": title_pattern,
+                    "locationPattern": location_pattern,
+                    "attendeeEmail": attendee_email
+                },
+                dryRun=dry_run,
+                message=f"❌ {error_msg}",
+                error=error_msg
+            )
 
         try:
             calendar_service = await _get_calendar_service_with_fallback(user_google_email)
@@ -2059,6 +2174,23 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             f"[move_events_between_calendars] Moving from {source_calendar_id} to {target_calendar_id}"
         )
 
+        # Check for None/empty email
+        if not user_google_email:
+            error_msg = "user_google_email is required but was not provided (received None or empty string)"
+            logger.error(f"[move_events_between_calendars] {error_msg}")
+            return MoveEventsResponse(
+                success=False,
+                sourceCalendarId=source_calendar_id,
+                targetCalendarId=target_calendar_id,
+                userEmail=user_google_email or "",
+                totalFound=0,
+                totalCopied=0,
+                totalDeleted=0,
+                results=[],
+                message=f"❌ {error_msg}",
+                error=error_msg
+            )
+
         try:
             calendar_service = await _get_calendar_service_with_fallback(user_google_email)
             
@@ -2253,6 +2385,32 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             GetEventResponse: Structured response with event details and status.
         """
         logger.info(f"[get_event] Invoked. Email: '{user_google_email}', Event ID: {event_id}")
+        
+        # Check for None/empty email
+        if not user_google_email:
+            error_msg = "user_google_email is required but was not provided (received None or empty string)"
+            logger.error(f"[get_event] {error_msg}")
+            return GetEventResponse(
+                success=False,
+                eventId=event_id,
+                summary=None,
+                description=None,
+                start=None,
+                end=None,
+                startTimeZone=None,
+                endTimeZone=None,
+                location=None,
+                htmlLink=None,
+                status=None,
+                creator=None,
+                organizer=None,
+                attendees=None,
+                attachments=None,
+                calendarId=calendar_id,
+                userEmail=user_google_email or "",
+                message=f"❌ {error_msg}",
+                error=error_msg
+            )
         
         try:
             calendar_service = await _get_calendar_service_with_fallback(user_google_email)

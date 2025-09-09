@@ -29,46 +29,94 @@ from drive.drive_tools import search_drive_files
 from drive.drive_search_types import DriveSearchResponse
 from drive.drive_enums import MimeTypeFilter
 
+# Import centralized scope registry for dynamic service discovery
+from auth.scope_registry import ScopeRegistry
+
 logger = logging.getLogger(__name__)
 
-# Type definition for supported services (shows as dropdown in inspector)
-SupportedService = Literal["drive", "docs", "sheets", "slides", "forms"]
+# Dynamic type definition based on scope registry - builds supported services list
+def _get_supported_services() -> List[str]:
+    """Get list of supported services from scope registry."""
+    # Include drive-based services and photos (which has its own list tools)
+    drive_based_services = ["drive", "docs", "sheets", "slides", "forms"]
+    
+    # Add services from scope registry that have list tools
+    registry_services = list(ScopeRegistry.SERVICE_METADATA.keys())
+    
+    # For now, focus on drive-based services + photos
+    # Photos will need special handling since it's not drive-based
+    supported = drive_based_services + ["photos"]
+    
+    return supported
 
+# Dynamic supported service type
+SupportedService = Literal["drive", "docs", "sheets", "slides", "forms", "photos"]
 
-# Service metadata for recent resources - Now using MimeTypeFilter enum
-SERVICE_INFO = {
-    "drive": {
-        "name": "Google Drive",
-        "icon": "📁",
-        "description": "Recent files from Google Drive (all types)",
-        "mime_filter": None,  # No specific MIME filter for all files
-        "exclude_folders": True  # But we typically want to exclude folders
-    },
-    "docs": {
-        "name": "Google Docs",
-        "icon": "📄",
-        "description": "Recent Google Docs documents",
-        "mime_filter": MimeTypeFilter.GOOGLE_DOCS
-    },
-    "sheets": {
-        "name": "Google Sheets",
-        "icon": "📊",
-        "description": "Recent Google Sheets spreadsheets",
-        "mime_filter": MimeTypeFilter.GOOGLE_SHEETS
-    },
-    "slides": {
-        "name": "Google Slides",
-        "icon": "🎯",
-        "description": "Recent Google Slides presentations",
-        "mime_filter": MimeTypeFilter.GOOGLE_SLIDES
-    },
-    "forms": {
-        "name": "Google Forms",
-        "icon": "📝",
-        "description": "Recent Google Forms",
-        "mime_filter": MimeTypeFilter.GOOGLE_FORMS
+# Build service info dynamically from scope registry where possible
+def _build_service_info() -> Dict[str, Dict[str, Any]]:
+    """Build service info dynamically from scope registry and custom configs."""
+    service_info = {}
+    
+    # Drive-based services with their MIME filters
+    drive_services = {
+        "drive": {
+            "name": "Google Drive",
+            "icon": "📁",
+            "description": "Recent files from Google Drive (all types)",
+            "mime_filter": None,  # No specific MIME filter for all files
+            "exclude_folders": True  # But we typically want to exclude folders
+        },
+        "docs": {
+            "name": "Google Docs",
+            "icon": "📄",
+            "description": "Recent Google Docs documents",
+            "mime_filter": MimeTypeFilter.GOOGLE_DOCS
+        },
+        "sheets": {
+            "name": "Google Sheets",
+            "icon": "📊",
+            "description": "Recent Google Sheets spreadsheets",
+            "mime_filter": MimeTypeFilter.GOOGLE_SHEETS
+        },
+        "slides": {
+            "name": "Google Slides",
+            "icon": "🎯",
+            "description": "Recent Google Slides presentations",
+            "mime_filter": MimeTypeFilter.GOOGLE_SLIDES
+        },
+        "forms": {
+            "name": "Google Forms",
+            "icon": "📝",
+            "description": "Recent Google Forms",
+            "mime_filter": MimeTypeFilter.GOOGLE_FORMS
+        }
     }
-}
+    
+    # Get metadata from scope registry where available
+    for service_name, service_config in drive_services.items():
+        if service_name in ScopeRegistry.SERVICE_METADATA:
+            registry_meta = ScopeRegistry.SERVICE_METADATA[service_name]
+            service_config["name"] = registry_meta.name
+            service_config["icon"] = registry_meta.icon
+            service_config["description"] = registry_meta.description
+        
+        service_info[service_name] = service_config
+    
+    # Add photos service - not drive-based, has its own list tools
+    if "photos" in ScopeRegistry.SERVICE_METADATA:
+        photos_meta = ScopeRegistry.SERVICE_METADATA["photos"]
+        service_info["photos"] = {
+            "name": photos_meta.name,
+            "icon": photos_meta.icon,
+            "description": f"Recent items from {photos_meta.name} (via photos tools)",
+            "mime_filter": None,  # Photos uses its own APIs, not Drive
+            "is_photos_service": True  # Special flag for photos handling
+        }
+    
+    return service_info
+
+# Build service info dynamically
+SERVICE_INFO = _build_service_info()
 
 
 def _get_authenticated_user_email(ctx: Context) -> Optional[str]:
@@ -94,14 +142,14 @@ def _generate_date_query(days_back: int = 30) -> str:
 
 async def _get_recent_items(service: str, user_email: str, days_back: int = 30, page_size: int = 20) -> Dict[str, Any]:
     """
-    Unified function to get recent items for any Drive-based service.
+    Unified function to get recent items for any service (Drive-based or Photos).
     
-    This function calls the search_drive_files tool directly and processes its structured response.
+    This function calls the appropriate tools directly and processes their structured responses.
     Note: Resources call tools as regular async functions - forward() is only used when creating
     transformed tools, not when resources need to use existing tools.
     
     Args:
-        service: Service name (drive, docs, sheets, slides, forms)
+        service: Service name (drive, docs, sheets, slides, forms, photos)
         user_email: Authenticated user email
         days_back: Number of days back to search (default: 30)
         page_size: Number of items to return (default: 20)
@@ -116,9 +164,13 @@ async def _get_recent_items(service: str, user_email: str, days_back: int = 30, 
         }
     
     service_info = SERVICE_INFO[service]
-    date_str = _generate_date_query(days_back)
     
-    # Build the date filter query
+    # Special handling for photos service (not Drive-based)
+    if service_info.get("is_photos_service"):
+        return await _get_recent_photos_items(service, service_info, user_email, page_size)
+    
+    # Drive-based services handling
+    date_str = _generate_date_query(days_back)
     date_query = f"modifiedTime > '{date_str}'"
     
     # Get the MIME type filter for the service
@@ -131,12 +183,6 @@ async def _get_recent_items(service: str, user_email: str, days_back: int = 30, 
     logger.info(f"📊 Searching {service} with MIME filter: {mime_filter}, date query: {date_query}")
     
     try:
-        # IMPORTANT: Resources call tools directly as async functions
-        # We're not using forward() here because:
-        # 1. forward() is only for creating transformed tools (Tool.from_tool)
-        # 2. Resources aren't tools - they're data providers that USE tools
-        # 3. This is the correct pattern: resources import and call tool functions directly
-        
         # Call the search_drive_files tool with the new enum-based approach
         # Using both mime_type parameter for type filtering and query for date filtering
         result: DriveSearchResponse = await search_drive_files(
@@ -214,6 +260,89 @@ async def _get_recent_items(service: str, user_email: str, days_back: int = 30, 
         }
 
 
+async def _get_recent_photos_items(service: str, service_info: Dict[str, Any], user_email: str, page_size: int = 20) -> Dict[str, Any]:
+    """
+    Get recent photos items using photos-specific tools.
+    
+    Args:
+        service: Service name ("photos")
+        service_info: Service metadata dict
+        user_email: Authenticated user email
+        page_size: Number of items to return
+        
+    Returns:
+        Dictionary with recent photos items and metadata
+    """
+    try:
+        # Import photos tools dynamically to avoid circular imports
+        from photos.photos_tools import list_photos_albums
+        
+        logger.info(f"📷 Getting recent {service} albums via list_photos_albums")
+        
+        # Call the list_photos_albums tool
+        albums_result = await list_photos_albums(
+            user_google_email=user_email,
+            max_results=min(page_size, 50)  # Photos API max is 50
+        )
+        
+        # Handle the structured response
+        if hasattr(albums_result, 'error') and albums_result.error:
+            return {
+                "error": albums_result.error,
+                "service": service,
+                "tool_used": "list_photos_albums",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Extract albums from the structured response
+        albums = getattr(albums_result, 'albums', []) if hasattr(albums_result, 'albums') else []
+        
+        # Convert albums to enhanced format similar to files
+        enhanced_items = []
+        for album in albums:
+            if isinstance(album, dict):
+                enhanced_item = {
+                    "id": album.get("id"),
+                    "name": album.get("title", "Untitled Album"),
+                    "type": "album",
+                    "itemCount": album.get("mediaItemsCount", 0),
+                    "webViewLink": album.get("productUrl"),
+                    "coverPhotoUrl": album.get("coverPhotoBaseUrl"),
+                    "service": service,
+                    "service_name": service_info["name"],
+                    "service_icon": service_info["icon"],
+                    "retrieved_at": datetime.now().isoformat()
+                }
+                enhanced_items.append(enhanced_item)
+        
+        return {
+            "service": service,
+            "service_name": service_info["name"],
+            "service_icon": service_info["icon"],
+            "description": service_info["description"],
+            "tool_used": "list_photos_albums",
+            "query_type": "photos_api",
+            "total_count": len(enhanced_items),
+            "files": enhanced_items,  # Keep same key name for consistency
+            "metadata": {
+                "user_email": user_email,
+                "type_filter": service,
+                "search_scope": "photos_library",
+                "item_type": "albums"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting recent {service} items: {e}")
+        return {
+            "error": f"Failed to retrieve recent {service} items: {str(e)}",
+            "service": service,
+            "tool_used": "list_photos_albums",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
 def setup_service_recent_resources(mcp: FastMCP) -> None:
     """
     Setup service recent resources for all Drive-based services.
@@ -227,7 +356,7 @@ def setup_service_recent_resources(mcp: FastMCP) -> None:
     @mcp.resource(
         uri="recent://{service}",
         name="Recent Service Items",
-        description=f"""Get recent items from Google Drive-based services.
+        description=f"""Get recent items from Google Workspace services.
 
 Supported services:
   • drive (📁): All recent Drive files
@@ -235,15 +364,17 @@ Supported services:
   • sheets (📊): Recent Google Sheets spreadsheets
   • slides (🎯): Recent Google Slides presentations
   • forms (📝): Recent Google Forms
+  • photos (📷): Recent Google Photos albums
 
-Uses Google Drive search with service-specific MIME type filters.
+Drive-based services use Google Drive search with MIME type filters.
+Photos service uses Google Photos API to list recent albums.
 Returns items modified within the last 30 days by default.""",
         mime_type="application/json",
-        tags={"service", "recent", "drive", "dynamic", "unified"}
+        tags={"service", "recent", "drive", "photos", "dynamic", "unified"}
     )
     async def get_service_recent_items(
         ctx: Context,
-        service: Annotated[SupportedService, Field(description="Service name: drive, docs, sheets, slides, or forms")]
+        service: Annotated[SupportedService, Field(description="Service name: drive, docs, sheets, slides, forms, or photos")]
     ) -> Dict[str, Any]:
         """Get recent items for a specific Drive-based service."""
         
@@ -252,7 +383,7 @@ Returns items modified within the last 30 days by default.""",
             return {
                 "error": f"Unsupported service: {service}",
                 "supported_services": list(SERVICE_INFO.keys()),
-                "suggestion": "Use one of: drive, docs, sheets, slides, forms",
+                "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
                 "timestamp": datetime.now().isoformat()
             }
         
@@ -267,17 +398,18 @@ Returns items modified within the last 30 days by default.""",
     @mcp.resource(
         uri="recent://{service}/{days}",
         name="Recent Service Items (Custom Days)",
-        description=f"""Get recent items from Google Drive-based services with custom day range.
+        description=f"""Get recent items from Google Workspace services with custom day range.
 
-Supported services: drive, docs, sheets, slides, forms
+Supported services: drive, docs, sheets, slides, forms, photos
 
-Specify number of days back to search (1-90 days).""",
+Specify number of days back to search (1-90 days).
+Note: Photos service returns albums (day range affects Drive services only).""",
         mime_type="application/json",
-        tags={"service", "recent", "drive", "dynamic", "custom-range"}
+        tags={"service", "recent", "drive", "photos", "dynamic", "custom-range"}
     )
     async def get_service_recent_items_custom_days(
         ctx: Context,
-        service: Annotated[SupportedService, Field(description="Service name: drive, docs, sheets, slides, or forms")],
+        service: Annotated[SupportedService, Field(description="Service name: drive, docs, sheets, slides, forms, or photos")],
         days: Annotated[int, Field(description="Number of days back to search (1-90)", ge=1, le=90)]
     ) -> Dict[str, Any]:
         """Get recent items for a specific service with custom day range."""
@@ -287,7 +419,7 @@ Specify number of days back to search (1-90 days).""",
             return {
                 "error": f"Unsupported service: {service}",
                 "supported_services": list(SERVICE_INFO.keys()),
-                "suggestion": "Use one of: drive, docs, sheets, slides, forms",
+                "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
                 "timestamp": datetime.now().isoformat()
             }
         
@@ -302,7 +434,7 @@ Specify number of days back to search (1-90 days).""",
     @mcp.resource(
         uri="recent://all",
         name="All Recent Workspace Items",
-        description="Get recent items from all Google Workspace services (Drive, Docs, Sheets, Slides, Forms) in a unified view.",
+        description="Get recent items from all Google Workspace services (Drive, Docs, Sheets, Slides, Forms, Photos) in a unified view.",
         mime_type="application/json",
         tags={"service", "recent", "all", "workspace", "unified"}
     )

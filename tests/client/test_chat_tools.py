@@ -32,7 +32,33 @@ if TEST_CHAT_WEBHOOK:
 
 @pytest.mark.service("chat")
 class TestChatTools:
-    """Test Google Chat tools using the FastMCP Client."""
+    """Test Chat tools using standardized framework.
+
+🔧 MCP Tools Used:
+- send_message: Send basic text messages to Chat spaces
+- send_interactive_card: Send cards with buttons and actions
+- send_form_card: Send forms within Chat for data collection
+- send_dynamic_card: Send AI-generated cards from natural language
+- send_rich_card: Send advanced formatted cards with images/sections
+- list_messages: Retrieve messages from Chat spaces
+- search_messages: Search message content across spaces
+
+🧪 What's Being Tested:
+- Basic messaging functionality
+- Rich card framework with interactive components
+- Form integration within Chat interfaces
+- AI-powered card generation from descriptions
+- Message retrieval and search capabilities
+- Webhook integration for Chat apps
+- Space and thread management
+- Authentication patterns for all Chat operations
+
+🔍 Potential Duplications:
+- Form functionality overlaps with Google Forms tools
+- Rich content handling might have patterns similar to Slides/Docs content
+- Search functionality might overlap with other Google Workspace search operations
+- File sharing in Chat might overlap with Drive sharing functionality
+"""
     
     @pytest.mark.asyncio
     async def test_chat_tools_available(self, client):

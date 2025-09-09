@@ -1,6 +1,9 @@
 """Authentication middleware for session management and service injection."""
 
 import logging
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import json
 import base64
 import secrets

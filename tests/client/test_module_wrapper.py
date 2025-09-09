@@ -1,5 +1,29 @@
 """Test suite for ModuleWrapper tools using FastMCP Client SDK."""
 
+"""Test module wrapper functionality for Python module introspection.
+
+🔧 MCP Tools Used:
+- wrap_module: Wrap Python modules for MCP integration
+- list_module_components: List components within wrapped modules
+- Module introspection tools: Analyze module structure and components
+- Semantic indexing: Index module components for search
+
+🧪 What's Being Tested:
+- Python module wrapping and integration with MCP
+- Module component discovery and enumeration
+- Semantic indexing of module components
+- Module documentation and metadata extraction
+- Dynamic module loading and unloading
+- Module version compatibility and validation
+- Performance of module introspection operations
+
+🔍 Potential Duplications:
+- Module analysis might overlap with other code analysis tools
+- Semantic indexing might overlap with Qdrant integration tests
+- Documentation extraction might be similar to other metadata extraction
+- Dynamic loading patterns might overlap with other dynamic functionality
+"""  
+
 import pytest
 import asyncio
 from typing import Any, Dict, List
