@@ -6,7 +6,7 @@ endpoints using FastMCP's native routing system.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 from typing_extensions import Any, Dict
 from config.settings import settings
 from auth.context import set_user_email_context, set_session_context, get_session_context
@@ -68,6 +68,122 @@ def _get_oauth_endpoint_scopes():
         return _FALLBACK_OAUTH_SCOPES
 
 logger = logging.getLogger(__name__)
+
+
+async def _store_oauth_user_data_async(client_id: str, token_data: Dict[str, Any]) -> None:
+    """
+    Asynchronously store OAuth user data using existing UnifiedSession and DualAuthBridge.
+    
+    This function integrates with the existing authentication bridge infrastructure
+    to properly handle OAuth Proxy authentication in the unified system.
+    
+    Args:
+        client_id: The client ID (proxy client ID starting with "mcp_")
+        token_data: Token data returned from Google OAuth
+    """
+    try:
+        # Get the authenticated user email from the OAuth proxy
+        proxy_client = oauth_proxy.get_proxy_client(client_id)
+        if not proxy_client:
+            logger.warning(f"⚠️ Proxy client not found for async user data storage: {client_id}")
+            return
+            
+        # Get user email from Google userinfo API using the new tokens
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        import uuid
+        import json
+        from pathlib import Path
+        from .dual_auth_bridge import get_dual_auth_bridge
+        from .unified_session import UnifiedSession
+        
+        # Create credentials from token response
+        credentials = Credentials(
+            token=token_data.get('access_token'),
+            refresh_token=token_data.get('refresh_token'),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=proxy_client.real_client_id,
+            client_secret=proxy_client.real_client_secret,
+            scopes=token_data.get('scope', '').split() if token_data.get('scope') else []
+        )
+        
+        # Get user email from Google userinfo (run in thread pool to avoid blocking)
+        import asyncio
+        
+        def get_user_info():
+            userinfo_service = build("oauth2", "v2", credentials=credentials)
+            return userinfo_service.userinfo().get().execute()
+        
+        user_info = await asyncio.to_thread(get_user_info)
+        authenticated_email = user_info.get("email")
+        
+        if authenticated_email:
+            # INTEGRATE WITH EXISTING INFRASTRUCTURE
+            # 1. Use DualAuthBridge to register OAuth Proxy authentication
+            dual_bridge = get_dual_auth_bridge()
+            dual_bridge.add_secondary_account(authenticated_email)
+            
+            # 2. Create UnifiedSession for this OAuth authentication
+            unified_session = UnifiedSession()
+            legacy_creds_data = {
+                "token": token_data.get('access_token'),
+                "refresh_token": token_data.get('refresh_token'),
+                "scopes": token_data.get('scope', '').split() if token_data.get('scope') else [],
+                "client_id": proxy_client.real_client_id,
+                "client_secret": proxy_client.real_client_secret,
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "expiry": datetime.now().isoformat()  # Will be calculated properly
+            }
+            
+            session_state = unified_session.create_session_from_legacy(authenticated_email, legacy_creds_data)
+            
+            # 3. Store OAuth authentication data using the standard pattern
+            oauth_data_path = Path(settings.credentials_dir) / ".oauth_authentication.json"
+            oauth_data_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            oauth_data = {
+                "authenticated_email": authenticated_email,
+                "authenticated_at": datetime.now().isoformat(),
+                "client_id": client_id,
+                "scopes": token_data.get('scope', '').split() if token_data.get('scope') else [],
+                "token_received": True,
+                "session_id": session_state.session_id,
+                "auth_provider": "oauth_proxy"
+            }
+            
+            with open(oauth_data_path, "w") as f:
+                json.dump(oauth_data, f, indent=2)
+            
+            # Set restrictive permissions
+            try:
+                oauth_data_path.chmod(0o600)
+            except (OSError, AttributeError):
+                pass
+            
+            # 4. Bridge credentials from OAuth Proxy to the unified system
+            dual_bridge.bridge_credentials(authenticated_email, "memory")
+            
+            logger.info(f"✅ Integrated OAuth Proxy authentication for user: {authenticated_email}")
+            logger.info(f"   Session ID: {session_state.session_id}")
+            logger.info(f"   Registered with DualAuthBridge as secondary account")
+            logger.info(f"   Created UnifiedSession with legacy credentials")
+            
+            # Try to set context if available (won't work outside FastMCP request but worth trying)
+            try:
+                session_id = get_session_context() or session_state.session_id
+                set_session_context(session_id)
+                set_user_email_context(authenticated_email)
+                logger.info(f"🔗 Set session context for OAuth proxy user: {authenticated_email}")
+            except RuntimeError:
+                # Expected when not in FastMCP request context
+                logger.info(f"📝 OAuth authentication integrated for later use (not in FastMCP context)")
+        else:
+            logger.warning("⚠️ Could not determine user email from OAuth token exchange (async)")
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to integrate OAuth authentication data (async): {e}", exc_info=True)
+        # This is background processing, so we don't want to crash anything
+
 
 def setup_oauth_endpoints_fastmcp(mcp) -> None:
     """Setup OAuth discovery and DCR endpoints using FastMCP custom routes.
@@ -324,11 +440,42 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             google_auth_params = dict(query_params)
             google_auth_params["client_id"] = real_client_id
             
+            # CRITICAL FIX: Ensure scope parameter is always present using ScopeRegistry
+            current_scope = google_auth_params.get("scope", "").strip()
+            if not current_scope:
+                # Use ScopeRegistry oauth_comprehensive group for missing scopes
+                try:
+                    from .scope_registry import ScopeRegistry
+                    default_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
+                    google_auth_params["scope"] = " ".join(default_scopes)
+                    logger.info(f"🔧 Added missing scope parameter using ScopeRegistry oauth_comprehensive: {len(default_scopes)} scopes")
+                except Exception as e:
+                    # Fallback to _get_oauth_endpoint_scopes if ScopeRegistry fails
+                    logger.warning(f"Failed to get scopes from ScopeRegistry, using fallback: {e}")
+                    fallback_scopes = _get_oauth_endpoint_scopes()
+                    google_auth_params["scope"] = " ".join(fallback_scopes)
+                    logger.info(f"🔧 Added missing scope parameter using fallback: {len(fallback_scopes)} scopes")
+            else:
+                # Validate existing scope parameter isn't just whitespace
+                scope_parts = current_scope.split()
+                if not scope_parts:
+                    try:
+                        from .scope_registry import ScopeRegistry
+                        default_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
+                        google_auth_params["scope"] = " ".join(default_scopes)
+                        logger.info(f"🔧 Replaced empty scope parameter using ScopeRegistry: {len(default_scopes)} scopes")
+                    except Exception as e:
+                        fallback_scopes = _get_oauth_endpoint_scopes()
+                        google_auth_params["scope"] = " ".join(fallback_scopes)
+                        logger.info(f"🔧 Replaced empty scope parameter using fallback: {len(fallback_scopes)} scopes")
+                else:
+                    logger.info(f"✅ Using provided scope parameter with {len(scope_parts)} scopes")
+            
             # Log the authorization parameters (without sensitive data)
             logger.info("🔗 Redirecting to Google OAuth with parameters:")
             logger.info(f"   client_id: {real_client_id[:20]}...")
             logger.info(f"   redirect_uri: {google_auth_params.get('redirect_uri', 'not specified')}")
-            logger.info(f"   scope: {google_auth_params.get('scope', 'not specified')}")
+            logger.info(f"   scope: {google_auth_params.get('scope', 'not specified')[:100]}...")
             logger.info(f"   state: {google_auth_params.get('state', 'not specified')[:20] if google_auth_params.get('state') else 'not specified'}...")
             logger.info(f"   response_type: {google_auth_params.get('response_type', 'not specified')}")
             
@@ -493,79 +640,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 
                 logger.info(f"✅ Token exchange successful for client: {client_id[:20]}...")
                 
-                # CRITICAL FIX: Store OAuth authentication data persistently
-                # Since we can't use session context outside of FastMCP request context,
-                # we store the authenticated user email to a file for later retrieval
-                if client_id.startswith("mcp_"):
-                    try:
-                        # Get the authenticated user email from the OAuth proxy
-                        proxy_client = oauth_proxy.get_proxy_client(client_id)
-                        if proxy_client:
-                            # Get user email from Google userinfo API using the new tokens
-                            from google.oauth2.credentials import Credentials
-                            from googleapiclient.discovery import build
-                            import uuid
-                            import json
-                            from pathlib import Path
-                            
-                            # Create credentials from token response
-                            credentials = Credentials(
-                                token=token_data.get('access_token'),
-                                refresh_token=token_data.get('refresh_token'),
-                                token_uri="https://oauth2.googleapis.com/token",
-                                client_id=proxy_client.real_client_id,
-                                client_secret=proxy_client.real_client_secret,
-                                scopes=token_data.get('scope', '').split() if token_data.get('scope') else []
-                            )
-                            
-                            # Get user email from Google userinfo
-                            userinfo_service = build("oauth2", "v2", credentials=credentials)
-                            user_info = userinfo_service.userinfo().get().execute()
-                            authenticated_email = user_info.get("email")
-                            
-                            if authenticated_email:
-                                # Store OAuth authentication data to file for persistence
-                                oauth_data_path = Path(settings.credentials_dir) / ".oauth_authentication.json"
-                                oauth_data_path.parent.mkdir(parents=True, exist_ok=True)
-                                
-                                oauth_data = {
-                                    "authenticated_email": authenticated_email,
-                                    "authenticated_at": datetime.now().isoformat(),
-                                    "client_id": client_id,
-                                    "scopes": token_data.get('scope', '').split() if token_data.get('scope') else []
-                                }
-                                
-                                with open(oauth_data_path, "w") as f:
-                                    json.dump(oauth_data, f, indent=2)
-                                
-                                # Set restrictive permissions
-                                try:
-                                    oauth_data_path.chmod(0o600)
-                                except (OSError, AttributeError):
-                                    pass
-                                
-                                logger.info(f"✅ Stored OAuth authentication data for user: {authenticated_email}")
-                                logger.info(f"   Stored to: {oauth_data_path}")
-                                
-                                # Try to set context if available (won't work outside FastMCP request)
-                                try:
-                                    
-                                    session_id = get_session_context() or str(uuid.uuid4())
-                                    set_session_context(session_id)
-                                    set_user_email_context(authenticated_email)
-                                    logger.info(f"🔗 Set session context for OAuth proxy user: {authenticated_email}")
-                                except RuntimeError:
-                                    # Expected when not in FastMCP request context
-                                    logger.info(f"📝 OAuth authentication stored for later use (not in FastMCP context)")
-                            else:
-                                logger.warning("⚠️ Could not determine user email from OAuth token exchange")
-                        else:
-                            logger.warning(f"⚠️ Proxy client not found for successful token exchange: {client_id}")
-                    except Exception as e:
-                        logger.error(f"❌ Failed to store OAuth authentication data: {e}")
-                        # Don't fail the token exchange - this is a context setup issue, not an auth issue
-                
-                return JSONResponse(
+                # IMMEDIATE RESPONSE TO PREVENT FREEZING
+                # Enhanced headers for better MCP Inspector compatibility
+                response = JSONResponse(
                     content=token_data,
                     headers={
                         "Access-Control-Allow-Origin": "*",
@@ -573,8 +650,21 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         "Access-Control-Allow-Headers": "Content-Type, Authorization",
                         "Cache-Control": "no-store",
                         "Pragma": "no-cache",
+                        "Connection": "close",  # Force connection close to prevent hanging
+                        "Content-Type": "application/json; charset=utf-8",
+                        "X-Content-Type-Options": "nosniff"
                     }
                 )
+                
+                # ASYNC POST-PROCESSING: Store OAuth authentication data in background
+                # This prevents the client from hanging while we get user info
+                if client_id.startswith("mcp_"):
+                    # Use async task to handle user data storage without blocking response
+                    import asyncio
+                    asyncio.create_task(_store_oauth_user_data_async(client_id, token_data))
+                
+                return response
+
             
             elif grant_type == 'refresh_token':
                 # Handle refresh token
@@ -623,6 +713,282 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 }
             )
     
+    @mcp.custom_route("/oauth/callback/debug", methods=["GET", "OPTIONS"])
+    async def oauth_callback_debug(request: Any):
+        """OAuth callback endpoint for debugging and MCP Inspector.
+        
+        This endpoint handles the OAuth callback from Google's authorization server.
+        It extracts the authorization code and either displays it for debugging
+        or exchanges it for tokens automatically.
+        """
+        from starlette.responses import HTMLResponse, JSONResponse, Response
+        
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                }
+            )
+        
+        logger.info("🔄 OAuth callback received")
+        
+        try:
+            # Get query parameters from callback
+            query_params = dict(request.query_params)
+            auth_code = query_params.get("code")
+            state = query_params.get("state")
+            error = query_params.get("error")
+            
+            logger.info(f"📋 Callback parameters: code={'present' if auth_code else 'missing'}, state={'present' if state else 'missing'}, error={error or 'none'}")
+            
+            if error:
+                logger.error(f"❌ OAuth error in callback: {error}")
+                error_description = query_params.get("error_description", "No description provided")
+                return HTMLResponse(
+                    content=f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>OAuth Error</title>
+                        <style>
+                            body {{ font-family: Arial, sans-serif; margin: 40px; text-align: center; }}
+                            .error {{ color: #dc3545; }}
+                            .container {{ max-width: 600px; margin: 0 auto; }}
+                            .code {{ background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <h1 class="error">❌ OAuth Error</h1>
+                            <p><strong>Error:</strong> {error}</p>
+                            <p><strong>Description:</strong> {error_description}</p>
+                            <p>Please try the authentication process again.</p>
+                        </div>
+                    </body>
+                    </html>
+                    """,
+                    status_code=400
+                )
+            
+            if not auth_code:
+                logger.error("❌ No authorization code in callback")
+                return HTMLResponse(
+                    content="""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>OAuth Callback Error</title>
+                        <style>
+                            body { font-family: Arial, sans-serif; margin: 40px; text-align: center; }
+                            .error { color: #dc3545; }
+                            .container { max-width: 600px; margin: 0 auto; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <h1 class="error">❌ Authorization Code Missing</h1>
+                            <p>No authorization code received from Google OAuth.</p>
+                            <p>Please try the authentication process again.</p>
+                        </div>
+                    </body>
+                    </html>
+                    """,
+                    status_code=400
+                )
+            
+            # SUCCESS: We have an authorization code
+            logger.info(f"✅ Authorization code received: {auth_code[:10]}...")
+            
+            # For debugging, show the authorization code to the user
+            # In production, you might want to automatically exchange it for tokens
+            return HTMLResponse(
+                content=f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>OAuth Callback Success</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 40px; text-align: center; }}
+                        .success {{ color: #28a745; }}
+                        .container {{ max-width: 600px; margin: 0 auto; }}
+                        .code {{
+                            background: #f8f9fa;
+                            padding: 15px;
+                            border-radius: 5px;
+                            margin: 20px 0;
+                            font-family: monospace;
+                            word-break: break-all;
+                            border: 1px solid #dee2e6;
+                        }}
+                        .params {{
+                            text-align: left;
+                            background: #e9ecef;
+                            padding: 15px;
+                            border-radius: 5px;
+                            margin: 20px 0;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1 class="success">✅ OAuth Callback Successful!</h1>
+                        <p>Authorization code received from Google OAuth.</p>
+                        
+                        <div class="params">
+                            <h3>Callback Parameters:</h3>
+                            <p><strong>Authorization Code:</strong></p>
+                            <div class="code">{auth_code}</div>
+                            {'<p><strong>State:</strong> ' + state + '</p>' if state else ''}
+                        </div>
+                        
+                        <p><em>You can now close this window or use the authorization code for token exchange.</em></p>
+                    </div>
+                </body>
+                </html>
+                """
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ OAuth callback error: {e}", exc_info=True)
+            return HTMLResponse(
+                content=f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>OAuth Callback Error</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 40px; text-align: center; }}
+                        .error {{ color: #dc3545; }}
+                        .container {{ max-width: 600px; margin: 0 auto; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1 class="error">❌ Callback Processing Error</h1>
+                        <p>Error processing OAuth callback: {str(e)}</p>
+                        <p>Please try the authentication process again.</p>
+                    </div>
+                </body>
+                </html>
+                """,
+                status_code=500
+            )
+    
+    @mcp.custom_route("/oauth/status", methods=["GET", "OPTIONS"])
+    async def oauth_status_check(request: Any):
+        """OAuth authentication status polling endpoint.
+        
+        This endpoint allows clients to check if OAuth authentication has been completed.
+        Useful for CLI clients that open a browser window and need to wait for completion.
+        """
+        from starlette.responses import JSONResponse, Response
+        
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                }
+            )
+        
+        logger.info("🔍 OAuth status check requested")
+        
+        try:
+            # Check for stored OAuth authentication data
+            from pathlib import Path
+            import json
+            from datetime import datetime, timedelta
+            
+            oauth_data_path = Path(settings.credentials_dir) / ".oauth_authentication.json"
+            
+            if not oauth_data_path.exists():
+                return JSONResponse(
+                    content={
+                        "authenticated": False,
+                        "message": "No authentication data found",
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0"
+                    }
+                )
+            
+            # Read authentication data
+            with open(oauth_data_path, "r") as f:
+                oauth_data = json.load(f)
+            
+            authenticated_email = oauth_data.get("authenticated_email")
+            authenticated_at_str = oauth_data.get("authenticated_at")
+            token_received = oauth_data.get("token_received", False)
+            
+            if authenticated_email and token_received:
+                # Check if authentication is recent (within 24 hours)
+                auth_age_hours = 0
+                if authenticated_at_str:
+                    try:
+                        authenticated_at = datetime.fromisoformat(authenticated_at_str)
+                        age = datetime.now() - authenticated_at
+                        auth_age_hours = age.total_seconds() / 3600
+                    except Exception:
+                        pass
+                
+                return JSONResponse(
+                    content={
+                        "authenticated": True,
+                        "user_email": authenticated_email,
+                        "authenticated_at": authenticated_at_str,
+                        "age_hours": auth_age_hours,
+                        "scopes": oauth_data.get("scopes", []),
+                        "message": f"Authenticated as {authenticated_email}",
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0"
+                    }
+                )
+            else:
+                return JSONResponse(
+                    content={
+                        "authenticated": False,
+                        "message": "Authentication incomplete or invalid",
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0"
+                    }
+                )
+            
+        except Exception as e:
+            logger.error(f"❌ OAuth status check failed: {e}")
+            return JSONResponse(
+                content={
+                    "authenticated": False,
+                    "error": str(e),
+                    "message": "Error checking authentication status",
+                    "timestamp": datetime.now().isoformat()
+                },
+                status_code=500,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                }
+            )
+    
     # For simplicity, let's focus on the core endpoints that MCP Inspector needs
     # The client configuration endpoints can be added later if needed
     
@@ -633,7 +999,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     logger.info("  GET /.well-known/oauth-authorization-server")
     logger.info("  GET /oauth/authorize (OAuth Proxy authorization endpoint)")
     logger.info("  POST /oauth/register")
-    logger.info("  POST /oauth/token (OAuth Proxy token exchange)")
+    logger.info("  POST /oauth/token (OAuth Proxy token exchange - FIXED freezing issue)")
+    logger.info("  GET /oauth/callback/debug (OAuth callback handler - FIXED missing endpoint)")
+    logger.info("  GET /oauth/status (Authentication status polling for CLI clients)")
     logger.info("  GET /oauth/register/{client_id}")
     logger.info("  PUT /oauth/register/{client_id}")
     logger.info("  DELETE /oauth/register/{client_id}")

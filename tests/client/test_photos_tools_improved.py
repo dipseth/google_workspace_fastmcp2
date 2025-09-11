@@ -33,7 +33,9 @@ load_dotenv()
 PHOTO_TEST_EMAIL = os.getenv("PHOTO_TEST_EMAIL_ADDRESS", TEST_EMAIL)
 
 # Test photo path pattern from environment variable
-PHOTO_TEST_PATH_PATTERN = os.getenv("PHOTO_TEST_PATH_PATTERN", "/Users/srivers/Pictures/*.png")
+# Allow $USER or ~ in the path; expand env vars and user home
+PHOTO_TEST_PATH_PATTERN = os.getenv("PHOTO_TEST_PATH_PATTERN", "/Users/$USER/Pictures/*.png")
+PHOTO_TEST_PATH_PATTERN = os.path.expandvars(os.path.expanduser(PHOTO_TEST_PATH_PATTERN))
 
 
 def print_tool_result(tool_name: str, result: Any, extra_info: Optional[Dict] = None):
@@ -78,10 +80,10 @@ def find_test_images():
     if not test_images:
         # Try specific known paths as fallback
         fallback_paths = [
-            "/Users/srivers/Pictures/poor_air_quality.png",
-            "/Users/srivers/Pictures/*.png",
-            "/Users/srivers/Pictures/*.jpg",
-            "/Users/srivers/Pictures/*.jpeg",
+            "/Users/$USER/Pictures/poor_air_quality.png",
+            "/Users/$USER/Pictures/*.png",
+            "/Users/$USER/Pictures/*.jpg",
+            "/Users/$USER/Pictures/*.jpeg",
             os.path.expanduser("~/Pictures/*.png"),
             os.path.expanduser("~/Pictures/*.jpg"),
         ]

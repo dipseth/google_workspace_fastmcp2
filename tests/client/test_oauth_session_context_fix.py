@@ -50,14 +50,7 @@ TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_user@example.com")
 class TestOAuthSessionContext:
     """Test OAuth session context and user email handling using the FastMCP Client."""
     
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        # Get JWT token for authentication if enabled
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        async with client:
-            yield client
+    # Use standardized client fixture from conftest.py
     
     @pytest.fixture
     async def oauth_client(self):

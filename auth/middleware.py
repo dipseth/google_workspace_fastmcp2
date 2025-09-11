@@ -8,7 +8,7 @@ import json
 import base64
 import secrets
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing_extensions import Any, Optional, Dict
 from enum import Enum
@@ -912,23 +912,82 @@ class AuthMiddleware(Middleware):
         """
         try:
             logger.info(f"🔧 DEBUG: _auto_inject_email_parameter called with user_email: {user_email}")
+            logger.info(f"🔧 DEBUG: Context type: {type(context)}")
+            logger.info(f"🔧 DEBUG: Message type: {type(getattr(context, 'message', None))}")
             
-            # Check if this is a tool call and has arguments
-            if hasattr(context.message, 'arguments') and context.message.arguments:
-                arguments = context.message.arguments
-                logger.info(f"🔧 DEBUG: Found tool arguments: {arguments}")
+            # Comprehensive debugging of the context structure
+            if hasattr(context, 'message'):
+                message = context.message
+                logger.info(f"🔧 DEBUG: Message attributes: {[attr for attr in dir(message) if not attr.startswith('_')]}")
                 
-                # Auto-inject user_google_email if not provided or is None
-                if 'user_google_email' not in arguments or arguments.get('user_google_email') is None:
-                    arguments['user_google_email'] = user_email
-                    logger.info(f"🔧 DEBUG: ✅ Auto-injected user_google_email={user_email} into tool call (was {arguments.get('user_google_email', 'not present')})")
+                # Check for arguments in various possible locations
+                arguments = None
+                arguments_source = None
+                
+                # Method 1: Direct arguments access
+                if hasattr(message, 'arguments') and message.arguments is not None:
+                    arguments = message.arguments
+                    arguments_source = "message.arguments"
+                    logger.info(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments} (type: {type(arguments)})")
+                
+                # Method 2: Check for params attribute
+                elif hasattr(message, 'params') and message.params is not None:
+                    arguments = message.params
+                    arguments_source = "message.params"
+                    logger.info(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments} (type: {type(arguments)})")
+                
+                # Method 3: Check content attribute
+                elif hasattr(message, 'content'):
+                    content = message.content
+                    logger.info(f"🔧 DEBUG: Found message.content: {content} (type: {type(content)})")
+                    if hasattr(content, 'arguments'):
+                        arguments = content.arguments
+                        arguments_source = "message.content.arguments"
+                        logger.info(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments}")
+                
+                # Log what we found for each possible attribute
+                for attr in ['arguments', 'params', 'args', 'data', 'payload', 'body', 'input']:
+                    if hasattr(message, attr):
+                        value = getattr(message, attr)
+                        logger.info(f"🔧 DEBUG: message.{attr} = {value} (type: {type(value)})")
+                
+                # Try to inject if we found arguments
+                if arguments is not None:
+                    logger.info(f"🔧 DEBUG: Working with {arguments_source}: {arguments}")
+                    
+                    # Handle different argument types
+                    if isinstance(arguments, dict):
+                        # Auto-inject user_google_email if not provided or is None
+                        current_value = arguments.get('user_google_email')
+                        logger.info(f"🔧 DEBUG: Current user_google_email value: {current_value}")
+                        
+                        if 'user_google_email' not in arguments or current_value is None:
+                            try:
+                                arguments['user_google_email'] = user_email
+                                logger.info(f"🔧 DEBUG: ✅ Auto-injected user_google_email={user_email} into {arguments_source}")
+                                
+                                # Also try to update the original location if different
+                                if arguments_source == "message.arguments":
+                                    message.arguments = arguments
+                                elif arguments_source == "message.params":
+                                    message.params = arguments
+                                elif arguments_source == "message.content.arguments":
+                                    message.content.arguments = arguments
+                                
+                            except Exception as inject_error:
+                                logger.error(f"🔧 DEBUG: ❌ Failed to inject: {inject_error}")
+                        else:
+                            logger.info(f"🔧 DEBUG: user_google_email already has value: {current_value}")
+                    else:
+                        logger.info(f"🔧 DEBUG: ❌ Arguments is not a dict: {type(arguments)}")
                 else:
-                    logger.info(f"🔧 DEBUG: user_google_email already has value: {arguments.get('user_google_email')}")
+                    logger.info(f"🔧 DEBUG: ❌ No arguments found in any expected location")
+                    
             else:
-                logger.info(f"🔧 DEBUG: ❌ No tool arguments found or message doesn't have arguments")
+                logger.info(f"🔧 DEBUG: ❌ Context has no message attribute")
             
         except Exception as e:
-            logger.info(f"⚠️ DEBUG: Could not auto-inject email parameter: {e}")
+            logger.error(f"⚠️ DEBUG: Could not auto-inject email parameter: {e}", exc_info=True)
     
     def set_google_provider(self, google_provider: Optional['GoogleProvider']) -> None:
         """

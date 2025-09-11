@@ -8,7 +8,7 @@ OAuth scope parameter missing issues have been resolved.
 import pytest
 import logging
 from unittest.mock import patch, MagicMock
-
+from datetime import datetime, timedelta, UTC
 
 class TestCircularImportResolution:
     """Test that circular imports between settings and compatibility_shim are resolved."""
@@ -203,25 +203,25 @@ class TestDeprecationWarningFixes:
     """Test that deprecation warnings have been fixed."""
     
     def test_no_datetime_utcnow_in_dynamic_client_registration(self):
-        """Test that datetime.utcnow() has been replaced in dynamic_client_registration.py"""
+        """Test that datetime.now(UTC) has been replaced in dynamic_client_registration.py"""
         # Read the file content to check for the deprecated call
         with open("auth/dynamic_client_registration.py", "r") as f:
             content = f.read()
         
-        # Should not contain the deprecated datetime.utcnow()
-        assert "datetime.utcnow()" not in content
+        # Should not contain the deprecated datetime.now(UTC)
+        assert "datetime.now(UTC)" not in content
         
         # Should contain the modern replacement
         assert "datetime.now(timezone.utc)" in content or "datetime.now(tz=" in content
     
     def test_no_datetime_utcnow_in_calendar_tools(self):
-        """Test that datetime.utcnow() has been replaced in calendar_tools.py"""
+        """Test that datetime.now(UTC) has been replaced in calendar_tools.py"""
         # Read the file content to check for the deprecated call
         with open("gcalendar/calendar_tools.py", "r") as f:
             content = f.read()
         
-        # Should not contain the deprecated datetime.utcnow()
-        assert "datetime.utcnow()" not in content
+        # Should not contain the deprecated datetime.now(UTC)
+        assert "datetime.now(UTC)" not in content
         
         # Should contain the modern replacement
         assert "datetime.now(timezone.utc)" in content

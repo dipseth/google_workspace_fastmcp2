@@ -5,6 +5,8 @@ import asyncio
 from typing import Any, Dict, List
 import os
 from .base_test_config import TEST_EMAIL
+from ..test_auth_utils import get_client_auth_config
+from fastmcp import Client
 
 
 @pytest.mark.core
@@ -501,13 +503,13 @@ class TestDocsTools:
                 "no google docs found" in content.lower() or
                 "found" in content.lower() and "google docs" in content.lower())
     
-    async def _test_get_doc_content_no_auth(self, client):
+    async def _test_get_doc_content_no_auth(self, client, real_drive_document_id=None):
         """Test get_doc_content without authentication."""
         test_email = TEST_EMAIL
         
         result = await client.call_tool("get_doc_content", {
             "user_google_email": test_email,
-            "document_id": "test_doc_id_123"
+            "document_id": real_drive_document_id or "test_doc_id_123"
         })
         
         # Should indicate authentication status (either success or failure)
@@ -518,13 +520,13 @@ class TestDocsTools:
                 "not authenticated" in content.lower() or
                 "document not found" in content.lower())
     
-    async def _test_list_docs_in_folder_no_auth(self, client):
+    async def _test_list_docs_in_folder_no_auth(self, client, real_drive_folder_id=None):
         """Test list_docs_in_folder without authentication."""
         test_email = TEST_EMAIL
         
         result = await client.call_tool("list_docs_in_folder", {
             "user_google_email": test_email,
-            "folder_id": "test_folder_id_123"
+            "folder_id": real_drive_folder_id or "test_folder_id_123"
         })
         
         # Should indicate authentication status (either success or failure)
@@ -644,13 +646,13 @@ class TestFormsTools:
                 "not authenticated" in content.lower() or
                 "successfully created form" in content.lower())
     
-    async def _test_add_questions_to_form_no_auth(self, client):
+    async def _test_add_questions_to_form_no_auth(self, client, real_forms_form_id=None):
         """Test add_questions_to_form without authentication."""
         test_email = TEST_EMAIL
         
         result = await client.call_tool("add_questions_to_form", {
             "user_google_email": test_email,
-            "form_id": "test_form_id",
+            "form_id": real_forms_form_id or "test_form_id",
             "questions": [{"type": "TEXT_QUESTION", "title": "Test Question"}]
         })
         
@@ -663,13 +665,13 @@ class TestFormsTools:
                 "entity was not found" in content.lower() or
                 "failed to add questions" in content.lower())
     
-    async def _test_get_form_no_auth(self, client):
+    async def _test_get_form_no_auth(self, client, real_forms_form_id=None):
         """Test get_form without authentication."""
         test_email = TEST_EMAIL
         
         result = await client.call_tool("get_form", {
             "user_google_email": test_email,
-            "form_id": "test_form_id"
+            "form_id": real_forms_form_id or "test_form_id"
         })
         
         # Should indicate authentication status (either success or failure)
@@ -681,13 +683,13 @@ class TestFormsTools:
                 "entity was not found" in content.lower() or
                 "form not found" in content.lower())
     
-    async def _test_set_form_publish_state_no_auth(self, client):
+    async def _test_set_form_publish_state_no_auth(self, client, real_forms_form_id=None):
         """Test set_form_publish_state without authentication."""
         test_email = TEST_EMAIL
         
         result = await client.call_tool("set_form_publish_state", {
             "user_google_email": test_email,
-            "form_id": "test_form_id"
+            "form_id": real_forms_form_id or "test_form_id"
         })
         
         # Should indicate authentication status (either success or failure)
@@ -699,13 +701,13 @@ class TestFormsTools:
                 "entity was not found" in content.lower() or
                 "form not found" in content.lower())
     
-    async def _test_publish_form_publicly_no_auth(self, client):
+    async def _test_publish_form_publicly_no_auth(self, client, real_forms_form_id=None):
         """Test publish_form_publicly without authentication."""
         test_email = TEST_EMAIL
         
         result = await client.call_tool("publish_form_publicly", {
             "user_google_email": test_email,
-            "form_id": "test_form_id"
+            "form_id": real_forms_form_id or "test_form_id"
         })
         
         # Should indicate authentication status (either success or failure)
@@ -717,13 +719,13 @@ class TestFormsTools:
                 "entity was not found" in content.lower() or
                 "failed to publish form" in content.lower())
     
-    async def _test_get_form_response_no_auth(self, client):
+    async def _test_get_form_response_no_auth(self, client, real_forms_form_id=None):
         """Test get_form_response without authentication."""
         test_email = TEST_EMAIL
         
         result = await client.call_tool("get_form_response", {
             "user_google_email": test_email,
-            "form_id": "test_form_id",
+            "form_id": real_forms_form_id or "test_form_id",
             "response_id": "test_response_id"
         })
         
@@ -736,13 +738,13 @@ class TestFormsTools:
                 "response not found" in content.lower() or
                 "response id" in content.lower())
     
-    async def _test_list_form_responses_no_auth(self, client):
+    async def _test_list_form_responses_no_auth(self, client, real_forms_form_id=None):
         """Test list_form_responses without authentication."""
         test_email = TEST_EMAIL
         
         result = await client.call_tool("list_form_responses", {
             "user_google_email": test_email,
-            "form_id": "test_form_id"
+            "form_id": real_forms_form_id or "test_form_id"
         })
         
         # Should indicate authentication required
@@ -754,13 +756,13 @@ class TestFormsTools:
                 "entity was not found" in content.lower() or
                 "requested entity was not found" in content.lower())
     
-    async def _test_update_form_questions_no_auth(self, client):
+    async def _test_update_form_questions_no_auth(self, client, real_forms_form_id=None):
         """Test update_form_questions without authentication."""
         test_email = TEST_EMAIL
         
         result = await client.call_tool("update_form_questions", {
             "user_google_email": test_email,
-            "form_id": "test_form_id",
+            "form_id": real_forms_form_id or "test_form_id",
             "questions_to_update": [{"item_id": "test_item_id", "title": "Updated Title"}]
         })
         
@@ -786,7 +788,7 @@ class TestFormsTools:
         with pytest.raises(Exception) as exc_info:
             await client.call_tool("add_questions_to_form", {
                 "user_google_email": TEST_EMAIL,
-                "form_id": "test_form_id"
+                "form_id": real_forms_form_id or "test_form_id"
             })
         assert "required" in str(exc_info.value).lower() or "missing" in str(exc_info.value).lower()
         
@@ -801,7 +803,7 @@ class TestFormsTools:
         with pytest.raises(Exception) as exc_info:
             await client.call_tool("get_form_response", {
                 "user_google_email": TEST_EMAIL,
-                "form_id": "test_form_id"
+                "form_id": real_forms_form_id or "test_form_id"
             })
         assert "required" in str(exc_info.value).lower() or "missing" in str(exc_info.value).lower()
 
@@ -947,15 +949,7 @@ class TestGmailLabelColors:
 
 class TestErrorHandling:
     """Test error handling and edge cases."""
-    
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        # Get JWT token for authentication if enabled
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        async with client:
-            yield client
+    # Use standardized client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_invalid_tool_name(self, client):

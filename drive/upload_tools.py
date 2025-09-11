@@ -34,14 +34,18 @@ Dependencies:
 """
 
 import logging
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 import time
 from pathlib import Path
 from typing_extensions import Optional, Any, List, Annotated
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
+
 # Import our custom type for consistent parameter definition
 from tools.common_types import UserGoogleEmailDrive
+from config.settings import settings
 
 from auth.google_auth import get_drive_service, initiate_oauth_flow, GoogleAuthError
 from auth.service_helpers import get_service, request_service, get_injected_service
@@ -54,7 +58,7 @@ from .upload_types import (
     CheckAuthResponse
 )
 
-logger = logging.getLogger(__name__)
+
 
 
 def setup_drive_tools(mcp: FastMCP) -> None:
@@ -76,10 +80,10 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="start_google_auth",
-        description="Initiate Google OAuth2 authentication flow for Google services (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
-        tags={"auth", "oauth", "google", "services", "authentication", "setup"},
+        description="Initiate Google OAuth2 authentication flow for Google services with automatic browser opening (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
+        tags={"auth", "oauth", "google", "services", "authentication", "setup", "browser"},
         annotations={
-            "title": "Google Services OAuth Setup",
+            "title": "Google Services OAuth Setup with Browser Support",
             "readOnlyHint": False,  # Modifies authentication state
             "destructiveHint": False,  # Creates auth tokens, doesn't destroy data
             "idempotentHint": True,  # Can be called multiple times safely
@@ -87,20 +91,21 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         }
     )
     async def start_google_auth(
-        user_google_email: UserGoogleEmailDrive = None,
-        service_name: Annotated[str, Field(description="Human-readable service name for display purposes")] = "Google Services"
+        user_google_email: str = '',
+        service_name: Annotated[str, Field(description="Human-readable service name for display purposes")] = "Google Services",
+        auto_open_browser: Annotated[bool, Field(description="Automatically open browser for authentication (default: True)")] = True
     ) -> StartAuthResponse:
         """
-        Initiate Google OAuth2 authentication flow for Google services access.
+        Initiate Google OAuth2 authentication flow for Google services access with automatic browser opening.
         
-        This tool generates an OAuth2 authorization URL and provides step-by-step
-        instructions for users to authenticate their Google account. The authentication
-        process grants the application permission to access multiple Google services
-        (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.) on behalf of the specified user.
+        This tool generates an OAuth2 authorization URL and can automatically open the browser
+        for authentication. For CLI clients, it also provides polling instructions to check
+        when authentication is complete.
         
         Args:
             user_google_email: Target Google email address for authentication
-            service_name: Human-readable service name for display purposes only (cosmetic parameter)
+            service_name: Human-readable service name for display purposes
+            auto_open_browser: Whether to automatically open the browser (default: True)
         
         Returns:
             StartAuthResponse: Structured response containing auth URL, instructions, and metadata
@@ -108,7 +113,37 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         Raises:
             Handles generic exceptions during OAuth flow initiation
         """
-        logger.info(f"Starting OAuth flow for {user_google_email}")
+        # DEBUG: Log all received parameters
+        logger.info(f"🔧 TOOL DEBUG: start_google_auth called with parameters:")
+        logger.info(f"🔧 TOOL DEBUG:   user_google_email = {user_google_email} (type: {type(user_google_email)})")
+        logger.info(f"🔧 TOOL DEBUG:   service_name = {service_name} (type: {type(service_name)})")
+        logger.info(f"🔧 TOOL DEBUG:   auto_open_browser = {auto_open_browser} (type: {type(auto_open_browser)})")
+        
+        # Try to get user email from context if not provided
+        if not user_google_email:
+            logger.info(f"🔧 TOOL DEBUG: user_google_email is None/empty, checking context")
+            from auth.context import get_user_email_context
+            context_email = get_user_email_context()
+            logger.info(f"🔧 TOOL DEBUG: get_user_email_context() returned: {context_email}")
+            
+            if context_email:
+                user_google_email = context_email
+                logger.info(f"🔧 TOOL DEBUG: Using email from context: {user_google_email}")
+            else:
+                logger.info(f"🔧 TOOL DEBUG: No email found in context either")
+        
+        logger.info(f"Starting OAuth flow for {user_google_email} (auto_open_browser={auto_open_browser})")
+        
+        # Validate that user_google_email is provided
+        if not user_google_email:
+            logger.error(f"🔧 TOOL DEBUG: ❌ Still no user_google_email after context check")
+            return StartAuthResponse(
+                status="error",
+                message="❌ Authentication Setup Failed",
+                userEmail="",
+                error="No user email provided. Please provide a Google email address to start authentication.",
+                templateApplied=False
+            )
         
         try:
             auth_url = await initiate_oauth_flow(
@@ -116,20 +151,55 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 service_name=service_name
             )
             
-            return StartAuthResponse(
+            # Attempt to open browser automatically if requested
+            browser_opened = False
+            browser_error = None
+            
+            if auto_open_browser:
+                try:
+                    import webbrowser
+                    browser_opened = webbrowser.open(auth_url)
+                    logger.info(f"✅ Browser opened automatically for OAuth authentication")
+                except Exception as e:
+                    browser_error = str(e)
+                    logger.warning(f"⚠️ Failed to open browser automatically: {e}")
+            
+            # Build instructions based on whether browser was opened
+            if browser_opened:
+                instructions = [
+                    "🌐 **Browser opened automatically** - complete authentication there",
+                    f"Sign in with: {user_google_email}",
+                    "Grant permissions for Google services (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
+                    "Wait for the success page",
+                    "Return here and retry your operation",
+                    "",
+                    "💡 **For CLI clients**: You can also poll authentication status:",
+                    f"   GET {settings.base_url}/oauth/status"
+                ]
+                message = "🔐 **Browser Opened - Complete Authentication**"
+            else:
+                instructions = [
+                    f"🔗 Click the authentication link: {auth_url}",
+                    f"Sign in with: {user_google_email}",
+                    "Grant permissions for Google services (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
+                    "Wait for the success page",
+                    "Return here and retry your operation",
+                    "",
+                    "💡 **For CLI clients**: You can poll authentication status:",
+                    f"   GET {settings.base_url}/oauth/status"
+                ]
+                message = "🔐 **Google Services Authentication Required**"
+                if browser_error:
+                    instructions.insert(0, f"⚠️ Auto-browser open failed: {browser_error}")
+            
+            response = StartAuthResponse(
                 status="success",
-                message="🔐 **Google Services Authentication Required**",
+                message=message,
                 authUrl=auth_url,
                 clickableLink=f"[🚀 Click here to authenticate]({auth_url})",
                 userEmail=user_google_email,
                 serviceName=service_name,
-                instructions=[
-                    f"Click the authentication link above",
-                    f"Sign in with: {user_google_email}",
-                    "Grant permissions for Google services (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
-                    "Wait for the success page",
-                    "Return here and retry your operation"
-                ],
+                instructions=instructions,
                 scopesIncluded=[
                     "Google Drive (file management)",
                     "Gmail (email access)",
@@ -141,6 +211,15 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 ],
                 note="The authentication will be linked to your current session and provide access to all Google services."
             )
+            
+            # Add browser-specific fields
+            if hasattr(response, '__dict__'):
+                response.__dict__['browserOpened'] = browser_opened
+                response.__dict__['pollingEndpoint'] = f"{settings.base_url}/oauth/status"
+                if browser_error:
+                    response.__dict__['browserError'] = browser_error
+            
+            return response
             
         except Exception as e:
             error_msg = f"Failed to start authentication: {e}"
@@ -184,6 +263,15 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             Handles GoogleAuthError for invalid/missing credentials and generic exceptions
         """
         logger.info(f"Checking authentication for {user_google_email}")
+        
+        # Validate that user_google_email is provided
+        if not user_google_email:
+            return CheckAuthResponse(
+                authenticated=False,
+                userEmail="",
+                message="No user email provided. Please provide a Google email address to check authentication status.",
+                error="Missing user_google_email parameter"
+            )
         
         try:
             # Try to get the Drive service - this will fail if not authenticated

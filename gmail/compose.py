@@ -12,7 +12,7 @@ import logging
 import json
 import asyncio
 import html
-from datetime import datetime
+from datetime import datetime, UTC
 from typing_extensions import Optional, Literal, Any, List, Dict, Union,Annotated
 from pydantic import Field
 from dataclasses import dataclass
@@ -21,11 +21,11 @@ from fastmcp import FastMCP, Context
 from googleapiclient.errors import HttpError
 
 from .service import _get_gmail_service_with_fallback
-from .utils import _create_mime_message, _prepare_reply_subject, _quote_original_message, _html_to_plain_text, _extract_headers, _extract_message_body
+from .utils import _create_mime_message, _prepare_reply_subject, _quote_original_message, _html_to_plain_text, _extract_headers, _extract_message_body, extract_email_addresses, _prepare_forward_subject, _extract_html_body, _format_forward_content
 from .templates import EmailTemplateManager
 from .gmail_types import (
-    SendGmailMessageResponse, DraftGmailMessageResponse, ReplyGmailMessageResponse, 
-    DraftGmailReplyResponse
+    SendGmailMessageResponse, DraftGmailMessageResponse, ReplyGmailMessageResponse,
+    DraftGmailReplyResponse, ForwardGmailMessageResponse, DraftGmailForwardResponse
 )
 from config.settings import settings
 from tools.common_types import UserGoogleEmail
@@ -820,11 +820,15 @@ async def reply_to_gmail_message(
     message_id: str,
     body: str,
     user_google_email: UserGoogleEmail = None,
+    reply_mode: Literal["sender_only", "reply_all", "custom"] = "sender_only",
+    to: Optional[Union[str, List[str]]] = None,
+    cc: Optional[Union[str, List[str]]] = None,
+    bcc: Optional[Union[str, List[str]]] = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None
 ) -> ReplyGmailMessageResponse:
     """
-    Sends a reply to a specific Gmail message with support for HTML formatting.
+    Sends a reply to a specific Gmail message with support for HTML formatting and flexible recipient options.
 
     Args:
         message_id: The ID of the message to reply to
@@ -833,6 +837,13 @@ async def reply_to_gmail_message(
             - content_type="html": Contains HTML content (plain text auto-generated for Gmail)
             - content_type="mixed": Contains plain text (HTML goes in html_body parameter)
         user_google_email: The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).
+        reply_mode: Controls who receives the reply:
+            - "sender_only": Reply only to the original sender (default, backward compatible)
+            - "reply_all": Reply to all original recipients (sender + all To/CC recipients)
+            - "custom": Use the provided to/cc/bcc parameters (must provide at least 'to')
+        to: Optional recipient(s) when reply_mode="custom" - can be a single string or list of strings
+        cc: Optional CC recipient(s) when reply_mode="custom" - can be a single string or list of strings
+        bcc: Optional BCC recipient(s) when reply_mode="custom" - can be a single string or list of strings
         content_type: Content type - controls how body and html_body are used:
             - "plain": Plain text reply (backward compatible)
             - "html": HTML reply - put HTML content in 'body' parameter
@@ -840,23 +851,24 @@ async def reply_to_gmail_message(
         html_body: HTML content when content_type="mixed". Ignored for other content types.
 
     Returns:
-        str: Confirmation message with the sent reply's message ID
+        ReplyGmailMessageResponse: Structured response with reply details
 
     Examples:
-        # Plain text reply
+        # Traditional reply to sender only (backward compatible)
         reply_to_gmail_message("msg_123", "Thanks for your message!")
 
-        # HTML reply (HTML content goes in 'body' parameter)
-        reply_to_gmail_message("msg_123", "<p>Thanks for your <b>message</b>!</p>", content_type="html")
+        # Reply to all recipients
+        reply_to_gmail_message("msg_123", "Thanks everyone!", reply_mode="reply_all")
 
-        # Mixed content reply
-        reply_to_gmail_message("msg_123", "Thanks for your message!",
-                              content_type="mixed", html_body="<p>Thanks for your <b>message</b>!</p>")
+        # Custom recipients
+        reply_to_gmail_message("msg_123", "Forwarding to team",
+                              reply_mode="custom", to=["team@example.com"], cc=["manager@example.com"])
 
-        # Auto-injected user (middleware handles user_google_email)
-        reply_to_gmail_message("msg_123", "Thanks for your message!")
+        # HTML reply with reply all
+        reply_to_gmail_message("msg_123", "<p>Thanks <b>everyone</b>!</p>",
+                              content_type="html", reply_mode="reply_all")
     """
-    logger.info(f"[reply_to_gmail_message] Email: '{user_google_email}', Replying to Message ID: '{message_id}', content_type: {content_type}")
+    logger.info(f"[reply_to_gmail_message] Email: '{user_google_email}', Replying to Message ID: '{message_id}', reply_mode: {reply_mode}, content_type: {content_type}")
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
@@ -869,7 +881,65 @@ async def reply_to_gmail_message(
         headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
         original_subject = headers.get("Subject", "(no subject)")
         original_from = headers.get("From", "(unknown sender)")
+        original_to = headers.get("To", "")
+        original_cc = headers.get("Cc", "")
         original_body = _extract_message_body(payload)
+
+        # Determine recipients based on reply_mode
+        if reply_mode == "sender_only":
+            # Current behavior - reply only to sender
+            final_to = original_from
+            final_cc = None
+            final_bcc = None
+            
+        elif reply_mode == "reply_all":
+            # Extract all original recipients
+            from_emails = extract_email_addresses(original_from)
+            to_emails = extract_email_addresses(original_to)
+            cc_emails = extract_email_addresses(original_cc)
+            
+            # Remove current user's email from the lists (case-insensitive)
+            if user_google_email:
+                user_email_lower = user_google_email.lower()
+                to_emails = [e for e in to_emails if e.lower() != user_email_lower]
+                cc_emails = [e for e in cc_emails if e.lower() != user_email_lower]
+                # Also remove from from_emails in case user is replying to their own message
+                from_emails = [e for e in from_emails if e.lower() != user_email_lower]
+            
+            # Combine recipients appropriately
+            # Original sender goes to 'To' field along with original To recipients
+            # Original CC recipients stay in 'CC' field
+            all_to_recipients = []
+            if from_emails:
+                all_to_recipients.extend(from_emails)
+            if to_emails:
+                all_to_recipients.extend(to_emails)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            final_to = []
+            for email in all_to_recipients:
+                if email.lower() not in seen:
+                    seen.add(email.lower())
+                    final_to.append(email)
+            
+            # If no recipients left (e.g., replying to own message), use original from
+            if not final_to:
+                final_to = original_from
+            
+            final_cc = cc_emails if cc_emails else None
+            final_bcc = None
+            
+        elif reply_mode == "custom":
+            # Use provided recipients
+            if not to:
+                raise ValueError("When using reply_mode='custom', you must provide 'to' recipients")
+            final_to = to
+            final_cc = cc
+            final_bcc = bcc
+            
+        else:
+            raise ValueError(f"Invalid reply_mode: {reply_mode}")
 
         reply_subject = _prepare_reply_subject(original_subject)
         quoted_body = _quote_original_message(original_body)
@@ -890,7 +960,9 @@ async def reply_to_gmail_message(
 
         # Create properly formatted MIME message using helper function
         raw_message = _create_mime_message(
-            to=original_from,
+            to=final_to,
+            cc=final_cc,
+            bcc=final_bcc,
             subject=reply_subject,
             body=full_body,
             content_type=content_type,
@@ -909,14 +981,30 @@ async def reply_to_gmail_message(
         sent_message_id = sent_message.get("id")
         thread_id = sent_message.get("threadId")
         
+        # Format recipients for response
+        def format_recipient_string(recipients):
+            if not recipients:
+                return ""
+            if isinstance(recipients, str):
+                return recipients
+            elif isinstance(recipients, list):
+                return ", ".join(recipients)
+            return ""
+        
+        replied_to_str = format_recipient_string(final_to)
+        
         return ReplyGmailMessageResponse(
             success=True,
             reply_message_id=sent_message_id,
             original_message_id=message_id,
             thread_id=thread_id or "",
-            replied_to=original_from,
+            replied_to=replied_to_str,
             subject=reply_subject,
             content_type=content_type,
+            reply_mode=reply_mode,
+            to_recipients=final_to if isinstance(final_to, list) else [final_to] if final_to else [],
+            cc_recipients=final_cc if isinstance(final_cc, list) else [final_cc] if final_cc else [],
+            bcc_recipients=final_bcc if isinstance(final_bcc, list) else [final_bcc] if final_bcc else [],
             userEmail=user_google_email or "",
             error=None
         )
@@ -931,6 +1019,10 @@ async def reply_to_gmail_message(
             replied_to="",
             subject="",
             content_type=content_type,
+            reply_mode=reply_mode,
+            to_recipients=[],
+            cc_recipients=[],
+            bcc_recipients=[],
             userEmail=user_google_email or "",
             error=str(e)
         )
@@ -940,11 +1032,15 @@ async def draft_gmail_reply(
     message_id: str,
     body: str,
     user_google_email: UserGoogleEmail = None,
+    reply_mode: Literal["sender_only", "reply_all", "custom"] = "sender_only",
+    to: Optional[Union[str, List[str]]] = None,
+    cc: Optional[Union[str, List[str]]] = None,
+    bcc: Optional[Union[str, List[str]]] = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None
 ) -> DraftGmailReplyResponse:
     """
-    Creates a draft reply to a specific Gmail message with support for HTML formatting.
+    Creates a draft reply to a specific Gmail message with support for HTML formatting and flexible recipient options.
 
     Args:
         message_id: The ID of the message to draft a reply for
@@ -953,6 +1049,13 @@ async def draft_gmail_reply(
             - content_type="html": Contains HTML content (plain text auto-generated for Gmail)
             - content_type="mixed": Contains plain text (HTML goes in html_body parameter)
         user_google_email: The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).
+        reply_mode: Controls who receives the reply:
+            - "sender_only": Reply only to the original sender (default, backward compatible)
+            - "reply_all": Reply to all original recipients (sender + all To/CC recipients)
+            - "custom": Use the provided to/cc/bcc parameters (must provide at least 'to')
+        to: Optional recipient(s) when reply_mode="custom" - can be a single string or list of strings
+        cc: Optional CC recipient(s) when reply_mode="custom" - can be a single string or list of strings
+        bcc: Optional BCC recipient(s) when reply_mode="custom" - can be a single string or list of strings
         content_type: Content type - controls how body and html_body are used:
             - "plain": Plain text draft reply (backward compatible)
             - "html": HTML draft reply - put HTML content in 'body' parameter
@@ -960,23 +1063,24 @@ async def draft_gmail_reply(
         html_body: HTML content when content_type="mixed". Ignored for other content types.
 
     Returns:
-        str: Confirmation message with the created draft's ID
+        DraftGmailReplyResponse: Structured response with draft creation details
 
     Examples:
-        # Plain text draft reply
+        # Traditional draft reply to sender only (backward compatible)
         draft_gmail_reply("msg_123", "Thanks for your message!")
 
-        # HTML draft reply (HTML content goes in 'body' parameter)
-        draft_gmail_reply("msg_123", "<p>Thanks for your <b>message</b>!</p>", content_type="html")
+        # Draft reply to all recipients
+        draft_gmail_reply("msg_123", "Thanks everyone!", reply_mode="reply_all")
 
-        # Mixed content draft reply
-        draft_gmail_reply("msg_123", "Thanks for your message!",
-                         content_type="mixed", html_body="<p>Thanks for your <b>message</b>!</p>")
+        # Custom recipients draft
+        draft_gmail_reply("msg_123", "Forwarding to team",
+                         reply_mode="custom", to=["team@example.com"], cc=["manager@example.com"])
 
-        # Auto-injected user (middleware handles user_google_email)
-        draft_gmail_reply("msg_123", "Thanks for your message!")
+        # HTML draft reply with reply all
+        draft_gmail_reply("msg_123", "<p>Thanks <b>everyone</b>!</p>",
+                         content_type="html", reply_mode="reply_all")
     """
-    logger.info(f"[draft_gmail_reply] Email: '{user_google_email}', Drafting reply to Message ID: '{message_id}', content_type: {content_type}")
+    logger.info(f"[draft_gmail_reply] Email: '{user_google_email}', Drafting reply to Message ID: '{message_id}', reply_mode: {reply_mode}, content_type: {content_type}")
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
@@ -989,7 +1093,65 @@ async def draft_gmail_reply(
         headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
         original_subject = headers.get("Subject", "(no subject)")
         original_from = headers.get("From", "(unknown sender)")
+        original_to = headers.get("To", "")
+        original_cc = headers.get("Cc", "")
         original_body = _extract_message_body(payload)
+
+        # Determine recipients based on reply_mode
+        if reply_mode == "sender_only":
+            # Current behavior - reply only to sender
+            final_to = original_from
+            final_cc = None
+            final_bcc = None
+            
+        elif reply_mode == "reply_all":
+            # Extract all original recipients
+            from_emails = extract_email_addresses(original_from)
+            to_emails = extract_email_addresses(original_to)
+            cc_emails = extract_email_addresses(original_cc)
+            
+            # Remove current user's email from the lists (case-insensitive)
+            if user_google_email:
+                user_email_lower = user_google_email.lower()
+                to_emails = [e for e in to_emails if e.lower() != user_email_lower]
+                cc_emails = [e for e in cc_emails if e.lower() != user_email_lower]
+                # Also remove from from_emails in case user is replying to their own message
+                from_emails = [e for e in from_emails if e.lower() != user_email_lower]
+            
+            # Combine recipients appropriately
+            # Original sender goes to 'To' field along with original To recipients
+            # Original CC recipients stay in 'CC' field
+            all_to_recipients = []
+            if from_emails:
+                all_to_recipients.extend(from_emails)
+            if to_emails:
+                all_to_recipients.extend(to_emails)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            final_to = []
+            for email in all_to_recipients:
+                if email.lower() not in seen:
+                    seen.add(email.lower())
+                    final_to.append(email)
+            
+            # If no recipients left (e.g., replying to own message), use original from
+            if not final_to:
+                final_to = original_from
+            
+            final_cc = cc_emails if cc_emails else None
+            final_bcc = None
+            
+        elif reply_mode == "custom":
+            # Use provided recipients
+            if not to:
+                raise ValueError("When using reply_mode='custom', you must provide 'to' recipients")
+            final_to = to
+            final_cc = cc
+            final_bcc = bcc
+            
+        else:
+            raise ValueError(f"Invalid reply_mode: {reply_mode}")
 
         reply_subject = _prepare_reply_subject(original_subject)
         quoted_body = _quote_original_message(original_body)
@@ -1010,7 +1172,9 @@ async def draft_gmail_reply(
 
         # Create properly formatted MIME message using helper function
         raw_message = _create_mime_message(
-            to=original_from,
+            to=final_to,
+            cc=final_cc,
+            bcc=final_bcc,
             subject=reply_subject,
             body=full_body,
             content_type=content_type,
@@ -1030,14 +1194,30 @@ async def draft_gmail_reply(
         message_id_from_draft = created_draft.get("message", {}).get("id")
         thread_id = created_draft.get("message", {}).get("threadId")
         
+        # Format recipients for response
+        def format_recipient_string(recipients):
+            if not recipients:
+                return ""
+            if isinstance(recipients, str):
+                return recipients
+            elif isinstance(recipients, list):
+                return ", ".join(recipients)
+            return ""
+        
+        replied_to_str = format_recipient_string(final_to)
+        
         return DraftGmailReplyResponse(
             success=True,
             draft_id=draft_id,
             original_message_id=message_id,
             thread_id=thread_id or "",
-            replied_to=original_from,
+            replied_to=replied_to_str,
             subject=reply_subject,
             content_type=content_type,
+            reply_mode=reply_mode,
+            to_recipients=final_to if isinstance(final_to, list) else [final_to] if final_to else [],
+            cc_recipients=final_cc if isinstance(final_cc, list) else [final_cc] if final_cc else [],
+            bcc_recipients=final_bcc if isinstance(final_bcc, list) else [final_bcc] if final_bcc else [],
             userEmail=user_google_email or "",
             error=None
         )
@@ -1052,6 +1232,699 @@ async def draft_gmail_reply(
             replied_to="",
             subject="",
             content_type=content_type,
+            reply_mode=reply_mode,
+            to_recipients=[],
+            cc_recipients=[],
+            bcc_recipients=[],
+            userEmail=user_google_email or "",
+            error=str(e)
+        )
+
+
+async def forward_gmail_message(
+    ctx: Context,
+    message_id: str,
+    to: Union[str, List[str]],
+    user_google_email: UserGoogleEmail = None,
+    body: Optional[str] = None,
+    content_type: Literal["plain", "html", "mixed"] = "mixed",
+    html_body: Optional[str] = None,
+    cc: Optional[Union[str, List[str]]] = None,
+    bcc: Optional[Union[str, List[str]]] = None
+) -> ForwardGmailMessageResponse:
+    """
+    Forward a Gmail message to specified recipients with HTML formatting preservation and elicitation support.
+
+    This function forwards an existing Gmail message while preserving the original HTML formatting
+    as much as possible. It includes the original message headers (From, Date, Subject, To, Cc)
+    and supports elicitation for recipients not on the allow list.
+
+    Args:
+        ctx: FastMCP context for elicitation support
+        message_id: The ID of the message to forward
+        to: Recipient email address(es) - can be a single string or list of strings
+        user_google_email: The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).
+        body: Optional additional message body to add before the forwarded content. Usage depends on content_type:
+            - content_type="plain": Contains plain text only
+            - content_type="html": Contains HTML content
+            - content_type="mixed": Contains plain text (HTML goes in html_body parameter)
+        content_type: Content type - controls how body and html_body are used:
+            - "plain": Plain text forward (original HTML converted to plain text)
+            - "html": HTML forward - preserves original HTML formatting
+            - "mixed": Dual content - plain text in 'body', HTML in 'html_body' (default, recommended)
+        html_body: HTML content when content_type="mixed". Ignored for other content types.
+        cc: Optional CC recipient(s) - can be a single string or list of strings
+        bcc: Optional BCC recipient(s) - can be a single string or list of strings
+
+    Returns:
+        ForwardGmailMessageResponse: Structured response with forward details
+
+    Examples:
+        # Simple forward (preserves HTML)
+        forward_gmail_message(ctx, "msg_123", "user@example.com")
+
+        # Forward with additional message
+        forward_gmail_message(ctx, "msg_123", "user@example.com",
+                            body="Please review this email.",
+                            content_type="mixed",
+                            html_body="<p>Please review this email.</p>")
+
+        # Forward to multiple recipients
+        forward_gmail_message(ctx, "msg_123", ["user1@example.com", "user2@example.com"],
+                            cc="manager@example.com")
+    """
+    # Format recipients for logging
+    to_str = to if isinstance(to, str) else f"{len(to)} recipients"
+    cc_str = f", CC: {cc if isinstance(cc, str) else f'{len(cc)} recipients'}" if cc else ""
+    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{len(bcc)} recipients'}" if bcc else ""
+
+    logger.info(f"[forward_gmail_message] Email: '{user_google_email}', Forwarding Message ID: '{message_id}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}")
+
+    # Check allow list and trigger elicitation if needed (same pattern as send_gmail_message)
+    allow_list = settings.get_gmail_allow_list()
+
+    if allow_list:
+        # Collect all recipient emails for the message
+        all_recipients = []
+
+        # Process 'to' recipients
+        if isinstance(to, str):
+            all_recipients.extend([email.strip() for email in to.split(',')])
+        elif isinstance(to, list):
+            all_recipients.extend(to)
+
+        # Process 'cc' recipients
+        if cc:
+            if isinstance(cc, str):
+                all_recipients.extend([email.strip() for email in cc.split(',')])
+            elif isinstance(cc, list):
+                all_recipients.extend(cc)
+
+        # Process 'bcc' recipients
+        if bcc:
+            if isinstance(bcc, str):
+                all_recipients.extend([email.strip() for email in bcc.split(',')])
+            elif isinstance(bcc, list):
+                all_recipients.extend(bcc)
+
+        # Normalize all recipient emails (lowercase, strip whitespace)
+        all_recipients = [email.strip().lower() for email in all_recipients if email]
+
+        # Normalize allow list emails
+        normalized_allow_list = [email.lower() for email in allow_list]
+
+        # Check if any recipient is NOT on the allow list
+        recipients_not_allowed = [
+            email for email in all_recipients
+            if email not in normalized_allow_list
+        ]
+
+        if recipients_not_allowed:
+            # Check if elicitation is enabled in settings
+            if not settings.gmail_enable_elicitation:
+                logger.info(f"Elicitation disabled in settings - applying fallback: {settings.gmail_elicitation_fallback}")
+                fallback_result = await _handle_elicitation_fallback(
+                    settings.gmail_elicitation_fallback, to, f"Fwd: Original Message",
+                    body or "Forwarded message", user_google_email,
+                    content_type, html_body, cc, bcc, recipients_not_allowed
+                )
+                if fallback_result is not None:
+                    # Convert SendGmailMessageResponse to ForwardGmailMessageResponse
+                    return ForwardGmailMessageResponse(
+                        success=fallback_result['success'],
+                        forward_message_id=fallback_result.get('messageId'),
+                        original_message_id=message_id,
+                        forwarded_to=to if isinstance(to, str) else ', '.join(to),
+                        subject=f"Fwd: Original Message",
+                        content_type=content_type,
+                        to_recipients=to if isinstance(to, list) else [to] if to else [],
+                        cc_recipients=cc if isinstance(cc, list) else [cc] if cc else [],
+                        bcc_recipients=bcc if isinstance(bcc, list) else [bcc] if bcc else [],
+                        html_preserved=False,
+                        userEmail=user_google_email or "",
+                        error=fallback_result.get('error'),
+                        elicitationRequired=fallback_result.get('elicitationRequired', False),
+                        elicitationNotSupported=fallback_result.get('elicitationNotSupported', False),
+                        recipientsNotAllowed=fallback_result.get('recipientsNotAllowed', []),
+                        action=fallback_result.get('action', 'blocked'),
+                        draftId=fallback_result.get('draftId')
+                    )
+
+            # Log elicitation trigger
+            logger.info(f"Elicitation triggered for {len(recipients_not_allowed)} recipient(s) not on allow list")
+
+            # Prepare elicitation message
+            to_display = to if isinstance(to, str) else ', '.join(to)
+            cc_display = f"\n📋 **CC:** {cc if isinstance(cc, str) else ', '.join(cc)}" if cc else ""
+            bcc_display = f"\n📋 **BCC:** {bcc if isinstance(bcc, str) else ', '.join(bcc)}" if bcc else ""
+
+            # Preview of additional message if provided
+            body_preview = ""
+            if body:
+                body_preview = f"\n📝 **Additional Message:**\n```\n{body[:200]}{'... [truncated]' if len(body) > 200 else ''}\n```\n"
+
+            elicitation_message = f"""📧 **Forward Email Confirmation Required**
+
+⏰ **Auto-timeout:** 300 seconds
+
+📬 **Recipients:**
+   • To: {to_display}{cc_display}{bcc_display}
+
+📄 **Forward Details:**
+   • Original Message ID: {message_id}
+   • Content Type: {content_type}
+   • HTML Preservation: {'Yes' if content_type in ['html', 'mixed'] else 'No'}{body_preview}
+
+🔒 **Security Notice:** This recipient is not on your allow list.
+
+❓ **Choose your action:**
+   • **Send** - Forward the email immediately
+   • **Save as Draft** - Save to drafts folder without sending
+   • **Cancel** - Discard the forward
+   
+⏰ Auto-cancels in 300 seconds if no response"""
+
+            # Trigger elicitation with graceful fallback for unsupported clients
+            try:
+                response = await asyncio.wait_for(
+                    ctx.elicit(
+                        message=elicitation_message,
+                        response_type=EmailAction
+                    ),
+                    timeout=300.0
+                )
+            except asyncio.TimeoutError:
+                logger.info("Elicitation timed out after 300 seconds")
+                return ForwardGmailMessageResponse(
+                    success=False,
+                    forward_message_id="",
+                    original_message_id=message_id,
+                    forwarded_to="",
+                    subject="",
+                    content_type=content_type,
+                    to_recipients=[],
+                    cc_recipients=[],
+                    bcc_recipients=[],
+                    html_preserved=False,
+                    userEmail=user_google_email or "",
+                    error="Forward operation timed out - no response received within 300 seconds",
+                    elicitationRequired=True,
+                    recipientsNotAllowed=recipients_not_allowed
+                )
+            except Exception as elicit_error:
+                # Handle clients that don't support elicitation
+                error_msg = str(elicit_error).lower()
+                if ("method not found" in error_msg or "not found" in error_msg or
+                    "not supported" in error_msg or "unsupported" in error_msg):
+                    
+                    logger.warning(f"Client doesn't support elicitation - applying fallback: {settings.gmail_elicitation_fallback}")
+                    fallback_result = await _handle_elicitation_fallback(
+                        settings.gmail_elicitation_fallback, to, f"Fwd: Original Message",
+                        body or "Forwarded message", user_google_email,
+                        content_type, html_body, cc, bcc, recipients_not_allowed
+                    )
+                    if fallback_result is not None:
+                        # Convert SendGmailMessageResponse to ForwardGmailMessageResponse
+                        return ForwardGmailMessageResponse(
+                            success=fallback_result['success'],
+                            forward_message_id=fallback_result.get('messageId'),
+                            original_message_id=message_id,
+                            forwarded_to=to if isinstance(to, str) else ', '.join(to),
+                            subject=f"Fwd: Original Message",
+                            content_type=content_type,
+                            to_recipients=to if isinstance(to, list) else [to] if to else [],
+                            cc_recipients=cc if isinstance(cc, list) else [cc] if cc else [],
+                            bcc_recipients=bcc if isinstance(bcc, list) else [bcc] if bcc else [],
+                            html_preserved=False,
+                            userEmail=user_google_email or "",
+                            error=fallback_result.get('error'),
+                            elicitationRequired=fallback_result.get('elicitationRequired', False),
+                            elicitationNotSupported=fallback_result.get('elicitationNotSupported', False),
+                            recipientsNotAllowed=fallback_result.get('recipientsNotAllowed', []),
+                            action=fallback_result.get('action', 'blocked'),
+                            draftId=fallback_result.get('draftId')
+                        )
+                    # If fallback_result is None (allow mode), continue with normal forwarding
+                else:
+                    # Other elicitation errors
+                    logger.error(f"Elicitation failed: {elicit_error}")
+                    return ForwardGmailMessageResponse(
+                        success=False,
+                        forward_message_id="",
+                        original_message_id=message_id,
+                        forwarded_to="",
+                        subject="",
+                        content_type=content_type,
+                        to_recipients=[],
+                        cc_recipients=[],
+                        bcc_recipients=[],
+                        html_preserved=False,
+                        userEmail=user_google_email or "",
+                        error=f"Forward confirmation failed: {elicit_error}",
+                        elicitationRequired=True,
+                        recipientsNotAllowed=recipients_not_allowed
+                    )
+
+            # Handle elicitation responses
+            if response.action == "decline" or response.action == "cancel":
+                logger.info(f"User {response.action}d forward operation")
+                return ForwardGmailMessageResponse(
+                    success=False,
+                    forward_message_id="",
+                    original_message_id=message_id,
+                    forwarded_to="",
+                    subject="",
+                    content_type=content_type,
+                    to_recipients=[],
+                    cc_recipients=[],
+                    bcc_recipients=[],
+                    html_preserved=False,
+                    userEmail=user_google_email or "",
+                    error=f"User {response.action}d",
+                    elicitationRequired=True,
+                    recipientsNotAllowed=recipients_not_allowed
+                )
+            elif response.action == "accept":
+                # Get the user's choice from the data field
+                user_choice = response.data.action
+                
+                if user_choice == "cancel":
+                    logger.info("User chose to cancel forward operation")
+                    return ForwardGmailMessageResponse(
+                        success=False,
+                        forward_message_id="",
+                        original_message_id=message_id,
+                        forwarded_to="",
+                        subject="",
+                        content_type=content_type,
+                        to_recipients=[],
+                        cc_recipients=[],
+                        bcc_recipients=[],
+                        html_preserved=False,
+                        userEmail=user_google_email or "",
+                        error="User cancelled",
+                        elicitationRequired=True,
+                        recipientsNotAllowed=recipients_not_allowed
+                    )
+                elif user_choice == "save_draft":
+                    logger.info("User chose to save forward as draft")
+                    # Create draft instead of sending
+                    draft_result = await draft_gmail_forward(
+                        message_id=message_id,
+                        to=to,
+                        user_google_email=user_google_email,
+                        body=body,
+                        content_type=content_type,
+                        html_body=html_body,
+                        cc=cc,
+                        bcc=bcc
+                    )
+                    # Return as forward response with draft info
+                    return ForwardGmailMessageResponse(
+                        success=True,
+                        forward_message_id="",
+                        original_message_id=message_id,
+                        forwarded_to=to if isinstance(to, str) else ', '.join(to),
+                        subject=draft_result.get('subject', ''),
+                        content_type=content_type,
+                        to_recipients=draft_result.get('to_recipients', []),
+                        cc_recipients=draft_result.get('cc_recipients', []),
+                        bcc_recipients=draft_result.get('bcc_recipients', []),
+                        html_preserved=draft_result.get('html_preserved', False),
+                        userEmail=user_google_email or "",
+                        error=None,
+                        elicitationRequired=True,
+                        recipientsNotAllowed=recipients_not_allowed,
+                        action="saved_draft",
+                        draftId=draft_result.get('draft_id')
+                    )
+                elif user_choice == "send":
+                    # Continue with forwarding
+                    logger.info("User chose to forward email")
+                else:
+                    # Unexpected choice
+                    logger.error(f"Unexpected user choice: {user_choice}")
+                    return ForwardGmailMessageResponse(
+                        success=False,
+                        forward_message_id="",
+                        original_message_id=message_id,
+                        forwarded_to="",
+                        subject="",
+                        content_type=content_type,
+                        to_recipients=[],
+                        cc_recipients=[],
+                        bcc_recipients=[],
+                        html_preserved=False,
+                        userEmail=user_google_email or "",
+                        error=f"Unexpected choice: {user_choice}",
+                        elicitationRequired=True,
+                        recipientsNotAllowed=recipients_not_allowed
+                    )
+            else:
+                # Unexpected elicitation action
+                logger.error(f"Unexpected elicitation action: {response.action}")
+                return ForwardGmailMessageResponse(
+                    success=False,
+                    forward_message_id="",
+                    original_message_id=message_id,
+                    forwarded_to="",
+                    subject="",
+                    content_type=content_type,
+                    to_recipients=[],
+                    cc_recipients=[],
+                    bcc_recipients=[],
+                    html_preserved=False,
+                    userEmail=user_google_email or "",
+                    error=f"Unexpected elicitation response: {response.action}",
+                    elicitationRequired=True,
+                    recipientsNotAllowed=recipients_not_allowed
+                )
+        else:
+            # All recipients are on allow list
+            logger.info(f"All {len(all_recipients)} recipient(s) are on allow list - forwarding without elicitation")
+    else:
+        # No allow list configured
+        logger.debug("No Gmail allow list configured - forwarding without elicitation")
+
+    try:
+        gmail_service = await _get_gmail_service_with_fallback(user_google_email)
+
+        # Fetch the original message to get headers and body for forwarding
+        original_message = await asyncio.to_thread(
+            gmail_service.users().messages().get(userId="me", id=message_id, format="full").execute
+        )
+        payload = original_message.get("payload", {})
+        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+        original_subject = headers.get("Subject", "(no subject)")
+
+        # Extract both plain text and HTML content from original message
+        original_plain_body = _extract_message_body(payload)
+        original_html_body = _extract_html_body(payload)
+        
+        # Determine if we have HTML content to preserve
+        has_html = bool(original_html_body)
+        html_preserved = has_html and content_type in ['html', 'mixed']
+
+        # Prepare forward subject
+        forward_subject = _prepare_forward_subject(original_subject)
+
+        # Format the forwarded content based on content_type
+        if content_type == "plain":
+            # Plain text only - use plain text version of original
+            forwarded_content = _format_forward_content(original_plain_body, headers, is_html=False)
+            if body:
+                full_body = f"{body}{forwarded_content}"
+            else:
+                full_body = forwarded_content
+            final_html_body = None
+            
+        elif content_type == "html":
+            # HTML only - use HTML version if available, fallback to plain text
+            content_to_forward = original_html_body if has_html else original_plain_body
+            forwarded_content = _format_forward_content(content_to_forward, headers, is_html=has_html)
+            if body:
+                if has_html:
+                    full_body = f"{body}{forwarded_content}"
+                else:
+                    full_body = f"{body}{forwarded_content}"
+            else:
+                full_body = forwarded_content
+            final_html_body = None
+            
+        elif content_type == "mixed":
+            # Mixed content - prepare both plain and HTML versions
+            # Plain text version
+            plain_forwarded = _format_forward_content(original_plain_body, headers, is_html=False)
+            if body:
+                full_plain_body = f"{body}{plain_forwarded}"
+            else:
+                full_plain_body = plain_forwarded
+            
+            # HTML version
+            if has_html:
+                html_forwarded = _format_forward_content(original_html_body, headers, is_html=True)
+                if html_body:
+                    final_html_body = f"{html_body}{html_forwarded}"
+                else:
+                    final_html_body = html_forwarded
+            else:
+                # No HTML content in original, convert plain text to HTML
+                html_forwarded = _format_forward_content(original_plain_body, headers, is_html=True)
+                if html_body:
+                    final_html_body = f"{html_body}{html_forwarded}"
+                else:
+                    final_html_body = html_forwarded
+            
+            full_body = full_plain_body
+
+        # Create properly formatted MIME message using helper function
+        raw_message = _create_mime_message(
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=forward_subject,
+            body=full_body,
+            content_type=content_type,
+            html_body=final_html_body,
+            from_email=user_google_email
+        )
+
+        send_body = {"raw": raw_message}
+
+        # Send the forward message
+        sent_message = await asyncio.to_thread(
+            gmail_service.users().messages().send(userId="me", body=send_body).execute
+        )
+        sent_message_id = sent_message.get("id")
+        
+        # Format recipients for response
+        def format_recipient_string(recipients):
+            if not recipients:
+                return ""
+            if isinstance(recipients, str):
+                return recipients
+            elif isinstance(recipients, list):
+                return ", ".join(recipients)
+            return ""
+        
+        forwarded_to_str = format_recipient_string(to)
+        
+        return ForwardGmailMessageResponse(
+            success=True,
+            forward_message_id=sent_message_id,
+            original_message_id=message_id,
+            forwarded_to=forwarded_to_str,
+            subject=forward_subject,
+            content_type=content_type,
+            to_recipients=to if isinstance(to, list) else [to] if to else [],
+            cc_recipients=cc if isinstance(cc, list) else [cc] if cc else [],
+            bcc_recipients=bcc if isinstance(bcc, list) else [bcc] if bcc else [],
+            html_preserved=html_preserved,
+            userEmail=user_google_email or "",
+            error=None,
+            elicitationRequired=bool(recipients_not_allowed) if allow_list else False,
+            recipientsNotAllowed=recipients_not_allowed if allow_list else []
+        )
+
+    except Exception as e:
+        logger.error(f"Unexpected error in forward_gmail_message: {e}")
+        return ForwardGmailMessageResponse(
+            success=False,
+            forward_message_id="",
+            original_message_id=message_id,
+            forwarded_to="",
+            subject="",
+            content_type=content_type,
+            to_recipients=[],
+            cc_recipients=[],
+            bcc_recipients=[],
+            html_preserved=False,
+            userEmail=user_google_email or "",
+            error=str(e)
+        )
+
+
+async def draft_gmail_forward(
+    message_id: str,
+    to: Union[str, List[str]],
+    user_google_email: UserGoogleEmail = None,
+    body: Optional[str] = None,
+    content_type: Literal["plain", "html", "mixed"] = "mixed",
+    html_body: Optional[str] = None,
+    cc: Optional[Union[str, List[str]]] = None,
+    bcc: Optional[Union[str, List[str]]] = None
+) -> DraftGmailForwardResponse:
+    """
+    Create a draft forward of a Gmail message with HTML formatting preservation.
+
+    This function creates a draft forward of an existing Gmail message while preserving
+    the original HTML formatting as much as possible. It includes the original message
+    headers (From, Date, Subject, To, Cc).
+
+    Args:
+        message_id: The ID of the message to forward
+        to: Recipient email address(es) - can be a single string or list of strings
+        user_google_email: The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware).
+        body: Optional additional message body to add before the forwarded content. Usage depends on content_type:
+            - content_type="plain": Contains plain text only
+            - content_type="html": Contains HTML content
+            - content_type="mixed": Contains plain text (HTML goes in html_body parameter)
+        content_type: Content type - controls how body and html_body are used:
+            - "plain": Plain text forward (original HTML converted to plain text)
+            - "html": HTML forward - preserves original HTML formatting
+            - "mixed": Dual content - plain text in 'body', HTML in 'html_body' (default, recommended)
+        html_body: HTML content when content_type="mixed". Ignored for other content types.
+        cc: Optional CC recipient(s) - can be a single string or list of strings
+        bcc: Optional BCC recipient(s) - can be a single string or list of strings
+
+    Returns:
+        DraftGmailForwardResponse: Structured response with draft creation details
+
+    Examples:
+        # Simple draft forward
+        draft_gmail_forward("msg_123", "user@example.com")
+
+        # Draft forward with additional message
+        draft_gmail_forward("msg_123", "user@example.com",
+                          body="Please review this email.",
+                          content_type="mixed",
+                          html_body="<p>Please review this email.</p>")
+    """
+    # Format recipients for logging
+    to_str = to if isinstance(to, str) else f"{len(to)} recipients"
+    cc_str = f", CC: {cc if isinstance(cc, str) else f'{len(cc)} recipients'}" if cc else ""
+    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{len(bcc)} recipients'}" if bcc else ""
+
+    logger.info(f"[draft_gmail_forward] Email: '{user_google_email}', Drafting forward of Message ID: '{message_id}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}")
+
+    try:
+        gmail_service = await _get_gmail_service_with_fallback(user_google_email)
+
+        # Fetch the original message to get headers and body for forwarding
+        original_message = await asyncio.to_thread(
+            gmail_service.users().messages().get(userId="me", id=message_id, format="full").execute
+        )
+        payload = original_message.get("payload", {})
+        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+        original_subject = headers.get("Subject", "(no subject)")
+
+        # Extract both plain text and HTML content from original message
+        original_plain_body = _extract_message_body(payload)
+        original_html_body = _extract_html_body(payload)
+        
+        # Determine if we have HTML content to preserve
+        has_html = bool(original_html_body)
+        html_preserved = has_html and content_type in ['html', 'mixed']
+
+        # Prepare forward subject
+        forward_subject = _prepare_forward_subject(original_subject)
+
+        # Format the forwarded content based on content_type
+        if content_type == "plain":
+            # Plain text only - use plain text version of original
+            forwarded_content = _format_forward_content(original_plain_body, headers, is_html=False)
+            if body:
+                full_body = f"{body}{forwarded_content}"
+            else:
+                full_body = forwarded_content
+            final_html_body = None
+            
+        elif content_type == "html":
+            # HTML only - use HTML version if available, fallback to plain text
+            content_to_forward = original_html_body if has_html else original_plain_body
+            forwarded_content = _format_forward_content(content_to_forward, headers, is_html=has_html)
+            if body:
+                full_body = f"{body}{forwarded_content}"
+            else:
+                full_body = forwarded_content
+            final_html_body = None
+            
+        elif content_type == "mixed":
+            # Mixed content - prepare both plain and HTML versions
+            # Plain text version
+            plain_forwarded = _format_forward_content(original_plain_body, headers, is_html=False)
+            if body:
+                full_plain_body = f"{body}{plain_forwarded}"
+            else:
+                full_plain_body = plain_forwarded
+            
+            # HTML version
+            if has_html:
+                html_forwarded = _format_forward_content(original_html_body, headers, is_html=True)
+                if html_body:
+                    final_html_body = f"{html_body}{html_forwarded}"
+                else:
+                    final_html_body = html_forwarded
+            else:
+                # No HTML content in original, convert plain text to HTML
+                html_forwarded = _format_forward_content(original_plain_body, headers, is_html=True)
+                if html_body:
+                    final_html_body = f"{html_body}{html_forwarded}"
+                else:
+                    final_html_body = html_forwarded
+            
+            full_body = full_plain_body
+
+        # Create properly formatted MIME message using helper function
+        raw_message = _create_mime_message(
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=forward_subject,
+            body=full_body,
+            content_type=content_type,
+            html_body=final_html_body,
+            from_email=user_google_email
+        )
+
+        draft_body = {"message": {"raw": raw_message}}
+
+        # Create the draft forward
+        created_draft = await asyncio.to_thread(
+            gmail_service.users().drafts().create(userId="me", body=draft_body).execute
+        )
+        draft_id = created_draft.get("id")
+        
+        # Format recipients for response
+        def format_recipient_string(recipients):
+            if not recipients:
+                return ""
+            if isinstance(recipients, str):
+                return recipients
+            elif isinstance(recipients, list):
+                return ", ".join(recipients)
+            return ""
+        
+        forwarded_to_str = format_recipient_string(to)
+        
+        return DraftGmailForwardResponse(
+            success=True,
+            draft_id=draft_id,
+            original_message_id=message_id,
+            forwarded_to=forwarded_to_str,
+            subject=forward_subject,
+            content_type=content_type,
+            to_recipients=to if isinstance(to, list) else [to] if to else [],
+            cc_recipients=cc if isinstance(cc, list) else [cc] if cc else [],
+            bcc_recipients=bcc if isinstance(bcc, list) else [bcc] if bcc else [],
+            html_preserved=html_preserved,
+            userEmail=user_google_email or "",
+            error=None
+        )
+
+    except Exception as e:
+        logger.error(f"Unexpected error in draft_gmail_forward: {e}")
+        return DraftGmailForwardResponse(
+            success=False,
+            draft_id="",
+            original_message_id=message_id,
+            forwarded_to="",
+            subject="",
+            content_type=content_type,
+            to_recipients=[],
+            cc_recipients=[],
+            bcc_recipients=[],
+            html_preserved=False,
             userEmail=user_google_email or "",
             error=str(e)
         )
@@ -1179,6 +2052,10 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         message_id: Annotated[str, Field(description="The ID of the original Gmail message to reply to. This maintains proper email threading")],
         body: Annotated[str, Field(description="Reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted")],
         user_google_email: UserGoogleEmail = None,
+        reply_mode: Annotated[Literal["sender_only", "reply_all", "custom"], Field(description="Who receives the reply: 'sender_only' = only original sender (default), 'reply_all' = all original recipients, 'custom' = use provided to/cc/bcc parameters")] = "sender_only",
+        to: Annotated[Optional[Union[str, List[str]]], Field(description="Recipient(s) when reply_mode='custom'. Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")] = None,
+        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s) when reply_mode='custom'. Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
+        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s) when reply_mode='custom'. Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)")] = "mixed",
         html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types")] = None
     ) -> ReplyGmailMessageResponse:
@@ -1193,6 +2070,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         - Automatic email threading (maintains conversation)
         - Original message quoting in reply
         - HTML and plain text support
+        - Flexible recipient options: sender only, reply all, or custom
         - Auto-extraction of reply-to address and subject
         - Auto-injection of user context via middleware
         
@@ -1200,13 +2078,17 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             message_id: ID of the original message to reply to
             body: Reply body content (original message auto-quoted)
             user_google_email: User's email address (auto-injected if None)
+            reply_mode: Controls who receives the reply
+            to: Custom recipients (when reply_mode='custom')
+            cc: Custom CC recipients (when reply_mode='custom')
+            bcc: Custom BCC recipients (when reply_mode='custom')
             content_type: How to handle body/html_body content
             html_body: HTML content for mixed-type replies
             
         Returns:
         ReplyGmailMessageResponse: Structured response with reply status and threading info
         """
-        return await reply_to_gmail_message(message_id, body, user_google_email, content_type, html_body)
+        return await reply_to_gmail_message(message_id, body, user_google_email, reply_mode, to, cc, bcc, content_type, html_body)
 
     @mcp.tool(
         name="draft_gmail_reply",
@@ -1224,6 +2106,10 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         message_id: Annotated[str, Field(description="The ID of the original Gmail message to draft a reply for. This maintains proper email threading in the draft")],
         body: Annotated[str, Field(description="Draft reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted")],
         user_google_email: UserGoogleEmail = None,
+        reply_mode: Annotated[Literal["sender_only", "reply_all", "custom"], Field(description="Who receives the reply: 'sender_only' = only original sender (default), 'reply_all' = all original recipients, 'custom' = use provided to/cc/bcc parameters")] = "sender_only",
+        to: Annotated[Optional[Union[str, List[str]]], Field(description="Recipient(s) when reply_mode='custom'. Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")] = None,
+        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s) when reply_mode='custom'. Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
+        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s) when reply_mode='custom'. Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)")] = "mixed",
         html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types")] = None
     ) -> DraftGmailReplyResponse:
@@ -1238,6 +2124,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         - Automatic email threading (maintains conversation in draft)
         - Original message quoting in draft
         - HTML and plain text support
+        - Flexible recipient options: sender only, reply all, or custom
         - Auto-extraction of reply-to address and subject
         - Auto-injection of user context via middleware
         
@@ -1245,10 +2132,132 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             message_id: ID of the original message to draft reply for
             body: Draft reply body content (original message auto-quoted)
             user_google_email: User's email address (auto-injected if None)
+            reply_mode: Controls who receives the reply
+            to: Custom recipients (when reply_mode='custom')
+            cc: Custom CC recipients (when reply_mode='custom')
+            bcc: Custom BCC recipients (when reply_mode='custom')
             content_type: How to handle body/html_body content
             html_body: HTML content for mixed-type draft replies
             
         Returns:
         DraftGmailReplyResponse: Structured response with draft creation and threading info
         """
-        return await draft_gmail_reply(message_id, body, user_google_email, content_type, html_body)
+        return await draft_gmail_reply(message_id, body, user_google_email, reply_mode, to, cc, bcc, content_type, html_body)
+
+    @mcp.tool(
+        name="forward_gmail_message",
+        description="Forward a Gmail message to specified recipients with HTML formatting preservation and elicitation support",
+        tags={"gmail", "forward", "send", "email", "html", "elicitation", "compose"},
+        annotations={
+            "title": "Forward Gmail Message",
+            "readOnlyHint": False,  # Sends emails, modifies state
+            "destructiveHint": False,  # Creates new content, doesn't destroy
+            "idempotentHint": False,  # Multiple forwards create multiple emails
+            "openWorldHint": True
+        }
+    )
+    async def forward_gmail_message_tool(
+        ctx: Annotated[Context, Field(description="FastMCP context for elicitation support and user interaction")],
+        message_id: Annotated[str, Field(description="The ID of the Gmail message to forward. This will include the original message content and headers")],
+        to: Annotated[Union[str, List[str]], Field(description="Recipient email address(es). Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")],
+        user_google_email: UserGoogleEmail = None,
+        body: Annotated[Optional[str], Field(description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)")] = None,
+        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)")] = "mixed",
+        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. This will be added before the forwarded HTML content. Ignored for 'plain' and 'html' types")] = None,
+        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s). Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
+        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s). Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None
+    ) -> ForwardGmailMessageResponse:
+        """
+        Forward Gmail message with structured output, HTML preservation, and elicitation support.
+        
+        Returns both:
+        - Traditional content: Human-readable confirmation message (automatic via FastMCP)
+        - Structured content: Machine-readable JSON with forward details and HTML preservation status
+        
+        Features:
+        - HTML formatting preservation (maintains original email styling)
+        - Elicitation for recipients not on allow list
+        - Multiple recipients (to, cc, bcc)
+        - Original message headers included (From, Date, Subject, To, Cc)
+        - Auto-injection of user context via middleware
+        - Proper Gmail forward formatting with "---------- Forwarded message ---------" separator
+        
+        HTML Preservation Strategy:
+        - Uses 'mixed' content type by default for maximum compatibility
+        - Preserves original HTML structure and inline styles
+        - Includes both plain text and HTML versions for email client compatibility
+        - Maintains formatting even when forwarded through Gmail
+        
+        Args:
+            ctx: FastMCP context for user interactions and elicitation
+            message_id: ID of the Gmail message to forward
+            to: Recipient email address(es)
+            user_google_email: User's email address (auto-injected if None)
+            body: Optional additional message before forwarded content
+            content_type: How to handle original message formatting
+            html_body: HTML content for mixed-type forwards
+            cc: CC recipients (optional)
+            bcc: BCC recipients (optional)
+            
+        Returns:
+        ForwardGmailMessageResponse: Structured response with forward status and HTML preservation info
+        """
+        return await forward_gmail_message(ctx, message_id, to, user_google_email, body, content_type, html_body, cc, bcc)
+
+    @mcp.tool(
+        name="draft_gmail_forward",
+        description="Create a draft forward of a Gmail message with HTML formatting preservation",
+        tags={"gmail", "draft", "forward", "email", "html", "save", "compose"},
+        annotations={
+            "title": "Draft Gmail Forward",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True
+        }
+    )
+    async def draft_gmail_forward_tool(
+        message_id: Annotated[str, Field(description="The ID of the Gmail message to create a forward draft for. This will include the original message content and headers")],
+        to: Annotated[Union[str, List[str]], Field(description="Recipient email address(es). Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")],
+        user_google_email: UserGoogleEmail = None,
+        body: Annotated[Optional[str], Field(description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)")] = None,
+        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)")] = "mixed",
+        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. This will be added before the forwarded HTML content. Ignored for 'plain' and 'html' types")] = None,
+        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s). Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
+        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s). Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None
+    ) -> DraftGmailForwardResponse:
+        """
+        Create Gmail forward draft with structured output and HTML preservation.
+        
+        Returns both:
+        - Traditional content: Human-readable confirmation message (automatic via FastMCP)
+        - Structured content: Machine-readable JSON with draft creation and HTML preservation info
+        
+        Features:
+        - HTML formatting preservation (maintains original email styling)
+        - Multiple recipients (to, cc, bcc)
+        - Original message headers included (From, Date, Subject, To, Cc)
+        - Auto-injection of user context via middleware
+        - Proper Gmail forward formatting with "---------- Forwarded message ---------" separator
+        - Draft saved to Gmail drafts folder for later review/sending
+        
+        HTML Preservation Strategy:
+        - Uses 'mixed' content type by default for maximum compatibility
+        - Preserves original HTML structure and inline styles
+        - Includes both plain text and HTML versions for email client compatibility
+        - Maintains formatting even when forwarded through Gmail
+        
+        Args:
+            message_id: ID of the Gmail message to draft forward for
+            to: Recipient email address(es)
+            user_google_email: User's email address (auto-injected if None)
+            body: Optional additional message before forwarded content
+            content_type: How to handle original message formatting
+            html_body: HTML content for mixed-type draft forwards
+            cc: CC recipients (optional)
+            bcc: BCC recipients (optional)
+            
+        Returns:
+        DraftGmailForwardResponse: Structured response with draft creation and HTML preservation info
+        """
+        return await draft_gmail_forward(message_id, to, user_google_email, body, content_type, html_body, cc, bcc)

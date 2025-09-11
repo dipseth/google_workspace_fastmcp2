@@ -10,7 +10,7 @@ from config.enhanced_logging import setup_logger
 logger = setup_logger()
 import time
 from typing import Optional, Dict, Any, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import jwt
 
 from fastmcp import Context
@@ -112,7 +112,7 @@ class UnifiedSession:
                 auth_provider="google",
                 metadata={
                     "client_id": auth_info.get("client_id"),
-                    "issued_at": datetime.utcnow().isoformat()
+                    "issued_at": datetime.now(UTC).isoformat()
                 }
             )
             
@@ -152,7 +152,7 @@ class UnifiedSession:
                 metadata={
                     "client_id": credentials.get("client_id"),
                     "token_uri": credentials.get("token_uri"),
-                    "imported_at": datetime.utcnow().isoformat()
+                    "imported_at": datetime.now(UTC)
                 }
             )
             
@@ -177,7 +177,7 @@ class UnifiedSession:
         """
         if self._session_state:
             # Update last accessed time
-            self._session_state.last_accessed = datetime.utcnow()
+            self._session_state.last_accessed = datetime.now(UTC)
         return self._session_state
     
     def is_session_valid(self) -> bool:
@@ -191,7 +191,7 @@ class UnifiedSession:
         
         # Check token expiry
         if self._session_state.token_expiry:
-            if datetime.utcnow() >= self._session_state.token_expiry:
+            if datetime.now(UTC) >= self._session_state.token_expiry:
                 if self._enhanced_logging:
                     logger.warning(f"⏰ Session expired for {self._session_state.user_email}")
                 return False
@@ -212,7 +212,7 @@ class UnifiedSession:
         
         # Check if we're within the buffer period
         refresh_time = self._session_state.token_expiry - timedelta(seconds=buffer_seconds)
-        return datetime.utcnow() >= refresh_time
+        return datetime.now(UTC) >= refresh_time
     
     def update_tokens(self, access_token: str, refresh_token: Optional[str] = None, 
                      expires_in: Optional[int] = None):
@@ -232,7 +232,7 @@ class UnifiedSession:
         if expires_in:
             self._session_state.token_expiry = self._calculate_expiry(expires_in)
         
-        self._session_state.last_accessed = datetime.utcnow()
+        self._session_state.last_accessed = datetime.now(UTC)
         
         if self._enhanced_logging:
             logger.info(f"🔄 Updated tokens for {self._session_state.user_email}")
@@ -252,7 +252,7 @@ class UnifiedSession:
     
     def _calculate_expiry(self, expires_in: int) -> datetime:
         """Calculate token expiry time."""
-        return datetime.utcnow() + timedelta(seconds=expires_in)
+        return datetime.now(UTC) + timedelta(seconds=expires_in)
     
     def _parse_legacy_expiry(self, expiry: Any) -> Optional[datetime]:
         """Parse legacy expiry format."""

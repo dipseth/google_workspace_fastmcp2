@@ -12,7 +12,7 @@ import json
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any, Union, List
-from datetime import datetime
+from datetime import datetime, UTC 
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -31,8 +31,8 @@ class CredentialMetadata(BaseModel):
     """Metadata for stored credentials."""
     
     format: CredentialFormat = Field(..., description="Credential format")
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation time")
-    last_modified: datetime = Field(default_factory=datetime.utcnow, description="Last modification time")
+    created_at: datetime = Field(default_factory=datetime.now, description="Creation time")
+    last_modified: datetime = Field(default_factory=datetime.now, description="Last modification time")
     migrated: bool = Field(False, description="Whether credentials have been migrated")
     migration_date: Optional[datetime] = Field(None, description="Migration date if migrated")
     source_format: Optional[str] = Field(None, description="Original format before migration")
@@ -98,7 +98,7 @@ class CredentialBridge:
                       success: bool, details: Optional[str] = None):
         """Log a migration attempt."""
         entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "user_email": user_email,
             "source_format": source_format,
             "target_format": target_format,
@@ -186,7 +186,7 @@ class CredentialBridge:
             cred_file = self.credentials_dir / filename
             
             # Update metadata
-            stored_credential.metadata.last_modified = datetime.utcnow()
+            stored_credential.metadata.last_modified = datetime.now(UTC)
             stored_credential.metadata.format = format_type
             
             # Write to file
@@ -237,7 +237,7 @@ class CredentialBridge:
             # Update metadata
             stored_cred.credentials = converted_creds
             stored_cred.metadata.migrated = True
-            stored_cred.metadata.migration_date = datetime.utcnow()
+            stored_cred.metadata.migration_date = datetime.now(UTC)
             stored_cred.metadata.source_format = source_format.value
             stored_cred.metadata.format = target_format
             
@@ -345,7 +345,7 @@ class CredentialBridge:
                     "scopes": credentials.get("scopes", [])
                 },
                 "metadata": {
-                    "created": datetime.utcnow().isoformat(),
+                    "created": datetime.now(UTC).isoformat(),
                     "source_format": source.value
                 }
             }

@@ -61,26 +61,7 @@ TEST_WEBHOOK_URL = os.getenv("TEST_CHAT_WEBHOOK_URL", "https://chat.googleapis.c
 class TestUnifiedCardTool:
     """Test the Unified Card Tool using the FastMCP Client."""
     
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        # Get JWT token for authentication if enabled
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        try:
-            async with client:
-                yield client
-        except Exception as e:
-            print(f"Error in client fixture: {str(e)}")
-            # Create a mock client that won't cause errors when tests try to use it
-            class MockClient:
-                async def call_tool(self, *args, **kwargs):
-                    return [type('obj', (object,), {'text': '{"results": [], "count": 0}'})]
-                
-                async def list_tools(self):
-                    return [type('obj', (object,), {'name': 'mock_tool'})]
-            
-            yield MockClient()
+    # Use standardized client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_unified_card_tools_available(self, client):

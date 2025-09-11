@@ -78,14 +78,7 @@ TEST_SPACE_ID = extract_space_id_from_webhook(TEST_WEBHOOK_URL)
 class TestSendDynamicCard:
     """Test the send_dynamic_card tool with different card variations."""
     
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        # Get JWT token for authentication if enabled
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        async with client:
-            yield client
+    # Use standardized client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_send_dynamic_card_tool_available(self, client):

@@ -289,9 +289,13 @@ class ReplyGmailMessageResponse(TypedDict):
     reply_message_id: NotRequired[Optional[str]]  # Optional when there's an error
     original_message_id: str
     thread_id: NotRequired[Optional[str]]  # Optional when there's an error
-    replied_to: NotRequired[Optional[str]]  # Optional when there's an error
+    replied_to: NotRequired[Optional[str]]  # Recipients who received the reply (comma-separated)
     subject: NotRequired[Optional[str]]  # Optional when there's an error
     content_type: str
+    reply_mode: NotRequired[str]  # "sender_only", "reply_all", or "custom"
+    to_recipients: NotRequired[List[str]]  # List of To recipients
+    cc_recipients: NotRequired[List[str]]  # List of CC recipients
+    bcc_recipients: NotRequired[List[str]]  # List of BCC recipients
     userEmail: str
     error: NotRequired[Optional[str]]
 
@@ -302,8 +306,50 @@ class DraftGmailReplyResponse(TypedDict):
     draft_id: NotRequired[Optional[str]]  # Optional when there's an error
     original_message_id: str
     thread_id: NotRequired[Optional[str]]  # Optional when there's an error
-    replied_to: NotRequired[Optional[str]]  # Optional when there's an error
+    replied_to: NotRequired[Optional[str]]  # Recipients who would receive the reply (comma-separated)
     subject: NotRequired[Optional[str]]  # Optional when there's an error
     content_type: str
+    reply_mode: NotRequired[str]  # "sender_only", "reply_all", or "custom"
+    to_recipients: NotRequired[List[str]]  # List of To recipients
+    cc_recipients: NotRequired[List[str]]  # List of CC recipients
+    bcc_recipients: NotRequired[List[str]]  # List of BCC recipients
+    userEmail: str
+    error: NotRequired[Optional[str]]
+
+
+class ForwardGmailMessageResponse(TypedDict):
+    """Response structure for forward_gmail_message tool."""
+    success: bool
+    forward_message_id: NotRequired[Optional[str]]  # Optional when there's an error
+    original_message_id: str
+    forwarded_to: NotRequired[Optional[str]]  # Recipients who received the forward (comma-separated)
+    subject: NotRequired[Optional[str]]  # Optional when there's an error
+    content_type: str
+    to_recipients: NotRequired[List[str]]  # List of To recipients
+    cc_recipients: NotRequired[List[str]]  # List of CC recipients
+    bcc_recipients: NotRequired[List[str]]  # List of BCC recipients
+    html_preserved: NotRequired[bool]  # Whether original HTML formatting was preserved
+    userEmail: str
+    error: NotRequired[Optional[str]]
+    # Elicitation support fields
+    elicitationRequired: NotRequired[bool]
+    elicitationNotSupported: NotRequired[bool]
+    recipientsNotAllowed: NotRequired[List[str]]
+    action: NotRequired[str]  # "forwarded", "saved_draft", "blocked", etc.
+    draftId: NotRequired[Optional[str]]  # Draft ID when saved as draft instead
+
+
+class DraftGmailForwardResponse(TypedDict):
+    """Response structure for draft_gmail_forward tool."""
+    success: bool
+    draft_id: NotRequired[Optional[str]]  # Optional when there's an error
+    original_message_id: str
+    forwarded_to: NotRequired[Optional[str]]  # Recipients who would receive the forward (comma-separated)
+    subject: NotRequired[Optional[str]]  # Optional when there's an error
+    content_type: str
+    to_recipients: NotRequired[List[str]]  # List of To recipients
+    cc_recipients: NotRequired[List[str]]  # List of CC recipients
+    bcc_recipients: NotRequired[List[str]]  # List of BCC recipients
+    html_preserved: NotRequired[bool]  # Whether original HTML formatting was preserved
     userEmail: str
     error: NotRequired[Optional[str]]

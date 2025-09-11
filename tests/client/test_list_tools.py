@@ -208,12 +208,12 @@ class TestFormsListTools(BaseListToolsTest):
     """Test Forms list tools."""
     
     @pytest.mark.asyncio
-    async def test_list_form_responses(self, client):
+    async def test_list_form_responses(self, client, real_forms_form_id):
         """Test listing form responses."""
         # This requires a form_id, so we'll test with a placeholder
         result = await client.call_tool("list_form_responses", {
             "user_google_email": TEST_EMAIL,
-            "form_id": "test_form_id_placeholder"
+            "form_id": real_forms_form_id
         })
         
         assert result is not None
@@ -508,12 +508,12 @@ class TestPhotosListTools(BaseListToolsTest):
             f"Photos albums response didn't match expected pattern: {content}"
     
     @pytest.mark.asyncio
-    async def test_list_album_photos(self, client):
+    async def test_list_album_photos(self, client, real_photos_album_id):
         """Test listing photos in an album."""
         # This requires an album_id, so we'll test with a placeholder
         result = await client.call_tool("list_album_photos", {
             "user_google_email": TEST_EMAIL,
-            "album_id": "test_album_id_placeholder"
+            "album_id": real_photos_album_id
         })
         
         assert result is not None

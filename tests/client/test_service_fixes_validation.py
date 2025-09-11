@@ -322,39 +322,8 @@ class TestServiceListResourceFixes:
 class TestServiceListResourceErrorHandling:
     """Test that error handling is consistent and helpful."""
     
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        
-        # Set environment variables to disable SSL verification
-        original_verify = os.environ.get('HTTPX_VERIFY')
-        original_ssl_verify = os.environ.get('SSL_VERIFY')
-        
-        os.environ['HTTPX_VERIFY'] = 'false'
-        os.environ['SSL_VERIFY'] = 'false'
-        
-        try:
-            # Create transport
-            transport = StreamableHttpTransport(
-                SERVER_URL,
-                auth=auth_config
-            )
-            
-            client = Client(transport)
-            async with client:
-                yield client
-        finally:
-            # Restore original environment
-            if original_verify is not None:
-                os.environ['HTTPX_VERIFY'] = original_verify
-            else:
-                os.environ.pop('HTTPX_VERIFY', None)
-                
-            if original_ssl_verify is not None:
-                os.environ['SSL_VERIFY'] = original_ssl_verify
-            else:
-                os.environ.pop('SSL_VERIFY', None)
+    # Use standardized client fixture from conftest.py
+    # Note: This test class may need special SSL configuration if issues arise
     
     @pytest.mark.asyncio
     async def test_helpful_error_messages(self, client):

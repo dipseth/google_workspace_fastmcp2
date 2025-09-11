@@ -237,6 +237,124 @@ def _quote_original_message(original_body: str) -> str:
     return "\n".join(quoted_lines)
 
 
+def _prepare_forward_subject(subject: str) -> str:
+    """
+    Prepare the subject line for a forward email.
+    Adds 'Fwd: ' prefix if not already present (case-insensitive).
+
+    Args:
+        subject (str): Original email subject.
+
+    Returns:
+        str: Prepared forward subject.
+    """
+    if subject is None:
+        return "Fwd: (no subject)"
+    if re.match(r"(?i)^fwd:\s", subject):
+        return subject
+    return f"Fwd: {subject}"
+
+
+def _extract_html_body(payload):
+    """
+    Helper function to extract HTML body from a Gmail message payload.
+    Prioritizes HTML content over plain text to preserve formatting.
+
+    Args:
+        payload (dict): The message payload from Gmail API
+
+    Returns:
+        str: The HTML body content, or empty string if not found
+    """
+    html_body = ""
+    parts = [payload] if "parts" not in payload else payload.get("parts", [])
+
+    part_queue = list(parts)  # Use a queue for BFS traversal of parts
+    while part_queue:
+        part = part_queue.pop(0)
+        if part.get("mimeType") == "text/html" and part.get("body", {}).get("data"):
+            data = base64.urlsafe_b64decode(part["body"]["data"])
+            html_body = data.decode("utf-8", errors="ignore")
+            break  # Found HTML body
+        elif part.get("mimeType", "").startswith("multipart/") and "parts" in part:
+            part_queue.extend(part.get("parts", []))  # Add sub-parts to the queue
+
+    # If no HTML found, check the main payload body if it exists
+    if (
+        not html_body
+        and payload.get("mimeType") == "text/html"
+        and payload.get("body", {}).get("data")
+    ):
+        data = base64.urlsafe_b64decode(payload["body"]["data"])
+        html_body = data.decode("utf-8", errors="ignore")
+
+    return html_body
+
+
+def _format_forward_content(original_body: str, original_headers: dict, is_html: bool = False) -> str:
+    """
+    Format original message content for forwarding with proper headers.
+    
+    Args:
+        original_body (str): The original message body (plain text or HTML)
+        original_headers (dict): Dictionary of original message headers
+        is_html (bool): Whether the content is HTML or plain text
+        
+    Returns:
+        str: Formatted forward content with headers
+    """
+    if not original_body:
+        return ""
+    
+    # Extract key headers
+    from_header = original_headers.get("From", "(unknown sender)")
+    to_header = original_headers.get("To", "")
+    cc_header = original_headers.get("Cc", "")
+    date_header = original_headers.get("Date", "")
+    subject_header = original_headers.get("Subject", "(no subject)")
+    
+    if is_html:
+        # HTML format with proper styling
+        separator = "---------- Forwarded message ---------"
+        header_lines = []
+        
+        header_lines.append(f"<strong>From:</strong> {html.escape(from_header)}<br>")
+        if date_header:
+            header_lines.append(f"<strong>Date:</strong> {html.escape(date_header)}<br>")
+        header_lines.append(f"<strong>Subject:</strong> {html.escape(subject_header)}<br>")
+        if to_header:
+            header_lines.append(f"<strong>To:</strong> {html.escape(to_header)}<br>")
+        if cc_header:
+            header_lines.append(f"<strong>Cc:</strong> {html.escape(cc_header)}<br>")
+        
+        formatted_content = (
+            f"<br><br>{html.escape(separator)}<br>"
+            + "".join(header_lines)
+            + f"<br>{original_body}"
+        )
+    else:
+        # Plain text format
+        separator = "---------- Forwarded message ---------"
+        header_lines = []
+        
+        header_lines.append(f"From: {from_header}")
+        if date_header:
+            header_lines.append(f"Date: {date_header}")
+        header_lines.append(f"Subject: {subject_header}")
+        if to_header:
+            header_lines.append(f"To: {to_header}")
+        if cc_header:
+            header_lines.append(f"Cc: {cc_header}")
+        
+        formatted_content = (
+            f"\n\n{separator}\n"
+            + "\n".join(header_lines)
+            + f"\n\n{original_body}"
+        )
+    
+    return formatted_content
+
+
 def _parse_email_addresses(email_input: Union[str, List[str]]) -> List[str]:
     """
     Parse email addresses from various input formats.
@@ -259,6 +377,39 @@ def _parse_email_addresses(email_input: Union[str, List[str]]) -> List[str]:
         return [email.strip() for email in email_input.split(',') if email.strip()]
     else:
         return []
+
+
+def extract_email_addresses(header_value: str) -> List[str]:
+    """
+    Extract email addresses from an email header value.
+    
+    Handles formats like:
+    - "John Doe <john@example.com>"
+    - "john@example.com"
+    - "John Doe <john@example.com>, Jane Smith <jane@example.com>"
+    - "john@example.com, jane@example.com"
+    
+    Args:
+        header_value: The raw header value string from Gmail API
+        
+    Returns:
+        List of extracted email addresses (lowercase, unique)
+    """
+    if not header_value:
+        return []
+    
+    # Regular expression to match email addresses
+    # This pattern matches email addresses either standalone or within angle brackets
+    # Using a more precise pattern that handles both cases correctly
+    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    
+    # Find all email addresses in the header
+    matches = re.findall(email_pattern, header_value)
+    
+    # Remove duplicates and return lowercase
+    unique_emails = list(set(email.strip().lower() for email in matches))
+    
+    return unique_emails
 
 
 def _html_to_plain_text(html_content: str) -> str:

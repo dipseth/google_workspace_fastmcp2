@@ -11,7 +11,7 @@ from config.enhanced_logging import setup_logger
 logger = setup_logger()
 import os
 from typing import Optional, Dict, Any, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import asyncio
 from functools import lru_cache
 
@@ -47,7 +47,7 @@ class ServiceCache:
                 return None
             
             # Check if expired
-            if datetime.utcnow() - self._timestamps[key] > self._ttl:
+            if datetime.now(UTC) - self._timestamps[key] > self._ttl:
                 del self._cache[key]
                 del self._timestamps[key]
                 return None
@@ -58,7 +58,7 @@ class ServiceCache:
         """Store service in cache."""
         async with self._lock:
             self._cache[key] = service
-            self._timestamps[key] = datetime.utcnow()
+            self._timestamps[key] = datetime.now(UTC)
     
     async def clear(self):
         """Clear all cached services."""

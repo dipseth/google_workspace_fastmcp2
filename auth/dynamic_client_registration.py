@@ -8,7 +8,7 @@ import json
 import logging
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from typing_extensions import Dict, Any, Optional
 
 # Import OAuth Proxy for secure credential management
@@ -209,15 +209,23 @@ class DynamicClientRegistry:
             "https://claude.com/api/mcp/auth_callback",  # Claude.ai future
         ]
         
-        # Set defaults
+        # Set defaults with proper scope handling
+        default_scope = _get_dcr_default_scope()
+        provided_scope = metadata.get("scope", "")
+        
+        # Ensure we always have a scope - use default if not provided or empty
+        final_scope = provided_scope if provided_scope.strip() else default_scope
+        
         validated = {
             "client_name": metadata.get("client_name", "MCP Client"),
             "redirect_uris": metadata.get("redirect_uris", default_redirect_uris),
             "grant_types": metadata.get("grant_types", ["authorization_code", "refresh_token"]),
             "response_types": metadata.get("response_types", ["code"]),
             "token_endpoint_auth_method": metadata.get("token_endpoint_auth_method", "client_secret_basic"),
-            "scope": metadata.get("scope", _get_dcr_default_scope()),
+            "scope": final_scope,
         }
+        
+        logger.info(f"📋 DCR validation: scope='{final_scope[:100]}...' (length: {len(final_scope)})")
         
         # Add any additional metadata
         for key, value in metadata.items():

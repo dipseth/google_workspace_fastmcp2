@@ -98,11 +98,11 @@ class TestEnhancedGmailFilters:
                 "please check your gmail permissions" in content.lower() or
                 "invalid label" in content.lower())
     
-    async def _test_get_gmail_filter_no_auth(self, client):
+    async def _test_get_gmail_filter_no_auth(self, client, real_gmail_filter_id=None):
         """Test getting Gmail filter without authentication."""
         result = await client.call_tool("get_gmail_filter", {
             "user_google_email": TEST_EMAIL,
-            "filter_id": "test_filter_id"
+            "filter_id": real_gmail_filter_id or "test_filter_id"
         })
         
         assert result is not None
@@ -113,11 +113,11 @@ class TestEnhancedGmailFilters:
                 "filter details" in content.lower() or
                 "filter not found" in content.lower())
     
-    async def _test_delete_gmail_filter_no_auth(self, client):
+    async def _test_delete_gmail_filter_no_auth(self, client, real_gmail_filter_id=None):
         """Test deleting Gmail filter without authentication."""
         result = await client.call_tool("delete_gmail_filter", {
             "user_google_email": TEST_EMAIL,
-            "filter_id": "test_filter_id"
+            "filter_id": real_gmail_filter_id or "test_filter_id"
         })
         
         assert result is not None

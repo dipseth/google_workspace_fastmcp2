@@ -319,8 +319,8 @@ class ScopeRegistry:
         "chat_basic": ["base.userinfo_email", "base.openid", "chat.messages_readonly", "chat.messages"],
         "forms_basic": ["base.userinfo_email", "base.openid", "forms.body", "forms.responses_readonly"],
         "slides_basic": ["base.userinfo_email", "base.openid", "slides.full", "slides.readonly"],
-        "photos_basic": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly"],
-        "photos_full": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly", "photos.full", "photos.full"],
+        "photos_basic": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly", "photos.readonly_appcreated"],
+        "photos_full": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly", "photos.full", "photos.readonly_appcreated", "photos.edit_appcreated"],
         "tasks_basic": ["base.userinfo_email", "base.openid", "tasks.readonly", "tasks.full"],
         "tasks_full": ["base.userinfo_email", "base.openid", "tasks.full"],
         
@@ -340,7 +340,7 @@ class ScopeRegistry:
             "sheets.readonly", "sheets.full",
             "forms.body", "forms.body_readonly", "forms.responses_readonly",
             "slides.full", "slides.readonly",
-            "photos.readonly", "photos.appendonly", "photos.full",
+            "photos.readonly", "photos.appendonly", "photos.full", "photos.readonly_appcreated", "photos.edit_appcreated",
             "calendar.readonly", "calendar.events", "calendar.full",
             "tasks.readonly", "tasks.full"
         ]

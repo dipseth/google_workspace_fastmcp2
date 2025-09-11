@@ -24,6 +24,12 @@ import pytest_asyncio
 import asyncio
 import os
 from .base_test_config import create_test_client, print_test_configuration
+from .resource_helpers import (
+    get_real_gmail_message_id, get_real_gmail_filter_id,
+    get_real_drive_document_id, get_real_drive_folder_id,
+    get_real_calendar_event_id, get_real_photos_album_id,
+    get_real_forms_form_id, get_real_chat_space_id
+)
 
 
 def pytest_configure(config):
@@ -80,6 +86,59 @@ async def custom_client():
         async with client:
             yield client
     return _create_client
+
+
+# =============================================================================
+# Real ID Fixtures from Resource System
+# =============================================================================
+
+@pytest_asyncio.fixture
+async def real_gmail_message_id(client):
+    """Get a real Gmail message ID from resources."""
+    real_id = await get_real_gmail_message_id(client)
+    return real_id or "fake_message_id_fallback"
+
+@pytest_asyncio.fixture  
+async def real_gmail_filter_id(client):
+    """Get a real Gmail filter ID from resources."""
+    real_id = await get_real_gmail_filter_id(client)
+    return real_id or "fake_filter_id_fallback"
+
+@pytest_asyncio.fixture
+async def real_drive_document_id(client):
+    """Get a real Drive document ID from resources."""
+    real_id = await get_real_drive_document_id(client)
+    return real_id or "fake_document_id_fallback"
+
+@pytest_asyncio.fixture
+async def real_drive_folder_id(client):
+    """Get a real Drive folder ID from resources."""
+    real_id = await get_real_drive_folder_id(client)
+    return real_id or "fake_folder_id_fallback"
+
+@pytest_asyncio.fixture
+async def real_calendar_event_id(client):
+    """Get a real Calendar event ID from resources."""
+    real_id = await get_real_calendar_event_id(client)
+    return real_id or "fake_event_id_fallback"
+
+@pytest_asyncio.fixture
+async def real_photos_album_id(client):
+    """Get a real Photos album ID from resources."""
+    real_id = await get_real_photos_album_id(client)
+    return real_id or "fake_album_id_fallback"
+
+@pytest_asyncio.fixture
+async def real_forms_form_id(client):
+    """Get a real Forms form ID from resources."""
+    real_id = await get_real_forms_form_id(client)
+    return real_id or "fake_form_id_fallback"
+
+@pytest_asyncio.fixture
+async def real_chat_space_id(client):
+    """Get a real Chat space ID from resources."""
+    real_id = await get_real_chat_space_id(client)
+    return real_id or "fake_space_id_fallback"
 
 
 # Configure asyncio mode for all tests

@@ -65,13 +65,7 @@ TEST_SPACE_ID = "spaces/test"
 class TestNLPCardParser:
     """Test the NLP card parser functionality integrated with send_dynamic_card tool."""
     
-    @pytest.fixture
-    async def client(self):
-        """Create a client connected to the running server."""
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        client = Client(SERVER_URL, auth=auth_config)
-        async with client:
-            yield client
+    # Use standardized client fixture from conftest.py
     
     @pytest.mark.asyncio
     async def test_nlp_basic_card_extraction(self, client):

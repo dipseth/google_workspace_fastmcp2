@@ -9,7 +9,7 @@ import json
 import os
 from typing_extensions import Optional, Tuple, Any
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 
 # Allow insecure transport for local development
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -37,6 +37,8 @@ class GoogleAuthError(Exception):
 
 def _get_credentials_path(user_email: str) -> Path:
     """Get the path to store credentials for a specific user."""
+    if not user_email:
+        raise GoogleAuthError("Cannot get credentials path: user_email is required")
     safe_email = user_email.replace("@", "_at_").replace(".", "_")
     return Path(settings.credentials_dir) / f"{safe_email}_credentials.json"
 
@@ -278,6 +280,9 @@ def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentia
 
 def get_valid_credentials(user_email: str) -> Optional[Credentials]:
     """Get valid credentials for a user, refreshing if necessary."""
+    if not user_email:
+        raise GoogleAuthError("Cannot get credentials: user_email is required")
+        
     credentials = _load_credentials(user_email)
     
     if not credentials:
@@ -331,6 +336,9 @@ async def initiate_oauth_flow(user_email: str, service_name: str = "Google Drive
     Returns:
         Authorization URL for the user to visit
     """
+    if not user_email:
+        raise GoogleAuthError("Cannot initiate OAuth flow: user_email is required")
+        
     logger.info(f"Initiating OAuth flow for {user_email}")
     
     # Get OAuth client configuration
@@ -510,6 +518,9 @@ async def get_drive_service(user_email: str):
     Returns:
         Authenticated Google Drive service
     """
+    if not user_email:
+        raise GoogleAuthError("Cannot get drive service: user_email is required")
+        
     # Import here to avoid circular imports
     from .service_manager import get_google_service
     

@@ -20,7 +20,7 @@ import os
 from typing_extensions import Any, Dict, List, Optional, Tuple, Union, Callable, Type
 import asyncio
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -1153,7 +1153,7 @@ class ModuleWrapper:
             
             # Generate a version identifier for this indexing run
             # This helps track when components were last indexed
-            index_version = datetime.utcnow().isoformat()
+            index_version = datetime.now(UTC).isoformat()
             
             # Use smaller batch size for better performance
             batch_size = 50

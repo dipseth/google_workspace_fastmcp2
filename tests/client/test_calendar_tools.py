@@ -728,10 +728,10 @@ class TestCalendarTools:
         assert any(keyword in content.lower() for keyword in valid_responses), f"Parameter conflict not handled correctly: {content}"
     
     @pytest.mark.asyncio
-    async def test_modify_event(self, client, test_event_id):
+    async def test_modify_event(self, client, real_calendar_event_id):
         """Test modifying an existing event."""
         # Use fake event ID if no real one is available (should get "not found" response)
-        event_id = test_event_id or "fake_event_id_for_testing"
+        event_id = real_calendar_event_id
         
         result = await client.call_tool("modify_event", {
             "user_google_email": TEST_EMAIL,
@@ -759,10 +759,10 @@ class TestCalendarTools:
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
     
     @pytest.mark.asyncio
-    async def test_modify_event_missing_fields(self, client, test_event_id):
+    async def test_modify_event_missing_fields(self, client, real_calendar_event_id):
         """Test modifying event with no fields provided."""
         # Use fake event ID if no real one is available (should get proper error response)
-        event_id = test_event_id or "fake_event_id_for_testing"
+        event_id = real_calendar_event_id
         
         result = await client.call_tool("modify_event", {
             "user_google_email": TEST_EMAIL,
@@ -785,10 +785,10 @@ class TestCalendarTools:
         assert "no fields provided" in content.lower() or "error" in content.lower()
     
     @pytest.mark.asyncio
-    async def test_get_event(self, client, test_event_id):
+    async def test_get_event(self, client, real_calendar_event_id):
         """Test getting a specific event by ID."""
         # Use fake event ID if no real one is available (should get "not found" response)
-        event_id = test_event_id or "fake_event_id_for_testing"
+        event_id = real_calendar_event_id
         
         result = await client.call_tool("get_event", {
             "user_google_email": TEST_EMAIL,
@@ -814,10 +814,10 @@ class TestCalendarTools:
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
     
     @pytest.mark.asyncio
-    async def test_delete_event(self, client, test_event_id):
+    async def test_delete_event(self, client, real_calendar_event_id):
         """Test deleting an event."""
         # Use fake event ID if no real one is available (should get "not found" response)
-        event_id = test_event_id or "fake_event_id_for_testing"
+        event_id = real_calendar_event_id
         
         result = await client.call_tool("delete_event", {
             "user_google_email": TEST_EMAIL,
