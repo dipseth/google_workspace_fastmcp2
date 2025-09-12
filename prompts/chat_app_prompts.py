@@ -190,8 +190,8 @@ This {complexity_description} implementation showcases FastMCP's advanced parame
         """
         
         request_id = context.request_id
-        services_list = ", ".join(required_services)
-        scopes_list = "\n".join([f"- {scope}" for scope in custom_scopes])
+        services_list = ", ".join(required_services.split(','))
+        scopes_list = "\n".join([f"- {scope.strip()}" for scope in custom_scopes.split(',')])
         
         setup_messages = [
             Message(
@@ -201,10 +201,10 @@ This {complexity_description} implementation showcases FastMCP's advanced parame
 *Request ID: {request_id}*
 
 ## Project Configuration
-- **App Name**: {app_configuration.get('name', 'ChatBot')}
-- **Version**: {app_configuration.get('version', '1.0.0')}
-- **Environment**: {environment.value.title()}
-- **Deployment Target**: {deployment_target.value.replace('_', ' ').title()}
+- **App Name**: {app_name}
+- **Version**: {app_version}
+- **Environment**: {environment.title()}
+- **Deployment Target**: {deployment_target.replace('_', ' ').title()}
 
 ## Prerequisites
 1. Google Cloud Project with billing enabled
@@ -218,11 +218,11 @@ This {complexity_description} implementation showcases FastMCP's advanced parame
 ## OAuth Scopes
 {scopes_list}
 
-## Authentication Setup ({authentication_type.value.replace('_', ' ').title()})
+## Authentication Setup ({authentication_type.replace('_', ' ').title()})
 """)
             ),
             Message(
-                role="assistant", 
+                role="assistant",
                 content=TextContent(text=f"""
 ## Step-by-Step Setup
 
@@ -241,7 +241,7 @@ gcloud iam service-accounts keys create service-account-key.json \\
     --iam-account=chat-bot-service@PROJECT_ID.iam.gserviceaccount.com
 ```
 
-### 3. Deploy to {deployment_target.value.replace('_', ' ').title()}
+### 3. Deploy to {deployment_target.replace('_', ' ').title()}
 """)
             ),
             Message(
@@ -249,15 +249,15 @@ gcloud iam service-accounts keys create service-account-key.json \\
                 content=TextContent(text=f"""
 ## Platform-Specific Deployment
 
-### {deployment_target.value.replace('_', ' ').title()} Configuration
+### {deployment_target.replace('_', ' ').title()} Configuration
 
 ```yaml
 # app.yaml or cloudbuild.yaml
-service: {app_configuration.get('name', 'chatbot').lower()}
+service: {app_name.lower()}
 runtime: python39
 env_variables:
   GOOGLE_APPLICATION_CREDENTIALS: service-account-key.json
-  ENVIRONMENT: {environment.value}
+  ENVIRONMENT: {environment}
   MONITORING_ENABLED: {str(enable_monitoring).lower()}
 
 automatic_scaling:
@@ -316,18 +316,26 @@ This setup guide demonstrates FastMCP's sophisticated parameter handling and mul
         """
         
         request_id = context.request_id
-        secondary_list = ", ".join(secondary_services)
-        triggers_list = ", ".join(trigger_events)
+        secondary_list = ", ".join(secondary_services.split(','))
+        triggers_list = ", ".join(trigger_events.split(','))
         automation_desc = "manual" if automation_level < 0.3 else "semi-automated" if automation_level < 0.7 else "fully automated"
+        
+        # Create integration settings from available parameters
+        integration_settings = {
+            'sync_frequency': sync_frequency,
+            'data_format': data_format,
+            'enable_notifications': enable_notifications,
+            'automation_level': automation_level
+        }
         
         integration_guide = f"""
 # Advanced Google Workspace Service Integration
 *Request ID: {request_id}*
 
 ## Integration Overview
-- **Primary Service**: {primary_service.value.title()}
+- **Primary Service**: {primary_service.title()}
 - **Secondary Services**: {secondary_list}
-- **Workflow Type**: {workflow_type.value.replace('_', ' ').title()}
+- **Workflow Type**: {workflow_type.replace('_', ' ').title()}
 - **Automation Level**: {automation_desc} ({automation_level:.2f})
 
 ## Configuration Settings
@@ -341,17 +349,17 @@ This setup guide demonstrates FastMCP's sophisticated parameter handling and mul
 ### Service Integration Pattern
 ```python
 class GoogleWorkspaceIntegrator:
-    def __init__(self, primary_service="{primary_service.value}"):
+    def __init__(self, primary_service="{primary_service}"):
         self.primary = self.get_service(primary_service)
         self.secondary_services = {{
-            {chr(10).join([f'            "{service}": self.get_service("{service}"),' for service in secondary_services])}
+            {chr(10).join([f'            "{service.strip()}": self.get_service("{service.strip()}"),' for service in secondary_services.split(',')])}
         }}
-        self.workflow_type = "{workflow_type.value}"
+        self.workflow_type = "{workflow_type}"
         self.automation_level = {automation_level}
     
     def setup_workflow(self):
         workflow_config = {{
-            "triggers": {trigger_events},
+            "triggers": {trigger_events.split(',')},
             "actions": self.get_workflow_actions(),
             "notifications": {str(enable_notifications).lower()}
         }}
@@ -360,15 +368,15 @@ class GoogleWorkspaceIntegrator:
 
 ### Workflow Implementation
 
-#### {workflow_type.value.replace('_', ' ').title()} Workflow
+#### {workflow_type.replace('_', ' ').title()} Workflow
 ```python
 async def handle_workflow_event(event_type, event_data):
-    if event_type in {trigger_events}:
+    if event_type in {trigger_events.split(',')}:
         # Primary service action
         result = await process_primary_action(event_data)
         
         # Secondary service updates
-        for service in {secondary_services}:
+        for service in {secondary_services.split(',')}:
             await sync_with_service(service, result)
         
         # Notification handling
@@ -381,8 +389,8 @@ async def handle_workflow_event(event_type, event_data):
 ## Advanced Features
 
 ### Real-time Synchronization
-- **Sync Frequency**: {integration_settings.get('sync_frequency', 'realtime')}
-- **Data Format**: {integration_settings.get('data_format', 'json')}
+- **Sync Frequency**: {sync_frequency}
+- **Data Format**: {data_format}
 - **Conflict Resolution**: Automatic with rollback capability
 
 ### Automation Capabilities
@@ -449,8 +457,15 @@ This integration pattern showcases FastMCP's advanced typing system and complex 
         """
         
         request_id = context.request_id
-        security_list = ", ".join(security_features)
-        backup_list = ", ".join(backup_strategy)
+        security_list = ", ".join(security_features.split(','))
+        backup_list = ", ".join(backup_strategy.split(','))
+        
+        # Create performance settings from available parameters
+        performance_settings = {
+            'max_instances': max_instances,
+            'memory': memory,
+            'cpu': cpu
+        }
         
         deployment_messages = [
             Message(
@@ -460,9 +475,9 @@ This integration pattern showcases FastMCP's advanced typing system and complex 
 *Request ID: {request_id}*
 
 ## Deployment Configuration
-- **Platform**: {deployment_target.value.replace('_', ' ').title()}
-- **Environment**: {environment.value.title()}
-- **Monitoring**: {monitoring_level.value.title()}
+- **Platform**: {deployment_target.replace('_', ' ').title()}
+- **Environment**: {environment.title()}
+- **Monitoring**: {monitoring_level.title()}
 - **Auto Scaling**: {'Enabled' if enable_auto_scaling else 'Disabled'}
 
 ## Resource Allocation
@@ -483,7 +498,7 @@ This integration pattern showcases FastMCP's advanced typing system and complex 
                 content=TextContent(text=f"""
 ## Infrastructure as Code
 
-### {deployment_target.value.replace('_', ' ').title()} Configuration
+### {deployment_target.replace('_', ' ').title()} Configuration
 ```yaml
 # deployment.yaml
 apiVersion: apps/v1
@@ -492,7 +507,7 @@ metadata:
   name: google-chat-app
   labels:
     app: google-chat-app
-    environment: {environment.value}
+    environment: {environment}
 spec:
   replicas: {3 if enable_auto_scaling else 1}
   selector:
@@ -510,16 +525,16 @@ spec:
         - containerPort: 8080
         resources:
           requests:
-            memory: "{performance_settings.get('memory', '1Gi')}"
-            cpu: "{performance_settings.get('cpu', '500m')}"
+            memory: "{memory}"
+            cpu: "{cpu}"
           limits:
-            memory: "{performance_settings.get('memory', '1Gi')}"
-            cpu: "{performance_settings.get('cpu', '500m')}"
+            memory: "{memory}"
+            cpu: "{cpu}"
         env:
         - name: ENVIRONMENT
-          value: "{environment.value}"
+          value: "{environment}"
         - name: MONITORING_LEVEL
-          value: "{monitoring_level.value}"
+          value: "{monitoring_level}"
 ```
 
 ### Auto Scaling Configuration
@@ -535,7 +550,7 @@ spec:
     kind: Deployment
     name: google-chat-app
   minReplicas: 1
-  maxReplicas: {performance_settings.get('max_instances', '10')}
+  maxReplicas: {max_instances}
   metrics:
   - type: Resource
     resource:
@@ -557,7 +572,7 @@ spec:
                 content=TextContent(text=f"""
 ## Monitoring and Observability
 
-### {monitoring_level.value.title()} Monitoring Setup
+### {monitoring_level.title()} Monitoring Setup
 ```yaml
 # monitoring.yaml
 apiVersion: v1
@@ -567,7 +582,7 @@ metadata:
 data:
   config.yaml: |
     monitoring:
-      level: {monitoring_level.value}
+      level: {monitoring_level}
       metrics:
         - response_time
         - error_rate

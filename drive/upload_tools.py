@@ -104,9 +104,11 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
     async def start_google_auth(
         user_google_email: str = '',
-        service_name:  list[str] = ['base', 'drive', 'gmail', 'calendar', 'docs', 'sheets', 'chat', 'forms', 'slides', 'photos', 'admin', 'cloud', 'tasks', 'youtube', 'script'],
+        service_name:  list[str] = ['drive', 'gmail', 'calendar', 'docs', 'sheets', 'slides', 'photos', 'chat', 'forms'],
         auto_open_browser: Annotated[bool, Field(description="Automatically open browser for authentication (default: True)")] = True,
-        use_pkce: Annotated[bool, Field(description="Use PKCE for authentication (default: True)")] = True
+        use_pkce: Annotated[bool, Field(description="Use PKCE for authentication (default: True, deprecated - use auth_method instead)")] = True,
+        show_service_selection: Annotated[bool, Field(description="Show service selection page before authentication (default: True)")] = True,
+        auth_method: Annotated[Literal['file_credentials', 'pkce_file', 'pkce_memory'], Field(description="Authentication method: 'file_credentials' (legacy), 'pkce_file' (PKCE + file storage), 'pkce_memory' (PKCE + session only)")] = 'pkce_file'
     ) -> StartAuthResponse:
         """
         Initiate Google OAuth2 authentication flow for Google services access with automatic browser opening.
@@ -158,29 +160,40 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             )
         
         try:
-            # Handle service_name parameter following UserGoogleEmailDrive pattern
-            if service_name is None:
-                # Default to ALL services from GOOGLE_API_SCOPES
-                from auth.scope_registry import ScopeRegistry
-                selected_services = list(ScopeRegistry.GOOGLE_API_SCOPES.keys())
-                display_service_name = "All Google Services"
-                logger.info(f"🎯 Using default (ALL services): {selected_services}")
-            elif isinstance(service_name, list):
-                # List of specific services provided
-                selected_services = service_name
-                display_service_name = f"{len(service_name)} Selected Services"
-                logger.info(f"🎯 Multiple services requested: {selected_services}")
+            # Backward compatibility mapping for use_pkce
+            if use_pkce and auth_method == 'file_credentials':
+                logger.warning("Overriding auth_method to 'pkce_file' since use_pkce=True")
+                auth_method = 'pkce_file'
+            elif not use_pkce and auth_method in ['pkce_file', 'pkce_memory']:
+                logger.warning("Overriding auth_method to 'file_credentials' since use_pkce=False")
+                auth_method = 'file_credentials'
+
+            # ALWAYS show service selection UI, but use service_name for pre-selection
+            if isinstance(service_name, list):
+                # List of specific services provided - these will be PRE-SELECTED in the UI
+                pre_selected_services = service_name
+                display_service_name = f"{len(service_name)} Pre-selected Services"
+                logger.info(f"🎯 Will pre-select services in UI: {pre_selected_services}")
+            elif service_name is None:
+                # No pre-selection - let user choose from common defaults
+                pre_selected_services = ['drive', 'gmail', 'calendar', 'docs', 'sheets']  # Common defaults
+                display_service_name = "Google Services (Common Pre-selected)"
+                logger.info(f"🎯 Will pre-select common services in UI: {pre_selected_services}")
             else:
-                # Single service display name (backward compatibility)
-                selected_services = None
+                # Single service display name (backward compatibility) - no pre-selection
+                pre_selected_services = []
                 display_service_name = str(service_name)
-                logger.info(f"🎯 Service display name: {display_service_name}")
+                logger.info(f"🎯 Service display name, no pre-selection: {display_service_name}")
             
+            # ALWAYS force service selection UI (selected_services=None)
+            # The UI will handle pre-selection with its existing JavaScript
             auth_url = await initiate_oauth_flow(
                 user_email=user_google_email,
                 service_name=display_service_name,
-                selected_services=selected_services,
-                use_pkce=use_pkce  # Always use PKCE for security
+                selected_services=None,  # Force UI to show
+                show_service_selection=show_service_selection,
+                use_pkce=(auth_method != 'file_credentials'),
+                auth_method=auth_method
             )
             
             # Attempt to open browser automatically if requested
@@ -693,10 +706,22 @@ def setup_oauth_callback_handler(mcp: FastMCP) -> None:
             if not code or not state:
                 return HTMLResponse(_create_error_response("Missing authorization code or state"))
             
-            # Handle the callback
+            # Handle the callback with PKCE support
+            # Retrieve code_verifier from PKCE manager if PKCE was used
+            code_verifier = None
+            try:
+                from auth.pkce_utils import pkce_manager
+                code_verifier = pkce_manager.get_code_verifier(state)
+                logger.info(f"🔐 Retrieved PKCE code verifier for callback: {code_verifier[:10]}...")
+            except KeyError:
+                logger.info(f"🔐 No PKCE session found for state: {state} (non-PKCE flow)")
+            except Exception as e:
+                logger.warning(f"🔐 Error retrieving PKCE code verifier: {e}")
+            
             user_email, credentials = await handle_oauth_callback(
                 authorization_response=str(request.url),
-                state=state
+                state=state,
+                code_verifier=code_verifier  # Pass the PKCE code verifier to fix "Missing code verifier" error
             )
             
             # Store user email in session context for future requests

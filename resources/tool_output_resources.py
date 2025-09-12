@@ -15,8 +15,7 @@ from datetime import datetime, timedelta
 
 from fastmcp import FastMCP, Context
 from resources.user_resources import get_current_user_email_simple
-from auth.context import get_injected_service
-from auth.service_helpers import request_gmail_service, request_service
+from auth.context import get_user_email_context
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +86,15 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
     async def get_recent_gmail_messages(ctx: Context) -> dict:
         """Internal implementation for recent Gmail messages cache resource."""
         try:
-            user_email = get_current_user_email_simple()
+            # Get authenticated user from context
+            user_email = get_user_email_context()
+            if not user_email:
+                return {
+                    "error": "No authenticated user found in current session",
+                    "suggestion": "Use start_google_auth tool to authenticate first",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
             cache_key = _get_cache_key(user_email, "recent_gmail_messages")
             
             # Check cache first
@@ -101,56 +108,95 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                     "ttl_minutes": _cache_ttl_minutes
                 }
             
-            # Cache miss - fetch fresh data
-            gmail_key = request_gmail_service()  # Uses correct scopes from registry
-            gmail_service = get_injected_service(gmail_key)
+            # Cache miss - fetch fresh data using FastMCP tool registry (following middleware pattern)
+            if not hasattr(ctx, 'fastmcp') or not ctx.fastmcp:
+                return {
+                    "error": "FastMCP context not available",
+                    "cached": False,
+                    "timestamp": datetime.now().isoformat()
+                }
             
-            # Get recent messages
-            results = gmail_service.users().messages().list(
-                userId='me',
-                q='newer_than:7d',  # Last 7 days
-                maxResults=10
-            ).execute()
+            # Access the tool registry directly via _tool_manager (following middleware pattern)
+            mcp_server = ctx.fastmcp
+            if not hasattr(mcp_server, '_tool_manager') or not hasattr(mcp_server._tool_manager, '_tools'):
+                return {
+                    "error": "Cannot access tool registry from FastMCP server",
+                    "cached": False,
+                    "timestamp": datetime.now().isoformat()
+                }
             
-            messages = results.get('messages', [])
+            tools_dict = mcp_server._tool_manager._tools
+            tool_name = "search_gmail_messages"
             
-            # Get message details
-            detailed_messages = []
-            for msg in messages[:10]:  # Limit to 10 for performance
-                try:
-                    message = gmail_service.users().messages().get(
-                        userId='me',
-                        id=msg['id'],
-                        format='metadata'
-                    ).execute()
-                    
-                    # Extract headers
-                    headers = message.get('payload', {}).get('headers', [])
-                    msg_data = {
-                        'id': message['id'],
-                        'thread_id': message['threadId'],
-                        'snippet': message.get('snippet', ''),
+            if tool_name not in tools_dict:
+                return {
+                    "error": f"Tool '{tool_name}' not found in registry",
+                    "available_tools": list(tools_dict.keys()),
+                    "cached": False,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Get the tool and call it (following middleware pattern)
+            tool_instance = tools_dict[tool_name]
+            
+            # Get the actual callable function from the tool
+            if hasattr(tool_instance, 'fn'):
+                tool_func = tool_instance.fn
+            elif hasattr(tool_instance, 'func'):
+                tool_func = tool_instance.func
+            elif hasattr(tool_instance, '__call__'):
+                tool_func = tool_instance
+            else:
+                return {
+                    "error": f"Tool '{tool_name}' is not callable",
+                    "cached": False,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Call the tool with parameters
+            tool_params = {
+                "user_google_email": user_email,
+                "query": "newer_than:7d",  # Last 7 days
+                "page_size": 10
+            }
+            
+            if asyncio.iscoroutinefunction(tool_func):
+                messages_result = await tool_func(**tool_params)
+            else:
+                messages_result = tool_func(**tool_params)
+            
+            # Handle the structured response from the Gmail tool
+            if hasattr(messages_result, 'error') and messages_result.error:
+                return {
+                    "error": f"Gmail tool error: {messages_result.error}",
+                    "cached": False,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Extract messages from the structured response
+            messages = getattr(messages_result, 'messages', []) if hasattr(messages_result, 'messages') else []
+            
+            # Format for the resource response
+            formatted_messages = []
+            for msg in messages:
+                if isinstance(msg, dict):
+                    formatted_msg = {
+                        'id': msg.get('id'),
+                        'thread_id': msg.get('threadId'),
+                        'snippet': msg.get('snippet', ''),
+                        'subject': msg.get('subject', 'No Subject'),
+                        'from': msg.get('sender', 'Unknown Sender'),
+                        'date': msg.get('date', 'Unknown Date'),
+                        'labels': msg.get('labelIds', [])
                     }
-                    
-                    # Parse headers
-                    for header in headers:
-                        if header['name'].lower() == 'subject':
-                            msg_data['subject'] = header['value']
-                        elif header['name'].lower() == 'from':
-                            msg_data['from'] = header['value']
-                        elif header['name'].lower() == 'date':
-                            msg_data['date'] = header['value']
-                    
-                    detailed_messages.append(msg_data)
-                    
-                except Exception as e:
-                    logger.warning(f"Error getting message details for {msg['id']}: {e}")
+                    formatted_messages.append(formatted_msg)
             
             output_data = {
                 "user_email": user_email,
-                "total_messages": len(detailed_messages),
-                "messages": detailed_messages,
+                "total_messages": len(formatted_messages),
+                "messages": formatted_messages,
                 "query": "Recent messages (last 7 days)",
+                "tool_used": "search_gmail_messages",
                 "timestamp": datetime.now().isoformat()
             }
             
@@ -165,111 +211,10 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 "ttl_minutes": _cache_ttl_minutes
             }
             
-        except ValueError as e:
-            return {
-                "error": f"Authentication error: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
         except Exception as e:
             logger.error(f"Error fetching recent Gmail messages: {e}")
             return {
                 "error": f"Failed to fetch recent Gmail messages: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
-    
-    @mcp.resource(
-        uri="calendar://events/today",
-        name="Today's Calendar Events Cache",
-        description="Cached list of today's calendar events with start/end times, attendees, locations, and meeting links - automatically updated every 5 minutes for current day schedule management",
-        mime_type="application/json",
-        tags={"google", "calendar", "events", "today", "cached", "schedule", "meetings", "performance"},
-        annotations={
-            "readOnlyHint": True,
-            "idempotentHint": False  # Results may vary due to caching
-        }
-    )
-    async def get_todays_calendar_events(ctx: Context) -> dict:
-        """Internal implementation for today's calendar events cache resource."""
-        try:
-            user_email = get_current_user_email_simple()
-            cache_key = _get_cache_key(user_email, "todays_events")
-            
-            # Check cache first
-            cached_result = _get_cached_output(cache_key)
-            if cached_result:
-                return {
-                    "cached": True,
-                    "user_email": user_email,
-                    "data": cached_result,
-                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
-                    "ttl_minutes": _cache_ttl_minutes
-                }
-            
-            # Cache miss - fetch fresh data
-            calendar_key = request_service("calendar")  # Uses correct scopes from registry
-            calendar_service = get_injected_service(calendar_key)
-            
-            # Get today's events
-            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            today_end = today_start.replace(hour=23, minute=59, second=59)
-            
-            events_result = calendar_service.events().list(
-                calendarId='primary',
-                timeMin=today_start.isoformat(),
-                timeMax=today_end.isoformat(),
-                singleEvents=True,
-                orderBy='startTime',
-                maxResults=50
-            ).execute()
-            
-            events = events_result.get('items', [])
-            
-            # Format events
-            formatted_events = []
-            for event in events:
-                event_info = {
-                    'id': event.get('id'),
-                    'summary': event.get('summary', 'No Title'),
-                    'start': event.get('start', {}),
-                    'end': event.get('end', {}),
-                    'description': event.get('description', ''),
-                    'location': event.get('location', ''),
-                    'attendees': [a.get('email') for a in event.get('attendees', [])],
-                    'htmlLink': event.get('htmlLink')
-                }
-                formatted_events.append(event_info)
-            
-            output_data = {
-                "user_email": user_email,
-                "total_events": len(formatted_events),
-                "events": formatted_events,
-                "date": today_start.strftime("%Y-%m-%d"),
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            # Cache the result
-            _cache_tool_output(cache_key, output_data)
-            
-            return {
-                "cached": False,
-                "user_email": user_email,
-                "data": output_data,
-                "cache_timestamp": datetime.now().isoformat(),
-                "ttl_minutes": _cache_ttl_minutes
-            }
-            
-        except ValueError as e:
-            return {
-                "error": f"Authentication error: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Error fetching today's calendar events: {e}")
-            return {
-                "error": f"Failed to fetch today's calendar events: {str(e)}",
                 "cached": False,
                 "timestamp": datetime.now().isoformat()
             }

@@ -42,6 +42,7 @@ from photos.advanced_tools import setup_advanced_photos_tools
 from middleware.qdrant_unified import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools
 # from middleware.template_middleware import setup_template_middleware
 from middleware.template_middleware import setup_streamlined_template_middleware as setup_template_middleware
+from middleware.sampling_middleware import setup_enhanced_sampling_middleware, EnhancementLevel
 from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
 from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
@@ -188,6 +189,17 @@ template_middleware = setup_template_middleware(
 )
 logger.info("✅ Template Parameter Middleware with Jinja2 support enabled - automatic resource templating + professional templates active")
 
+# Setup Enhanced Sampling Middleware with tag-based elicitation
+logger.info("🎯 Setting up Enhanced Sampling Middleware...")
+sampling_middleware = setup_enhanced_sampling_middleware(
+    mcp,
+    enable_debug=True,  # Enable for testing and development
+    target_tags=["gmail", "compose", "elicitation"],  # Tools with these tags get enhanced sampling
+    qdrant_middleware=None,  # Will be set after Qdrant middleware is initialized
+    template_middleware=template_middleware,
+    default_enhancement_level=EnhancementLevel.CONTEXTUAL
+)
+logger.info("✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context")
 
 # Initialize Qdrant unified middleware (completely non-blocking)
 logger.info("🔄 Initializing Qdrant unified middleware...")
@@ -204,6 +216,11 @@ mcp.add_middleware(qdrant_middleware)
 logger.info("✅ Qdrant unified middleware enabled - configured for cloud instance")
 logger.info(f"🔧 Qdrant URL: {settings.qdrant_url}")
 logger.info(f"🔧 API Key configured: {bool(settings.qdrant_api_key)}")
+
+# Update sampling middleware with Qdrant integration now that it's initialized
+if hasattr(sampling_middleware, 'qdrant_middleware'):
+    sampling_middleware.qdrant_middleware = qdrant_middleware
+    logger.info("🔗 Enhanced Sampling Middleware connected to Qdrant for historical context")
 
 # Add TagBasedResourceMiddleware for service list resource handling
 logger.info("🏷️ Setting up TagBasedResourceMiddleware for service:// resource handling...")

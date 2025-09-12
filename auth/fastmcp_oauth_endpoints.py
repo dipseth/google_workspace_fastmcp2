@@ -279,6 +279,20 @@ def _generate_service_selection_html(state: str, flow_type: str, use_pkce: bool 
                         </div>
                     </div>
                     
+                    <!-- Custom Credentials Section -->
+                    <div class="custom-credentials-section">
+                        <label>
+                            <input type="checkbox" id="use_custom_creds" name="use_custom_creds">
+                            Use custom Google OAuth credentials
+                        </label>
+                        <div id="custom-creds-fields">
+                            <p style="color: red; font-weight: bold;">Warning: Providing client secret through UI is not recommended - use PKCE instead!</p>
+                            <p>Provide your own Google OAuth app credentials (from Google Cloud Console)</p>
+                            <input type="text" name="custom_client_id" placeholder="Custom Client ID (required)">
+                            <input type="text" name="custom_client_secret" placeholder="Custom Client Secret (optional for PKCE)">
+                        </div>
+                    </div>
+                    
                     <div class="auto-select-info">
                         <p>💡 Common services (Drive, Gmail, Calendar, Docs, Sheets) are pre-selected for your convenience</p>
                     </div>
@@ -321,9 +335,9 @@ def _generate_service_selection_html(state: str, flow_type: str, use_pkce: bool 
             </div>
             
             <script>
-                // Auto-select common services
+                // Auto-select common services - matches drive/upload_tools.py default list
                 document.addEventListener('DOMContentLoaded', function() {
-                    const commonServices = ['drive', 'gmail', 'calendar', 'docs', 'sheets'];
+                    const commonServices = ['drive', 'gmail', 'calendar', 'docs', 'sheets', 'slides', 'photos', 'chat', 'forms'];
                     commonServices.forEach(serviceKey => {
                         const checkbox = document.querySelector(`input[value="${serviceKey}"]`);
                         if (checkbox && !checkbox.disabled) {
@@ -1311,8 +1325,13 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             flow_type = form_data.get("flow_type", "fastmcp")
             
             # Get authentication method choice
-            auth_method = form_data.get("auth_method", "pkce")
-            use_pkce = auth_method == "pkce"
+            auth_method = form_data.get("auth_method", "pkce_file")
+            use_pkce = auth_method != "file_credentials"
+            
+            # Get custom credentials if enabled
+            use_custom = form_data.get("use_custom_creds") == "on"
+            custom_client_id = form_data.get("custom_client_id") if use_custom else None
+            custom_client_secret = form_data.get("custom_client_secret") if use_custom else None
             
             # Get selected services (can be multiple)
             services = form_data.getlist("services") if hasattr(form_data, 'getlist') else []
@@ -1322,11 +1341,8 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             
             logger.info(f"📋 Service selection received: state={state}, flow_type={flow_type}, services={services}")
             logger.info(f"🔐 Authentication method chosen: {auth_method} (PKCE: {use_pkce})")
-            
-            if use_pkce:
-                logger.info("🔐 User chose PKCE flow - enhanced security, session-based authentication")
-            else:
-                logger.info("📁 User chose encrypted credentials - persistent, multi-account authentication")
+            if use_custom:
+                logger.info(f"🔑 Using custom credentials: client_id={custom_client_id[:10]}...")
             
             if not state:
                 raise ValueError("Missing state parameter")
@@ -1336,9 +1352,16 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 oauth_url = await _handle_fastmcp_service_selection(state, services, use_pkce)
             else:
                 from .google_auth import handle_service_selection_callback
-                oauth_url = await handle_service_selection_callback(state, services)
+                oauth_url = await handle_service_selection_callback(
+                    state=state,
+                    selected_services=services,
+                    use_pkce=use_pkce,
+                    auth_method=auth_method,
+                    custom_client_id=custom_client_id,
+                    custom_client_secret=custom_client_secret
+                )
             
-            logger.info(f"✅ Redirecting to OAuth URL for selected services (PKCE: {use_pkce})")
+            logger.info(f"✅ Redirecting to OAuth URL for selected services (auth_method: {auth_method})")
             return RedirectResponse(url=oauth_url, status_code=302)
             
         except Exception as e:

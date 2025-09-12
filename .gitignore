@@ -30,7 +30,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
+.env_prod*
 # IDE
 .vscode/
 .idea/

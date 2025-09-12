@@ -14,6 +14,7 @@ Updated to use the newer, simpler Google Drive search syntax:
 - type:forms
 """
 
+import asyncio
 import logging
 from typing_extensions import Dict, Any, Optional, Annotated, List, Literal
 from datetime import datetime, timedelta
@@ -140,7 +141,7 @@ def _generate_date_query(days_back: int = 30) -> str:
     return cutoff_date.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-async def _get_recent_items(service: str, user_email: str, days_back: int = 30, page_size: int = 20) -> Dict[str, Any]:
+async def _get_recent_items(service: str, user_email: str, days_back: int = 30, page_size: int = 20, ctx: Context = None) -> Dict[str, Any]:
     """
     Unified function to get recent items for any service (Drive-based or Photos).
     
@@ -153,6 +154,7 @@ async def _get_recent_items(service: str, user_email: str, days_back: int = 30, 
         user_email: Authenticated user email
         days_back: Number of days back to search (default: 30)
         page_size: Number of items to return (default: 20)
+        ctx: FastMCP Context for tool access
         
     Returns:
         Dictionary with recent items and metadata from the tool's structured response
@@ -167,7 +169,7 @@ async def _get_recent_items(service: str, user_email: str, days_back: int = 30, 
     
     # Special handling for photos service (not Drive-based)
     if service_info.get("is_photos_service"):
-        return await _get_recent_photos_items(service, service_info, user_email, page_size)
+        return await _get_recent_photos_items(service, service_info, user_email, page_size, ctx)
     
     # Drive-based services handling
     date_str = _generate_date_query(days_back)
@@ -260,37 +262,85 @@ async def _get_recent_items(service: str, user_email: str, days_back: int = 30, 
         }
 
 
-async def _get_recent_photos_items(service: str, service_info: Dict[str, Any], user_email: str, page_size: int = 20) -> Dict[str, Any]:
+async def _get_recent_photos_items(service: str, service_info: Dict[str, Any], user_email: str, page_size: int = 20, ctx: Context = None) -> Dict[str, Any]:
     """
-    Get recent photos items using photos-specific tools.
+    Get recent photos items using photos-specific tools via FastMCP context.
     
     Args:
         service: Service name ("photos")
         service_info: Service metadata dict
         user_email: Authenticated user email
         page_size: Number of items to return
+        ctx: FastMCP Context for tool access
         
     Returns:
         Dictionary with recent photos items and metadata
     """
     try:
-        # Import photos tools dynamically to avoid circular imports
-        from photos.photos_tools import list_photos_albums
+        # Use FastMCP context to find tools dynamically (following middleware pattern)
+        if not ctx or not hasattr(ctx, 'fastmcp') or not ctx.fastmcp:
+            return {
+                "error": "FastMCP context not available for photos tool discovery",
+                "service": service,
+                "timestamp": datetime.now().isoformat()
+            }
         
-        logger.info(f"📷 Getting recent {service} albums via list_photos_albums")
+        # Access the tool registry directly via _tool_manager (following middleware pattern)
+        mcp_server = ctx.fastmcp
+        if not hasattr(mcp_server, '_tool_manager') or not hasattr(mcp_server._tool_manager, '_tools'):
+            return {
+                "error": "Cannot access tool registry from FastMCP server",
+                "service": service,
+                "timestamp": datetime.now().isoformat()
+            }
         
-        # Call the list_photos_albums tool
-        albums_result = await list_photos_albums(
-            user_google_email=user_email,
-            max_results=min(page_size, 50)  # Photos API max is 50
-        )
+        tools_dict = mcp_server._tool_manager._tools
+        tool_name = "list_photos_albums"
+        
+        if tool_name not in tools_dict:
+            return {
+                "error": f"Tool '{tool_name}' not found in registry",
+                "available_tools": [name for name in tools_dict.keys() if 'photos' in name.lower()],
+                "service": service,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        logger.info(f"📷 Getting recent {service} albums via {tool_name} from tool registry")
+        
+        # Get the tool and call it (following middleware pattern)
+        tool_instance = tools_dict[tool_name]
+        
+        # Get the actual callable function from the tool
+        if hasattr(tool_instance, 'fn'):
+            tool_func = tool_instance.fn
+        elif hasattr(tool_instance, 'func'):
+            tool_func = tool_instance.func
+        elif hasattr(tool_instance, '__call__'):
+            tool_func = tool_instance
+        else:
+            return {
+                "error": f"Tool '{tool_name}' is not callable",
+                "service": service,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Call the tool with parameters
+        tool_params = {
+            "user_google_email": user_email,
+            "max_results": min(page_size, 50)  # Photos API max is 50
+        }
+        
+        if asyncio.iscoroutinefunction(tool_func):
+            albums_result = await tool_func(**tool_params)
+        else:
+            albums_result = tool_func(**tool_params)
         
         # Handle the structured response
         if hasattr(albums_result, 'error') and albums_result.error:
             return {
                 "error": albums_result.error,
                 "service": service,
-                "tool_used": "list_photos_albums",
+                "tool_used": tool_name,
                 "timestamp": datetime.now().isoformat()
             }
         
@@ -320,7 +370,7 @@ async def _get_recent_photos_items(service: str, service_info: Dict[str, Any], u
             "service_name": service_info["name"],
             "service_icon": service_info["icon"],
             "description": service_info["description"],
-            "tool_used": "list_photos_albums",
+            "tool_used": tool_name,
             "query_type": "photos_api",
             "total_count": len(enhanced_items),
             "files": enhanced_items,  # Keep same key name for consistency
@@ -338,7 +388,7 @@ async def _get_recent_photos_items(service: str, service_info: Dict[str, Any], u
         return {
             "error": f"Failed to retrieve recent {service} items: {str(e)}",
             "service": service,
-            "tool_used": "list_photos_albums",
+            "tool_used": tool_name if 'tool_name' in locals() else "unknown",
             "timestamp": datetime.now().isoformat()
         }
 
@@ -393,7 +443,7 @@ Returns items modified within the last 30 days by default.""",
             return _create_auth_error_response(service.lower())
         
         # Get recent items using unified function
-        return await _get_recent_items(service.lower(), user_email)
+        return await _get_recent_items(service.lower(), user_email, ctx=ctx)
     
     @mcp.resource(
         uri="recent://{service}/{days}",
@@ -429,7 +479,7 @@ Note: Photos service returns albums (day range affects Drive services only).""",
             return _create_auth_error_response(service.lower())
         
         # Get recent items with custom day range
-        return await _get_recent_items(service.lower(), user_email, days_back=days)
+        return await _get_recent_items(service.lower(), user_email, days_back=days, ctx=ctx)
     
     @mcp.resource(
         uri="recent://all",
@@ -452,7 +502,7 @@ Note: Photos service returns albums (day range affects Drive services only).""",
         
         for service in SERVICE_INFO.keys():
             try:
-                service_result = await _get_recent_items(service, user_email, days_back=30, page_size=10)
+                service_result = await _get_recent_items(service, user_email, days_back=30, page_size=10, ctx=ctx)
                 all_results[service] = service_result
                 if "files" in service_result:
                     total_items += len(service_result["files"])

@@ -21,6 +21,7 @@ from typing import Optional
 from fastmcp import FastMCP
 from config.settings import settings
 from auth.middleware import CredentialStorageMode
+from tools.common_types import UserGoogleEmail
 
 logger = logging.getLogger(__name__)
 
@@ -136,13 +137,14 @@ async def check_oauth_flows_health(google_auth_provider=None) -> str:
     return "\n".join(status_lines)
 
 
-async def health_check(google_auth_provider=None, credential_storage_mode=None) -> str:
+async def health_check(google_auth_provider=None, credential_storage_mode=None, user_google_email=None) -> str:
     """
     Check server health and configuration.
     
     Args:
         google_auth_provider: Optional GoogleProvider instance from server context
         credential_storage_mode: Current credential storage mode from server context
+        user_google_email: Optional user email for context-specific health checks
     
     Returns:
         str: Server health status
@@ -294,14 +296,17 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "openWorldHint": False
         }
     )
-    async def health_check_tool() -> str:
+    async def health_check_tool(user_google_email: UserGoogleEmail = None) -> str:
         """
         Check server health and configuration.
+        
+        Args:
+            user_google_email: The user's Google email address (auto-injected by middleware)
         
         Returns:
             str: Server health status
         """
-        return await health_check()
+        return await health_check(user_google_email=user_google_email)
     
     
     @mcp.tool(

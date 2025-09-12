@@ -66,6 +66,8 @@ See documentation/TEMPLATE_PARAMETER_MIDDLEWARE.md for complete usage guide.
 import re
 import json
 import logging
+import random
+import importlib
 
 from config.enhanced_logging import setup_logger
 logger = setup_logger()
@@ -209,7 +211,7 @@ class EnhancedTemplateMiddleware(Middleware):
     ### Supported Resource URIs
     - `user://current/email` - Current user's email address
     - `service://gmail/labels` - Gmail labels list
-    - `workspace://content/recent` - Recent workspace content
+    - `recent://all` - Recent content across all Google Workspace services
     - `auth://session/current` - Current authentication session
     - Custom resource schemes via FastMCP resource endpoints
     
@@ -407,8 +409,14 @@ class EnhancedTemplateMiddleware(Middleware):
         else:
             self.templates_dir = Path(templates_dir)
         
+        # Set up prompts directory for random template rendering
+        self.prompts_dir = Path(__file__).parent.parent / "prompts"
+        
         # Resource cache: {resource_uri: {data: Any, expires_at: datetime}}
         self._resource_cache: Dict[str, Dict[str, Any]] = {}
+        
+        # Available prompt functions cache for random selection
+        self._available_prompts: Optional[List[Dict[str, Any]]] = None
         
         # Initialize Jinja2 environment if available
         self.jinja2_env = None
@@ -573,6 +581,353 @@ class EnhancedTemplateMiddleware(Middleware):
                 logger.warning(f"⚠️ Failed to scan template {template_file.name} for macros: {e}")
         
         logger.info(f"📚 Discovered {len(self._macro_registry)} macros from {len(template_files)} template files")
+    
+    async def on_get_prompt(self, context: MiddlewareContext, call_next):
+        """
+        Handle prompt requests with automatic random template rendering.
+        
+        This handler intercepts prompt requests and can optionally render a random
+        template from the prompts folder using the existing Jinja2 infrastructure.
+        
+        Supports:
+        - Automatic discovery of prompt functions from prompts/*.py files
+        - Random selection from available prompts and templates
+        - Full Jinja2 rendering with resource resolution
+        - Template file rendering from prompts/templates/
+        """
+        prompt_name = getattr(context.message, 'name', '')
+        
+        if self.enable_debug_logging:
+            logger.debug(f"🎭 Processing prompt request: {prompt_name}")
+        
+        # Check if this is a request for a random template
+        if prompt_name == "random_template" or prompt_name.startswith("random_"):
+            try:
+                # Generate a random template response
+                random_response = await self._generate_random_template(context)
+                if random_response:
+                    return random_response
+            except Exception as e:
+                logger.error(f"❌ Random template generation failed: {e}")
+                # Fall through to normal prompt handling
+        
+        # Continue with normal prompt processing
+        return await call_next(context)
+    
+    async def _generate_random_template(self, context: MiddlewareContext):
+        """
+        Generate a random template from available prompts and template files.
+        
+        This method:
+        1. Discovers available prompt functions from prompts/*.py files
+        2. Finds template files in prompts/templates/
+        3. Randomly selects one to render
+        4. Uses Jinja2 infrastructure to render with resource resolution
+        5. Returns rendered content wrapped in PromptMessage
+        """
+        if not context.fastmcp_context:
+            if self.enable_debug_logging:
+                logger.debug("⚠️ No FastMCP context available for random template generation")
+            return None
+        
+        try:
+            # Discover available templates/prompts
+            available_options = await self._discover_available_prompts()
+            
+            if not available_options:
+                logger.warning("⚠️ No prompts or templates found for random selection")
+                return None
+            
+            # Randomly select an option
+            selected = random.choice(available_options)
+            
+            if self.enable_debug_logging:
+                logger.debug(f"🎲 Randomly selected: {selected['type']} → {selected['name']}")
+            
+            # Render the selected template
+            if selected['type'] == 'prompt_function':
+                # Execute the prompt function
+                return await self._execute_prompt_function(selected, context)
+            elif selected['type'] == 'template_file':
+                # Render the template file
+                return await self._render_template_file(selected, context)
+            else:
+                logger.warning(f"⚠️ Unknown template type: {selected['type']}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Random template generation failed: {e}")
+            return None
+    
+    async def _discover_available_prompts(self) -> List[Dict[str, Any]]:
+        """
+        Discover available prompts from both .py files and template files.
+        
+        Returns:
+            List of available prompt options with metadata
+        """
+        if self._available_prompts is not None:
+            return self._available_prompts
+        
+        available = []
+        
+        # 1. Discover prompt functions from .py files
+        prompt_functions = await self._discover_prompt_functions()
+        available.extend(prompt_functions)
+        
+        # 2. Discover template files
+        template_files = await self._discover_template_files()
+        available.extend(template_files)
+        
+        # Cache the results
+        self._available_prompts = available
+        
+        if self.enable_debug_logging:
+            logger.debug(f"🔍 Discovered {len(available)} total prompt options:")
+            logger.debug(f"   - {len(prompt_functions)} prompt functions")
+            logger.debug(f"   - {len(template_files)} template files")
+        
+        return available
+    
+    async def _discover_prompt_functions(self) -> List[Dict[str, Any]]:
+        """Discover prompt functions from prompts/*.py files."""
+        prompt_functions = []
+        
+        # Find all Python files in prompts directory
+        prompts_py_files = list(self.prompts_dir.glob("*.py"))
+        
+        for py_file in prompts_py_files:
+            if py_file.name == "__init__.py":
+                continue
+                
+            try:
+                # Extract module name and expected setup function
+                module_name = py_file.stem
+                setup_function_name = f"setup_{module_name}"
+                
+                # Add to available prompt functions list
+                prompt_functions.append({
+                    'type': 'prompt_function',
+                    'name': module_name,
+                    'module_file': str(py_file.relative_to(self.prompts_dir.parent)),
+                    'setup_function': setup_function_name,
+                    'description': f"Prompt functions from {module_name}",
+                    'source': 'python_module'
+                })
+                
+                if self.enable_debug_logging:
+                    logger.debug(f"📝 Found prompt module: {module_name}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to process prompt file {py_file.name}: {e}")
+        
+        return prompt_functions
+    
+    async def _discover_template_files(self) -> List[Dict[str, Any]]:
+        """Discover template files from prompts/templates/ directory."""
+        template_files = []
+        
+        templates_dir = self.prompts_dir / "templates"
+        if not templates_dir.exists():
+            return template_files
+        
+        # Find all template files recursively
+        for template_file in templates_dir.rglob("*"):
+            if template_file.is_file() and template_file.suffix in ['.txt', '.j2', '.jinja2', '.md']:
+                try:
+                    template_files.append({
+                        'type': 'template_file',
+                        'name': template_file.stem,
+                        'file_path': str(template_file),
+                        'relative_path': str(template_file.relative_to(templates_dir)),
+                        'category': template_file.parent.name if template_file.parent != templates_dir else 'general',
+                        'description': f"Template file: {template_file.relative_to(templates_dir)}",
+                        'source': 'template_file'
+                    })
+                    
+                    if self.enable_debug_logging:
+                        logger.debug(f"📄 Found template file: {template_file.relative_to(templates_dir)}")
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to process template file {template_file}: {e}")
+        
+        return template_files
+    
+    async def _execute_prompt_function(self, selected: Dict[str, Any], context: MiddlewareContext):
+        """
+        Execute a randomly selected prompt function.
+        
+        This imports the prompt module and calls a representative prompt function
+        to generate content using the existing prompt infrastructure.
+        """
+        try:
+            module_name = selected['name']
+            
+            # Import the prompt module dynamically
+            module_path = f"prompts.{module_name}"
+            prompt_module = importlib.import_module(module_path)
+            
+            if self.enable_debug_logging:
+                logger.debug(f"📦 Imported prompt module: {module_path}")
+            
+            # Find available prompt functions in the module
+            prompt_functions = []
+            for attr_name in dir(prompt_module):
+                attr = getattr(prompt_module, attr_name)
+                if callable(attr) and not attr_name.startswith('_') and attr_name != 'setup':
+                    # Check if it looks like a prompt function (has Context parameter)
+                    try:
+                        import inspect
+                        sig = inspect.signature(attr)
+                        params = list(sig.parameters.keys())
+                        if 'context' in params or len(params) > 0:
+                            prompt_functions.append({
+                                'name': attr_name,
+                                'function': attr,
+                                'signature': sig
+                            })
+                    except Exception:
+                        continue
+            
+            if not prompt_functions:
+                logger.warning(f"⚠️ No prompt functions found in {module_name}")
+                return None
+            
+            # Randomly select a prompt function
+            selected_func = random.choice(prompt_functions)
+            
+            if self.enable_debug_logging:
+                logger.debug(f"🎯 Selected prompt function: {selected_func['name']}")
+            
+            # Create a mock Context object
+            mock_context = self._create_mock_context(context)
+            
+            # Call the prompt function with default parameters
+            try:
+                result = await selected_func['function'](mock_context)
+                
+                if self.enable_debug_logging:
+                    logger.debug(f"✅ Prompt function executed successfully")
+                
+                return result
+                
+            except Exception as e:
+                # Try calling without await if it's not async
+                try:
+                    result = selected_func['function'](mock_context)
+                    return result
+                except Exception as e2:
+                    logger.error(f"❌ Failed to execute prompt function {selected_func['name']}: {e2}")
+                    return None
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to execute prompt function from {selected['name']}: {e}")
+            return None
+    
+    async def _render_template_file(self, selected: Dict[str, Any], context: MiddlewareContext):
+        """
+        Render a randomly selected template file using Jinja2.
+        
+        This loads and renders a template file from prompts/templates/ using
+        the existing Jinja2 infrastructure with full resource resolution.
+        """
+        try:
+            template_file_path = Path(selected['file_path'])
+            
+            if not template_file_path.exists():
+                logger.warning(f"⚠️ Template file not found: {template_file_path}")
+                return None
+            
+            # Read template content
+            template_content = template_file_path.read_text(encoding='utf-8')
+            
+            if self.enable_debug_logging:
+                logger.debug(f"📄 Loaded template file: {selected['relative_path']}")
+                logger.debug(f"📝 Template length: {len(template_content)} characters")
+            
+            # Use Jinja2 to render if available, otherwise fallback to simple rendering
+            if JINJA2_AVAILABLE and self.jinja2_env:
+                rendered_content = await self._render_with_jinja2(
+                    template_content,
+                    context.fastmcp_context,
+                    f"template_file_{selected['name']}"
+                )
+            else:
+                # Fallback to simple template resolution
+                rendered_content = await self._resolve_string_templates(
+                    template_content,
+                    context.fastmcp_context,
+                    f"template_file_{selected['name']}"
+                )
+            
+            # Wrap in PromptMessage format
+            from fastmcp.prompts.prompt import PromptMessage, TextContent
+            
+            result = PromptMessage(
+                role="assistant",
+                content=TextContent(type="text", text=rendered_content)
+            )
+            
+            if self.enable_debug_logging:
+                logger.debug(f"✅ Template file rendered successfully")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to render template file {selected['name']}: {e}")
+            return None
+    
+    async def _render_with_jinja2(self, template_content: str, fastmcp_context, param_path: str) -> str:
+        """Render template content using Jinja2 with full resource resolution."""
+        if not self.jinja2_env:
+            # Fallback to simple template resolution
+            return await self._resolve_string_templates(template_content, fastmcp_context, param_path)
+        
+        try:
+            # Pre-process resource URIs
+            processed_template_text, resource_context = await self._preprocess_resource_uris(
+                template_content, fastmcp_context
+            )
+            
+            # Create Jinja2 template
+            template = self.jinja2_env.from_string(processed_template_text)
+            
+            # Build template context with resources
+            template_context = await self._build_template_context(fastmcp_context)
+            template_context.update(resource_context)
+            
+            # Render template
+            result = template.render(**template_context)
+            
+            if self.enable_debug_logging:
+                logger.debug(f"✅ Jinja2 template rendered: {param_path}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Jinja2 template rendering failed for {param_path}: {e}")
+            # Fall back to simple template resolution
+            return await self._resolve_string_templates(template_content, fastmcp_context, param_path)
+    
+    def _create_mock_context(self, middleware_context: MiddlewareContext):
+        """Create a mock Context object for prompt function execution."""
+        # Create a simple mock context object that mimics the Context interface
+        class MockContext:
+            def __init__(self):
+                self.request_id = getattr(middleware_context, 'request_id', f"random_template_{random.randint(1000, 9999)}")
+                self.session_id = getattr(middleware_context, 'session_id', None)
+                self.meta = {}
+                
+            async def read_resource(self, uri: str):
+                """Mock resource reading - delegates to FastMCP context if available."""
+                if hasattr(middleware_context, 'fastmcp_context') and middleware_context.fastmcp_context:
+                    try:
+                        return await middleware_context.fastmcp_context.read_resource(uri)
+                    except Exception:
+                        return None
+                return None
+        
+        return MockContext()
     
     async def on_read_resource(self, context: MiddlewareContext, call_next):
         """
@@ -1530,9 +1885,9 @@ class EnhancedTemplateMiddleware(Middleware):
         except Exception:
             context['user_profile'] = lambda: {}
         
-        # Workspace content - both as data and function
+        # Recent content across all services - replaces deprecated workspace://content/recent
         try:
-            workspace_data = await self._fetch_resource('workspace://content/recent', fastmcp_context)
+            workspace_data = await self._fetch_resource('recent://all', fastmcp_context)
             workspace_list = workspace_data if workspace_data else []
             context['workspace_content'] = lambda: workspace_list
         except Exception:
@@ -1963,7 +2318,7 @@ class EnhancedTemplateMiddleware(Middleware):
                 "cached_uris": [
                     "user://current/email",
                     "service://gmail/labels",
-                    "workspace://content/recent"
+                    "recent://all"
                 ]
             }
             ```

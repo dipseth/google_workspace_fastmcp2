@@ -49,7 +49,7 @@ class OAuthInstruction(TypedDict):
 
 class OAuthScope(TypedDict):
     """Structure for OAuth scope information."""
-    service: str
+    service: List[str]  # Changed from str to List[str] to match actual usage
     description: str
 
 
@@ -60,7 +60,7 @@ class StartAuthResponse(TypedDict, total=False):
     authUrl: Optional[str]
     clickableLink: Optional[str]
     userEmail: str
-    serviceName: Optional[str]
+    serviceName: Optional[List[str]] = ['base', 'drive', 'gmail', 'calendar', 'docs', 'sheets', 'chat', 'forms', 'slides', 'photos', 'admin', 'cloud', 'tasks', 'youtube', 'script']
     instructions: Optional[List[str]]
     scopesIncluded: Optional[List[str]]
     note: Optional[str]

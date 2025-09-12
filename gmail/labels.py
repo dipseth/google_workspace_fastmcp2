@@ -440,8 +440,13 @@ async def list_gmail_labels( user_google_email: UserGoogleEmail = None,) -> Gmai
             if exception is not None:
                 logger.warning(f"Failed to get details for label {request_id}: {exception}")
                 failed_count += 1
-            else:
+            elif isinstance(response, dict):
+                # Only store valid dictionary responses
                 label_details[request_id] = response
+            else:
+                # Log unexpected response type but don't store it
+                logger.warning(f"Unexpected response type for label {request_id}: {type(response)} - {response}")
+                failed_count += 1
         
         # Process labels in batches with delays to avoid rate limiting
         for i in range(0, len(labels_data), BATCH_SIZE):
@@ -494,18 +499,36 @@ async def list_gmail_labels( user_google_email: UserGoogleEmail = None,) -> Gmai
             # Use detailed data from batch response if available, otherwise use basic data
             if label_id in label_details:
                 detailed_label = label_details[label_id]
-                label_info: GmailLabelInfo = {
-                    "id": detailed_label.get("id", ""),
-                    "name": detailed_label.get("name", ""),
-                    "type": detailed_label.get("type", "user"),
-                    "messageListVisibility": detailed_label.get("messageListVisibility"),
-                    "labelListVisibility": detailed_label.get("labelListVisibility"),
-                    "color": detailed_label.get("color"),
-                    "messagesTotal": detailed_label.get("messagesTotal"),
-                    "messagesUnread": detailed_label.get("messagesUnread"),
-                    "threadsTotal": detailed_label.get("threadsTotal"),
-                    "threadsUnread": detailed_label.get("threadsUnread")
-                }
+                # Additional safety check to ensure it's a dictionary (should be guaranteed by batch_callback fix)
+                if isinstance(detailed_label, dict):
+                    label_info: GmailLabelInfo = {
+                        "id": detailed_label.get("id", ""),
+                        "name": detailed_label.get("name", ""),
+                        "type": detailed_label.get("type", "user"),
+                        "messageListVisibility": detailed_label.get("messageListVisibility"),
+                        "labelListVisibility": detailed_label.get("labelListVisibility"),
+                        "color": detailed_label.get("color"),
+                        "messagesTotal": detailed_label.get("messagesTotal"),
+                        "messagesUnread": detailed_label.get("messagesUnread"),
+                        "threadsTotal": detailed_label.get("threadsTotal"),
+                        "threadsUnread": detailed_label.get("threadsUnread")
+                    }
+                else:
+                    # This should not happen anymore due to batch_callback fix, but adding as extra safety
+                    logger.warning(f"Invalid detailed_label type for {label_id}: {type(detailed_label)}, falling back to basic info")
+                    # Fallback to basic info if detailed response is not a dict
+                    label_info: GmailLabelInfo = {
+                        "id": label_id,
+                        "name": label_data.get("name", ""),
+                        "type": label_data.get("type", "user"),
+                        "messageListVisibility": label_data.get("messageListVisibility"),
+                        "labelListVisibility": label_data.get("labelListVisibility"),
+                        "color": label_data.get("color"),
+                        "messagesTotal": None,  # Not available without detailed info
+                        "messagesUnread": None,  # Not available without detailed info
+                        "threadsTotal": None,  # Not available without detailed info
+                        "threadsUnread": None  # Not available without detailed info
+                    }
             else:
                 # Fallback to basic info if batch request failed for this label
                 label_info: GmailLabelInfo = {

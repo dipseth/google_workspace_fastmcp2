@@ -7,7 +7,7 @@ logger = setup_logger()
 import secrets
 import json
 import os
-from typing_extensions import Optional, Tuple, Any, Dict, List
+from typing_extensions import Optional, Tuple, Any, Dict, List, Literal
 from pathlib import Path
 from datetime import datetime, UTC, timedelta
 
@@ -28,7 +28,7 @@ from .pkce_utils import generate_pkce_pair, pkce_manager
 logger = logging.getLogger(__name__)
 
 # OAuth state to user email mapping (since callback comes outside of FastMCP session)
-_oauth_state_map: dict[str, str] = {}
+_oauth_state_map: dict[str, dict[str, Any]] = {}
 
 # Service selection cache for OAuth flows
 _service_selection_cache: Dict[str, Dict[str, Any]] = {}
@@ -334,7 +334,10 @@ async def initiate_oauth_flow(
     service_name: str = "Google Drive",
     selected_services: Optional[List[str]] = None,
     show_service_selection: bool = True,
-    use_pkce: bool = True
+    use_pkce: bool = True,
+    auth_method: Literal['file_credentials', 'pkce_file', 'pkce_memory'] = 'pkce_file',
+    custom_client_id: Optional[str] = None,
+    custom_client_secret: Optional[str] = None
 ) -> str:
     """
     Initiate OAuth flow for a user with optional service selection and PKCE support.
@@ -352,7 +355,7 @@ async def initiate_oauth_flow(
     if not user_email:
         raise GoogleAuthError("Cannot initiate OAuth flow: user_email is required")
         
-    logger.info(f"Initiating OAuth flow for {user_email} (PKCE: {'enabled' if use_pkce else 'disabled'})")
+    logger.info(f"Initiating OAuth flow for {user_email} (auth_method: {auth_method}, PKCE: {'enabled' if use_pkce else 'disabled'})")
     
     # If no services selected and service selection is enabled, return selection URL
     if show_service_selection and not selected_services:
@@ -370,6 +373,10 @@ async def initiate_oauth_flow(
     
     # Get OAuth client configuration
     oauth_config = settings.get_oauth_client_config()
+    if custom_client_id:
+        oauth_config['client_id'] = custom_client_id
+        if custom_client_secret:
+            oauth_config['client_secret'] = custom_client_secret
     
     # Verify no problematic scopes are included
     problematic_patterns = ['photoslibrary.sharing', 'cloud-platform', 'cloudfunctions', 'pubsub', 'iam']
@@ -395,8 +402,13 @@ async def initiate_oauth_flow(
     # Generate state parameter
     state = secrets.token_urlsafe(32)
     
-    # Store user email directly with OAuth state (callback comes outside FastMCP session)
-    _oauth_state_map[state] = user_email
+    # Store user email and additional info with OAuth state
+    _oauth_state_map[state] = {
+        'user_email': user_email,
+        'auth_method': auth_method,
+        'custom_client_id': custom_client_id,
+        'custom_client_secret': custom_client_secret
+    }
     
     # Generate PKCE parameters if enabled
     pkce_params = {}
@@ -414,7 +426,7 @@ async def initiate_oauth_flow(
         **pkce_params  # Add PKCE parameters if enabled
     )
     
-    logger.info(f"Generated OAuth URL for {user_email} (PKCE: {'enabled' if use_pkce else 'disabled'})")
+    logger.info(f"Generated OAuth URL for {user_email} (auth_method: {auth_method})")
     return auth_url
 
 
@@ -452,25 +464,53 @@ def _cleanup_service_selection_cache():
 
 async def handle_service_selection_callback(
     state: str,
-    selected_services: List[str]
+    selected_services: List[str],
+    use_pkce: Optional[bool] = None,
+    auth_method: Optional[Literal['file_credentials', 'pkce_file', 'pkce_memory']] = None,
+    custom_client_id: Optional[str] = None,
+    custom_client_secret: Optional[str] = None
 ) -> str:
-    """Handle service selection and return OAuth URL with PKCE support."""
+    """Handle service selection and return OAuth URL with PKCE and custom credentials support."""
     flow_info = _service_selection_cache.pop(state, None)
     if not flow_info:
         raise GoogleAuthError("Invalid or expired service selection state")
     
     user_email = flow_info["user_email"]
-    use_pkce = flow_info.get("use_pkce", True)  # Default to PKCE enabled
     
-    logger.info(f"🎯 Service selection callback for {user_email} (PKCE: {'enabled' if use_pkce else 'disabled'})")
+    # Use explicit use_pkce parameter if provided, otherwise fall back to cached value
+    if use_pkce is not None:
+        final_use_pkce = use_pkce
+        logger.info(f"🔐 Using explicit PKCE setting from form: {final_use_pkce}")
+    else:
+        final_use_pkce = flow_info.get("use_pkce", True)  # Default to PKCE enabled
+        logger.info(f"🔐 Using cached PKCE setting: {final_use_pkce}")
+    
+    # Determine auth method: explicit parameter > PKCE setting > default
+    if auth_method is not None:
+        final_auth_method = auth_method
+        logger.info(f"🔑 Using explicit auth_method from form: {final_auth_method}")
+    elif final_use_pkce:
+        final_auth_method = 'pkce_file'  # Default PKCE method
+        logger.info(f"🔑 Using default PKCE auth_method: {final_auth_method}")
+    else:
+        final_auth_method = 'file_credentials'  # Legacy method
+        logger.info(f"🔑 Using legacy auth_method: {final_auth_method}")
+    
+    logger.info(f"🎯 Service selection callback for {user_email} (PKCE: {'enabled' if final_use_pkce else 'disabled'}, auth_method: {final_auth_method})")
     logger.info(f"📋 Selected services: {selected_services}")
     
-    # Now call the regular OAuth flow with selected services
+    if custom_client_id:
+        logger.info(f"🔑 Using custom client credentials: {custom_client_id[:10]}...")
+    
+    # Now call the regular OAuth flow with selected services and custom credentials
     return await initiate_oauth_flow(
         user_email=user_email,
         selected_services=selected_services,
         show_service_selection=False,  # Don't show selection again
-        use_pkce=use_pkce  # Pass PKCE setting through
+        use_pkce=final_use_pkce,  # Pass PKCE setting through
+        auth_method=final_auth_method,  # Pass auth method through
+        custom_client_id=custom_client_id,  # Pass custom client credentials
+        custom_client_secret=custom_client_secret
     )
 
 
@@ -492,9 +532,9 @@ async def handle_oauth_callback(
     """
     logger.info(f"Handling OAuth callback with state: {state} (PKCE: {'enabled' if code_verifier else 'disabled'})")
     
-    # Get user email from state mapping
-    user_email = _oauth_state_map.pop(state, None)
-    if not user_email:
+    # Get state info
+    state_info = _oauth_state_map.pop(state, None)
+    if not state_info:
         logger.warning(f"OAuth state not found in current session: {state}")
         logger.info("This may happen if the server was restarted. Clearing all OAuth states.")
         _oauth_state_map.clear()
@@ -502,6 +542,11 @@ async def handle_oauth_callback(
             "OAuth session expired (possibly due to server restart). "
             "Please start the authentication process again by calling the start_google_auth tool."
         )
+    
+    user_email = state_info['user_email']
+    auth_method = state_info['auth_method']
+    custom_client_id = state_info.get('custom_client_id')
+    custom_client_secret = state_info.get('custom_client_secret')
     
     # Validate PKCE if code_verifier is provided
     if code_verifier:
@@ -518,6 +563,10 @@ async def handle_oauth_callback(
     
     # Create OAuth flow with same configuration used for authorization URL
     oauth_config = settings.get_oauth_client_config()
+    if custom_client_id:
+        oauth_config['client_id'] = custom_client_id
+        if custom_client_secret:
+            oauth_config['client_secret'] = custom_client_secret
     
     # Use centralized scope registry as single source of truth (same as initiate_oauth_flow)
     from .scope_registry import ScopeRegistry
@@ -532,7 +581,7 @@ async def handle_oauth_callback(
     
     # DIAGNOSTIC LOG: OAuth scope consistency debugging
     logger.info(f"OAUTH_SCOPE_DEBUG: Starting OAuth callback with oauth_comprehensive scopes: {len(oauth_scopes)} total")
-
+ 
     flow = Flow.from_client_config(
         {"web": oauth_config},
         scopes=oauth_scopes,  # Use centralized scopes instead of settings.drive_scopes
@@ -560,13 +609,13 @@ async def handle_oauth_callback(
         os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
         
         try:
-            # Add PKCE code verifier if provided
+            # Add PKCE code verifier if provided - pass it directly to fetch_token
+            token_kwargs = {}
             if code_verifier:
-                # For google-auth-oauthlib, we need to set the code_verifier on the flow
-                flow.code_verifier = code_verifier
-                logger.info(f"🔐 Added PKCE code verifier to flow for token exchange")
+                token_kwargs['code_verifier'] = code_verifier
+                logger.info(f"🔐 Added PKCE code verifier to token exchange")
             
-            flow.fetch_token(authorization_response=authorization_response)
+            flow.fetch_token(authorization_response=authorization_response, **token_kwargs)
             credentials = flow.credentials
         finally:
             # Restore original setting
@@ -590,10 +639,21 @@ async def handle_oauth_callback(
                 f"Authenticated email ({authenticated_email}) does not match expected ({user_email})"
             )
         
-        # Save credentials
-        _save_credentials(user_email, credentials)
+        # Conditional storage based on auth_method
+        if auth_method == 'pkce_memory':
+            # Store in session memory only
+            session_id = get_session_context()
+            if session_id:
+                store_session_data(session_id, "credentials", credentials.to_json())
+                logger.info(f"Stored credentials in session memory for {user_email}")
+            else:
+                logger.warning(f"No session context available - falling back to file storage for {user_email}")
+                _save_credentials(user_email, credentials)
+        else:
+            # File storage for 'file_credentials' and 'pkce_file'
+            _save_credentials(user_email, credentials)
         
-        logger.info(f"Successfully authenticated {user_email} (PKCE: {'enabled' if code_verifier else 'disabled'})")
+        logger.info(f"Successfully authenticated {user_email} (auth_method: {auth_method})")
         return user_email, credentials
         
     except Exception as e:

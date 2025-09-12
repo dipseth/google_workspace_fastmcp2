@@ -1,2 +1,3 @@
 .env
 credentials/*
+.env_prod

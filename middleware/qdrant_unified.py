@@ -1348,7 +1348,8 @@ def setup_enhanced_qdrant_tools(mcp, middleware):
         query: str,
         tool_name: Optional[str] = None,
         user_email: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
+        user_google_email: Optional[str] = None
     ) -> str:
         """
         Search through historical tool responses using natural language.
@@ -1389,7 +1390,8 @@ def setup_enhanced_qdrant_tools(mcp, middleware):
     async def get_tool_analytics(
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        group_by: str = "tool_name"
+        group_by: str = "tool_name",
+        user_google_email: Optional[str] = None
     ) -> str:
         """
         Get analytics on tool usage and performance.
@@ -1424,7 +1426,7 @@ def setup_enhanced_qdrant_tools(mcp, middleware):
             "openWorldHint": False
         }
     )
-    async def get_response_details(response_id: str) -> str:
+    async def get_response_details(response_id: str, user_google_email: Optional[str] = None) -> str:
         """
         Get full details of a stored response by ID.
         
