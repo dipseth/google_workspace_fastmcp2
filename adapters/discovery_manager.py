@@ -7,7 +7,10 @@ import os
 import json
 import yaml
 import logging
-from typing import Dict, Any, Optional, List
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
+from typing_extensions import Dict, Any, Optional, List
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

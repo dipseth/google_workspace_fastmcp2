@@ -2,26 +2,30 @@
 
 This module provides development-ready JWT authentication with Google email claims.
 For production, replace RSAKeyPair with proper certificate infrastructure.
+Updated to use FastMCP 2's JWTVerifier pattern and centralized scope registry.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing_extensions import Optional, Dict, Any, List, Union
 from pathlib import Path
 
-from fastmcp.server.auth import BearerAuthProvider
-from fastmcp.server.auth.providers.bearer import RSAKeyPair
+# FastMCP 2 JWT verification imports
+from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
+
+# Import centralized scope registry
+from auth.scope_registry import ScopeRegistry
 
 logger = logging.getLogger(__name__)
 
 # Global key pair for development (in production, use proper key management)
 _key_pair: Optional[RSAKeyPair] = None
-_auth_provider: Optional[BearerAuthProvider] = None
+_auth_provider: Optional[JWTVerifier] = None
 
-def setup_jwt_auth() -> BearerAuthProvider:
-    """Setup JWT authentication for development.
+def setup_jwt_auth() -> JWTVerifier:
+    """Setup JWT authentication for development using FastMCP 2's JWTVerifier.
     
     Returns:
-        Configured BearerAuthProvider instance
+        Configured JWTVerifier instance
     """
     global _key_pair, _auth_provider
     
@@ -31,30 +35,41 @@ def setup_jwt_auth() -> BearerAuthProvider:
     # Generate RSA key pair for development
     _key_pair = RSAKeyPair.generate()
     
-    # Configure the auth provider
-    _auth_provider = BearerAuthProvider(
+    # Get required scopes from the registry - using the base Google access scope
+    # This maintains backward compatibility with the original ["google:access"] requirement
+    base_scopes = [
+        ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_email"],
+        ScopeRegistry.GOOGLE_API_SCOPES["base"]["openid"]
+    ]
+    
+    # Configure the JWT verifier using FastMCP 2 pattern
+    _auth_provider = JWTVerifier(
         public_key=_key_pair.public_key,
         issuer="https://fastmcp-google-workspace.dev",
         audience="google-workspace-server",
-        required_scopes=["google:access"]
+        required_scopes=base_scopes  # Using registry scopes instead of hardcoded
     )
     
-    logger.info("✅ JWT Bearer Token authentication configured for development")
+    logger.info("✅ JWT authentication configured using FastMCP 2 JWTVerifier")
     logger.info(f"🔑 Public key configured for token validation")
+    logger.info(f"📋 Required scopes from registry: {base_scopes}")
     
     return _auth_provider
 
 
 def generate_user_token(
     user_email: str,
-    scopes: Optional[list[str]] = None,
+    scopes: Optional[Union[List[str], str]] = None,
     expires_in_seconds: int = 3600
 ) -> str:
     """Generate a JWT token for a specific Google user.
     
     Args:
         user_email: The user's Google email address
-        scopes: OAuth scopes to include in token
+        scopes: OAuth scopes to include in token. Can be:
+            - None: Uses comprehensive OAuth scopes from registry
+            - List[str]: List of scope URLs or registry references
+            - str: Name of a scope group from the registry
         expires_in_seconds: Token expiration time in seconds
         
     Returns:
@@ -68,25 +83,53 @@ def generate_user_token(
     if _key_pair is None:
         raise RuntimeError("JWT auth not initialized. Call setup_jwt_auth() first.")
     
+    # Use scope registry to get scopes instead of hardcoded values
     if scopes is None:
-        scopes = [
-            "google:access",
-            "drive:read", 
-            "drive:write",
-            "gmail:read",
-            "gmail:write", 
-            "calendar:read",
-            "calendar:write",
-            "chat:read",
-            "chat:write"
-        ]
+        # Default to comprehensive OAuth scopes for development tokens
+        # This provides broad access similar to the previous hardcoded scopes
+        resolved_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
+        logger.debug("Using comprehensive OAuth scopes from registry")
+    elif isinstance(scopes, str):
+        # If a string is provided, treat it as a scope group name
+        try:
+            resolved_scopes = ScopeRegistry.resolve_scope_group(scopes)
+            logger.debug(f"Resolved scope group '{scopes}' from registry")
+        except ValueError:
+            # If not a valid group, treat as a single scope URL
+            resolved_scopes = [scopes]
+            logger.debug(f"Using single scope: {scopes}")
+    else:
+        # For list of scopes, resolve any registry references
+        resolved_scopes = []
+        for scope in scopes:
+            if scope.startswith("http"):
+                # Direct scope URL
+                resolved_scopes.append(scope)
+            elif "." in scope:
+                # Registry reference like "drive.full"
+                try:
+                    service, scope_name = scope.split(".", 1)
+                    if service in ScopeRegistry.GOOGLE_API_SCOPES and \
+                       scope_name in ScopeRegistry.GOOGLE_API_SCOPES[service]:
+                        resolved_scopes.append(
+                            ScopeRegistry.GOOGLE_API_SCOPES[service][scope_name]
+                        )
+                    else:
+                        # Fallback to treating as direct scope
+                        resolved_scopes.append(scope)
+                except ValueError:
+                    resolved_scopes.append(scope)
+            else:
+                # Assume it's a direct scope
+                resolved_scopes.append(scope)
+        logger.debug(f"Resolved {len(scopes)} scopes to {len(resolved_scopes)} URLs")
     
     # Create token with user email in additional claims
     token = _key_pair.create_token(
         subject=f"google-user-{user_email}",
         issuer="https://fastmcp-google-workspace.dev",
         audience="google-workspace-server",
-        scopes=scopes,
+        scopes=resolved_scopes,
         expires_in_seconds=expires_in_seconds,
         additional_claims={
             "email": user_email,  # This is the key part!
@@ -97,16 +140,16 @@ def generate_user_token(
     )
     
     logger.info(f"🎫 Generated JWT token for user: {user_email}")
-    logger.debug(f"Token scopes: {scopes}")
+    logger.debug(f"Token includes {len(resolved_scopes)} scopes from registry")
     
     return token
 
 
 def create_test_tokens() -> Dict[str, str]:
-    """Create test tokens for development.
+    """Create test tokens for development using scope registry.
     
     Returns:
-        Dict mapping user emails to their JWT tokens
+        Dict mapping user emails to their JWT tokens with comprehensive scopes
     """
     test_users = [
         "sethrivers@riversunlimited.xyz",
@@ -116,9 +159,13 @@ def create_test_tokens() -> Dict[str, str]:
     tokens = {}
     for user_email in test_users:
         try:
-            token = generate_user_token(user_email)
+            # Use comprehensive OAuth scopes from registry for test tokens
+            token = generate_user_token(
+                user_email,
+                scopes="oauth_comprehensive"  # Using scope group from registry
+            )
             tokens[user_email] = token
-            logger.info(f"✅ Created test token for {user_email}")
+            logger.info(f"✅ Created test token for {user_email} with comprehensive scopes")
         except Exception as e:
             logger.error(f"❌ Failed to create token for {user_email}: {e}")
     
@@ -169,11 +216,21 @@ def get_user_email_from_token() -> str:
 
 
 if __name__ == "__main__":
-    # Development test
-    auth_provider = setup_jwt_auth()
+    # Development test using FastMCP 2 JWTVerifier and scope registry
+    auth_verifier = setup_jwt_auth()
     tokens = create_test_tokens()
     
-    print("\n🎫 Test JWT Tokens Generated:")
+    print("\n🎫 Test JWT Tokens Generated with Scope Registry:")
+    print(f"Verifier Type: {type(auth_verifier).__name__}")
+    print(f"Issuer: {auth_verifier.issuer}")
+    print(f"Audience: {auth_verifier.audience}")
+    
     for email, token in tokens.items():
         print(f"\nUser: {email}")
-        print(f"Token: {token[:50]}...")
+        print(f"Token (first 50 chars): {token[:50]}...")
+        
+        # Demonstrate scope group usage
+        print("\n📋 Available Scope Groups:")
+        for group_name in ["drive_basic", "gmail_basic", "calendar_basic", "office_suite"]:
+            scopes = ScopeRegistry.resolve_scope_group(group_name)
+            print(f"  - {group_name}: {len(scopes)} scopes")

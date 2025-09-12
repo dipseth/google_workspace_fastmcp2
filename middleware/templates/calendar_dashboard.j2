@@ -1,0 +1,284 @@
+
+
+{% macro render_calendar_dashboard(calendars_data, events_data=null, title="Google Calendars") %}
+{#
+    Relaxed & Compact Google Calendar Dashboard Macro (Dark Theme)
+    Accepts: service://calendar/calendars and service://calendar/events data
+    Returns: Clean, readable HTML visualization with generous spacing
+    
+    Parameters:
+    - calendars_data: The calendar data object (from service://calendar/calendars)
+    - events_data: The events data object (from service://calendar/events) - optional
+    - title: Dashboard title (default: "Google Calendars")
+#}
+
+{# Process the calendars data - handle namespace structure from service://calendar/calendars #}
+{% if calendars_data and calendars_data.result and calendars_data.result.calendars %}
+    {% set all_calendars = calendars_data.result.calendars %}
+{% elif calendars_data and calendars_data.calendars %}
+    {% set all_calendars = calendars_data.calendars %}
+{% elif calendars_data is sequence and calendars_data is not string %}
+    {% set all_calendars = calendars_data %}
+{% else %}
+    {% set all_calendars = [] %}
+{% endif %}
+
+{# Process the events data #}
+{% if events_data and events_data.result and events_data.result.events %}
+    {% set all_events = events_data.result.events %}
+{% elif events_data and events_data.events %}
+    {% set all_events = events_data.events %}
+{% elif events_data is sequence and events_data is not string %}
+    {% set all_events = events_data %}
+{% else %}
+    {% set all_events = [] %}
+{% endif %}
+
+{# Categorize calendars #}
+{% set primary_calendars = all_calendars | selectattr('primary', 'equalto', true) | list %}
+{% set shared_calendars = all_calendars | rejectattr('primary', 'equalto', true) | list %}
+
+<!-- Relaxed Google Calendar Dashboard (Dark Theme) -->
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,sans-serif; line-height:1.5; color:#e5e7eb; background:#0b1220; margin:24px 0; border-radius:16px; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+    <div style="max-width:1000px; margin:0 auto; padding:32px;">
+        
+        {# Header with generous spacing #}
+        <div style="text-align:center; margin-bottom:32px;">
+            <h2 style="margin:0 0 16px 0; color:#f1f5f9; font-size:28px; font-weight:800; letter-spacing:-0.02em; display:flex; align-items:center; justify-content:center; gap:12px;">
+                📅 {{ title }}
+                <span style="background:#3b82f6; color:white; padding:6px 12px; border-radius:8px; font-size:14px; font-weight:700;">
+                    {{ all_calendars|length }}
+                </span>
+            </h2>
+            
+            <div style="font-size:15px; color:#94a3b8; display:flex; justify-content:center; gap:24px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="color:#fbbf24; font-size:18px;">🌟</span>
+                    <span><strong style="color:#cbd5e1;">Primary:</strong> {{ primary_calendars|length }}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="color:#8b5cf6; font-size:18px;">🤝</span>
+                    <span><strong style="color:#cbd5e1;">Shared:</strong> {{ shared_calendars|length }}</span>
+                </div>
+                {% if all_events|length > 0 %}
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="color:#10b981; font-size:18px;">📅</span>
+                    <span><strong style="color:#cbd5e1;">Events:</strong> {{ all_events|length }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if all_calendars|length > 0 %}
+            {# Primary Calendar Section with breathing room #}
+            {% if primary_calendars|length > 0 %}
+                <div style="margin-bottom:32px;">
+                    <h3 style="margin:0 0 18px 0; color:#e2e8f0; font-size:20px; font-weight:700; border-bottom:2px solid #1f2937; padding-bottom:12px; display:flex; align-items:center; gap:12px;">
+                        🌟 Primary Calendar
+                        <span style="background:#fbbf24; color:#000; padding:4px 10px; border-radius:6px; font-size:12px; font-weight:700;">MAIN</span>
+                    </h3>
+                    
+                    {% for calendar in primary_calendars %}
+                        {% set bg_color = calendar.backgroundColor or '#3b82f6' %}
+                        {% set fg_color = calendar.foregroundColor or '#ffffff' %}
+                        <div style="
+                            background: {{ bg_color }};
+                            background-image: linear-gradient(135deg, rgba(255,255,255,.14), rgba(0,0,0,.10));
+                            color: {{ fg_color }};
+                            border: 1px solid rgba(255,255,255,.18);
+                            border-radius: 12px;
+                            padding: 20px 24px;
+                            display: flex;
+                            align-items: center;
+                            gap: 16px;
+                            font-size: 16px;
+                            font-weight: 600;
+                            box-shadow: 0 4px 12px rgba(0,0,0,.3);
+                            transition: transform .2s ease;
+                            cursor: pointer;
+                            margin-bottom: 16px;">
+                            <span style="font-size:24px;">📅</span>
+                            <div style="flex:1;">
+                                <div style="font-weight:700; font-size:18px; margin-bottom:4px;">{{ calendar.summary or 'Primary Calendar' }}</div>
+                                {% if calendar.timeZone %}
+                                    <div style="font-size:14px; opacity:0.85; display:flex; align-items:center; gap:6px;">
+                                        <span>🌍</span>
+                                        {{ calendar.timeZone }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {# Shared Calendars Section - larger, more readable chips #}
+            {% if shared_calendars|length > 0 %}
+                <div style="margin-bottom:32px;">
+                    <h3 style="margin:0 0 18px 0; color:#e2e8f0; font-size:20px; font-weight:700; border-bottom:2px solid #1f2937; padding-bottom:12px; display:flex; align-items:center; gap:12px;">
+                        🤝 Shared Calendars
+                        <span style="background:#8b5cf6; color:white; padding:4px 10px; border-radius:6px; font-size:12px; font-weight:700;">{{ shared_calendars|length }}</span>
+                    </h3>
+                    
+                    <div class="calendar-chip-grid" style="display:flex; flex-wrap:wrap; gap:12px;">
+                        {% for calendar in shared_calendars %}
+                            {% set bg_color = calendar.backgroundColor or '#6366f1' %}
+                            {% set fg_color = calendar.foregroundColor or '#ffffff' %}
+                            <div style="
+                                background: {{ bg_color }};
+                                background-image: linear-gradient(135deg, rgba(255,255,255,.12), rgba(0,0,0,.08));
+                                color: {{ fg_color }};
+                                border: 1px solid rgba(255,255,255,.15);
+                                border-radius: 10px;
+                                padding: 12px 16px;
+                                display: inline-flex;
+                                align-items: center;
+                                gap: 10px;
+                                font-size: 14px;
+                                font-weight: 600;
+                                white-space: nowrap;
+                                overflow: hidden;
+                                text-overflow: ellipsis;
+                                max-width: 280px;
+                                min-width: 120px;
+                                box-shadow: 0 3px 8px rgba(0,0,0,.25);
+                                transition: all .2s ease;
+                                cursor: pointer;"
+                                title="{{ calendar.summary }}{% if calendar.description %} - {{ calendar.description }}{% endif %}{% if calendar.timeZone %} ({{ calendar.timeZone }}){% endif %}">
+                                <span style="font-size:16px;">🗓️</span>
+                                <span style="overflow:hidden; text-overflow:ellipsis;">{{ calendar.summary[:20] }}{% if calendar.summary|length > 20 %}...{% endif %}</span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endif %}
+
+        {# Upcoming Events Section - more spacious layout #}
+        {% if all_events|length > 0 %}
+            <div>
+                <h3 style="margin:0 0 18px 0; color:#e2e8f0; font-size:20px; font-weight:700; border-bottom:2px solid #1f2937; padding-bottom:12px; display:flex; align-items:center; gap:12px;">
+                    📅 Upcoming Events
+                    <span style="background:#10b981; color:white; padding:4px 10px; border-radius:6px; font-size:12px; font-weight:700;">{{ all_events|length }}</span>
+                </h3>
+                
+                <div style="display:grid; gap:16px;">
+                    {% for event in all_events[:5] %}
+                        {% set start_date = event.start[:10] if event.start|length > 10 else event.start %}
+                        {% set start_time = event.start[11:16] if event.start|length > 16 else '' %}
+                        {% set end_time = event.end[11:16] if event.end and event.end|length > 16 else '' %}
+                        {% set is_today = start_date == '2025-09-08' %}
+                        
+                        <div style="background:#1f2937; border-radius:12px; padding:20px; {% if is_today %}border-left:5px solid #fbbf24;{% else %}border-left:5px solid #10b981;{% endif %} transition:all 0.2s; box-shadow:0 2px 8px rgba(0,0,0,.2);">
+                            <div style="display:flex; align-items:start; justify-content:space-between; gap:16px;">
+                                <div style="flex:1;">
+                                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                                        {% if is_today %}
+                                            <span style="background:#fbbf24; color:#000; padding:4px 8px; border-radius:6px; font-size:10px; font-weight:700;">TODAY</span>
+                                        {% endif %}
+                                        <h4 style="color:#f3f4f6; font-weight:600; font-size:16px; margin:0;">
+                                            {{ event.summary or 'Untitled Event' }}
+                                        </h4>
+                                    </div>
+                                    
+                                    <div style="display:flex; align-items:center; gap:20px; font-size:13px; color:#9ca3af; margin-bottom:8px; flex-wrap:wrap;">
+                                        {% if start_time %}
+                                            <span style="display:flex; align-items:center; gap:6px;">
+                                                <span style="font-size:14px;">🕐</span>
+                                                {{ start_time }}{% if end_time %} - {{ end_time }}{% endif %}
+                                            </span>
+                                        {% endif %}
+                                        <span style="display:flex; align-items:center; gap:6px;">
+                                            <span style="font-size:14px;">📅</span>
+                                            {{ start_date }}
+                                        </span>
+                                        {% if event.location %}
+                                            <span style="display:flex; align-items:center; gap:6px;">
+                                                <span style="font-size:14px;">📍</span>
+                                                {{ event.location[:25] }}{% if event.location|length > 25 %}...{% endif %}
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                    
+                                    {% if event.description %}
+                                        <div style="color:#6b7280; font-size:13px; line-height:1.4; margin-top:8px;">
+                                            {{ event.description[:100] }}{% if event.description|length > 100 %}...{% endif %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                
+                                {% if event.htmlLink %}
+                                    <a href="{{ event.htmlLink }}" target="_blank" style="background:{% if is_today %}#fbbf24{% else %}#10b981{% endif %}; color:{% if is_today %}#000{% else %}#fff{% endif %}; padding:8px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600; transition:all 0.2s; white-space:nowrap;">
+                                        VIEW EVENT
+                                    </a>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                    
+                    {% if all_events|length > 5 %}
+                        <div style="background:rgba(59,130,246,0.1); border:2px dashed #3b82f6; border-radius:12px; padding:20px; text-align:center;">
+                            <div style="color:#3b82f6; font-size:16px; font-weight:600; margin-bottom:4px;">
+                                📋 {{ all_events|length - 5 }} more events
+                            </div>
+                            <div style="color:#6b7280; font-size:13px;">
+                                View your full calendar for all upcoming events
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if all_calendars|length == 0 %}
+            {# No Calendars Message #}
+            <div style="background:#1f2937; border-radius:16px; padding:48px; text-align:center;">
+                <div style="font-size:64px; margin-bottom:20px; opacity:0.5;">📅</div>
+                <h3 style="margin:0 0 12px 0; color:#6b7280; font-size:20px; font-weight:600;">No Calendars Found</h3>
+                <p style="margin:0; color:#9ca3af; font-size:15px; line-height:1.5;">
+                    No Google Calendar data is currently available.<br>
+                    Please check your account permissions and try again.
+                </p>
+            </div>
+        {% endif %}
+
+        {# Footer with better spacing #}
+        <div style="margin-top:32px; text-align:center; padding-top:24px; border-top:1px solid #374151;">
+            <div style="color:#6b7280; font-size:13px;">
+                🤖 Calendar Dashboard • {{ all_calendars|length }} calendars{% if all_events|length > 0 %} • {{ all_events|length }} events{% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Enhanced Styles for better interaction #}
+<style>
+.calendar-chip-grid div:hover { 
+    transform: translateY(-2px); 
+    box-shadow: 0 6px 16px rgba(0,0,0,.4) !important; 
+}
+@media (max-width: 768px) { 
+    .calendar-chip-grid { 
+        gap: 8px !important; 
+    }
+    .calendar-chip-grid div { 
+        font-size: 13px !important; 
+        padding: 10px 14px !important; 
+        max-width: 200px !important; 
+        min-width: 100px !important;
+    } 
+}
+@media (max-width: 480px) { 
+    .calendar-chip-grid div { 
+        font-size: 12px !important; 
+        padding: 8px 12px !important; 
+        max-width: 160px !important; 
+    } 
+}
+</style>
+{% endmacro %}
+
+{#
+MACRO USAGE EXAMPLE:
+ {{ render_calendar_dashboard(service://calendar/calendars, service://calendar/events, 'Calendar Summary for: ' + user://current/email.email) }}
+#}

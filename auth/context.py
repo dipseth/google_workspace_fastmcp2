@@ -1,63 +1,84 @@
-"""Session context management for multi-user OAuth authentication."""
+"""Session context management for multi-user OAuth authentication using FastMCP Context."""
 
 import logging
-from contextvars import ContextVar
-from typing import Optional, Dict, Any, Union, List
+from typing_extensions import Optional, Dict, Any, Union, List
 from datetime import datetime, timedelta
 import threading
 
+from fastmcp import Context
+from fastmcp.server.dependencies import get_context
+
 logger = logging.getLogger(__name__)
 
-# Context variable to store the current session ID
-_session_context: ContextVar[Optional[str]] = ContextVar("session_context", default=None)
-
-# Context variable to store the current user email
-_user_email_context: ContextVar[Optional[str]] = ContextVar("user_email_context", default=None)
-
-# Context variable to store service requests for middleware injection
-_service_requests_context: ContextVar[Dict[str, Dict[str, Any]]] = ContextVar("service_requests_context", default={})
-
-# Thread-safe storage for session data
+# Thread-safe storage for session data (this remains as it's not context-specific)
 _session_store: Dict[str, Dict[str, Any]] = {}
 _store_lock = threading.Lock()
 
-# Global storage for middleware instances
+# Global storage for middleware instances (this remains as it's not context-specific)
 _auth_middleware: Optional[Any] = None
 _middleware_lock = threading.Lock()
 
 
 def set_session_context(session_id: str) -> None:
-    """Set the current session ID in the context."""
-    _session_context.set(session_id)
-    logger.debug(f"Set session context: {session_id}")
+    """Set the current session ID in the FastMCP context."""
+    try:
+        ctx = get_context()
+        ctx.set_state("session_id", session_id)
+        logger.debug(f"Set session context: {session_id}")
+    except RuntimeError:
+        # This is expected when called outside FastMCP request context (e.g., OAuth endpoints)
+        logger.debug("Cannot set session context - not in a FastMCP request context")
 
 
 def get_session_context() -> Optional[str]:
-    """Get the current session ID from the context."""
-    return _session_context.get()
+    """Get the current session ID from the FastMCP context."""
+    try:
+        ctx = get_context()
+        return ctx.get_state("session_id")
+    except RuntimeError:
+        logger.debug("Cannot get session context - not in a FastMCP request context")
+        return None
 
 
 def clear_session_context() -> None:
     """Clear the session context."""
-    _session_context.set(None)
-    logger.debug("Cleared session context")
+    try:
+        ctx = get_context()
+        ctx.set_state("session_id", None)
+        logger.debug("Cleared session context")
+    except RuntimeError:
+        logger.debug("Cannot clear session context - not in a FastMCP request context")
 
 
 def set_user_email_context(user_email: str) -> None:
-    """Set the current user email in the context."""
-    _user_email_context.set(user_email)
-    logger.debug(f"Set user email context: {user_email}")
+    """Set the current user email in the FastMCP context."""
+    try:
+        ctx = get_context()
+        ctx.set_state("user_email", user_email)
+        logger.debug(f"Set user email context: {user_email}")
+    except RuntimeError:
+        # This is expected when called outside FastMCP request context (e.g., OAuth endpoints)
+        logger.debug("Cannot set user email context - not in a FastMCP request context")
 
 
 def get_user_email_context() -> Optional[str]:
-    """Get the current user email from the context."""
-    return _user_email_context.get()
+    """Get the current user email from the FastMCP context."""
+    try:
+        ctx = get_context()
+        return ctx.get_state("user_email")
+    except RuntimeError:
+        logger.debug("Cannot get user email context - not in a FastMCP request context")
+        return None
 
 
 def clear_user_email_context() -> None:
     """Clear the user email context."""
-    _user_email_context.set(None)
-    logger.debug("Cleared user email context")
+    try:
+        ctx = get_context()
+        ctx.set_state("user_email", None)
+        logger.debug("Cleared user email context")
+    except RuntimeError:
+        logger.debug("Cannot clear user email context - not in a FastMCP request context")
 
 
 def request_google_service(
@@ -82,30 +103,37 @@ def request_google_service(
     Returns:
         Context key to retrieve the service with get_injected_service()
     """
-    # Get current service requests or create new dict
-    current_requests = _service_requests_context.get({})
-    
-    # Generate a unique key for this service request
-    # Use just the service type as the key (middleware expects "drive", not "drive_v3")
-    service_key = service_type
-    
-    # Store the service request
-    service_data = {
-        "service_type": service_type,
-        "scopes": scopes,
-        "version": version,
-        "cache_enabled": cache_enabled,
-        "requested": True,
-        "fulfilled": False,
-        "service": None,
-        "error": None
-    }
-    
-    current_requests[service_key] = service_data
-    _service_requests_context.set(current_requests)
-    
-    logger.debug(f"Requested Google service: {service_type} (key: {service_key})")
-    return service_key
+    try:
+        ctx = get_context()
+        
+        # Get current service requests or create new dict
+        current_requests = ctx.get_state("service_requests") or {}
+        
+        # Generate a unique key for this service request
+        # Use just the service type as the key (middleware expects "drive", not "drive_v3")
+        service_key = service_type
+        
+        # Store the service request
+        service_data = {
+            "service_type": service_type,
+            "scopes": scopes,
+            "version": version,
+            "cache_enabled": cache_enabled,
+            "requested": True,
+            "fulfilled": False,
+            "service": None,
+            "error": None
+        }
+        
+        current_requests[service_key] = service_data
+        ctx.set_state("service_requests", current_requests)
+        
+        logger.debug(f"Requested Google service: {service_type} (key: {service_key})")
+        return service_key
+        
+    except RuntimeError:
+        logger.error("Cannot request service - not in a FastMCP request context")
+        raise RuntimeError("Service request requires an active FastMCP request context")
 
 
 def get_injected_service(service_key: str) -> Any:
@@ -121,25 +149,33 @@ def get_injected_service(service_key: str) -> Any:
     Raises:
         RuntimeError: If service not found, not fulfilled, or error occurred
     """
-    current_requests = _service_requests_context.get({})
-    
-    if service_key not in current_requests:
-        raise RuntimeError(f"Service key '{service_key}' not found. Did you call request_google_service()?")
-    
-    service_data = current_requests[service_key]
-    
-    if service_data.get("error"):
-        raise RuntimeError(f"Service injection failed: {service_data['error']}")
-    
-    if not service_data.get("fulfilled"):
-        raise RuntimeError(f"Service '{service_key}' not yet fulfilled by middleware")
-    
-    service = service_data.get("service")
-    if service is None:
-        raise RuntimeError(f"Service '{service_key}' was fulfilled but no service instance found")
-    
-    logger.debug(f"Retrieved injected service: {service_key}")
-    return service
+    try:
+        ctx = get_context()
+        current_requests = ctx.get_state("service_requests") or {}
+        
+        if service_key not in current_requests:
+            raise RuntimeError(f"Service key '{service_key}' not found. Did you call request_google_service()?")
+        
+        service_data = current_requests[service_key]
+        
+        if service_data.get("error"):
+            raise RuntimeError(f"Service injection failed: {service_data['error']}")
+        
+        if not service_data.get("fulfilled"):
+            raise RuntimeError(f"Service '{service_key}' not yet fulfilled by middleware")
+        
+        service = service_data.get("service")
+        if service is None:
+            raise RuntimeError(f"Service '{service_key}' was fulfilled but no service instance found")
+        
+        logger.debug(f"Retrieved injected service: {service_key}")
+        return service
+        
+    except RuntimeError as e:
+        if "not in a FastMCP request context" not in str(e):
+            raise
+        logger.error("Cannot get injected service - not in a FastMCP request context")
+        raise RuntimeError("Getting injected service requires an active FastMCP request context")
 
 
 def get_google_service_simple(
@@ -177,10 +213,15 @@ def get_google_service_simple(
     
     # Check if we already have this service in the current context
     service_key = f"{service_type}_{version or 'default'}"
-    current_requests = _service_requests_context.get({})
     
-    if service_key in current_requests and current_requests[service_key].get("fulfilled"):
-        return get_injected_service(service_key)
+    try:
+        ctx = get_context()
+        current_requests = ctx.get_state("service_requests") or {}
+        
+        if service_key in current_requests and current_requests[service_key].get("fulfilled"):
+            return get_injected_service(service_key)
+    except RuntimeError:
+        pass
     
     # For now, fall back to direct service creation
     # In the future, this could be enhanced to work with middleware pre-injection
@@ -217,14 +258,18 @@ def _set_injected_service(service_key: str, service: Any) -> None:
         service_key: The service key
         service: The authenticated service instance
     """
-    current_requests = _service_requests_context.get({})
-    
-    if service_key in current_requests:
-        current_requests[service_key]["service"] = service
-        current_requests[service_key]["fulfilled"] = True
-        current_requests[service_key]["error"] = None
-        _service_requests_context.set(current_requests)
-        logger.debug(f"Middleware injected service: {service_key}")
+    try:
+        ctx = get_context()
+        current_requests = ctx.get_state("service_requests") or {}
+        
+        if service_key in current_requests:
+            current_requests[service_key]["service"] = service
+            current_requests[service_key]["fulfilled"] = True
+            current_requests[service_key]["error"] = None
+            ctx.set_state("service_requests", current_requests)
+            logger.debug(f"Middleware injected service: {service_key}")
+    except RuntimeError:
+        logger.warning(f"Cannot inject service {service_key} - not in a FastMCP request context")
 
 
 def _set_service_error(service_key: str, error: str) -> None:
@@ -235,13 +280,17 @@ def _set_service_error(service_key: str, error: str) -> None:
         service_key: The service key
         error: The error message
     """
-    current_requests = _service_requests_context.get({})
-    
-    if service_key in current_requests:
-        current_requests[service_key]["error"] = error
-        current_requests[service_key]["fulfilled"] = False
-        _service_requests_context.set(current_requests)
-        logger.debug(f"Middleware set error for service {service_key}: {error}")
+    try:
+        ctx = get_context()
+        current_requests = ctx.get_state("service_requests") or {}
+        
+        if service_key in current_requests:
+            current_requests[service_key]["error"] = error
+            current_requests[service_key]["fulfilled"] = False
+            ctx.set_state("service_requests", current_requests)
+            logger.debug(f"Middleware set error for service {service_key}: {error}")
+    except RuntimeError:
+        logger.warning(f"Cannot set service error for {service_key} - not in a FastMCP request context")
 
 
 def _get_pending_service_requests() -> Dict[str, Dict[str, Any]]:
@@ -251,15 +300,24 @@ def _get_pending_service_requests() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dictionary of pending service requests
     """
-    current_requests = _service_requests_context.get({})
-    return {k: v for k, v in current_requests.items() if v.get("requested") and not v.get("fulfilled")}
+    try:
+        ctx = get_context()
+        current_requests = ctx.get_state("service_requests") or {}
+        return {k: v for k, v in current_requests.items() if v.get("requested") and not v.get("fulfilled")}
+    except RuntimeError:
+        logger.debug("Cannot get pending service requests - not in a FastMCP request context")
+        return {}
 
 
 def clear_all_context() -> None:
     """Clear all context variables."""
     clear_session_context()
     clear_user_email_context()
-    _service_requests_context.set({})
+    try:
+        ctx = get_context()
+        ctx.set_state("service_requests", {})
+    except RuntimeError:
+        pass
     logger.debug("Cleared all context variables")
 
 
@@ -357,3 +415,27 @@ def get_auth_middleware() -> Optional[Any]:
     """Get the AuthMiddleware instance."""
     with _middleware_lock:
         return _auth_middleware
+
+
+# Google Provider management for service selection
+_google_provider_instance = None
+
+def set_google_provider(provider):
+    """Store GoogleProvider instance for global access."""
+    global _google_provider_instance
+    _google_provider_instance = provider
+    logger.debug("Set GoogleProvider instance in context")
+
+def get_google_provider():
+    """Get GoogleProvider instance."""
+    return _google_provider_instance
+
+def is_service_selection_needed(session_id: str = None) -> bool:
+    """Check if service selection is needed for current session."""
+    if not session_id:
+        session_id = get_session_context()
+    
+    if session_id:
+        return get_session_data(session_id, "service_selection_needed", False)
+    
+    return False

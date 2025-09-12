@@ -1,0 +1,1078 @@
+{# Document Generation Templates for Google Docs #}
+{# These macros integrate with docs/doc_template_helper.py to create dynamic Google Docs #}
+
+{% macro generate_report_doc(
+    report_title="Quarterly Report",
+    generation_date="",
+    start_date="",
+    end_date="",
+    metrics=[],
+    table_headers=[],
+    table_data=[],
+    charts=[],
+    company_name="Your Company",
+    footer_text="Confidential Report"
+) %}
+{#
+    Generate a professional report document with metrics, tables, and charts.
+    
+    Parameters:
+    - report_title: Main title of the report
+    - generation_date: Date when report was generated
+    - start_date: Beginning of reporting period
+    - end_date: End of reporting period
+    - metrics: List of dicts with 'value', 'label', and optional 'change' keys
+    - table_headers: List of column headers
+    - table_data: List of lists containing table rows
+    - charts: List of chart definitions with 'title', 'description', 'type', 'data_points'
+    - company_name: Company name for branding
+    - footer_text: Footer disclaimer text
+    
+    Usage:
+    {{ generate_report_doc(
+        report_title="Q4 2024 Performance",
+        metrics=[{"value": "$1.2M", "label": "Revenue", "change": 15}],
+        table_data=[["Oct", "$380K"], ["Nov", "$405K"]]
+    ) }}
+#}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            padding: 40px; 
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 36px;
+            font-weight: 700;
+        }
+        .header p {
+            margin: 5px 0;
+            opacity: 0.95;
+        }
+        .metrics-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .metric { 
+            flex: 1;
+            min-width: 200px;
+            padding: 25px; 
+            background: linear-gradient(135deg, #f6f9fc 0%, #e9ecef 100%);
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.2s;
+        }
+        .metric:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .metric-value { 
+            font-size: 36px; 
+            font-weight: bold; 
+            color: #2d3748;
+            margin-bottom: 5px;
+        }
+        .metric-label { 
+            color: #718096; 
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .change-positive { color: #48bb78; font-weight: 600; }
+        .change-negative { color: #f56565; font-weight: 600; }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin: 25px 0;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; 
+            padding: 15px; 
+            text-align: left;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+        }
+        td { 
+            padding: 15px; 
+            border-bottom: 1px solid #e2e8f0;
+        }
+        tr:hover {
+            background: #f7fafc;
+        }
+        .chart { 
+            margin: 25px 0; 
+            padding: 25px; 
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+        }
+        .chart h3 {
+            color: #2d3748;
+            margin-top: 0;
+        }
+        .chart-placeholder {
+            height: 250px;
+            background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #718096;
+        }
+        h2 {
+            color: #2d3748;
+            margin: 35px 0 20px 0;
+            font-size: 28px;
+            font-weight: 600;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        footer {
+            margin-top: 50px;
+            padding: 30px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 10px;
+            text-align: center;
+            color: #718096;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 {{ report_title }}</h1>
+        <p>🗓️ Generated: {{ generation_date or now().strftime('%Y-%m-%d') }}</p>
+        {% if start_date and end_date %}
+        <p>📅 Period: {{ start_date }} to {{ end_date }}</p>
+        {% endif %}
+    </div>
+    
+    {% if metrics %}
+    <h2>Key Performance Metrics</h2>
+    <div class="metrics-container">
+        {% for metric in metrics %}
+        <div class="metric">
+            <div class="metric-value">{{ metric.value }}</div>
+            <div class="metric-label">{{ metric.label }}</div>
+            {% if metric.change is defined %}
+            <div class="{% if metric.change > 0 %}change-positive{% else %}change-negative{% endif %}">
+                {% if metric.change > 0 %}↑{% else %}↓{% endif %} {{ metric.change }}%
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    {% if table_headers and table_data %}
+    <h2>Detailed Performance Data</h2>
+    <table>
+        <thead>
+            <tr>
+                {% for header in table_headers %}
+                <th>{{ header }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in table_data %}
+            <tr>
+                {% for cell in row %}
+                <td>{{ cell }}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    
+    {% if charts %}
+    <h2>Data Visualizations</h2>
+    {% for chart in charts %}
+    <div class="chart">
+        <h3>{{ chart.title }}</h3>
+        <p>{{ chart.description }}</p>
+        <div class="chart-placeholder">
+            📈 {{ chart.type }} Chart: {{ chart.data_points }} data points
+        </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+    
+    <footer>
+        <p><strong>{{ company_name }}</strong></p>
+        <p>{{ footer_text }}</p>
+        <p style="font-size: 12px; margin-top: 10px;">
+            Document generated using FastMCP Document Templates
+        </p>
+    </footer>
+</body>
+</html>
+{% endmacro %}
+
+
+{% macro generate_invoice_doc(
+    invoice_number="",
+    invoice_date="",
+    due_date="",
+    company={},
+    client={},
+    line_items=[],
+    subtotal=0,
+    tax_rate=0,
+    tax_amount=0,
+    discount=0,
+    total=0,
+    payment_instructions="",
+    bank_details=None,
+    notes="",
+    terms=""
+) %}
+{#
+    Generate a professional invoice document.
+    
+    Parameters:
+    - invoice_number: Unique invoice identifier
+    - invoice_date: Date of invoice creation
+    - due_date: Payment due date
+    - company: Dict with name, address, city, state, zip, email, phone
+    - client: Dict with name, address, city, state, zip, email
+    - line_items: List of dicts with description, quantity, rate
+    - financial fields: subtotal, tax_rate, tax_amount, discount, total
+    - payment_instructions: Payment instructions text
+    - bank_details: Optional dict with account_name, account_number, routing_number
+    - notes: Additional notes
+    - terms: Payment terms
+#}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 850px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            color: #2d3748;
+            line-height: 1.6;
+        }
+        .invoice-header { 
+            display: flex; 
+            justify-content: space-between; 
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #667eea;
+        }
+        .invoice-title {
+            font-size: 42px;
+            font-weight: 700;
+            color: #667eea;
+            margin: 0;
+            letter-spacing: -1px;
+        }
+        .invoice-meta p {
+            margin: 5px 0;
+            color: #4a5568;
+        }
+        .company-info { 
+            text-align: right;
+            max-width: 300px;
+        }
+        .company-info h2 {
+            color: #2d3748;
+            margin: 0 0 10px 0;
+            font-size: 24px;
+        }
+        .company-info p {
+            margin: 3px 0;
+            color: #4a5568;
+            font-size: 14px;
+        }
+        .invoice-details { 
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            padding: 25px; 
+            border-radius: 10px; 
+            margin: 30px 0;
+            border-left: 4px solid #667eea;
+        }
+        .invoice-details h3 {
+            color: #667eea;
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .invoice-details p {
+            margin: 5px 0;
+            color: #4a5568;
+        }
+        .line-items { 
+            margin: 40px 0; 
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th { 
+            background: #2d3748;
+            color: white; 
+            padding: 15px; 
+            text-align: left;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+        td { 
+            padding: 15px; 
+            border-bottom: 1px solid #e2e8f0;
+            color: #4a5568;
+        }
+        tr:hover {
+            background: #f7fafc;
+        }
+        .total-section { 
+            text-align: right; 
+            margin-top: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 10px;
+        }
+        .total-section p {
+            margin: 8px 0;
+            color: #4a5568;
+            font-size: 16px;
+        }
+        .total-row { 
+            font-size: 24px !important;
+            font-weight: bold; 
+            color: #667eea !important;
+            margin-top: 15px !important;
+            padding-top: 15px;
+            border-top: 2px solid #667eea;
+        }
+        .payment-info { 
+            background: linear-gradient(135deg, #e6f7ff 0%, #d6f0ff 100%);
+            padding: 25px; 
+            border-radius: 10px; 
+            margin-top: 40px;
+            border: 1px solid #91d5ff;
+        }
+        .payment-info h3 {
+            color: #0050b3;
+            margin: 0 0 15px 0;
+        }
+        .notes-section {
+            margin-top: 40px;
+            padding: 25px;
+            background: #fffbf0;
+            border-radius: 10px;
+            border-left: 4px solid #faad14;
+        }
+        .notes-section h3 {
+            color: #ad6800;
+            margin: 0 0 10px 0;
+        }
+        footer {
+            margin-top: 50px;
+            text-align: center;
+            padding: 30px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 10px;
+        }
+        footer p {
+            color: #718096;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="invoice-header">
+        <div>
+            <h1 class="invoice-title">INVOICE</h1>
+            <div class="invoice-meta">
+                <p><strong>Invoice #:</strong> {{ invoice_number }}</p>
+                <p><strong>Date:</strong> {{ invoice_date or now().strftime('%Y-%m-%d') }}</p>
+                <p><strong>Due Date:</strong> {{ due_date }}</p>
+            </div>
+        </div>
+        <div class="company-info">
+            <h2>{{ company.name or 'Your Company' }}</h2>
+            <p>{{ company.address }}</p>
+            <p>{{ company.city }}, {{ company.state }} {{ company.zip }}</p>
+            <p>📧 {{ company.email }}</p>
+            <p>📞 {{ company.phone }}</p>
+        </div>
+    </div>
+    
+    <div class="invoice-details">
+        <h3>Bill To:</h3>
+        <p><strong>{{ client.name }}</strong></p>
+        <p>{{ client.address }}</p>
+        <p>{{ client.city }}, {{ client.state }} {{ client.zip }}</p>
+        <p>📧 {{ client.email }}</p>
+    </div>
+    
+    <div class="line-items">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 50%;">Item Description</th>
+                    <th style="width: 15%; text-align: center;">Quantity</th>
+                    <th style="width: 15%; text-align: right;">Rate</th>
+                    <th style="width: 20%; text-align: right;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in line_items %}
+                <tr>
+                    <td>{{ item.description }}</td>
+                    <td style="text-align: center;">{{ item.quantity }}</td>
+                    <td style="text-align: right;">${{ "%.2f" | format(item.rate) }}</td>
+                    <td style="text-align: right;"><strong>${{ "%.2f" | format(item.quantity * item.rate) }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="total-section">
+        <p>Subtotal: <strong>${{ "%.2f" | format(subtotal) }}</strong></p>
+        {% if tax_rate %}
+        <p>Tax ({{ tax_rate }}%): <strong>${{ "%.2f" | format(tax_amount) }}</strong></p>
+        {% endif %}
+        {% if discount %}
+        <p>Discount: <strong>-${{ "%.2f" | format(discount) }}</strong></p>
+        {% endif %}
+        <p class="total-row">Total Due: ${{ "%.2f" | format(total) }}</p>
+    </div>
+    
+    <div class="payment-info">
+        <h3>💳 Payment Information</h3>
+        <p>{{ payment_instructions or 'Please make payment by the due date.' }}</p>
+        {% if bank_details %}
+        <p style="margin-top: 15px;"><strong>Bank Transfer Details:</strong></p>
+        <p>Account Name: {{ bank_details.account_name }}</p>
+        <p>Account Number: {{ bank_details.account_number }}</p>
+        <p>Routing Number: {{ bank_details.routing_number }}</p>
+        {% endif %}
+    </div>
+    
+    {% if notes %}
+    <div class="notes-section">
+        <h3>📝 Notes</h3>
+        <p>{{ notes }}</p>
+    </div>
+    {% endif %}
+    
+    <footer>
+        <p style="font-size: 20px; color: #667eea; font-weight: 600;">Thank you for your business!</p>
+        <p style="font-size: 13px; margin-top: 15px;">
+            {{ terms or 'Payment is due within 30 days. Late payments subject to 1.5% monthly interest.' }}
+        </p>
+        <p style="font-size: 11px; color: #a0aec0; margin-top: 20px;">
+            Generated with FastMCP Invoice Template System
+        </p>
+    </footer>
+</body>
+</html>
+{% endmacro %}
+
+
+{% macro generate_meeting_notes_doc(
+    meeting_title="Team Meeting",
+    meeting_date="",
+    meeting_time="",
+    location="",
+    attendees=[],
+    agenda_items=[],
+    discussion_points=[],
+    action_items=[],
+    decisions=[],
+    next_meeting="",
+    notes=""
+) %}
+{#
+    Generate meeting notes document with structured sections.
+    
+    Parameters:
+    - meeting_title: Title of the meeting
+    - meeting_date: Date of the meeting
+    - meeting_time: Time of the meeting
+    - location: Meeting location (physical or virtual link)
+    - attendees: List of attendee names
+    - agenda_items: List of agenda topics
+    - discussion_points: List of dicts with 'topic' and 'summary'
+    - action_items: List of dicts with 'task', 'assignee', 'due_date'
+    - decisions: List of decision strings
+    - next_meeting: Details about the next meeting
+    - notes: Additional notes
+#}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 30px;
+            color: #2d3748;
+            line-height: 1.7;
+        }
+        .meeting-header {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
+            padding: 35px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+        }
+        .meeting-header h1 {
+            margin: 0 0 15px 0;
+            font-size: 32px;
+        }
+        .meeting-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .meeting-meta-item {
+            background: rgba(255,255,255,0.1);
+            padding: 10px 15px;
+            border-radius: 6px;
+        }
+        .section {
+            margin: 35px 0;
+            padding: 25px;
+            background: #f8fafc;
+            border-radius: 10px;
+            border-left: 4px solid #4f46e5;
+        }
+        .section h2 {
+            color: #4f46e5;
+            margin: 0 0 20px 0;
+            font-size: 22px;
+        }
+        .attendee-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .attendee {
+            background: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            border: 1px solid #e2e8f0;
+            font-size: 14px;
+        }
+        .agenda-item {
+            background: white;
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 6px;
+            border-left: 3px solid #10b981;
+        }
+        .discussion-point {
+            background: white;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .discussion-point h3 {
+            color: #2d3748;
+            margin: 0 0 10px 0;
+            font-size: 18px;
+        }
+        .action-item {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            padding: 15px;
+            margin: 12px 0;
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 15px;
+            align-items: center;
+        }
+        .action-task {
+            font-weight: 600;
+            color: #991b1b;
+        }
+        .action-assignee {
+            background: #dc2626;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 13px;
+        }
+        .action-due {
+            color: #7c2d12;
+            font-size: 14px;
+        }
+        .decision {
+            background: #ecfdf5;
+            border-left: 4px solid #10b981;
+            padding: 12px 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+        }
+        .next-meeting-box {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 30px;
+            text-align: center;
+        }
+        .notes-section {
+            background: #fffbeb;
+            border: 1px solid #fcd34d;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="meeting-header">
+        <h1>📋 {{ meeting_title }}</h1>
+        <div class="meeting-meta">
+            <div class="meeting-meta-item">
+                📅 <strong>Date:</strong> {{ meeting_date or now().strftime('%Y-%m-%d') }}
+            </div>
+            {% if meeting_time %}
+            <div class="meeting-meta-item">
+                ⏰ <strong>Time:</strong> {{ meeting_time }}
+            </div>
+            {% endif %}
+            {% if location %}
+            <div class="meeting-meta-item">
+                📍 <strong>Location:</strong> {{ location }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    {% if attendees %}
+    <div class="section">
+        <h2>👥 Attendees</h2>
+        <div class="attendee-list">
+            {% for attendee in attendees %}
+            <div class="attendee">{{ attendee }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if agenda_items %}
+    <div class="section">
+        <h2>📌 Agenda</h2>
+        {% for item in agenda_items %}
+        <div class="agenda-item">{{ loop.index }}. {{ item }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    {% if discussion_points %}
+    <div class="section">
+        <h2>💬 Discussion Summary</h2>
+        {% for point in discussion_points %}
+        <div class="discussion-point">
+            <h3>{{ point.topic }}</h3>
+            <p>{{ point.summary }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    {% if action_items %}
+    <div class="section">
+        <h2>⚡ Action Items</h2>
+        {% for action in action_items %}
+        <div class="action-item">
+            <div class="action-task">{{ action.task }}</div>
+            <div class="action-assignee">{{ action.assignee }}</div>
+            <div class="action-due">Due: {{ action.due_date }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    {% if decisions %}
+    <div class="section">
+        <h2>✅ Decisions Made</h2>
+        {% for decision in decisions %}
+        <div class="decision">{{ decision }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    {% if next_meeting %}
+    <div class="next-meeting-box">
+        <h3 style="margin: 0 0 10px 0;">🗓️ Next Meeting</h3>
+        <p style="margin: 0;">{{ next_meeting }}</p>
+    </div>
+    {% endif %}
+    
+    {% if notes %}
+    <div class="notes-section">
+        <h3 style="color: #92400e; margin: 0 0 10px 0;">📝 Additional Notes</h3>
+        <p>{{ notes }}</p>
+    </div>
+    {% endif %}
+</body>
+</html>
+{% endmacro %}
+
+
+{% macro generate_proposal_doc(
+    proposal_title="Project Proposal",
+    client_name="",
+    date="",
+    executive_summary="",
+    problem_statement="",
+    proposed_solution="",
+    scope_items=[],
+    timeline_phases=[],
+    budget_items=[],
+    team_members=[],
+    benefits=[],
+    risks=[],
+    terms="",
+    company_info={}
+) %}
+{#
+    Generate a professional project proposal document.
+    
+    Parameters:
+    - proposal_title: Title of the proposal
+    - client_name: Name of the client/recipient
+    - date: Proposal date
+    - executive_summary: Brief summary of the proposal
+    - problem_statement: Description of the problem being solved
+    - proposed_solution: Detailed solution description
+    - scope_items: List of project scope items
+    - timeline_phases: List of dicts with 'phase', 'duration', 'deliverables'
+    - budget_items: List of dicts with 'item', 'cost', 'description'
+    - team_members: List of dicts with 'name', 'role', 'expertise'
+    - benefits: List of expected benefits
+    - risks: List of dicts with 'risk', 'mitigation'
+    - terms: Terms and conditions
+    - company_info: Dict with company details
+#}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px;
+            color: #1a202c;
+            line-height: 1.8;
+        }
+        .proposal-cover {
+            background: linear-gradient(135deg, #1e40af 0%, #3730a3 100%);
+            color: white;
+            padding: 60px;
+            border-radius: 15px;
+            margin-bottom: 40px;
+            text-align: center;
+        }
+        .proposal-cover h1 {
+            font-size: 42px;
+            margin: 0 0 20px 0;
+            font-weight: 300;
+            letter-spacing: -1px;
+        }
+        .proposal-meta {
+            font-size: 18px;
+            opacity: 0.95;
+        }
+        .section {
+            margin: 40px 0;
+            page-break-inside: avoid;
+        }
+        .section h2 {
+            color: #1e40af;
+            font-size: 28px;
+            margin: 0 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e7ff;
+        }
+        .executive-summary {
+            background: #f0f9ff;
+            padding: 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            margin: 30px 0;
+        }
+        .scope-list {
+            list-style: none;
+            padding: 0;
+        }
+        .scope-item {
+            background: white;
+            border: 1px solid #e0e7ff;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #1e40af;
+        }
+        .timeline-phase {
+            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 10px;
+        }
+        .timeline-phase h3 {
+            color: #1f2937;
+            margin: 0 0 10px 0;
+        }
+        .budget-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .budget-table th {
+            background: #1e40af;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        .budget-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .budget-total {
+            background: #fef2f2;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .team-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .team-member {
+            background: white;
+            border: 1px solid #e0e7ff;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .team-member h4 {
+            color: #1e40af;
+            margin: 0 0 5px 0;
+        }
+        .team-role {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .benefit {
+            background: #ecfdf5;
+            border-left: 4px solid #10b981;
+            padding: 12px 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+        }
+        .risk-item {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            padding: 15px;
+            margin: 12px 0;
+            border-radius: 8px;
+        }
+        .risk-title {
+            color: #dc2626;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .terms-section {
+            background: #f9fafb;
+            padding: 25px;
+            border-radius: 10px;
+            font-size: 14px;
+            margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+    <div class="proposal-cover">
+        <h1>{{ proposal_title }}</h1>
+        <div class="proposal-meta">
+            <p><strong>Prepared for:</strong> {{ client_name }}</p>
+            <p><strong>Date:</strong> {{ date or now().strftime('%B %d, %Y') }}</p>
+            {% if company_info.name %}
+            <p><strong>Prepared by:</strong> {{ company_info.name }}</p>
+            {% endif %}
+        </div>
+    </div>
+    
+    {% if executive_summary %}
+    <div class="executive-summary">
+        <h2 style="color: #1e40af; margin-top: 0;">Executive Summary</h2>
+        <p>{{ executive_summary }}</p>
+    </div>
+    {% endif %}
+    
+    {% if problem_statement %}
+    <div class="section">
+        <h2>Problem Statement</h2>
+        <p>{{ problem_statement }}</p>
+    </div>
+    {% endif %}
+    
+    {% if proposed_solution %}
+    <div class="section">
+        <h2>Proposed Solution</h2>
+        <p>{{ proposed_solution }}</p>
+    </div>
+    {% endif %}
+    
+    {% if scope_items %}
+    <div class="section">
+        <h2>Project Scope</h2>
+        <ul class="scope-list">
+            {% for item in scope_items %}
+            <li class="scope-item">✓ {{ item }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    
+    {% if timeline_phases %}
+    <div class="section">
+        <h2>Project Timeline</h2>
+        {% for phase in timeline_phases %}
+        <div class="timeline-phase">
+            <h3>Phase {{ loop.index }}: {{ phase.phase }}</h3>
+            <p><strong>Duration:</strong> {{ phase.duration }}</p>
+            {% if phase.deliverables %}
+            <p><strong>Deliverables:</strong> {{ phase.deliverables }}</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    {% if budget_items %}
+    <div class="section">
+        <h2>Project Budget</h2>
+        <table class="budget-table">
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Description</th>
+                    <th style="text-align: right;">Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set total_cost = namespace(value=0) %}
+                {% for item in budget_items %}
+                <tr>
+                    <td><strong>{{ item.item }}</strong></td>
+                    <td>{{ item.description or '-' }}</td>
+                    <td style="text-align: right;">${{ "%.2f" | format(item.cost) }}</td>
+                </tr>
+                {% set total_cost.value = total_cost.value + item.cost %}
+                {% endfor %}
+                <tr class="budget-total">
+                    <td colspan="2">Total Project Cost</td>
+                    <td style="text-align: right;">${{ "%.2f" | format(total_cost.value) }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if team_members %}
+    <div class="section">
+        <h2>Project Team</h2>
+        <div class="team-grid">
+            {% for member in team_members %}
+            <div class="team-member">
+                <h4>{{ member.name }}</h4>
+                <div class="team-role">{{ member.role }}</div>
+                {% if member.expertise %}
+                <p style="font-size: 14px; color: #6b7280;">{{ member.expertise }}</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if benefits %}
+    <div class="section">
+        <h2>Expected Benefits</h2>
+        {% for benefit in benefits %}
+        <div class="benefit">{{ benefit }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    {% if risks %}
+    <div class="section">
+        <h2>Risk Assessment</h2>
+        {% for risk in risks %}
+        <div class="risk-item">
+            <div class="risk-title">⚠️ {{ risk.risk }}</div>
+            <div><strong>Mitigation:</strong> {{ risk.mitigation }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    {% if terms %}
+    <div class="terms-section">
+        <h3>Terms & Conditions</h3>
+        <p>{{ terms }}</p>
+    </div>
+    {% endif %}
+    
+    <div style="margin-top: 50px; text-align: center; color: #6b7280; font-size: 14px;">
+        <p>{{ company_info.name or 'Your Company' }}</p>
+        {% if company_info.email %}
+        <p>{{ company_info.email }} | {{ company_info.phone or '' }}</p>
+        {% endif %}
+        <p style="margin-top: 20px; font-size: 12px;">
+            Generated with FastMCP Proposal Template System
+        </p>
+    </div>
+</body>
+</html>
+{% endmacro %}

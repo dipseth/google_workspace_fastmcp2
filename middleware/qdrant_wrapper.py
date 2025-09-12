@@ -5,11 +5,12 @@ Simple wrapper for Qdrant middleware to ensure it doesn't block server startup.
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing_extensions import Any, Dict, Optional
 from datetime import datetime
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from auth.context import get_session_context
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +95,17 @@ class QdrantMiddlewareWrapper(Middleware):
             logger.info("🔄 Initializing Qdrant middleware on first tool call...")
             from .qdrant_unified import QdrantUnifiedMiddleware as EnhancedQdrantResponseMiddleware
             
-            # Create the middleware
-            self._inner_middleware = EnhancedQdrantResponseMiddleware()
+            # Create the middleware with settings from config
+            logger.info(f"🔧 Using Qdrant settings: host={settings.qdrant_host}, port={settings.qdrant_port}, url={settings.qdrant_url}, api_key={'***' if settings.qdrant_api_key else 'None'}")
+            self._inner_middleware = EnhancedQdrantResponseMiddleware(
+                qdrant_host=settings.qdrant_host,
+                qdrant_port=settings.qdrant_port,
+                qdrant_api_key=settings.qdrant_api_key,
+                qdrant_url=settings.qdrant_url,
+                collection_name="mcp_tool_responses",
+                auto_discovery=True,  # Enable auto-discovery to find available Qdrant instances
+                ports=[settings.qdrant_port, 6333, 6335, 6334]  # Try configured port first, then fallback
+            )
             
             # Initialize it
             await self._inner_middleware.initialize()

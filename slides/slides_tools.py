@@ -10,14 +10,29 @@ import asyncio
 import os
 import re
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Union
+from typing_extensions import List, Optional, Dict, Any, Union
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
 import aiohttp
 import aiofiles
 
+# Import our custom type for consistent parameter definition
+from tools.common_types import UserGoogleEmailSlides
+
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
+from .slides_types import (
+    CreatePresentationResponse,
+    PresentationInfoResponse,
+    AddSlideResponse,
+    UpdateSlideContentResponse,
+    ExportPresentationResponse,
+    GetPresentationFileResponse,
+    SlideInfo,
+    PageSize,
+    BatchUpdateReply,
+    FileDownloadInfo
+)
 
 logger = logging.getLogger(__name__)
 
@@ -356,9 +371,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         }
     )
     async def create_presentation(
-        user_google_email: str,
+        user_google_email: UserGoogleEmailSlides = None,
         title: str = "Untitled Presentation"
-    ) -> str:
+    ) -> CreatePresentationResponse:
         """
         Create a new Google Slides presentation.
 
@@ -367,7 +382,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             title (str): The title for the new presentation. Defaults to "Untitled Presentation".
 
         Returns:
-            str: Details about the created presentation including ID and URL.
+            CreatePresentationResponse: Structured response with details about the created presentation.
         """
         logger.info(f"[create_presentation] Invoked. Email: '{user_google_email}', Title: '{title}'")
 
@@ -388,25 +403,41 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             presentation_id = result.get('presentationId')
             presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
             
-            success_msg = (
-                f"✅ Presentation Created Successfully for {user_google_email}:\n"
-                f"- Title: {title}\n"
-                f"- Presentation ID: {presentation_id}\n"
-                f"- URL: {presentation_url}\n"
-                f"- Slides: {len(result.get('slides', []))} slide(s) created"
+            logger.info(f"Presentation created successfully for {user_google_email}")
+            
+            return CreatePresentationResponse(
+                presentationId=presentation_id,
+                presentationUrl=presentation_url,
+                title=title,
+                slideCount=len(result.get('slides', [])),
+                success=True,
+                message=f"Presentation '{title}' created successfully for {user_google_email}"
             )
             
-            logger.info(f"Presentation created successfully for {user_google_email}")
-            return success_msg
-            
         except HttpError as e:
-            error_msg = f"❌ Failed to create presentation: {e}"
+            error_msg = f"Failed to create presentation: {e}"
             logger.error(f"[create_presentation] HTTP error: {e}")
-            return error_msg
+            return CreatePresentationResponse(
+                presentationId="",
+                presentationUrl="",
+                title=title,
+                slideCount=0,
+                success=False,
+                message="",
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error creating presentation: {str(e)}"
+            error_msg = f"Unexpected error creating presentation: {str(e)}"
             logger.error(f"[create_presentation] Unexpected error: {e}")
-            return error_msg
+            return CreatePresentationResponse(
+                presentationId="",
+                presentationUrl="",
+                title=title,
+                slideCount=0,
+                success=False,
+                message="",
+                error=error_msg
+            )
 
     @mcp.tool(
         name="get_presentation_info",
@@ -421,9 +452,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_presentation_info(
-        user_google_email: str,
-        presentation_id: str
-    ) -> str:
+        presentation_id: str,
+        user_google_email: UserGoogleEmailSlides = None
+    ) -> PresentationInfoResponse:
         """
         Get details about a Google Slides presentation.
 
@@ -432,7 +463,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             presentation_id (str): The ID of the presentation to retrieve.
 
         Returns:
-            str: Details about the presentation including title, slides count, and metadata.
+            PresentationInfoResponse: Structured response with presentation details.
         """
         logger.info(f"[get_presentation_info] Invoked. Email: '{user_google_email}', ID: '{presentation_id}'")
 
@@ -446,40 +477,76 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             
             title = result.get('title', 'Untitled')
             slides = result.get('slides', [])
-            page_size = result.get('pageSize', {})
+            page_size_data = result.get('pageSize', {})
             
-            # Format slide details
-            slides_info = []
-            for i, slide in enumerate(slides, 1):
-                slides_info.append(format_slide_details(slide, i))
+            # Build page size info
+            page_size: PageSize = {
+                "width": page_size_data.get('width', {}).get('magnitude', 0),
+                "height": page_size_data.get('height', {}).get('magnitude', 0),
+                "unit": page_size_data.get('width', {}).get('unit', 'PT')
+            }
             
-            # Build response
-            response_parts = [
-                f"📊 Presentation Details for {user_google_email}:",
-                f"- Title: {title}",
-                f"- Presentation ID: {presentation_id}",
-                f"- URL: https://docs.google.com/presentation/d/{presentation_id}/edit",
-                f"- Total Slides: {len(slides)}",
-                f"- Page Size: {page_size.get('width', {}).get('magnitude', 'Unknown')} x {page_size.get('height', {}).get('magnitude', 'Unknown')} {page_size.get('width', {}).get('unit', '')}",
-                "",
-                "Slides Breakdown:"
-            ]
+            # Build slide info list
+            slides_info: List[SlideInfo] = []
+            for i, slide in enumerate(slides):
+                slide_id = slide.get("objectId", "Unknown")
+                page_elements = slide.get("pageElements", [])
+                
+                # Count different types of elements
+                element_counts = {}
+                for element in page_elements:
+                    if "shape" in element:
+                        element_counts["shapes"] = element_counts.get("shapes", 0) + 1
+                    elif "table" in element:
+                        element_counts["tables"] = element_counts.get("tables", 0) + 1
+                    elif "line" in element:
+                        element_counts["lines"] = element_counts.get("lines", 0) + 1
+                    elif "image" in element:
+                        element_counts["images"] = element_counts.get("images", 0) + 1
+                    else:
+                        element_counts["other"] = element_counts.get("other", 0) + 1
+                
+                slide_info: SlideInfo = {
+                    "objectId": slide_id,
+                    "index": i,
+                    "elementCount": len(page_elements),
+                    "elementTypes": element_counts
+                }
+                slides_info.append(slide_info)
             
-            if slides_info:
-                response_parts.extend(slides_info)
-            else:
-                response_parts.append("  No slides found")
-            
-            return "\n".join(response_parts)
+            return PresentationInfoResponse(
+                presentationId=presentation_id,
+                title=title,
+                presentationUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
+                slideCount=len(slides),
+                pageSize=page_size,
+                slides=slides_info
+            )
             
         except HttpError as e:
-            error_msg = f"❌ Failed to get presentation: {e}"
+            error_msg = f"Failed to get presentation: {e}"
             logger.error(f"[get_presentation_info] HTTP error: {e}")
-            return error_msg
+            return PresentationInfoResponse(
+                presentationId=presentation_id,
+                title="",
+                presentationUrl="",
+                slideCount=0,
+                pageSize={"width": 0, "height": 0, "unit": ""},
+                slides=[],
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {str(e)}"
             logger.error(f"[get_presentation_info] {error_msg}")
-            return error_msg
+            return PresentationInfoResponse(
+                presentationId=presentation_id,
+                title="",
+                presentationUrl="",
+                slideCount=0,
+                pageSize={"width": 0, "height": 0, "unit": ""},
+                slides=[],
+                error=error_msg
+            )
 
     @mcp.tool(
         name="add_slide",
@@ -494,11 +561,11 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         }
     )
     async def add_slide(
-        user_google_email: str,
         presentation_id: str,
         layout_id: Optional[str] = None,
-        index: Optional[int] = None
-    ) -> str:
+        index: Optional[int] = None,
+        user_google_email: UserGoogleEmailSlides = None
+    ) -> AddSlideResponse:
         """
         Add a new slide to an existing presentation using batch update.
 
@@ -509,7 +576,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             index (Optional[int]): Position to insert the slide (0-based). If not specified, appends to end.
 
         Returns:
-            str: Details about the added slide.
+            AddSlideResponse: Structured response with details about the added slide.
         """
         logger.info(f"[add_slide] Invoked. Email: '{user_google_email}', Presentation: '{presentation_id}'")
 
@@ -540,26 +607,44 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             if replies and 'createSlide' in replies[0]:
                 slide_id = replies[0]['createSlide'].get('objectId', 'Unknown')
             
-            success_msg = (
-                f"✅ Successfully added slide to presentation\n"
-                f"- Presentation ID: {presentation_id}\n"
-                f"- New Slide ID: {slide_id}\n"
-                f"- Insertion Index: {index if index is not None else 'End of presentation'}\n"
-                f"- Layout ID: {layout_id or 'Default layout'}\n"
-                f"- Edit URL: https://docs.google.com/presentation/d/{presentation_id}/edit"
+            logger.info(f"Slide added successfully for {user_google_email}")
+            
+            return AddSlideResponse(
+                presentationId=presentation_id,
+                slideId=slide_id or "",
+                insertionIndex=index,
+                layoutId=layout_id,
+                presentationUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
+                success=True,
+                message=f"Successfully added slide to presentation {presentation_id}"
             )
             
-            logger.info(f"Slide added successfully for {user_google_email}")
-            return success_msg
-            
         except HttpError as e:
-            error_msg = f"❌ Failed to add slide: {e}"
+            error_msg = f"Failed to add slide: {e}"
             logger.error(f"[add_slide] HTTP error: {e}")
-            return error_msg
+            return AddSlideResponse(
+                presentationId=presentation_id,
+                slideId="",
+                insertionIndex=index,
+                layoutId=layout_id,
+                presentationUrl="",
+                success=False,
+                message="",
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {str(e)}"
             logger.error(f"[add_slide] {error_msg}")
-            return error_msg
+            return AddSlideResponse(
+                presentationId=presentation_id,
+                slideId="",
+                insertionIndex=index,
+                layoutId=layout_id,
+                presentationUrl="",
+                success=False,
+                message="",
+                error=error_msg
+            )
 
     @mcp.tool(
         name="update_slide_content",
@@ -574,10 +659,10 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         }
     )
     async def update_slide_content(
-        user_google_email: str,
         presentation_id: str,
-        requests: List[Dict[str, Any]]
-    ) -> str:
+        requests: List[Dict[str, Any]],
+        user_google_email: UserGoogleEmailSlides = None
+    ) -> UpdateSlideContentResponse:
         """
         Apply batch updates to a Google Slides presentation.
 
@@ -593,7 +678,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             requests (List[Dict[str, Any]]): List of update requests to apply.
 
         Returns:
-            str: Details about the batch update operation results.
+            UpdateSlideContentResponse: Structured response with batch update operation results.
         """
         logger.info(f"[update_slide_content] Invoked. Email: '{user_google_email}', ID: '{presentation_id}', Requests: {len(requests)}")
 
@@ -613,43 +698,78 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             
             replies = result.get('replies', [])
             
-            # Build response message
-            response_parts = [
-                f"✅ Batch Update Completed for {user_google_email}:",
-                f"- Presentation ID: {presentation_id}",
-                f"- URL: https://docs.google.com/presentation/d/{presentation_id}/edit",
-                f"- Requests Applied: {len(requests)}",
-                f"- Replies Received: {len(replies)}"
-            ]
+            # Build structured replies
+            batch_replies: List[BatchUpdateReply] = []
+            for i, reply in enumerate(replies):
+                object_id = None
+                operation_type = "unknown"
+                details = "Operation completed"
+                
+                if 'createSlide' in reply:
+                    object_id = reply['createSlide'].get('objectId')
+                    operation_type = "createSlide"
+                    details = f"Created slide with ID {object_id}"
+                elif 'createShape' in reply:
+                    object_id = reply['createShape'].get('objectId')
+                    operation_type = "createShape"
+                    details = f"Created shape with ID {object_id}"
+                elif 'createTable' in reply:
+                    object_id = reply['createTable'].get('objectId')
+                    operation_type = "createTable"
+                    details = f"Created table with ID {object_id}"
+                elif 'createImage' in reply:
+                    object_id = reply['createImage'].get('objectId')
+                    operation_type = "createImage"
+                    details = f"Created image with ID {object_id}"
+                else:
+                    # Try to determine operation type from keys
+                    if reply:
+                        operation_type = list(reply.keys())[0] if reply else "unknown"
+                
+                batch_reply: BatchUpdateReply = {
+                    "requestIndex": i,
+                    "operationType": operation_type,
+                    "objectId": object_id,
+                    "details": details
+                }
+                batch_replies.append(batch_reply)
             
-            if replies:
-                response_parts.append("\nUpdate Results:")
-                for i, reply in enumerate(replies, 1):
-                    if 'createSlide' in reply:
-                        slide_id = reply['createSlide'].get('objectId', 'Unknown')
-                        response_parts.append(f"  Request {i}: Created slide with ID {slide_id}")
-                    elif 'createShape' in reply:
-                        shape_id = reply['createShape'].get('objectId', 'Unknown')
-                        response_parts.append(f"  Request {i}: Created shape with ID {shape_id}")
-                    elif 'createTable' in reply:
-                        table_id = reply['createTable'].get('objectId', 'Unknown')
-                        response_parts.append(f"  Request {i}: Created table with ID {table_id}")
-                    elif 'createImage' in reply:
-                        image_id = reply['createImage'].get('objectId', 'Unknown')
-                        response_parts.append(f"  Request {i}: Created image with ID {image_id}")
-                    else:
-                        response_parts.append(f"  Request {i}: Operation completed")
-            
-            return "\n".join(response_parts)
+            return UpdateSlideContentResponse(
+                presentationId=presentation_id,
+                presentationUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
+                requestCount=len(requests),
+                replyCount=len(replies),
+                replies=batch_replies,
+                success=True,
+                message=f"Batch update completed successfully for {user_google_email}"
+            )
             
         except HttpError as e:
-            error_msg = f"❌ Failed to update slide content: {e}"
+            error_msg = f"Failed to update slide content: {e}"
             logger.error(f"[update_slide_content] HTTP error: {e}")
-            return error_msg
+            return UpdateSlideContentResponse(
+                presentationId=presentation_id,
+                presentationUrl="",
+                requestCount=len(requests),
+                replyCount=0,
+                replies=[],
+                success=False,
+                message="",
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {str(e)}"
             logger.error(f"[update_slide_content] {error_msg}")
-            return error_msg
+            return UpdateSlideContentResponse(
+                presentationId=presentation_id,
+                presentationUrl="",
+                requestCount=len(requests),
+                replyCount=0,
+                replies=[],
+                success=False,
+                message="",
+                error=error_msg
+            )
 
     @mcp.tool(
         name="export_presentation",
@@ -664,10 +784,10 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         }
     )
     async def export_presentation(
-        user_google_email: str,
         presentation_id: str,
+        user_google_email: UserGoogleEmailSlides = None,
         export_format: str = "PDF"
-    ) -> str:
+    ) -> ExportPresentationResponse:
         """
         Export a Google Slides presentation to various formats.
 
@@ -680,7 +800,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             export_format (str): Export format - "PDF", "PPTX", "ODP", "TXT", "PNG", "JPEG", "SVG".
 
         Returns:
-            str: Export URL and instructions.
+            ExportPresentationResponse: Structured response with export URL and instructions.
         """
         logger.info(f"[export_presentation] Invoked. Email: '{user_google_email}', ID: '{presentation_id}', Format: '{export_format}'")
 
@@ -698,7 +818,15 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             
             export_format_upper = export_format.upper()
             if export_format_upper not in format_mapping:
-                return f"❌ Invalid export format. Supported formats: {', '.join(format_mapping.keys())}"
+                return ExportPresentationResponse(
+                    presentationId=presentation_id,
+                    exportFormat=export_format_upper,
+                    exportUrl="",
+                    editUrl="",
+                    success=False,
+                    message="",
+                    error=f"Invalid export format. Supported formats: {', '.join(format_mapping.keys())}"
+                )
             
             # For image formats, we export the first slide
             if export_format_upper in ["PNG", "JPEG", "SVG"]:
@@ -707,25 +835,34 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 mime_type = format_mapping[export_format_upper]
                 export_url = f"https://docs.google.com/presentation/d/{presentation_id}/export/{export_format_upper.lower()}"
             
-            success_msg = (
-                f"✅ Export URL Generated for {user_google_email}:\n"
-                f"- Presentation ID: {presentation_id}\n"
-                f"- Export Format: {export_format_upper}\n"
-                f"- Export URL: {export_url}\n"
-                f"- Edit URL: https://docs.google.com/presentation/d/{presentation_id}/edit\n\n"
-                f"Note: Use the export URL to download the presentation in {export_format_upper} format."
-            )
-            
+            warning = None
             if export_format_upper in ["PNG", "JPEG", "SVG"]:
-                success_msg += f"\n⚠️ For image formats, only the first slide is exported. To export all slides as images, use the get_page_thumbnail tool for each slide."
+                warning = "For image formats, only the first slide is exported. To export all slides as images, use the get_page_thumbnail tool for each slide."
             
             logger.info(f"Export URL generated successfully for {user_google_email}")
-            return success_msg
+            
+            return ExportPresentationResponse(
+                presentationId=presentation_id,
+                exportFormat=export_format_upper,
+                exportUrl=export_url,
+                editUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
+                success=True,
+                message=f"Export URL generated for presentation in {export_format_upper} format",
+                warning=warning
+            )
             
         except Exception as e:
-            error_msg = f"❌ Unexpected error generating export URL: {str(e)}"
+            error_msg = f"Unexpected error generating export URL: {str(e)}"
             logger.error(f"[export_presentation] {error_msg}")
-            return error_msg
+            return ExportPresentationResponse(
+                presentationId=presentation_id,
+                exportFormat=export_format.upper(),
+                exportUrl="",
+                editUrl="",
+                success=False,
+                message="",
+                error=error_msg
+            )
 
     @mcp.tool(
         name="get_presentation_file",
@@ -740,11 +877,11 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_presentation_file(
-        user_google_email: str,
         presentation_id: str,
         export_format: str = "PDF",
-        download_directory: str = "./downloads/presentations"
-    ) -> str:
+        download_directory: str = "./downloads/presentations",
+        user_google_email: UserGoogleEmailSlides = None
+    ) -> GetPresentationFileResponse:
         """
         Download a Google Slides presentation file to local storage.
 
@@ -758,7 +895,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             download_directory (str): Local directory to save the file. Defaults to "./downloads/presentations".
 
         Returns:
-            str: Details about the downloaded file including local path, size, and metadata.
+            GetPresentationFileResponse: Structured response with downloaded file details.
         """
         logger.info(f"[get_presentation_file] Invoked. Email: '{user_google_email}', ID: '{presentation_id}', Format: '{export_format}'")
 
@@ -776,7 +913,23 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             
             export_format_upper = export_format.upper()
             if export_format_upper not in format_mapping:
-                return f"❌ Invalid export format. Supported formats: {', '.join(format_mapping.keys())}"
+                return GetPresentationFileResponse(
+                    presentationId=presentation_id,
+                    presentationTitle="",
+                    exportFormat=export_format_upper,
+                    fileInfo={
+                        "localPath": "",
+                        "absolutePath": "",
+                        "fileSize": 0,
+                        "fileSizeMB": 0.0,
+                        "downloadDuration": 0.0,
+                        "timestamp": ""
+                    },
+                    editUrl="",
+                    success=False,
+                    message="",
+                    error=f"Invalid export format. Supported formats: {', '.join(format_mapping.keys())}"
+                )
 
             # Get the Slides service to fetch presentation info
             slides_service = await _get_slides_service_with_fallback(user_google_email)
@@ -861,25 +1014,32 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 file_size = os.path.getsize(local_file_path)
                 file_size_mb = file_size / (1024 * 1024)
                 
-                # Build success message with comprehensive information
-                success_msg = (
-                    f"✅ Presentation File Downloaded Successfully for {user_google_email}:\n"
-                    f"- Original Title: {presentation_title}\n"
-                    f"- Presentation ID: {presentation_id}\n"
-                    f"- Export Format: {export_format_upper}\n"
-                    f"- Local File Path: {local_file_path}\n"
-                    f"- File Size: {file_size:,} bytes ({file_size_mb:.2f} MB)\n"
-                    f"- Download Duration: {download_duration:.2f} seconds\n"
-                    f"- Download Timestamp: {download_end_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                    f"- Edit URL: https://docs.google.com/presentation/d/{presentation_id}/edit\n\n"
-                    f"📁 File saved to: {os.path.abspath(local_file_path)}"
-                )
+                # Build file info
+                file_info: FileDownloadInfo = {
+                    "localPath": local_file_path,
+                    "absolutePath": os.path.abspath(local_file_path),
+                    "fileSize": file_size,
+                    "fileSizeMB": file_size_mb,
+                    "downloadDuration": download_duration,
+                    "timestamp": download_end_time.strftime('%Y-%m-%d %H:%M:%S')
+                }
                 
+                warning = None
                 if export_format_upper in ["PNG", "JPEG", "SVG"]:
-                    success_msg += f"\n⚠️ For image formats, only the first slide is exported. To export all slides as images, use the get_page_thumbnail tool for each slide."
+                    warning = "For image formats, only the first slide is exported. To export all slides as images, use the get_page_thumbnail tool for each slide."
                 
                 logger.info(f"[get_presentation_file] File downloaded successfully: {local_file_path}")
-                return success_msg
+                
+                return GetPresentationFileResponse(
+                    presentationId=presentation_id,
+                    presentationTitle=presentation_title,
+                    exportFormat=export_format_upper,
+                    fileInfo=file_info,
+                    editUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
+                    success=True,
+                    message=f"Presentation file downloaded successfully for {user_google_email}",
+                    warning=warning
+                )
                 
             except Exception as download_error:
                 # Clean up partial file if it exists
@@ -889,18 +1049,66 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                     except:
                         pass
                 
-                error_msg = f"❌ Failed to download presentation file: {str(download_error)}"
+                error_msg = f"Failed to download presentation file: {str(download_error)}"
                 logger.error(f"[get_presentation_file] Download error: {download_error}")
-                return error_msg
+                return GetPresentationFileResponse(
+                    presentationId=presentation_id,
+                    presentationTitle=presentation_title,
+                    exportFormat=export_format_upper,
+                    fileInfo={
+                        "localPath": "",
+                        "absolutePath": "",
+                        "fileSize": 0,
+                        "fileSizeMB": 0.0,
+                        "downloadDuration": 0.0,
+                        "timestamp": ""
+                    },
+                    editUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
+                    success=False,
+                    message="",
+                    error=error_msg
+                )
                 
         except HttpError as e:
-            error_msg = f"❌ HTTP error accessing presentation: {e}"
+            error_msg = f"HTTP error accessing presentation: {e}"
             logger.error(f"[get_presentation_file] HTTP error: {e}")
-            return error_msg
+            return GetPresentationFileResponse(
+                presentationId=presentation_id,
+                presentationTitle="",
+                exportFormat=export_format.upper(),
+                fileInfo={
+                    "localPath": "",
+                    "absolutePath": "",
+                    "fileSize": 0,
+                    "fileSizeMB": 0.0,
+                    "downloadDuration": 0.0,
+                    "timestamp": ""
+                },
+                editUrl="",
+                success=False,
+                message="",
+                error=error_msg
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error downloading presentation file: {str(e)}"
+            error_msg = f"Unexpected error downloading presentation file: {str(e)}"
             logger.error(f"[get_presentation_file] {error_msg}")
-            return error_msg
+            return GetPresentationFileResponse(
+                presentationId=presentation_id,
+                presentationTitle="",
+                exportFormat=export_format.upper(),
+                fileInfo={
+                    "localPath": "",
+                    "absolutePath": "",
+                    "fileSize": 0,
+                    "fileSizeMB": 0.0,
+                    "downloadDuration": 0.0,
+                    "timestamp": ""
+                },
+                editUrl="",
+                success=False,
+                message="",
+                error=error_msg
+            )
     
     # Log successful setup
     tool_count = 6  # Updated total number of Slides tools

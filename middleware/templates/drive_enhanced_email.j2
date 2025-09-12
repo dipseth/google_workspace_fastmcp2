@@ -1,0 +1,154 @@
+{# 
+  Enhanced Beautiful Email with Drive Items Integration
+  Accepts service://drive/items resource data directly
+  Automatically filters for images and formats them properly
+#}
+
+{% macro render_email_from_drive_items(
+    title="Amazing Update!",
+    subtitle=none,
+    content_text="Check out these amazing photos!",
+    drive_items_data=none,
+    folder_filter=none,
+    image_mimetypes=['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+    max_images=10,
+    layout_style="auto",
+    header_gradient="linear-gradient(45deg, #ff6b35, #f7931e, #ffd32a)",
+    body_gradient="linear-gradient(135deg, #74b9ff, #0984e3)",
+    signature_style="professional",
+    user_name="{{user://current/email.name}}",
+    user_email="{{user://current/email.email}}"
+) %}
+{# 
+  Enhanced macro that accepts service://drive/items data directly!
+  
+  Parameters:
+  - title: Email title
+  - subtitle: Optional subtitle
+  - content_text: Main content text
+  - drive_items_data: service://drive/items resource data OR list of Drive items
+  - folder_filter: Optional folder name to filter by
+  - image_mimetypes: List of image MIME types to include
+  - max_images: Maximum number of images to include
+  - layout_style: "single", "grid", or "auto" (auto = grid if >2 images)
+  - Other styling parameters...
+#}
+
+{# Process Drive items data #}
+{% if drive_items_data %}
+  {% if drive_items_data.result and drive_items_data.result.items %}
+    {% set all_items = drive_items_data.result.items %}
+  {% elif drive_items_data.items %}
+    {% set all_items = drive_items_data.items %}
+  {% elif drive_items_data is sequence and drive_items_data is not string %}
+    {% set all_items = drive_items_data %}
+  {% else %}
+    {% set all_items = [] %}
+  {% endif %}
+{% else %}
+  {% set all_items = [] %}
+{% endif %}
+
+{# Filter for image files only #}
+{% set image_items = [] %}
+{% for item in all_items %}
+  {% if not item.isFolder and (
+    (item.mimeType and item.mimeType in image_mimetypes) or
+    (item.name and (
+      item.name.lower().endswith('.jpg') or
+      item.name.lower().endswith('.jpeg') or 
+      item.name.lower().endswith('.png') or
+      item.name.lower().endswith('.gif') or
+      item.name.lower().endswith('.webp')
+    ))
+  ) %}
+    {% if folder_filter %}
+      {# TODO: Add folder filtering logic if needed #}
+      {% set _ = image_items.append(item) %}
+    {% else %}
+      {% set _ = image_items.append(item) %}
+    {% endif %}
+  {% endif %}
+{% endfor %}
+
+{# Limit images #}
+{% set filtered_images = image_items[:max_images] %}
+
+{# Determine layout based on image count #}
+{% if layout_style == "auto" %}
+  {% if filtered_images|length > 2 %}
+    {% set final_layout = "grid" %}
+  {% else %}
+    {% set final_layout = "single" %}
+  {% endif %}
+{% else %}
+  {% set final_layout = layout_style %}
+{% endif %}
+
+{# Convert Drive items to image format for the main macro #}
+{% set drive_images = [] %}
+{% if final_layout == "grid" and filtered_images|length > 1 %}
+  {# Create grid layout #}
+  {% set grid_images = [] %}
+  {% for item in filtered_images %}
+    {% set _ = grid_images.append({
+      'url': item.id,
+      'caption': '📸 ' + item.name,
+      'alt': item.name
+    }) %}
+  {% endfor %}
+  {% set _ = drive_images.append({
+    'layout': 'grid',
+    'images': grid_images
+  }) %}
+{% else %}
+  {# Create individual images #}
+  {% for item in filtered_images %}
+    {% set _ = drive_images.append({
+      'url': item.id,
+      'caption': '✨ ' + item.name + ' ✨',
+      'alt': item.name,
+      'layout': 'single'
+    }) %}
+  {% endfor %}
+{% endif %}
+
+{# Create content sections #}
+{% set content_sections = [
+  {'type': 'text', 'content': content_text},
+  {'type': 'excitement', 'content': '🎉 Check out these ' + (filtered_images|length|string) + ' amazing photos! 🎉'}
+] %}
+
+{# Now call the main beautiful email macro #}
+{% from 'beautiful_email.j2' import render_beautiful_email %}
+{{ render_beautiful_email(
+    title=title,
+    subtitle=subtitle,
+    header_gradient=header_gradient,
+    body_gradient=body_gradient,
+    user_name=user_name,
+    user_email=user_email,
+    content_sections=content_sections,
+    drive_images=drive_images,
+    signature_style=signature_style
+) }}
+{% endmacro %}
+
+{# Smart macro for quick Drive folder emails #}
+{% macro quick_photo_email_from_drive(
+    title="Photo Update!",
+    recipient_name="there",
+    folder_name=none,
+    drive_items="{{service://drive/items}}",
+    max_photos=6
+) %}
+{% from 'drive_enhanced_email.j2' import render_email_from_drive_items %}
+{{ render_email_from_drive_items(
+    title=title,
+    content_text="Hi " + recipient_name + "! " + ("Here are some great photos from " + folder_name + ":" if folder_name else "Here are some amazing photos to share:"),
+    drive_items_data=drive_items,
+    folder_filter=folder_name,
+    max_images=max_photos,
+    layout_style="auto"
+) }}
+{% endmacro %}

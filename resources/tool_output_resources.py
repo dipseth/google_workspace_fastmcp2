@@ -2,17 +2,21 @@
 
 This module provides resources that cache and expose the outputs of various tools,
 making frequently accessed data available as resources for better performance.
+
+Note: Qdrant-specific resources (qdrant://*) are now handled directly by the
+QdrantUnifiedMiddleware using the on_read_resource hook for better integration.
 """
 
-import logging
 import asyncio
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
 import json
+import logging
+from typing_extensions import Dict, Any, Optional
+from datetime import datetime, timedelta
 
 from fastmcp import FastMCP, Context
 from resources.user_resources import get_current_user_email_simple
-from auth.context import request_google_service, get_injected_service
+from auth.context import get_injected_service
+from auth.service_helpers import request_gmail_service, request_service
 
 logger = logging.getLogger(__name__)
 
@@ -58,163 +62,27 @@ def _get_cached_output(cache_key: str) -> Optional[Any]:
     return cache_entry["output"]
 
 
-def setup_tool_output_resources(mcp: FastMCP) -> None:
-    """Setup resources that expose cached tool outputs."""
+def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
+    """Setup resources that expose cached tool outputs.
     
-    @mcp.resource(
-        uri="spaces://list",
-        name="Google Chat Spaces Cache",
-        description="Cached list of Google Chat spaces for the current user with room details, member counts, and space types - automatically refreshed every 5 minutes for optimal performance",
-        mime_type="application/json",
-        tags={"google", "chat", "spaces", "cached", "rooms", "performance", "messaging"}
-    )
-    async def get_chat_spaces_list(ctx: Context) -> dict:
-        """Internal implementation for Google Chat spaces cache resource."""
-        try:
-            user_email = get_current_user_email_simple()
-            cache_key = _get_cache_key(user_email, "list_spaces")
-            
-            # Check cache first
-            cached_result = _get_cached_output(cache_key)
-            if cached_result:
-                return {
-                    "cached": True,
-                    "user_email": user_email,
-                    "data": cached_result,
-                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
-                    "ttl_minutes": _cache_ttl_minutes
-                }
-            
-            # Cache miss - fetch fresh data
-            chat_key = request_google_service("chat", ["chat_read"])
-            chat_service = get_injected_service(chat_key)
-            
-            # Call the Chat API
-            results = chat_service.spaces().list(pageSize=100).execute()
-            spaces = results.get('spaces', [])
-            
-            # Format the output similar to list_spaces tool
-            formatted_spaces = []
-            for space in spaces:
-                space_info = {
-                    'name': space.get('name', ''),
-                    'displayName': space.get('displayName', 'Unnamed Space'),
-                    'type': space.get('type', 'UNKNOWN'),
-                    'spaceType': space.get('spaceType', 'UNKNOWN'),
-                    'memberCount': len(space.get('spaceDetails', {}).get('members', [])),
-                    'threaded': space.get('spaceDetails', {}).get('guidelines', {}).get('threaded', False)
-                }
-                formatted_spaces.append(space_info)
-            
-            output_data = {
-                "user_email": user_email,
-                "total_spaces": len(formatted_spaces),
-                "spaces": formatted_spaces,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            # Cache the result
-            _cache_tool_output(cache_key, output_data)
-            
-            return {
-                "cached": False,
-                "user_email": user_email,
-                "data": output_data,
-                "cache_timestamp": datetime.now().isoformat(),
-                "ttl_minutes": _cache_ttl_minutes
-            }
-            
-        except ValueError as e:
-            return {
-                "error": f"Authentication error: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Error fetching chat spaces: {e}")
-            return {
-                "error": f"Failed to fetch chat spaces: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
+    Note: The qdrant_middleware parameter is kept for backward compatibility
+    but Qdrant resources are now handled directly by QdrantUnifiedMiddleware.
+    """
     
-    @mcp.resource(
-        uri="drive://files/recent",
-        name="Recent Google Drive Files Cache",
-        description="Cached list of recently modified Google Drive files with metadata including file names, sizes, modification times, and sharing links - updated every 5 minutes for quick access",
-        mime_type="application/json",
-        tags={"google", "drive", "files", "cached", "recent", "performance", "storage", "documents"}
-    )
-    async def get_recent_drive_files(ctx: Context) -> dict:
-        """Internal implementation for recent Google Drive files cache resource."""
-        try:
-            user_email = get_current_user_email_simple()
-            cache_key = _get_cache_key(user_email, "recent_drive_files")
-            
-            # Check cache first
-            cached_result = _get_cached_output(cache_key)
-            if cached_result:
-                return {
-                    "cached": True,
-                    "user_email": user_email,
-                    "data": cached_result,
-                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
-                    "ttl_minutes": _cache_ttl_minutes
-                }
-            
-            # Cache miss - fetch fresh data
-            drive_key = request_google_service("drive", ["drive_read"])
-            drive_service = get_injected_service(drive_key)
-            
-            # Get recent files (modified in last 30 days)
-            results = drive_service.files().list(
-                q="modifiedTime > '2025-01-01T00:00:00Z'",
-                pageSize=25,
-                orderBy="modifiedTime desc",
-                fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink, owners)"
-            ).execute()
-            
-            files = results.get('files', [])
-            
-            output_data = {
-                "user_email": user_email,
-                "total_files": len(files),
-                "files": files,
-                "query": "Recent files (last 30 days)",
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            # Cache the result
-            _cache_tool_output(cache_key, output_data)
-            
-            return {
-                "cached": False,
-                "user_email": user_email,
-                "data": output_data,
-                "cache_timestamp": datetime.now().isoformat(),
-                "ttl_minutes": _cache_ttl_minutes
-            }
-            
-        except ValueError as e:
-            return {
-                "error": f"Authentication error: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Error fetching recent drive files: {e}")
-            return {
-                "error": f"Failed to fetch recent drive files: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
+    # REMOVED: spaces://list resource - use service://chat/spaces instead for same functionality
+    
+    # REMOVED: drive://files/recent resource - use recent://drive instead for same functionality
     
     @mcp.resource(
         uri="gmail://messages/recent",
         name="Recent Gmail Messages Cache",
         description="Cached list of recent Gmail messages from the last 7 days with sender information, subjects, snippets, and thread IDs - refreshed every 5 minutes for efficient email monitoring",
         mime_type="application/json",
-        tags={"google", "gmail", "email", "messages", "cached", "recent", "performance", "inbox"}
+        tags={"google", "gmail", "email", "messages", "cached", "recent", "performance", "inbox"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": False  # Results may vary due to caching
+        }
     )
     async def get_recent_gmail_messages(ctx: Context) -> dict:
         """Internal implementation for recent Gmail messages cache resource."""
@@ -234,7 +102,7 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
                 }
             
             # Cache miss - fetch fresh data
-            gmail_key = request_google_service("gmail", ["gmail_read"])
+            gmail_key = request_gmail_service()  # Uses correct scopes from registry
             gmail_service = get_injected_service(gmail_key)
             
             # Get recent messages
@@ -253,8 +121,7 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
                     message = gmail_service.users().messages().get(
                         userId='me',
                         id=msg['id'],
-                        format='metadata',
-                        metadataHeaders=['From', 'Subject', 'Date']
+                        format='metadata'
                     ).execute()
                     
                     # Extract headers
@@ -267,9 +134,12 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
                     
                     # Parse headers
                     for header in headers:
-                        name = header['name'].lower()
-                        if name in ['from', 'subject', 'date']:
-                            msg_data[name] = header['value']
+                        if header['name'].lower() == 'subject':
+                            msg_data['subject'] = header['value']
+                        elif header['name'].lower() == 'from':
+                            msg_data['from'] = header['value']
+                        elif header['name'].lower() == 'date':
+                            msg_data['date'] = header['value']
                     
                     detailed_messages.append(msg_data)
                     
@@ -314,7 +184,11 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
         name="Today's Calendar Events Cache",
         description="Cached list of today's calendar events with start/end times, attendees, locations, and meeting links - automatically updated every 5 minutes for current day schedule management",
         mime_type="application/json",
-        tags={"google", "calendar", "events", "today", "cached", "schedule", "meetings", "performance"}
+        tags={"google", "calendar", "events", "today", "cached", "schedule", "meetings", "performance"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": False  # Results may vary due to caching
+        }
     )
     async def get_todays_calendar_events(ctx: Context) -> dict:
         """Internal implementation for today's calendar events cache resource."""
@@ -334,12 +208,11 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
                 }
             
             # Cache miss - fetch fresh data
-            calendar_key = request_google_service("calendar", ["calendar_events"])
+            calendar_key = request_service("calendar")  # Uses correct scopes from registry
             calendar_service = get_injected_service(calendar_key)
             
             # Get today's events
-            from datetime import datetime, timezone
-            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             today_end = today_start.replace(hour=23, minute=59, second=59)
             
             events_result = calendar_service.events().list(
@@ -406,7 +279,11 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
         name="Tool Output Cache Status",
         description="Comprehensive status of the tool output cache including total entries, valid/expired counts, TTL information, and detailed cache key analysis for performance monitoring",
         mime_type="application/json",
-        tags={"cache", "status", "performance", "monitoring", "ttl", "analytics", "system"}
+        tags={"cache", "status", "performance", "monitoring", "ttl", "analytics", "system"},
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True  # Status reporting is idempotent
+        }
     )
     async def get_cache_status(ctx: Context) -> dict:
         """Internal implementation for tool output cache status resource."""
@@ -469,7 +346,11 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
         name="Clear Tool Output Cache",
         description="Administrative resource to clear the tool output cache for the current user, forcing fresh API calls and removing stale cached data with detailed operation statistics",
         mime_type="application/json",
-        tags={"cache", "clear", "admin", "reset", "performance", "maintenance", "system"}
+        tags={"cache", "clear", "admin", "reset", "performance", "maintenance", "system"},
+        annotations={
+            "readOnlyHint": False,  # This resource modifies state (clears cache)
+            "idempotentHint": True  # Clearing an already empty cache is safe
+        }
     )
     async def clear_cache(ctx: Context) -> dict:
         """Internal implementation for cache clearing resource."""
@@ -512,284 +393,4 @@ def setup_tool_output_resources(mcp: FastMCP) -> None:
                 "timestamp": datetime.now().isoformat()
             }
     
-    @mcp.resource(
-        uri="qdrant://collection/info",
-        name="Qdrant Collection Information",
-        description="Vector database collection metadata including schema, vector count, indexing configuration, and collection health status for tool response storage system",
-        mime_type="application/json",
-        tags={"qdrant", "vector", "database", "metadata", "collection", "schema", "info", "semantic"}
-    )
-    async def get_qdrant_collection_info(ctx: Context) -> dict:
-        """Internal implementation for Qdrant collection information resource."""
-        try:
-            # Import Qdrant middleware to access collection info
-            from middleware.qdrant_unified import QdrantUnifiedMiddleware, QdrantConfig
-            
-            # Try to get collection info
-            config = QdrantConfig.from_file()
-            
-            # Create a temporary middleware instance to access collection info
-            middleware = QdrantUnifiedMiddleware()
-            await middleware.initialize()
-            
-            if not middleware.client:
-                return {
-                    "error": "Qdrant not available",
-                    "qdrant_enabled": False,
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-            # Get collection information
-            try:
-                collections = await asyncio.to_thread(middleware.client.get_collections)
-                collection_names = [c.name for c in collections.collections]
-                
-                collection_info = None
-                if middleware.config.collection_name in collection_names:
-                    collection_info = await asyncio.to_thread(
-                        middleware.client.get_collection,
-                        middleware.config.collection_name
-                    )
-                
-                return {
-                    "qdrant_enabled": True,
-                    "qdrant_url": middleware.connection_manager.discovered_url,
-                    "collection_name": middleware.config.collection_name,
-                    "collection_exists": middleware.config.collection_name in collection_names,
-                    "total_collections": len(collection_names),
-                    "all_collections": collection_names,
-                    "collection_info": {
-                        "vectors_count": collection_info.vectors_count if collection_info else 0,
-                        "indexed_vectors_count": collection_info.indexed_vectors_count if collection_info else 0,
-                        "points_count": collection_info.points_count if collection_info else 0,
-                        "segments_count": collection_info.segments_count if collection_info else 0,
-                        "status": str(collection_info.status) if collection_info else "unknown"
-                    } if collection_info else None,
-                    "config": {
-                        "host": config.host,
-                        "ports": config.ports,
-                        "collection_name": config.collection_name,
-                        "vector_size": config.vector_size,
-                        "enabled": config.enabled
-                    },
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-            except Exception as e:
-                logger.error(f"Error getting Qdrant collection info: {e}")
-                return {
-                    "error": f"Failed to get collection info: {str(e)}",
-                    "qdrant_enabled": True,
-                    "qdrant_url": getattr(middleware.connection_manager, 'discovered_url', 'unknown'),
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-        except Exception as e:
-            logger.error(f"Error accessing Qdrant: {e}")
-            return {
-                "error": f"Qdrant access error: {str(e)}",
-                "qdrant_enabled": False,
-                "timestamp": datetime.now().isoformat()
-            }
-    
-    @mcp.resource(
-        uri="qdrant://collection/responses/recent",
-        name="Recent Tool Responses from Vector Database",
-        description="Access recent tool execution responses stored in Qdrant vector database with semantic embeddings, response metadata, timestamps, and user context for analysis and debugging",
-        mime_type="application/json",
-        tags={"qdrant", "vector", "responses", "recent", "tool", "history", "semantic", "database", "debug"}
-    )
-    async def get_qdrant_stored_responses(ctx: Context) -> dict:
-        """Internal implementation for recent tool responses from vector database resource."""
-        try:
-            # Try to get user email, but allow access without authentication for debugging
-            user_email = "anonymous"
-            authenticated = False
-            try:
-                user_email = get_current_user_email_simple()
-                authenticated = True
-            except (ValueError, Exception):
-                logger.info("Accessing Qdrant responses without user authentication")
-            
-            # Import Qdrant middleware
-            from middleware.qdrant_unified import QdrantUnifiedMiddleware
-            
-            # Create middleware instance to access stored data
-            middleware = QdrantUnifiedMiddleware()
-            await middleware.initialize()
-            
-            if not middleware.client:
-                return {
-                    "error": "Qdrant not available",
-                    "user_email": user_email,
-                    "qdrant_enabled": False,
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-            # Search for recent responses (last 50)
-            try:
-                # Get all points with metadata
-                search_result = await asyncio.to_thread(
-                    middleware.client.scroll,
-                    collection_name=middleware.config.collection_name,
-                    limit=50,
-                    with_payload=True,
-                    with_vectors=False  # Don't need vectors, just metadata
-                )
-                
-                points = search_result[0] if search_result else []
-                
-                # Filter and format responses
-                user_responses = []
-                all_responses = []
-                
-                for point in points:
-                    payload = point.payload or {}
-                    
-                    response_data = {
-                        "id": str(point.id),
-                        "tool_name": payload.get("tool_name", "unknown"),
-                        "user_email": payload.get("user_email", "unknown"),
-                        "timestamp": payload.get("timestamp", "unknown"),
-                        "response_size": len(str(payload.get("response", ""))),
-                        "session_id": payload.get("session_id", "unknown"),
-                        "payload_type": payload.get("payload_type", "unknown"),
-                        "has_error": "error" in payload.get("response", {}) if isinstance(payload.get("response"), dict) else False
-                    }
-                    
-                    all_responses.append(response_data)
-                    
-                    # Filter for current user only if authenticated
-                    if authenticated and payload.get("user_email") == user_email:
-                        user_responses.append(response_data)
-                
-                # Sort by timestamp (most recent first)
-                user_responses.sort(key=lambda x: x["timestamp"], reverse=True)
-                all_responses.sort(key=lambda x: x["timestamp"], reverse=True)
-                
-                return {
-                    "user_email": user_email,
-                    "authenticated": authenticated,
-                    "qdrant_enabled": True,
-                    "collection_name": middleware.config.collection_name,
-                    "total_responses": len(all_responses),
-                    "user_responses_count": len(user_responses) if authenticated else 0,
-                    "user_responses": user_responses[:20] if authenticated else [],  # Last 20 for current user
-                    "recent_all_responses": all_responses[:10],  # Last 10 from all users
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-            except Exception as e:
-                logger.error(f"Error querying Qdrant responses: {e}")
-                return {
-                    "error": f"Failed to query responses: {str(e)}",
-                    "user_email": user_email,
-                    "authenticated": authenticated,
-                    "qdrant_enabled": True,
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-        except Exception as e:
-            logger.error(f"Error accessing Qdrant responses: {e}")
-            return {
-                "error": f"Qdrant access error: {str(e)}",
-                "qdrant_enabled": False,
-                "timestamp": datetime.now().isoformat()
-            }
-    
-    @mcp.resource(
-        uri="qdrant://search/{query}",
-        name="Advanced Search Tool Responses",
-        description="Advanced search across stored tool responses with support for: ID lookup (id:xxxxx), filtered search (field:value), combined filters with semantic search (field1:value1 field2:value2 semantic query), and pure natural language queries",
-        mime_type="application/json",
-        tags={"qdrant", "search", "semantic", "vector", "similarity", "tool", "responses", "nlp", "context", "filters", "advanced"}
-    )
-    async def search_qdrant_responses(query: str, ctx: Context) -> dict:
-        """Advanced search implementation using unified middleware with query parsing."""
-        try:
-            # Try to get user email, but don't require it for search functionality
-            user_email = "anonymous"
-            try:
-                user_email = get_current_user_email_simple()
-            except (ValueError, Exception):
-                # Search works without authentication - this is for debugging/analysis
-                logger.info("Performing Qdrant search without user authentication")
-            
-            # Import Qdrant middleware
-            from middleware.qdrant_unified import QdrantUnifiedMiddleware
-            
-            # Create middleware instance for search
-            middleware = QdrantUnifiedMiddleware()
-            await middleware.initialize()
-            
-            if not middleware.client or not middleware.embedder:
-                return {
-                    "error": "Qdrant or embedding model not available",
-                    "user_email": user_email,
-                    "query": query,
-                    "qdrant_enabled": False,
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-            # Use the enhanced search method from middleware
-            try:
-                search_results = await middleware.search(
-                    query=query,
-                    limit=10,
-                    score_threshold=0.3
-                )
-                
-                # Format results for resource response
-                formatted_results = []
-                for result in search_results:
-                    result_data = {
-                        "id": result.get("id", "unknown"),
-                        "score": result.get("score", 0.0),
-                        "tool_name": result.get("tool_name", "unknown"),
-                        "user_email": result.get("user_email", "unknown"),
-                        "timestamp": result.get("timestamp", "unknown"),
-                        "session_id": result.get("session_id", "unknown"),
-                        "response_preview": str(result.get("response_data", ""))[:200] + "..." if len(str(result.get("response_data", ""))) > 200 else str(result.get("response_data", "")),
-                        "payload_type": result.get("payload_type", "unknown")
-                    }
-                    
-                    formatted_results.append(result_data)
-                
-                return {
-                    "user_email": user_email,
-                    "query": query,
-                    "qdrant_enabled": True,
-                    "collection_name": middleware.config.collection_name,
-                    "total_results": len(formatted_results),
-                    "results": formatted_results,
-                    "search_timestamp": datetime.now().isoformat(),
-                    "authenticated": user_email != "anonymous",
-                    "query_examples": [
-                        "id:6e05e913-fbe1-4e24-a205-16cb7fd53c9a",
-                        "user_email:test@gmail.com",
-                        "tool_name:get_tool_analytics",
-                        "user_email:test@gmail.com documents for gardening",
-                        "tool_name:search session_id:123 semantic query text"
-                    ]
-                }
-                
-            except Exception as e:
-                logger.error(f"Error performing Qdrant search: {e}")
-                return {
-                    "error": f"Search failed: {str(e)}",
-                    "user_email": user_email,
-                    "query": query,
-                    "qdrant_enabled": True,
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-        except Exception as e:
-            logger.error(f"Error accessing Qdrant for search: {e}")
-            return {
-                "error": f"Qdrant search error: {str(e)}",
-                "query": query,
-                "qdrant_enabled": False,
-                "timestamp": datetime.now().isoformat()
-            }
-    
-    logger.info("✅ Tool output resources registered with caching and Qdrant integration")
+    logger.info("✅ Tool output resources registered with caching (Qdrant resources handled by middleware)")

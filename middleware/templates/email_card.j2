@@ -1,0 +1,221 @@
+{% macro render_gmail_labels_chips(labels_data, title="Gmail Labels") %}
+{# 
+  Gmail Labels Dark Theme Chips Macro
+  Accepts: service://gmail/labels.items data
+  Returns: Complete HTML visualization with dark theme chips
+#}
+
+{# Handle the nested result structure from service://gmail/labels #}
+{% if labels_data and labels_data.result %}
+  {# Nested structure: namespace(result=namespace(labels=[...], user_labels=[...], system_labels=[...])) #}
+  {% set all_labels = labels_data.result.labels or [] %}
+  {% set user_labels = (labels_data.result.user_labels or []) | sort(attribute='name') | list %}
+  {% set sys_labels = (labels_data.result.system_labels or []) | sort(attribute='name') | list %}
+{% elif labels_data and labels_data.labels %}
+  {# Direct structure: namespace(labels=[...], user_labels=[...], system_labels=[...]) #}
+  {% set all_labels = labels_data.labels or [] %}
+  {% set user_labels = (labels_data.user_labels or []) | sort(attribute='name') | list %}
+  {% set sys_labels = (labels_data.system_labels or []) | sort(attribute='name') | list %}
+{% elif labels_data is sequence and labels_data is not string %}
+  {# It's a direct array of labels #}
+  {% set all_labels = labels_data %}
+  {% set user_labels = labels_data | selectattr('type','equalto','user') | sort(attribute='name') | list %}
+  {% set sys_labels = labels_data | selectattr('type','equalto','system') | sort(attribute='name') | list %}
+{% else %}
+  {# Empty fallback #}
+  {% set all_labels = [] %}
+  {% set user_labels = [] %}
+  {% set sys_labels = [] %}
+{% endif %}
+
+<!-- Gmail Labels Dark Theme Visualization -->
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,sans-serif; line-height:1.45; color:#e5e7eb; background:#0b1220;">
+  <div style="max-width:1000px; margin:0 auto; padding:20px;">
+    
+    <h2 style="margin:0 0 12px 0; color:#f1f5f9; font-size:28px; font-weight:800; letter-spacing:-0.02em;">
+      {{ title }} ({{ all_labels|length }})
+    </h2>
+    
+    <div style="font-size:14px; color:#94a3b8; margin-bottom:24px;">
+      <strong style="color:#cbd5e1;">User Labels:</strong> {{ user_labels|length }}
+      &nbsp;•&nbsp;
+      <strong style="color:#cbd5e1;">System Labels:</strong> {{ sys_labels|length }}
+    </div>
+
+    {# ---- Section: USER LABELS ---- #}
+    {% if user_labels %}
+      <h3 style="margin:24px 0 10px 0; color:#e2e8f0; font-size:18px; font-weight:700; border-bottom:2px solid #1f2937; padding-bottom:8px;">
+        User Labels
+      </h3>
+      
+      <div class="gmail-chip-grid">
+        {% for label in user_labels %}
+          {% set bg = (label.color.backgroundColor if label.color else '#3b82f6') %}
+          {% set fg = (label.color.textColor if label.color else '#ffffff') %}
+          {% set unread = label.messagesUnread or 0 %}
+          {% set label_url = 'https://mail.google.com/mail/u/0/#label/' + (label.name | urlencode) %}
+          <a href="{{ label_url }}"
+             target="_blank"
+             style="text-decoration: none;">
+            <div class="gmail-label-chip"
+                 title="{{ label.name }} — {{ unread }} unread messages"
+                 aria-label="{{ label.name }} ({{ unread }} unread)"
+                 style="
+                   background: {{ bg }};
+                   background-image: linear-gradient(135deg, rgba(255,255,255,.14), rgba(0,0,0,.10));
+                   color: {{ fg }};
+                   border: 1px solid rgba(255,255,255,.18);
+                   border-radius: 999px;
+                   padding: 8px 12px;
+                   margin: 4px;
+                   display: inline-flex;
+                   align-items: center;
+                   gap: 8px;
+                   vertical-align: top;
+                   font-size: 12px;
+                   font-weight: 600;
+                   white-space: nowrap;
+                   overflow: hidden;
+                   text-overflow: ellipsis;
+                   max-width: 300px;
+                   box-shadow: 0 2px 8px rgba(0,0,0,.45);
+                   transition: transform .2s ease;
+                   cursor: pointer;">
+              <span>📧</span>
+              <span style="overflow:hidden; text-overflow:ellipsis;">{{ label.name }}</span>
+              {% if unread > 0 %}
+                <span style="background: rgba(255,255,255,0.25); padding: 2px 6px; border-radius: 10px; font-size: 11px; font-weight: 700;">
+                  {{ unread }}
+                </span>
+              {% endif %}
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {# ---- Section: SYSTEM LABELS ---- #}
+    {% if sys_labels %}
+      <h3 style="margin:28px 0 10px 0; color:#e2e8f0; font-size:18px; font-weight:700; border-bottom:2px solid #1f2937; padding-bottom:8px;">
+        System Labels
+      </h3>
+      
+      <div class="gmail-chip-grid">
+        {% for label in sys_labels %}
+          {% set bg = (label.color.backgroundColor if label.color else '#334155') %}
+          {% set fg = (label.color.textColor if label.color else '#f8fafc') %}
+          {% set unread = label.messagesUnread or 0 %}
+          {# Map system label IDs to Gmail URL paths #}
+          {% if label.id == 'INBOX' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#inbox' %}
+          {% elif label.id == 'SENT' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#sent' %}
+          {% elif label.id == 'DRAFT' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#drafts' %}
+          {% elif label.id == 'SPAM' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#spam' %}
+          {% elif label.id == 'TRASH' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#trash' %}
+          {% elif label.id == 'STARRED' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#starred' %}
+          {% elif label.id == 'IMPORTANT' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#imp' %}
+          {% elif label.id == 'UNREAD' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#search/is%3Aunread' %}
+          {% elif label.id == 'CATEGORY_PERSONAL' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#category/personal' %}
+          {% elif label.id == 'CATEGORY_SOCIAL' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#category/social' %}
+          {% elif label.id == 'CATEGORY_PROMOTIONS' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#category/promotions' %}
+          {% elif label.id == 'CATEGORY_UPDATES' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#category/updates' %}
+          {% elif label.id == 'CATEGORY_FORUMS' %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#category/forums' %}
+          {% else %}
+            {% set label_url = 'https://mail.google.com/mail/u/0/#label/' + (label.id | urlencode) %}
+          {% endif %}
+          <a href="{{ label_url }}"
+             target="_blank"
+             style="text-decoration: none;">
+            <div class="gmail-label-chip"
+                 title="{{ label.name }} — {{ unread }} unread messages"
+                 aria-label="{{ label.name }} ({{ unread }} unread)"
+                 style="
+                   background: {{ bg }};
+                   background-image: linear-gradient(135deg, rgba(255,255,255,.10), rgba(0,0,0,.12));
+                   color: {{ fg }};
+                   border: 1px solid rgba(255,255,255,.18);
+                   border-radius: 999px;
+                   padding: 8px 12px;
+                   margin: 4px;
+                   display: inline-flex;
+                   align-items: center;
+                   gap: 8px;
+                   vertical-align: top;
+                   font-size: 12px;
+                   font-weight: 600;
+                   white-space: nowrap;
+                   overflow: hidden;
+                   text-overflow: ellipsis;
+                   max-width: 300px;
+                   box-shadow: 0 2px 8px rgba(0,0,0,.45);
+                   transition: transform .2s ease;
+                   cursor: pointer;">
+              <span>🏷️</span>
+              <span style="overflow:hidden; text-overflow:ellipsis;">{{ label.name }}</span>
+              {% if unread > 0 %}
+                <span style="background: rgba(255,255,255,0.25); padding: 2px 6px; border-radius: 10px; font-size: 11px; font-weight: 700;">
+                  {{ unread }}
+                </span>
+              {% endif %}
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+{# --- Gmail Labels Chip Grid Styles --- #}
+<style>
+  .gmail-chip-grid { 
+    display: flex; 
+    flex-wrap: wrap; 
+    gap: 8px; 
+    align-items: center; 
+  }
+  .gmail-label-chip:hover { 
+    transform: translateY(-1px); 
+    box-shadow: 0 6px 14px rgba(0,0,0,.55) !important; 
+  }
+  @media (max-width: 768px) { 
+    .gmail-label-chip { 
+      font-size: 11px !important; 
+      padding: 6px 10px !important; 
+      max-width: 250px !important; 
+    } 
+  }
+  @media (max-width: 480px) { 
+    .gmail-label-chip { 
+      font-size: 10px !important; 
+      padding: 5px 8px !important; 
+      max-width: 200px !important; 
+    } 
+  }
+  @media print {
+    .gmail-chip-grid { gap: 4px; }
+    .gmail-label-chip { 
+      padding: 4px 8px !important; 
+      font-size: 10px !important; 
+      margin: 2px !important; 
+      box-shadow: none !important; 
+    }
+  }
+</style>
+{% endmacro %}
+
+{#
+MACRO USAGE EXAMPLE:
+{{ render_gmail_labels_chips( service://gmail/labels , 'Label summary for: ' + user://current/email.email ) }}
+#}

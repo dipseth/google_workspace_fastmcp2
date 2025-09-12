@@ -4,7 +4,7 @@ Deployment Templates for Google Chat Apps
 Generates deployment configurations and scripts.
 """
 import logging
-from typing import Dict, Any, Optional
+from typing_extensions import Dict, Any, Optional
 from datetime import datetime
 
 logger = logging.getLogger(__name__)

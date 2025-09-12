@@ -1,13 +1,25 @@
 """
 Google Docs tools for FastMCP2 with middleware-based service injection and fallback support.
 
-This module provides comprehensive Google Docs integration tools for FastMCP2 servers,
+This module provides comprehensive Google Docs integrationasync def get_doc_content(
+    document_id: str,
+    user_google_email: UserGoogleEmail = None
+) -> str:ls for FastMCP2 servers,
 using the new middleware-dependent pattern for Google service authentication with
 fallback to direct service creation when middleware injection is unavailable.
 
-Key Features:
-- Search for Google Docs by name using Drive API
-- Retrieve content from Google Docs and Drive files
+    async def list_docs_in_folder_tool(
+        folder_id: str = 'root',
+        page_size: int = 100,
+        user_google_email: UserGoogleEmail = None
+    ) -> str:eatures:
+- Search for Google Docs by name using Dasync def create_doc(
+    title: str,
+    content: str = "",
+    user_google_email: UserGoogleEmail = None
+) -> str:API
+- R        ""List Google Docs within a specific Drive folder.""
+        return await list_docs_in_folder(folder_id, page_size, user_google_email)rieve content from Google Docs and Drive files
 - List Google Docs within specific folders
 - Create new Google Docs with initial content
 - Support for both native Google Docs and Office files
@@ -15,7 +27,11 @@ Key Features:
 - Fallback to direct service creation when middleware unavailable
 
 Architecture:
-- Primary: Uses middleware-based service injection (no decorators)
+- Primary: Uses middleware-based servic    async def create_doc_tool(
+        title: str,
+        content: str = "",
+        user_google_email: UserGoogleEmail = None
+    ) -> str:ection (no decorators)
 - Fallback: Direct service creation when middleware unavailable
 - Automatic Google service authentication and caching
 - Consistent error handling and token refresh
@@ -30,8 +46,10 @@ Dependencies:
 import logging
 import asyncio
 import io
-from typing import List, Optional
+import re
+from typing import List, Optional, Union
 from pathlib import Path
+from googleapiclient.http import MediaIoBaseUpload
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
@@ -39,15 +57,17 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from auth.service_helpers import request_service, get_injected_service, get_service
 from auth.context import get_user_email_context
+from tools.common_types import UserGoogleEmail
 from .utils import extract_office_xml_text
+from .docs_types import DocsListResponse, DocInfo, CreateDocResponse
 
 logger = logging.getLogger(__name__)
 
 
 async def search_docs(
-    user_google_email: str,
     query: str,
     page_size: int = 10,
+    user_google_email: UserGoogleEmail = None
 ) -> str:
     """
     Searches for Google Docs by name using Drive API (mimeType filter).
@@ -143,7 +163,7 @@ async def search_docs(
 
 
 async def get_doc_content(
-    user_google_email: str,
+    user_google_email: UserGoogleEmail,
     document_id: str,
 ) -> str:
     """
@@ -341,10 +361,10 @@ async def get_doc_content(
 
 
 async def list_docs_in_folder(
-    user_google_email: str,
     folder_id: str = 'root',
-    page_size: int = 100
-) -> str:
+    page_size: int = 100,
+    user_google_email: UserGoogleEmail = None
+) -> DocsListResponse:
     """
     Lists Google Docs within a specific Drive folder.
 
@@ -354,7 +374,7 @@ async def list_docs_in_folder(
         page_size: Maximum number of results to return (default: 100)
 
     Returns:
-        str: A formatted list of Google Docs in the specified folder.
+        DocsListResponse: Structured response with list of Google Docs in the specified folder.
     """
     logger.info(f"[list_docs_in_folder] Email: '{user_google_email}', Folder ID: '{folder_id}'")
 
@@ -380,7 +400,7 @@ async def list_docs_in_folder(
                 
                 # Check for specific credential errors and return user-friendly messages
                 if "no valid credentials found" in error_str.lower():
-                    return (
+                    error_msg = (
                         f"❌ **No Credentials Found**\n\n"
                         f"No authentication credentials found for {user_google_email}.\n\n"
                         f"**To authenticate:**\n"
@@ -390,7 +410,7 @@ async def list_docs_in_folder(
                         f"4. Return here after seeing the success page"
                     )
                 elif "credentials do not contain the necessary fields" in error_str.lower():
-                    return (
+                    error_msg = (
                         f"❌ **Invalid or Corrupted Credentials**\n\n"
                         f"Your stored credentials for {user_google_email} are missing required OAuth fields.\n\n"
                         f"**To fix this:**\n"
@@ -399,7 +419,16 @@ async def list_docs_in_folder(
                         f"3. Try your Docs command again"
                     )
                 else:
-                    return f"❌ Authentication error: {error_str}"
+                    error_msg = f"❌ Authentication error: {error_str}"
+                
+                return DocsListResponse(
+                    docs=[],
+                    count=0,
+                    folderId=folder_id,
+                    folderName=None,
+                    userEmail=user_google_email,
+                    error=error_msg
+                )
         else:
             logger.error(f"[list_docs_in_folder] Unexpected RuntimeError: {e}")
             raise
@@ -413,121 +442,533 @@ async def list_docs_in_folder(
             ).execute
         )
         items = rsp.get('files', [])
-        if not items:
-            return f"No Google Docs found in folder '{folder_id}'."
         
-        out = [f"Found {len(items)} Docs in folder '{folder_id}':"]
-        for f in items:
-            out.append(f"- {f['name']} (ID: {f['id']}) Modified: {f.get('modifiedTime')} Link: {f.get('webViewLink')}")
-        return "\n".join(out)
+        # Build structured response
+        docs: List[DocInfo] = []
+        for file in items:
+            doc_info = DocInfo(
+                id=file.get('id', ''),
+                name=file.get('name', 'Unknown'),
+                modifiedTime=file.get('modifiedTime'),
+                webViewLink=file.get('webViewLink')
+            )
+            docs.append(doc_info)
+        
+        return DocsListResponse(
+            docs=docs,
+            count=len(docs),
+            folderId=folder_id,
+            folderName="root" if folder_id == "root" else None,
+            userEmail=user_google_email
+        )
 
     except HttpError as e:
         logger.error(f"Google API error in list_docs_in_folder: {e}")
+        error_msg = ""
         if e.resp.status == 401:
-            return "❌ Authentication failed. Please check your Google credentials."
+            error_msg = "Authentication failed. Please check your Google credentials."
         elif e.resp.status == 403:
-            return "❌ Permission denied. Make sure you have access to this folder."
+            error_msg = "Permission denied. Make sure you have access to this folder."
         elif e.resp.status == 404:
-            return f"❌ Folder not found: {folder_id}"
+            error_msg = f"Folder not found: {folder_id}"
         else:
-            return f"❌ Error listing docs: {str(e)}"
+            error_msg = f"Error listing docs: {str(e)}"
+        
+        return DocsListResponse(
+            docs=[],
+            count=0,
+            folderId=folder_id,
+            folderName=None,
+            userEmail=user_google_email,
+            error=error_msg
+        )
     except Exception as e:
         logger.error(f"Unexpected error in list_docs_in_folder: {e}", exc_info=True)
-        return f"❌ Unexpected error: {str(e)}"
+        return DocsListResponse(
+            docs=[],
+            count=0,
+            folderId=folder_id,
+            folderName=None,
+            userEmail=user_google_email,
+            error=f"Unexpected error: {str(e)}"
+        )
+
+
+def detect_content_type(content: Union[str, bytes]) -> tuple[str, str]:
+    """
+    Enhanced detection of content type based on content patterns and structure.
+    
+    Args:
+        content: The content (string or bytes) to analyze
+        
+    Returns:
+        tuple: (detected_type, suggested_mime_type)
+            - detected_type: 'html', 'markdown', 'rtf', 'docx', 'plain', etc.
+            - suggested_mime_type: The MIME type to use for upload
+    """
+    # Handle bytes content (binary files)
+    if isinstance(content, bytes):
+        # Check for DOCX (ZIP signature with specific structure)
+        if content.startswith(b'PK\x03\x04'):
+            return 'docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        # Check for RTF
+        if content.startswith(b'{\\rtf'):
+            return 'rtf', 'application/rtf'
+        # Check for PDF
+        if content.startswith(b'%PDF'):
+            return 'pdf', 'application/pdf'
+        # Try to decode as text
+        try:
+            content = content.decode('utf-8')
+        except UnicodeDecodeError:
+            return 'binary', 'application/octet-stream'
+    
+    # Check for HTML (more comprehensive patterns)
+    if re.search(r'<!DOCTYPE\s+html|<html[\s>]|<head[\s>]|<body[\s>]|<h[1-6][\s>]|<p[\s>]|<div[\s>]|<span[\s>]|<table[\s>]|<strong[\s>]|<em[\s>]|<ul[\s>]|<ol[\s>]|<li[\s>]|<a\s+href=|<img\s+src=', content, re.IGNORECASE):
+        return 'html', 'text/html'
+    
+    # Check for Markdown (comprehensive patterns)
+    markdown_patterns = [
+        r'^#{1,6}\s+',  # Headers
+        r'\*\*[^*]+\*\*',  # Bold
+        r'\*[^*]+\*',  # Italic
+        r'!\[.*?\]\(.*?\)',  # Images
+        r'\[.*?\]\(.*?\)',  # Links
+        r'^[\*\-+]\s+',  # Unordered lists
+        r'^\d+\.\s+',  # Ordered lists
+        r'^>\s+',  # Blockquotes
+        r'```[\s\S]*?```',  # Code blocks
+        r'`[^`]+`',  # Inline code
+        r'^\|.*\|.*\|',  # Tables
+        r'^---+$',  # Horizontal rules
+    ]
+    
+    if any(re.search(pattern, content, re.MULTILINE) for pattern in markdown_patterns):
+        return 'markdown', 'text/markdown'
+    
+    # Check for RTF text format
+    if content.startswith('{\\rtf'):
+        return 'rtf', 'application/rtf'
+    
+    # Check for LaTeX
+    if re.search(r'\\documentclass|\\begin\{document\}|\\section\{|\\subsection\{', content):
+        return 'latex', 'text/x-latex'
+    
+    # Default to plain text
+    return 'plain', 'text/plain'
+
+
+def markdown_to_html(markdown_content: str) -> str:
+    """
+    Enhanced Markdown to HTML converter with support for more markdown features.
+    
+    Args:
+        markdown_content: Markdown content string
+        
+    Returns:
+        str: HTML content with proper formatting
+    """
+    html = markdown_content
+    
+    # Convert code blocks first (to protect them from other conversions)
+    code_blocks = []
+    def save_code_block(match):
+        code_blocks.append(match.group(0))
+        return f'<!--CODE_BLOCK_{len(code_blocks)-1}-->'
+    
+    html = re.sub(r'```[\s\S]*?```', save_code_block, html)
+    html = re.sub(r'`[^`]+`', save_code_block, html)
+    
+    # Convert headers (h1-h6)
+    for level in range(6, 0, -1):
+        pattern = r'^' + '#' * level + r'\s+(.+)$'
+        html = re.sub(pattern, f'<h{level}>\\1</h{level}>', html, flags=re.MULTILINE)
+    
+    # Convert bold and italic (handle nested cases)
+    html = re.sub(r'\*\*\*(.+?)\*\*\*', r'<strong><em>\1</em></strong>', html)
+    html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html)
+    html = re.sub(r'\*(.+?)\*', r'<em>\1</em>', html)
+    html = re.sub(r'__(.+?)__', r'<strong>\1</strong>', html)
+    html = re.sub(r'_(.+?)_', r'<em>\1</em>', html)
+    
+    # Convert links and images
+    html = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', r'<img src="\2" alt="\1" />', html)
+    html = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', html)
+    
+    # Convert blockquotes
+    lines = html.split('\n')
+    result_lines = []
+    in_blockquote = False
+    
+    for line in lines:
+        if line.startswith('> '):
+            if not in_blockquote:
+                result_lines.append('<blockquote>')
+                in_blockquote = True
+            result_lines.append(line[2:])
+        else:
+            if in_blockquote:
+                result_lines.append('</blockquote>')
+                in_blockquote = False
+            result_lines.append(line)
+    
+    if in_blockquote:
+        result_lines.append('</blockquote>')
+    
+    html = '\n'.join(result_lines)
+    
+    # Convert lists (both ordered and unordered)
+    lines = html.split('\n')
+    result_lines = []
+    in_ul = False
+    in_ol = False
+    
+    for line in lines:
+        # Unordered list
+        if re.match(r'^[\*\-+]\s+', line):
+            if not in_ul:
+                if in_ol:
+                    result_lines.append('</ol>')
+                    in_ol = False
+                result_lines.append('<ul>')
+                in_ul = True
+            item_text = re.sub(r'^[\*\-+]\s+', '', line)
+            result_lines.append(f'<li>{item_text}</li>')
+        # Ordered list
+        elif re.match(r'^\d+\.\s+', line):
+            if not in_ol:
+                if in_ul:
+                    result_lines.append('</ul>')
+                    in_ul = False
+                result_lines.append('<ol>')
+                in_ol = True
+            item_text = re.sub(r'^\d+\.\s+', '', line)
+            result_lines.append(f'<li>{item_text}</li>')
+        else:
+            if in_ul:
+                result_lines.append('</ul>')
+                in_ul = False
+            if in_ol:
+                result_lines.append('</ol>')
+                in_ol = False
+            result_lines.append(line)
+    
+    if in_ul:
+        result_lines.append('</ul>')
+    if in_ol:
+        result_lines.append('</ol>')
+    
+    html = '\n'.join(result_lines)
+    
+    # Convert horizontal rules
+    html = re.sub(r'^---+$', '<hr />', html, flags=re.MULTILINE)
+    html = re.sub(r'^\*\*\*+$', '<hr />', html, flags=re.MULTILINE)
+    
+    # Restore code blocks
+    for i, code_block in enumerate(code_blocks):
+        if code_block.startswith('```'):
+            # Fenced code block
+            code_content = code_block[3:-3].strip()
+            if '\n' in code_content:
+                lang_line, code = code_content.split('\n', 1)
+                html = html.replace(f'<!--CODE_BLOCK_{i}-->', f'<pre><code>{code}</code></pre>')
+            else:
+                html = html.replace(f'<!--CODE_BLOCK_{i}-->', f'<pre><code>{code_content}</code></pre>')
+        else:
+            # Inline code
+            code_content = code_block[1:-1]
+            html = html.replace(f'<!--CODE_BLOCK_{i}-->', f'<code>{code_content}</code>')
+    
+    # Wrap non-HTML lines in paragraphs
+    lines = html.split('\n')
+    result_lines = []
+    for line in lines:
+        if line.strip() and not re.match(r'^<[^>]+>', line.strip()):
+            result_lines.append(f'<p>{line}</p>')
+        else:
+            result_lines.append(line)
+    
+    return '\n'.join(result_lines)
 
 
 async def create_doc(
-    user_google_email: str,
     title: str,
-    content: str = '',
-) -> str:
+    content: Union[str, bytes] = '',
+    user_google_email: UserGoogleEmail = None,
+    content_mime_type: Optional[str] = None
+) -> CreateDocResponse:
     """
-    Creates a new Google Doc and optionally inserts initial content.
+    Creates a new Google Doc with support for multiple content formats and rich formatting.
+    
+    This enhanced function uses Google Drive API's automatic conversion feature to create
+    properly formatted Google Docs from various content types. It supports:
+    
+    - Plain text: Direct conversion to Google Doc
+    - Markdown: Converted to HTML then to Google Doc with formatting preserved
+    - HTML: Direct upload with automatic conversion to Google Doc format
+    - RTF: Rich Text Format documents converted to Google Docs
+    - DOCX: Word documents converted to Google Docs
+    - LaTeX: LaTeX documents converted via HTML to Google Docs
+    - PDF: Uploaded as-is (not converted, but viewable in Drive)
+    - Any other MIME type: Attempted conversion based on Drive's capabilities
+    
+    The function leverages Google's built-in conversion capabilities and MediaIoBaseUpload
+    for flexible content handling. It automatically detects content type if not specified.
 
     Args:
-        user_google_email: The user's Google email address
         title: Title for the new document
-        content: Initial content to insert into the document (optional)
+        content: Initial content (string or bytes) to insert into the document
+        user_google_email: The user's Google email address
+        content_mime_type: Optional MIME type override. If not provided, auto-detected
 
     Returns:
-        str: Confirmation message with document ID and link.
+        CreateDocResponse: Structured response with document details and metadata
     """
-    logger.info(f"[create_doc] Email: '{user_google_email}', Title='{title}'")
+    logger.info(f"[create_doc] Email: '{user_google_email}', Title='{title}', Content size: {len(content) if content else 0}")
 
-    # Request Docs service through middleware
-    docs_key = request_service("docs")
+    # Handle empty content case
+    if not content:
+        docs_key = request_service("docs")
+        
+        try:
+            docs_service = get_injected_service(docs_key)
+            logger.info(f"[create_doc] Using injected Docs service for empty doc")
+        except RuntimeError as e:
+            logger.warning(f"[create_doc] Docs middleware injection failed: {e}")
+            if "not yet fulfilled" in str(e).lower() or "service injection" in str(e).lower():
+                docs_service = await get_service("docs", user_google_email)
+                logger.info(f"[create_doc] Using direct Docs service for empty doc")
+            else:
+                raise
+
+        try:
+            doc = await asyncio.to_thread(
+                docs_service.documents().create(body={'title': title}).execute
+            )
+            doc_id = doc.get('documentId')
+            link = f"https://docs.google.com/document/d/{doc_id}/edit"
+            
+            return CreateDocResponse(
+                docId=doc_id,
+                docName=title,
+                webViewLink=link,
+                mimeType='application/vnd.google-apps.document',
+                sourceContentType='empty',
+                uploadMimeType='none',
+                userEmail=user_google_email or '',
+                success=True,
+                message=f"Created empty Google Doc '{title}'",
+                contentLength=0,
+                hasFormatting=False
+            )
+        except HttpError as e:
+            logger.error(f"Google API error creating empty doc: {e}")
+            error_msg = "Authentication failed" if e.resp.status == 401 else \
+                       "Permission denied" if e.resp.status == 403 else \
+                       f"Error creating document: {str(e)}"
+            return CreateDocResponse(
+                docId='',
+                docName=title,
+                webViewLink='',
+                mimeType='',
+                sourceContentType='empty',
+                uploadMimeType='none',
+                userEmail=user_google_email or '',
+                success=False,
+                message='',
+                error=error_msg
+            )
+
+    # Get Drive service for content upload
+    drive_key = request_service("drive")
     
     try:
-        docs_service = get_injected_service(docs_key)
-        logger.info(f"[create_doc] Successfully retrieved injected Docs service for {user_google_email}")
+        drive_service = get_injected_service(drive_key)
+        logger.info(f"[create_doc] Using injected Drive service for content conversion")
     except RuntimeError as e:
-        logger.warning(f"[create_doc] Middleware injection failed: {e}")
+        logger.warning(f"[create_doc] Drive middleware injection failed: {e}")
         if "not yet fulfilled" in str(e).lower() or "service injection" in str(e).lower():
-            logger.info("[create_doc] Falling back to direct service creation")
+            logger.info("[create_doc] Falling back to direct drive service creation")
             try:
-                docs_service = await get_service("docs", user_google_email)
-                logger.info(f"[create_doc] Successfully created Docs service directly for {user_google_email}")
+                drive_service = await get_service("drive", user_google_email)
+                logger.info(f"[create_doc] Using direct Drive service for content conversion")
             except Exception as direct_error:
                 error_str = str(direct_error)
-                logger.error(f"[create_doc] Direct service creation also failed: {direct_error}")
+                logger.error(f"[create_doc] Direct drive service creation failed: {direct_error}")
                 
-                # Check for specific credential errors and return user-friendly messages
+                error_msg = ""
                 if "no valid credentials found" in error_str.lower():
-                    return (
-                        f"❌ **No Credentials Found**\n\n"
-                        f"No authentication credentials found for {user_google_email}.\n\n"
-                        f"**To authenticate:**\n"
-                        f"1. Run `start_google_auth` with your email: {user_google_email}\n"
-                        f"2. Follow the authentication flow in your browser\n"
-                        f"3. Grant Docs permissions when prompted\n"
-                        f"4. Return here after seeing the success page"
-                    )
+                    error_msg = f"No authentication credentials found for {user_google_email}"
                 elif "credentials do not contain the necessary fields" in error_str.lower():
-                    return (
-                        f"❌ **Invalid or Corrupted Credentials**\n\n"
-                        f"Your stored credentials for {user_google_email} are missing required OAuth fields.\n\n"
-                        f"**To fix this:**\n"
-                        f"1. Run `start_google_auth` with your email: {user_google_email}\n"
-                        f"2. Complete the authentication flow\n"
-                        f"3. Try your Docs command again"
-                    )
+                    error_msg = f"Invalid or corrupted credentials for {user_google_email}"
                 else:
-                    return f"❌ Authentication error: {error_str}"
+                    error_msg = f"Authentication error: {error_str}"
+                    
+                return CreateDocResponse(
+                    docId='',
+                    docName=title,
+                    webViewLink='',
+                    mimeType='',
+                    sourceContentType='unknown',
+                    uploadMimeType='',
+                    userEmail=user_google_email or '',
+                    success=False,
+                    message='',
+                    error=error_msg
+                )
         else:
             logger.error(f"[create_doc] Unexpected RuntimeError: {e}")
             raise
 
     try:
-        doc = await asyncio.to_thread(
-            docs_service.documents().create(body={'title': title}).execute
+        # Detect or use provided content type
+        if content_mime_type:
+            # Use provided MIME type
+            detected_type = content_mime_type.split('/')[-1] if '/' in content_mime_type else content_mime_type
+            upload_mime_type = content_mime_type
+            logger.info(f"[create_doc] Using provided MIME type: {content_mime_type}")
+        else:
+            # Auto-detect content type
+            detected_type, upload_mime_type = detect_content_type(content)
+            logger.info(f"[create_doc] Detected content type: {detected_type}, MIME: {upload_mime_type}")
+        
+        # Prepare content for upload
+        content_bytes = None
+        has_formatting = False
+        
+        if detected_type == 'markdown':
+            # Convert markdown to HTML for better formatting
+            if isinstance(content, bytes):
+                content = content.decode('utf-8')
+            html_content = markdown_to_html(content)
+            content_bytes = html_content.encode('utf-8')
+            upload_mime_type = 'text/html'
+            has_formatting = True
+            logger.info("[create_doc] Converted markdown to HTML")
+            
+        elif detected_type == 'html':
+            # HTML content - use as-is
+            if isinstance(content, str):
+                content_bytes = content.encode('utf-8')
+            else:
+                content_bytes = content
+            has_formatting = True
+            
+        elif detected_type == 'latex':
+            # Convert LaTeX to HTML (basic conversion)
+            if isinstance(content, bytes):
+                content = content.decode('utf-8')
+            # Basic LaTeX to HTML conversion (can be enhanced)
+            html_content = content.replace('\\section{', '<h2>').replace('}', '</h2>')
+            html_content = html_content.replace('\\subsection{', '<h3>').replace('}', '</h3>')
+            html_content = f"<html><body>{html_content}</body></html>"
+            content_bytes = html_content.encode('utf-8')
+            upload_mime_type = 'text/html'
+            has_formatting = True
+            
+        elif detected_type in ['docx', 'rtf', 'pdf', 'binary']:
+            # Binary content - use as-is
+            if isinstance(content, str):
+                content_bytes = content.encode('utf-8')
+            else:
+                content_bytes = content
+            has_formatting = detected_type != 'binary'
+            
+        else:
+            # Plain text or unknown - wrap in basic HTML for better display
+            if isinstance(content, bytes):
+                content = content.decode('utf-8', errors='replace')
+            # Escape HTML characters
+            content = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            # Convert newlines to paragraphs
+            paragraphs = content.split('\n\n')
+            html_content = ''.join(f'<p>{p.replace(chr(10), "<br>")}</p>' for p in paragraphs if p.strip())
+            content_bytes = html_content.encode('utf-8')
+            upload_mime_type = 'text/html'
+        
+        # Create file metadata for Google Docs conversion
+        file_metadata = {
+            'name': title,
+            'mimeType': 'application/vnd.google-apps.document'  # Target: Google Doc
+        }
+        
+        # Create media upload object with the appropriate MIME type
+        media_body = MediaIoBaseUpload(
+            io.BytesIO(content_bytes),
+            mimetype=upload_mime_type,
+            resumable=len(content_bytes) > 5 * 1024 * 1024  # Use resumable for files > 5MB
         )
-        doc_id = doc.get('documentId')
         
-        if content:
-            requests = [{'insertText': {'location': {'index': 1}, 'text': content}}]
-            await asyncio.to_thread(
-                docs_service.documents().batchUpdate(
-                    documentId=doc_id, 
-                    body={'requests': requests}
-                ).execute
-            )
+        # Upload and convert to Google Doc
+        logger.info(f"[create_doc] Uploading with MIME type: {upload_mime_type}, Size: {len(content_bytes)} bytes")
+        file = await asyncio.to_thread(
+            drive_service.files().create(
+                body=file_metadata,
+                media_body=media_body,
+                fields='id,name,webViewLink,mimeType'
+            ).execute
+        )
         
-        link = f"https://docs.google.com/document/d/{doc_id}/edit"
-        msg = f"Created Google Doc '{title}' (ID: {doc_id}) for {user_google_email}. Link: {link}"
-        logger.info(f"Successfully created Google Doc '{title}' (ID: {doc_id}) for {user_google_email}. Link: {link}")
-        return msg
+        doc_id = file.get('id')
+        doc_name = file.get('name')
+        web_link = file.get('webViewLink')
+        final_mime = file.get('mimeType', 'application/vnd.google-apps.document')
+        
+        logger.info(f"Successfully created Google Doc: {doc_id} with {detected_type} content")
+        
+        return CreateDocResponse(
+            docId=doc_id,
+            docName=doc_name,
+            webViewLink=web_link,
+            mimeType=final_mime,
+            sourceContentType=detected_type,
+            uploadMimeType=upload_mime_type,
+            userEmail=user_google_email or '',
+            success=True,
+            message=f"Created Google Doc '{doc_name}' with {detected_type} formatting",
+            contentLength=len(content_bytes),
+            hasFormatting=has_formatting
+        )
 
     except HttpError as e:
         logger.error(f"Google API error in create_doc: {e}")
+        error_msg = ""
         if e.resp.status == 401:
-            return "❌ Authentication failed. Please check your Google credentials."
+            error_msg = "Authentication failed. Please check your Google credentials."
         elif e.resp.status == 403:
-            return "❌ Permission denied. Make sure you have permission to create documents."
+            error_msg = "Permission denied. Make sure you have permission to create documents."
+        elif e.resp.status == 400:
+            error_msg = f"Invalid request. The content may not be supported for conversion: {str(e)}"
         else:
-            return f"❌ Error creating document: {str(e)}"
+            error_msg = f"Error creating document: {str(e)}"
+            
+        return CreateDocResponse(
+            docId='',
+            docName=title,
+            webViewLink='',
+            mimeType='',
+            sourceContentType=detected_type if 'detected_type' in locals() else 'unknown',
+            uploadMimeType=upload_mime_type if 'upload_mime_type' in locals() else '',
+            userEmail=user_google_email or '',
+            success=False,
+            message='',
+            error=error_msg
+        )
+        
     except Exception as e:
         logger.error(f"Unexpected error in create_doc: {e}", exc_info=True)
-        return f"❌ Unexpected error: {str(e)}"
+        return CreateDocResponse(
+            docId='',
+            docName=title,
+            webViewLink='',
+            mimeType='',
+            sourceContentType='unknown',
+            uploadMimeType='',
+            userEmail=user_google_email or '',
+            success=False,
+            message='',
+            error=f"Unexpected error: {str(e)}"
+        )
 
 
 def setup_docs_tools(mcp: FastMCP):
@@ -543,12 +984,12 @@ def setup_docs_tools(mcp: FastMCP):
         description="Search for Google Docs by name using Drive API"
     )
     async def search_docs_tool(
-        user_google_email: str,
         query: str,
-        page_size: int = 10
+        page_size: int = 10,
+        user_google_email: UserGoogleEmail = None
     ) -> str:
         """Search for Google Docs by name."""
-        return await search_docs(user_google_email, query, page_size)
+        return await search_docs(query, page_size, user_google_email)
     
     @mcp.tool(
         name="get_doc_content",
@@ -563,11 +1004,11 @@ def setup_docs_tools(mcp: FastMCP):
         }
     )
     async def get_doc_content_tool(
-        user_google_email: str,
-        document_id: str
+        document_id: str,
+        user_google_email: UserGoogleEmail = None
     ) -> str:
         """Get content of a Google Doc or Drive file."""
-        return await get_doc_content(user_google_email, document_id)
+        return await get_doc_content(document_id, user_google_email)
     
     @mcp.tool(
         name="list_docs_in_folder",
@@ -582,31 +1023,43 @@ def setup_docs_tools(mcp: FastMCP):
         }
     )
     async def list_docs_in_folder_tool(
-        user_google_email: str,
         folder_id: str = 'root',
-        page_size: int = 100
-    ) -> str:
+        page_size: int = 100,
+        user_google_email: UserGoogleEmail = None
+    ) -> DocsListResponse:
         """List Google Docs within a specific folder."""
-        return await list_docs_in_folder(user_google_email, folder_id, page_size)
+        return await list_docs_in_folder(folder_id, page_size, user_google_email)
     
     @mcp.tool(
         name="create_doc",
-        description="Create a new Google Doc with optional initial content",
-        tags={"docs", "create", "google"},
+        description="Create a new Google Doc with support for multiple content formats. Accepts plain text, Markdown, HTML, RTF, DOCX, LaTeX, and other formats. Content type is automatically detected or can be specified via content_mime_type parameter. Returns structured response with document metadata.",
+        tags={"docs", "create", "google", "markdown", "html", "formatting", "docx", "rtf", "convert"},
         annotations={
-            "title": "Create Google Doc",
+            "title": "Create Google Doc with Multi-Format Support",
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
+            "openWorldHint": True,
+            "supportsMultipleFormats": True
         }
     )
     async def create_doc_tool(
-        user_google_email: str,
         title: str,
-        content: str = ''
-    ) -> str:
-        """Create a new Google Doc."""
-        return await create_doc(user_google_email, title, content)
+        content: Union[str, bytes] = '',
+        user_google_email: UserGoogleEmail = None,
+        content_mime_type: Optional[str] = None
+    ) -> CreateDocResponse:
+        """Create a new Google Doc with automatic content format detection and conversion.
+        
+        Supports:
+        - Plain text, Markdown, HTML for rich formatting
+        - RTF, DOCX for document conversion
+        - LaTeX for academic documents
+        - Custom MIME types via content_mime_type parameter
+        - Binary content as bytes
+        
+        Returns structured response with document ID, link, and metadata.
+        """
+        return await create_doc(title, content, user_google_email, content_mime_type)
     
     logger.info("Google Docs tools registered successfully")

@@ -3,7 +3,7 @@
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing_extensions import Dict, Any, Optional
 import asyncio
 from io import BytesIO
 

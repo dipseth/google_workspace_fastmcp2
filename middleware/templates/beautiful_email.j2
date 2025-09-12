@@ -1,0 +1,505 @@
+{#
+    Beautiful Email with Drive Images Macro - Enhanced Dark / Color-blind Friendly Version
+    Kept macro parameters unchanged. Improved contrast, color-blind friendly palette,
+    CSS variables, fallbacks for email clients, and accessible focus/alt handling.
+#}
+
+{% macro render_beautiful_email(
+        title="Amazing Update!",
+        subtitle=none,
+        header_gradient="linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        body_gradient="linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+        user_name=none,
+        user_email=none,
+        content_sections=[],
+        drive_images=[],
+        signature_style="teacher",
+        signature_quote="Every child deserves a champion--an adult who will never give up on them, who understands the power of connection and insists that they become the best that they can possibly be.",
+        date_format="%B %d, %Y",
+        random_theme=true
+) %}
+{% if user_name is none %}
+        {% set user_name = user_current_email.email if user_current_email and user_current_email.email else "Your Name" %}
+{% endif %}
+{% if user_email is none %}
+        {% set user_email = user_current_email.email if user_current_email and user_current_email.email else "" %}
+{% endif %}
+
+{# Random theme selection #}
+{% if random_theme %}
+        {% set theme_options = [
+                {
+                        "header": "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                        "body": "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+                        "name": "Purple Dream"
+                },
+                {
+                        "header": "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+                        "body": "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+                        "name": "Ocean Breeze"
+                },
+                {
+                        "header": "linear-gradient(135deg, #fa709a 0%, #fee140 100%)",
+                        "body": "linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)",
+                        "name": "Sunset Glow"
+                },
+                {
+                        "header": "linear-gradient(135deg, #d299c2 0%, #fef9d7 100%)",
+                        "body": "linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%)",
+                        "name": "Soft Lavender"
+                },
+                {
+                        "header": "linear-gradient(135deg, #81fbb8 0%, #28d79f 100%)",
+                        "body": "linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)",
+                        "name": "Fresh Mint"
+                },
+                {
+                        "header": "linear-gradient(135deg, #a8caba 0%, #5d4e75 100%)",
+                        "body": "linear-gradient(135deg, #bee5eb 0%, #faf2e4 100%)",
+                        "name": "Forest Sage"
+                },
+                {
+                        "header": "linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)",
+                        "body": "linear-gradient(135deg, #c1dfc4 0%, #deecdd 100%)",
+                        "name": "Rose Garden"
+                },
+                {
+                        "header": "linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)",
+                        "body": "linear-gradient(135deg, #fad0c4 0%, #ffd1ff 100%)",
+                        "name": "Cotton Candy"
+                },
+                {
+                        "header": "linear-gradient(135deg, #ff6b6b 0%, #ffa726 100%)",
+                        "body": "linear-gradient(135deg, #74b9ff 0%, #0984e3 100%)",
+                        "name": "Fire & Ice"
+                },
+                {
+                        "header": "linear-gradient(135deg, #2d3748 0%, #4a5568 100%)",
+                        "body": "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                        "name": "Dark Professional"
+                }
+        ] %}
+        
+        {# Generate pseudo-random index based on current timestamp #}
+        {% set random_seed = (now().timestamp() * 1000) | int %}
+        {% set theme_index = random_seed % theme_options|length %}
+        {% set selected_theme = theme_options[theme_index] %}
+        
+        {# Override gradients with selected theme #}
+        {% set header_gradient = selected_theme.header %}
+        {% set body_gradient = selected_theme.body %}
+{% endif %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{{ title }}</title>
+        <style>
+                /* Color-blind friendly palette + dark theme variables with improved contrast */
+                :root{
+                        --bg-dark: #0b0f12;                 /* page background */
+                        --panel: rgba(15,20,25,0.96);      /* container background */
+                        --muted: #b8c5d1;                  /* improved secondary text contrast */
+                        --muted-signature: #d1dae3;        /* even lighter for signature readability */
+                        --text: #f1f5f9;                   /* enhanced main text contrast */
+                        --accent-blue: #0072B2;            /* color-blind friendly blue */
+                        --accent-orange: #E69F00;          /* orange */
+                        --accent-green: #009E73;           /* green */
+                        --accent-magenta: #CC79A7;         /* magenta */
+                        --glass: rgba(255,255,255,0.03);
+                        --card-contrast: rgba(255,255,255,0.02);
+                        --focus: 3px solid rgba(255,255,255,0.08);
+                        --radius-lg: 20px;
+                        --signature-gradient-1: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(245,158,11,0.12));
+                        --signature-gradient-2: linear-gradient(135deg, rgba(3,105,161,0.18), rgba(14,165,164,0.12));
+                        --signature-gradient-3: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(100,116,139,0.08));
+                }
+
+                /* Allow host-provided gradients as fallbacks */
+                .body-bg {
+                        background: var(--body-gradient, {{ body_gradient }});
+                }
+                .header-bg {
+                        background: var(--header-gradient, {{ header_gradient }});
+                }
+
+                /* Basic reset */
+                * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+                body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        color: var(--text);
+                        background: linear-gradient(180deg, var(--bg-dark) 0%, #071018 100%);
+                        padding: 24px;
+                        -webkit-text-size-adjust: 100%;
+                        -ms-text-size-adjust: 100%;
+                }
+
+                /* container */
+                .container {
+                        max-width: 720px;
+                        margin: 0 auto;
+                        border-radius: var(--radius-lg);
+                        overflow: hidden;
+                        background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+                        border: 1px solid rgba(255,255,255,0.04);
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.02);
+                }
+
+                /* header */
+                .header {
+                        padding: 44px 28px;
+                        text-align: center;
+                        position: relative;
+                        color: var(--text);
+                        background: linear-gradient(135deg, rgba(0,0,0,0.25), rgba(255,255,255,0.02));
+                }
+                .header-inner {
+                        padding: 30px;
+                        border-radius: 14px;
+                        display: inline-block;
+                        min-width: 90%;
+                        backdrop-filter: blur(6px);
+                        background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+                        border: 1px solid rgba(255,255,255,0.03);
+                }
+                .header h1 {
+                        font-size: 2.6em;
+                        line-height: 1.05;
+                        margin-bottom: 8px;
+                        letter-spacing: -0.02em;
+                        color: var(--text);
+                        text-shadow: 0 6px 18px rgba(0,0,0,0.7);
+                }
+                .subtitle {
+                        color: var(--muted);
+                        font-size: 0.98em;
+                        margin-top: 8px;
+                        font-weight: 400;
+                }
+
+                /* content */
+                .content-section {
+                        padding: 28px;
+                        background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(0,0,0,0.03));
+                        color: var(--text);
+                }
+                .section-text {
+                        font-size: 1.2em;
+                        color: var(--text);
+                        margin-bottom: 18px;
+                        line-height: 1.7;
+                        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+                }
+                .section-text.highlight {
+                        background: linear-gradient(90deg, rgba(14,114,178,0.15), rgba(230,159,0,0.12));
+                        padding: 18px;
+                        border-radius: 12px;
+                        border-left: 4px solid var(--accent-orange);
+                        color: #ffffff;
+                        box-shadow: 0 6px 18px rgba(0,0,0,0.6);
+                        position: relative;
+                        text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+                        font-weight: 500;
+                }
+
+                /* image blocks */
+                .drive-image-moment {
+                        margin: 32px 0;
+                        text-align: center;
+                        padding: 20px;
+                        border-radius: 14px;
+                        background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(0,0,0,0.04));
+                        border: 1px solid rgba(255,255,255,0.03);
+                }
+                .drive-image-moment img,
+                .image-card img {
+                        max-width: 100%;
+                        height: auto;
+                        border-radius: 12px;
+                        display: block;
+                        margin: 0 auto;
+                        box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+                        border: 2px solid rgba(255,255,255,0.03);
+                        transition: transform 0.28s ease, box-shadow 0.28s ease;
+                }
+                .drive-image-moment img:focus,
+                .image-card img:focus {
+                        outline: var(--focus);
+                }
+                .drive-image-moment img:hover,
+                .image-card img:hover {
+                        transform: translateY(-4px) scale(1.02);
+                        box-shadow: 0 28px 60px rgba(0,0,0,0.7);
+                }
+                .image-caption {
+                        margin-top: 12px;
+                        color: var(--muted);
+                        font-size: 1.05em;
+                        font-style: italic;
+                        text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+                }
+
+                /* grid */
+                .image-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                        gap: 18px;
+                        margin: 24px 0;
+                }
+                .image-card {
+                        padding: 14px;
+                        border-radius: 12px;
+                        background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(0,0,0,0.03));
+                        border: 1px solid rgba(255,255,255,0.02);
+                        text-align: center;
+                }
+
+                /* banners and video */
+                .excitement-banner {
+                        background: linear-gradient(135deg, var(--accent-orange), #ff8a65);
+                        color: #0b0b0b;
+                        padding: 24px;
+                        border-radius: 12px;
+                        margin: 18px 0;
+                        text-align: center;
+                        box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+                }
+                .video-showcase {
+                        padding: 22px;
+                        border-radius: 12px;
+                        background: linear-gradient(135deg, rgba(0,114,178,0.12), rgba(0,158,115,0.06));
+                        color: var(--text);
+                        margin: 18px 0;
+                        text-align: center;
+                }
+                .video-showcase a {
+                        display: inline-block;
+                        margin-top: 10px;
+                        padding: 10px 18px;
+                        border-radius: 999px;
+                        background: rgba(255,255,255,0.04);
+                        color: var(--text);
+                        text-decoration: none;
+                        border: 1px solid rgba(255,255,255,0.03);
+                }
+
+                /* signatures */
+                .signature-section {
+                        padding: 26px;
+                        margin: 0;
+                        border-top: 1px solid rgba(255,255,255,0.02);
+                }
+                .teacher-signature, .professional-signature, .simple-signature {
+                        display:flex;
+                        gap:16px;
+                        align-items:center;
+                        padding:14px;
+                        border-radius:12px;
+                }
+                .teacher-signature { 
+                        background: var(--signature-gradient-1);
+                        border: 1px solid rgba(255,255,255,0.08);
+                        box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+                }
+                .professional-signature { 
+                        background: var(--signature-gradient-2);
+                        border: 1px solid rgba(255,255,255,0.08);
+                        box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+                }
+                .simple-signature { 
+                        background: var(--signature-gradient-3);
+                        border: 1px solid rgba(255,255,255,0.08);
+                        box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+                }
+
+                .signature-email { 
+                        font-weight:700; 
+                        color: var(--text); 
+                        text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+                        background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+                        padding: 4px 8px;
+                        border-radius: 6px;
+                        border: 1px solid rgba(255,255,255,0.03);
+                }
+                .signature-muted {
+                        color: var(--muted-signature);
+                        text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+                        font-weight: 500;
+                }
+
+                /* accessibility & responsive tweaks */
+                a { color: var(--accent-blue); text-decoration: none; outline: none; }
+                a:focus, button:focus, img:focus { outline: var(--focus); border-radius: 6px; }
+                @media (max-width: 640px){
+                        .header h1 { font-size: 1.6em; }
+                        .header { padding: 28px 18px; }
+                        .content-section { padding: 18px; }
+                        .drive-image-moment { padding: 14px; }
+                        .image-grid { gap: 12px; }
+                }
+
+                /* high-contrast user agent preferences */
+                @media (prefers-contrast: more){
+                        .container { border: 1px solid rgba(255,255,255,0.08); }
+                        .drive-image-moment img, .image-card img { box-shadow: 0 30px 80px rgba(0,0,0,0.85); }
+                }
+
+                /* optional dark-mode override via prefers-color-scheme */
+                @media (prefers-color-scheme: dark) {
+                        body { background: linear-gradient(180deg, #040507 0%, #071018 100%); }
+                }
+
+                /* small friendly helper for legacy clients: ensure inline style fallback handled in markup */
+        </style>
+</head>
+<body class="body-bg">
+        <div class="container" role="article" aria-label="{{ title }}">
+                <!-- Header Section -->
+                <div class="header header-bg" role="banner" style="background: var(--header-gradient, {{ header_gradient }});">
+                        <div class="header-inner" aria-hidden="false">
+                                <h1>{{ title }}</h1>
+                                {% if subtitle %}
+                                        <p class="subtitle">{{ subtitle }} • {{ now() | strftime(date_format) }}</p>
+                                {% endif %}
+                        </div>
+                </div>
+
+                <!-- Main Content Section -->
+                <div class="content-section" role="main">
+                        {% if user_name %}
+                                <div class="section-text">Hi {{ user_name | default('there') }},</div>
+                        {% endif %}
+
+                        {% for section in content_sections %}
+                                {% if section.type == 'text' %}
+                                        <div class="section-text {% if section.highlight %}highlight{% endif %}">
+                                                {{ section.content }}
+                                        </div>
+                                {% elif section.type == 'excitement' %}
+                                        <div class="excitement-banner" role="note" aria-live="polite">
+                                                <h3 style="margin:0;font-size:1.25em;">{{ section.content }}</h3>
+                                        </div>
+                                {% elif section.type == 'video' %}
+                                        <div class="video-showcase" role="region" aria-label="{{ section.title | default('Video') }}">
+                                                <h3 style="margin:0 0 8px 0;">{{ section.title | default('🎬 Watch Now!') }}</h3>
+                                                {% if section.description %}
+                                                        <p style="color:var(--muted);margin-bottom:10px;">{{ section.description }}</p>
+                                                {% endif %}
+                                                <a href="{{ section.url }}" target="_blank" rel="noopener noreferrer">▶️ {{ section.link_text | default('Watch Video') }}</a>
+                                        </div>
+                                {% endif %}
+                        {% endfor %}
+
+                        <!-- Drive Images Processing -->
+                        {% if drive_images %}
+                                {% for image in drive_images %}
+                                        {% if image.layout == 'single' or not image.layout %}
+                                                <div class="drive-image-moment" role="group" aria-label="{{ image.caption | default('Image') }}">
+                                                        <img src="{{ image.url | format_drive_image_url }}"
+                                                                 alt="{{ image.alt | default(image.caption | default('Drive image')) }}"
+                                                                 {% if image.width %}width="{{ image.width }}"{% endif %}
+                                                                 {% if image.height %}height="{{ image.height }}"{% endif %}
+                                                                 {% if image.max_width %}
+                                                                        style="max-width: {{ image.max_width }}{% if not image.max_width.endswith('px') and not image.max_width.endswith('%') %}px{% endif %};"
+                                                                 {% endif %}
+                                                                 loading="lazy" />
+                                                        {% if image.caption %}
+                                                                <div class="image-caption">{{ image.caption }}</div>
+                                                        {% endif %}
+                                                </div>
+                                        {% elif image.layout == 'grid' %}
+                                                <div class="image-grid" role="list">
+                                                        {% for img in image.images %}
+                                                                <div class="image-card" role="listitem" aria-label="{{ img.caption | default('Image') }}">
+                                                                        <img src="{{ img.url | format_drive_image_url }}"
+                                                                                 alt="{{ img.alt | default(img.caption | default('Drive image')) }}"
+                                                                                 {% if img.width %}width="{{ img.width }}"{% endif %}
+                                                                                 {% if img.height %}height="{{ img.height }}"{% endif %}
+                                                                                 {% if img.max_width %}
+                                                                                        style="max-width: {{ img.max_width }}{% if not img.max_width.endswith('px') and not img.max_width.endswith('%') %}px{% endif %};"
+                                                                                 {% endif %}
+                                                                                 loading="lazy" />
+                                                                        {% if img.caption %}
+                                                                                <div class="image-caption">{{ img.caption }}</div>
+                                                                        {% endif %}
+                                                                </div>
+                                                        {% endfor %}
+                                                </div>
+                                        {% endif %}
+                                {% endfor %}
+                        {% endif %}
+
+                </div>
+
+                <!-- Signature Section -->
+                {% set initials = (user_name[:2] | upper) if user_name else 'YN' %}
+                <div class="signature-section" role="contentinfo">
+                {% if signature_style == 'teacher' %}
+                        <div class="teacher-signature" aria-label="Teacher signature">
+                                <div style="flex:0 0 auto;width:72px;height:72px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#061024;background:linear-gradient(135deg,var(--accent-blue),var(--accent-green));font-size:20px;">
+                                        {{ initials }}
+                                </div>
+                                <div style="flex:1 1 auto;">
+                                        <div style="font-size:1.2em;font-weight:700;margin-bottom:6px;color:var(--text);text-shadow:0 1px 3px rgba(0,0,0,0.7);">{{ user_name | default('Your Name') }}</div>
+                                        {% if user_email %}
+                                                <div class="signature-email" style="font-size:1.05em;margin-bottom:10px;">{{ user_email }}</div>
+                                        {% endif %}
+                                        <div style="font-style:italic;padding:14px;border-radius:12px;color:var(--text);background:linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));border:1px solid rgba(255,255,255,0.08);text-shadow:0 1px 3px rgba(0,0,0,0.7);">
+                                                “{{ signature_quote | default('Every child deserves a champion. -Rita F. Pierson') }}”
+                                        </div>
+                                </div>
+                                <div style="flex:0 0 auto;text-align:right;">
+                                        <div class="signature-muted" style="font-weight:700;font-size:0.95em;background:linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05);">Teacher • FastMCP</div>
+                                        <div class="signature-muted" style="margin-top:8px;font-size:0.9em;">{{ now() | strftime('%b %-d, %Y') }}</div>
+                                </div>
+                        </div>
+
+                {% elif signature_style == 'professional' %}
+                        <div class="professional-signature" aria-label="Professional signature">
+                                <div style="flex:0 0 auto;">
+                                        <div style="width:56px;height:56px;border-radius:10px;background:linear-gradient(135deg,var(--accent-blue),var(--accent-magenta));display:flex;align-items:center;justify-content:center;color:#02121a;font-weight:800;font-size:18px;">
+                                                {{ initials }}
+                                        </div>
+                                </div>
+                                <div style="flex:1 1 auto;">
+                                        <div style="font-size:1.2em;font-weight:800;color:var(--text);text-shadow:0 1px 3px rgba(0,0,0,0.7);margin-bottom:4px;">{{ user_name | default('Your Name') }}</div>
+                                        {% if user_email %}
+                                                <div class="signature-email" style="font-size:1.05em;margin-bottom:8px;">{{ user_email }}</div>
+                                        {% endif %}
+                                        <div class="signature-muted" style="font-size:1.05em;background:linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.04);">Senior Product • FastMCP</div>
+                                        <div style="margin-top:12px;font-size:0.85em;">
+                                                <span style="background:linear-gradient(135deg, rgba(0,114,178,0.15), rgba(0,158,115,0.1));padding:6px 12px;border-radius:20px;color:var(--text);text-shadow:0 1px 2px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.06);">⚡ FastMCP</span>
+                                                <small class="signature-muted" style="margin-left:10px;font-size:0.9em;">Generated {{ now() | strftime('%Y-%m-%d') }}</small>
+                                        </div>
+                                </div>
+                                <div style="flex:0 0 auto; text-align:right;">
+                                        <a href="#" aria-hidden="true" style="color:var(--accent-blue);text-decoration:none;margin-left:6px;">🔗</a>
+                                        <a href="#" aria-hidden="true" style="color:var(--accent-magenta);text-decoration:none;margin-left:8px;">🐦</a>
+                                </div>
+                        </div>
+
+                {% else %}
+                        <div class="simple-signature" aria-label="Simple signature">
+                                <div style="flex:0 0 auto;width:56px;height:56px;border-radius:8px;background:linear-gradient(135deg,#c7d2fe,#93c5fd);display:flex;align-items:center;justify-content:center;font-weight:700;color:#062a6f;">
+                                        {{ initials }}
+                                </div>
+                                <div style="flex:1 1 auto;">
+                                        <div class="signature-muted" style="font-weight:700;font-size:1.1em;margin-bottom:4px;">Best regards,</div>
+                                        <div style="font-size:1.2em;font-weight:800;margin-top:4px;color:var(--text);text-shadow:0 1px 3px rgba(0,0,0,0.7);">{{ user_name | default('Your Name') }}</div>
+                                        {% if user_email %}
+                                                <div class="signature-email" style="font-size:1.05em;margin-top:8px;">{{ user_email }}</div>
+                                        {% endif %}
+                                </div>
+                                <div style="flex:0 0 auto;text-align:right;">
+                                        <div class="signature-muted" style="font-size:0.9em;background:linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05);">FastMCP</div>
+                                        <div class="signature-muted" style="margin-top:8px;font-size:0.85em;">{{ now() | strftime('%b %-d, %Y') }}</div>
+                                </div>
+                        </div>
+                {% endif %}
+                </div>
+        </div>
+</body>
+</html>
+{% endmacro %}

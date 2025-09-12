@@ -1,7 +1,10 @@
 """Generic Google service management for FastMCP2."""
 
 import logging
-from typing import Dict, List, Optional, Any, Union
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
+from typing_extensions import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 
 from google.auth.exceptions import RefreshError
@@ -33,13 +36,13 @@ SERVICE_CONFIGS = {
     "chat": {"service": "chat", "version": "v1"},
     "forms": {"service": "forms", "version": "v1"},
     "slides": {"service": "slides", "version": "v1"},
+    "photos": {"service": "photoslibrary", "version": "v1"},
     "oauth2": {"service": "oauth2", "version": "v2"},  # For user info
     "admin": {"service": "admin", "version": "directory_v1"},
     "classroom": {"service": "classroom", "version": "v1"},
     "people": {"service": "people", "version": "v1"},
     "youtube": {"service": "youtube", "version": "v3"},
     "tasks": {"service": "tasks", "version": "v1"},
-    "keep": {"service": "keep", "version": "v1"},
     "script": {"service": "script", "version": "v1"}, # Google Apps Script
     "vault": {"service": "vault", "version": "v1"}, # Google Vault
     "groupssettings": {"service": "groupssettings", "version": "v1"}, # Google Groups Settings
@@ -63,115 +66,41 @@ SERVICE_CONFIGS = {
     "slides_v1": {"service": "slides", "version": "v1"} # Slides (explicit v1)
 }
 
-# Legacy scope group definitions - now managed through centralized registry
-# Maintained for backward compatibility through compatibility shim
-_FALLBACK_SCOPE_GROUPS = {
-    # Base scopes
-    "userinfo": "https://www.googleapis.com/auth/userinfo.email",
-    "openid": "openid",
+# Import centralized scope registry
+from .scope_registry import ScopeRegistry
+
+# Legacy fallback for compatibility - now redirects to scope_registry
+_FALLBACK_SCOPE_GROUPS = {}  # Empty - now uses ScopeRegistry
+
+
+def _get_scope_groups() -> Dict[str, str]:
+    """
+    Get scope groups dictionary from centralized registry.
     
-    # Drive scopes
-    "drive_read": "https://www.googleapis.com/auth/drive.readonly",
-    "drive_file": "https://www.googleapis.com/auth/drive.file",
-    # "drive_full": "https://www.googleapis.com/auth/drive",
-    "drive_appdata": "https://www.googleapis.com/auth/drive.appdata",
-    "drive_metadata": "https://www.googleapis.com/auth/drive.metadata",
-    "drive_metadata_readonly": "https://www.googleapis.com/auth/drive.metadata.readonly",
-    "drive_photos_readonly": "https://www.googleapis.com/auth/drive.photos.readonly",
-    "drive_scripts": "https://www.googleapis.com/auth/drive.scripts",
+    This function provides backward compatibility for legacy _FALLBACK_SCOPE_GROUPS usage
+    while automatically redirecting to the new centralized scope registry.
+    Falls back to empty dict if the registry is unavailable.
     
-    # Gmail scopes
-    "gmail_read": "https://www.googleapis.com/auth/gmail.readonly",
-    "gmail_send": "https://www.googleapis.com/auth/gmail.send",
-    "gmail_compose": "https://www.googleapis.com/auth/gmail.compose",
-    "gmail_modify": "https://www.googleapis.com/auth/gmail.modify",
-    "gmail_labels": "https://www.googleapis.com/auth/gmail.labels",
-    "gmail_full": "https://mail.google.com/",
-    "gmail_insert": "https://www.googleapis.com/auth/gmail.insert",
-    "gmail_metadata": "https://www.googleapis.com/auth/gmail.metadata",
-    "gmail_settings_basic": "https://www.googleapis.com/auth/gmail.settings.basic",
-    "gmail_settings_sharing": "https://www.googleapis.com/auth/gmail.settings.sharing",
-    
-    # Docs scopes
-    "docs_read": "https://www.googleapis.com/auth/documents.readonly",
-    "docs_write": "https://www.googleapis.com/auth/documents",
-    
-    # Calendar scopes
-    "calendar_read": "https://www.googleapis.com/auth/calendar.readonly",
-    "calendar_events": "https://www.googleapis.com/auth/calendar.events",
-    "calendar_full": "https://www.googleapis.com/auth/calendar",
-    "calendar_settings_read": "https://www.googleapis.com/auth/calendar.settings.readonly",
-    
-    # Sheets scopes
-    "sheets_read": "https://www.googleapis.com/auth/spreadsheets.readonly",
-    "sheets_write": "https://www.googleapis.com/auth/spreadsheets",
-    "sheets_full": "https://www.googleapis.com/auth/spreadsheets",
-    
-    # Chat scopes
-    "chat_read": "https://www.googleapis.com/auth/chat.messages.readonly",
-    "chat_write": "https://www.googleapis.com/auth/chat.messages",
-    "chat_spaces": "https://www.googleapis.com/auth/chat.spaces",
-    "chat_memberships_readonly": "https://www.googleapis.com/auth/chat.memberships.readonly",
-    "chat_memberships": "https://www.googleapis.com/auth/chat.memberships",
-    
-    # Forms scopes
-    "forms": "https://www.googleapis.com/auth/forms.body",
-    "forms_read": "https://www.googleapis.com/auth/forms.body.readonly",
-    "forms_responses_read": "https://www.googleapis.com/auth/forms.responses.readonly",
-    "forms_body": "https://www.googleapis.com/auth/forms.body",
-    "forms_body_readonly": "https://www.googleapis.com/auth/forms.body.readonly",
-    "forms_responses_readonly": "https://www.googleapis.com/auth/forms.responses.readonly",
-    
-    # Slides scopes
-    "slides": "https://www.googleapis.com/auth/presentations",
-    "slides_read": "https://www.googleapis.com/auth/presentations.readonly",
-    
-    # Admin scopes
-    "admin_users": "https://www.googleapis.com/auth/admin.directory.user",
-    "admin_groups": "https://www.googleapis.com/auth/admin.directory.group",
-    "admin_roles": "https://www.googleapis.com/auth/admin.directory.rolemanagement",
-    "admin_orgunit": "https://www.googleapis.com/auth/admin.directory.orgunit",
-    
-    # Cloud Platform scopes
-    "cloud_platform": "https://www.googleapis.com/auth/cloud-platform",
-    "cloud_platform_read_only": "https://www.googleapis.com/auth/cloud-platform.read-only",
-    
-    # Other common scopes
-    "userinfo_profile": "https://www.googleapis.com/auth/userinfo.profile",
-    "userinfo_email": "https://www.googleapis.com/auth/userinfo.email",
-    "openid": "openid",
-    "tasks_read": "https://www.googleapis.com/auth/tasks.readonly",
-    "tasks_full": "https://www.googleapis.com/auth/tasks",
-    "keep_read": "https://www.googleapis.com/auth/keep.readonly",
-    "keep_full": "https://www.googleapis.com/auth/keep",
-    "youtube_read": "https://www.googleapis.com/auth/youtube.readonly",
-    "youtube_upload": "https://www.googleapis.com/auth/youtube.upload",
-    "youtube_full": "https://www.googleapis.com/auth/youtube",
-    "script_projects": "https://www.googleapis.com/auth/script.projects",
-    "script_deployments": "https://www.googleapis.com/auth/script.deployments",
-    "vault_read": "https://www.googleapis.com/auth/vault.readonly",
-    "vault_full": "https://www.googleapis.com/auth/vault",
-    "groupssettings_read": "https://www.googleapis.com/auth/apps.groups.settings",
-    "siteverification_read": "https://www.googleapis.com/auth/siteverification.readonly",
-    "siteverification_full": "https://www.googleapis.com/auth/siteverification",
-    "tagmanager_read": "https://www.googleapis.com/auth/tagmanager.readonly",
-    "tagmanager_full": "https://www.googleapis.com/auth/tagmanager.manage.containers",
-    "webmasters_read": "https://www.googleapis.com/auth/webmasters.readonly",
-    "webmasters_full": "https://www.googleapis.com/auth/webmasters",
-    "analytics_read": "https://www.googleapis.com/auth/analytics.readonly",
-    "analytics_full": "https://www.googleapis.com/auth/analytics",
-    "adsense_read": "https://www.googleapis.com/auth/adsense.readonly",
-    "adsense_full": "https://www.googleapis.com/auth/adsense",
-    "books_read": "https://www.googleapis.com/auth/books",
-    "blogger_read": "https://www.googleapis.com/auth/blogger.readonly",
-    "blogger_full": "https://www.googleapis.com/auth/blogger",
-    "driveactivity_read": "https://www.googleapis.com/auth/drive.activity.readonly",
-    "fitness_activity_read": "https://www.googleapis.com/auth/fitness.activity.read",
-    "photoslibrary_read": "https://www.googleapis.com/auth/photoslibrary.readonly",
-    "photoslibrary_append": "https://www.googleapis.com/auth/photoslibrary.appendonly",
-    "photoslibrary_full": "https://www.googleapis.com/auth/photoslibrary",
-    "plus_me": "https://www.googleapis.com/auth/plus.me"
-}
+    Returns:
+        Dictionary mapping legacy scope names to scope URLs
+    """
+    if _COMPATIBILITY_AVAILABLE:
+        try:
+            # Use scope registry to get legacy scope mappings
+            legacy_mappings = {}
+            
+            # Build legacy mappings from scope registry
+            for service, scopes in ScopeRegistry.GOOGLE_API_SCOPES.items():
+                for scope_name, scope_url in scopes.items():
+                    legacy_key = f"{service}_{scope_name}"
+                    legacy_mappings[legacy_key] = scope_url
+            
+            return legacy_mappings
+        except Exception as e:
+            logger.warning(f"Error getting scope groups from registry, using fallback: {e}")
+            return {}
+    else:
+        return {}
 
 
 def _get_scope_groups() -> Dict[str, str]:
@@ -397,8 +326,19 @@ async def get_google_service(
     
     # Build the service
     try:
-        service = build(service_name, service_version, credentials=credentials)
-        logger.info(f"Created {service_type} service (v{service_version}) for {user_email}")
+        # Special handling for Photos Library API which uses a custom discovery URL
+        if service_name == "photoslibrary":
+            from googleapiclient.discovery import build_from_document
+            import requests
+            
+            # Photos Library API uses a custom discovery document
+            discovery_url = f"https://photoslibrary.googleapis.com/$discovery/rest?version={service_version}"
+            discovery_doc = requests.get(discovery_url).json()
+            service = build_from_document(discovery_doc, credentials=credentials)
+            logger.info(f"Created Photos Library service (v{service_version}) for {user_email} using custom discovery")
+        else:
+            service = build(service_name, service_version, credentials=credentials)
+            logger.info(f"Created {service_type} service (v{service_version}) for {user_email}")
         
         # Cache the service
         if cache_enabled:

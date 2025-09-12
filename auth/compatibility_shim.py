@@ -6,7 +6,7 @@ while automatically redirecting to the new centralized scope registry.
 """
 
 import logging
-from typing import Dict, List, Any, Optional, Union
+from typing_extensions import Dict, List, Any, Optional, Union
 from .scope_registry import ScopeRegistry, ServiceScopeManager
 
 logger = logging.getLogger(__name__)
@@ -104,6 +104,17 @@ class CompatibilityShim:
             "slides": ScopeRegistry.GOOGLE_API_SCOPES["slides"]["full"],
             "slides_read": ScopeRegistry.GOOGLE_API_SCOPES["slides"]["readonly"],
             
+            # Photos legacy names (using only valid scopes)
+            "photos_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly"],
+            "photos_append": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["appendonly"],
+            "photos_readonly_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly_appcreated"],
+            "photos_edit_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["edit_appcreated"],
+            # PhotosLibrary legacy names (for backwards compatibility)
+            "photoslibrary_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly"],
+            "photoslibrary_append": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["appendonly"],
+            "photoslibrary_readonly_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly_appcreated"],
+            "photoslibrary_edit_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["edit_appcreated"],
+            
             # Admin legacy names
             "admin_users": ScopeRegistry.GOOGLE_API_SCOPES["admin"]["users"],
             "admin_groups": ScopeRegistry.GOOGLE_API_SCOPES["admin"]["groups"],
@@ -119,8 +130,6 @@ class CompatibilityShim:
             "userinfo_email": ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_email"],
             "tasks_read": ScopeRegistry.GOOGLE_API_SCOPES["tasks"]["readonly"],
             "tasks_full": ScopeRegistry.GOOGLE_API_SCOPES["tasks"]["full"],
-            "keep_read": ScopeRegistry.GOOGLE_API_SCOPES["keep"]["readonly"],
-            "keep_full": ScopeRegistry.GOOGLE_API_SCOPES["keep"]["full"],
             "youtube_read": ScopeRegistry.GOOGLE_API_SCOPES["youtube"]["readonly"],
             "youtube_upload": ScopeRegistry.GOOGLE_API_SCOPES["youtube"]["upload"],
             "youtube_full": ScopeRegistry.GOOGLE_API_SCOPES["youtube"]["full"],
@@ -160,12 +169,12 @@ class CompatibilityShim:
                 "description": "Google Drive service"
             },
             "gmail": {
-                "default_scopes": ["gmail_read", "gmail_send", "gmail_compose", "gmail_modify", "gmail_labels"],
+                "default_scopes": ["gmail_read", "gmail_send", "gmail_compose", "gmail_modify", "gmail_labels", "gmail_settings_basic", "gmail_settings_sharing"],
                 "version": "v1",
                 "description": "Gmail service"
             },
             "calendar": {
-                "default_scopes": ["calendar_read", "calendar_events"],
+                "default_scopes": ["calendar_read", "calendar_events", "calendar_full"],
                 "version": "v3",
                 "description": "Google Calendar service"
             },
@@ -193,6 +202,21 @@ class CompatibilityShim:
                 "default_scopes": ["slides", "slides_read"],
                 "version": "v1",
                 "description": "Google Slides service"
+            },
+            "photos": {
+                "default_scopes": ["photos_read", "photos_append"],
+                "version": "v1",
+                "description": "Google Photos service"
+            },
+            "photoslibrary": {
+                "default_scopes": ["photos_read", "photos_append"],
+                "version": "v1",
+                "description": "Google Photos Library API service"
+            },
+            "tasks": {
+                "default_scopes": ["tasks_read", "tasks_full"],
+                "version": "v1",
+                "description": "Google Tasks API service"
             }
         }
         
@@ -209,23 +233,21 @@ class CompatibilityShim:
         """
         Provide legacy drive_scopes format for settings.py
         
-        This method provides the comprehensive OAuth scopes list that was
-        previously defined in settings.py drive_scopes.
+        This method provides the comprehensive OAuth scopes list using
+        oauth_comprehensive as the single source of truth.
         """
         if cls._legacy_drive_scopes_cache is not None:
             return cls._legacy_drive_scopes_cache
         
-        logger.info("COMPATIBILITY: Generating legacy drive_scopes format from registry")
+        logger.info("COMPATIBILITY: Generating legacy drive_scopes from oauth_comprehensive group")
         
-        # Get comprehensive OAuth scopes for multiple services (matching the original settings.py)
-        oauth_scopes = ScopeRegistry.get_oauth_scopes([
-            "drive", "gmail", "calendar", "docs", "sheets", "chat", "forms", "slides"
-        ])
+        # Use oauth_comprehensive as the single source of truth
+        oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
         
         # Cache the result
         cls._legacy_drive_scopes_cache = oauth_scopes
         
-        logger.info(f"COMPATIBILITY: Generated {len(oauth_scopes)} legacy drive_scopes")
+        logger.info(f"COMPATIBILITY: Generated {len(oauth_scopes)} legacy drive_scopes from oauth_comprehensive")
         return oauth_scopes
     
     @classmethod
@@ -233,22 +255,12 @@ class CompatibilityShim:
         """
         Provide legacy scope format for OAuth endpoints
         
-        Returns the basic scopes used in fastmcp_oauth_endpoints.py
+        Returns scopes for OAuth endpoints - now uses oauth_comprehensive as single source of truth
         """
-        logger.info("COMPATIBILITY: Generating legacy OAuth endpoint scopes")
+        logger.info("COMPATIBILITY: Generating OAuth endpoint scopes from oauth_comprehensive")
         
-        # Return the basic scopes that were hardcoded in OAuth endpoints
-        basic_scopes = [
-            ScopeRegistry.GOOGLE_API_SCOPES["base"]["openid"],
-            ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_email"],
-            ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_profile"],
-            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["file"],
-            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["readonly"],
-            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["readonly"],
-            ScopeRegistry.GOOGLE_API_SCOPES["calendar"]["readonly"]
-        ]
-        
-        return basic_scopes
+        # Use oauth_comprehensive as the single source of truth
+        return ScopeRegistry.resolve_scope_group("oauth_comprehensive")
     
     @classmethod
     def get_legacy_dcr_scope_defaults(cls) -> str:
@@ -259,13 +271,24 @@ class CompatibilityShim:
         """
         logger.info("COMPATIBILITY: Generating legacy DCR scope defaults")
         
-        # Return the default scope string from DCR
+        # Ensure DCR default scopes include Gmail Settings scopes so clients can request filters/forwarding
         default_scopes = [
+            # Base
             ScopeRegistry.GOOGLE_API_SCOPES["base"]["openid"],
             ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_email"],
             ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_profile"],
+            # Drive basics
             ScopeRegistry.GOOGLE_API_SCOPES["drive"]["readonly"],
-            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["file"]
+            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["file"],
+            # Gmail basics
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["readonly"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["send"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["compose"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["modify"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["labels"],
+            # Gmail settings needed for filters/forwarding
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_basic"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_sharing"]
         ]
         
         return " ".join(default_scopes)
@@ -381,6 +404,8 @@ class CompatibilityShim:
         cls._legacy_scope_groups_cache = None
         cls._legacy_service_defaults_cache = None
         cls._legacy_drive_scopes_cache = None
+        # Force immediate cache invalidation
+        logger.info("COMPATIBILITY: Cache cleared - next scope request will regenerate from updated registry")
     
     @classmethod
     def get_cache_stats(cls) -> Dict[str, bool]:

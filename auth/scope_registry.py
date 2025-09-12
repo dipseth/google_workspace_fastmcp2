@@ -6,7 +6,10 @@ the FastMCP2 system, eliminating the previous fragmentation across 7+ files.
 """
 
 import logging
-from typing import Dict, List, Optional, Set, Union
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
+from typing_extensions import Dict, List, Optional, Set, Union, Any
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -28,8 +31,23 @@ class ValidationResult:
             self.warnings = []
 
 
+@dataclass
+class ServiceMetadata:
+    """Comprehensive service metadata"""
+    name: str
+    description: str
+    icon: str
+    version: str
+    scopes: Dict[str, str]
+    default_scope_group: str
+    features: List[str]
+    api_endpoint: str
+    documentation_url: str
+    service_config: Dict[str, str]
+
+
 class ScopeRegistry:
-    """Central registry for all Google API scopes"""
+    """Central registry for all Google API scopes and service metadata"""
     
     # Core scope registry - Single Source of Truth
     GOOGLE_API_SCOPES = {
@@ -108,6 +126,16 @@ class ScopeRegistry:
             "readonly": "https://www.googleapis.com/auth/presentations.readonly"
         },
         
+        # Google Photos scopes
+        "photos": {
+            "readonly": "https://www.googleapis.com/auth/photoslibrary.readonly",
+            "appendonly": "https://www.googleapis.com/auth/photoslibrary.appendonly", 
+            "full": "https://www.googleapis.com/auth/photoslibrary",
+            "readonly_appcreated": "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
+            "edit_appcreated": "https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata"
+            # Note: Added back 'full' scope - needed for album listing and search operations
+        },
+        
         # Admin scopes
         "admin": {
             "users": "https://www.googleapis.com/auth/admin.directory.user",
@@ -116,7 +144,7 @@ class ScopeRegistry:
             "orgunit": "https://www.googleapis.com/auth/admin.directory.orgunit"
         },
         
-        # Cloud Platform scopes
+        # Cloud Platform scopes (Note: Require special project setup and approval)
         "cloud": {
             "platform": "https://www.googleapis.com/auth/cloud-platform",
             "platform_readonly": "https://www.googleapis.com/auth/cloud-platform.read-only",
@@ -131,11 +159,6 @@ class ScopeRegistry:
             "full": "https://www.googleapis.com/auth/tasks"
         },
         
-        "keep": {
-            "readonly": "https://www.googleapis.com/auth/keep.readonly",
-            "full": "https://www.googleapis.com/auth/keep"
-        },
-        
         "youtube": {
             "readonly": "https://www.googleapis.com/auth/youtube.readonly",
             "upload": "https://www.googleapis.com/auth/youtube.upload",
@@ -145,43 +168,217 @@ class ScopeRegistry:
         "script": {
             "projects": "https://www.googleapis.com/auth/script.projects",
             "deployments": "https://www.googleapis.com/auth/script.deployments"
+            # Removed external_request - deprecated/invalid scope
         }
+    }
+    
+    # Comprehensive service metadata registry
+    SERVICE_METADATA = {
+        "drive": ServiceMetadata(
+            name="Google Drive",
+            description="Cloud storage and file synchronization service",
+            icon="📁",
+            version="v3",
+            scopes=GOOGLE_API_SCOPES["drive"],
+            default_scope_group="drive_basic",
+            features=["file_storage", "sharing", "collaboration", "version_control"],
+            api_endpoint="https://www.googleapis.com/drive/v3",
+            documentation_url="https://developers.google.com/drive/api/v3/reference",
+            service_config={"service": "drive", "version": "v3"}
+        ),
+        
+        "gmail": ServiceMetadata(
+            name="Gmail",
+            description="Email service with powerful search, filtering, and organization features",
+            icon="📧",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["gmail"],
+            default_scope_group="gmail_basic",
+            features=["email", "search", "labels", "filters", "templates", "batch_operations"],
+            api_endpoint="https://www.googleapis.com/gmail/v1",
+            documentation_url="https://developers.google.com/gmail/api/reference",
+            service_config={"service": "gmail", "version": "v1"}
+        ),
+        
+        "calendar": ServiceMetadata(
+            name="Google Calendar",
+            description="Time management and scheduling service",
+            icon="📅",
+            version="v3",
+            scopes=GOOGLE_API_SCOPES["calendar"],
+            default_scope_group="calendar_basic",
+            features=["events", "scheduling", "reminders", "sharing", "bulk_operations"],
+            api_endpoint="https://www.googleapis.com/calendar/v3",
+            documentation_url="https://developers.google.com/calendar/api/v3/reference",
+            service_config={"service": "calendar", "version": "v3"}
+        ),
+        
+        "docs": ServiceMetadata(
+            name="Google Docs",
+            description="Document creation and collaboration service",
+            icon="📄",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["docs"],
+            default_scope_group="docs_basic",
+            features=["document_creation", "rich_formatting", "collaboration", "templates"],
+            api_endpoint="https://docs.googleapis.com/v1",
+            documentation_url="https://developers.google.com/docs/api/reference",
+            service_config={"service": "docs", "version": "v1"}
+        ),
+        
+        "sheets": ServiceMetadata(
+            name="Google Sheets",
+            description="Spreadsheet and data analysis service",
+            icon="📊",
+            version="v4",
+            scopes=GOOGLE_API_SCOPES["sheets"],
+            default_scope_group="sheets_basic",
+            features=["spreadsheets", "data_analysis", "formulas", "charts", "collaboration"],
+            api_endpoint="https://sheets.googleapis.com/v4",
+            documentation_url="https://developers.google.com/sheets/api/reference",
+            service_config={"service": "sheets", "version": "v4"}
+        ),
+        
+        "chat": ServiceMetadata(
+            name="Google Chat",
+            description="Team messaging and collaboration platform",
+            icon="💬",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["chat"],
+            default_scope_group="chat_basic",
+            features=["messaging", "spaces", "cards", "bots", "webhooks"],
+            api_endpoint="https://chat.googleapis.com/v1",
+            documentation_url="https://developers.google.com/chat/api/reference",
+            service_config={"service": "chat", "version": "v1"}
+        ),
+        
+        "forms": ServiceMetadata(
+            name="Google Forms",
+            description="Survey and form creation service",
+            icon="📝",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["forms"],
+            default_scope_group="forms_basic",
+            features=["form_creation", "responses", "validation", "analysis"],
+            api_endpoint="https://forms.googleapis.com/v1",
+            documentation_url="https://developers.google.com/forms/api/reference",
+            service_config={"service": "forms", "version": "v1"}
+        ),
+        
+        "slides": ServiceMetadata(
+            name="Google Slides",
+            description="Presentation creation and sharing service",
+            icon="🎯",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["slides"],
+            default_scope_group="slides_basic",
+            features=["presentations", "templates", "animations", "collaboration"],
+            api_endpoint="https://slides.googleapis.com/v1",
+            documentation_url="https://developers.google.com/slides/api/reference",
+            service_config={"service": "slides", "version": "v1"}
+        ),
+        
+        "photos": ServiceMetadata(
+            name="Google Photos",
+            description="Photo and video storage service",
+            icon="📷",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["photos"],
+            default_scope_group="photos_basic",
+            features=["photo_storage", "albums", "sharing", "search", "metadata"],
+            api_endpoint="https://photoslibrary.googleapis.com/v1",
+            documentation_url="https://developers.google.com/photos/library/reference",
+            service_config={"service": "photoslibrary", "version": "v1"}
+        ),
+        
+        "tasks": ServiceMetadata(
+            name="Google Tasks",
+            description="Task management service",
+            icon="✅",
+            version="v1",
+            scopes=GOOGLE_API_SCOPES["tasks"],
+            default_scope_group="tasks_basic",
+            features=["task_lists", "due_dates", "notes", "completion_tracking"],
+            api_endpoint="https://tasks.googleapis.com/tasks/v1",
+            documentation_url="https://developers.google.com/tasks/reference",
+            service_config={"service": "tasks", "version": "v1"}
+        )
     }
     
     # Predefined service scope groups for common use cases
     SERVICE_SCOPE_GROUPS = {
+        # Base OAuth scopes for user authentication
+        "base": ["base.userinfo_email", "base.userinfo_profile", "base.openid"],
+        
         # Basic service combinations
         "drive_basic": ["base.userinfo_email", "base.openid", "drive.file", "drive.readonly"],
         "drive_full": ["base.userinfo_email", "base.openid", "drive.full"],
-        "gmail_basic": ["base.userinfo_email", "base.openid", "gmail.readonly", "gmail.send"],
+        "gmail_basic": ["base.userinfo_email", "base.openid", "gmail.readonly", "gmail.send", "gmail.settings_basic", "gmail.settings_sharing"],
         "gmail_full": ["base.userinfo_email", "base.openid", "gmail.full"],
-        "calendar_basic": ["base.userinfo_email", "base.openid", "calendar.readonly", "calendar.events"],
+        "calendar_basic": ["base.userinfo_email", "base.openid", "calendar.readonly", "calendar.events", "calendar.full"],
         "calendar_full": ["base.userinfo_email", "base.openid", "calendar.full"],
         "docs_basic": ["base.userinfo_email", "base.openid", "docs.readonly", "docs.full"],
         "sheets_basic": ["base.userinfo_email", "base.openid", "sheets.readonly", "sheets.full"],
         "chat_basic": ["base.userinfo_email", "base.openid", "chat.messages_readonly", "chat.messages"],
         "forms_basic": ["base.userinfo_email", "base.openid", "forms.body", "forms.responses_readonly"],
         "slides_basic": ["base.userinfo_email", "base.openid", "slides.full", "slides.readonly"],
+        "photos_basic": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly", "photos.readonly_appcreated"],
+        "photos_full": ["base.userinfo_email", "base.openid", "photos.readonly", "photos.appendonly", "photos.full", "photos.readonly_appcreated", "photos.edit_appcreated"],
+        "tasks_basic": ["base.userinfo_email", "base.openid", "tasks.readonly", "tasks.full"],
+        "tasks_full": ["base.userinfo_email", "base.openid", "tasks.full"],
         
         # Multi-service combinations
         "office_suite": ["base.userinfo_email", "base.openid", "drive.file", "docs.full", "sheets.full", "slides.full"],
         "communication_suite": ["base.userinfo_email", "base.openid", "gmail.modify", "chat.messages", "calendar.events"],
         "admin_suite": ["base.userinfo_email", "base.openid", "admin.users", "admin.groups", "admin.roles"],
         
-        # Comprehensive access for OAuth flows
+        # Comprehensive access for OAuth flows (validated scopes only)
         "oauth_comprehensive": [
             "base.userinfo_email", "base.userinfo_profile", "base.openid",
             "drive.full", "drive.readonly", "drive.file",
             "docs.readonly", "docs.full",
             "gmail.readonly", "gmail.send", "gmail.compose", "gmail.modify", "gmail.labels",
+            "gmail.settings_basic", "gmail.settings_sharing",
             "chat.messages_readonly", "chat.messages", "chat.spaces",
             "sheets.readonly", "sheets.full",
             "forms.body", "forms.body_readonly", "forms.responses_readonly",
             "slides.full", "slides.readonly",
-            "calendar.readonly", "calendar.events",
-            "cloud.platform", "cloud.functions", "cloud.pubsub", "cloud.iam"
+            "photos.readonly", "photos.appendonly", "photos.full", "photos.readonly_appcreated", "photos.edit_appcreated",
+            "calendar.readonly", "calendar.events", "calendar.full",
+            "tasks.readonly", "tasks.full"
         ]
     }
+    
+    # Convenient access to individual service scope groups
+    DRIVE_SCOPES = GOOGLE_API_SCOPES["drive"]
+    GMAIL_SCOPES = GOOGLE_API_SCOPES["gmail"]
+    CALENDAR_SCOPES = GOOGLE_API_SCOPES["calendar"]
+    DOCS_SCOPES = GOOGLE_API_SCOPES["docs"]
+    SHEETS_SCOPES = GOOGLE_API_SCOPES["sheets"]
+    CHAT_SCOPES = GOOGLE_API_SCOPES["chat"]
+    FORMS_SCOPES = GOOGLE_API_SCOPES["forms"]
+    SLIDES_SCOPES = GOOGLE_API_SCOPES["slides"]
+    PHOTOS_SCOPES = GOOGLE_API_SCOPES["photos"]
+    TASKS_SCOPES = GOOGLE_API_SCOPES["tasks"]
+    BASE_SCOPES = GOOGLE_API_SCOPES["base"]
+    
+    @classmethod
+    def get_service_metadata(cls, service: str) -> Optional[ServiceMetadata]:
+        """
+        Get comprehensive metadata for a service.
+        
+        Args:
+            service: Service name
+            
+        Returns:
+            ServiceMetadata object or None if service not found
+        """
+        return cls.SERVICE_METADATA.get(service)
+    
+    @classmethod
+    def get_all_services(cls) -> List[str]:
+        """Get list of all available services."""
+        return list(cls.SERVICE_METADATA.keys())
     
     @classmethod
     def get_service_scopes(cls, service: str, access_level: str = "basic") -> List[str]:
@@ -234,6 +431,8 @@ class ScopeRegistry:
                 result_scopes.extend([service_scopes["readonly"], service_scopes["send"]])
             elif service == "calendar":
                 result_scopes.extend([service_scopes["readonly"], service_scopes["events"]])
+            elif service == "photos":
+                result_scopes.extend([service_scopes["readonly"], service_scopes["appendonly"]])
             else:
                 # Default to readonly and full if available
                 if "readonly" in service_scopes:
@@ -292,47 +491,19 @@ class ScopeRegistry:
         """
         Get OAuth scopes for multiple services.
         
+        Now uses the validated oauth_comprehensive scope group as the single source of truth
+        instead of dynamically building scopes which could include problematic ones.
+        
         Args:
-            services: List of service names
+            services: List of service names (ignored - uses comprehensive list)
             
         Returns:
-            Combined list of scopes for all services
+            Combined list of scopes from oauth_comprehensive group
         """
-        logger.info(f"SCOPE_REGISTRY: Getting OAuth scopes for services: {services}")
+        logger.info(f"SCOPE_REGISTRY: Getting OAuth scopes - using oauth_comprehensive as single source of truth")
         
-        all_scopes = []
-        
-        # Always include base scopes
-        base_scopes = cls.GOOGLE_API_SCOPES["base"]
-        all_scopes.extend([
-            base_scopes["userinfo_email"],
-            base_scopes["userinfo_profile"],
-            base_scopes["openid"]
-        ])
-        
-        # Add service-specific scopes
-        for service in services:
-            if service in cls.GOOGLE_API_SCOPES:
-                service_scopes = cls.GOOGLE_API_SCOPES[service]
-                all_scopes.extend(service_scopes.values())
-            else:
-                logger.warning(f"SCOPE_REGISTRY: Unknown service '{service}' requested for OAuth")
-        
-        # Add cloud platform scopes for broader access
-        if "cloud" in cls.GOOGLE_API_SCOPES:
-            cloud_scopes = cls.GOOGLE_API_SCOPES["cloud"]
-            all_scopes.extend([
-                cloud_scopes["platform"],
-                cloud_scopes["functions"],
-                cloud_scopes["pubsub"],
-                cloud_scopes["iam"]
-            ])
-        
-        # Remove duplicates while preserving order
-        unique_scopes = list(dict.fromkeys(all_scopes))
-        logger.info(f"SCOPE_REGISTRY: OAuth scopes resolved to {len(unique_scopes)} unique scopes")
-        
-        return unique_scopes
+        # Use our cleaned-up oauth_comprehensive group as the single source of truth
+        return cls.resolve_scope_group("oauth_comprehensive")
     
     @classmethod
     def validate_scope_combination(cls, scopes: List[str]) -> ValidationResult:
@@ -410,12 +581,18 @@ class ScopeRegistry:
             "gmail_read": cls.GOOGLE_API_SCOPES["gmail"]["readonly"],
             "gmail_send": cls.GOOGLE_API_SCOPES["gmail"]["send"],
             "gmail_modify": cls.GOOGLE_API_SCOPES["gmail"]["modify"],
+            "gmail_settings_basic": cls.GOOGLE_API_SCOPES["gmail"]["settings_basic"],
+            "gmail_settings_sharing": cls.GOOGLE_API_SCOPES["gmail"]["settings_sharing"],
             "calendar_read": cls.GOOGLE_API_SCOPES["calendar"]["readonly"],
             "calendar_events": cls.GOOGLE_API_SCOPES["calendar"]["events"],
             "docs_read": cls.GOOGLE_API_SCOPES["docs"]["readonly"],
             "docs_write": cls.GOOGLE_API_SCOPES["docs"]["full"],
             "sheets_read": cls.GOOGLE_API_SCOPES["sheets"]["readonly"],
-            "sheets_write": cls.GOOGLE_API_SCOPES["sheets"]["full"]
+            "sheets_write": cls.GOOGLE_API_SCOPES["sheets"]["full"],
+            "photos_read": cls.GOOGLE_API_SCOPES["photos"]["readonly"],
+            "photos_append": cls.GOOGLE_API_SCOPES["photos"]["appendonly"],
+            "tasks_read": cls.GOOGLE_API_SCOPES["tasks"]["readonly"],
+            "tasks_full": cls.GOOGLE_API_SCOPES["tasks"]["full"]
         }
         
         if legacy_scope in legacy_mappings:
@@ -433,6 +610,103 @@ class ScopeRegistry:
         # If no match found, return as-is and log warning
         logger.warning(f"SCOPE_REGISTRY: Could not resolve legacy scope '{legacy_scope}'")
         return legacy_scope
+    
+    @classmethod
+    def get_service_catalog(cls) -> Dict[str, Dict[str, Any]]:
+        """Get user-friendly service catalog for selection interface."""
+        return {
+            "userinfo": {
+                "name": "Basic Profile",
+                "description": "Access your basic profile information and email",
+                "category": "Core Services",
+                "required": True,
+                "scopes": cls.resolve_scope_group("base")
+            },
+            "drive": {
+                "name": "Google Drive",
+                "description": "Upload, download, and manage files in Google Drive",
+                "category": "Storage & Files",
+                "required": False,
+                "scopes": cls.get_service_scopes("drive", "basic")
+            },
+            "gmail": {
+                "name": "Gmail",
+                "description": "Send, read, and manage email messages",
+                "category": "Communication",
+                "required": False,
+                "scopes": cls.get_service_scopes("gmail", "basic")
+            },
+            "calendar": {
+                "name": "Google Calendar",
+                "description": "Manage calendar events and scheduling",
+                "category": "Productivity",
+                "required": False,
+                "scopes": cls.get_service_scopes("calendar", "basic")
+            },
+            "docs": {
+                "name": "Google Docs",
+                "description": "Create and edit documents",
+                "category": "Office Suite",
+                "required": False,
+                "scopes": cls.get_service_scopes("docs", "basic")
+            },
+            "sheets": {
+                "name": "Google Sheets",
+                "description": "Create and edit spreadsheets",
+                "category": "Office Suite",
+                "required": False,
+                "scopes": cls.get_service_scopes("sheets", "basic")
+            },
+            "slides": {
+                "name": "Google Slides",
+                "description": "Create and edit presentations",
+                "category": "Office Suite",
+                "required": False,
+                "scopes": cls.get_service_scopes("slides", "basic")
+            },
+            "chat": {
+                "name": "Google Chat",
+                "description": "Send messages and manage chat spaces",
+                "category": "Communication",
+                "required": False,
+                "scopes": cls.get_service_scopes("chat", "basic")
+            },
+            "forms": {
+                "name": "Google Forms",
+                "description": "Create forms and collect responses",
+                "category": "Productivity",
+                "required": False,
+                "scopes": cls.get_service_scopes("forms", "basic")
+            },
+            "photos": {
+                "name": "Google Photos",
+                "description": "Access and manage photos and albums",
+                "category": "Storage & Files",
+                "required": False,
+                "scopes": cls.get_service_scopes("photos", "basic")
+            }
+        }
+    
+    @classmethod
+    def get_scopes_for_services(cls, service_keys: List[str]) -> List[str]:
+        """Get combined scopes for selected services."""
+        catalog = cls.get_service_catalog()
+        all_scopes = set()
+        
+        # Always include required services
+        for service_key, service_info in catalog.items():
+            if service_info.get("required", False):
+                all_scopes.update(service_info["scopes"])
+        
+        # Add selected services
+        for key in service_keys:
+            if key in catalog:
+                all_scopes.update(catalog[key]["scopes"])
+        
+        return list(all_scopes)
+
+
+
 
 
 class ServiceScopeManager:

@@ -1,7 +1,10 @@
 """Helper functions and utilities for Google service management."""
 
 import logging
-from typing import Any, Optional, Union, List, Dict
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
+from typing_extensions import Any, Optional, Union, List, Dict
 
 from .service_manager import get_google_service, get_available_services, get_available_scope_groups
 from .context import (
@@ -20,50 +23,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Legacy service defaults - now managed through centralized registry
-# Maintained for backward compatibility through compatibility shim
-_FALLBACK_SERVICE_DEFAULTS = {
-    "drive": {
-        "default_scopes": ["drive_file", "drive_read"],
-        "version": "v3",
-        "description": "Google Drive service"
-    },
-    "gmail": {
-        "default_scopes": ["gmail_read", "gmail_send", "gmail_compose", "gmail_modify", "gmail_labels"],
-        "version": "v1",
-        "description": "Gmail service"
-    },
-    "calendar": {
-        "default_scopes": ["calendar_read", "calendar_events"],
-        "version": "v3",
-        "description": "Google Calendar service"
-    },
-    "docs": {
-        "default_scopes": ["docs_read", "docs_write"],
-        "version": "v1",
-        "description": "Google Docs service"
-    },
-    "sheets": {
-        "default_scopes": ["sheets_read", "sheets_write"],
-        "version": "v4",
-        "description": "Google Sheets service"
-    },
-    "chat": {
-        "default_scopes": ["chat_read", "chat_write"],
-        "version": "v1",
-        "description": "Google Chat service"
-    },
-    "forms": {
-        "default_scopes": ["forms", "forms_read", "forms_responses_read"],
-        "version": "v1",
-        "description": "Google Forms service"
-    },
-    "slides": {
-        "default_scopes": ["slides", "slides_read"],
-        "version": "v1",
-        "description": "Google Slides service"
-    }
-}
+# Import centralized scope registry
+from .scope_registry import ScopeRegistry
+
+# Legacy fallback for compatibility - now redirects to scope_registry
+_FALLBACK_SERVICE_DEFAULTS = {}  # Empty - now uses ScopeRegistry
 
 
 def _get_service_defaults() -> Dict[str, Dict]:
@@ -79,12 +43,22 @@ def _get_service_defaults() -> Dict[str, Dict]:
     """
     if _COMPATIBILITY_AVAILABLE:
         try:
-            return CompatibilityShim.get_legacy_service_defaults()
+            # Build service defaults from scope registry
+            service_defaults = {}
+            
+            for service_name, service_metadata in ScopeRegistry.SERVICE_METADATA.items():
+                service_defaults[service_name] = {
+                    "default_scopes": ScopeRegistry.get_service_scopes(service_name, "basic"),
+                    "version": service_metadata.version,
+                    "description": service_metadata.description
+                }
+            
+            return service_defaults
         except Exception as e:
             logger.warning(f"Error getting service defaults from registry, using fallback: {e}")
-            return _FALLBACK_SERVICE_DEFAULTS
+            return {}
     else:
-        return _FALLBACK_SERVICE_DEFAULTS
+        return {}
 
 
 # Create a dynamic SERVICE_DEFAULTS that uses the compatibility shim
@@ -375,3 +349,24 @@ def request_drive_service(scopes: Union[str, List[str]] = None) -> str:
 def request_gmail_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Gmail service through middleware - convenience alias."""
     return request_service("gmail", scopes)
+
+
+async def get_photos_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Photos service - convenience alias."""
+    return await get_service("photos", user_email, scopes)
+
+
+def request_photos_service(scopes: Union[str, List[str]] = None) -> str:
+    """Request Photos service through middleware - convenience alias."""
+    return request_service("photos", scopes)
+
+
+
+async def get_tasks_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Tasks service - convenience alias."""
+    return await get_service("tasks", user_email, scopes)
+
+
+def request_tasks_service(scopes: Union[str, List[str]] = None) -> str:
+    """Request Tasks service through middleware - convenience alias."""
+    return request_service("tasks", scopes)

@@ -7,7 +7,7 @@ import hashlib
 import uuid
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, List, Tuple
+from typing_extensions import Any, Dict, Optional, List, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 from pathlib import Path
@@ -182,6 +182,8 @@ class QdrantUnifiedMiddleware(Middleware):
         self,
         qdrant_host: str = "localhost",
         qdrant_port: int = 6333,
+        qdrant_api_key: Optional[str] = None,
+        qdrant_url: Optional[str] = None,
         collection_name: str = "mcp_tool_responses",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         summary_max_tokens: int = 500,
@@ -197,6 +199,8 @@ class QdrantUnifiedMiddleware(Middleware):
         Args:
             qdrant_host: Qdrant server hostname
             qdrant_port: Primary Qdrant server port
+            qdrant_api_key: API key for cloud Qdrant authentication
+            qdrant_url: Full Qdrant URL (if provided, overrides host/port)
             collection_name: Name of the collection to store responses
             embedding_model: Model to use for generating embeddings
             summary_max_tokens: Maximum tokens in summarized response
@@ -206,10 +210,27 @@ class QdrantUnifiedMiddleware(Middleware):
             auto_discovery: Whether to auto-discover Qdrant ports
             ports: List of ports to try for auto-discovery
         """
+        # Parse URL if provided
+        if qdrant_url:
+            from urllib.parse import urlparse
+            parsed = urlparse(qdrant_url)
+            self.qdrant_host = parsed.hostname or qdrant_host
+            self.qdrant_port = parsed.port or qdrant_port
+            self.qdrant_url = qdrant_url
+            self.qdrant_use_https = parsed.scheme == 'https'
+            logger.info(f"🔧 Parsed Qdrant URL: {qdrant_url} -> host={self.qdrant_host}, port={self.qdrant_port}, https={self.qdrant_use_https}")
+        else:
+            self.qdrant_host = qdrant_host
+            self.qdrant_port = qdrant_port
+            self.qdrant_url = None
+            self.qdrant_use_https = False
+        
+        self.qdrant_api_key = qdrant_api_key
+        
         # Create configuration
         self.config = QdrantConfig(
-            host=qdrant_host,
-            ports=ports or [qdrant_port, 6333, 6335, 6334],
+            host=self.qdrant_host,
+            ports=ports or [self.qdrant_port, 6333, 6335, 6334],
             collection_name=collection_name,
             embedding_model=embedding_model,
             summary_max_tokens=summary_max_tokens,
@@ -241,11 +262,22 @@ class QdrantUnifiedMiddleware(Middleware):
             else:
                 # Direct connection mode
                 QdrantClient, _ = _get_qdrant_imports()
-                self.client = QdrantClient(
-                    host=self.config.host,
-                    port=self.config.ports[0]
-                )
-                logger.info(f"✅ Connected to Qdrant at {self.config.host}:{self.config.ports[0]}")
+                
+                # Use URL if provided, otherwise use host/port
+                if self.qdrant_url:
+                    logger.info(f"🔗 Connecting to Qdrant using URL: {self.qdrant_url}")
+                    self.client = QdrantClient(
+                        url=self.qdrant_url,
+                        api_key=self.qdrant_api_key
+                    )
+                else:
+                    logger.info(f"🔗 Connecting to Qdrant at {self.config.host}:{self.config.ports[0]}")
+                    self.client = QdrantClient(
+                        host=self.config.host,
+                        port=self.config.ports[0],
+                        api_key=self.qdrant_api_key
+                    )
+                logger.info(f"✅ Connected to Qdrant")
                 
             self._initialized = True
             
@@ -282,12 +314,13 @@ class QdrantUnifiedMiddleware(Middleware):
             
         QdrantClient, _ = _get_qdrant_imports()
         
-        for port in self.config.ports:
+        # If we have a full URL, try that first
+        if self.qdrant_url:
             try:
-                logger.info(f"🔍 Trying Qdrant at {self.config.host}:{port}")
+                logger.info(f"🔍 Trying Qdrant at URL: {self.qdrant_url}")
                 client = QdrantClient(
-                    host=self.config.host,
-                    port=port,
+                    url=self.qdrant_url,
+                    api_key=self.qdrant_api_key,
                     timeout=self.config.connection_timeout/1000
                 )
                 
@@ -295,7 +328,31 @@ class QdrantUnifiedMiddleware(Middleware):
                 await asyncio.to_thread(client.get_collections)
                 
                 self.client = client
-                self.discovered_url = f"http://{self.config.host}:{port}"
+                self.discovered_url = self.qdrant_url
+                logger.info(f"✅ Connected to Qdrant at {self.discovered_url}")
+                return
+                
+            except Exception as e:
+                logger.warning(f"❌ Failed to connect to URL {self.qdrant_url}: {e}")
+                # Fall through to try host/port discovery
+        
+        # Try different ports on the configured host
+        for port in self.config.ports:
+            try:
+                logger.info(f"🔍 Trying Qdrant at {self.config.host}:{port}")
+                client = QdrantClient(
+                    host=self.config.host,
+                    port=port,
+                    api_key=self.qdrant_api_key,
+                    timeout=self.config.connection_timeout/1000
+                )
+                
+                # Test connection
+                await asyncio.to_thread(client.get_collections)
+                
+                self.client = client
+                protocol = "https" if self.qdrant_use_https else "http"
+                self.discovered_url = f"{protocol}://{self.config.host}:{port}"
                 logger.info(f"✅ Discovered Qdrant at {self.discovered_url}")
                 return
                 
@@ -383,17 +440,468 @@ class QdrantUnifiedMiddleware(Middleware):
         
         return response
     
-    async def _store_response(self, context: MiddlewareContext, response: Any):
-        """Store tool response in Qdrant with embedding."""
+    async def on_read_resource(self, context: MiddlewareContext, call_next):
+        """
+        FastMCP2 middleware hook for intercepting resource reads.
+        Handle Qdrant-specific resources directly in the middleware.
+        """
+        # Check if this is a Qdrant resource
+        # Convert AnyUrl to string before using string methods
+        uri = str(context.message.uri) if context.message.uri else ""
+        
+        if not uri.startswith("qdrant://"):
+            # Not a Qdrant resource, let other handlers deal with it
+            return await call_next(context)
+        
+        # Handle Qdrant resources directly
+        try:
+            return await self._handle_qdrant_resource(uri, context)
+        except Exception as e:
+            logger.error(f"❌ Failed to handle Qdrant resource {uri}: {e}")
+            # Return error response in proper format
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "error": f"Failed to handle Qdrant resource: {str(e)}",
+                        "uri": uri,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                }]
+            }
+    
+    async def _handle_qdrant_resource(self, uri: str, context: MiddlewareContext):
+        """Handle Qdrant-specific resource requests."""
+        # Ensure middleware is initialized
+        if not self.client or not self.embedder:
+            await self.initialize()
+        
+        if not self.client:
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json", 
+                    "text": json.dumps({
+                        "error": "Qdrant not available - client not initialized",
+                        "qdrant_enabled": False,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                }]
+            }
+        
+        # Parse the URI to determine the resource type
+        parts = uri.replace("qdrant://", "").split("/")
+        
+        if not parts:
+            return self._error_response(uri, "Invalid Qdrant URI format")
+        
+        resource_type = parts[0]
+        
+        if resource_type == "collections" and len(parts) == 2 and parts[1] == "list":
+            # qdrant://collections/list
+            return await self._handle_collections_list(uri)
+            
+        elif resource_type == "collection" and len(parts) >= 3:
+            collection_name = parts[1]
+            
+            if parts[2] == "info":
+                # qdrant://collection/{collection}/info
+                return await self._handle_collection_info(uri, collection_name)
+                
+            elif parts[2] == "responses" and len(parts) == 4 and parts[3] == "recent":
+                # qdrant://collection/{collection}/responses/recent
+                return await self._handle_collection_responses(uri, collection_name)
+                
+        elif resource_type == "search":
+            if len(parts) == 3:
+                # qdrant://search/{collection}/{query}
+                collection_name = parts[1]
+                query = parts[2]
+                return await self._handle_collection_search(uri, collection_name, query)
+            elif len(parts) == 2:
+                # qdrant://search/{query}
+                query = parts[1]
+                return await self._handle_global_search(uri, query)
+        
+        return self._error_response(uri, f"Unknown Qdrant resource type: {resource_type}")
+    
+    def _error_response(self, uri: str, error_message: str):
+        """Create a standard error response for resources."""
+        return {
+            "contents": [{
+                "uri": uri,
+                "mimeType": "application/json",
+                "text": json.dumps({
+                    "error": error_message,
+                    "uri": uri,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+            }]
+        }
+    
+    async def _handle_collections_list(self, uri: str):
+        """Handle qdrant://collections/list resource."""
+        try:
+            collections = await asyncio.to_thread(self.client.get_collections)
+            
+            collections_info = []
+            for collection in collections.collections:
+                try:
+                    info = await asyncio.to_thread(self.client.get_collection, collection.name)
+                    collections_info.append({
+                        "name": collection.name,
+                        "points_count": info.points_count,
+                        "vectors_count": getattr(info, 'vectors_count', 0),
+                        "indexed_vectors_count": getattr(info, 'indexed_vectors_count', 0),
+                        "segments_count": getattr(info, 'segments_count', 0),
+                        "status": str(info.status) if hasattr(info, 'status') else 'unknown'
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to get info for collection {collection.name}: {e}")
+                    collections_info.append({
+                        "name": collection.name,
+                        "error": str(e)
+                    })
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "qdrant_url": self.discovered_url,
+                        "total_collections": len(collections_info),
+                        "collections": collections_info,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error listing Qdrant collections: {e}")
+            return self._error_response(uri, f"Failed to list collections: {str(e)}")
+    
+    async def _handle_collection_info(self, uri: str, collection_name: str):
+        """Handle qdrant://collection/{collection}/info resource."""
+        try:
+            collections = await asyncio.to_thread(self.client.get_collections)
+            collection_names = [c.name for c in collections.collections]
+            
+            collection_info = None
+            if collection_name in collection_names:
+                collection_info = await asyncio.to_thread(
+                    self.client.get_collection,
+                    collection_name
+                )
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "qdrant_url": self.discovered_url,
+                        "requested_collection": collection_name,
+                        "collection_exists": collection_name in collection_names,
+                        "total_collections": len(collection_names),
+                        "all_collections": collection_names,
+                        "collection_info": {
+                            "vectors_count": getattr(collection_info, 'vectors_count', 0),
+                            "indexed_vectors_count": getattr(collection_info, 'indexed_vectors_count', 0),
+                            "points_count": collection_info.points_count if collection_info else 0,
+                            "segments_count": getattr(collection_info, 'segments_count', 0),
+                            "status": str(collection_info.status) if collection_info and hasattr(collection_info, 'status') else "unknown"
+                        } if collection_info else None,
+                        "config": {
+                            "host": self.config.host,
+                            "ports": self.config.ports,
+                            "default_collection": self.config.collection_name,
+                            "vector_size": self.config.vector_size,
+                            "enabled": self.config.enabled
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting collection info: {e}")
+            return self._error_response(uri, f"Failed to get collection info: {str(e)}")
+    
+    async def _handle_collection_responses(self, uri: str, collection_name: str):
+        """Handle qdrant://collection/{collection}/responses/recent resource."""
+        try:
+            # Check if collection exists
+            collections_response = await asyncio.to_thread(self.client.get_collections)
+            available_collections = [c.name for c in collections_response.collections]
+            
+            if collection_name not in available_collections:
+                return {
+                    "contents": [{
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps({
+                            "error": f"Collection '{collection_name}' not found",
+                            "available_collections": available_collections,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                    }]
+                }
+            
+            # Get recent responses from the collection
+            scroll_result = await asyncio.to_thread(
+                self.client.scroll,
+                collection_name=collection_name,
+                limit=50,
+                with_payload=True,
+                with_vector=False
+            )
+            
+            points = scroll_result[0] if scroll_result else []
+            
+            responses = []
+            for point in points[:20]:  # Limit to 20 most recent
+                payload = point.payload or {}
+                
+                # Decompress data if needed
+                data = payload.get("data", "{}")
+                if payload.get("compressed", False) and payload.get("compressed_data"):
+                    try:
+                        data = self._decompress_data(payload["compressed_data"])
+                    except Exception as e:
+                        logger.warning(f"Failed to decompress data for point {point.id}: {e}")
+                
+                # Parse response data
+                try:
+                    response_data = json.loads(data)
+                except json.JSONDecodeError:
+                    response_data = {"error": "Failed to parse stored data", "raw_data": data}
+                
+                responses.append({
+                    "id": str(point.id),
+                    "tool_name": payload.get("tool_name", "unknown"),
+                    "timestamp": payload.get("timestamp", "unknown"),
+                    "user_id": payload.get("user_id", "unknown"),
+                    "user_email": payload.get("user_email", "unknown"),
+                    "session_id": payload.get("session_id", "unknown"),
+                    "payload_type": payload.get("payload_type", "unknown"),
+                    "compressed": payload.get("compressed", False),
+                    "response_data": response_data
+                })
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "collection_name": collection_name,
+                        "total_points": len(points),
+                        "responses_shown": len(responses),
+                        "responses": responses,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting collection responses: {e}")
+            return self._error_response(uri, f"Failed to get collection responses: {str(e)}")
+    
+    async def _handle_collection_search(self, uri: str, collection_name: str, query: str):
+        """Handle qdrant://search/{collection}/{query} resource."""
+        try:
+            # Use the existing search method but limit to specific collection
+            results = await self.search(query, limit=10)
+            
+            # Filter results to only include those from the specified collection
+            # Note: This is a simplified approach - ideally we'd search within the collection directly
+            filtered_results = []
+            for result in results:
+                # Check if result is from the correct collection (this would need collection tracking)
+                filtered_results.append(result)
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "collection": collection_name,
+                        "query": query,
+                        "total_results": len(filtered_results),
+                        "results": filtered_results,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error searching collection: {e}")
+            return self._error_response(uri, f"Failed to search collection: {str(e)}")
+    
+    async def _handle_global_search(self, uri: str, query: str):
+        """Handle qdrant://search/{query} resource."""
+        try:
+            results = await self.search(query, limit=10)
+            
+            return {
+                "contents": [{
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps({
+                        "qdrant_enabled": True,
+                        "query": query,
+                        "total_results": len(results),
+                        "results": results,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, indent=2)
+                }]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in global search: {e}")
+            return self._error_response(uri, f"Failed to search: {str(e)}")
+    
+    async def _store_response(self, context=None, response=None, **kwargs):
+        """
+        Store tool response in Qdrant with embedding.
+        
+        This method supports multiple calling patterns:
+        1. With a MiddlewareContext object: _store_response(context, response)
+        2. With individual parameters as positional args: _store_response("tool_name", response_data)
+        3. With individual parameters as kwargs: _store_response(tool_name="name", tool_args={...}, response=data, ...)
+        """
+        # Check if called with all keyword arguments (template_manager.py style)
+        if 'tool_name' in kwargs and 'response' in kwargs:
+            # Called with all keyword arguments
+            return await self._store_response_with_params(
+                tool_name=kwargs.get('tool_name'),
+                tool_args=kwargs.get('tool_args', {}),
+                response=kwargs.get('response'),
+                execution_time_ms=kwargs.get('execution_time_ms', 0),
+                session_id=kwargs.get('session_id'),
+                user_email=kwargs.get('user_email')
+            )
+        
+        # Check if context is a string (tool_name) - positional args style
+        elif isinstance(context, str):
+            # Called with individual parameters as positional args
+            return await self._store_response_with_params(
+                tool_name=context,
+                tool_args={},
+                response=response,
+                execution_time_ms=0,
+                session_id=None,
+                user_email=None
+            )
+        
+        # Default case: context is a MiddlewareContext object
+        elif context is not None and response is not None:
+            # Called with MiddlewareContext object
+            try:
+                # Extract tool information from context safely
+                tool_name = getattr(context, 'tool_name', None) or getattr(context, 'name', 'unknown_tool')
+                arguments = getattr(context, 'arguments', None) or getattr(context, 'params', {})
+                
+                # Create response payload
+                response_data = {
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                    "response": response,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "user_id": getattr(context, 'user_id', 'unknown'),
+                    "user_email": getattr(context, 'user_email', getattr(context, 'user_id', 'unknown')),
+                    "session_id": str(uuid.uuid4()),
+                    "payload_type": PayloadType.TOOL_RESPONSE.value
+                }
+                
+                # Convert to JSON
+                json_data = json.dumps(response_data, default=str)
+                
+                # Generate text for embedding
+                embed_text = f"Tool: {tool_name}\nArguments: {json.dumps(arguments)}\nResponse: {str(response)[:1000]}"
+                
+                # Generate embedding
+                embedding = await asyncio.to_thread(self.embedder.encode, embed_text)
+                
+                # Check if compression is needed
+                compressed = self._should_compress(json_data)
+                if compressed:
+                    stored_data = self._compress_data(json_data)
+                    logger.debug(f"📦 Compressed response: {len(json_data)} -> {len(stored_data)} bytes")
+                else:
+                    stored_data = json_data
+                
+                # Create point for Qdrant (use proper UUID format)
+                _, qdrant_models = _get_qdrant_imports()
+                point_id = str(uuid.uuid4())  # Generate UUID and convert to string
+                point = qdrant_models['PointStruct'](
+                    id=point_id,  # Use UUID string for Qdrant compatibility
+                    vector=embedding.tolist(),
+                    payload={
+                        "tool_name": tool_name,
+                        "timestamp": response_data["timestamp"],
+                        "user_id": response_data["user_id"],
+                        "user_email": response_data["user_email"],
+                        "session_id": response_data["session_id"],
+                        "payload_type": PayloadType.TOOL_RESPONSE.value,
+                        "compressed": compressed,
+                        "data": stored_data if not compressed else None,
+                        "compressed_data": stored_data if compressed else None
+                    }
+                )
+                
+                # Store in Qdrant
+                await asyncio.to_thread(
+                    self.client.upsert,
+                    collection_name=self.config.collection_name,
+                    points=[point]
+                )
+                
+                logger.debug(f"✅ Stored response for tool: {tool_name} (ID: {point_id})")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to store response: {e}")
+                raise
+        
+        # If we get here, we don't know how to handle the input
+        else:
+            raise ValueError("Invalid parameters for _store_response. Expected MiddlewareContext or keyword arguments.")
+    
+    async def _store_response_with_params(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        response: Any,
+        execution_time_ms: int = 0,
+        session_id: Optional[str] = None,
+        user_email: Optional[str] = None
+    ):
+        """
+        Store tool response in Qdrant with embedding using individual parameters.
+        This method is called by _store_response when it's called with individual parameters
+        instead of a MiddlewareContext object.
+        
+        Args:
+            tool_name: Name of the tool being called
+            tool_args: Arguments passed to the tool
+            response: Response from the tool
+            execution_time_ms: Execution time in milliseconds
+            session_id: Session ID
+            user_email: User email
+        """
         try:
             # Create response payload
             response_data = {
-                "tool_name": context.tool_name,
-                "arguments": context.arguments,
+                "tool_name": tool_name,
+                "arguments": tool_args,
                 "response": response,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "user_id": getattr(context, 'user_id', 'unknown'),
-                "session_id": str(uuid.uuid4()),
+                "user_id": user_email or "unknown",
+                "user_email": user_email or "unknown",
+                "session_id": session_id or str(uuid.uuid4()),
                 "payload_type": PayloadType.TOOL_RESPONSE.value
             }
             
@@ -401,7 +909,7 @@ class QdrantUnifiedMiddleware(Middleware):
             json_data = json.dumps(response_data, default=str)
             
             # Generate text for embedding
-            embed_text = f"Tool: {context.tool_name}\nArguments: {json.dumps(context.arguments)}\nResponse: {str(response)[:1000]}"
+            embed_text = f"Tool: {tool_name}\nArguments: {json.dumps(tool_args)}\nResponse: {str(response)[:1000]}"
             
             # Generate embedding
             embedding = await asyncio.to_thread(self.embedder.encode, embed_text)
@@ -414,15 +922,18 @@ class QdrantUnifiedMiddleware(Middleware):
             else:
                 stored_data = json_data
             
-            # Create point for Qdrant
+            # Create point for Qdrant (use proper UUID format)
             _, qdrant_models = _get_qdrant_imports()
+            point_id = str(uuid.uuid4())  # Generate UUID and convert to string
             point = qdrant_models['PointStruct'](
-                id=str(uuid.uuid4()),
+                id=point_id,  # Use UUID string for Qdrant compatibility
                 vector=embedding.tolist(),
                 payload={
-                    "tool_name": context.tool_name,
+                    "tool_name": tool_name,
                     "timestamp": response_data["timestamp"],
                     "user_id": response_data["user_id"],
+                    "user_email": response_data["user_email"],
+                    "session_id": response_data["session_id"],
                     "payload_type": PayloadType.TOOL_RESPONSE.value,
                     "compressed": compressed,
                     "data": stored_data if not compressed else None,
@@ -437,12 +948,42 @@ class QdrantUnifiedMiddleware(Middleware):
                 points=[point]
             )
             
-            logger.debug(f"✅ Stored response for tool: {context.tool_name}")
+            logger.debug(f"✅ Stored response for tool: {tool_name} (ID: {point_id})")
             
         except Exception as e:
-            logger.error(f"❌ Failed to store response: {e}")
+            logger.error(f"❌ Failed to store response with params: {e}")
             raise
     
+    async def _execute_semantic_search(
+        self, 
+        query_embedding, 
+        qdrant_filter=None, 
+        limit=None, 
+        score_threshold=None
+    ):
+        """
+        Execute semantic search using query_points (new Qdrant API).
+        
+        Args:
+            query_embedding: The embedding vector for the query
+            qdrant_filter: Optional Qdrant filter
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
+            
+        Returns:
+            List of ScoredPoint objects from Qdrant
+        """
+        search_response = await asyncio.to_thread(
+            self.client.query_points,
+            collection_name=self.config.collection_name,
+            query=query_embedding.tolist(),
+            query_filter=qdrant_filter,
+            limit=limit or self.config.default_search_limit,
+            score_threshold=score_threshold or self.config.score_threshold,
+            with_payload=True
+        )
+        return search_response.points  # Extract points from response
+
     async def search(self, query: str, limit: int = None, score_threshold: float = None) -> List[Dict]:
         """
         Advanced search with query parsing support.
@@ -480,10 +1021,19 @@ class QdrantUnifiedMiddleware(Middleware):
                 logger.debug(f"🎯 Looking up point by ID: {target_id}")
                 
                 try:
+                    # Handle both string and UUID formats
+                    try:
+                        # Try to parse as UUID first
+                        uuid_id = uuid.UUID(target_id)
+                        search_id = uuid_id
+                    except ValueError:
+                        # If not a valid UUID, use as string
+                        search_id = target_id
+                    
                     points = await asyncio.to_thread(
                         self.client.retrieve,
                         collection_name=self.config.collection_name,
-                        ids=[target_id],
+                        ids=[search_id],
                         with_payload=True
                     )
                     
@@ -541,15 +1091,12 @@ class QdrantUnifiedMiddleware(Middleware):
                         parsed_query["semantic_query"]
                     )
                     
-                    # Search in Qdrant with filters
-                    search_results = await asyncio.to_thread(
-                        self.client.search,
-                        collection_name=self.config.collection_name,
-                        query_vector=query_embedding.tolist(),
-                        query_filter=qdrant_filter,
-                        limit=limit or self.config.default_search_limit,
-                        score_threshold=score_threshold or self.config.score_threshold,
-                        with_payload=True
+                    # Use helper method for consistent query_points usage
+                    search_results = await self._execute_semantic_search(
+                        query_embedding=query_embedding,
+                        qdrant_filter=qdrant_filter,
+                        limit=limit,
+                        score_threshold=score_threshold
                     )
                     
                     logger.debug(f"🎯 Semantic search found {len(search_results)} results")
@@ -583,14 +1130,11 @@ class QdrantUnifiedMiddleware(Middleware):
                     # Generate embedding for the entire query
                     query_embedding = await asyncio.to_thread(self.embedder.encode, query)
                     
-                    # Search in Qdrant
-                    search_results = await asyncio.to_thread(
-                        self.client.search,
-                        collection_name=self.config.collection_name,
-                        query_vector=query_embedding.tolist(),
-                        limit=limit or self.config.default_search_limit,
-                        score_threshold=score_threshold or self.config.score_threshold,
-                        with_payload=True
+                    # Use helper method for consistent query_points usage
+                    search_results = await self._execute_semantic_search(
+                        query_embedding=query_embedding,
+                        limit=limit,
+                        score_threshold=score_threshold
                     )
                     
                     logger.debug(f"🧠 Pure semantic search found {len(search_results)} results")
@@ -658,22 +1202,27 @@ class QdrantUnifiedMiddleware(Middleware):
         Returns:
             List of matching responses
         """
-        # Use the existing search method and apply filters
-        results = await self.search(query, limit=limit)
-        
-        if filters:
-            filtered_results = []
-            for result in results:
-                match = True
-                if "tool_name" in filters and result.get("tool_name") != filters["tool_name"]:
-                    match = False
-                if "user_email" in filters and result.get("user_id") != filters["user_email"]:
-                    match = False
-                if match:
-                    filtered_results.append(result)
-            return filtered_results
-        
-        return results
+        try:
+            # Use the existing search method and apply filters
+            results = await self.search(query, limit=limit)
+            
+            if filters:
+                filtered_results = []
+                for result in results:
+                    match = True
+                    if "tool_name" in filters and result.get("tool_name") != filters["tool_name"]:
+                        match = False
+                    if "user_email" in filters and result.get("user_email") != filters["user_email"]:
+                        match = False
+                    if match:
+                        filtered_results.append(result)
+                return filtered_results
+            
+            return results
+        except Exception as e:
+            logger.error(f"❌ Search responses failed: {e}")
+            # Return empty list instead of raising to prevent tool failures
+            return []
     
     async def get_analytics(self, start_date=None, end_date=None, group_by="tool_name") -> Dict:
         """
@@ -741,11 +1290,20 @@ class QdrantUnifiedMiddleware(Middleware):
             return None
         
         try:
+            # Handle both string and UUID formats
+            try:
+                # Try to parse as UUID first
+                uuid_id = uuid.UUID(response_id)
+                search_id = uuid_id
+            except ValueError:
+                # If not a valid UUID, use as string
+                search_id = response_id
+            
             # Retrieve the specific point by ID
             point = await asyncio.to_thread(
                 self.client.retrieve,
                 collection_name=self.config.collection_name,
-                ids=[response_id]
+                ids=[search_id]
             )
             
             if not point:

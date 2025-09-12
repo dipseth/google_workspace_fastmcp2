@@ -1,1 +1,1 @@
-"""Test suite for FastMCP2 Drive Upload Server."""
+# Tests package for fastmcp2_drive_upload

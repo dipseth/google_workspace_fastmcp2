@@ -5,7 +5,10 @@ on 401 responses to trigger OAuth discovery flow in MCP clients.
 """
 
 import logging
-from typing import Any
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
+from typing_extensions import Any
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from config.settings import settings
@@ -18,7 +21,7 @@ class MCPAuthMiddleware(Middleware):
     
     def __init__(self):
         """Initialize MCP authentication middleware."""
-        self.resource_metadata_url = f"http://{settings.server_host}:{settings.server_port}/.well-known/oauth-protected-resource"
+        self.resource_metadata_url = f"{settings.base_url}/.well-known/oauth-protected-resource"
         self.www_authenticate_header = f'Bearer realm="MCP", resource_metadata="{self.resource_metadata_url}"'
         logger.info(f"🔐 MCP Auth Middleware initialized with resource metadata: {self.resource_metadata_url}")
     
@@ -42,6 +45,29 @@ class MCPAuthMiddleware(Middleware):
             
         except Exception as e:
             logger.error(f"Error in MCP auth middleware: {e}")
+            raise
+    
+    async def on_read_resource(self, context: MiddlewareContext, call_next):
+        """Handle resource read requests with proper type conversion."""
+        try:
+            # Check if we have a URI in the message
+            if hasattr(context.message, 'uri'):
+                uri = context.message.uri
+                
+                # Convert AnyUrl to string for any string operations
+                uri_str = str(uri) if uri else ""
+                
+                # Check if it's a protected resource pattern that needs authentication
+                if uri_str.startswith("user://") or uri_str.startswith("oauth://"):
+                    logger.debug(f"Protected resource detected: {uri_str}")
+                    # Here we could add authentication checks if needed
+            
+            # Continue with the normal flow
+            result = await call_next(context)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in on_read_resource: {e}", exc_info=True)
             raise
     
     async def on_call_tool(self, context: MiddlewareContext, call_next):

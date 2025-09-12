@@ -22,8 +22,9 @@ import logging
 import asyncio
 import re
 import io
-from typing import List, Optional, Dict, Any
+from typing_extensions import List, Optional, Dict, Any, Annotated
 from pathlib import Path
+from pydantic import Field
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
@@ -32,6 +33,14 @@ import httpx
 
 from auth.service_helpers import request_service, get_injected_service, get_service
 from auth.context import get_user_email_context
+from .drive_types import (
+    DriveItemsResponse, DriveItemInfo, CreateDriveFileResponse,
+    ShareDriveFilesResponse, ShareFileResult, MakeDriveFilesPublicResponse, PublicFileResult
+)
+from .drive_search_types import DriveSearchResponse, DriveFileInfo, DriveSearchError
+from .drive_enums import MimeTypeFilter
+from tools.common_types import UserGoogleEmail, UserGoogleEmailDrive
+
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +269,226 @@ async def _get_drive_service_with_fallback(user_google_email: str) -> Any:
             raise
 
 
+# Define search_drive_files at module level so it can be imported
+async def search_drive_files(
+    query: Annotated[str, Field(
+        description="Search query - can be free text (e.g. 'quarterly report') or Google Drive query syntax (e.g. 'name contains \"budget\"'). Leave empty to search all files when using mime_type filter."
+    )] = "",
+    mime_type: Annotated[Optional[MimeTypeFilter], Field(
+        description="Filter by file type (e.g., PDF, GOOGLE_DOCS, EXCEL, ALL_SPREADSHEETS). This provides an easy way to filter without writing MIME type queries."
+    )] = None,
+    page_size: Annotated[int, Field(
+        description="Maximum number of results to return (1-100)",
+        ge=1,
+        le=100
+    )] = 10,
+    drive_id: Annotated[Optional[str], Field(
+        description="Optional ID of a specific shared drive to search within"
+    )] = None,
+    include_items_from_all_drives: Annotated[bool, Field(
+        description="Include items from all shared drives the user has access to"
+    )] = True,
+    corpora: Annotated[Optional[str], Field(
+        description="Bodies of items to query: 'user' (personal drive), 'domain' (domain shared), 'drive' (specific drive), 'allDrives' (all accessible drives)"
+    )] = None,
+    user_google_email: UserGoogleEmailDrive = None,
+) -> DriveSearchResponse:
+    """
+    Search for files in Google Drive with easy file type filtering.
+    
+    ## Usage Examples:
+    
+    **Simple file type search:**
+    - `mime_type=MimeTypeFilter.PDF` - Find all PDFs
+    - `mime_type=MimeTypeFilter.GOOGLE_DOCS` - Find all Google Docs
+    - `mime_type=MimeTypeFilter.ALL_SPREADSHEETS` - Find all spreadsheets (Sheets + Excel)
+    
+    **Combined with text search:**
+    - `mime_type=MimeTypeFilter.PDF, query="quarterly report"` - PDFs containing "quarterly report"
+    - `mime_type=MimeTypeFilter.GOOGLE_DOCS, query="meeting"` - Google Docs about meetings
+    
+    **Advanced query syntax (in query parameter):**
+    - `query="name contains 'report' and modifiedTime > '2024-01-01'"` - Complex filtering
+    - `query="'folderID' in parents"` - Files in specific folder
+    - `query="sharedWithMe = true"` - Files shared with you
+    
+    The function automatically detects whether you're using simple text search or
+    Google Drive Query Language based on the query structure.
+    
+    Args:
+        user_google_email: User's Google email address for authentication
+        query: Search query - either free text or Google Drive query syntax
+        page_size: Max results to return (1-100, default: 10)
+        drive_id: Optional shared drive ID to search within
+        include_items_from_all_drives: Include shared drive items (default: True)
+        corpora: Search scope - 'user', 'domain', 'drive', or 'allDrives'
+        
+    Returns:
+        DriveSearchResponse: Structured response containing:
+            - query: Original query string
+            - queryType: "structured" or "free-text"
+            - processedQuery: Actual query sent to API
+            - results: List of matching files with metadata
+            - resultCount: Number of results returned
+            - nextPageToken: Token for pagination (if more results)
+            - searchScope: Scope of the search
+            - error: Error message if search failed
+            
+    Raises:
+        HttpError: If Drive API returns an error
+        RuntimeError: If authentication fails or service unavailable
+    """
+    logger.info(f"[search_drive_files] Email: '{user_google_email}', Query: '{query}', MimeType: '{mime_type}'")
+        
+    try:
+        # Get Drive service with fallback support
+        drive_service = await _get_drive_service_with_fallback(user_google_email)
+        
+        # Build query parts
+        query_parts = []
+        
+        # Add MIME type filter if provided
+        if mime_type:
+            mime_filter = mime_type.to_query_filter()
+            if mime_filter:
+                query_parts.append(mime_filter)
+        
+        # Handle user query
+        if query:
+            # Check if query is structured or free text
+            is_structured_query = any(pattern.search(query) for pattern in DRIVE_QUERY_PATTERNS)
+            
+            if is_structured_query:
+                query_parts.append(f"({query})")
+                query_type = "structured"
+            else:
+                # For free text queries, wrap in fullText contains
+                escaped_query = query.replace("'", "\\'")
+                query_parts.append(f"fullText contains '{escaped_query}'")
+                query_type = "free-text"
+        else:
+            query_type = "mime-filter" if mime_type else "all"
+        
+        # Always exclude trashed files unless explicitly included in query
+        if not any("trashed" in part for part in query_parts):
+            query_parts.append("trashed = false")
+        
+        # Combine query parts
+        final_query = " and ".join(query_parts) if query_parts else "trashed = false"
+        
+        logger.info(f"[search_drive_files] Final query: '{final_query}'")
+            
+        # Build parameters and execute query (for both structured and free-text)
+        list_params = _build_drive_list_params(
+            query=final_query,
+            page_size=page_size,
+            drive_id=drive_id,
+            include_items_from_all_drives=include_items_from_all_drives,
+            corpora=corpora,
+        )
+        
+        results = await asyncio.to_thread(
+            drive_service.files().list(**list_params).execute
+        )
+        files = results.get('files', [])
+            
+        # Convert to structured file info
+        structured_results: List[DriveFileInfo] = []
+        for item in files:
+            file_info: DriveFileInfo = {
+                'id': item.get('id', ''),
+                'name': item.get('name', ''),
+                'mimeType': item.get('mimeType', ''),
+                'size': item.get('size'),
+                'webViewLink': item.get('webViewLink'),
+                'iconLink': item.get('iconLink'),
+                'createdTime': item.get('createdTime'),
+                'modifiedTime': item.get('modifiedTime'),
+                'parents': item.get('parents'),
+                'owners': item.get('owners'),
+                'shared': item.get('shared'),
+                'starred': item.get('starred'),
+                'trashed': item.get('trashed', False),
+                'isFolder': item.get('mimeType') == 'application/vnd.google-apps.folder'
+            }
+            structured_results.append(file_info)
+            
+        # Determine search scope
+        if corpora:
+            search_scope = corpora
+        elif drive_id:
+            search_scope = "drive"
+        elif include_items_from_all_drives:
+            search_scope = "allDrives"
+        else:
+            search_scope = "user"
+            
+        return DriveSearchResponse(
+            query=query,
+            queryType=query_type,
+            processedQuery=final_query,
+            results=structured_results,
+            resultCount=len(structured_results),
+            totalResults=None,  # Unknown unless we get total from API
+            nextPageToken=results.get('nextPageToken'),
+            userEmail=user_google_email,
+            driveId=drive_id,
+            corpora=corpora,
+            searchScope=search_scope,
+            error=None
+        )
+                
+    except HttpError as e:
+        logger.error(f"Drive API error in search_drive_files: {e}")
+        error_msg = str(e)
+            
+        # Provide helpful suggestions based on error
+        suggestions = []
+        if "invalid" in error_msg.lower() and "query" in error_msg.lower():
+            suggestions = [
+                "Check query syntax - use single quotes for string values",
+                "Verify field names (e.g., 'mimeType' not 'mimetype')",
+                "Ensure operators are valid (=, !=, contains, <, >)"
+            ]
+        elif "401" in error_msg or "403" in error_msg:
+            suggestions = [
+                "Re-authenticate using start_google_auth",
+                "Check if you have access to the requested drive/files"
+            ]
+            
+        return DriveSearchResponse(
+            query=query,
+            queryType="structured" if any(pattern.search(query) for pattern in DRIVE_QUERY_PATTERNS) else "free-text",
+            processedQuery=query,
+            results=[],
+            resultCount=0,
+            totalResults=None,
+            nextPageToken=None,
+            userEmail=user_google_email,
+            driveId=drive_id,
+            corpora=corpora,
+            searchScope=corpora or "user",
+            error=f"Drive API error: {error_msg}"
+        )
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in search_drive_files: {e}")
+        return DriveSearchResponse(
+            query=query,
+            queryType="structured" if any(pattern.search(query) for pattern in DRIVE_QUERY_PATTERNS) else "free-text",
+            processedQuery=query,
+            results=[],
+            resultCount=0,
+            totalResults=None,
+            nextPageToken=None,
+            userEmail=user_google_email,
+            driveId=drive_id,
+            corpora=corpora,
+            searchScope=corpora or "user",
+            error=f"Unexpected error: {str(e)}"
+        )
+
+
 def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
     """
     Register comprehensive Google Drive tools with the FastMCP server.
@@ -279,10 +508,11 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         None: Tools are registered as side effects
     """
     
-    @mcp.tool(
+    # Register the search_drive_files tool (module-level function)
+    mcp.tool(
         name="search_drive_files",
-        description="Search for files and folders in Google Drive with advanced query support",
-        tags={"drive", "search", "files", "folders", "query"},
+        description="Search Google Drive files with easy file type filtering. Use mime_type parameter for simple filtering (PDF, GOOGLE_DOCS, EXCEL, etc.) or query parameter for advanced Google Drive Query Language searches.",
+        tags={"drive", "search", "files", "folders", "query", "structured", "mime", "gdrive"},
         annotations={
             "title": "Search Google Drive",
             "readOnlyHint": True,
@@ -290,80 +520,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             "idempotentHint": True,
             "openWorldHint": True
         }
-    )
-    async def search_drive_files(
-        user_google_email: str,
-        query: str,
-        page_size: int = 10,
-        drive_id: Optional[str] = None,
-        include_items_from_all_drives: bool = True,
-        corpora: Optional[str] = None,
-    ) -> str:
-        """
-        Search for files and folders within Google Drive, including shared drives.
-        
-        Args:
-            user_google_email: User's Google email address
-            query: Search query string (supports Google Drive search operators)
-            page_size: Maximum number of files to return (default: 10)
-            drive_id: ID of shared drive to search (optional)
-            include_items_from_all_drives: Include shared drive items (default: True)
-            corpora: Bodies of items to query ('user', 'domain', 'drive', 'allDrives')
-            
-        Returns:
-            str: Formatted list of found files/folders with details
-        """
-        logger.info(f"[search_drive_files] Email: '{user_google_email}', Query: '{query}'")
-        
-        try:
-            # Get Drive service with fallback support
-            drive_service = await _get_drive_service_with_fallback(user_google_email)
-            
-            # Check if query is structured or free text
-            is_structured_query = any(pattern.search(query) for pattern in DRIVE_QUERY_PATTERNS)
-            
-            if is_structured_query:
-                final_query = query
-                logger.info(f"[search_drive_files] Using structured query: '{final_query}'")
-            else:
-                # For free text queries, wrap in fullText contains
-                escaped_query = query.replace("'", "\\'")
-                final_query = f"fullText contains '{escaped_query}'"
-                logger.info(f"[search_drive_files] Reformatting to: '{final_query}'")
-            
-            list_params = _build_drive_list_params(
-                query=final_query,
-                page_size=page_size,
-                drive_id=drive_id,
-                include_items_from_all_drives=include_items_from_all_drives,
-                corpora=corpora,
-            )
-            
-            results = await asyncio.to_thread(
-                drive_service.files().list(**list_params).execute
-            )
-            files = results.get('files', [])
-            
-            if not files:
-                return f"No files found for '{query}'."
-            
-            formatted_parts = [f"Found {len(files)} files for {user_google_email} matching '{query}':"]
-            for item in files:
-                size_str = f", Size: {item.get('size', 'N/A')}" if 'size' in item else ""
-                formatted_parts.append(
-                    f"- Name: \"{item['name']}\" (ID: {item['id']}, Type: {item['mimeType']}{size_str}, "
-                    f"Modified: {item.get('modifiedTime', 'N/A')}) Link: {item.get('webViewLink', '#')}"
-                )
-            
-            return "\n".join(formatted_parts)
-                
-        except HttpError as e:
-            logger.error(f"Drive API error in search_drive_files: {e}")
-            return f"❌ Drive API error: {e}"
-            
-        except Exception as e:
-            logger.error(f"Unexpected error in search_drive_files: {e}")
-            return f"❌ Unexpected error: {e}"
+    )(search_drive_files)
     
     @mcp.tool(
         name="get_drive_file_content", 
@@ -378,8 +535,8 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_drive_file_content(
-        user_google_email: str,
         file_id: str,
+        user_google_email: UserGoogleEmail = None
     ) -> str:
         """
         Retrieve the content of a specific Google Drive file by ID.
@@ -474,81 +631,181 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             logger.error(f"Unexpected error in get_drive_file_content: {e}")
             return f"❌ Unexpected error: {e}"
     
+    #user_google_email: UserGoogleEmail = None,
     @mcp.tool(
         name="list_drive_items",
-        description="List files and folders in a Google Drive directory, including shared drives",
-        tags={"drive", "list", "directory", "folder", "files"},
+        description="List files and folders in a specific Google Drive folder with structured output",
+        tags={"drive", "list", "folder", "files", "directories", "structured"},
         annotations={
             "title": "List Drive Items",
             "readOnlyHint": True,
-            "destructiveHint": False, 
+            "destructiveHint": False,
             "idempotentHint": True,
             "openWorldHint": True
         }
     )
     async def list_drive_items(
-        user_google_email: str,
-        folder_id: str = 'root',
-        page_size: int = 100,
-        drive_id: Optional[str] = None,
-        include_items_from_all_drives: bool = True,
-        corpora: Optional[str] = None,
-    ) -> str:
+        user_google_email: UserGoogleEmail = None,
+        folder_id: Annotated[str, Field(
+            description="Google Drive folder ID to list contents from (use 'root' for root folder)"
+        )] = 'root',
+        page_size: Annotated[int, Field(
+            description="Maximum number of items to return (1-100)",
+            ge=1,
+            le=100
+        )] = 20,
+        include_subfolders: Annotated[bool, Field(
+            description="Include subfolders in the listing"
+        )] = True,
+        include_files: Annotated[bool, Field(
+            description="Include files in the listing"
+        )] = True,
+    ) -> DriveItemsResponse:
         """
-        List files and folders in a Drive directory, supporting shared drives.
+        List all items (files and folders) in a specific Google Drive folder.
+        
+        Returns a structured response with categorized items for easy processing.
+        Supports filtering by item type (files vs folders) and pagination control.
         
         Args:
-            user_google_email: User's Google email address
-            folder_id: Folder ID to list (default: 'root')
-            page_size: Maximum number of items to return (default: 100)
-            drive_id: ID of shared drive (optional)
-            include_items_from_all_drives: Include shared drive items (default: True)
-            corpora: Corpus to query ('user', 'drive', 'allDrives')
+            user_google_email: User's Google email address for authentication
+            folder_id: Target folder ID (default: 'root' for root folder)
+            page_size: Max items to return (1-100, default: 20)
+            include_subfolders: Whether to include folders in results (default: True)
+            include_files: Whether to include files in results (default: True)
             
         Returns:
-            str: Formatted list of files/folders in the specified directory
+            DriveItemsResponse: Structured response containing:
+                - folderId: The queried folder ID
+                - folderName: Name of the queried folder
+                - items: List of items with metadata
+                - itemCount: Total items returned
+                - hasMore: Whether more items are available
+                - nextPageToken: Token for pagination
+                - error: Error message if listing failed
+                
+        Raises:
+            HttpError: If Drive API returns an error
+            RuntimeError: If authentication fails
         """
-        logger.info(f"[list_drive_items] Email: '{user_google_email}', Folder ID: '{folder_id}'")
+        logger.info(f"[list_drive_items] Email: '{user_google_email}', Folder: '{folder_id}'")
         
         try:
+            # Get Drive service with fallback support
             drive_service = await _get_drive_service_with_fallback(user_google_email)
             
-            # Build query for items in folder
-            final_query = f"'{folder_id}' in parents and trashed=false"
+            # Get folder metadata first (if not root)
+            folder_name = "My Drive (Root)"
+            if folder_id != 'root':
+                try:
+                    folder_meta = await asyncio.to_thread(
+                        drive_service.files().get(
+                            fileId=folder_id,
+                            fields="name",
+                            supportsAllDrives=True
+                        ).execute
+                    )
+                    folder_name = folder_meta.get('name', 'Unknown Folder')
+                except Exception as e:
+                    logger.warning(f"Could not fetch folder metadata: {e}")
+                    folder_name = f"Folder {folder_id}"
             
-            list_params = _build_drive_list_params(
-                query=final_query,
-                page_size=page_size,
-                drive_id=drive_id,
-                include_items_from_all_drives=include_items_from_all_drives,
-                corpora=corpora,
-            )
+            # Build query based on filters
+            query_parts = [f"'{folder_id}' in parents", "trashed = false"]
+            
+            if not include_subfolders and not include_files:
+                # If both are false, return empty result
+                return DriveItemsResponse(
+                    folderId=folder_id,
+                    folderName=folder_name,
+                    items=[],
+                    count=0,
+                    userEmail=user_google_email,
+                    driveId=None,
+                    error=None
+                )
+            elif not include_subfolders:
+                # Only files
+                query_parts.append("mimeType != 'application/vnd.google-apps.folder'")
+            elif not include_files:
+                # Only folders
+                query_parts.append("mimeType = 'application/vnd.google-apps.folder'")
+            # else: include both (no additional filter needed)
+            
+            query = " and ".join(query_parts)
+            
+            # List items
+            list_params = {
+                "q": query,
+                "pageSize": page_size,
+                "fields": "nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, webViewLink, iconLink, parents, owners, shared)",
+                "orderBy": "folder,name",  # Folders first, then alphabetical
+                "supportsAllDrives": True,
+                "includeItemsFromAllDrives": True,
+            }
             
             results = await asyncio.to_thread(
                 drive_service.files().list(**list_params).execute
             )
+            
             files = results.get('files', [])
             
-            if not files:
-                return f"No items found in folder '{folder_id}'."
-            
-            formatted_parts = [f"Found {len(files)} items in folder '{folder_id}' for {user_google_email}:"]
+            # Convert to structured items
+            structured_items: List[DriveItemInfo] = []
             for item in files:
-                size_str = f", Size: {item.get('size', 'N/A')}" if 'size' in item else ""
-                formatted_parts.append(
-                    f"- Name: \"{item['name']}\" (ID: {item['id']}, Type: {item['mimeType']}{size_str}, "
-                    f"Modified: {item.get('modifiedTime', 'N/A')}) Link: {item.get('webViewLink', '#')}"
-                )
+                is_folder = item.get('mimeType') == 'application/vnd.google-apps.folder'
+                
+                item_info: DriveItemInfo = {
+                    'id': item.get('id', ''),
+                    'name': item.get('name', ''),
+                    'mimeType': item.get('mimeType', ''),
+                    'size': item.get('size'),
+                    'webViewLink': item.get('webViewLink'),
+                    'iconLink': item.get('iconLink'),
+                    'createdTime': item.get('createdTime'),
+                    'modifiedTime': item.get('modifiedTime'),
+                    'parents': item.get('parents'),
+                    'owners': item.get('owners'),
+                    'shared': item.get('shared'),
+                    'starred': item.get('starred'),
+                    'trashed': False,  # We filter out trashed items
+                    'isFolder': is_folder
+                }
+                structured_items.append(item_info)
             
-            return "\n".join(formatted_parts)
+            return DriveItemsResponse(
+                folderId=folder_id,
+                folderName=folder_name,
+                items=structured_items,
+                count=len(structured_items),
+                userEmail=user_google_email,
+                driveId=None,
+                error=None
+            )
                 
         except HttpError as e:
             logger.error(f"Drive API error in list_drive_items: {e}")
-            return f"❌ Drive API error: {e}"
+            return DriveItemsResponse(
+                folderId=folder_id,
+                folderName="Unknown",
+                items=[],
+                count=0,
+                userEmail=user_google_email,
+                driveId=None,
+                error=f"Drive API error: {str(e)}"
+            )
             
         except Exception as e:
             logger.error(f"Unexpected error in list_drive_items: {e}")
-            return f"❌ Unexpected error: {e}"
+            return DriveItemsResponse(
+                folderId=folder_id,
+                folderName="Unknown",
+                items=[],
+                count=0,
+                userEmail=user_google_email,
+                driveId=None,
+                error=f"Unexpected error: {str(e)}"
+            )
     
     @mcp.tool(
         name="create_drive_file",
@@ -563,13 +820,13 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         }
     )
     async def create_drive_file(
-        user_google_email: str,
         file_name: str,
         content: Optional[str] = None,
         folder_id: str = 'root',
         mime_type: str = 'text/plain',
         fileUrl: Optional[str] = None,
-    ) -> str:
+        user_google_email: UserGoogleEmail = None,
+    ) -> CreateDriveFileResponse:
         """
         Create a new file in Google Drive, supporting creation within shared drives.
         Accepts either direct content or a fileUrl to fetch content from.
@@ -583,12 +840,22 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             fileUrl: URL to fetch file content from (optional)
             
         Returns:
-            str: Confirmation message with created file details and link
+            CreateDriveFileResponse: Structured response with created file details
         """
         logger.info(f"[create_drive_file] Email: '{user_google_email}', File: '{file_name}'")
         
         if not content and not fileUrl:
-            return "❌ You must provide either 'content' or 'fileUrl'."
+            return CreateDriveFileResponse(
+                success=False,
+                fileId=None,
+                fileName=file_name,
+                mimeType=mime_type,
+                folderId=folder_id,
+                webViewLink=None,
+                userEmail=user_google_email,
+                message="You must provide either 'content' or 'fileUrl'.",
+                error="Missing required content or fileUrl parameter"
+            )
         
         try:
             drive_service = await _get_drive_service_with_fallback(user_google_email)
@@ -633,19 +900,45 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             )
             
             link = created_file.get('webViewLink', 'No link available')
-            return (
-                f"✅ Successfully created file '{created_file.get('name', file_name)}' "
-                f"(ID: {created_file.get('id', 'N/A')}) in folder '{folder_id}' "
-                f"for {user_google_email}.\nLink: {link}"
+            return CreateDriveFileResponse(
+                success=True,
+                fileId=created_file.get('id'),
+                fileName=created_file.get('name', file_name),
+                mimeType=mime_type,
+                folderId=folder_id,
+                webViewLink=created_file.get('webViewLink'),
+                userEmail=user_google_email,
+                message=f"Successfully created file '{created_file.get('name', file_name)}' (ID: {created_file.get('id', 'N/A')}) in folder '{folder_id}' for {user_google_email}.",
+                error=None
             )
                 
         except HttpError as e:
             logger.error(f"Drive API error in create_drive_file: {e}")
-            return f"❌ Drive API error: {e}"
+            return CreateDriveFileResponse(
+                success=False,
+                fileId=None,
+                fileName=file_name,
+                mimeType=mime_type,
+                folderId=folder_id,
+                webViewLink=None,
+                userEmail=user_google_email,
+                message=f"Drive API error: {e}",
+                error=str(e)
+            )
             
         except Exception as e:
             logger.error(f"Unexpected error in create_drive_file: {e}")
-            return f"❌ Unexpected error: {e}"
+            return CreateDriveFileResponse(
+                success=False,
+                fileId=None,
+                fileName=file_name,
+                mimeType=mime_type,
+                folderId=folder_id,
+                webViewLink=None,
+                userEmail=user_google_email,
+                message=f"Unexpected error: {e}",
+                error=str(e)
+            )
     
     @mcp.tool(
         name="share_drive_files",
@@ -660,13 +953,11 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         }
     )
     async def share_drive_files(
-        user_google_email: str,
-        file_ids: List[str],
-        email_addresses: List[str],
-        role: str = "reader",
-        send_notification: bool = True,
-        message: Optional[str] = None,
-    ) -> str:
+        role: Annotated[str, Field(description="Permission role: 'reader' (view only), 'writer' (edit), 'commenter' (comment only)")] = "reader",
+        send_notification: Annotated[bool, Field(description="Whether to send email notifications to shared users")] = True,
+        message: Annotated[Optional[str], Field(description="Optional message to include in the sharing notification email")] = None,
+        user_google_email: UserGoogleEmail = None,
+    ) -> ShareDriveFilesResponse:
         """
         Share Google Drive files with specific people via email addresses.
         Supports batch operations for multiple files and multiple recipients.
@@ -680,24 +971,63 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             message: Optional message to include in sharing notification
             
         Returns:
-            str: Detailed results of sharing operations for each file and recipient
+            ShareDriveFilesResponse: Structured response with sharing operation results
         """
         logger.info(f"[share_drive_files] Email: '{user_google_email}', Files: {len(file_ids)}, Recipients: {len(email_addresses)}")
         
         if not file_ids:
-            return "❌ No file IDs provided."
+            return ShareDriveFilesResponse(
+                success=False,
+                totalFiles=0,
+                totalRecipients=len(email_addresses),
+                totalOperations=0,
+                successfulOperations=0,
+                failedOperations=0,
+                role=role,
+                sendNotification=send_notification,
+                results=[],
+                userEmail=user_google_email,
+                message="No file IDs provided.",
+                error="No file IDs provided"
+            )
         
         if not email_addresses:
-            return "❌ No email addresses provided."
+            return ShareDriveFilesResponse(
+                success=False,
+                totalFiles=len(file_ids),
+                totalRecipients=0,
+                totalOperations=0,
+                successfulOperations=0,
+                failedOperations=0,
+                role=role,
+                sendNotification=send_notification,
+                results=[],
+                userEmail=user_google_email,
+                message="No email addresses provided.",
+                error="No email addresses provided"
+            )
         
         valid_roles = ['reader', 'writer', 'commenter']
         if role not in valid_roles:
-            return f"❌ Invalid role '{role}'. Must be one of: {', '.join(valid_roles)}"
+            return ShareDriveFilesResponse(
+                success=False,
+                totalFiles=len(file_ids),
+                totalRecipients=len(email_addresses),
+                totalOperations=0,
+                successfulOperations=0,
+                failedOperations=0,
+                role=role,
+                sendNotification=send_notification,
+                results=[],
+                userEmail=user_google_email,
+                message=f"Invalid role '{role}'. Must be one of: {', '.join(valid_roles)}",
+                error=f"Invalid role: {role}"
+            )
         
         try:
             drive_service = await _get_drive_service_with_fallback(user_google_email)
             
-            results = []
+            share_results: List[ShareFileResult] = []
             total_operations = len(file_ids) * len(email_addresses)
             successful_operations = 0
             failed_operations = 0
@@ -719,7 +1049,9 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                     file_link = '#'
                     logger.warning(f"Could not fetch metadata for file {file_id}: {e}")
                 
-                file_results = []
+                recipients_processed = []
+                recipients_failed = []
+                recipients_already_had_access = []
                 
                 for email in email_addresses:
                     try:
@@ -741,47 +1073,80 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                             ).execute
                         )
                         
-                        file_results.append(f"  ✅ Shared with {email} as {role}")
+                        recipients_processed.append(email)
                         successful_operations += 1
                         
                     except HttpError as e:
                         error_msg = str(e)
                         if "already has access" in error_msg.lower():
-                            file_results.append(f"  ℹ️ {email} already has access as {role}")
+                            recipients_already_had_access.append(email)
                             successful_operations += 1
                         else:
-                            file_results.append(f"  ❌ Failed to share with {email}: {e}")
+                            recipients_failed.append(email)
                             failed_operations += 1
                     except Exception as e:
-                        file_results.append(f"  ❌ Failed to share with {email}: {e}")
+                        recipients_failed.append(email)
                         failed_operations += 1
                 
-                results.append(f"📁 {file_name} (ID: {file_id})")
-                results.append(f"   Link: {file_link}")
-                results.extend(file_results)
-                results.append("")  # Empty line for spacing
+                # Create result for this file
+                file_result = ShareFileResult(
+                    fileId=file_id,
+                    fileName=file_name,
+                    webViewLink=file_link,
+                    recipientsProcessed=recipients_processed,
+                    recipientsFailed=recipients_failed,
+                    recipientsAlreadyHadAccess=recipients_already_had_access
+                )
+                share_results.append(file_result)
             
-            # Summary
-            summary = [
-                f"📊 Sharing Summary for {user_google_email}:",
-                f"   Files processed: {len(file_ids)}",
-                f"   Recipients: {len(email_addresses)}",
-                f"   Total operations: {total_operations}",
-                f"   Successful: {successful_operations}",
-                f"   Failed: {failed_operations}",
-                "",
-                "📋 Detailed Results:"
-            ]
-            
-            return "\n".join(summary + results)
+            return ShareDriveFilesResponse(
+                success=failed_operations == 0,
+                totalFiles=len(file_ids),
+                totalRecipients=len(email_addresses),
+                totalOperations=total_operations,
+                successfulOperations=successful_operations,
+                failedOperations=failed_operations,
+                role=role,
+                sendNotification=send_notification,
+                results=share_results,
+                userEmail=user_google_email,
+                message=f"Sharing completed. Files processed: {len(file_ids)}, Recipients: {len(email_addresses)}, Successful: {successful_operations}, Failed: {failed_operations}",
+                error=None
+            )
                 
         except HttpError as e:
             logger.error(f"Drive API error in share_drive_files: {e}")
-            return f"❌ Drive API error: {e}"
+            return ShareDriveFilesResponse(
+                success=False,
+                totalFiles=len(file_ids),
+                totalRecipients=len(email_addresses),
+                totalOperations=0,
+                successfulOperations=0,
+                failedOperations=len(file_ids) * len(email_addresses),
+                role=role,
+                sendNotification=send_notification,
+                results=[],
+                userEmail=user_google_email,
+                message=f"Drive API error: {e}",
+                error=str(e)
+            )
             
         except Exception as e:
             logger.error(f"Unexpected error in share_drive_files: {e}")
-            return f"❌ Unexpected error: {e}"
+            return ShareDriveFilesResponse(
+                success=False,
+                totalFiles=len(file_ids),
+                totalRecipients=len(email_addresses),
+                totalOperations=0,
+                successfulOperations=0,
+                failedOperations=len(file_ids) * len(email_addresses),
+                role=role,
+                sendNotification=send_notification,
+                results=[],
+                userEmail=user_google_email,
+                message=f"Unexpected error: {e}",
+                error=str(e)
+            )
     
     @mcp.tool(
         name="make_drive_files_public",
@@ -796,11 +1161,11 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         }
     )
     async def make_drive_files_public(
-        user_google_email: str,
         file_ids: List[str],
         public: bool = True,
         role: str = "reader",
-    ) -> str:
+        user_google_email: UserGoogleEmail = None,
+    ) -> MakeDriveFilesPublicResponse:
         """
         Make Google Drive files publicly accessible or remove public access.
         Supports batch operations for multiple files.
@@ -812,21 +1177,43 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             role: Permission role for public access ('reader', 'commenter') (default: 'reader')
             
         Returns:
-            str: Detailed results of public sharing operations for each file
+            MakeDriveFilesPublicResponse: Structured response with public sharing operation results
         """
         logger.info(f"[make_drive_files_public] Email: '{user_google_email}', Files: {len(file_ids)}, Public: {public}")
         
         if not file_ids:
-            return "❌ No file IDs provided."
+            return MakeDriveFilesPublicResponse(
+                success=False,
+                totalFiles=0,
+                successfulOperations=0,
+                failedOperations=0,
+                public=public,
+                role=role if public else None,
+                results=[],
+                userEmail=user_google_email,
+                message="No file IDs provided.",
+                error="No file IDs provided"
+            )
         
         valid_public_roles = ['reader', 'commenter']
         if public and role not in valid_public_roles:
-            return f"❌ Invalid public role '{role}'. Must be one of: {', '.join(valid_public_roles)}"
+            return MakeDriveFilesPublicResponse(
+                success=False,
+                totalFiles=len(file_ids),
+                successfulOperations=0,
+                failedOperations=len(file_ids),
+                public=public,
+                role=role,
+                results=[],
+                userEmail=user_google_email,
+                message=f"Invalid public role '{role}'. Must be one of: {', '.join(valid_public_roles)}",
+                error=f"Invalid role: {role}"
+            )
         
         try:
             drive_service = await _get_drive_service_with_fallback(user_google_email)
             
-            results = []
+            public_results: List[PublicFileResult] = []
             successful_operations = 0
             failed_operations = 0
             
@@ -847,6 +1234,14 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                     file_link = '#'
                     logger.warning(f"Could not fetch metadata for file {file_id}: {e}")
                 
+                file_result = PublicFileResult(
+                    fileId=file_id,
+                    fileName=file_name,
+                    webViewLink=file_link,
+                    status="",
+                    error=None
+                )
+                
                 try:
                     if public:
                         # Make file publicly accessible
@@ -863,8 +1258,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                             ).execute
                         )
                         
-                        results.append(f"✅ {file_name} (ID: {file_id}) - Made publicly {role}")
-                        results.append(f"   Link: {file_link}")
+                        file_result["status"] = "made_public"
                         successful_operations += 1
                         
                     else:
@@ -890,44 +1284,68 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                                     supportsAllDrives=True,
                                 ).execute
                             )
-                            results.append(f"✅ {file_name} (ID: {file_id}) - Removed public access")
+                            file_result["status"] = "removed_public"
                         else:
-                            results.append(f"ℹ️ {file_name} (ID: {file_id}) - Was not publicly accessible")
+                            file_result["status"] = "was_not_public"
                         
-                        results.append(f"   Link: {file_link}")
                         successful_operations += 1
                     
                 except HttpError as e:
                     error_msg = str(e)
                     if public and "already exists" in error_msg.lower():
-                        results.append(f"ℹ️ {file_name} (ID: {file_id}) - Already publicly accessible")
+                        file_result["status"] = "already_public"
                         successful_operations += 1
                     else:
-                        results.append(f"❌ {file_name} (ID: {file_id}) - Failed: {e}")
+                        file_result["status"] = "failed"
+                        file_result["error"] = str(e)
                         failed_operations += 1
                 except Exception as e:
-                    results.append(f"❌ {file_name} (ID: {file_id}) - Failed: {e}")
+                    file_result["status"] = "failed"
+                    file_result["error"] = str(e)
                     failed_operations += 1
                 
-                results.append("")  # Empty line for spacing
+                public_results.append(file_result)
             
-            # Summary
             action = "made public" if public else "made private"
-            summary = [
-                f"📊 Public Sharing Summary for {user_google_email}:",
-                f"   Files processed: {len(file_ids)}",
-                f"   Successfully {action}: {successful_operations}",
-                f"   Failed: {failed_operations}",
-                "",
-                "📋 Detailed Results:"
-            ]
-            
-            return "\n".join(summary + results)
+            return MakeDriveFilesPublicResponse(
+                success=failed_operations == 0,
+                totalFiles=len(file_ids),
+                successfulOperations=successful_operations,
+                failedOperations=failed_operations,
+                public=public,
+                role=role if public else None,
+                results=public_results,
+                userEmail=user_google_email,
+                message=f"Public sharing completed. Files processed: {len(file_ids)}, Successfully {action}: {successful_operations}, Failed: {failed_operations}",
+                error=None
+            )
                 
         except HttpError as e:
             logger.error(f"Drive API error in make_drive_files_public: {e}")
-            return f"❌ Drive API error: {e}"
+            return MakeDriveFilesPublicResponse(
+                success=False,
+                totalFiles=len(file_ids),
+                successfulOperations=0,
+                failedOperations=len(file_ids),
+                public=public,
+                role=role if public else None,
+                results=[],
+                userEmail=user_google_email,
+                message=f"Drive API error: {e}",
+                error=str(e)
+            )
             
         except Exception as e:
             logger.error(f"Unexpected error in make_drive_files_public: {e}")
-            return f"❌ Unexpected error: {e}"
+            return MakeDriveFilesPublicResponse(
+                success=False,
+                totalFiles=len(file_ids),
+                successfulOperations=0,
+                failedOperations=len(file_ids),
+                public=public,
+                role=role if public else None,
+                results=[],
+                userEmail=user_google_email,
+                message=f"Unexpected error: {e}",
+                error=str(e)
+            )
