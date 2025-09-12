@@ -80,6 +80,9 @@ class AuthMiddleware(Middleware):
         self._google_provider = google_provider
         self._unified_auth_enabled = bool(google_provider and settings.enable_unified_auth)
         
+        # Service selection configuration
+        self._enable_service_selection = True
+        
         # Initialize dual auth bridge
         self._dual_auth_bridge = get_dual_auth_bridge()
         
@@ -817,7 +820,7 @@ class AuthMiddleware(Middleware):
         """
         Extract user email from FastMCP 2.12.0 GoogleProvider token context.
         
-        This implements the unified OAuth architecture by extracting authenticated 
+        This implements the unified OAuth architecture by extracting authenticated
         user information from GoogleProvider without requiring manual email parameters.
         
         Returns:
@@ -862,7 +865,12 @@ class AuthMiddleware(Middleware):
             return None
             
         except Exception as e:
-            logger.debug(f"🔍 Could not extract user from GoogleProvider: {e}")
+            # No valid token - this means we need to authenticate
+            logger.info(f"🔍 GoogleProvider: No valid token ({e}), service selection needed")
+            
+            # Store indication that service selection is needed
+            self._set_service_selection_needed(True)
+            
             return None
     
     async def _bridge_credentials_if_needed(self, user_email: str) -> None:
@@ -1007,6 +1015,22 @@ class AuthMiddleware(Middleware):
     def is_unified_auth_enabled(self) -> bool:
         """Check if unified authentication is enabled."""
         return self._unified_auth_enabled
+    
+    def _set_service_selection_needed(self, needed: bool):
+        """Set flag indicating service selection is needed."""
+        try:
+            from .context import store_session_data, get_session_context
+            session_id = get_session_context()
+            if session_id:
+                store_session_data(session_id, "service_selection_needed", needed)
+                logger.debug(f"Set service selection needed flag: {needed} for session {session_id}")
+        except Exception as e:
+            logger.debug(f"Could not set service selection flag: {e}")
+    
+    def enable_service_selection(self, enabled: bool = True):
+        """Enable or disable service selection interface."""
+        self._enable_service_selection = enabled
+        logger.info(f"Service selection {'enabled' if enabled else 'disabled'}")
     
     def _extract_user_from_jwt_token(self) -> Optional[str]:
         """

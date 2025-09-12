@@ -9,7 +9,7 @@ import logging
 
 from config.enhanced_logging import setup_logger
 logger = setup_logger()
-from typing_extensions import Dict, List, Optional, Set, Union
+from typing_extensions import Dict, List, Optional, Set, Union, Any
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -307,6 +307,9 @@ class ScopeRegistry:
     
     # Predefined service scope groups for common use cases
     SERVICE_SCOPE_GROUPS = {
+        # Base OAuth scopes for user authentication
+        "base": ["base.userinfo_email", "base.userinfo_profile", "base.openid"],
+        
         # Basic service combinations
         "drive_basic": ["base.userinfo_email", "base.openid", "drive.file", "drive.readonly"],
         "drive_full": ["base.userinfo_email", "base.openid", "drive.full"],
@@ -607,6 +610,103 @@ class ScopeRegistry:
         # If no match found, return as-is and log warning
         logger.warning(f"SCOPE_REGISTRY: Could not resolve legacy scope '{legacy_scope}'")
         return legacy_scope
+    
+    @classmethod
+    def get_service_catalog(cls) -> Dict[str, Dict[str, Any]]:
+        """Get user-friendly service catalog for selection interface."""
+        return {
+            "userinfo": {
+                "name": "Basic Profile",
+                "description": "Access your basic profile information and email",
+                "category": "Core Services",
+                "required": True,
+                "scopes": cls.resolve_scope_group("base")
+            },
+            "drive": {
+                "name": "Google Drive",
+                "description": "Upload, download, and manage files in Google Drive",
+                "category": "Storage & Files",
+                "required": False,
+                "scopes": cls.get_service_scopes("drive", "basic")
+            },
+            "gmail": {
+                "name": "Gmail",
+                "description": "Send, read, and manage email messages",
+                "category": "Communication",
+                "required": False,
+                "scopes": cls.get_service_scopes("gmail", "basic")
+            },
+            "calendar": {
+                "name": "Google Calendar",
+                "description": "Manage calendar events and scheduling",
+                "category": "Productivity",
+                "required": False,
+                "scopes": cls.get_service_scopes("calendar", "basic")
+            },
+            "docs": {
+                "name": "Google Docs",
+                "description": "Create and edit documents",
+                "category": "Office Suite",
+                "required": False,
+                "scopes": cls.get_service_scopes("docs", "basic")
+            },
+            "sheets": {
+                "name": "Google Sheets",
+                "description": "Create and edit spreadsheets",
+                "category": "Office Suite",
+                "required": False,
+                "scopes": cls.get_service_scopes("sheets", "basic")
+            },
+            "slides": {
+                "name": "Google Slides",
+                "description": "Create and edit presentations",
+                "category": "Office Suite",
+                "required": False,
+                "scopes": cls.get_service_scopes("slides", "basic")
+            },
+            "chat": {
+                "name": "Google Chat",
+                "description": "Send messages and manage chat spaces",
+                "category": "Communication",
+                "required": False,
+                "scopes": cls.get_service_scopes("chat", "basic")
+            },
+            "forms": {
+                "name": "Google Forms",
+                "description": "Create forms and collect responses",
+                "category": "Productivity",
+                "required": False,
+                "scopes": cls.get_service_scopes("forms", "basic")
+            },
+            "photos": {
+                "name": "Google Photos",
+                "description": "Access and manage photos and albums",
+                "category": "Storage & Files",
+                "required": False,
+                "scopes": cls.get_service_scopes("photos", "basic")
+            }
+        }
+    
+    @classmethod
+    def get_scopes_for_services(cls, service_keys: List[str]) -> List[str]:
+        """Get combined scopes for selected services."""
+        catalog = cls.get_service_catalog()
+        all_scopes = set()
+        
+        # Always include required services
+        for service_key, service_info in catalog.items():
+            if service_info.get("required", False):
+                all_scopes.update(service_info["scopes"])
+        
+        # Add selected services
+        for key in service_keys:
+            if key in catalog:
+                all_scopes.update(catalog[key]["scopes"])
+        
+        return list(all_scopes)
+
+
+
 
 
 class ServiceScopeManager:

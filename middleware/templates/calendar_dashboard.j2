@@ -1,3 +1,5 @@
+
+
 {% macro render_calendar_dashboard(calendars_data, events_data=null, title="Google Calendars") %}
 {#
     Relaxed & Compact Google Calendar Dashboard Macro (Dark Theme)
@@ -275,3 +277,8 @@
 }
 </style>
 {% endmacro %}
+
+{#
+MACRO USAGE EXAMPLE:
+ {{ render_calendar_dashboard(service://calendar/calendars, service://calendar/events, 'Calendar Summary for: ' + user://current/email.email) }}
+#}

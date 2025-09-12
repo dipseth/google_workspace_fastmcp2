@@ -169,7 +169,7 @@ class CompatibilityShim:
                 "description": "Google Drive service"
             },
             "gmail": {
-                "default_scopes": ["gmail_read", "gmail_send", "gmail_compose", "gmail_modify", "gmail_labels"],
+                "default_scopes": ["gmail_read", "gmail_send", "gmail_compose", "gmail_modify", "gmail_labels", "gmail_settings_basic", "gmail_settings_sharing"],
                 "version": "v1",
                 "description": "Gmail service"
             },

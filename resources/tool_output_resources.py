@@ -15,7 +15,8 @@ from datetime import datetime, timedelta
 
 from fastmcp import FastMCP, Context
 from resources.user_resources import get_current_user_email_simple
-from auth.context import request_google_service, get_injected_service
+from auth.context import get_injected_service
+from auth.service_helpers import request_gmail_service, request_service
 
 logger = logging.getLogger(__name__)
 
@@ -68,161 +69,9 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
     but Qdrant resources are now handled directly by QdrantUnifiedMiddleware.
     """
     
-    @mcp.resource(
-        uri="spaces://list",
-        name="Google Chat Spaces Cache",
-        description="Cached list of Google Chat spaces for the current user with room details, member counts, and space types - automatically refreshed every 5 minutes for optimal performance",
-        mime_type="application/json",
-        tags={"google", "chat", "spaces", "cached", "rooms", "performance", "messaging"},
-        annotations={
-            "readOnlyHint": True,
-            "idempotentHint": False  # Results may vary due to caching
-        }
-    )
-    async def get_chat_spaces_list(ctx: Context) -> dict:
-        """Internal implementation for Google Chat spaces cache resource."""
-        try:
-            user_email = get_current_user_email_simple()
-            cache_key = _get_cache_key(user_email, "list_spaces")
-            
-            # Check cache first
-            cached_result = _get_cached_output(cache_key)
-            if cached_result:
-                return {
-                    "cached": True,
-                    "user_email": user_email,
-                    "data": cached_result,
-                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
-                    "ttl_minutes": _cache_ttl_minutes
-                }
-            
-            # Cache miss - fetch fresh data
-            chat_key = request_google_service("chat", ["chat_read"])
-            chat_service = get_injected_service(chat_key)
-            
-            # Call the Chat API
-            results = chat_service.spaces().list(pageSize=100).execute()
-            spaces = results.get('spaces', [])
-            
-            # Format the output similar to list_spaces tool
-            formatted_spaces = []
-            for space in spaces:
-                formatted_spaces.append({
-                    'name': space.get('name', ''),
-                    'displayName': space.get('displayName', 'Unnamed Space'),
-                    'type': space.get('type', 'UNKNOWN'),
-                    'spaceType': space.get('spaceType', 'UNKNOWN'),
-                    'threaded': space.get('threaded', False),
-                    'memberCount': space.get('memberCount', 0),
-                    'adminInstalled': space.get('adminInstalled', False)
-                })
-            
-            output_data = {
-                "user_email": user_email,
-                "total_spaces": len(formatted_spaces),
-                "spaces": formatted_spaces,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            # Cache the result
-            _cache_tool_output(cache_key, output_data)
-            
-            return {
-                "cached": False,
-                "user_email": user_email,
-                "data": output_data,
-                "cache_timestamp": datetime.now().isoformat(),
-                "ttl_minutes": _cache_ttl_minutes
-            }
-            
-        except ValueError as e:
-            return {
-                "error": f"Authentication error: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Error fetching chat spaces: {e}")
-            return {
-                "error": f"Failed to fetch chat spaces: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
+    # REMOVED: spaces://list resource - use service://chat/spaces instead for same functionality
     
-    @mcp.resource(
-        uri="drive://files/recent",
-        name="Recent Google Drive Files Cache",
-        description="Cached list of recently modified Google Drive files with metadata including file names, sizes, modification times, and sharing links - updated every 5 minutes for quick access",
-        mime_type="application/json",
-        tags={"google", "drive", "files", "cached", "recent", "performance", "storage", "documents"},
-        annotations={
-            "readOnlyHint": True,
-            "idempotentHint": False  # Results may vary due to caching
-        }
-    )
-    async def get_recent_drive_files(ctx: Context) -> dict:
-        """Internal implementation for recent Google Drive files cache resource."""
-        try:
-            user_email = get_current_user_email_simple()
-            cache_key = _get_cache_key(user_email, "recent_drive_files")
-            
-            # Check cache first
-            cached_result = _get_cached_output(cache_key)
-            if cached_result:
-                return {
-                    "cached": True,
-                    "user_email": user_email,
-                    "data": cached_result,
-                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
-                    "ttl_minutes": _cache_ttl_minutes
-                }
-            
-            # Cache miss - fetch fresh data
-            drive_key = request_google_service("drive", ["drive_read"])
-            drive_service = get_injected_service(drive_key)
-            
-            # Get recent files (modified in last 30 days)
-            results = drive_service.files().list(
-                q="modifiedTime > '2025-01-01T00:00:00Z'",
-                pageSize=25,
-                orderBy="modifiedTime desc",
-                fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink, owners)"
-            ).execute()
-            
-            files = results.get('files', [])
-            
-            output_data = {
-                "user_email": user_email,
-                "total_files": len(files),
-                "files": files,
-                "query": "Recent files (last 30 days)",
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            # Cache the result
-            _cache_tool_output(cache_key, output_data)
-            
-            return {
-                "cached": False,
-                "user_email": user_email,
-                "data": output_data,
-                "cache_timestamp": datetime.now().isoformat(),
-                "ttl_minutes": _cache_ttl_minutes
-            }
-            
-        except ValueError as e:
-            return {
-                "error": f"Authentication error: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Error fetching recent drive files: {e}")
-            return {
-                "error": f"Failed to fetch recent drive files: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat()
-            }
+    # REMOVED: drive://files/recent resource - use recent://drive instead for same functionality
     
     @mcp.resource(
         uri="gmail://messages/recent",
@@ -253,7 +102,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 }
             
             # Cache miss - fetch fresh data
-            gmail_key = request_google_service("gmail", ["gmail_read"])
+            gmail_key = request_gmail_service()  # Uses correct scopes from registry
             gmail_service = get_injected_service(gmail_key)
             
             # Get recent messages
@@ -359,7 +208,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 }
             
             # Cache miss - fetch fresh data
-            calendar_key = request_google_service("calendar", ["calendar_events"])
+            calendar_key = request_service("calendar")  # Uses correct scopes from registry
             calendar_service = get_injected_service(calendar_key)
             
             # Get today's events

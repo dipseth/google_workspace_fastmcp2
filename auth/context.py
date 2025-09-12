@@ -415,3 +415,27 @@ def get_auth_middleware() -> Optional[Any]:
     """Get the AuthMiddleware instance."""
     with _middleware_lock:
         return _auth_middleware
+
+
+# Google Provider management for service selection
+_google_provider_instance = None
+
+def set_google_provider(provider):
+    """Store GoogleProvider instance for global access."""
+    global _google_provider_instance
+    _google_provider_instance = provider
+    logger.debug("Set GoogleProvider instance in context")
+
+def get_google_provider():
+    """Get GoogleProvider instance."""
+    return _google_provider_instance
+
+def is_service_selection_needed(session_id: str = None) -> bool:
+    """Check if service selection is needed for current session."""
+    if not session_id:
+        session_id = get_session_context()
+    
+    if session_id:
+        return get_session_data(session_id, "service_selection_needed", False)
+    
+    return False

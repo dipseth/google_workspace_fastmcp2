@@ -353,3 +353,36 @@ class DraftGmailForwardResponse(TypedDict):
     html_preserved: NotRequired[bool]  # Whether original HTML formatting was preserved
     userEmail: str
     error: NotRequired[Optional[str]]
+
+
+# Unified Gmail Message Content Types
+
+
+class GmailMessageData(TypedDict):
+    """Structure for unified Gmail message data."""
+    message_id: str
+    thread_id: str
+    subject: str
+    sender: str
+    recipients: List[str]
+    cc: NotRequired[List[str]]
+    bcc: NotRequired[List[str]]
+    date: NotRequired[Optional[str]]
+    body_text: NotRequired[Optional[str]]  # Only when format="full"
+    body_html: NotRequired[Optional[str]]  # Only when format="full"
+    headers: NotRequired[Dict[str, str]]
+    attachments: NotRequired[List[str]]
+    labels: NotRequired[List[str]]
+    web_url: str
+
+
+class GmailMessageContentResponse(TypedDict):
+    """Response structure for unified get_gmail_message_content tool."""
+    success: bool
+    messages: List[GmailMessageData]
+    total_count: int
+    request_type: str  # "single", "batch", "thread"
+    thread_id: NotRequired[Optional[str]]
+    format: str
+    user_email: str
+    error: NotRequired[Optional[str]]

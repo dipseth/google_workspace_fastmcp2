@@ -7,9 +7,9 @@ logger = setup_logger()
 import secrets
 import json
 import os
-from typing_extensions import Optional, Tuple, Any
+from typing_extensions import Optional, Tuple, Any, Dict, List
 from pathlib import Path
-from datetime import datetime, UTC
+from datetime import datetime, UTC, timedelta
 
 # Allow insecure transport for local development
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -23,11 +23,15 @@ from googleapiclient.errors import HttpError
 
 from config.settings import settings
 from .context import store_session_data, get_session_data, get_session_context
+from .pkce_utils import generate_pkce_pair, pkce_manager
 
 logger = logging.getLogger(__name__)
 
 # OAuth state to user email mapping (since callback comes outside of FastMCP session)
 _oauth_state_map: dict[str, str] = {}
+
+# Service selection cache for OAuth flows
+_service_selection_cache: Dict[str, Dict[str, Any]] = {}
 
 
 class GoogleAuthError(Exception):
@@ -325,29 +329,47 @@ def get_all_stored_users() -> list[str]:
         return []
 
 
-async def initiate_oauth_flow(user_email: str, service_name: str = "Google Drive") -> str:
+async def initiate_oauth_flow(
+    user_email: str,
+    service_name: str = "Google Drive",
+    selected_services: Optional[List[str]] = None,
+    show_service_selection: bool = True,
+    use_pkce: bool = True
+) -> str:
     """
-    Initiate OAuth flow for a user.
+    Initiate OAuth flow for a user with optional service selection and PKCE support.
     
     Args:
         user_email: User's email address
         service_name: Service name for display purposes
+        selected_services: Optional pre-selected services
+        show_service_selection: Whether to show service selection page
+        use_pkce: Whether to use PKCE (Proof Key for Code Exchange) for enhanced security
     
     Returns:
-        Authorization URL for the user to visit
+        Authorization URL or service selection URL
     """
     if not user_email:
         raise GoogleAuthError("Cannot initiate OAuth flow: user_email is required")
         
-    logger.info(f"Initiating OAuth flow for {user_email}")
+    logger.info(f"Initiating OAuth flow for {user_email} (PKCE: {'enabled' if use_pkce else 'disabled'})")
+    
+    # If no services selected and service selection is enabled, return selection URL
+    if show_service_selection and not selected_services:
+        return await _create_service_selection_url(user_email, "custom", use_pkce=use_pkce)
+    
+    # Use selected services or default to comprehensive
+    if selected_services:
+        from .scope_registry import ScopeRegistry
+        oauth_scopes = ScopeRegistry.get_scopes_for_services(selected_services)
+        logger.info(f"Using selected services: {selected_services}")
+    else:
+        from .scope_registry import ScopeRegistry
+        oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
+        logger.info(f"Using oauth_comprehensive scopes: {len(oauth_scopes)} scopes")
     
     # Get OAuth client configuration
     oauth_config = settings.get_oauth_client_config()
-    
-    # Use centralized scope registry as single source of truth
-    from .scope_registry import ScopeRegistry
-    oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
-    logger.info(f"Using oauth_comprehensive scopes: {len(oauth_scopes)} scopes")
     
     # Verify no problematic scopes are included
     problematic_patterns = ['photoslibrary.sharing', 'cloud-platform', 'cloudfunctions', 'pubsub', 'iam']
@@ -376,34 +398,99 @@ async def initiate_oauth_flow(user_email: str, service_name: str = "Google Drive
     # Store user email directly with OAuth state (callback comes outside FastMCP session)
     _oauth_state_map[state] = user_email
     
+    # Generate PKCE parameters if enabled
+    pkce_params = {}
+    if use_pkce:
+        pkce_data = pkce_manager.create_pkce_session(state)
+        pkce_params.update(pkce_data)
+        logger.info(f"🔐 Generated PKCE parameters for state: {state}")
+    
     # Generate authorization URL
-    # The Flow object already has scopes configured, don't pass them again
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         state=state,
-        prompt="consent"  # Force consent to ensure refresh_token is granted
+        prompt="consent",  # Force consent to ensure refresh_token is granted
+        **pkce_params  # Add PKCE parameters if enabled
     )
     
-    logger.info(f"Generated OAuth URL for {user_email}")
+    logger.info(f"Generated OAuth URL for {user_email} (PKCE: {'enabled' if use_pkce else 'disabled'})")
     return auth_url
+
+
+async def _create_service_selection_url(user_email: str, flow_type: str, use_pkce: bool = True) -> str:
+    """Create URL for service selection page with PKCE support."""
+    state = secrets.token_urlsafe(32)
+    
+    # Store flow information
+    _service_selection_cache[state] = {
+        "user_email": user_email,
+        "flow_type": flow_type,
+        "use_pkce": use_pkce,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    # Clean up old entries
+    _cleanup_service_selection_cache()
+    
+    # Use base_url directly since our endpoint is /auth/services/select
+    base_url = settings.base_url
+    pkce_param = "&use_pkce=true" if use_pkce else "&use_pkce=false"
+    return f"{base_url}/auth/services/select?state={state}&flow_type={flow_type}{pkce_param}"
+
+
+def _cleanup_service_selection_cache():
+    """Clean up expired cache entries."""
+    cutoff = datetime.now() - timedelta(minutes=30)
+    expired_keys = [
+        key for key, value in _service_selection_cache.items()
+        if datetime.fromisoformat(value["timestamp"]) < cutoff
+    ]
+    for key in expired_keys:
+        _service_selection_cache.pop(key, None)
+
+
+async def handle_service_selection_callback(
+    state: str,
+    selected_services: List[str]
+) -> str:
+    """Handle service selection and return OAuth URL with PKCE support."""
+    flow_info = _service_selection_cache.pop(state, None)
+    if not flow_info:
+        raise GoogleAuthError("Invalid or expired service selection state")
+    
+    user_email = flow_info["user_email"]
+    use_pkce = flow_info.get("use_pkce", True)  # Default to PKCE enabled
+    
+    logger.info(f"🎯 Service selection callback for {user_email} (PKCE: {'enabled' if use_pkce else 'disabled'})")
+    logger.info(f"📋 Selected services: {selected_services}")
+    
+    # Now call the regular OAuth flow with selected services
+    return await initiate_oauth_flow(
+        user_email=user_email,
+        selected_services=selected_services,
+        show_service_selection=False,  # Don't show selection again
+        use_pkce=use_pkce  # Pass PKCE setting through
+    )
 
 
 async def handle_oauth_callback(
     authorization_response: str,
-    state: str
+    state: str,
+    code_verifier: Optional[str] = None
 ) -> Tuple[str, Credentials]:
     """
-    Handle OAuth callback and exchange code for credentials.
+    Handle OAuth callback and exchange code for credentials with PKCE support.
     
     Args:
         authorization_response: Full authorization response URL
         state: OAuth state parameter
+        code_verifier: PKCE code verifier (if PKCE was used)
     
     Returns:
         Tuple of (user_email, credentials)
     """
-    logger.info(f"Handling OAuth callback with state: {state}")
+    logger.info(f"Handling OAuth callback with state: {state} (PKCE: {'enabled' if code_verifier else 'disabled'})")
     
     # Get user email from state mapping
     user_email = _oauth_state_map.pop(state, None)
@@ -415,6 +502,19 @@ async def handle_oauth_callback(
             "OAuth session expired (possibly due to server restart). "
             "Please start the authentication process again by calling the start_google_auth tool."
         )
+    
+    # Validate PKCE if code_verifier is provided
+    if code_verifier:
+        try:
+            # The PKCE manager validates the session and returns the code verifier
+            stored_verifier = pkce_manager.get_code_verifier(state)
+            if stored_verifier != code_verifier:
+                logger.error(f"🔐 PKCE verification failed for state: {state}")
+                raise GoogleAuthError("PKCE verification failed")
+            logger.info(f"🔐 PKCE verification successful for state: {state}")
+        except KeyError:
+            logger.error(f"🔐 PKCE session not found for state: {state}")
+            raise GoogleAuthError("PKCE session not found or expired")
     
     # Create OAuth flow with same configuration used for authorization URL
     oauth_config = settings.get_oauth_client_config()
@@ -460,6 +560,12 @@ async def handle_oauth_callback(
         os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
         
         try:
+            # Add PKCE code verifier if provided
+            if code_verifier:
+                # For google-auth-oauthlib, we need to set the code_verifier on the flow
+                flow.code_verifier = code_verifier
+                logger.info(f"🔐 Added PKCE code verifier to flow for token exchange")
+            
             flow.fetch_token(authorization_response=authorization_response)
             credentials = flow.credentials
         finally:
@@ -487,7 +593,7 @@ async def handle_oauth_callback(
         # Save credentials
         _save_credentials(user_email, credentials)
         
-        logger.info(f"Successfully authenticated {user_email}")
+        logger.info(f"Successfully authenticated {user_email} (PKCE: {'enabled' if code_verifier else 'disabled'})")
         return user_email, credentials
         
     except Exception as e:

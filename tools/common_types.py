@@ -123,3 +123,12 @@ ServiceTypeAnnotated = Annotated[
     GoogleServiceType,
     Field(description="Google service type from available services in scope registry")
 ]
+
+# Service name(s) for authentication - supports both single and multiple services
+GoogleServiceNames = Annotated[
+    str | list[str],
+    Field(
+        default=None,
+        description="Service name(s) for authentication. Can be a single display name like 'Google Services' or a list of specific services like ['drive', 'gmail', 'calendar']. If None, defaults to all available services from scope registry."
+    )
+]

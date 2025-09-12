@@ -47,6 +47,7 @@ from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
 from resources.service_list_resources import setup_service_list_resources
 from resources.service_recent_resources import setup_service_recent_resources
+from resources.template_resources import register_template_resources
 from tools.server_tools import setup_server_tools
 
 # Authentication setup - choose between Google OAuth and custom JWT
@@ -148,6 +149,19 @@ auth_middleware = create_enhanced_auth_middleware(
     storage_mode=credential_storage_mode,
     google_provider=google_auth_provider  # Pass the GoogleProvider instance
 )
+
+# Enable service selection for GoogleProvider
+if google_auth_provider:
+    logger.info("🔧 Configuring GoogleProvider with service selection support")
+    
+    # Store reference for middleware access
+    from auth.context import set_google_provider
+    set_google_provider(google_auth_provider)
+    
+    # Enable service selection
+    auth_middleware.enable_service_selection(enabled=True)
+    logger.info("✅ Service selection interface enabled for OAuth flows")
+
 mcp.add_middleware(auth_middleware)
 
 # Register the AuthMiddleware instance in context for tool access
@@ -277,6 +291,11 @@ logger.info("✅ Service list resources registered - URIs handled by TagBasedRes
 
 # Setup service recent resources (recent files from Drive-based services)
 setup_service_recent_resources(mcp)
+
+# Setup template macro resources (discovery and usage examples)
+logger.info("📚 Registering template macro resources...")
+register_template_resources(mcp)
+logger.info("✅ Template macro resources registered - URIs handled by EnhancedTemplateMiddleware")
 
 # Register server management tools
 logger.info("🔧 Registering server management tools...")

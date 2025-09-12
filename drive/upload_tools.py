@@ -38,17 +38,27 @@ from config.enhanced_logging import setup_logger
 logger = setup_logger()
 import time
 from pathlib import Path
-from typing_extensions import Optional, Any, List, Annotated
+from typing_extensions import Optional, Any, List, Annotated, Union, Literal
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
 
 # Import our custom type for consistent parameter definition
-from tools.common_types import UserGoogleEmailDrive
+from tools.common_types import UserGoogleEmailDrive, GoogleServiceNames
 from config.settings import settings
 
-from auth.google_auth import get_drive_service, initiate_oauth_flow, GoogleAuthError
-from auth.service_helpers import get_service, request_service, get_injected_service
+# Import service types for proper typing
+from auth.service_types import GoogleServiceDisplayName, AuthenticationMethod, GoogleServiceName
+
+from auth.google_auth import initiate_oauth_flow, GoogleAuthError
+from auth.service_helpers import (
+    get_service,
+    request_service,
+    get_injected_service,
+    get_drive_service,
+    list_supported_services,
+    get_service_defaults
+)
 from .utils import upload_file_to_drive_api, format_upload_result, DriveUploadError
 from .upload_types import (
     UploadFileResponse,
@@ -57,6 +67,7 @@ from .upload_types import (
     StartAuthResponse,
     CheckAuthResponse
 )
+from .auth_models import GoogleAuthConfig
 
 
 
@@ -90,21 +101,22 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             "openWorldHint": True  # Interacts with external Google OAuth services
         }
     )
+
     async def start_google_auth(
         user_google_email: str = '',
-        service_name: Annotated[str, Field(description="Human-readable service name for display purposes")] = "Google Services",
-        auto_open_browser: Annotated[bool, Field(description="Automatically open browser for authentication (default: True)")] = True
+        service_name:  list[str] = ['base', 'drive', 'gmail', 'calendar', 'docs', 'sheets', 'chat', 'forms', 'slides', 'photos', 'admin', 'cloud', 'tasks', 'youtube', 'script'],
+        auto_open_browser: Annotated[bool, Field(description="Automatically open browser for authentication (default: True)")] = True,
+        use_pkce: Annotated[bool, Field(description="Use PKCE for authentication (default: True)")] = True
     ) -> StartAuthResponse:
         """
         Initiate Google OAuth2 authentication flow for Google services access with automatic browser opening.
         
         This tool generates an OAuth2 authorization URL and can automatically open the browser
-        for authentication. For CLI clients, it also provides polling instructions to check
-        when authentication is complete.
+        for authentication. Supports both single services and service lists with PKCE or credential-based authentication.
         
         Args:
             user_google_email: Target Google email address for authentication
-            service_name: Human-readable service name for display purposes
+            service_name: Service name(s) for authentication. Defaults to all services if None.
             auto_open_browser: Whether to automatically open the browser (default: True)
         
         Returns:
@@ -146,9 +158,29 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             )
         
         try:
+            # Handle service_name parameter following UserGoogleEmailDrive pattern
+            if service_name is None:
+                # Default to ALL services from GOOGLE_API_SCOPES
+                from auth.scope_registry import ScopeRegistry
+                selected_services = list(ScopeRegistry.GOOGLE_API_SCOPES.keys())
+                display_service_name = "All Google Services"
+                logger.info(f"🎯 Using default (ALL services): {selected_services}")
+            elif isinstance(service_name, list):
+                # List of specific services provided
+                selected_services = service_name
+                display_service_name = f"{len(service_name)} Selected Services"
+                logger.info(f"🎯 Multiple services requested: {selected_services}")
+            else:
+                # Single service display name (backward compatibility)
+                selected_services = None
+                display_service_name = str(service_name)
+                logger.info(f"🎯 Service display name: {display_service_name}")
+            
             auth_url = await initiate_oauth_flow(
                 user_email=user_google_email,
-                service_name=service_name
+                service_name=display_service_name,
+                selected_services=selected_services,
+                use_pkce=use_pkce  # Always use PKCE for security
             )
             
             # Attempt to open browser automatically if requested
@@ -274,8 +306,15 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             )
         
         try:
-            # Try to get the Drive service - this will fail if not authenticated
-            await get_drive_service(user_google_email)
+            # Use service helpers for better service management
+            drive_service = await get_service("drive", user_google_email)
+            
+            # Test basic Drive access to verify authentication
+            import asyncio
+            await asyncio.to_thread(
+                drive_service.about().get(fields='user').execute
+            )
+            
             return CheckAuthResponse(
                 authenticated=True,
                 userEmail=user_google_email,
@@ -363,8 +402,8 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             if not local_path.exists():
                 raise FileNotFoundError(f"Path not found: {path}")
             
-            # Get authenticated Drive service
-            drive_service = await get_drive_service(user_google_email)
+            # Get authenticated Drive service using service helpers
+            drive_service = await get_service("drive", user_google_email)
             
             # Check if it's a directory
             if local_path.is_dir():

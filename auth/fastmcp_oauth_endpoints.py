@@ -7,7 +7,7 @@ endpoints using FastMCP's native routing system.
 import json
 import logging
 from datetime import datetime, UTC
-from typing_extensions import Any, Dict
+from typing_extensions import Any, Dict, List 
 from config.settings import settings
 from auth.context import set_user_email_context, set_session_context, get_session_context
 # Import OAuth proxy at module level to ensure singleton behavior
@@ -183,6 +183,233 @@ async def _store_oauth_user_data_async(client_id: str, token_data: Dict[str, Any
     except Exception as e:
         logger.error(f"❌ Failed to integrate OAuth authentication data (async): {e}", exc_info=True)
         # This is background processing, so we don't want to crash anything
+
+
+def _generate_service_selection_html(state: str, flow_type: str, use_pkce: bool = True) -> str:
+    """Generate the service selection page HTML with authentication method choice."""
+    try:
+        from .scope_registry import ScopeRegistry
+        
+        services_catalog = ScopeRegistry.get_service_catalog()
+        
+        # Group services by category
+        categories = {}
+        for key, service in services_catalog.items():
+            category = service.get("category", "Other")
+            if category not in categories:
+                categories[category] = []
+            categories[category].append((key, service))
+        
+        # Generate HTML with authentication method selection
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Select Google Services - FastMCP</title>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f5f5f5; }}
+                .container {{ background: white; border-radius: 12px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+                .header {{ text-align: center; margin-bottom: 30px; }}
+                .header h1 {{ color: #1a73e8; margin-bottom: 10px; }}
+                .header p {{ color: #5f6368; }}
+                .auth-method-section {{ margin-bottom: 30px; }}
+                .auth-method-title {{ font-size: 18px; font-weight: 600; color: #1a73e8; margin-bottom: 15px; }}
+                .auth-method-options {{ display: flex; gap: 15px; margin-bottom: 20px; }}
+                .auth-method-option {{ flex: 1; padding: 20px; border: 2px solid #e8eaed; border-radius: 12px; cursor: pointer; transition: all 0.2s ease; }}
+                .auth-method-option:hover {{ border-color: #1a73e8; background-color: #f8f9ff; }}
+                .auth-method-option.selected {{ border-color: #1a73e8; background-color: #e8f0fe; }}
+                .auth-method-option input[type="radio"] {{ margin-right: 10px; transform: scale(1.2); }}
+                .auth-method-name {{ font-weight: 600; color: #202124; margin-bottom: 8px; }}
+                .auth-method-description {{ font-size: 14px; color: #5f6368; line-height: 1.4; }}
+                .auth-method-pros {{ font-size: 12px; color: #137333; margin-top: 8px; }}
+                .auth-method-cons {{ font-size: 12px; color: #d93025; margin-top: 4px; }}
+                .category {{ margin-bottom: 25px; }}
+                .category-title {{ font-size: 18px; font-weight: 600; color: #1a73e8; margin-bottom: 12px; border-bottom: 2px solid #e8eaed; padding-bottom: 5px; }}
+                .service-item {{ display: flex; align-items: center; padding: 12px; border: 1px solid #e8eaed; border-radius: 8px; margin-bottom: 8px; transition: all 0.2s ease; }}
+                .service-item:hover {{ border-color: #1a73e8; background-color: #f8f9ff; }}
+                .service-item.required {{ background-color: #e8f5e8; border-color: #34a853; }}
+                .service-checkbox {{ margin-right: 12px; transform: scale(1.2); }}
+                .service-info {{ flex: 1; }}
+                .service-name {{ font-weight: 500; color: #202124; }}
+                .service-description {{ font-size: 14px; color: #5f6368; margin-top: 4px; }}
+                .required-badge {{ color: #34a853; font-size: 12px; font-weight: 500; margin-left: 8px; }}
+                .btn {{ padding: 14px 24px; border-radius: 6px; border: none; font-weight: 500; cursor: pointer; font-size: 16px; }}
+                .btn-primary {{ background: #1a73e8; color: white; margin-right: 10px; }}
+                .btn-primary:hover {{ background: #1557b0; }}
+                .btn-secondary {{ background: #f8f9fa; color: #3c4043; border: 1px solid #dadce0; }}
+                .btn-secondary:hover {{ background: #e8eaed; }}
+                .form-actions {{ text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e8eaed; }}
+                .auto-select-info {{ background: #e8f0fe; padding: 12px; border-radius: 8px; margin-bottom: 20px; }}
+                .auto-select-info p {{ margin: 0; color: #1a73e8; font-size: 14px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔐 Configure Google Authentication</h1>
+                    <p>Choose your authentication method and services for FastMCP</p>
+                </div>
+                
+                <form method="POST" action="/auth/services/selected">
+                    <input type="hidden" name="state" value="{state}">
+                    <input type="hidden" name="flow_type" value="{flow_type}">
+                    
+                    <!-- Authentication Method Selection -->
+                    <div class="auth-method-section">
+                        <div class="auth-method-title">🔒 Choose Authentication Method</div>
+                        <div class="auth-method-options">
+                            <div class="auth-method-option {'selected' if use_pkce else ''}" onclick="selectAuthMethod('pkce', this)">
+                                <label>
+                                    <input type="radio" name="auth_method" value="pkce" {'checked' if use_pkce else ''}>
+                                    <div class="auth-method-name">🔐 PKCE Flow (Recommended)</div>
+                                    <div class="auth-method-description">Enhanced security using Proof Key for Code Exchange</div>
+                                    <div class="auth-method-pros">✅ No secrets stored • More secure • Perfect for single sessions</div>
+                                    <div class="auth-method-cons">⚠️ Session-based only • Doesn't persist across restarts</div>
+                                </label>
+                            </div>
+                            <div class="auth-method-option {'selected' if not use_pkce else ''}" onclick="selectAuthMethod('credentials', this)">
+                                <label>
+                                    <input type="radio" name="auth_method" value="credentials" {'checked' if not use_pkce else ''}>
+                                    <div class="auth-method-name">📁 Encrypted Credentials</div>
+                                    <div class="auth-method-description">Persistent authentication with encrypted file storage</div>
+                                    <div class="auth-method-pros">✅ Multi-account support • Persists across restarts • Encrypted storage</div>
+                                    <div class="auth-method-cons">⚠️ Requires credential files • Slightly less secure</div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="auto-select-info">
+                        <p>💡 Common services (Drive, Gmail, Calendar, Docs, Sheets) are pre-selected for your convenience</p>
+                    </div>
+        """
+        
+        # Sort categories for better organization
+        category_order = ["Core Services", "Storage & Files", "Communication", "Productivity", "Office Suite", "Other"]
+        sorted_categories = sorted(categories.items(), key=lambda x: category_order.index(x[0]) if x[0] in category_order else len(category_order))
+        
+        for category_name, services in sorted_categories:
+            html += f'<div class="category"><div class="category-title">{category_name}</div>'
+            
+            for service_key, service_info in services:
+                required = service_info.get("required", False)
+                checked = "checked disabled" if required else ""
+                required_class = "required" if required else ""
+                
+                html += f"""
+                    <div class="service-item {required_class}">
+                        <input type="checkbox" class="service-checkbox" name="services"
+                               value="{service_key}" {checked}>
+                        <div class="service-info">
+                            <div class="service-name">
+                                {service_info['name']}
+                                {'<span class="required-badge">Required</span>' if required else ''}
+                            </div>
+                            <div class="service-description">{service_info['description']}</div>
+                        </div>
+                    </div>
+                """
+            
+            html += '</div>'
+        
+        html += """
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Continue with Selected Configuration</button>
+                        <button type="button" class="btn btn-secondary" onclick="selectAll()">Select All Services</button>
+                    </div>
+                </form>
+            </div>
+            
+            <script>
+                // Auto-select common services
+                document.addEventListener('DOMContentLoaded', function() {
+                    const commonServices = ['drive', 'gmail', 'calendar', 'docs', 'sheets'];
+                    commonServices.forEach(serviceKey => {
+                        const checkbox = document.querySelector(`input[value="${serviceKey}"]`);
+                        if (checkbox && !checkbox.disabled) {
+                            checkbox.checked = true;
+                        }
+                    });
+                });
+                
+                function selectAll() {
+                    const checkboxes = document.querySelectorAll('input[name="services"]:not(:disabled)');
+                    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                    checkboxes.forEach(cb => cb.checked = !allChecked);
+                }
+                
+                function selectAuthMethod(method, element) {
+                    // Update radio button
+                    const radio = element.querySelector('input[type="radio"]');
+                    radio.checked = true;
+                    
+                    // Update visual selection
+                    document.querySelectorAll('.auth-method-option').forEach(opt => {
+                        opt.classList.remove('selected');
+                    });
+                    element.classList.add('selected');
+                    
+                    // Update hidden form field
+                    const usesPkce = method === 'pkce';
+                    const hiddenField = document.querySelector('input[name="use_pkce"]');
+                    if (hiddenField) {
+                        hiddenField.value = usesPkce.toString();
+                    }
+                    
+                    console.log(`Selected authentication method: ${method} (PKCE: ${usesPkce})`);
+                }
+                
+                // Handle radio button clicks
+                document.addEventListener('DOMContentLoaded', function() {
+                    document.querySelectorAll('.auth-method-option input[type="radio"]').forEach(radio => {
+                        radio.addEventListener('change', function() {
+                            if (this.checked) {
+                                selectAuthMethod(this.value, this.closest('.auth-method-option'));
+                            }
+                        });
+                    });
+                });
+            </script>
+        </body>
+        </html>
+        """
+        
+        return html
+        
+    except Exception as e:
+        logger.error(f"Error generating service selection HTML: {e}")
+        return f"""
+        <!DOCTYPE html>
+        <html><head><title>Error</title></head>
+        <body><h1>Service Selection Error</h1><p>Error: {str(e)}</p></body></html>
+        """
+
+
+async def _handle_fastmcp_service_selection(state: str, services: List[str], use_pkce: bool = True) -> str:
+    """Handle FastMCP service selection and create OAuth URL with PKCE support."""
+    try:
+        from .google_auth import _service_selection_cache
+        from .scope_registry import ScopeRegistry
+        
+        flow_info = _service_selection_cache.pop(state, None)
+        if not flow_info:
+            raise ValueError("Invalid or expired service selection state")
+        
+        user_email = flow_info["user_email"]
+        
+        # Get scopes for selected services
+        scopes = ScopeRegistry.get_scopes_for_services(services)
+        
+        logger.info(f"🔧 FastMCP service selection: {len(services)} services selected, {len(scopes)} scopes (PKCE: {use_pkce})")
+        
+        # For FastMCP integration, we'll fall back to the custom OAuth flow for now
+        # In the future, this could integrate more directly with GoogleProvider
+        from .google_auth import handle_service_selection_callback
+        return await handle_service_selection_callback(state, services)
+        
+    except Exception as e:
+        logger.error(f"Error handling FastMCP service selection: {e}")
+        raise
 
 
 def setup_oauth_endpoints_fastmcp(mcp) -> None:
@@ -1005,3 +1232,131 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     logger.info("  GET /oauth/register/{client_id}")
     logger.info("  PUT /oauth/register/{client_id}")
     logger.info("  DELETE /oauth/register/{client_id}")
+    
+    @mcp.custom_route("/auth/services/select", methods=["GET", "OPTIONS"])
+    async def show_service_selection(request: Any):
+        """Show service selection page with PKCE support."""
+        from starlette.responses import HTMLResponse, Response
+        from urllib.parse import parse_qs
+        
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                }
+            )
+        
+        logger.info("🎨 Service selection page requested")
+        
+        try:
+            # Get query parameters
+            query_params = dict(request.query_params)
+            state = query_params.get("state")
+            flow_type = query_params.get("flow_type", "fastmcp")
+            use_pkce = query_params.get("use_pkce", "true").lower() == "true"
+            
+            if not state:
+                logger.error("❌ Missing state parameter in service selection request")
+                return HTMLResponse(
+                    content="""
+                    <!DOCTYPE html>
+                    <html><head><title>Error</title></head>
+                    <body><h1>Error: Invalid service selection request</h1></body></html>
+                    """,
+                    status_code=400
+                )
+            
+            logger.info(f"📋 Showing service selection for state: {state}, flow_type: {flow_type}, PKCE: {use_pkce}")
+            
+            html_content = _generate_service_selection_html(state, flow_type, use_pkce)
+            return HTMLResponse(content=html_content)
+            
+        except Exception as e:
+            logger.error(f"❌ Error showing service selection: {e}")
+            return HTMLResponse(
+                content=f"""
+                <!DOCTYPE html>
+                <html><head><title>Error</title></head>
+                <body><h1>Service Selection Error</h1><p>{str(e)}</p></body></html>
+                """,
+                status_code=500
+            )
+    
+    @mcp.custom_route("/auth/services/selected", methods=["POST", "OPTIONS"])
+    async def handle_service_selection(request: Any):
+        """Handle service selection form submission with PKCE support."""
+        from starlette.responses import RedirectResponse, HTMLResponse, Response
+        
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                }
+            )
+        
+        logger.info("✅ Service selection form submitted")
+        
+        try:
+            # Parse form data
+            form_data = await request.form()
+            state = form_data.get("state")
+            flow_type = form_data.get("flow_type", "fastmcp")
+            
+            # Get authentication method choice
+            auth_method = form_data.get("auth_method", "pkce")
+            use_pkce = auth_method == "pkce"
+            
+            # Get selected services (can be multiple)
+            services = form_data.getlist("services") if hasattr(form_data, 'getlist') else []
+            if not services and "services" in form_data:
+                # Fallback for single service
+                services = [form_data.get("services")]
+            
+            logger.info(f"📋 Service selection received: state={state}, flow_type={flow_type}, services={services}")
+            logger.info(f"🔐 Authentication method chosen: {auth_method} (PKCE: {use_pkce})")
+            
+            if use_pkce:
+                logger.info("🔐 User chose PKCE flow - enhanced security, session-based authentication")
+            else:
+                logger.info("📁 User chose encrypted credentials - persistent, multi-account authentication")
+            
+            if not state:
+                raise ValueError("Missing state parameter")
+            
+            # Handle based on flow type
+            if flow_type == "fastmcp":
+                oauth_url = await _handle_fastmcp_service_selection(state, services, use_pkce)
+            else:
+                from .google_auth import handle_service_selection_callback
+                oauth_url = await handle_service_selection_callback(state, services)
+            
+            logger.info(f"✅ Redirecting to OAuth URL for selected services (PKCE: {use_pkce})")
+            return RedirectResponse(url=oauth_url, status_code=302)
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling service selection: {e}")
+            return HTMLResponse(
+                content=f"""
+                <!DOCTYPE html>
+                <html>
+                <head><title>Service Selection Error</title></head>
+                <body>
+                    <h1>Service Selection Error</h1>
+                    <p>Error: {str(e)}</p>
+                    <p>Please try the authentication process again.</p>
+                </body>
+                </html>
+                """,
+                status_code=400
+            )
+    
+    logger.info("  GET /auth/services/select (Service selection page)")
+    logger.info("  POST /auth/services/selected (Service selection form handler)")
