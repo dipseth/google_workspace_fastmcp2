@@ -128,9 +128,9 @@ Search the current user's Gmail messages without email parameter.
 ### Parameters
 
 | Parameter | Type | Required | Description | Default |
-|-----------|------|----------|-------------|---------| 
+|-----------|------|----------|-------------|---------|
 | `query` | string | Yes | Gmail search query | - |
-| `max_results` | integer | No | Maximum messages (1-500) | 10 |
+| `page_size` | integer | No | Maximum messages (1-100) | 10 |
 
 ### Returns
 

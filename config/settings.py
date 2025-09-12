@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     credential_storage_mode: str = "FILE_ENCRYPTED"
     chat_service_account_file: str = ""
     
+    @property
+    def is_cloud_deployment(self) -> bool:
+        """Detect if running in FastMCP Cloud."""
+        return os.getenv("FASTMCP_CLOUD", "false").lower() in ("true", "1", "yes", "on")
+    
     # Qdrant Configuration
     qdrant_url: str = "http://localhost:6333"
     qdrant_key: str = "NONE"
@@ -201,6 +206,18 @@ class Settings(BaseSettings):
         logging.info(f"🔧 SETTINGS DEBUG - Environment variables: QDRANT_URL='{env_qdrant_url}', QDRANT_KEY={'***' if env_qdrant_key else 'None'}")
         logging.info(f"🔧 SETTINGS DEBUG - Settings fields: qdrant_url='{self.qdrant_url}', qdrant_key={'***' if self.qdrant_key and self.qdrant_key != 'NONE' else 'None'}")
         
+        # Cloud-aware configuration
+        if self.is_cloud_deployment:
+            # Use cloud-optimized settings
+            self.credentials_dir = os.getenv("CREDENTIALS_DIR", "/tmp/credentials")
+            if not self.credential_storage_mode or self.credential_storage_mode == "FILE_ENCRYPTED":
+                self.credential_storage_mode = os.getenv("CREDENTIAL_STORAGE_MODE", "MEMORY_WITH_BACKUP")
+            logging.info(f"☁️ Cloud deployment detected - using credentials_dir='{self.credentials_dir}', storage_mode='{self.credential_storage_mode}'")
+        else:
+            # Use environment variable override if provided, otherwise keep current value
+            self.credentials_dir = os.getenv("CREDENTIALS_DIR", self.credentials_dir)
+            self.credential_storage_mode = os.getenv("CREDENTIAL_STORAGE_MODE", self.credential_storage_mode)
+        
         # Ensure credentials directory exists
         Path(self.credentials_dir).mkdir(parents=True, exist_ok=True)
         
@@ -341,10 +358,15 @@ class Settings(BaseSettings):
     
     def get_uvicorn_ssl_config(self) -> Optional[dict]:
         """Get uvicorn SSL configuration for FastMCP if HTTPS is enabled."""
+        if self.is_cloud_deployment:
+            # FastMCP Cloud handles SSL automatically
+            logging.info("☁️ Cloud deployment detected - SSL handled by FastMCP Cloud")
+            return None
+        
         if not self.enable_https:
             return None
         
-        # Return uvicorn-compatible SSL configuration
+        # Return uvicorn-compatible SSL configuration for local deployment
         uvicorn_config = {
             "ssl_keyfile": self.ssl_key_file,
             "ssl_certfile": self.ssl_cert_file,

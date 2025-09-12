@@ -64,9 +64,16 @@ htmlcov/
 !/README.md
 test_tokens.json
 test_downloads/** 
+# SSL/TLS Certificate files
 cert.pem
 .env.https
 key.pem
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
 delete_later/** 
 .auth_encryption_key
 gchat/serverless_chat_bot/.env.template

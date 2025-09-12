@@ -54,6 +54,13 @@ from tools.server_tools import setup_server_tools
 use_google_oauth = os.getenv("USE_GOOGLE_OAUTH", "true").lower() == "true"
 enable_jwt_auth = os.getenv("ENABLE_JWT_AUTH", "false").lower() == "true"
 
+# Cloud deployment detection
+is_cloud_deployment = settings.is_cloud_deployment
+if is_cloud_deployment:
+    logger.info("☁️ FastMCP Cloud deployment detected")
+    logger.info(f"☁️ Using cloud-optimized credential storage: {settings.credential_storage_mode}")
+    logger.info(f"☁️ Credentials directory: {settings.credentials_dir}")
+
 # Phase 1 Feature Flags for gradual rollout (loaded from .env via settings)
 ENABLE_UNIFIED_AUTH = settings.enable_unified_auth
 LEGACY_COMPAT_MODE = settings.legacy_compat_mode
@@ -409,8 +416,8 @@ def main():
     logger.info(f"OAuth callback: {settings.dynamic_oauth_redirect_uri}")
     logger.info(f"Credentials directory: {settings.credentials_dir}")
     
-    # Validate SSL configuration if HTTPS is enabled
-    if settings.enable_https:
+    # Validate SSL configuration if HTTPS is enabled (skip for cloud deployment)
+    if settings.enable_https and not settings.is_cloud_deployment:
         try:
             settings.validate_ssl_config()
             logger.info(f"✅ SSL configuration validated")
@@ -421,6 +428,8 @@ def main():
         except ValueError as e:
             logger.error(f"❌ SSL configuration error: {e}")
             raise
+    elif settings.is_cloud_deployment:
+        logger.info("☁️ Skipping SSL validation - handled by FastMCP Cloud")
     
     # Ensure credentials directory exists
     Path(settings.credentials_dir).mkdir(parents=True, exist_ok=True)
@@ -432,8 +441,12 @@ def main():
             "port": settings.server_port
         }
         
-        # Configure transport and SSL based on HTTPS setting
-        if settings.enable_https:
+        # Configure transport and SSL based on HTTPS setting and cloud deployment
+        if settings.is_cloud_deployment:
+            # FastMCP Cloud handles SSL automatically
+            run_args["transport"] = "http"
+            logger.info("☁️ Cloud deployment - FastMCP Cloud handles HTTPS/SSL automatically")
+        elif settings.enable_https:
             ssl_config = settings.get_uvicorn_ssl_config()
             if ssl_config:
                 run_args["transport"] = "http"  # FastMCP uses http transport with SSL via uvicorn_config
