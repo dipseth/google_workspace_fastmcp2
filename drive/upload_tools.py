@@ -654,90 +654,18 @@ def setup_oauth_callback_handler(mcp: FastMCP) -> None:
     """
     Setup OAuth2 callback route handler for FastMCP2 server.
     
-    This function registers a custom HTTP route to handle OAuth2 callback responses
-    from Google's authentication service. The callback processes authorization codes
-    and completes the authentication flow.
-    
-    Route Details:
-    - Path: /oauth2callback
-    - Method: GET
-    - Purpose: Complete OAuth2 flow after user authorization
+    NOTE: This function is now deprecated. The OAuth callback handler
+    has been moved to auth/fastmcp_oauth_endpoints.py where it belongs
+    with all other OAuth endpoints.
     
     Args:
         mcp: FastMCP server instance to register the route with
         
     Returns:
-        None: Route handler is registered as a side effect
+        None: No-op - callback handler is now in fastmcp_oauth_endpoints.py
     """
-    
-    @mcp.custom_route("/oauth2callback", methods=["GET"])
-    async def oauth_callback(request: Any) -> Any:
-        """
-        Handle OAuth2 callback from Google authentication service.
-        
-        This endpoint processes the OAuth2 callback after a user completes
-        authentication with Google. It extracts the authorization code,
-        validates the state parameter, and completes the credential exchange.
-        
-        Query Parameters Expected:
-        - code: Authorization code from Google
-        - state: CSRF protection state parameter
-        - error: Error code if authentication failed
-        
-        Args:
-            request: HTTP request object containing query parameters
-            
-        Returns:
-            HTMLResponse: Success page or error page based on authentication result
-        """
-        from auth.google_auth import handle_oauth_callback
-        from starlette.responses import HTMLResponse
-        
-        try:
-            # Extract parameters from query string
-            query_params = dict(request.query_params)
-            state = query_params.get("state")
-            code = query_params.get("code")
-            error = query_params.get("error")
-            
-            if error:
-                return HTMLResponse(_create_error_response(f"Authentication failed: {error}"))
-            
-            if not code or not state:
-                return HTMLResponse(_create_error_response("Missing authorization code or state"))
-            
-            # Handle the callback with PKCE support
-            # Retrieve code_verifier from PKCE manager if PKCE was used
-            code_verifier = None
-            try:
-                from auth.pkce_utils import pkce_manager
-                code_verifier = pkce_manager.get_code_verifier(state)
-                logger.info(f"🔐 Retrieved PKCE code verifier for callback: {code_verifier[:10]}...")
-            except KeyError:
-                logger.info(f"🔐 No PKCE session found for state: {state} (non-PKCE flow)")
-            except Exception as e:
-                logger.warning(f"🔐 Error retrieving PKCE code verifier: {e}")
-            
-            user_email, credentials = await handle_oauth_callback(
-                authorization_response=str(request.url),
-                state=state,
-                code_verifier=code_verifier  # Pass the PKCE code verifier to fix "Missing code verifier" error
-            )
-            
-            # Store user email in session context for future requests
-            from auth.context import get_session_context, store_session_data
-            session_id = get_session_context()
-            if session_id:
-                store_session_data(session_id, "user_email", user_email)
-                logger.info(f"Stored user email {user_email} in session {session_id}")
-            else:
-                logger.warning(f"No session context available to store user email for {user_email}")
-            
-            return HTMLResponse(_create_success_response(user_email))
-            
-        except Exception as e:
-            logger.error(f"OAuth callback error: {e}", exc_info=True)
-            return HTMLResponse(_create_error_response(f"Authentication failed: {e}"))
+    logger.info("ℹ️ OAuth callback handler registration skipped - now handled in fastmcp_oauth_endpoints.py")
+    pass
 
 
 def _create_success_response(user_email: str) -> str:

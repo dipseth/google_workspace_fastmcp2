@@ -413,7 +413,7 @@ Our middleware transforms responses to consistent JSON:
 <mcp_tool_call>
   <tool>send_gmail_message_structured</tool>
   <params>
-    <user_google_email>{{user://current/email}}</user_google_email>
+    <user_google_email>{{ "{{" }}user://current/email{{ "}}" }}</user_google_email>
     <to>test@example.com</to>
     <subject>Structured Response Test</subject>
     <body>Testing the new structured response system!</body>
@@ -426,7 +426,7 @@ Our middleware transforms responses to consistent JSON:
 <mcp_tool_call>
   <tool>send_gmail_message</tool>
   <params>
-    <user_google_email>{{user://current/email}}</user_google_email>
+    <user_google_email>{{ "{{" }}user://current/email{{ "}}" }}</user_google_email>
     <to>test@example.com</to>
     <subject>Original Response Test</subject>
     <body>Testing the original response format.</body>

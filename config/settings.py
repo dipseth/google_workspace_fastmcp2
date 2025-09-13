@@ -349,11 +349,48 @@ class Settings(BaseSettings):
     @property
     def base_url(self) -> str:
         """Get the base URL for the server."""
+        # For OAuth flows, always use localhost if OAUTH_REDIRECT_URI points to localhost
+        # This is needed because FastMCP Cloud only hosts the MCP endpoint, not OAuth endpoints
+        env_oauth_uri = os.getenv("OAUTH_REDIRECT_URI", self.oauth_redirect_uri)
+        if env_oauth_uri and "localhost" in env_oauth_uri:
+            # Extract port from OAuth redirect URI for consistency
+            if ":8002" in env_oauth_uri:
+                return f"{self.protocol}://localhost:8002"
+            elif ":8000" in env_oauth_uri:
+                return f"{self.protocol}://localhost:8000"
+            else:
+                return f"{self.protocol}://localhost:{self.server_port}"
+        
+        # Check if we have an explicit BASE_URL environment variable for cloud MCP endpoint
+        explicit_base_url = os.getenv("BASE_URL")
+        if explicit_base_url:
+            return explicit_base_url
+            
         return f"{self.protocol}://{self.server_host}:{self.server_port}"
     
     @property
     def dynamic_oauth_redirect_uri(self) -> str:
         """Get the OAuth redirect URI that dynamically switches between HTTP and HTTPS."""
+        # Always use explicit OAUTH_REDIRECT_URI if it's been set via environment variable
+        env_oauth_uri = os.getenv("OAUTH_REDIRECT_URI")
+        if env_oauth_uri:
+            # CRITICAL FIX: Automatically adjust protocol to match server configuration
+            if self.enable_https and env_oauth_uri.startswith("http://localhost"):
+                # Convert HTTP to HTTPS for localhost when HTTPS is enabled
+                https_uri = env_oauth_uri.replace("http://localhost", "https://localhost")
+                logging.info(f"🔧 PROTOCOL FIX: Converted OAuth redirect URI from HTTP to HTTPS: {env_oauth_uri} → {https_uri}")
+                return https_uri
+            elif not self.enable_https and env_oauth_uri.startswith("https://localhost"):
+                # Convert HTTPS to HTTP for localhost when HTTPS is disabled
+                http_uri = env_oauth_uri.replace("https://localhost", "http://localhost")
+                logging.info(f"🔧 PROTOCOL FIX: Converted OAuth redirect URI from HTTPS to HTTP: {env_oauth_uri} → {http_uri}")
+                return http_uri
+            else:
+                # Use as-is for non-localhost or already correct protocol
+                return env_oauth_uri
+        # Otherwise, use the configured value or construct from base_url
+        if self.oauth_redirect_uri:
+            return self.oauth_redirect_uri
         return f"{self.base_url}/oauth2callback"
     
     def get_uvicorn_ssl_config(self) -> Optional[dict]:

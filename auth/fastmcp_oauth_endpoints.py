@@ -954,6 +954,203 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 }
             )
     
+    @mcp.custom_route("/oauth2callback", methods=["GET", "OPTIONS"])
+    async def oauth2callback_main(request: Any):
+        """Main OAuth2 callback endpoint for the application.
+        
+        This is the primary callback endpoint that handles OAuth redirects from Google.
+        It processes authorization codes and completes the authentication flow with
+        full credential storage and success page display.
+        """
+        # IMMEDIATE logging to ensure we see if the route is hit
+        logger.info("🚨 CRITICAL: OAuth2 callback route HIT!")
+        logger.info(f"🚨 CRITICAL: Request URL: {request.url}")
+        logger.info(f"🚨 CRITICAL: Request method: {request.method}")
+        
+        from starlette.responses import HTMLResponse, Response
+        
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            logger.info("🚨 CRITICAL: Handling OPTIONS request")
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                }
+            )
+        
+        # FULL OAuth processing now that route is confirmed working
+        logger.info("🔄 Processing full OAuth callback with credential exchange")
+        
+        try:
+            # Extract parameters from query string
+            query_params = dict(request.query_params)
+            state = query_params.get("state")
+            code = query_params.get("code")
+            error = query_params.get("error")
+            
+            logger.info(f"🔍 Query parameters extracted:")
+            logger.info(f"   state: {state[:20] if state else 'MISSING'}...")
+            logger.info(f"   code: {'PRESENT' if code else 'MISSING'}")
+            logger.info(f"   error: {error or 'None'}")
+            
+            # SUCCESS: Process OAuth callback and save credentials
+            logger.info(f"✅ OAuth callback received - processing authorization code")
+            
+            try:
+                # Import OAuth handling
+                from auth.google_auth import handle_oauth_callback
+                from auth.pkce_utils import pkce_manager
+                from auth.context import get_session_context, store_session_data
+                
+                # Retrieve PKCE code verifier if available
+                code_verifier = None
+                try:
+                    code_verifier = pkce_manager.get_code_verifier(state)
+                    logger.info(f"🔐 Retrieved PKCE code verifier for callback")
+                except KeyError:
+                    logger.info(f"ℹ️ No PKCE session found for state: {state} (non-PKCE flow)")
+                except Exception as e:
+                    logger.warning(f"⚠️ PKCE retrieval error (continuing): {e}")
+                
+                # Handle OAuth callback with full credential processing
+                user_email, credentials = await handle_oauth_callback(
+                    authorization_response=str(request.url),
+                    state=state,
+                    code_verifier=code_verifier
+                )
+                
+                logger.info(f"✅ OAuth callback processed successfully for user: {user_email}")
+                logger.info(f"✅ Credentials saved for user: {user_email}")
+                
+                # Store user email in session context
+                try:
+                    session_id = get_session_context()
+                    if session_id:
+                        store_session_data(session_id, "user_email", user_email)
+                        logger.info(f"✅ Stored user email {user_email} in session {session_id}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Session storage error (continuing): {e}")
+                
+                # Create beautiful success page
+                success_html = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Authentication Successful</title>
+                    <style>
+                        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
+                        .container {{ max-width: 500px; background: white; border-radius: 20px; padding: 50px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }}
+                        .success-icon {{ font-size: 72px; margin-bottom: 20px; }}
+                        h1 {{ color: #28a745; margin-bottom: 10px; font-size: 32px; }}
+                        .email {{ color: #6c757d; font-size: 18px; margin: 20px 0; }}
+                        .message {{ color: #495057; font-size: 16px; line-height: 1.5; margin: 20px 0; }}
+                        .services {{ background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; }}
+                        .services h3 {{ color: #495057; margin-top: 0; }}
+                        .service-list {{ color: #6c757d; font-size: 14px; }}
+                        .credentials-saved {{ background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #c3e6cb; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="success-icon">✅</div>
+                        <h1>Authentication Successful!</h1>
+                        <div class="email">Successfully authenticated: <strong>{user_email}</strong></div>
+                        <div class="credentials-saved">
+                            <strong>🔐 Credentials Saved!</strong><br>
+                            Your authentication has been securely stored and is ready to use.
+                        </div>
+                        <div class="message">
+                            Your Google services are now connected and ready to use!
+                        </div>
+                        <div class="services">
+                            <h3>🚀 Services Available</h3>
+                            <div class="service-list">
+                                Google Drive • Gmail • Calendar • Docs • Sheets • Slides • Photos • Chat • Forms
+                            </div>
+                        </div>
+                        <div class="message">
+                            You can now close this window and return to your application.
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """
+                
+                logger.info(f"✅ Returning success page for {user_email} with credential confirmation")
+                return HTMLResponse(
+                    content=success_html,
+                    status_code=200,
+                    headers={
+                        "Content-Type": "text/html; charset=utf-8",
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "X-OAuth-Success": "true",
+                        "X-Credentials-Saved": "true"
+                    }
+                )
+                
+            except Exception as oauth_error:
+                logger.error(f"❌ OAuth processing failed: {oauth_error}", exc_info=True)
+                return HTMLResponse(
+                    content=f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>OAuth Processing Error</title>
+                        <style>
+                            body {{ font-family: Arial, sans-serif; margin: 40px; text-align: center; background: #fff5f5; }}
+                            .container {{ max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+                            .error {{ color: #dc3545; font-size: 48px; margin-bottom: 20px; }}
+                            h1 {{ color: #333; margin-bottom: 20px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="error">❌</div>
+                            <h1>OAuth Processing Error</h1>
+                            <p><strong>Error:</strong> {str(oauth_error)}</p>
+                            <p>Please try the authentication process again.</p>
+                        </div>
+                    </body>
+                    </html>
+                    """,
+                    status_code=500,
+                    headers={
+                        "Content-Type": "text/html; charset=utf-8",
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache"
+                    }
+                )
+            
+        except Exception as e:
+            logger.error(f"🚨 CRITICAL: Basic callback error: {e}", exc_info=True)
+            
+            # Even if everything fails, return a basic HTML response
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Callback Route Error</title></head>
+            <body>
+                <h1>🚨 Callback Route Error</h1>
+                <p><strong>Error:</strong> {str(e)}</p>
+                <p><strong>State:</strong> Unknown</p>
+                <p>At least we know the route is being hit!</p>
+            </body>
+            </html>
+            """
+            
+            return HTMLResponse(
+                content=error_html,
+                status_code=500,
+                headers={
+                    "Content-Type": "text/html; charset=utf-8",
+                    "X-Error-Response": "oauth-callback-basic-error"
+                }
+            )
+    
     @mcp.custom_route("/oauth/callback/debug", methods=["GET", "OPTIONS"])
     async def oauth_callback_debug(request: Any):
         """OAuth callback endpoint for debugging and MCP Inspector.
@@ -1241,7 +1438,8 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     logger.info("  GET /oauth/authorize (OAuth Proxy authorization endpoint)")
     logger.info("  POST /oauth/register")
     logger.info("  POST /oauth/token (OAuth Proxy token exchange - FIXED freezing issue)")
-    logger.info("  GET /oauth/callback/debug (OAuth callback handler - FIXED missing endpoint)")
+    logger.info("  GET /oauth2callback (MAIN OAuth callback handler - FIXED routing issue)")
+    logger.info("  GET /oauth/callback/debug (OAuth callback handler - debugging)")
     logger.info("  GET /oauth/status (Authentication status polling for CLI clients)")
     logger.info("  GET /oauth/register/{client_id}")
     logger.info("  PUT /oauth/register/{client_id}")
