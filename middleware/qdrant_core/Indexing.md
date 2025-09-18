@@ -1,0 +1,463 @@
+Indexing
+A key feature of Qdrant is the effective combination of vector and traditional indexes. It is essential to have this because for vector search to work effectively with filters, having a vector index only is not enough. In simpler terms, a vector index speeds up vector search, and payload indexes speed up filtering.
+
+The indexes in the segments exist independently, but the parameters of the indexes themselves are configured for the whole collection.
+
+Not all segments automatically have indexes. Their necessity is determined by the optimizer settings and depends, as a rule, on the number of stored points.
+
+Payload Index
+Payload index in Qdrant is similar to the index in conventional document-oriented databases. This index is built for a specific field and type, and is used for quick point requests by the corresponding filtering condition.
+
+The index is also used to accurately estimate the filter cardinality, which helps the query planning choose a search strategy.
+
+Creating an index requires additional computational resources and memory, so choosing fields to be indexed is essential. Qdrant does not make this choice but grants it to the user.
+
+To mark a field as indexable, you can use the following:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="name_of_the_field_to_index",
+    field_schema="keyword",
+)
+
+You can use dot notation to specify a nested field for indexing. Similar to specifying nested filters.
+
+Available field types are:
+
+keyword - for keyword payload, affects Match filtering conditions.
+integer - for integer payload, affects Match and Range filtering conditions.
+float - for float payload, affects Range filtering conditions.
+bool - for bool payload, affects Match filtering conditions (available as of v1.4.0).
+geo - for geo payload, affects Geo Bounding Box and Geo Radius filtering conditions.
+datetime - for datetime payload, affects Range filtering conditions (available as of v1.8.0).
+text - a special kind of index, available for keyword / string payloads, affects Full Text search filtering conditions. Read more about text index configuration
+uuid - a special type of index, similar to keyword, but optimized for UUID values. Affects Match filtering conditions. (available as of v1.11.0)
+Payload index may occupy some additional memory, so it is recommended to only use the index for those fields that are used in filtering conditions. If you need to filter by many fields and the memory limits do not allow for indexing all of them, it is recommended to choose the field that limits the search result the most. As a rule, the more different values a payload value has, the more efficiently the index will be used.
+
+Parameterized index
+Available as of v1.8.0
+
+We’ve added a parameterized variant to the integer index, which allows you to fine-tune indexing and search performance.
+
+Both the regular and parameterized integer indexes use the following flags:
+
+lookup: enables support for direct lookup using Match filters.
+range: enables support for Range filters.
+The regular integer index assumes both lookup and range are true. In contrast, to configure a parameterized index, you would set only one of these filters to true:
+
+lookup	range	Result
+true	true	Regular integer index
+true	false	Parameterized integer index
+false	true	Parameterized integer index
+false	false	No integer index
+The parameterized index can enhance performance in collections with millions of points. We encourage you to try it out. If it does not enhance performance in your use case, you can always restore the regular integer index.
+
+Note: If you set "lookup": true with a range filter, that may lead to significant performance issues.
+
+For example, the following code sets up a parameterized integer index which supports only range filters:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="name_of_the_field_to_index",
+    field_schema=models.IntegerIndexParams(
+        type=models.IntegerIndexType.INTEGER,
+        lookup=False,
+        range=True,
+    ),
+)
+
+On-disk payload index
+Available as of v1.11.0
+
+By default all payload-related structures are stored in memory. In this way, the vector index can quickly access payload values during search. As latency in this case is critical, it is recommended to keep hot payload indexes in memory.
+
+There are, however, cases when payload indexes are too large or rarely used. In those cases, it is possible to store payload indexes on disk.
+
+On-disk payload index might affect cold requests latency, as it requires additional disk I/O operations.
+To configure on-disk payload index, you can use the following index parameters:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="payload_field_name",
+    field_schema=models.KeywordIndexParams(
+        type=models.KeywordIndexType.KEYWORD,
+        on_disk=True,
+    ),
+)
+
+Payload index on-disk is supported for the following types:
+
+keyword
+integer
+float
+datetime
+uuid
+text
+geo
+The list will be extended in future versions.
+
+Tenant Index
+Available as of v1.11.0
+
+Many vector search use-cases require multitenancy. In a multi-tenant scenario the collection is expected to contain multiple subsets of data, where each subset belongs to a different tenant.
+
+Qdrant supports efficient multi-tenant search by enabling special configuration vector index, which disables global search and only builds sub-indexes for each tenant.
+
+In Qdrant, tenants are not necessarily non-overlapping. It is possible to have subsets of data that belong to multiple tenants.
+However, knowing that the collection contains multiple tenants unlocks more opportunities for optimization. To optimize storage in Qdrant further, you can enable tenant indexing for payload fields.
+
+This option will tell Qdrant which fields are used for tenant identification and will allow Qdrant to structure storage for faster search of tenant-specific data. One example of such optimization is localizing tenant-specific data closer on disk, which will reduce the number of disk reads during search.
+
+To enable tenant index for a field, you can use the following index parameters:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="payload_field_name",
+    field_schema=models.KeywordIndexParams(
+        type=models.KeywordIndexType.KEYWORD,
+        is_tenant=True,
+    ),
+)
+
+Tenant optimization is supported for the following datatypes:
+
+keyword
+uuid
+Principal Index
+Available as of v1.11.0
+
+Similar to the tenant index, the principal index is used to optimize storage for faster search, assuming that the search request is primarily filtered by the principal field.
+
+A good example of a use case for the principal index is time-related data, where each point is associated with a timestamp. In this case, the principal index can be used to optimize storage for faster search with time-based filters.
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="timestamp",
+    field_schema=models.IntegerIndexParams(
+        type=models.IntegerIndexType.INTEGER,
+        is_principal=True,
+    ),
+)
+
+Principal optimization is supported for following types:
+
+integer
+float
+datetime
+Full-text index
+Qdrant supports full-text search for string payload. Full-text index allows you to filter points by the presence of a word or a phrase in the payload field.
+
+Full-text index configuration is a bit more complex than other indexes, as you can specify the tokenization parameters. Tokenization is the process of splitting a string into tokens, which are then indexed in the inverted index.
+
+See Full Text match for examples of querying with a full-text index.
+
+To create a full-text index, you can use the following:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="name_of_the_field_to_index",
+    field_schema=models.TextIndexParams(
+        type="text",
+        tokenizer=models.TokenizerType.WORD,
+        min_token_len=2,
+        max_token_len=10,
+        lowercase=True,
+    ),
+)
+
+Tokenizers
+Tokenizers are algorithms used to split text into smaller units called tokens, which are then indexed and searched in a full-text index. In the context of Qdrant, tokenizers determine how string payloads are broken down for efficient searching and filtering. The choice of tokenizer affects how queries match the indexed text, supporting different languages, word boundaries, and search behaviours such as prefix or phrase matching.
+
+Available tokenizers are:
+
+word - splits the string into words, separated by spaces, punctuation marks, and special characters.
+whitespace - splits the string into words, separated by spaces.
+prefix - splits the string into words, separated by spaces, punctuation marks, and special characters, and then creates a prefix index for each word. For example: hello will be indexed as h, he, hel, hell, hello.
+multilingual - a special type of tokenizer based on multiple packages like charabia and vaporetto to deliver fast and accurate tokenization for a large variety of languages. It allows proper tokenization and lemmatization for multiple languages, including those with non-Latin alphabets and non-space delimiters. See the charabia documentation for a full list of supported languages and normalization options. Note: For the Japanese language, Qdrant relies on the vaporetto project, which has much less overhead compared to charabia, while maintaining comparable performance.
+Stemmer
+A stemmer is an algorithm used in text processing to reduce words to their root or base form, known as the “stem.” For example, the words “running”, “runner and “runs” can all be reduced to the stem “run.” When configuring a full-text index in Qdrant, you can specify a stemmer to be used for a particular language. This enables the index to recognize and match different inflections or derivations of a word.
+
+Qdrant provides an implementation of Snowball stemmer, a widely used and performant variant for some of the most popular languages. For the list of supported languages, please visit the rust-stemmers repository.
+
+Here is an example of full-text Index configuration with Snowball stemmer:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="name_of_the_field_to_index",
+    field_schema=models.TextIndexParams(
+        type="text",
+        tokenizer=models.TokenizerType.WORD,
+        stemmer=models.SnowballParams(
+            type=models.Snowball.SNOWBALL,
+            language=models.SnowballLanguage.ENGLISH
+        )
+    ),
+)
+
+Stopwords
+Stopwords are common words (such as “the”, “is”, “at”, “which”, and “on”) that are often filtered out during text processing because they carry little meaningful information for search and retrieval tasks.
+
+In Qdrant, you can specify a list of stopwords to be ignored during full-text indexing and search. This helps simplify search queries and improves relevance.
+
+You can configure stopwords based on predefined languages, as well as extend existing stopword lists with custom words.
+
+Here is an example of configuring a full-text index with custom stopwords:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient(url="http://localhost:6333")
+
+# Simple
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="name_of_the_field_to_index",
+    field_schema=models.TextIndexParams(
+        type="text",
+        tokenizer=models.TokenizerType.WORD,
+        stopwords=models.Language.ENGLISH,
+    ),
+)
+
+# Explicit
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="name_of_the_field_to_index",
+    field_schema=models.TextIndexParams(
+        type="text",
+        tokenizer=models.TokenizerType.WORD,
+        stopwords=models.StopwordsSet(
+            languages=[
+                models.Language.ENGLISH,
+                models.Language.SPANISH,
+            ],
+            custom=[
+                "example"
+            ]
+        ),
+    ),
+)
+
+Phrase Search
+Phrase search in Qdrant allows you to find documents or points where a specific sequence of words appears together, in the same order, within a text payload field. This is useful when you want to match exact phrases rather than individual words scattered throughout the text.
+
+When using a full-text index with phrase search enabled, you can perform phrase search by enclosing the desired phrase in double quotes in your filter query. For example, searching for "machine learning" will only return results where the words “machine” and “learning” appear together as a phrase, not just anywhere in the text.
+
+For efficient phrase search, Qdrant requires building an additional data structure, so it needs to be configured during the creation of the full-text index:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_payload_index(
+    collection_name="{collection_name}",
+    field_name="name_of_the_field_to_index",
+    field_schema=models.TextIndexParams(
+        type="text",
+        tokenizer=models.TokenizerType.WORD,
+        lowercase=True,
+        phrase_matching=True,
+    ),
+)
+
+See Phrase Match for examples of querying phrases with a full-text index.
+
+Vector Index
+A vector index is a data structure built on vectors through a specific mathematical model. Through the vector index, we can efficiently query several vectors similar to the target vector.
+
+Qdrant currently only uses HNSW as a dense vector index.
+
+HNSW (Hierarchical Navigable Small World Graph) is a graph-based indexing algorithm. It builds a multi-layer navigation structure for an image according to certain rules. In this structure, the upper layers are more sparse and the distances between nodes are farther. The lower layers are denser and the distances between nodes are closer. The search starts from the uppermost layer, finds the node closest to the target in this layer, and then enters the next layer to begin another search. After multiple iterations, it can quickly approach the target position.
+
+In order to improve performance, HNSW limits the maximum degree of nodes on each layer of the graph to m. In addition, you can use ef_construct (when building an index) or ef (when searching targets) to specify a search range.
+
+The corresponding parameters could be configured in the configuration file:
+
+storage:
+  # Default parameters of HNSW Index. Could be overridden for each collection or named vector individually
+  hnsw_index:
+    # Number of edges per node in the index graph.
+    # Larger the value - more accurate the search, more space required.
+    m: 16
+    # Number of neighbours to consider during the index building.
+    # Larger the value - more accurate the search, more time required to build index.
+    ef_construct: 100
+    # Minimal size threshold (in KiloBytes) below which full-scan is preferred over HNSW search.
+    # This measures the total size of vectors being queried against.
+    # When the maximum estimated amount of points that a condition satisfies is smaller than
+    # `full_scan_threshold_kb`, the query planner will use full-scan search instead of HNSW index
+    # traversal for better performance.
+    # Note: 1Kb = 1 vector of size 256
+    full_scan_threshold: 10000
+
+And so in the process of creating a collection. The ef parameter is configured during the search and by default is equal to ef_construct.
+
+HNSW is chosen for several reasons. First, HNSW is well-compatible with the modification that allows Qdrant to use filters during a search. Second, it is one of the most accurate and fastest algorithms, according to public benchmarks.
+
+Available as of v1.1.1
+
+The HNSW parameters can also be configured on a collection and named vector level by setting hnsw_config to fine-tune search performance.
+
+Sparse Vector Index
+Available as of v1.7.0
+
+Sparse vectors in Qdrant are indexed with a special data structure, which is optimized for vectors that have a high proportion of zeroes. In some ways, this indexing method is similar to the inverted index, which is used in text search engines.
+
+A sparse vector index in Qdrant is exact, meaning it does not use any approximation algorithms.
+All sparse vectors added to the collection are immediately indexed in the mutable version of a sparse index.
+With Qdrant, you can benefit from a more compact and efficient immutable sparse index, which is constructed during the same optimization process as the dense vector index.
+
+This approach is particularly useful for collections storing both dense and sparse vectors.
+
+To configure a sparse vector index, create a collection with the following parameters:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_collection(
+    collection_name="{collection_name}",
+    vectors_config={},
+    sparse_vectors_config={
+        "text": models.SparseVectorParams(
+            index=models.SparseIndexParams(on_disk=False),
+        )
+    },
+)
+
+`
+The following parameters may affect performance:
+
+on_disk: true - The index is stored on disk, which lets you save memory. This may slow down search performance.
+on_disk: false - The index is still persisted on disk, but it is also loaded into memory for faster search.
+Unlike a dense vector index, a sparse vector index does not require a predefined vector size. It automatically adjusts to the size of the vectors added to the collection.
+
+Note: A sparse vector index only supports dot-product similarity searches. It does not support other distance metrics.
+
+IDF Modifier
+Available as of v1.10.0
+
+For many search algorithms, it is important to consider how often an item occurs in a collection. Intuitively speaking, the less frequently an item appears in a collection, the more important it is in a search.
+
+This is also known as the Inverse Document Frequency (IDF). It is used in text search engines to rank search results based on the rarity of a word in a collection.
+
+IDF depends on the currently stored documents and therefore can’t be pre-computed in the sparse vectors in streaming inference mode. In order to support IDF in the sparse vector index, Qdrant provides an option to modify the sparse vector query with the IDF statistics automatically.
+
+The only requirement is to enable the IDF modifier in the collection configuration:
+
+http
+python
+typescript
+rust
+java
+csharp
+go
+from qdrant_client import QdrantClient, models
+
+client = QdrantClient(url="http://localhost:6333")
+
+client.create_collection(
+    collection_name="{collection_name}",
+    vectors_config={},
+    sparse_vectors_config={
+        "text": models.SparseVectorParams(
+            modifier=models.Modifier.IDF,
+        ),
+    },
+)
+
+Qdrant uses the following formula to calculate the IDF modifier:
+
+ 
+
+Where:
+
+N is the total number of documents in the collection.
+n is the number of documents containing non-zero values for the given vector element.
+Filtrable Index
+Separately, a payload index and a vector index cannot solve the problem of search using the filter completely.
+
+In the case of weak filters, you can use the HNSW index as it is. In the case of stringent filters, you can use the payload index and complete rescore. However, for cases in the middle, this approach does not work well.
+
+On the one hand, we cannot apply a full scan on too many vectors. On the other hand, the HNSW graph starts to fall apart when using too strict filters.

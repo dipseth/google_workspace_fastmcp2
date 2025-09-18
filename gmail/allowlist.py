@@ -26,319 +26,253 @@ from .gmail_types import GmailAllowListResponse, AllowedEmailInfo
 logger = logging.getLogger(__name__)
 
 
-async def add_to_gmail_allow_list(
-    email: Union[str, List[str]],
+async def manage_gmail_allow_list(
+    action: str,
+    email: Optional[Union[str, List[str]]] = None,
     user_google_email: UserGoogleEmail = None
-) -> str:
+) -> Union[str, GmailAllowListResponse]:
     """
-    Adds one or more email addresses to the Gmail allow list.
+    Manage the Gmail allow list: add, remove, or view email addresses.
     Recipients on this list will skip elicitation confirmation when sending emails.
 
     Args:
-        user_google_email: The authenticated user's Google email address (for authorization)
-        email: Email address(es) to add to the allow list. Supports:
+        action: Action to perform - 'add', 'remove', or 'view'
+        email: Email address(es) for add/remove operations. Supports:
             - Single email: "user@example.com"
             - List of emails: ["user1@example.com", "user2@example.com"]
             - Comma-separated string: "user1@example.com,user2@example.com"
-
-    Returns:
-        str: Confirmation message of the operation
-    """
-    logger.info(f"[add_to_gmail_allow_list] User: '{user_google_email}' adding email(s): '{email}'")
-
-    # Parse input emails using utility function and normalize to lowercase
-    emails_to_add = [e.strip().lower() for e in _parse_email_addresses(email)]
-    if not emails_to_add:
-        return "❌ No valid email addresses provided"
-
-    # Validate email formats
-    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    invalid_emails = []
-    valid_emails = []
-    
-    for email_addr in emails_to_add:
-        if re.match(email_pattern, email_addr):
-            valid_emails.append(email_addr)
-        else:
-            invalid_emails.append(email_addr)
-
-    if not valid_emails:
-        return f"❌ No valid email addresses found. Invalid: {', '.join(invalid_emails)}"
-
-    try:
-        # Get current allow list
-        current_list = settings.get_gmail_allow_list()
-
-        # Track which emails are already in the list and which are new
-        already_in_list = []
-        emails_added = []
-
-        for email_to_add in valid_emails:
-            if email_to_add in current_list:
-                already_in_list.append(email_to_add)
-            else:
-                emails_added.append(email_to_add)
-
-        # Add the new emails
-        updated_list = current_list + emails_added
-
-        if emails_added:
-            # Update the environment variable (in memory)
-            new_value = ",".join(updated_list)
-            settings.gmail_allow_list = new_value
-            import os
-            os.environ["GMAIL_ALLOW_LIST"] = new_value
-
-        # Build response
-        response_lines = []
-
-        if emails_added:
-            # Mask emails for privacy
-            masked_added = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in emails_added]
-            response_lines.append(f"✅ Successfully added {len(emails_added)} email(s) to Gmail allow list!")
-            response_lines.append(f"Added: {', '.join(masked_added)}")
-
-        if already_in_list:
-            masked_already = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in already_in_list]
-            response_lines.append(f"ℹ️ {len(already_in_list)} email(s) were already in the allow list: {', '.join(masked_already)}")
-
-        if invalid_emails:
-            response_lines.append(f"❌ {len(invalid_emails)} invalid email(s) skipped: {', '.join(invalid_emails)}")
-
-        response_lines.extend([
-            "",
-            "**Current Status:**",
-            f"• Allow list now contains {len(updated_list)} email(s)",
-            "• Added emails will skip elicitation confirmation when sending emails"
-        ])
-
-        if emails_added:
-            response_lines.extend([
-                "",
-                "**⚠️ IMPORTANT - Make this change permanent:**",
-                "To persist this change across server restarts, update your .env file:",
-                "```",
-                f"GMAIL_ALLOW_LIST={','.join(updated_list)}",
-                "```",
-                "",
-                "**Note:** The change is active for the current session but will be lost on restart unless updated in .env file."
-            ])
-
-        return "\n".join(response_lines)
-
-    except Exception as e:
-        logger.error(f"Unexpected error in add_to_gmail_allow_list: {e}")
-        return f"❌ Unexpected error: {e}"
-
-
-async def remove_from_gmail_allow_list(
-    email: Union[str, List[str]],
-    user_google_email: UserGoogleEmail = None
-) -> str:
-    """
-    Removes one or more email addresses from the Gmail allow list.
-    After removal, these recipients will require elicitation confirmation when sending emails.
-
-    Args:
-        user_google_email: The authenticated user's Google email address (for authorization)
-        email: Email address(es) to remove from the allow list. Supports:
-            - Single email: "user@example.com"
-            - List of emails: ["user1@example.com", "user2@example.com"]
-            - Comma-separated string: "user1@example.com,user2@example.com"
-
-    Returns:
-        str: Confirmation message of the operation
-    """
-    logger.info(f"[remove_from_gmail_allow_list] User: '{user_google_email}' removing email(s): '{email}'")
-
-    # Parse input emails using utility function and normalize to lowercase
-    emails_to_remove = [e.strip().lower() for e in _parse_email_addresses(email)]
-    if not emails_to_remove:
-        return "❌ No valid email addresses provided"
-
-    try:
-        # Get current allow list
-        current_list = settings.get_gmail_allow_list()
-
-        # Track which emails are not in the list and which are removed
-        not_in_list = []
-        emails_removed = []
-
-        for email_to_remove in emails_to_remove:
-            if email_to_remove not in current_list:
-                not_in_list.append(email_to_remove)
-            else:
-                emails_removed.append(email_to_remove)
-
-        # Remove the emails
-        updated_list = [e for e in current_list if e not in emails_removed]
-
-        if emails_removed:
-            # Update the environment variable (in memory)
-            new_value = ",".join(updated_list) if updated_list else ""
-            settings.gmail_allow_list = new_value
-            import os
-            os.environ["GMAIL_ALLOW_LIST"] = new_value
-
-        # Build response
-        response_lines = []
-
-        if emails_removed:
-            # Mask emails for privacy
-            masked_removed = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in emails_removed]
-            response_lines.append(f"✅ Successfully removed {len(emails_removed)} email(s) from Gmail allow list!")
-            response_lines.append(f"Removed: {', '.join(masked_removed)}")
-
-        if not_in_list:
-            masked_not_in_list = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in not_in_list]
-            response_lines.append(f"ℹ️ {len(not_in_list)} email(s) were not in the allow list: {', '.join(masked_not_in_list)}")
-
-        response_lines.extend([
-            "",
-            "**Current Status:**",
-            f"• Allow list now contains {len(updated_list)} email(s)",
-            "• Removed emails will now require elicitation confirmation when sending emails"
-        ])
-
-        if emails_removed:
-            if updated_list:
-                env_instruction = f"GMAIL_ALLOW_LIST={','.join(updated_list)}"
-            else:
-                env_instruction = "# GMAIL_ALLOW_LIST= (comment out or remove the line)"
-
-            response_lines.extend([
-                "",
-                "**⚠️ IMPORTANT - Make this change permanent:**",
-                "To persist this change across server restarts, update your .env file:",
-                "```",
-                env_instruction,
-                "```",
-                "",
-                "**Note:** The change is active for the current session but will be lost on restart unless updated in .env file."
-            ])
-
-        return "\n".join(response_lines)
-
-    except Exception as e:
-        logger.error(f"Unexpected error in remove_from_gmail_allow_list: {e}")
-        return f"❌ Unexpected error: {e}"
-
-
-async def view_gmail_allow_list(
-    user_google_email: UserGoogleEmail = None
-) -> GmailAllowListResponse:
-    """
-    Views the current Gmail allow list configuration.
-    Shows which email addresses will skip elicitation confirmation.
-
-    Args:
+            (Required for add/remove, ignored for view)
         user_google_email: The authenticated user's Google email address (for authorization)
 
     Returns:
-        GmailAllowListResponse: Structured response with allow list information
+        Union[str, GmailAllowListResponse]: Confirmation message for add/remove, structured response for view
     """
-    logger.info(f"[view_gmail_allow_list] User: '{user_google_email}' viewing allow list")
+    action = action.lower().strip()
+    logger.info(f"[manage_gmail_allow_list] User: '{user_google_email}' action: '{action}' email(s): '{email}'")
 
-    try:
-        # Get current allow list
-        allow_list = settings.get_gmail_allow_list()
+    if action not in ['add', 'remove', 'view']:
+        return "❌ Invalid action. Must be 'add', 'remove', or 'view'"
 
-        # Convert to structured format
-        allowed_emails: List[AllowedEmailInfo] = []
-        
-        for email in allow_list:
-            # Create masked version for privacy
-            if '@' in email:
-                local, domain = email.split('@', 1)
-                if len(local) > 3:
-                    masked = f"{local[:2]}***@{domain}"
-                else:
-                    masked = f"***@{domain}"
-            else:
-                masked = email[:3] + "***" if len(email) > 3 else "***"
+    # Handle view action
+    if action == 'view':
+        try:
+            # Get current allow list
+            allow_list = settings.get_gmail_allow_list()
+
+            # Convert to structured format
+            allowed_emails: List[AllowedEmailInfo] = []
             
-            email_info: AllowedEmailInfo = {
-                "email": email,
-                "masked_email": masked
-            }
-            allowed_emails.append(email_info)
+            for email_addr in allow_list:
+                # Create masked version for privacy
+                if '@' in email_addr:
+                    local, domain = email_addr.split('@', 1)
+                    if len(local) > 3:
+                        masked = f"{local[:2]}***@{domain}"
+                    else:
+                        masked = f"***@{domain}"
+                else:
+                    masked = email_addr[:3] + "***" if len(email_addr) > 3 else "***"
+                
+                email_info: AllowedEmailInfo = {
+                    "email": email_addr,
+                    "masked_email": masked
+                }
+                allowed_emails.append(email_info)
 
-        logger.info(f"Successfully retrieved {len(allowed_emails)} allowed emails for {user_google_email}")
+            logger.info(f"Successfully retrieved {len(allowed_emails)} allowed emails for {user_google_email}")
 
-        return GmailAllowListResponse(
-            allowed_emails=allowed_emails,
-            count=len(allowed_emails),
-            userEmail=user_google_email,
-            is_configured=len(allowed_emails) > 0,
-            source="GMAIL_ALLOW_LIST environment variable",
-            error=None
-        )
+            return GmailAllowListResponse(
+                allowed_emails=allowed_emails,
+                count=len(allowed_emails),
+                userEmail=user_google_email,
+                is_configured=len(allowed_emails) > 0,
+                source="GMAIL_ALLOW_LIST environment variable",
+                error=None
+            )
+
+        except Exception as e:
+            logger.error(f"Unexpected error in manage_gmail_allow_list (view): {e}")
+            # Return structured error response
+            return GmailAllowListResponse(
+                allowed_emails=[],
+                count=0,
+                userEmail=user_google_email,
+                is_configured=False,
+                source="GMAIL_ALLOW_LIST environment variable",
+                error=f"Unexpected error: {e}"
+            )
+
+    # For add/remove actions, email parameter is required
+    if email is None:
+        return f"❌ Email parameter is required for '{action}' action"
+
+    # Parse input emails using utility function and normalize to lowercase
+    emails_to_process = [e.strip().lower() for e in _parse_email_addresses(email)]
+    if not emails_to_process:
+        return "❌ No valid email addresses provided"
+
+    # Validate email formats for add/remove operations
+    if action in ['add', 'remove']:
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        invalid_emails = []
+        valid_emails = []
+        
+        for email_addr in emails_to_process:
+            if re.match(email_pattern, email_addr):
+                valid_emails.append(email_addr)
+            else:
+                invalid_emails.append(email_addr)
+
+        if not valid_emails and action == 'add':
+            return f"❌ No valid email addresses found. Invalid: {', '.join(invalid_emails)}"
+
+        emails_to_process = valid_emails
+
+    try:
+        # Get current allow list
+        current_list = settings.get_gmail_allow_list()
+
+        if action == 'add':
+            # Track which emails are already in the list and which are new
+            already_in_list = []
+            emails_added = []
+
+            for email_to_add in emails_to_process:
+                if email_to_add in current_list:
+                    already_in_list.append(email_to_add)
+                else:
+                    emails_added.append(email_to_add)
+
+            # Add the new emails
+            updated_list = current_list + emails_added
+
+            if emails_added:
+                # Update the environment variable (in memory)
+                new_value = ",".join(updated_list)
+                settings.gmail_allow_list = new_value
+                import os
+                os.environ["GMAIL_ALLOW_LIST"] = new_value
+
+            # Build response
+            response_lines = []
+
+            if emails_added:
+                # Mask emails for privacy
+                masked_added = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in emails_added]
+                response_lines.append(f"✅ Successfully added {len(emails_added)} email(s) to Gmail allow list!")
+                response_lines.append(f"Added: {', '.join(masked_added)}")
+
+            if already_in_list:
+                masked_already = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in already_in_list]
+                response_lines.append(f"ℹ️ {len(already_in_list)} email(s) were already in the allow list: {', '.join(masked_already)}")
+
+            if invalid_emails:
+                response_lines.append(f"❌ {len(invalid_emails)} invalid email(s) skipped: {', '.join(invalid_emails)}")
+
+            response_lines.extend([
+                "",
+                "**Current Status:**",
+                f"• Allow list now contains {len(updated_list)} email(s)",
+                "• Added emails will skip elicitation confirmation when sending emails"
+            ])
+
+            if emails_added:
+                response_lines.extend([
+                    "",
+                    "**⚠️ IMPORTANT - Make this change permanent:**",
+                    "To persist this change across server restarts, update your .env file:",
+                    "```",
+                    f"GMAIL_ALLOW_LIST={','.join(updated_list)}",
+                    "```",
+                    "",
+                    "**Note:** The change is active for the current session but will be lost on restart unless updated in .env file."
+                ])
+
+            return "\n".join(response_lines)
+
+        elif action == 'remove':
+            # Track which emails are not in the list and which are removed
+            not_in_list = []
+            emails_removed = []
+
+            for email_to_remove in emails_to_process:
+                if email_to_remove not in current_list:
+                    not_in_list.append(email_to_remove)
+                else:
+                    emails_removed.append(email_to_remove)
+
+            # Remove the emails
+            updated_list = [e for e in current_list if e not in emails_removed]
+
+            if emails_removed:
+                # Update the environment variable (in memory)
+                new_value = ",".join(updated_list) if updated_list else ""
+                settings.gmail_allow_list = new_value
+                import os
+                os.environ["GMAIL_ALLOW_LIST"] = new_value
+
+            # Build response
+            response_lines = []
+
+            if emails_removed:
+                # Mask emails for privacy
+                masked_removed = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in emails_removed]
+                response_lines.append(f"✅ Successfully removed {len(emails_removed)} email(s) from Gmail allow list!")
+                response_lines.append(f"Removed: {', '.join(masked_removed)}")
+
+            if not_in_list:
+                masked_not_in_list = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in not_in_list]
+                response_lines.append(f"ℹ️ {len(not_in_list)} email(s) were not in the allow list: {', '.join(masked_not_in_list)}")
+
+            response_lines.extend([
+                "",
+                "**Current Status:**",
+                f"• Allow list now contains {len(updated_list)} email(s)",
+                "• Removed emails will now require elicitation confirmation when sending emails"
+            ])
+
+            if emails_removed:
+                if updated_list:
+                    env_instruction = f"GMAIL_ALLOW_LIST={','.join(updated_list)}"
+                else:
+                    env_instruction = "# GMAIL_ALLOW_LIST= (comment out or remove the line)"
+
+                response_lines.extend([
+                    "",
+                    "**⚠️ IMPORTANT - Make this change permanent:**",
+                    "To persist this change across server restarts, update your .env file:",
+                    "```",
+                    env_instruction,
+                    "```",
+                    "",
+                    "**Note:** The change is active for the current session but will be lost on restart unless updated in .env file."
+                ])
+
+            return "\n".join(response_lines)
 
     except Exception as e:
-        logger.error(f"Unexpected error in view_gmail_allow_list: {e}")
-        # Return structured error response
-        return GmailAllowListResponse(
-            allowed_emails=[],
-            count=0,
-            userEmail=user_google_email,
-            is_configured=False,
-            source="GMAIL_ALLOW_LIST environment variable",
-            error=f"Unexpected error: {e}"
-        )
+        logger.error(f"Unexpected error in manage_gmail_allow_list ({action}): {e}")
+        return f"❌ Unexpected error: {e}"
 
 
 def setup_allowlist_tools(mcp: FastMCP) -> None:
-    """Register Gmail allow list tools with the FastMCP server."""
+    """Register Gmail allow list tool with the FastMCP server."""
 
     @mcp.tool(
-        name="add_to_gmail_allow_list",
-        description="Add one or more email addresses to the Gmail allow list (recipients on this list skip elicitation confirmation). Supports single emails, lists, or comma-separated strings.",
-        tags={"gmail", "allow-list", "security", "management", "trusted", "bulk"},
+        name="manage_gmail_allow_list",
+        description="Manage Gmail allow list: add, remove, or view email addresses. Recipients on this list skip elicitation confirmation. Supports single emails, lists, or comma-separated strings.",
+        tags={"gmail", "allow-list", "security", "management", "trusted", "bulk", "unified"},
         annotations={
-            "title": "Add to Gmail Allow List",
-            "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": True,  # Adding same email multiple times has same effect
+            "title": "Manage Gmail Allow List",
+            "readOnlyHint": False,  # Can modify list with add/remove actions
+            "destructiveHint": False,  # Not truly destructive, manages trust settings
+            "idempotentHint": True,  # Same operations have same effect
             "openWorldHint": False  # Local configuration only
         }
     )
-    async def add_to_gmail_allow_list_tool(
-        email: Union[str, List[str]],
+    async def manage_gmail_allow_list_tool(
+        action: str,
+        email: Optional[Union[str, List[str]]] = None,
         user_google_email: UserGoogleEmail = None
-    ) -> str:
-        return await add_to_gmail_allow_list(email, user_google_email)
-
-    @mcp.tool(
-        name="remove_from_gmail_allow_list",
-        description="Remove one or more email addresses from the Gmail allow list. Supports single emails, lists, or comma-separated strings.",
-        tags={"gmail", "allow-list", "security", "management", "untrust", "bulk"},
-        annotations={
-            "title": "Remove from Gmail Allow List",
-            "readOnlyHint": False,
-            "destructiveHint": False,  # Not truly destructive, just removes trust
-            "idempotentHint": True,  # Removing non-existent email has same effect
-            "openWorldHint": False  # Local configuration only
-        }
-    )
-    async def remove_from_gmail_allow_list_tool(
-        email: Union[str, List[str]],
-        user_google_email: UserGoogleEmail = None
-    ) -> str:
-        return await remove_from_gmail_allow_list(email, user_google_email)
-
-    @mcp.tool(
-        name="view_gmail_allow_list",
-        description="View the current Gmail allow list configuration",
-        tags={"gmail", "allow-list", "security", "view", "list"},
-        annotations={
-            "title": "View Gmail Allow List",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False
-        }
-    )
-    async def view_gmail_allow_list_tool(
-        user_google_email: UserGoogleEmail = None
-    ) -> GmailAllowListResponse:
-        return await view_gmail_allow_list(user_google_email)
+    ) -> Union[str, GmailAllowListResponse]:
+        return await manage_gmail_allow_list(action, email, user_google_email)

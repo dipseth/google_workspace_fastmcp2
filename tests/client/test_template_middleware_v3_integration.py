@@ -19,7 +19,7 @@ class TestTemplateMiddlewareV3Integration:
         runner = ToolTestRunner(client, TEST_EMAIL)
         
         # Test with simple v2 template syntax first
-        v2_template = "User email via v2 template: {{resource://user://current/email}}"
+        v2_template = "User email via v2 template: {{user://current/email}}"
         
         result = await runner.test_tool_with_explicit_email("send_gmail_message", {
             "to": [TEST_EMAIL],
@@ -127,7 +127,7 @@ End test."""
         # This is the exact syntax that was failing
         mixed_template = """Mixed Template Test:
 
-v2: {{resource://user://current/email}}
+v2: {{user://current/email}}
 
 Jinja2: {% if user_email() %}Hello {{ user_email() }}!{% endif %}
 

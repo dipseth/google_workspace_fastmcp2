@@ -3,8 +3,6 @@
 This module provides resources that cache and expose the outputs of various tools,
 making frequently accessed data available as resources for better performance.
 
-Note: Qdrant-specific resources (qdrant://*) are now handled directly by the
-QdrantUnifiedMiddleware using the on_read_resource hook for better integration.
 """
 
 import asyncio

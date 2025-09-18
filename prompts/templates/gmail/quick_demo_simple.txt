@@ -1,103 +1,145 @@
-# ⚡ Quick Email Demo (Simple) - With Real Gmail Resources
+# ⚡ Quick Email Demo (Simple) - Template Middleware Resource Resolution
 *Request ID: {{ request_id }} | Generated: {{ current_time }}*
 
-## 🎯 Zero-Configuration Demo with Live Gmail Data
+## 🎯 Template Parameter Middleware Integration Demo
 
 ### Features
-- **Level**: Simple - No parameters required
-- **Ready**: Instant send capability with real Gmail integration  
-- **Design**: Clean and professional with live resource data
-- **Testing**: Perfect for quick demos using actual Gmail labels
+- **Template Middleware**: Uses same resource resolution as tool parameters
+- **Resource Variables**: Direct `{{resource://uri}}` resolution
+- **Live Integration**: Real Gmail data via Template Parameter Middleware
+- **Unified System**: Same resolution system for tools AND prompts
 
-### 📊 **GMAIL RESOURCE INTEGRATION:**
-- **Resource Status**: {{ auth_status }}
-- **Your Email**: `{{ user_email }}` (from `{{user://current/email}}`)
+### 📊 **TEMPLATE MIDDLEWARE RESOURCE RESOLUTION:**
+- **Resolution Method**: {{ auth_status }}
+- **Your Email**: `{{ user_email }}`
+- **Resource System**: Template Parameter Middleware (same as tools)
 {% if labels %}
-- **Your Labels**: 
+- **Your Gmail Labels** (via middleware resolution):
 {% for label in labels[:3] %}
-  - {{ label.name }} ({{ label.id }})
+  - 📧 {{ label.name }} (ID: {{ label.id }})
 {% endfor %}
 {% else %}
 - **Labels**: Authentication required - run `start_google_auth('your.email@gmail.com')`
 {% endif %}
-- **System Labels**: {{ system_count }} available
-- **Custom Labels**: {{ user_count }} total
+- **System Labels**: {{ system_count }} (resolved via middleware)
+- **Custom Labels**: {{ user_count }} (resolved via middleware)
 
-### 🔍 **RESOURCE DATA FROM MCP CONTEXT:**
+### 🔧 **RESOURCE RESOLUTION DEMONSTRATION:**
 
-```xml
-<resource_status>{{ auth_status }}</resource_status>
-<gmail_data source="context.resources">
-  <user_email>{{ user_email }}</user_email>
-  <system_labels count="{{ system_count }}"></system_labels>
-  <user_labels count="{{ user_count }}">
-    {% for label in labels[:5] %}
-    <label id="{{ label.id }}" name="{{ label.name }}"/>
-    {% endfor %}
-  </user_labels>
-</gmail_data>
-{% if not authenticated %}
-<authentication_help>
-  <!-- If you see "Authentication required", run: -->
-  <!-- start_google_auth('your.email@gmail.com') -->  
-</authentication_help>
-{% endif %}
+This prompt demonstrates Template Parameter Middleware resource resolution:
+
+```yaml
+Resource Resolution Pipeline:
+  1. Prompt Template Contains: "{{user://current/email}}"
+  2. Template Middleware Detects: Resource URI pattern
+  3. Middleware Resolves: FastMCP resource system
+  4. Result Injected: {{ user_email }}
+  5. Template Renders: Final content with resolved data
+
+Resolved Resources:
+  - user://current/email → "{{ user_email }}"
+  - service://gmail/labels → {{ user_count + system_count }} total labels
+  - Authentication Status → {{ auth_status }}
 ```
 
-## 📧 Instant Send Example with Real Resource Integration
+### 🎭 **MIDDLEWARE RESOURCE CONTEXT:**
+
+```xml
+<template_middleware_demo>
+  <resolution_status>{{ auth_status }}</resolution_status>
+  <resources_resolved>
+    <user_email source="user://current/email">{{ user_email }}</user_email>
+    <gmail_labels source="service://gmail/labels" count="{{ user_count + system_count }}">
+      {% for label in labels[:5] %}
+      <label id="{{ label.id }}" name="{{ label.name }}" type="user"/>
+      {% endfor %}
+    </gmail_labels>
+  </resources_resolved>
+  <middleware_integration>true</middleware_integration>
+</template_middleware_demo>
+```
+
+## 📧 **Template Middleware In Action: Tool Call with Resource Resolution**
+
+This demonstrates how `{{user://current/email}}` gets resolved by Template Parameter Middleware in BOTH the prompt AND the tool parameters:
 
 ```xml
 <mcp_tool_call>
   <tool>send_gmail_message</tool>
   <params>
+    <!-- This resource variable gets resolved by Template Parameter Middleware: -->
     <user_google_email>{{user://current/email}}</user_google_email>
     <to>demo@example.com</to>
-    <subject>FastMCP2 Email Demo - {{ current_time[:10] }}</subject>
-    <content_type>mixed</content_type>
+    <subject>Template Middleware Demo - {{ current_time[:10] }}</subject>
     <body><![CDATA[
 Hello!
 
-This is a demonstration of FastMCP2's email capabilities with live Gmail integration.
+This email demonstrates Template Parameter Middleware resource resolution working in both:
+1. PROMPT templates (what you're reading now)
+2. TOOL parameters (this email's user_google_email field)
 
-🔥 Real Gmail Data:
+📊 Middleware-Resolved Data in This Prompt:
+• Resolved Email: {{ user_email }} (from {{user://current/email}})
+• Resolution Status: {{ auth_status }}
 {% for label in labels[:5] %}
-• Label: {{ label.name }} (ID: {{ label.id }})
+• Gmail Label: {{ label.name }} (ID: {{ label.id }})
 {% endfor %}
-• System Labels: {{ system_count }} available
-• Custom Labels: {{ user_count }} total  
-• Total Labels: {{ user_count + system_count }} (system + custom)
+• System Labels: {{ system_count }} • Custom Labels: {{ user_count }}
 
-Key benefits:
-• Zero setup required with real Gmail integration
-• Professional appearance using live label data
-• Instant results with actual user email
-• Cross-platform compatibility with Gmail resources
+🔧 How Template Middleware Works:
+1. Detects {{resource://uri}} patterns in tool parameters
+2. Resolves via FastMCP resource system
+3. Substitutes resolved values before tool execution
+4. Same system now works for prompt templates!
+
+✅ Benefits:
+• Unified resource resolution system
+• Same {{resource://uri}} syntax everywhere
+• Automatic resolution for both tools and prompts
+• No manual resource fetching needed
 
 Best regards,
-FastMCP2 Team with Jinja2 Templates
+Template Parameter Middleware Demo
     ]]></body>
   </params>
 </mcp_tool_call>
 ```
 
-## 🚀 Simple & Effective with Real Gmail Integration
+## 🎯 **Key Middleware Integration Points**
 
-### Zero Configuration Benefits + Live Data  
-- **Instant Results**: Works immediately with real Gmail data
-- **Professional Look**: Clean design enhanced with actual Gmail information
-- **Perfect Testing**: Ideal for verifying Gmail resource integration  
-- **Zero Config**: No setup required but uses live data
+### 🔄 **Resource Resolution Flow:**
+1. **Prompt Render**: This template resolves `user://current/email` → `{{ user_email }}`
+2. **Tool Parameter**: The tool call above also resolves `{{user://current/email}}`
+3. **Same System**: Both use Template Parameter Middleware
+4. **Unified Experience**: Consistent behavior across prompts and tools
 
-### Real Gmail Resource Integration Features
-- **Live User Email**: Automatically uses `user://current/email` for sender
-- **Actual Labels**: Shows real Gmail labels from `service://gmail/labels`
-- **System Integration**: Displays count of system labels available
-- **Authentication Status**: Real-time authentication validation
+### ⚡ **Template Middleware Benefits:**
+- **Consistent**: Same `{{resource://uri}}` syntax for prompts and tools
+- **Automatic**: No manual resource fetching required
+- **Cached**: Resources cached across multiple resolutions
+- **Reliable**: Fallback handling for auth/connection issues
+
+### 🛠️ **Before vs After:**
+
+**Before** (manual resource fetching):
+```python
+gmail_data = await context.read_resource("service://gmail/labels")
+user_email = await context.read_resource("user://current/email")
+# Manual processing and template context building...
+```
+
+**After** (Template Middleware):
+```python
+# Resources automatically resolved in template:
+# {{user://current/email}} → actual email
+# {{service://gmail/labels}} → actual labels
+# No manual fetching needed!
+```
 
 {% if not authenticated %}
-### 🔧 Setup Required
-To see your real Gmail data, run: `start_google_auth('your.email@gmail.com')`
+### 🔧 **Setup Required**
+To see your real Gmail data: `start_google_auth('your.email@gmail.com')`
 {% endif %}
 
 ---
-*Generated with FastMCP2 + Jinja2 templates • No more f-string CSS errors!*
+*Template Parameter Middleware Integration Demo • Same system for tools AND prompts!*

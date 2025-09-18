@@ -799,655 +799,11 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             )
 
     @mcp.tool(
-        name="format_sheet_cells",
-        description="Format cells in a Google Sheet with various styling options (text, colors, alignment, number formats)",
-        tags={"sheets", "format", "style", "cells", "google"},
-        annotations={
-            "title": "Format Sheet Cells",
-            "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True
-        }
-    )
-    async def format_sheet_cells(
-        spreadsheet_id: str,
-        sheet_id: int,
-        range_start_row: int,
-        range_end_row: int,
-        range_start_col: int,
-        range_end_col: int,
-        bold: Optional[bool] = None,
-        italic: Optional[bool] = None,
-        font_size: Optional[int] = None,
-        text_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
-        background_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
-        horizontal_alignment: Optional[str] = None,  # "LEFT", "CENTER", "RIGHT"
-        vertical_alignment: Optional[str] = None,  # "TOP", "MIDDLE", "BOTTOM"
-        number_format_type: Optional[str] = None,  # "TEXT", "NUMBER", "PERCENT", "CURRENCY", "DATE", "TIME", "DATE_TIME", "SCIENTIFIC"
-        number_format_pattern: Optional[str] = None,  # Custom pattern like "$#,##0.00"
-        wrap_strategy: Optional[str] = None,  # "WRAP", "OVERFLOW", "CLIP"
-        text_rotation: Optional[int] = None,  # Angle in degrees (-90 to 90)
-        user_google_email: UserGoogleEmailSheets = None
-    ) -> FormatCellsResponse:
-        """
-        Format cells in a Google Sheet with various styling options.
-
-        Args:
-            spreadsheet_id: The ID of the spreadsheet
-            sheet_id: The sheet ID (can be found via get_spreadsheet_info)
-            range_start_row: Starting row index (0-based)
-            range_end_row: Ending row index (exclusive)
-            range_start_col: Starting column index (0-based)
-            range_end_col: Ending column index (exclusive)
-            bold: Make text bold
-            italic: Make text italic
-            font_size: Font size in points (typically 8-72)
-            text_color: Text color as RGB dict (values 0.0-1.0)
-            background_color: Background color as RGB dict (values 0.0-1.0)
-            horizontal_alignment: Text horizontal alignment
-            vertical_alignment: Text vertical alignment
-            number_format_type: Predefined number format type
-            number_format_pattern: Custom number format pattern
-            wrap_strategy: Text wrapping strategy
-            text_rotation: Text rotation angle in degrees
-            user_google_email: User's Google email address
-
-        Returns:
-            FormatCellsResponse with details of applied formatting
-        """
-        logger.info(f"[format_sheet_cells] Formatting cells in spreadsheet {spreadsheet_id}, sheet {sheet_id}")
-
-        try:
-            sheets_service = await _get_sheets_service_with_fallback(user_google_email)
-
-            # Build the CellFormat object
-            cell_format = {}
-            fields = []
-            
-            # Text format
-            text_format = {}
-            if bold is not None:
-                text_format["bold"] = bold
-                fields.append("userEnteredFormat.textFormat.bold")
-            if italic is not None:
-                text_format["italic"] = italic
-                fields.append("userEnteredFormat.textFormat.italic")
-            if font_size is not None:
-                text_format["fontSize"] = font_size
-                fields.append("userEnteredFormat.textFormat.fontSize")
-            if text_color is not None:
-                text_format["foregroundColor"] = text_color
-                fields.append("userEnteredFormat.textFormat.foregroundColor")
-            
-            if text_format:
-                cell_format["textFormat"] = text_format
-            
-            # Background color
-            if background_color is not None:
-                cell_format["backgroundColor"] = background_color
-                fields.append("userEnteredFormat.backgroundColor")
-            
-            # Alignment
-            if horizontal_alignment:
-                cell_format["horizontalAlignment"] = horizontal_alignment
-                fields.append("userEnteredFormat.horizontalAlignment")
-            if vertical_alignment:
-                cell_format["verticalAlignment"] = vertical_alignment
-                fields.append("userEnteredFormat.verticalAlignment")
-            
-            # Number format
-            if number_format_type or number_format_pattern:
-                number_format = {}
-                if number_format_type:
-                    number_format["type"] = number_format_type
-                    fields.append("userEnteredFormat.numberFormat.type")
-                if number_format_pattern:
-                    number_format["pattern"] = number_format_pattern
-                    fields.append("userEnteredFormat.numberFormat.pattern")
-                cell_format["numberFormat"] = number_format
-            
-            # Wrap strategy
-            if wrap_strategy:
-                cell_format["wrapStrategy"] = wrap_strategy
-                fields.append("userEnteredFormat.wrapStrategy")
-            
-            # Text rotation
-            if text_rotation is not None:
-                cell_format["textRotation"] = {"angle": text_rotation}
-                fields.append("userEnteredFormat.textRotation")
-            
-            # Create the request
-            if cell_format and fields:
-                requests = [{
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": range_start_row,
-                            "endRowIndex": range_end_row,
-                            "startColumnIndex": range_start_col,
-                            "endColumnIndex": range_end_col
-                        },
-                        "cell": {
-                            "userEnteredFormat": cell_format
-                        },
-                        "fields": ",".join(fields)
-                    }
-                }]
-                
-                body = {"requests": requests}
-                response = await asyncio.to_thread(
-                    sheets_service.spreadsheets()
-                    .batchUpdate(spreadsheetId=spreadsheet_id, body=body)
-                    .execute
-                )
-                
-                # Build summary of applied formatting
-                formatting_applied = {
-                    "bold": bold,
-                    "italic": italic,
-                    "fontSize": font_size,
-                    "textColor": text_color,
-                    "backgroundColor": background_color,
-                    "horizontalAlignment": horizontal_alignment,
-                    "verticalAlignment": vertical_alignment,
-                    "numberFormat": f"{number_format_type or 'custom'}: {number_format_pattern}" if (number_format_type or number_format_pattern) else None,
-                    "wrapStrategy": wrap_strategy,
-                    "textRotation": text_rotation
-                }
-                # Remove None values
-                formatting_applied = {k: v for k, v in formatting_applied.items() if v is not None}
-                
-                range_str = f"R{range_start_row+1}C{range_start_col+1}:R{range_end_row}C{range_end_col}"
-                
-                logger.info(f"Successfully formatted cells in range {range_str}")
-                return FormatCellsResponse(
-                    spreadsheetId=spreadsheet_id,
-                    sheetId=sheet_id,
-                    range=range_str,
-                    formattingApplied=formatting_applied,
-                    success=True,
-                    message=f"Successfully formatted cells in range {range_str}"
-                )
-            else:
-                return FormatCellsResponse(
-                    spreadsheetId=spreadsheet_id,
-                    sheetId=sheet_id,
-                    range="",
-                    formattingApplied={},
-                    success=False,
-                    message="No formatting options provided"
-                )
-        
-        except HttpError as e:
-            error_msg = f"Failed to format cells: {e}"
-            logger.error(f"❌ {error_msg}")
-            return FormatCellsResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range="",
-                formattingApplied={},
-                success=False,
-                message="",
-                error=error_msg
-            )
-        except Exception as e:
-            error_msg = f"Unexpected error formatting cells: {str(e)}"
-            logger.error(f"❌ {error_msg}")
-            return FormatCellsResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range="",
-                formattingApplied={},
-                success=False,
-                message="",
-                error=error_msg
-            )
-
-    @mcp.tool(
-        name="update_sheet_borders",
-        description="Update borders for a range of cells in a Google Sheet",
-        tags={"sheets", "borders", "format", "style", "google"},
-        annotations={
-            "title": "Update Sheet Borders",
-            "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True
-        }
-    )
-    async def update_sheet_borders(
-        spreadsheet_id: str,
-        sheet_id: int,
-        range_start_row: int,
-        range_end_row: int,
-        range_start_col: int,
-        range_end_col: int,
-        border_style: str = "SOLID",  # "SOLID", "DASHED", "DOTTED", "SOLID_MEDIUM", "SOLID_THICK", "DOUBLE"
-        border_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
-        top: bool = True,
-        bottom: bool = True,
-        left: bool = True,
-        right: bool = True,
-        inner_horizontal: bool = False,
-        inner_vertical: bool = False,
-        user_google_email: UserGoogleEmailSheets = None
-    ) -> UpdateBordersResponse:
-        """
-        Update borders for a range of cells in a Google Sheet.
-
-        Args:
-            spreadsheet_id: The ID of the spreadsheet
-            sheet_id: The sheet ID
-            range_start_row: Starting row index (0-based)
-            range_end_row: Ending row index (exclusive)
-            range_start_col: Starting column index (0-based)
-            range_end_col: Ending column index (exclusive)
-            border_style: Style of the border
-            border_color: Border color as RGB dict (default: black)
-            top: Apply top border
-            bottom: Apply bottom border
-            left: Apply left border
-            right: Apply right border
-            inner_horizontal: Apply inner horizontal borders
-            inner_vertical: Apply inner vertical borders
-            user_google_email: User's Google email address
-
-        Returns:
-            UpdateBordersResponse with details of applied borders
-        """
-        logger.info(f"[update_sheet_borders] Updating borders in spreadsheet {spreadsheet_id}, sheet {sheet_id}")
-
-        try:
-            sheets_service = await _get_sheets_service_with_fallback(user_google_email)
-
-            # Default to black if no color provided
-            if border_color is None:
-                border_color = {"red": 0.0, "green": 0.0, "blue": 0.0}
-
-            # Build the border object
-            border = {
-                "style": border_style,
-                "color": border_color
-            }
-
-            # Create the request
-            request = {
-                "updateBorders": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": range_start_row,
-                        "endRowIndex": range_end_row,
-                        "startColumnIndex": range_start_col,
-                        "endColumnIndex": range_end_col
-                    }
-                }
-            }
-
-            # Add borders based on parameters
-            if top:
-                request["updateBorders"]["top"] = border
-            if bottom:
-                request["updateBorders"]["bottom"] = border
-            if left:
-                request["updateBorders"]["left"] = border
-            if right:
-                request["updateBorders"]["right"] = border
-            if inner_horizontal:
-                request["updateBorders"]["innerHorizontal"] = border
-            if inner_vertical:
-                request["updateBorders"]["innerVertical"] = border
-
-            body = {"requests": [request]}
-            response = await asyncio.to_thread(
-                sheets_service.spreadsheets()
-                .batchUpdate(spreadsheetId=spreadsheet_id, body=body)
-                .execute
-            )
-
-            range_str = f"R{range_start_row+1}C{range_start_col+1}:R{range_end_row}C{range_end_col}"
-            
-            logger.info(f"Successfully updated borders for range {range_str}")
-            return UpdateBordersResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range=range_str,
-                borderStyle=border_style,
-                success=True,
-                message=f"Successfully updated borders for range {range_str} with style {border_style}"
-            )
-        
-        except HttpError as e:
-            error_msg = f"Failed to update borders: {e}"
-            logger.error(f"❌ {error_msg}")
-            return UpdateBordersResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range="",
-                borderStyle=border_style,
-                success=False,
-                message="",
-                error=error_msg
-            )
-        except Exception as e:
-            error_msg = f"Unexpected error updating borders: {str(e)}"
-            logger.error(f"❌ {error_msg}")
-            return UpdateBordersResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range="",
-                borderStyle=border_style,
-                success=False,
-                message="",
-                error=error_msg
-            )
-
-    @mcp.tool(
-        name="add_conditional_formatting",
-        description="Add conditional formatting rules to a Google Sheet",
-        tags={"sheets", "conditional", "format", "rules", "google"},
-        annotations={
-            "title": "Add Conditional Formatting",
-            "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": False,
-            "openWorldHint": True
-        }
-    )
-    async def add_conditional_formatting(
-        spreadsheet_id: str,
-        sheet_id: int,
-        range_start_row: int,
-        range_end_row: int,
-        range_start_col: int,
-        range_end_col: int,
-        condition_type: str,  # "NUMBER_GREATER", "NUMBER_LESS", "NUMBER_EQ", "TEXT_CONTAINS", "TEXT_EQ", "BLANK", "NOT_BLANK", "CUSTOM_FORMULA"
-        value: Optional[Union[str, float]] = None,  # Value for comparison or formula
-        format_background_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
-        format_text_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
-        format_bold: Optional[bool] = None,
-        format_italic: Optional[bool] = None,
-        user_google_email: UserGoogleEmailSheets = None
-    ) -> ConditionalFormattingResponse:
-        """
-        Add conditional formatting rules to a Google Sheet.
-
-        Args:
-            spreadsheet_id: The ID of the spreadsheet
-            sheet_id: The sheet ID
-            range_start_row: Starting row index (0-based)
-            range_end_row: Ending row index (exclusive)
-            range_start_col: Starting column index (0-based)
-            range_end_col: Ending column index (exclusive)
-            condition_type: Type of condition to apply
-            value: Value for comparison (for NUMBER/TEXT conditions) or formula (for CUSTOM_FORMULA)
-            format_background_color: Background color when condition is met
-            format_text_color: Text color when condition is met
-            format_bold: Make text bold when condition is met
-            format_italic: Make text italic when condition is met
-            user_google_email: User's Google email address
-
-        Returns:
-            ConditionalFormattingResponse with details of the created rule
-        """
-        logger.info(f"[add_conditional_formatting] Adding conditional formatting to spreadsheet {spreadsheet_id}, sheet {sheet_id}")
-
-        try:
-            sheets_service = await _get_sheets_service_with_fallback(user_google_email)
-
-            # Build the condition
-            condition = {}
-            if condition_type == "NUMBER_GREATER":
-                condition = {
-                    "type": "NUMBER_GREATER",
-                    "values": [{"userEnteredValue": str(value)}]
-                }
-            elif condition_type == "NUMBER_LESS":
-                condition = {
-                    "type": "NUMBER_LESS",
-                    "values": [{"userEnteredValue": str(value)}]
-                }
-            elif condition_type == "NUMBER_EQ":
-                condition = {
-                    "type": "NUMBER_EQ",
-                    "values": [{"userEnteredValue": str(value)}]
-                }
-            elif condition_type == "TEXT_CONTAINS":
-                condition = {
-                    "type": "TEXT_CONTAINS",
-                    "values": [{"userEnteredValue": str(value)}]
-                }
-            elif condition_type == "TEXT_EQ":
-                condition = {
-                    "type": "TEXT_EQ",
-                    "values": [{"userEnteredValue": str(value)}]
-                }
-            elif condition_type == "BLANK":
-                condition = {"type": "BLANK"}
-            elif condition_type == "NOT_BLANK":
-                condition = {"type": "NOT_BLANK"}
-            elif condition_type == "CUSTOM_FORMULA":
-                condition = {
-                    "type": "CUSTOM_FORMULA",
-                    "values": [{"userEnteredValue": str(value)}]
-                }
-            else:
-                return ConditionalFormattingResponse(
-                    spreadsheetId=spreadsheet_id,
-                    sheetId=sheet_id,
-                    range="",
-                    condition=condition_type,
-                    success=False,
-                    message="",
-                    error=f"Invalid condition type: {condition_type}"
-                )
-
-            # Build the format
-            format_dict = {}
-            if format_background_color:
-                format_dict["backgroundColor"] = format_background_color
-            if format_text_color or format_bold is not None or format_italic is not None:
-                text_format = {}
-                if format_text_color:
-                    text_format["foregroundColor"] = format_text_color
-                if format_bold is not None:
-                    text_format["bold"] = format_bold
-                if format_italic is not None:
-                    text_format["italic"] = format_italic
-                format_dict["textFormat"] = text_format
-
-            # Create the rule
-            rule = {
-                "ranges": [{
-                    "sheetId": sheet_id,
-                    "startRowIndex": range_start_row,
-                    "endRowIndex": range_end_row,
-                    "startColumnIndex": range_start_col,
-                    "endColumnIndex": range_end_col
-                }],
-                "booleanRule": {
-                    "condition": condition,
-                    "format": format_dict
-                }
-            }
-
-            request = {
-                "addConditionalFormatRule": {
-                    "rule": rule,
-                    "index": 0  # Add at the beginning (highest priority)
-                }
-            }
-
-            body = {"requests": [request]}
-            response = await asyncio.to_thread(
-                sheets_service.spreadsheets()
-                .batchUpdate(spreadsheetId=spreadsheet_id, body=body)
-                .execute
-            )
-
-            range_str = f"R{range_start_row+1}C{range_start_col+1}:R{range_end_row}C{range_end_col}"
-            
-            logger.info(f"Successfully added conditional formatting rule to range {range_str}")
-            return ConditionalFormattingResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range=range_str,
-                condition=f"{condition_type}: {value}" if value else condition_type,
-                success=True,
-                message=f"Successfully added conditional formatting rule to range {range_str}"
-            )
-        
-        except HttpError as e:
-            error_msg = f"Failed to add conditional formatting: {e}"
-            logger.error(f"❌ {error_msg}")
-            return ConditionalFormattingResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range="",
-                condition=condition_type,
-                success=False,
-                message="",
-                error=error_msg
-            )
-        except Exception as e:
-            error_msg = f"Unexpected error adding conditional formatting: {str(e)}"
-            logger.error(f"❌ {error_msg}")
-            return ConditionalFormattingResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range="",
-                condition=condition_type,
-                success=False,
-                message="",
-                error=error_msg
-            )
-
-    @mcp.tool(
-        name="merge_cells",
-        description="Merge or unmerge cells in a Google Sheet",
-        tags={"sheets", "merge", "cells", "format", "google"},
-        annotations={
-            "title": "Merge Cells",
-            "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True
-        }
-    )
-    async def merge_cells(
-        spreadsheet_id: str,
-        sheet_id: int,
-        range_start_row: int,
-        range_end_row: int,
-        range_start_col: int,
-        range_end_col: int,
-        merge_type: str = "MERGE_ALL",  # "MERGE_ALL", "MERGE_ROWS", "MERGE_COLUMNS", or "UNMERGE"
-        user_google_email: UserGoogleEmailSheets = None
-    ) -> MergeCellsResponse:
-        """
-        Merge or unmerge cells in a Google Sheet.
-
-        Args:
-            spreadsheet_id: The ID of the spreadsheet
-            sheet_id: The sheet ID
-            range_start_row: Starting row index (0-based)
-            range_end_row: Ending row index (exclusive)
-            range_start_col: Starting column index (0-based)
-            range_end_col: Ending column index (exclusive)
-            merge_type: Type of merge operation:
-                - "MERGE_ALL": Merge all cells in range into one
-                - "MERGE_ROWS": Merge cells in each row separately
-                - "MERGE_COLUMNS": Merge cells in each column separately
-                - "UNMERGE": Unmerge all cells in range
-            user_google_email: User's Google email address
-
-        Returns:
-            MergeCellsResponse with details of the merge operation
-        """
-        logger.info(f"[merge_cells] {merge_type} operation on spreadsheet {spreadsheet_id}, sheet {sheet_id}")
-
-        try:
-            sheets_service = await _get_sheets_service_with_fallback(user_google_email)
-
-            # Create the appropriate request based on merge_type
-            if merge_type == "UNMERGE":
-                request = {
-                    "unmergeCells": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": range_start_row,
-                            "endRowIndex": range_end_row,
-                            "startColumnIndex": range_start_col,
-                            "endColumnIndex": range_end_col
-                        }
-                    }
-                }
-            else:
-                request = {
-                    "mergeCells": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": range_start_row,
-                            "endRowIndex": range_end_row,
-                            "startColumnIndex": range_start_col,
-                            "endColumnIndex": range_end_col
-                        },
-                        "mergeType": merge_type
-                    }
-                }
-
-            body = {"requests": [request]}
-            response = await asyncio.to_thread(
-                sheets_service.spreadsheets()
-                .batchUpdate(spreadsheetId=spreadsheet_id, body=body)
-                .execute
-            )
-
-            range_str = f"R{range_start_row+1}C{range_start_col+1}:R{range_end_row}C{range_end_col}"
-            
-            operation = "unmerged" if merge_type == "UNMERGE" else "merged"
-            logger.info(f"Successfully {operation} cells in range {range_str}")
-            
-            return MergeCellsResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range=range_str,
-                mergeType=merge_type,
-                success=True,
-                message=f"Successfully {operation} cells in range {range_str} with type {merge_type}"
-            )
-        
-        except HttpError as e:
-            error_msg = f"Failed to merge/unmerge cells: {e}"
-            logger.error(f"❌ {error_msg}")
-            return MergeCellsResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range="",
-                mergeType=merge_type,
-                success=False,
-                message="",
-                error=error_msg
-            )
-        except Exception as e:
-            error_msg = f"Unexpected error merging/unmerging cells: {str(e)}"
-            logger.error(f"❌ {error_msg}")
-            return MergeCellsResponse(
-                spreadsheetId=spreadsheet_id,
-                sheetId=sheet_id,
-                range="",
-                mergeType=merge_type,
-                success=False,
-                message="",
-                error=error_msg
-            )
-
-    @mcp.tool(
         name="format_sheet_range",
-        description="Apply comprehensive formatting to a range in Google Sheets with multiple formatting options in a single request",
-        tags={"sheets", "format", "comprehensive", "batch", "google"},
+        description="Apply comprehensive formatting to a range in Google Sheets with multiple formatting options in a single request - unified formatting tool that replaces format_sheet_cells, update_sheet_borders, add_conditional_formatting, and merge_cells",
+        tags={"sheets", "format", "comprehensive", "unified", "batch", "google"},
         annotations={
-            "title": "Format Sheet Range (Comprehensive)",
+            "title": "Unified Sheet Range Formatter",
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": True,
@@ -1461,16 +817,43 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         range_end_row: int,
         range_start_col: int,
         range_end_col: int,
-        # Cell formatting options
+        # Cell formatting options (replaces format_sheet_cells)
         cell_format: Optional[dict] = None,
-        # Border options
+        # Individual cell format parameters for convenience
+        bold: Optional[bool] = None,
+        italic: Optional[bool] = None,
+        font_size: Optional[int] = None,
+        text_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
+        background_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
+        horizontal_alignment: Optional[str] = None,  # "LEFT", "CENTER", "RIGHT"
+        vertical_alignment: Optional[str] = None,  # "TOP", "MIDDLE", "BOTTOM"
+        number_format_type: Optional[str] = None,  # "TEXT", "NUMBER", "PERCENT", "CURRENCY", "DATE", "TIME", "DATE_TIME", "SCIENTIFIC"
+        number_format_pattern: Optional[str] = None,  # Custom pattern like "$#,##0.00"
+        wrap_strategy: Optional[str] = None,  # "WRAP", "CLIP"
+        text_rotation: Optional[int] = None,  # Angle in degrees (-90 to 90)
+        # Border options (replaces update_sheet_borders)
         apply_borders: bool = False,
-        border_style: Optional[str] = None,
-        border_positions: Optional[dict] = None,  # {"top": True, "bottom": True, "left": True, "right": True}
-        # Merge options
-        merge_cells_option: Optional[str] = None,  # "MERGE_ALL", "MERGE_ROWS", "MERGE_COLUMNS"
-        # Conditional formatting
+        border_style: Optional[str] = None,  # "SOLID", "DASHED", "DOTTED", "SOLID_MEDIUM", "SOLID_THICK", "DOUBLE"
+        border_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
+        border_positions: Optional[dict] = None,  # {"top": True, "bottom": True, "left": True, "right": True, "inner_horizontal": False, "inner_vertical": False}
+        # Individual border position parameters for convenience
+        top_border: Optional[bool] = None,
+        bottom_border: Optional[bool] = None,
+        left_border: Optional[bool] = None,
+        right_border: Optional[bool] = None,
+        inner_horizontal_border: Optional[bool] = None,
+        inner_vertical_border: Optional[bool] = None,
+        # Merge options (replaces merge_cells)
+        merge_cells_option: Optional[str] = None,  # "MERGE_ALL", "MERGE_ROWS", "MERGE_COLUMNS", "UNMERGE"
+        # Conditional formatting options (replaces add_conditional_formatting)
         conditional_rules: Optional[List[dict]] = None,
+        # Simple conditional formatting parameters for convenience
+        condition_type: Optional[str] = None,  # "NUMBER_GREATER", "NUMBER_LESS", "NUMBER_EQ", "TEXT_CONTAINS", "TEXT_EQ", "BLANK", "NOT_BLANK", "CUSTOM_FORMULA"
+        condition_value: Optional[Union[str, float]] = None,  # Value for comparison or formula
+        condition_format_background_color: Optional[dict] = None,  # Background color when condition is met
+        condition_format_text_color: Optional[dict] = None,  # Text color when condition is met
+        condition_format_bold: Optional[bool] = None,  # Make text bold when condition is met
+        condition_format_italic: Optional[bool] = None,  # Make text italic when condition is met
         # Column width
         column_width: Optional[int] = None,
         # Row height
@@ -1525,67 +908,131 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             requests = []
             formatting_details = {}
 
-            # 1. Cell formatting
+            # 1. Cell formatting (combining cell_format dict with convenience parameters)
+            final_cell_format = {}
+            fields = []
+            
+            # Start with cell_format dict if provided
             if cell_format:
+                final_cell_format.update(cell_format)
+            
+            # Override with convenience parameters (they take precedence)
+            text_format_updates = {}
+            if bold is not None:
+                text_format_updates["bold"] = bold
+                fields.append("userEnteredFormat.textFormat.bold")
+            if italic is not None:
+                text_format_updates["italic"] = italic
+                fields.append("userEnteredFormat.textFormat.italic")
+            if font_size is not None:
+                text_format_updates["fontSize"] = font_size
+                fields.append("userEnteredFormat.textFormat.fontSize")
+            if text_color is not None:
+                text_format_updates["foregroundColor"] = text_color
+                fields.append("userEnteredFormat.textFormat.foregroundColor")
+            
+            # Merge text format updates
+            if text_format_updates:
+                if "textFormat" not in final_cell_format:
+                    final_cell_format["textFormat"] = {}
+                final_cell_format["textFormat"].update(text_format_updates)
+            
+            # Other convenience parameters
+            if background_color is not None:
+                final_cell_format["backgroundColor"] = background_color
+                fields.append("userEnteredFormat.backgroundColor")
+            if horizontal_alignment is not None:
+                final_cell_format["horizontalAlignment"] = horizontal_alignment
+                fields.append("userEnteredFormat.horizontalAlignment")
+            if vertical_alignment is not None:
+                final_cell_format["verticalAlignment"] = vertical_alignment
+                fields.append("userEnteredFormat.verticalAlignment")
+            if wrap_strategy is not None:
+                final_cell_format["wrapStrategy"] = wrap_strategy
+                fields.append("userEnteredFormat.wrapStrategy")
+            if text_rotation is not None:
+                final_cell_format["textRotation"] = {"angle": text_rotation}
+                fields.append("userEnteredFormat.textRotation")
+            # Number format - both type and pattern must be provided together
+            if number_format_type and number_format_pattern:
+                number_format = {
+                    "type": number_format_type,
+                    "pattern": number_format_pattern
+                }
+                fields.append("userEnteredFormat.numberFormat.type")
+                fields.append("userEnteredFormat.numberFormat.pattern")
+                final_cell_format["numberFormat"] = number_format
+            elif number_format_type or number_format_pattern:
+                # Return error if only one is provided
+                return FormatRangeResponse(
+                    spreadsheetId=spreadsheet_id,
+                    sheetId=sheet_id,
+                    range="",
+                    requestsApplied=0,
+                    formattingDetails={},
+                    success=False,
+                    message="",
+                    error="Both number_format_type and number_format_pattern must be provided together, or neither."
+                )
+            
+            # Create cell format request if we have any formatting
+            if final_cell_format and fields:
                 cell_format_request = {}
-                fields = []
                 
                 # Build text format
-                text_format = {}
-                if "bold" in cell_format:
-                    text_format["bold"] = cell_format["bold"]
-                    fields.append("userEnteredFormat.textFormat.bold")
-                if "italic" in cell_format:
-                    text_format["italic"] = cell_format["italic"]
-                    fields.append("userEnteredFormat.textFormat.italic")
-                if "fontSize" in cell_format:
-                    text_format["fontSize"] = cell_format["fontSize"]
-                    fields.append("userEnteredFormat.textFormat.fontSize")
-                if "textColor" in cell_format:
-                    text_format["foregroundColor"] = cell_format["textColor"]
-                    fields.append("userEnteredFormat.textFormat.foregroundColor")
+                if "textFormat" in final_cell_format:
+                    cell_format_request["textFormat"] = final_cell_format["textFormat"]
                 
-                if text_format:
-                    cell_format_request["textFormat"] = text_format
+                # Other properties
+                for prop in ["backgroundColor", "horizontalAlignment", "verticalAlignment",
+                           "numberFormat", "wrapStrategy", "textRotation"]:
+                    if prop in final_cell_format:
+                        cell_format_request[prop] = final_cell_format[prop]
                 
-                # Other cell format properties
-                if "backgroundColor" in cell_format:
-                    cell_format_request["backgroundColor"] = cell_format["backgroundColor"]
-                    fields.append("userEnteredFormat.backgroundColor")
-                if "horizontalAlignment" in cell_format:
-                    cell_format_request["horizontalAlignment"] = cell_format["horizontalAlignment"]
-                    fields.append("userEnteredFormat.horizontalAlignment")
-                if "verticalAlignment" in cell_format:
-                    cell_format_request["verticalAlignment"] = cell_format["verticalAlignment"]
-                    fields.append("userEnteredFormat.verticalAlignment")
-                if "numberFormat" in cell_format:
-                    cell_format_request["numberFormat"] = cell_format["numberFormat"]
-                    fields.append("userEnteredFormat.numberFormat")
-                if "wrapStrategy" in cell_format:
-                    cell_format_request["wrapStrategy"] = cell_format["wrapStrategy"]
-                    fields.append("userEnteredFormat.wrapStrategy")
-                
-                if cell_format_request and fields:
-                    requests.append({
-                        "repeatCell": {
-                            "range": {
-                                "sheetId": sheet_id,
-                                "startRowIndex": range_start_row,
-                                "endRowIndex": range_end_row,
-                                "startColumnIndex": range_start_col,
-                                "endColumnIndex": range_end_col
-                            },
-                            "cell": {"userEnteredFormat": cell_format_request},
-                            "fields": ",".join(fields)
-                        }
-                    })
-                    formatting_details["cellFormat"] = cell_format
+                requests.append({
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": range_start_row,
+                            "endRowIndex": range_end_row,
+                            "startColumnIndex": range_start_col,
+                            "endColumnIndex": range_end_col
+                        },
+                        "cell": {"userEnteredFormat": cell_format_request},
+                        "fields": ",".join(fields)
+                    }
+                })
+                formatting_details["cellFormat"] = final_cell_format
 
-            # 2. Borders
-            if apply_borders and border_style:
-                border = {"style": border_style}
-                if not border_positions:
-                    border_positions = {"top": True, "bottom": True, "left": True, "right": True}
+            # 2. Borders (combining border_positions dict with convenience parameters)
+            if apply_borders:
+                final_border_style = border_style or "SOLID"
+                final_border_color = border_color or {"red": 0.0, "green": 0.0, "blue": 0.0}
+                
+                # Determine border positions
+                final_border_positions = {}
+                if border_positions:
+                    final_border_positions = border_positions.copy()
+                
+                # Override with convenience parameters
+                if top_border is not None:
+                    final_border_positions["top"] = top_border
+                if bottom_border is not None:
+                    final_border_positions["bottom"] = bottom_border
+                if left_border is not None:
+                    final_border_positions["left"] = left_border
+                if right_border is not None:
+                    final_border_positions["right"] = right_border
+                if inner_horizontal_border is not None:
+                    final_border_positions["innerHorizontal"] = inner_horizontal_border
+                if inner_vertical_border is not None:
+                    final_border_positions["innerVertical"] = inner_vertical_border
+                
+                # Default to all borders if none specified
+                if not final_border_positions:
+                    final_border_positions = {"top": True, "bottom": True, "left": True, "right": True}
+                
+                border = {"style": final_border_style, "color": final_border_color}
                 
                 border_request = {
                     "updateBorders": {
@@ -1599,12 +1046,16 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     }
                 }
                 
-                for position, apply in border_positions.items():
+                for position, apply in final_border_positions.items():
                     if apply:
                         border_request["updateBorders"][position] = border
                 
                 requests.append(border_request)
-                formatting_details["borders"] = {"style": border_style, "positions": border_positions}
+                formatting_details["borders"] = {
+                    "style": final_border_style,
+                    "color": final_border_color,
+                    "positions": final_border_positions
+                }
 
             # 3. Merge cells
             if merge_cells_option:
@@ -1654,7 +1105,79 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 })
                 formatting_details["rowHeight"] = row_height
 
-            # 6. Freeze rows/columns
+            # 6. Conditional formatting (combining conditional_rules with convenience parameters)
+            final_conditional_rules = []
+            if conditional_rules:
+                final_conditional_rules.extend(conditional_rules)
+            
+            # Add simple conditional rule from convenience parameters
+            if condition_type:
+                condition = {}
+                if condition_type in ["NUMBER_GREATER", "NUMBER_LESS", "NUMBER_EQ"]:
+                    if condition_value is not None:
+                        condition = {
+                            "type": condition_type,
+                            "values": [{"userEnteredValue": str(condition_value)}]
+                        }
+                elif condition_type in ["TEXT_CONTAINS", "TEXT_EQ"]:
+                    if condition_value is not None:
+                        condition = {
+                            "type": condition_type,
+                            "values": [{"userEnteredValue": str(condition_value)}]
+                        }
+                elif condition_type == "CUSTOM_FORMULA":
+                    if condition_value is not None:
+                        condition = {
+                            "type": "CUSTOM_FORMULA",
+                            "values": [{"userEnteredValue": str(condition_value)}]
+                        }
+                elif condition_type in ["BLANK", "NOT_BLANK"]:
+                    condition = {"type": condition_type}
+                
+                if condition:
+                    # Build format for condition
+                    format_dict = {}
+                    if condition_format_background_color:
+                        format_dict["backgroundColor"] = condition_format_background_color
+                    if (condition_format_text_color or condition_format_bold is not None
+                        or condition_format_italic is not None):
+                        text_format = {}
+                        if condition_format_text_color:
+                            text_format["foregroundColor"] = condition_format_text_color
+                        if condition_format_bold is not None:
+                            text_format["bold"] = condition_format_bold
+                        if condition_format_italic is not None:
+                            text_format["italic"] = condition_format_italic
+                        format_dict["textFormat"] = text_format
+                    
+                    rule = {
+                        "ranges": [{
+                            "sheetId": sheet_id,
+                            "startRowIndex": range_start_row,
+                            "endRowIndex": range_end_row,
+                            "startColumnIndex": range_start_col,
+                            "endColumnIndex": range_end_col
+                        }],
+                        "booleanRule": {
+                            "condition": condition,
+                            "format": format_dict
+                        }
+                    }
+                    final_conditional_rules.append(rule)
+            
+            # Add conditional formatting rules
+            for rule in final_conditional_rules:
+                requests.append({
+                    "addConditionalFormatRule": {
+                        "rule": rule,
+                        "index": 0  # Add at the beginning (highest priority)
+                    }
+                })
+            
+            if final_conditional_rules:
+                formatting_details["conditionalFormatting"] = len(final_conditional_rules)
+
+            # 7. Freeze rows/columns
             if freeze_rows is not None or freeze_columns is not None:
                 grid_properties = {}
                 if freeze_rows is not None:

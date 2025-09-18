@@ -206,6 +206,22 @@ class Settings(BaseSettings):
         logging.info(f"🔧 SETTINGS DEBUG - Environment variables: QDRANT_URL='{env_qdrant_url}', QDRANT_KEY={'***' if env_qdrant_key else 'None'}")
         logging.info(f"🔧 SETTINGS DEBUG - Settings fields: qdrant_url='{self.qdrant_url}', qdrant_key={'***' if self.qdrant_key and self.qdrant_key != 'NONE' else 'None'}")
         
+        # DEBUG: Log FastMCP GoogleProvider environment variable loading
+        env_fastmcp_auth = os.getenv("FASTMCP_SERVER_AUTH")
+        env_fastmcp_client_id = os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID")
+        env_fastmcp_client_secret = os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET")
+        env_fastmcp_base_url = os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL")
+        logging.info(f"🔧 FASTMCP DEBUG - Environment variables:")
+        logging.info(f"🔧   FASTMCP_SERVER_AUTH='{env_fastmcp_auth}'")
+        logging.info(f"🔧   FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID={'***' if env_fastmcp_client_id else 'None'}")
+        logging.info(f"🔧   FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET={'***' if env_fastmcp_client_secret else 'None'}")
+        logging.info(f"🔧   FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL='{env_fastmcp_base_url}'")
+        logging.info(f"🔧 FASTMCP DEBUG - Settings fields:")
+        logging.info(f"🔧   fastmcp_server_auth='{self.fastmcp_server_auth}'")
+        logging.info(f"🔧   fastmcp_server_auth_google_client_id={'***' if self.fastmcp_server_auth_google_client_id else 'None'}")
+        logging.info(f"🔧   fastmcp_server_auth_google_client_secret={'***' if self.fastmcp_server_auth_google_client_secret else 'None'}")
+        logging.info(f"🔧   fastmcp_server_auth_google_base_url='{self.fastmcp_server_auth_google_base_url}'")
+        
         # Cloud-aware configuration
         if self.is_cloud_deployment:
             # Use cloud-optimized settings
@@ -353,20 +369,25 @@ class Settings(BaseSettings):
         # This is needed because FastMCP Cloud only hosts the MCP endpoint, not OAuth endpoints
         env_oauth_uri = os.getenv("OAUTH_REDIRECT_URI", self.oauth_redirect_uri)
         if env_oauth_uri and "localhost" in env_oauth_uri:
+            # In cloud deployment, use HTTPS for client-facing URLs even if enable_https=false
+            # (CloudFlare handles HTTPS, but clients need HTTPS URLs)
+            protocol = "https" if self.is_cloud_deployment else self.protocol
             # Extract port from OAuth redirect URI for consistency
             if ":8002" in env_oauth_uri:
-                return f"{self.protocol}://localhost:8002"
+                return f"{protocol}://localhost:8002"
             elif ":8000" in env_oauth_uri:
-                return f"{self.protocol}://localhost:8000"
+                return f"{protocol}://localhost:8000"
             else:
-                return f"{self.protocol}://localhost:{self.server_port}"
+                return f"{protocol}://localhost:{self.server_port}"
         
         # Check if we have an explicit BASE_URL environment variable for cloud MCP endpoint
         explicit_base_url = os.getenv("BASE_URL")
         if explicit_base_url:
             return explicit_base_url
-            
-        return f"{self.protocol}://{self.server_host}:{self.server_port}"
+        
+        # In cloud deployment, use HTTPS for client-facing URLs even if enable_https=false
+        protocol = "https" if self.is_cloud_deployment else self.protocol
+        return f"{protocol}://{self.server_host}:{self.server_port}"
     
     @property
     def dynamic_oauth_redirect_uri(self) -> str:

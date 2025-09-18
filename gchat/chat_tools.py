@@ -1469,128 +1469,129 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 error="No webhook URL provided"
             )
 
-    @mcp.tool(
-        name="get_card_framework_status",
-        description="Get the status of Card Framework integration",
-        tags={"chat", "card", "framework", "status", "google"},
-        annotations={
-            "title": "Get Card Framework Status",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True
-        }
-    )
-    async def get_card_framework_status() -> str:
-        """
-        Get the status of Card Framework integration.
+    # @mcp.tool(
+    #     name="get_card_framework_status",
+    #     description="Get the status of Card Framework integration",
+    #     tags={"chat", "card", "framework", "status", "google"},
+    #     annotations={
+    #         "title": "Get Card Framework Status",
+    #         "readOnlyHint": True,
+    #         "destructiveHint": False,
+    #         "idempotentHint": True,
+    #         "openWorldHint": True
+    #     }
+    # )
+    # async def get_card_framework_status() -> str:
+    #     """
+    #     Get the status of Card Framework integration.
 
-        Returns:
-            str: Status information about Card Framework availability
-        """
-        if card_manager:
-            status = card_manager.get_framework_status()
-            return f"Card Framework Status: {status}"
-        else:
-            return "Card Framework Status: Not available - using fallback text messaging"
+    #     Returns:
+    #         str: Status information about Card Framework availability
+    #     """
+    #     if card_manager:
+    #         status = card_manager.get_framework_status()
+    #         return f"Card Framework Status: {status}"
+    #     else:
+    #         return "Card Framework Status: Not available - using fallback text messaging"
 
-    @mcp.tool(
-        name="get_adapter_system_status",
-        description="Get the status of the adapter system integration",
-        tags={"chat", "adapter", "system", "status", "google"},
-        annotations={
-            "title": "Get Adapter System Status",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True
-        }
-    )
-    async def get_adapter_system_status() -> str:
-        """
-        Get the status of the adapter system integration.
+    # @mcp.tool(
+    #     name="get_adapter_system_status",
+    #     description="Get the status of the adapter system integration",
+    #     tags={"chat", "adapter", "system", "status", "google"},
+    #     annotations={
+    #         "title": "Get Adapter System Status",
+    #         "readOnlyHint": True,
+    #         "destructiveHint": False,
+    #         "idempotentHint": True,
+    #         "openWorldHint": True
+    #     }
+    # )
+    # async def get_adapter_system_status() -> str:
+    #     """
+    #     Get the status of the adapter system integration.
 
-        Returns:
-            str: Status information about adapter system availability
-        """
-        if ADAPTERS_AVAILABLE and adapter_registry:
-            # Check if methods exist before calling them
-            try:
-                if hasattr(adapter_registry, 'get_adapter_count'):
-                    adapter_count = adapter_registry.get_adapter_count()
-                    adapter_names = adapter_registry.get_adapter_names() if hasattr(adapter_registry, 'get_adapter_names') else "Unknown"
-                    return f"Adapter System Status: Available - {adapter_count} adapters registered: {adapter_names}"
-                else:
-                    return f"Adapter System Status: Available - adapter registry loaded (methods not available)"
-            except Exception as e:
-                return f"Adapter System Status: Available but error accessing details: {e}"
-        else:
-            return "Adapter System Status: Not available"
+    #     Returns:
+    #         str: Status information about adapter system availability
+    #     """
+    #     if ADAPTERS_AVAILABLE and adapter_registry:
+    #         # Check if methods exist before calling them
+    #         try:
+    #             if hasattr(adapter_registry, 'get_adapter_count'):
+    #                 adapter_count = adapter_registry.get_adapter_count()
+    #                 adapter_names = adapter_registry.get_adapter_names() if hasattr(adapter_registry, 'get_adapter_names') else "Unknown"
+    #                 return f"Adapter System Status: Available - {adapter_count} adapters registered: {adapter_names}"
+    #             else:
+    #                 return f"Adapter System Status: Available - adapter registry loaded (methods not available)"
+    #         except Exception as e:
+    #             return f"Adapter System Status: Available but error accessing details: {e}"
+    #     else:
+    #         return "Adapter System Status: Not available"
 
-    @mcp.tool(
-        name="list_available_card_types",
-        description="List all available card types and their descriptions",
-        tags={"chat", "card", "types", "list", "google"},
-        annotations={
-            "title": "List Available Card Types",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True
-        }
-    )
-    async def list_available_card_types() -> CardTypesResponse:
-        """
-        List all available card types and their descriptions.
+    # @mcp.tool(
+    #     name="list_available_card_types",
+    #     description="List all available card types and their descriptions",
+    #     tags={"chat", "card", "types", "list", "google"},
+    #     annotations={
+    #         "title": "List Available Card Types",
+    #         "readOnlyHint": True,
+    #         "destructiveHint": False,
+    #         "idempotentHint": True,
+    #         "openWorldHint": True
+    #     }
+    # )
+    # async def list_available_card_types() -> CardTypesResponse:
+    #     """
+    #     List all available card types and their descriptions.
 
-        Returns:
-            CardTypesResponse: Structured response with available card types
-        """
-        try:
-            card_type_infos: List[CardTypeInfo] = [
-                CardTypeInfo(
-                    type="simple",
-                    description="Basic card with title, text, optional subtitle and image",
-                    supported_features=["title", "text", "subtitle", "image"]
-                ),
-                CardTypeInfo(
-                    type="interactive",
-                    description="Card with buttons for user interaction",
-                    supported_features=["title", "text", "buttons", "actions"]
-                ),
-                CardTypeInfo(
-                    type="form",
-                    description="Card with input fields and submit functionality",
-                    supported_features=["title", "text", "input_fields", "submit_button"]
-                ),
-                CardTypeInfo(
-                    type="rich",
-                    description="Advanced card with multiple sections, columns, decorated text, and complex layouts",
-                    supported_features=["sections", "columns", "decorated_text", "grids", "advanced_widgets"]
-                )
-            ]
+    #     Returns:
+    #         CardTypesResponse: Structured response with available card types
+    #     """
+    #     try:
+    #         card_type_infos: List[CardTypeInfo] = [
+    #             CardTypeInfo(
+    #                 type="simple",
+    #                 description="Basic card with title, text, optional subtitle and image",
+    #                 supported_features=["title", "text", "subtitle", "image"]
+    #             ),
+    #             CardTypeInfo(
+    #                 type="interactive",
+    #                 description="Card with buttons for user interaction",
+    #                 supported_features=["title", "text", "buttons", "actions"]
+    #             ),
+    #             CardTypeInfo(
+    #                 type="form",
+    #                 description="Card with input fields and submit functionality",
+    #                 supported_features=["title", "text", "input_fields", "submit_button"]
+    #             ),
+    #             CardTypeInfo(
+    #                 type="rich",
+    #                 description="Advanced card with multiple sections, columns, decorated text, and complex layouts",
+    #                 supported_features=["sections", "columns", "decorated_text", "grids", "advanced_widgets"]
+    #             )
+    #         ]
             
-            framework_status = "Not available"
-            if card_manager:
-                status = card_manager.get_framework_status()
-                framework_status = 'Available' if status['framework_available'] else 'Fallback mode'
+    #         framework_status = "Not available"
+    #         if card_manager:
+    #             status = card_manager.get_framework_status()
+    #             framework_status = 'Available' if status['framework_available'] else 'Fallback mode'
             
-            return CardTypesResponse(
-                card_types=card_type_infos,
-                count=len(card_type_infos),
-                framework_status=framework_status,
-                error=None
-            )
-        except Exception as e:
-            logger.error(f"Error in list_available_card_types: {e}")
-            return CardTypesResponse(
-                card_types=[],
-                count=0,
-                framework_status="Error",
-                error=str(e)
-            )
+    #         return CardTypesResponse(
+    #             card_types=card_type_infos,
+    #             count=len(card_type_infos),
+    #             framework_status=framework_status,
+    #             error=None
+    #         )
+    #     except Exception as e:
+    #         logger.error(f"Error in list_available_card_types: {e}")
+    #         return CardTypesResponse(
+    #             card_types=[],
+    #             count=0,
+    #             framework_status="Error",
+    #             error=str(e)
+    #         )
 
-    
+
+
     @mcp.tool(
         name="send_rich_card",
         description="Sends a rich card message to a Google Chat space with advanced formatting",

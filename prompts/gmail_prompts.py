@@ -140,39 +140,39 @@ Run: `start_google_auth('your.email@gmail.com')`
     
     async def quick_email_demo(self, context: Context) -> PromptMessage:
         """
-        Clean Gmail Quick Email Demo using Jinja2 templates.
+        Gmail Quick Email Demo that returns template content with {{resource://uri}} variables.
         
-        This replaces the broken f-string version with a clean Jinja2 approach
-        that doesn't have CSS parsing errors.
+        The Template Parameter Middleware will automatically resolve these variables
+        in the on_get_prompt hook after this function returns.
         """
         try:
-            # Get Gmail resource data
-            gmail_data = await self._get_gmail_resources(context)
-            
-            # Prepare template context
-            template_context = {
-                'request_id': context.request_id,
-                'current_time': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-                'current_date': datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                'authenticated': gmail_data['authenticated'],
-                'auth_status': gmail_data['auth_status'],
-                'user_email': gmail_data['user_email'],
-                'labels': gmail_data['labels'],
-                'system_count': gmail_data['system_count'],
-                'user_count': gmail_data['user_count']
-            }
-            
-            # Render with Jinja2
+            # Return template content with resource variables - middleware will resolve them!
             if JINJA2_AVAILABLE and self.jinja_env:
                 try:
                     template = self.jinja_env.get_template('quick_demo_simple.txt')
-                    content = template.render(**template_context)
-                    logger.info("✅ Rendered with Jinja2 template")
-                except Exception as e:
-                    logger.warning(f"Template error: {e}, using fallback")
-                    content = self._render_fallback(template_context)
+                    # Return raw template content with resource variables
+                    template_content = template.source
+                except Exception:
+                    template_content = self._get_template_content_with_resources()
             else:
-                content = self._render_fallback(template_context)
+                template_content = self._get_template_content_with_resources()
+            
+            # Basic template context that doesn't require resource resolution
+            basic_context = {
+                'request_id': context.request_id,
+                'current_time': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                'current_date': datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            }
+            
+            # Do basic Jinja2 rendering for non-resource variables only
+            if JINJA2_AVAILABLE and self.jinja_env:
+                template_obj = self.jinja_env.from_string(template_content)
+                content = template_obj.render(**basic_context)
+            else:
+                # Simple string replacement for basic variables
+                content = template_content
+                for key, value in basic_context.items():
+                    content = content.replace(f"{{{{ {key} }}}}", str(value))
             
             return PromptMessage(
                 role="user",
@@ -183,115 +183,63 @@ Run: `start_google_auth('your.email@gmail.com')`
             logger.error(f"Error in Gmail prompt: {e}")
             return self._create_error_prompt(str(e))
     
-    async def _get_gmail_resources(self, context: Context) -> Dict[str, Any]:
-        """Get Gmail resources from context - clean implementation."""
-        try:
-            # Try to read Gmail resources
-            gmail_labels = None
-            user_email = "test_example@gmail.com"  # fallback
-            
-            # Check for resources in context (implementation depends on your context structure)
-            if hasattr(context, 'read_resource'):
-                try:
-                    gmail_labels = await context.read_resource("service://gmail/labels")
-                    user_email_result = await context.read_resource("user://current/email")
-                    if user_email_result:
-                        if isinstance(user_email_result, dict):
-                            user_email = user_email_result.get('email', user_email)
-                        elif isinstance(user_email_result, str):
-                            user_email = user_email_result
-                except Exception as e:
-                    logger.warning(f"Resource read error: {e}")
-            
-            # Process Gmail labels - handle both dict and list responses
-            if gmail_labels:
-                if isinstance(gmail_labels, dict) and not gmail_labels.get('error'):
-                    return {
-                        'authenticated': True,
-                        'auth_status': "✅ Authenticated - Real data loaded",
-                        'user_email': user_email,
-                        'labels': gmail_labels.get('user_labels', []),
-                        'system_count': len(gmail_labels.get('system_labels', [])),
-                        'user_count': len(gmail_labels.get('user_labels', []))
-                    }
-                elif isinstance(gmail_labels, list):
-                    # Handle direct list of labels
-                    processed_labels = []
-                    for label in gmail_labels:
-                        if isinstance(label, dict):
-                            processed_labels.append({
-                                'name': label.get('name', 'Unknown'),
-                                'id': label.get('id', 'Unknown'),
-                                'type': label.get('type', 'user')
-                            })
-                    
-                    return {
-                        'authenticated': True,
-                        'auth_status': "✅ Authenticated - List data loaded",
-                        'user_email': user_email,
-                        'labels': processed_labels[:10],  # Take first 10 for display
-                        'system_count': len([l for l in processed_labels if l.get('type') == 'system']),
-                        'user_count': len([l for l in processed_labels if l.get('type') != 'system'])
-                    }
-                else:
-                    # Authentication required or error
-                    error_msg = "Authentication required"
-                    if isinstance(gmail_labels, dict) and gmail_labels.get('error'):
-                        error_msg = gmail_labels.get('error', 'Unknown error')
-                    else:
-                        error_msg = f"Unexpected data format: {type(gmail_labels)}"
-            else:
-                # No data available
-                error_msg = "No Gmail data available"
-            
-            return {
-                'authenticated': False,
-                'auth_status': f"❌ {error_msg}",
-                'user_email': user_email,
-                'labels': [
-                    {'name': 'MCP', 'id': 'Label_13'},
-                    {'name': 'Tech/Development', 'id': 'Label_21'}
-                ],
-                'system_count': 15,
-                'user_count': 38
-            }
-                
-        except Exception as e:
-            logger.error(f"Gmail resource error: {e}")
-            return {
-                'authenticated': False,
-                'auth_status': f"⚠️ Resource error: {str(e)}",
-                'user_email': 'test_example@gmail.com',
-                'labels': [],
-                'system_count': 0,
-                'user_count': 0
-            }
-    
-    def _render_fallback(self, context: Dict) -> str:
-        """Render fallback content without Jinja2."""
-        return f"""# ⚡ Quick Email Demo (Simple) - Fallback
-*Request ID: {context['request_id']} | Generated: {context['current_time']}*
+    def _get_template_content_with_resources(self) -> str:
+        """Get template content with resource variables that middleware will resolve."""
+        return """# ⚡ Template Middleware Resource Resolution Demo
+*Request ID: {{ request_id }} | Generated: {{ current_time }}*
 
-## 📊 Gmail Integration Status
-- **Status**: {context['auth_status']}
-- **Email**: {context['user_email']}
-- **Labels**: {context['user_count']} custom + {context['system_count']} system
+## 🎯 Template Parameter Middleware Integration Demo
 
-## 📧 Basic Email Example
+### 📊 **MIDDLEWARE RESOURCE RESOLUTION:**
+- **Your Email**: `{{user://current/email}}` (resolved by middleware)
+- **Gmail Labels**: `{{service://gmail/labels}}` (resolved by middleware)
+- **System Status**: Template Parameter Middleware processing
+
+### 🔧 **How This Works:**
+1. **Prompt Function**: Returns content with `{{resource://uri}}` variables
+2. **Middleware Hook**: `on_get_prompt` processes the result
+3. **Resource Resolution**: Same system as tool parameters
+4. **Final Result**: Variables resolved automatically
+
+## 📧 **Template Middleware Tool Call Demo**
+
+This tool call will also have its `{{resource://uri}}` resolved by the same middleware:
 
 ```xml
 <mcp_tool_call>
   <tool>send_gmail_message</tool>
   <params>
-    <user_google_email>{{{{user://current/email}}}}</user_google_email>
+    <user_google_email>{{user://current/email}}</user_google_email>
     <to>demo@example.com</to>
-    <subject>FastMCP2 Demo</subject>
-    <body>Hello! This is a FastMCP2 email demo.</body>
+    <subject>Template Middleware Demo - {{ current_date }}</subject>
+    <body><![CDATA[
+Hello!
+
+This demonstrates Template Parameter Middleware working for BOTH:
+1. PROMPT content (this message you're reading)
+2. TOOL parameters (the user_google_email field above)
+
+Resource Variables Resolved:
+- Email: {{user://current/email}}
+- Labels: {{service://gmail/labels}}
+
+Same middleware, same resolution system!
+
+Best regards,
+Template Parameter Middleware Demo
+    ]]></body>
   </params>
 </mcp_tool_call>
 ```
 
-*Fallback template - install Jinja2 for better templates*"""
+## ✅ **Unified Resource Resolution**
+- **Prompts**: Resource variables resolved via `on_get_prompt` hook
+- **Tools**: Resource variables resolved via `on_call_tool` hook
+- **Same System**: Both use Template Parameter Middleware
+- **Consistent**: `{{resource://uri}}` syntax works everywhere
+
+---
+*Template Parameter Middleware • Same system for tools AND prompts!*"""
     
     def _create_error_prompt(self, error: str) -> PromptMessage:
         """Create error prompt."""

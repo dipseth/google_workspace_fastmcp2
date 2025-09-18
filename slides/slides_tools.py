@@ -28,6 +28,7 @@ from .slides_types import (
     UpdateSlideContentResponse,
     ExportPresentationResponse,
     GetPresentationFileResponse,
+    ExportAndDownloadPresentationResponse,
     SlideInfo,
     PageSize,
     BatchUpdateReply,
@@ -772,37 +773,42 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             )
 
     @mcp.tool(
-        name="export_presentation",
-        description="Export a Google Slides presentation to various formats (PDF, PPTX, etc.)",
-        tags={"slides", "export", "google", "download"},
+        name="export_and_download_presentation",
+        description="Export a Google Slides presentation to various formats with optional local download",
+        tags={"slides", "export", "download", "google", "file"},
         annotations={
-            "title": "Export Presentation",
+            "title": "Export and Download Presentation",
             "readOnlyHint": True,
             "destructiveHint": False,
-            "idempotentHint": True,
+            "idempotentHint": False,
             "openWorldHint": True
         }
     )
-    async def export_presentation(
+    async def export_and_download_presentation(
         presentation_id: str,
-        user_google_email: UserGoogleEmailSlides = None,
-        export_format: str = "PDF"
-    ) -> ExportPresentationResponse:
+        export_format: str = "PDF",
+        download_to_local: bool = False,
+        download_directory: str = "./downloads/presentations",
+        user_google_email: UserGoogleEmailSlides = None
+    ) -> ExportAndDownloadPresentationResponse:
         """
-        Export a Google Slides presentation to various formats.
+        Export a Google Slides presentation to various formats with optional local download.
 
-        Note: This generates export URLs. The actual file download would need
-        to be handled separately through Drive API or direct download.
+        This unified tool combines the functionality of both export_presentation and
+        get_presentation_file tools. It always generates export URLs and optionally
+        downloads the file to local storage based on the download_to_local parameter.
 
         Args:
-            user_google_email (str): The user's Google email address. Required.
             presentation_id (str): The ID of the presentation to export.
             export_format (str): Export format - "PDF", "PPTX", "ODP", "TXT", "PNG", "JPEG", "SVG".
+            download_to_local (bool): Whether to download the file locally. If False, only generates URLs.
+            download_directory (str): Local directory to save the file. Only used if download_to_local=True.
+            user_google_email (str): The user's Google email address. Required.
 
         Returns:
-            ExportPresentationResponse: Structured response with export URL and instructions.
+            ExportAndDownloadPresentationResponse: Structured response with export URL and optional file details.
         """
-        logger.info(f"[export_presentation] Invoked. Email: '{user_google_email}', ID: '{presentation_id}', Format: '{export_format}'")
+        logger.info(f"[export_and_download_presentation] Email: '{user_google_email}', ID: '{presentation_id}', Format: '{export_format}', Download: {download_to_local}")
 
         try:
             # Map format strings to export MIME types
@@ -818,161 +824,81 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             
             export_format_upper = export_format.upper()
             if export_format_upper not in format_mapping:
-                return ExportPresentationResponse(
-                    presentationId=presentation_id,
-                    exportFormat=export_format_upper,
-                    exportUrl="",
-                    editUrl="",
-                    success=False,
-                    message="",
-                    error=f"Invalid export format. Supported formats: {', '.join(format_mapping.keys())}"
-                )
-            
-            # For image formats, we export the first slide
-            if export_format_upper in ["PNG", "JPEG", "SVG"]:
-                export_url = f"https://docs.google.com/presentation/d/{presentation_id}/export/{export_format_upper.lower()}"
-            else:
-                mime_type = format_mapping[export_format_upper]
-                export_url = f"https://docs.google.com/presentation/d/{presentation_id}/export/{export_format_upper.lower()}"
-            
-            warning = None
-            if export_format_upper in ["PNG", "JPEG", "SVG"]:
-                warning = "For image formats, only the first slide is exported. To export all slides as images, use the get_page_thumbnail tool for each slide."
-            
-            logger.info(f"Export URL generated successfully for {user_google_email}")
-            
-            return ExportPresentationResponse(
-                presentationId=presentation_id,
-                exportFormat=export_format_upper,
-                exportUrl=export_url,
-                editUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
-                success=True,
-                message=f"Export URL generated for presentation in {export_format_upper} format",
-                warning=warning
-            )
-            
-        except Exception as e:
-            error_msg = f"Unexpected error generating export URL: {str(e)}"
-            logger.error(f"[export_presentation] {error_msg}")
-            return ExportPresentationResponse(
-                presentationId=presentation_id,
-                exportFormat=export_format.upper(),
-                exportUrl="",
-                editUrl="",
-                success=False,
-                message="",
-                error=error_msg
-            )
-
-    @mcp.tool(
-        name="get_presentation_file",
-        description="Download a Google Slides presentation file to local storage in various formats",
-        tags={"slides", "download", "google", "file", "local"},
-        annotations={
-            "title": "Download Presentation File",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": False,
-            "openWorldHint": True
-        }
-    )
-    async def get_presentation_file(
-        presentation_id: str,
-        export_format: str = "PDF",
-        download_directory: str = "./downloads/presentations",
-        user_google_email: UserGoogleEmailSlides = None
-    ) -> GetPresentationFileResponse:
-        """
-        Download a Google Slides presentation file to local storage.
-
-        This tool actually downloads presentation files to a local directory instead of
-        just providing links, making it usable for working with presentation content locally.
-
-        Args:
-            user_google_email (str): The user's Google email address. Required.
-            presentation_id (str): The ID of the presentation to download.
-            export_format (str): Export format - "PDF", "PPTX", "ODP", "TXT", "PNG", "JPEG", "SVG".
-            download_directory (str): Local directory to save the file. Defaults to "./downloads/presentations".
-
-        Returns:
-            GetPresentationFileResponse: Structured response with downloaded file details.
-        """
-        logger.info(f"[get_presentation_file] Invoked. Email: '{user_google_email}', ID: '{presentation_id}', Format: '{export_format}'")
-
-        try:
-            # Validate export format
-            format_mapping = {
-                "PDF": "application/pdf",
-                "PPTX": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                "ODP": "application/vnd.oasis.opendocument.presentation",
-                "TXT": "text/plain",
-                "PNG": "image/png",
-                "JPEG": "image/jpeg",
-                "SVG": "image/svg+xml"
-            }
-            
-            export_format_upper = export_format.upper()
-            if export_format_upper not in format_mapping:
-                return GetPresentationFileResponse(
+                return ExportAndDownloadPresentationResponse(
                     presentationId=presentation_id,
                     presentationTitle="",
                     exportFormat=export_format_upper,
-                    fileInfo={
-                        "localPath": "",
-                        "absolutePath": "",
-                        "fileSize": 0,
-                        "fileSizeMB": 0.0,
-                        "downloadDuration": 0.0,
-                        "timestamp": ""
-                    },
+                    exportUrl="",
                     editUrl="",
+                    downloaded=False,
+                    fileInfo=None,
                     success=False,
                     message="",
                     error=f"Invalid export format. Supported formats: {', '.join(format_mapping.keys())}"
                 )
 
-            # Get the Slides service to fetch presentation info
+            # Get presentation title (needed for both modes)
             slides_service = await _get_slides_service_with_fallback(user_google_email)
-            
-            # Get presentation details for filename
             presentation_info = await asyncio.to_thread(
                 slides_service.presentations().get(presentationId=presentation_id).execute
             )
-            
             presentation_title = presentation_info.get('title', 'Untitled_Presentation')
-            
-            # Get Drive service for file export/download
-            drive_service = await get_service("drive", user_google_email)
-            
-            # Create download directory if it doesn't exist
-            os.makedirs(download_directory, exist_ok=True)
-            
-            # Sanitize filename for filesystem safety
-            safe_title = re.sub(r'[<>:"/\\|?*]', '_', presentation_title)
-            safe_title = re.sub(r'[^\w\s\-_.]', '_', safe_title)
-            safe_title = re.sub(r'\s+', '_', safe_title.strip())
-            
-            # Generate timestamp for unique filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Build filename with proper extension
-            file_extension = export_format_upper.lower()
-            if file_extension == 'jpeg':
-                file_extension = 'jpg'
-            filename = f"{safe_title}_{timestamp}.{file_extension}"
-            local_file_path = os.path.join(download_directory, filename)
-            
-            # Get the export URL based on format
+
+            # Generate export URL
             if export_format_upper in ["PNG", "JPEG", "SVG"]:
                 export_url = f"https://docs.google.com/presentation/d/{presentation_id}/export/{export_format_upper.lower()}"
             else:
-                mime_type = format_mapping[export_format_upper]
                 export_url = f"https://docs.google.com/presentation/d/{presentation_id}/export/{export_format_upper.lower()}"
             
-            # Download the file using Drive API export
-            download_start_time = datetime.now()
+            edit_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
             
+            # Set up warning for image formats
+            warning = None
+            if export_format_upper in ["PNG", "JPEG", "SVG"]:
+                warning = "For image formats, only the first slide is exported. To export all slides as images, use the get_page_thumbnail tool for each slide."
+
+            # If download not requested, return just the URLs
+            if not download_to_local:
+                logger.info(f"Export URL generated successfully for {user_google_email}")
+                return ExportAndDownloadPresentationResponse(
+                    presentationId=presentation_id,
+                    presentationTitle=presentation_title,
+                    exportFormat=export_format_upper,
+                    exportUrl=export_url,
+                    editUrl=edit_url,
+                    downloaded=False,
+                    fileInfo=None,
+                    success=True,
+                    message=f"Export URL generated for presentation '{presentation_title}' in {export_format_upper} format",
+                    warning=warning
+                )
+
+            # Download functionality
             try:
+                # Get Drive service for file export/download
+                drive_service = await get_service("drive", user_google_email)
+                
+                # Create download directory if it doesn't exist
+                os.makedirs(download_directory, exist_ok=True)
+                
+                # Sanitize filename for filesystem safety
+                safe_title = re.sub(r'[<>:"/\\|?*]', '_', presentation_title)
+                safe_title = re.sub(r'[^\w\s\-_.]', '_', safe_title)
+                safe_title = re.sub(r'\s+', '_', safe_title.strip())
+                
+                # Generate timestamp for unique filename
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                
+                # Build filename with proper extension
+                file_extension = export_format_upper.lower()
+                if file_extension == 'jpeg':
+                    file_extension = 'jpg'
+                filename = f"{safe_title}_{timestamp}.{file_extension}"
+                local_file_path = os.path.join(download_directory, filename)
+                
+                # Download the file using Drive API export
+                download_start_time = datetime.now()
+                
                 # Use Drive API to export and get file content
                 if export_format_upper in ["PDF", "PPTX", "ODP", "TXT"]:
                     # Use Drive API export for document formats
@@ -1024,92 +950,77 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                     "timestamp": download_end_time.strftime('%Y-%m-%d %H:%M:%S')
                 }
                 
-                warning = None
-                if export_format_upper in ["PNG", "JPEG", "SVG"]:
-                    warning = "For image formats, only the first slide is exported. To export all slides as images, use the get_page_thumbnail tool for each slide."
+                logger.info(f"[export_and_download_presentation] File downloaded successfully: {local_file_path}")
                 
-                logger.info(f"[get_presentation_file] File downloaded successfully: {local_file_path}")
-                
-                return GetPresentationFileResponse(
+                return ExportAndDownloadPresentationResponse(
                     presentationId=presentation_id,
                     presentationTitle=presentation_title,
                     exportFormat=export_format_upper,
+                    exportUrl=export_url,
+                    editUrl=edit_url,
+                    downloaded=True,
                     fileInfo=file_info,
-                    editUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
                     success=True,
-                    message=f"Presentation file downloaded successfully for {user_google_email}",
+                    message=f"Presentation '{presentation_title}' exported and downloaded successfully in {export_format_upper} format",
                     warning=warning
                 )
                 
             except Exception as download_error:
                 # Clean up partial file if it exists
-                if os.path.exists(local_file_path):
+                if 'local_file_path' in locals() and os.path.exists(local_file_path):
                     try:
                         os.remove(local_file_path)
                     except:
                         pass
                 
-                error_msg = f"Failed to download presentation file: {str(download_error)}"
-                logger.error(f"[get_presentation_file] Download error: {download_error}")
-                return GetPresentationFileResponse(
+                # Return with URL generation success but download failure
+                error_msg = f"Export URL generated successfully, but download failed: {str(download_error)}"
+                logger.error(f"[export_and_download_presentation] Download error: {download_error}")
+                return ExportAndDownloadPresentationResponse(
                     presentationId=presentation_id,
                     presentationTitle=presentation_title,
                     exportFormat=export_format_upper,
-                    fileInfo={
-                        "localPath": "",
-                        "absolutePath": "",
-                        "fileSize": 0,
-                        "fileSizeMB": 0.0,
-                        "downloadDuration": 0.0,
-                        "timestamp": ""
-                    },
-                    editUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
-                    success=False,
-                    message="",
-                    error=error_msg
+                    exportUrl=export_url,
+                    editUrl=edit_url,
+                    downloaded=False,
+                    fileInfo=None,
+                    success=True,  # URL generation succeeded
+                    message=error_msg,
+                    warning=warning,
+                    error=f"Download failed: {str(download_error)}"
                 )
                 
         except HttpError as e:
             error_msg = f"HTTP error accessing presentation: {e}"
-            logger.error(f"[get_presentation_file] HTTP error: {e}")
-            return GetPresentationFileResponse(
+            logger.error(f"[export_and_download_presentation] HTTP error: {e}")
+            return ExportAndDownloadPresentationResponse(
                 presentationId=presentation_id,
                 presentationTitle="",
                 exportFormat=export_format.upper(),
-                fileInfo={
-                    "localPath": "",
-                    "absolutePath": "",
-                    "fileSize": 0,
-                    "fileSizeMB": 0.0,
-                    "downloadDuration": 0.0,
-                    "timestamp": ""
-                },
+                exportUrl="",
                 editUrl="",
+                downloaded=False,
+                fileInfo=None,
                 success=False,
                 message="",
                 error=error_msg
             )
         except Exception as e:
-            error_msg = f"Unexpected error downloading presentation file: {str(e)}"
-            logger.error(f"[get_presentation_file] {error_msg}")
-            return GetPresentationFileResponse(
+            error_msg = f"Unexpected error: {str(e)}"
+            logger.error(f"[export_and_download_presentation] {error_msg}")
+            return ExportAndDownloadPresentationResponse(
                 presentationId=presentation_id,
                 presentationTitle="",
                 exportFormat=export_format.upper(),
-                fileInfo={
-                    "localPath": "",
-                    "absolutePath": "",
-                    "fileSize": 0,
-                    "fileSizeMB": 0.0,
-                    "downloadDuration": 0.0,
-                    "timestamp": ""
-                },
+                exportUrl="",
                 editUrl="",
+                downloaded=False,
+                fileInfo=None,
                 success=False,
                 message="",
                 error=error_msg
             )
     
     # Log successful setup
-    tool_count = 6  # Updated total number of Slides tools
+    tool_count = 5  # Updated total number of Slides tools (combined export tools)
     logger.info(f"Successfully registered {tool_count} Google Slides tools")

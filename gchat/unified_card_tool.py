@@ -2014,572 +2014,572 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
             logger.error(f"❌ Error sending dynamic card: {e}", exc_info=True)
             return f"❌ Error sending dynamic card: {str(e)}"
     
-    @mcp.tool(
-        name="list_available_card_components",
-        description="List available card components that can be used with send_dynamic_card",
-        tags={"chat", "card", "list", "components", "google"},
-        annotations={
-            "title": "List Card Components",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False
-        }
-    )
-    async def list_available_card_components(
-        query: Optional[str] = None,
-        limit: int = 10
-    ) -> CardComponentsResponse:
-        """
-        List available card components that can be used with send_dynamic_card.
+#     @mcp.tool(
+#         name="list_available_card_components",
+#         description="List available card components that can be used with send_dynamic_card",
+#         tags={"chat", "card", "list", "components", "google"},
+#         annotations={
+#             "title": "List Card Components",
+#             "readOnlyHint": True,
+#             "destructiveHint": False,
+#             "idempotentHint": True,
+#             "openWorldHint": False
+#         }
+#     )
+#     async def list_available_card_components(
+#         query: Optional[str] = None,
+#         limit: int = 10
+#     ) -> CardComponentsResponse:
+#         """
+#         List available card components that can be used with send_dynamic_card.
         
-        Args:
-            query: Optional search query to filter components
-            limit: Maximum number of components to return
+#         Args:
+#             query: Optional search query to filter components
+#             limit: Maximum number of components to return
             
-        Returns:
-            CardComponentsResponse: Structured response with available card components
-        """
-        try:
-            # Initialize wrapper if needed
-            if not _card_framework_wrapper:
-                _initialize_card_framework_wrapper()
+#         Returns:
+#             CardComponentsResponse: Structured response with available card components
+#         """
+#         try:
+#             # Initialize wrapper if needed
+#             if not _card_framework_wrapper:
+#                 _initialize_card_framework_wrapper()
                 
-            if not _card_framework_wrapper:
-                return CardComponentsResponse(
-                    components=[],
-                    count=0,
-                    query=query or "all",
-                    error="Card Framework wrapper not available"
-                )
+#             if not _card_framework_wrapper:
+#                 return CardComponentsResponse(
+#                     components=[],
+#                     count=0,
+#                     query=query or "all",
+#                     error="Card Framework wrapper not available"
+#                 )
             
-            # Search for components or list cached types
-            if query:
-                results = _card_framework_wrapper.search(query, limit=limit)
-            else:
-                # Use cached card types
-                if not _card_types_cache:
-                    _cache_card_types()
+#             # Search for components or list cached types
+#             if query:
+#                 results = _card_framework_wrapper.search(query, limit=limit)
+#             else:
+#                 # Use cached card types
+#                 if not _card_types_cache:
+#                     _cache_card_types()
                 
-                # Flatten results from cache
-                results = []
-                for card_type, type_results in _card_types_cache.items():
-                    for result in type_results[:2]:  # Take top 2 from each type
-                        results.append(result)
+#                 # Flatten results from cache
+#                 results = []
+#                 for card_type, type_results in _card_types_cache.items():
+#                     for result in type_results[:2]:  # Take top 2 from each type
+#                         results.append(result)
                 
-                # Limit results
-                results = results[:limit]
+#                 # Limit results
+#                 results = results[:limit]
             
-            # Format results as TypedDict
-            components: List[CardComponentInfo] = []
-            for result in results:
-                component = CardComponentInfo(
-                    name=result.get("name", ""),
-                    path=result.get("path", ""),
-                    type=result.get("type", ""),
-                    score=result.get("score"),
-                    docstring=result.get("docstring", "")[:200]  # Truncate long docstrings
-                )
-                components.append(component)
+#             # Format results as TypedDict
+#             components: List[CardComponentInfo] = []
+#             for result in results:
+#                 component = CardComponentInfo(
+#                     name=result.get("name", ""),
+#                     path=result.get("path", ""),
+#                     type=result.get("type", ""),
+#                     score=result.get("score"),
+#                     docstring=result.get("docstring", "")[:200]  # Truncate long docstrings
+#                 )
+#                 components.append(component)
             
-            return CardComponentsResponse(
-                components=components,
-                count=len(components),
-                query=query or "cached card types",
-                error=None
-            )
+#             return CardComponentsResponse(
+#                 components=components,
+#                 count=len(components),
+#                 query=query or "cached card types",
+#                 error=None
+#             )
             
-        except Exception as e:
-            logger.error(f"❌ Error listing card components: {e}", exc_info=True)
-            return CardComponentsResponse(
-                components=[],
-                count=0,
-                query=query or "all",
-                error=str(e)
-            )
+#         except Exception as e:
+#             logger.error(f"❌ Error listing card components: {e}", exc_info=True)
+#             return CardComponentsResponse(
+#                 components=[],
+#                 count=0,
+#                 query=query or "all",
+#                 error=str(e)
+#             )
     
-    @mcp.tool(
-        name="list_card_templates",
-        description="List available card templates stored in Qdrant",
-        tags={"chat", "card", "template", "list", "qdrant"},
-        annotations={
-            "title": "List Card Templates",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False
-        }
-    )
-    async def list_card_templates(
-        query: Optional[str] = None,
-        limit: int = 10
-    ) -> CardTemplatesResponse:
-        """
-        List available card templates stored in Qdrant.
+#     @mcp.tool(
+#         name="list_card_templates",
+#         description="List available card templates stored in Qdrant",
+#         tags={"chat", "card", "template", "list", "qdrant"},
+#         annotations={
+#             "title": "List Card Templates",
+#             "readOnlyHint": True,
+#             "destructiveHint": False,
+#             "idempotentHint": True,
+#             "openWorldHint": False
+#         }
+#     )
+#     async def list_card_templates(
+#         query: Optional[str] = None,
+#         limit: int = 10
+#     ) -> CardTemplatesResponse:
+#         """
+#         List available card templates stored in Qdrant.
         
-        Args:
-            query: Optional search query to filter templates
-            limit: Maximum number of templates to return
+#         Args:
+#             query: Optional search query to filter templates
+#             limit: Maximum number of templates to return
             
-        Returns:
-            CardTemplatesResponse: Structured response with available card templates
-        """
-        try:
-            client = _get_qdrant_client()
-            if not client:
-                return CardTemplatesResponse(
-                    templates=[],
-                    count=0,
-                    query=query or "all templates",
-                    error="Qdrant client not available - cannot list templates"
-                )
+#         Returns:
+#             CardTemplatesResponse: Structured response with available card templates
+#         """
+#         try:
+#             client = _get_qdrant_client()
+#             if not client:
+#                 return CardTemplatesResponse(
+#                     templates=[],
+#                     count=0,
+#                     query=query or "all templates",
+#                     error="Qdrant client not available - cannot list templates"
+#                 )
             
-            # Check if collection exists
-            collections = client.get_collections()
-            collection_names = [c.name for c in collections.collections]
+#             # Check if collection exists
+#             collections = client.get_collections()
+#             collection_names = [c.name for c in collections.collections]
             
-            if _card_templates_collection not in collection_names:
-                return CardTemplatesResponse(
-                    templates=[],
-                    count=0,
-                    query=query or "all templates",
-                    error=f"Collection {_card_templates_collection} does not exist"
-                )
+#             if _card_templates_collection not in collection_names:
+#                 return CardTemplatesResponse(
+#                     templates=[],
+#                     count=0,
+#                     query=query or "all templates",
+#                     error=f"Collection {_card_templates_collection} does not exist"
+#                 )
             
-            # Search for templates if query is provided
-            template_infos: List[CardTemplateInfo] = []
-            if query:
-                templates = await _find_card_template(query_or_id=query)
-                for template in templates:
-                    template_info = CardTemplateInfo(
-                        template_id=template.get("template_id", ""),
-                        name=template.get("name", ""),
-                        description=template.get("description", ""),
-                        created_at=template.get("created_at"),
-                        template=template.get("template")
-                    )
-                    template_infos.append(template_info)
-            else:
-                # List all templates
-                try:
-                    # Import required modules
-                    from qdrant_client.models import Filter
+#             # Search for templates if query is provided
+#             template_infos: List[CardTemplateInfo] = []
+#             if query:
+#                 templates = await _find_card_template(query_or_id=query)
+#                 for template in templates:
+#                     template_info = CardTemplateInfo(
+#                         template_id=template.get("template_id", ""),
+#                         name=template.get("name", ""),
+#                         description=template.get("description", ""),
+#                         created_at=template.get("created_at"),
+#                         template=template.get("template")
+#                     )
+#                     template_infos.append(template_info)
+#             else:
+#                 # List all templates
+#                 try:
+#                     # Import required modules
+#                     from qdrant_client.models import Filter
                     
-                    # Get all templates
-                    search_results = client.scroll(
-                        collection_name=_card_templates_collection,
-                        limit=limit,
-                        with_payload=True,
-                        with_vectors=False
-                    )
+#                     # Get all templates
+#                     search_results = client.scroll(
+#                         collection_name=_card_templates_collection,
+#                         limit=limit,
+#                         with_payload=True,
+#                         with_vectors=False
+#                     )
                     
-                    # Process results
-                    for point in search_results[0]:
-                        template_info = CardTemplateInfo(
-                            template_id=point.payload.get("template_id", ""),
-                            name=point.payload.get("name", ""),
-                            description=point.payload.get("description", ""),
-                            created_at=point.payload.get("created_at"),
-                            template=point.payload.get("template")
-                        )
-                        template_infos.append(template_info)
+#                     # Process results
+#                     for point in search_results[0]:
+#                         template_info = CardTemplateInfo(
+#                             template_id=point.payload.get("template_id", ""),
+#                             name=point.payload.get("name", ""),
+#                             description=point.payload.get("description", ""),
+#                             created_at=point.payload.get("created_at"),
+#                             template=point.payload.get("template")
+#                         )
+#                         template_infos.append(template_info)
                         
-                except ImportError:
-                    return CardTemplatesResponse(
-                        templates=[],
-                        count=0,
-                        query=query or "all templates",
-                        error="Qdrant client models not available"
-                    )
-                except Exception as e:
-                    logger.error(f"❌ Error listing templates: {e}", exc_info=True)
-                    return CardTemplatesResponse(
-                        templates=[],
-                        count=0,
-                        query=query or "all templates",
-                        error=str(e)
-                    )
+#                 except ImportError:
+#                     return CardTemplatesResponse(
+#                         templates=[],
+#                         count=0,
+#                         query=query or "all templates",
+#                         error="Qdrant client models not available"
+#                     )
+#                 except Exception as e:
+#                     logger.error(f"❌ Error listing templates: {e}", exc_info=True)
+#                     return CardTemplatesResponse(
+#                         templates=[],
+#                         count=0,
+#                         query=query or "all templates",
+#                         error=str(e)
+#                     )
             
-            return CardTemplatesResponse(
-                templates=template_infos,
-                count=len(template_infos),
-                query=query or "all templates",
-                #  error=None
-            )
+#             return CardTemplatesResponse(
+#                 templates=template_infos,
+#                 count=len(template_infos),
+#                 query=query or "all templates",
+#                 #  error=None
+#             )
             
-        except Exception as e:
-            logger.error(f"❌ Error listing card templates: {e}", exc_info=True)
-            return CardTemplatesResponse(
-                templates=[],
-                count=0,
-                query=query or "all templates",
-                error=str(e)
-            )
+#         except Exception as e:
+#             logger.error(f"❌ Error listing card templates: {e}", exc_info=True)
+#             return CardTemplatesResponse(
+#                 templates=[],
+#                 count=0,
+#                 query=query or "all templates",
+#                 error=str(e)
+#             )
     
-    @mcp.tool(
-        name="get_card_template",
-        description="Get a specific card template from Qdrant by ID or name",
-        tags={"chat", "card", "template", "get", "qdrant"},
-        annotations={
-            "title": "Get Card Template",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False
-        }
-    )
-    async def get_card_template(
-        template_id_or_name: str
-    ) -> str:
-        """
-        Get a specific card template from Qdrant by ID or name.
+#     @mcp.tool(
+#         name="get_card_template",
+#         description="Get a specific card template from Qdrant by ID or name",
+#         tags={"chat", "card", "template", "get", "qdrant"},
+#         annotations={
+#             "title": "Get Card Template",
+#             "readOnlyHint": True,
+#             "destructiveHint": False,
+#             "idempotentHint": True,
+#             "openWorldHint": False
+#         }
+#     )
+#     async def get_card_template(
+#         template_id_or_name: str
+#     ) -> str:
+#         """
+#         Get a specific card template from Qdrant by ID or name.
         
-        Args:
-            template_id_or_name: ID or name of the template to retrieve
-                                (e.g., "4e4a2881-8de2-4adf-bcbd-5fa814c8657a" or "Bullet List Card")
+#         Args:
+#             template_id_or_name: ID or name of the template to retrieve
+#                                 (e.g., "4e4a2881-8de2-4adf-bcbd-5fa814c8657a" or "Bullet List Card")
             
-        Returns:
-            JSON string with the template details
-        """
-        try:
-            client = _get_qdrant_client()
-            if not client:
-                return "❌ Qdrant client not available - cannot get template"
+#         Returns:
+#             JSON string with the template details
+#         """
+#         try:
+#             client = _get_qdrant_client()
+#             if not client:
+#                 return "❌ Qdrant client not available - cannot get template"
             
-            # Try to find the template using our enhanced function
-            templates = await _find_card_template(query_or_id=template_id_or_name, limit=1)
+#             # Try to find the template using our enhanced function
+#             templates = await _find_card_template(query_or_id=template_id_or_name, limit=1)
             
-            if not templates or len(templates) == 0:
-                return f"❌ Template not found: {template_id_or_name}"
+#             if not templates or len(templates) == 0:
+#                 return f"❌ Template not found: {template_id_or_name}"
             
-            # Get the template
-            template = templates[0]
+#             # Get the template
+#             template = templates[0]
             
-            # Format result
-            return json.dumps(template, indent=2)
+#             # Format result
+#             return json.dumps(template, indent=2)
             
-        except Exception as e:
-            logger.error(f"❌ Error getting card template: {e}", exc_info=True)
-            return f"❌ Error getting card template: {str(e)}"
+#         except Exception as e:
+#             logger.error(f"❌ Error getting card template: {e}", exc_info=True)
+#             return f"❌ Error getting card template: {str(e)}"
     
-    @mcp.tool(
-        name="save_card_template",
-        description="Save a card template to Qdrant",
-        tags={"chat", "card", "template", "save", "qdrant"},
-        annotations={
-            "title": "Save Card Template",
-            "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": False,
-            "openWorldHint": True
-        }
-    )
-    async def save_card_template(
-        name: str,
-        description: str,
-        template: Dict[str, Any]
-    ) -> str:
-        """
-        Save a card template to Qdrant for future use.
+#     @mcp.tool(
+#         name="save_card_template",
+#         description="Save a card template to Qdrant",
+#         tags={"chat", "card", "template", "save", "qdrant"},
+#         annotations={
+#             "title": "Save Card Template",
+#             "readOnlyHint": False,
+#             "destructiveHint": False,
+#             "idempotentHint": False,
+#             "openWorldHint": True
+#         }
+#     )
+#     async def save_card_template(
+#         name: str,
+#         description: str,
+#         template: Dict[str, Any]
+#     ) -> str:
+#         """
+#         Save a card template to Qdrant for future use.
         
-        Args:
-            name: Template name
-            description: Template description
-            template: The card template (dictionary)
+#         Args:
+#             name: Template name
+#             description: Template description
+#             template: The card template (dictionary)
             
-        Returns:
-            Template ID if successful
-        """
-        try:
-            template_id = await _store_card_template(name, description, template)
+#         Returns:
+#             Template ID if successful
+#         """
+#         try:
+#             template_id = await _store_card_template(name, description, template)
             
-            if not template_id:
-                return "❌ Failed to save template"
+#             if not template_id:
+#                 return "❌ Failed to save template"
             
-            return f"✅ Template saved successfully! ID: {template_id}"
+#             return f"✅ Template saved successfully! ID: {template_id}"
             
-        except Exception as e:
-            logger.error(f"❌ Error saving card template: {e}", exc_info=True)
-            return f"❌ Error saving card template: {str(e)}"
+#         except Exception as e:
+#             logger.error(f"❌ Error saving card template: {e}", exc_info=True)
+#             return f"❌ Error saving card template: {str(e)}"
     
-    @mcp.tool(
-        name="delete_card_template",
-        description="Delete a card template from Qdrant",
-        tags={"chat", "card", "template", "delete", "qdrant"},
-        annotations={
-            "title": "Delete Card Template",
-            "readOnlyHint": False,
-            "destructiveHint": True,
-            "idempotentHint": False,
-            "openWorldHint": False
-        }
-    )
-    async def delete_card_template(
-        template_id: str
-    ) -> str:
-        """
-        Delete a card template from Qdrant.
+#     @mcp.tool(
+#         name="delete_card_template",
+#         description="Delete a card template from Qdrant",
+#         tags={"chat", "card", "template", "delete", "qdrant"},
+#         annotations={
+#             "title": "Delete Card Template",
+#             "readOnlyHint": False,
+#             "destructiveHint": True,
+#             "idempotentHint": False,
+#             "openWorldHint": False
+#         }
+#     )
+#     async def delete_card_template(
+#         template_id: str
+#     ) -> str:
+#         """
+#         Delete a card template from Qdrant.
         
-        Args:
-            template_id: ID of the template to delete
+#         Args:
+#             template_id: ID of the template to delete
             
-        Returns:
-            Confirmation message
-        """
-        try:
-            client = _get_qdrant_client()
-            if not client:
-                return "❌ Qdrant client not available - cannot delete template"
+#         Returns:
+#             Confirmation message
+#         """
+#         try:
+#             client = _get_qdrant_client()
+#             if not client:
+#                 return "❌ Qdrant client not available - cannot delete template"
             
-            # Check if collection exists
-            try:
-                collections = client.get_collections()
-                collection_names = [c.name for c in collections.collections]
+#             # Check if collection exists
+#             try:
+#                 collections = client.get_collections()
+#                 collection_names = [c.name for c in collections.collections]
                 
-                if _card_templates_collection not in collection_names:
-                    return f"❌ Collection {_card_templates_collection} does not exist"
-            except Exception as coll_error:
-                logger.error(f"❌ Error checking collections: {coll_error}", exc_info=True)
-                return f"❌ Error checking collections: {str(coll_error)}"
+#                 if _card_templates_collection not in collection_names:
+#                     return f"❌ Collection {_card_templates_collection} does not exist"
+#             except Exception as coll_error:
+#                 logger.error(f"❌ Error checking collections: {coll_error}", exc_info=True)
+#                 return f"❌ Error checking collections: {str(coll_error)}"
             
-            # Check if template exists using payload-based search
-            try:
-                from qdrant_client.models import Filter, FieldCondition, MatchValue
+#             # Check if template exists using payload-based search
+#             try:
+#                 from qdrant_client.models import Filter, FieldCondition, MatchValue
                 
-                # Create filter for template_id in payload
-                template_id_filter = Filter(
-                    must=[
-                        FieldCondition(
-                            key="payload_type",
-                            match=MatchValue(value="template")
-                        ),
-                        FieldCondition(
-                            key="template_id",
-                            match=MatchValue(value=template_id)
-                        )
-                    ]
-                )
+#                 # Create filter for template_id in payload
+#                 template_id_filter = Filter(
+#                     must=[
+#                         FieldCondition(
+#                             key="payload_type",
+#                             match=MatchValue(value="template")
+#                         ),
+#                         FieldCondition(
+#                             key="template_id",
+#                             match=MatchValue(value=template_id)
+#                         )
+#                     ]
+#                 )
                 
-                # Search with filter
-                search_results = client.scroll(
-                    collection_name=_card_templates_collection,
-                    scroll_filter=template_id_filter,
-                    limit=10,  # Get all matching points (there should be only one, but just in case)
-                    with_payload=True
-                )
+#                 # Search with filter
+#                 search_results = client.scroll(
+#                     collection_name=_card_templates_collection,
+#                     scroll_filter=template_id_filter,
+#                     limit=10,  # Get all matching points (there should be only one, but just in case)
+#                     with_payload=True
+#                 )
                 
-                if not search_results or len(search_results[0]) == 0:
-                    return f"❌ Template not found: {template_id}"
+#                 if not search_results or len(search_results[0]) == 0:
+#                     return f"❌ Template not found: {template_id}"
                 
-                # Get point IDs to delete
-                point_ids = [point.id for point in search_results[0]]
-                logger.info(f"Found {len(point_ids)} points to delete for template_id: {template_id}")
+#                 # Get point IDs to delete
+#                 point_ids = [point.id for point in search_results[0]]
+#                 logger.info(f"Found {len(point_ids)} points to delete for template_id: {template_id}")
                 
-            except Exception as retrieve_error:
-                logger.error(f"❌ Error finding template: {retrieve_error}", exc_info=True)
-                return f"❌ Error finding template: {str(retrieve_error)}"
+#             except Exception as retrieve_error:
+#                 logger.error(f"❌ Error finding template: {retrieve_error}", exc_info=True)
+#                 return f"❌ Error finding template: {str(retrieve_error)}"
             
-            # Delete the template with proper error handling
-            try:
-                from qdrant_client.models import PointIdsList
+#             # Delete the template with proper error handling
+#             try:
+#                 from qdrant_client.models import PointIdsList
                 
-                # Use PointIdsList for more reliable deletion
-                client.delete(
-                    collection_name=_card_templates_collection,
-                    points_selector=PointIdsList(
-                        points=point_ids
-                    )
-                )
+#                 # Use PointIdsList for more reliable deletion
+#                 client.delete(
+#                     collection_name=_card_templates_collection,
+#                     points_selector=PointIdsList(
+#                         points=point_ids
+#                     )
+#                 )
                 
-                # Verify deletion
-                verify_results = client.scroll(
-                    collection_name=_card_templates_collection,
-                    scroll_filter=template_id_filter,
-                    limit=1,
-                    with_payload=True
-                )
+#                 # Verify deletion
+#                 verify_results = client.scroll(
+#                     collection_name=_card_templates_collection,
+#                     scroll_filter=template_id_filter,
+#                     limit=1,
+#                     with_payload=True
+#                 )
                 
-                if not verify_results or len(verify_results[0]) == 0:
-                    return f"✅ Template deleted successfully: {template_id}"
-                else:
-                    return f"⚠️ Template may not have been deleted: {template_id}"
+#                 if not verify_results or len(verify_results[0]) == 0:
+#                     return f"✅ Template deleted successfully: {template_id}"
+#                 else:
+#                     return f"⚠️ Template may not have been deleted: {template_id}"
                 
-            except ImportError:
-                # Fall back to simpler deletion if models not available
-                for point_id in point_ids:
-                    client.delete(
-                        collection_name=_card_templates_collection,
-                        points_selector=[point_id]
-                    )
-                return f"✅ Template deleted successfully: {template_id}"
+#             except ImportError:
+#                 # Fall back to simpler deletion if models not available
+#                 for point_id in point_ids:
+#                     client.delete(
+#                         collection_name=_card_templates_collection,
+#                         points_selector=[point_id]
+#                     )
+#                 return f"✅ Template deleted successfully: {template_id}"
                 
-            except Exception as delete_error:
-                logger.error(f"❌ Error during template deletion: {delete_error}", exc_info=True)
-                return f"❌ Error during template deletion: {str(delete_error)}"
+#             except Exception as delete_error:
+#                 logger.error(f"❌ Error during template deletion: {delete_error}", exc_info=True)
+#                 return f"❌ Error during template deletion: {str(delete_error)}"
             
-        except Exception as e:
-            logger.error(f"❌ Error deleting card template: {e}", exc_info=True)
-            return f"❌ Error deleting card template: {str(e)}"
+#         except Exception as e:
+#             logger.error(f"❌ Error deleting card template: {e}", exc_info=True)
+#             return f"❌ Error deleting card template: {str(e)}"
     
-    @mcp.tool(
-        name="get_card_component_info",
-        description="Get detailed information about a specific card component",
-        tags={"chat", "card", "info", "component", "google"},
-        annotations={
-            "title": "Get Card Component Info",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False
-        }
-    )
-    async def get_card_component_info(
-        component_path: str,
-        include_source: bool = False
-    ) -> str:
-        """
-        Get detailed information about a specific card component.
+#     @mcp.tool(
+#         name="get_card_component_info",
+#         description="Get detailed information about a specific card component",
+#         tags={"chat", "card", "info", "component", "google"},
+#         annotations={
+#             "title": "Get Card Component Info",
+#             "readOnlyHint": True,
+#             "destructiveHint": False,
+#             "idempotentHint": True,
+#             "openWorldHint": False
+#         }
+#     )
+#     async def get_card_component_info(
+#         component_path: str,
+#         include_source: bool = False
+#     ) -> str:
+#         """
+#         Get detailed information about a specific card component.
         
-        Args:
-            component_path: Path to the component (e.g., "card_framework.v2.Card")
-            include_source: Whether to include source code in the response
+#         Args:
+#             component_path: Path to the component (e.g., "card_framework.v2.Card")
+#             include_source: Whether to include source code in the response
             
-        Returns:
-            JSON string with component details
-        """
-        try:
-            # Initialize wrapper if needed
-            if not _card_framework_wrapper:
-                _initialize_card_framework_wrapper()
+#         Returns:
+#             JSON string with component details
+#         """
+#         try:
+#             # Initialize wrapper if needed
+#             if not _card_framework_wrapper:
+#                 _initialize_card_framework_wrapper()
                 
-            if not _card_framework_wrapper:
-                return "❌ Card Framework wrapper not available"
+#             if not _card_framework_wrapper:
+#                 return "❌ Card Framework wrapper not available"
             
-            # Get component info
-            info = _card_framework_wrapper.get_component_info(component_path)
+#             # Get component info
+#             info = _card_framework_wrapper.get_component_info(component_path)
             
-            if not info:
-                return f"❌ Component not found: {component_path}"
+#             if not info:
+#                 return f"❌ Component not found: {component_path}"
             
-            # Get the actual component
-            component = _card_framework_wrapper.get_component_by_path(component_path)
+#             # Get the actual component
+#             component = _card_framework_wrapper.get_component_by_path(component_path)
             
-            # Format result
-            result = {
-                "name": info.get("name"),
-                "path": info.get("path"),
-                "type": info.get("type"),
-                "module_path": info.get("module_path"),
-                "docstring": info.get("docstring", "")
-            }
+#             # Format result
+#             result = {
+#                 "name": info.get("name"),
+#                 "path": info.get("path"),
+#                 "type": info.get("type"),
+#                 "module_path": info.get("module_path"),
+#                 "docstring": info.get("docstring", "")
+#             }
             
-            # Add source code if requested
-            if include_source and component:
-                try:
-                    import inspect
-                    source = inspect.getsource(component)
-                    result["source"] = source
-                except (TypeError, OSError):
-                    result["source"] = "Source code not available"
+#             # Add source code if requested
+#             if include_source and component:
+#                 try:
+#                     import inspect
+#                     source = inspect.getsource(component)
+#                     result["source"] = source
+#                 except (TypeError, OSError):
+#                     result["source"] = "Source code not available"
             
-            # Add signature for callable components
-            if component and callable(component):
-                try:
-                    import inspect
-                    sig = inspect.signature(component)
-                    result["signature"] = str(sig)
+#             # Add signature for callable components
+#             if component and callable(component):
+#                 try:
+#                     import inspect
+#                     sig = inspect.signature(component)
+#                     result["signature"] = str(sig)
                     
-                    # Add parameter details
-                    params = {}
-                    for name, param in sig.parameters.items():
-                        params[name] = {
-                            "kind": str(param.kind),
-                            "default": str(param.default) if param.default is not inspect.Parameter.empty else None,
-                            "annotation": str(param.annotation) if param.annotation is not inspect.Parameter.empty else None
-                        }
+#                     # Add parameter details
+#                     params = {}
+#                     for name, param in sig.parameters.items():
+#                         params[name] = {
+#                             "kind": str(param.kind),
+#                             "default": str(param.default) if param.default is not inspect.Parameter.empty else None,
+#                             "annotation": str(param.annotation) if param.annotation is not inspect.Parameter.empty else None
+#                         }
                     
-                    result["parameters"] = params
-                except (TypeError, ValueError):
-                    result["signature"] = "Signature not available"
+#                     result["parameters"] = params
+#                 except (TypeError, ValueError):
+#                     result["signature"] = "Signature not available"
             
-            return json.dumps(result, indent=2)
+#             return json.dumps(result, indent=2)
             
-        except Exception as e:
-            logger.error(f"❌ Error getting card component info: {e}", exc_info=True)
-            return f"❌ Error getting card component info: {str(e)}"
+#         except Exception as e:
+#             logger.error(f"❌ Error getting card component info: {e}", exc_info=True)
+#             return f"❌ Error getting card component info: {str(e)}"
     
-    @mcp.tool(
-        name="create_card_framework_wrapper",
-        description="Create a ModuleWrapper for a specific module",
-        tags={"chat", "card", "wrapper", "module", "qdrant"},
-        annotations={
-            "title": "Create Module Wrapper",
-            "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": False,
-            "openWorldHint": True
-        }
-    )
-    async def create_card_framework_wrapper(
-        module_name: str,
-        collection_name: Optional[str] = None,
-        index_nested: bool = True,
-        max_depth: int = 2
-    ) -> str:
-        """
-        Create a ModuleWrapper for a specific module.
+#     @mcp.tool(
+#         name="create_card_framework_wrapper",
+#         description="Create a ModuleWrapper for a specific module",
+#         tags={"chat", "card", "wrapper", "module", "qdrant"},
+#         annotations={
+#             "title": "Create Module Wrapper",
+#             "readOnlyHint": False,
+#             "destructiveHint": False,
+#             "idempotentHint": False,
+#             "openWorldHint": True
+#         }
+#     )
+#     async def create_card_framework_wrapper(
+#         module_name: str,
+#         collection_name: Optional[str] = None,
+#         index_nested: bool = True,
+#         max_depth: int = 2
+#     ) -> str:
+#         """
+#         Create a ModuleWrapper for a specific module.
         
-        This tool allows you to create a ModuleWrapper for any module,
-        not just card_framework. This can be useful for exploring and
-        using components from other modules.
+#         This tool allows you to create a ModuleWrapper for any module,
+#         not just card_framework. This can be useful for exploring and
+#         using components from other modules.
         
-        Args:
-            module_name: Name of the module to wrap
-            collection_name: Name of the Qdrant collection to use
-            index_nested: Whether to index nested components
-            max_depth: Maximum recursion depth for indexing
+#         Args:
+#             module_name: Name of the module to wrap
+#             collection_name: Name of the Qdrant collection to use
+#             index_nested: Whether to index nested components
+#             max_depth: Maximum recursion depth for indexing
             
-        Returns:
-            Confirmation message
-        """
-        try:
-            # Import the module
-            try:
-                import importlib
-                module = importlib.import_module(module_name)
-            except ImportError:
-                return f"❌ Could not import module: {module_name}"
+#         Returns:
+#             Confirmation message
+#         """
+#         try:
+#             # Import the module
+#             try:
+#                 import importlib
+#                 module = importlib.import_module(module_name)
+#             except ImportError:
+#                 return f"❌ Could not import module: {module_name}"
             
-            # Generate collection name if not provided
-            if not collection_name:
-                collection_name = f"{module_name.replace('.', '_')}_components"
+#             # Generate collection name if not provided
+#             if not collection_name:
+#                 collection_name = f"{module_name.replace('.', '_')}_components"
             
-            # Create the wrapper
-            from adapters.module_wrapper import ModuleWrapper
+#             # Create the wrapper
+#             from adapters.module_wrapper import ModuleWrapper
             
-            wrapper = ModuleWrapper(
-                module_or_name=module,
-                collection_name=collection_name,
-                index_nested=index_nested,
-                index_private=False,
-                max_depth=max_depth,
-                skip_standard_library=True
-            )
+#             wrapper = ModuleWrapper(
+#                 module_or_name=module,
+#                 collection_name=collection_name,
+#                 index_nested=index_nested,
+#                 index_private=False,
+#                 max_depth=max_depth,
+#                 skip_standard_library=True
+#             )
             
-            # Get component counts
-            component_count = len(wrapper.components)
-            class_count = len(wrapper.list_components("class"))
-            function_count = len(wrapper.list_components("function"))
+#             # Get component counts
+#             component_count = len(wrapper.components)
+#             class_count = len(wrapper.list_components("class"))
+#             function_count = len(wrapper.list_components("function"))
             
-            return f"""✅ ModuleWrapper created for {module_name}!
-Collection: {collection_name}
-Components: {component_count} total
-Classes: {class_count}
-Functions: {function_count}
+#             return f"""✅ ModuleWrapper created for {module_name}!
+# Collection: {collection_name}
+# Components: {component_count} total
+# Classes: {class_count}
+# Functions: {function_count}
 
-You can now use this wrapper with the send_dynamic_card tool by specifying components from this module.
-"""
+# You can now use this wrapper with the send_dynamic_card tool by specifying components from this module.
+# """
             
-        except Exception as e:
+#         except Exception as e:
             logger.error(f"❌ Error creating ModuleWrapper: {e}", exc_info=True)
             return f"❌ Error creating ModuleWrapper: {str(e)}"

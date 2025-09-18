@@ -39,9 +39,9 @@ from adapters.module_wrapper_mcp import setup_module_wrapper_middleware
 from sheets.sheets_tools import setup_sheets_tools
 from photos.photos_tools import setup_photos_tools
 from photos.advanced_tools import setup_advanced_photos_tools
-from middleware.qdrant_unified import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools
+from middleware.qdrant_middleware import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools, setup_qdrant_resources
 # from middleware.template_middleware import setup_template_middleware
-from middleware.template_middleware import setup_streamlined_template_middleware as setup_template_middleware
+from middleware.template_middleware import setup_enhanced_template_middleware as setup_template_middleware
 from middleware.sampling_middleware import setup_enhanced_sampling_middleware, EnhancementLevel
 from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
 from resources.user_resources import setup_user_resources
@@ -179,15 +179,15 @@ set_auth_middleware(auth_middleware)
 # Add MCP spec-compliant auth middleware for WWW-Authenticate headers
 mcp.add_middleware(MCPAuthMiddleware())
 
-# Setup Template Parameter Middleware with Jinja2 support (MUST be before tools are registered)
-logger.info("🎭 Setting up Template Parameter Middleware with Jinja2 support...")
+# Setup Enhanced Template Parameter Middleware with full Jinja2 support (MUST be before tools are registered)
+logger.info("🎭 Setting up Enhanced Template Parameter Middleware with full modular architecture...")
 template_middleware = setup_template_middleware(
     mcp,
     enable_debug=True,  # Force enable for testing
     enable_caching=True,
     cache_ttl_seconds=300
 )
-logger.info("✅ Template Parameter Middleware with Jinja2 support enabled - automatic resource templating + professional templates active")
+logger.info("✅ Enhanced Template Parameter Middleware enabled - modular architecture with 12 focused components active")
 
 # Setup Enhanced Sampling Middleware with tag-based elicitation
 logger.info("🎯 Setting up Enhanced Sampling Middleware...")
@@ -278,10 +278,10 @@ logger.info("✅ ModuleWrapper middleware initialized")
 # setup_jwt_chat_tools(mcp)
 
 # Register Google Chat App Development tools
-setup_chat_app_tools(mcp)
+# setup_chat_app_tools(mcp)
 
-# Register Google Chat App Development prompts
-setup_chat_app_prompts(mcp)
+# # Register Google Chat App Development prompts
+# setup_chat_app_prompts(mcp)
 
 # Register Gmail prompts
 setup_gmail_prompts(mcp)
@@ -327,14 +327,18 @@ setup_server_tools(mcp)
 logger.info("✅ Server management tools registered")
 
 
-# Register Qdrant tools if middleware is available
+# Register Qdrant tools and resources if middleware is available
 try:
     if qdrant_middleware:
         logger.info("📊 Registering Qdrant search tools...")
         setup_enhanced_qdrant_tools(mcp, qdrant_middleware)
         logger.info("✅ Qdrant search and diagnostic tools registered")
+        
+        logger.info("📋 Registering Qdrant resources...")
+        setup_qdrant_resources(mcp, qdrant_middleware)
+        logger.info("✅ Qdrant resources registered - qdrant:// URIs available")
 except Exception as e:
-    logger.warning(f"⚠️ Could not register Qdrant tools: {e}")
+    logger.warning(f"⚠️ Could not register Qdrant tools and resources: {e}")
 
 
 

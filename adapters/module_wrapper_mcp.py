@@ -658,7 +658,7 @@ def setup_module_wrapper_tools(mcp):
             )
 
 
-def setup_module_wrapper_middleware(mcp, modules_to_wrap=None):
+def setup_module_wrapper_middleware(mcp, modules_to_wrap=None, tool_pushdown=False):
     """
     Set up the ModuleWrapper middleware and tools using proper middleware hooks.
     
@@ -678,6 +678,7 @@ def setup_module_wrapper_middleware(mcp, modules_to_wrap=None):
     mcp.add_middleware(middleware)
     
     # Set up tools - no middleware parameter needed, tools get it from context
-    setup_module_wrapper_tools(mcp)
+    if tool_pushdown:
+        setup_module_wrapper_tools(mcp)
     
     return middleware

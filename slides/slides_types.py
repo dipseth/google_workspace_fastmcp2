@@ -110,3 +110,18 @@ class GetPresentationFileResponse(TypedDict, total=False):
     message: str
     warning: Optional[str]
     error: Optional[str]
+
+
+class ExportAndDownloadPresentationResponse(TypedDict, total=False):
+    """Response structure for combined export_and_download_presentation tool."""
+    presentationId: str
+    presentationTitle: str
+    exportFormat: str
+    exportUrl: str
+    editUrl: str
+    downloaded: bool
+    fileInfo: Optional[FileDownloadInfo]  # Only present if downloaded=True
+    success: bool
+    message: str
+    warning: Optional[str]
+    error: Optional[str]
