@@ -21,7 +21,8 @@ except ImportError:
     _COMPATIBILITY_AVAILABLE = False
     logging.warning("Compatibility shim not available, using fallback service defaults")
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Import centralized scope registry
 from .scope_registry import ScopeRegistry

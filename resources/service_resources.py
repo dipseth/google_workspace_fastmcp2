@@ -15,7 +15,8 @@ from tools.common_types import ServiceTypeAnnotated
 from resources.service_list_resources import SupportedService, get_supported_services
 from auth.scope_registry import ScopeRegistry
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 def setup_service_resources(main_mcp: FastMCP):
     """Register service resources with the main FastMCP server using FastMCP 2.10.6+ API."""

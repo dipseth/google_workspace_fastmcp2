@@ -30,7 +30,8 @@ from .calendar_types import (
     BulkCreateEventResponse, CreateCalendarResponse
 )
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 # Export tools at module level for import compatibility

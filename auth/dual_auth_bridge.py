@@ -28,7 +28,8 @@ from .context import (
     get_session_data
 )
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class DualAuthBridge:

@@ -37,7 +37,8 @@ from pydantic import Field, BaseModel
 from typing_extensions import Annotated
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class MacroInfo(BaseModel):

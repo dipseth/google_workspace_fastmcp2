@@ -10,7 +10,8 @@ from typing import Dict, List, Optional, Set, Any, Union
 from fastmcp import FastMCP
 from auth.scope_registry import ScopeRegistry, ValidationResult
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class MCPMetadataHandler:

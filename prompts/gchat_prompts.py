@@ -24,7 +24,8 @@ from pydantic import Field
 from fastmcp import FastMCP, Context
 from fastmcp.prompts.prompt import Message, PromptMessage, TextContent
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 def setup_gchat_prompts(mcp: FastMCP):
     """

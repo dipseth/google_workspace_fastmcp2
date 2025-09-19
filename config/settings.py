@@ -147,7 +147,7 @@ class Settings(BaseSettings):
             # Use the scope registry directly as single source of truth
             from auth.scope_registry import ScopeRegistry
             scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
-            logging.info(f"SCOPE_DEBUG: Retrieved {len(scopes)} scopes from oauth_comprehensive group")
+            logging.debug(f"SCOPE_DEBUG: Retrieved {len(scopes)} scopes from oauth_comprehensive group")
             
             # Verify no problematic scopes are included
             problematic_patterns = ['photoslibrary.sharing', 'cloud-platform', 'cloudfunctions', 'pubsub', 'iam']
@@ -158,15 +158,15 @@ class Settings(BaseSettings):
                 for scope in problematic_scopes:
                     logging.error(f"SCOPE_DEBUG: Problematic scope: {scope}")
             else:
-                logging.info("SCOPE_DEBUG: No problematic scopes found - using clean oauth_comprehensive group")
+                logging.debug("SCOPE_DEBUG: No problematic scopes found - using clean oauth_comprehensive group")
             
             # Check if Gmail settings scopes are included
             gmail_settings_basic = "https://www.googleapis.com/auth/gmail.settings.basic"
             gmail_settings_sharing = "https://www.googleapis.com/auth/gmail.settings.sharing"
             has_settings_basic = gmail_settings_basic in scopes
             has_settings_sharing = gmail_settings_sharing in scopes
-            logging.info(f"SCOPE_DEBUG: Gmail settings.basic included: {has_settings_basic}")
-            logging.info(f"SCOPE_DEBUG: Gmail settings.sharing included: {has_settings_sharing}")
+            logging.debug(f"SCOPE_DEBUG: Gmail settings.basic included: {has_settings_basic}")
+            logging.debug(f"SCOPE_DEBUG: Gmail settings.sharing included: {has_settings_sharing}")
             
             return scopes
             
@@ -203,24 +203,24 @@ class Settings(BaseSettings):
         import os
         env_qdrant_url = os.getenv("QDRANT_URL")
         env_qdrant_key = os.getenv("QDRANT_KEY")
-        logging.info(f"🔧 SETTINGS DEBUG - Environment variables: QDRANT_URL='{env_qdrant_url}', QDRANT_KEY={'***' if env_qdrant_key else 'None'}")
-        logging.info(f"🔧 SETTINGS DEBUG - Settings fields: qdrant_url='{self.qdrant_url}', qdrant_key={'***' if self.qdrant_key and self.qdrant_key != 'NONE' else 'None'}")
+        logging.debug(f"🔧 SETTINGS DEBUG - Environment variables: QDRANT_URL='{env_qdrant_url}', QDRANT_KEY={'***' if env_qdrant_key else 'None'}")
+        logging.debug(f"🔧 SETTINGS DEBUG - Settings fields: qdrant_url='{self.qdrant_url}', qdrant_key={'***' if self.qdrant_key and self.qdrant_key != 'NONE' else 'None'}")
         
         # DEBUG: Log FastMCP GoogleProvider environment variable loading
         env_fastmcp_auth = os.getenv("FASTMCP_SERVER_AUTH")
         env_fastmcp_client_id = os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID")
         env_fastmcp_client_secret = os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET")
         env_fastmcp_base_url = os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL")
-        logging.info(f"🔧 FASTMCP DEBUG - Environment variables:")
-        logging.info(f"🔧   FASTMCP_SERVER_AUTH='{env_fastmcp_auth}'")
-        logging.info(f"🔧   FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID={'***' if env_fastmcp_client_id else 'None'}")
-        logging.info(f"🔧   FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET={'***' if env_fastmcp_client_secret else 'None'}")
-        logging.info(f"🔧   FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL='{env_fastmcp_base_url}'")
-        logging.info(f"🔧 FASTMCP DEBUG - Settings fields:")
-        logging.info(f"🔧   fastmcp_server_auth='{self.fastmcp_server_auth}'")
-        logging.info(f"🔧   fastmcp_server_auth_google_client_id={'***' if self.fastmcp_server_auth_google_client_id else 'None'}")
-        logging.info(f"🔧   fastmcp_server_auth_google_client_secret={'***' if self.fastmcp_server_auth_google_client_secret else 'None'}")
-        logging.info(f"🔧   fastmcp_server_auth_google_base_url='{self.fastmcp_server_auth_google_base_url}'")
+        logging.debug(f"🔧 FASTMCP DEBUG - Environment variables:")
+        logging.debug(f"🔧   FASTMCP_SERVER_AUTH='{env_fastmcp_auth}'")
+        logging.debug(f"🔧   FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID={'***' if env_fastmcp_client_id else 'None'}")
+        logging.debug(f"🔧   FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET={'***' if env_fastmcp_client_secret else 'None'}")
+        logging.debug(f"🔧   FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL='{env_fastmcp_base_url}'")
+        logging.debug(f"🔧 FASTMCP DEBUG - Settings fields:")
+        logging.debug(f"🔧   fastmcp_server_auth='{self.fastmcp_server_auth}'")
+        logging.debug(f"🔧   fastmcp_server_auth_google_client_id={'***' if self.fastmcp_server_auth_google_client_id else 'None'}")
+        logging.debug(f"🔧   fastmcp_server_auth_google_client_secret={'***' if self.fastmcp_server_auth_google_client_secret else 'None'}")
+        logging.debug(f"🔧   fastmcp_server_auth_google_base_url='{self.fastmcp_server_auth_google_base_url}'")
         
         # Cloud-aware configuration
         if self.is_cloud_deployment:
@@ -228,7 +228,7 @@ class Settings(BaseSettings):
             self.credentials_dir = os.getenv("CREDENTIALS_DIR", "/tmp/credentials")
             if not self.credential_storage_mode or self.credential_storage_mode == "FILE_ENCRYPTED":
                 self.credential_storage_mode = os.getenv("CREDENTIAL_STORAGE_MODE", "MEMORY_WITH_BACKUP")
-            logging.info(f"☁️ Cloud deployment detected - using credentials_dir='{self.credentials_dir}', storage_mode='{self.credential_storage_mode}'")
+            logging.debug(f"☁️ Cloud deployment detected - using credentials_dir='{self.credentials_dir}', storage_mode='{self.credential_storage_mode}'")
         else:
             # Use environment variable override if provided, otherwise keep current value
             self.credentials_dir = os.getenv("CREDENTIALS_DIR", self.credentials_dir)
@@ -245,7 +245,7 @@ class Settings(BaseSettings):
         self.qdrant_api_key = None if self.qdrant_key in ["NONE", "", None] else self.qdrant_key
         
         # DEBUG: Log final parsed values
-        logging.info(f"🔧 SETTINGS DEBUG - Parsed values: host='{self.qdrant_host}', port={self.qdrant_port}, api_key={'***' if self.qdrant_api_key else 'None'}")
+        logging.debug(f"🔧 SETTINGS DEBUG - Parsed values: host='{self.qdrant_host}', port={self.qdrant_port}, api_key={'***' if self.qdrant_api_key else 'None'}")
     
     def get_gmail_allow_list(self) -> List[str]:
         """
@@ -399,12 +399,12 @@ class Settings(BaseSettings):
             if self.enable_https and env_oauth_uri.startswith("http://localhost"):
                 # Convert HTTP to HTTPS for localhost when HTTPS is enabled
                 https_uri = env_oauth_uri.replace("http://localhost", "https://localhost")
-                logging.info(f"🔧 PROTOCOL FIX: Converted OAuth redirect URI from HTTP to HTTPS: {env_oauth_uri} → {https_uri}")
+                logging.debug(f"🔧 PROTOCOL FIX: Converted OAuth redirect URI from HTTP to HTTPS: {env_oauth_uri} → {https_uri}")
                 return https_uri
             elif not self.enable_https and env_oauth_uri.startswith("https://localhost"):
                 # Convert HTTPS to HTTP for localhost when HTTPS is disabled
                 http_uri = env_oauth_uri.replace("https://localhost", "http://localhost")
-                logging.info(f"🔧 PROTOCOL FIX: Converted OAuth redirect URI from HTTPS to HTTP: {env_oauth_uri} → {http_uri}")
+                logging.debug(f"🔧 PROTOCOL FIX: Converted OAuth redirect URI from HTTPS to HTTP: {env_oauth_uri} → {http_uri}")
                 return http_uri
             else:
                 # Use as-is for non-localhost or already correct protocol
@@ -418,7 +418,7 @@ class Settings(BaseSettings):
         """Get uvicorn SSL configuration for FastMCP if HTTPS is enabled."""
         if self.is_cloud_deployment:
             # FastMCP Cloud handles SSL automatically
-            logging.info("☁️ Cloud deployment detected - SSL handled by FastMCP Cloud")
+            logging.debug("☁️ Cloud deployment detected - SSL handled by FastMCP Cloud")
             return None
         
         if not self.enable_https:

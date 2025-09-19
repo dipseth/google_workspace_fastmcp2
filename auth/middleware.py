@@ -41,7 +41,8 @@ from .service_manager import get_google_service, GoogleServiceError
 from config.settings import settings
 from .dual_auth_bridge import get_dual_auth_bridge
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class CredentialStorageMode(Enum):
@@ -90,14 +91,14 @@ class AuthMiddleware(Middleware):
         if storage_mode in [CredentialStorageMode.FILE_ENCRYPTED, CredentialStorageMode.MEMORY_WITH_BACKUP]:
             self._setup_encryption()
         
-        logger.info(f"🔐 AuthMiddleware initialized with storage mode: {storage_mode.value}")
+        logger.debug(f"🔐 AuthMiddleware initialized with storage mode: {storage_mode.value}")
         
         if self._unified_auth_enabled:
-            logger.info("✅ Unified authentication enabled (FastMCP GoogleProvider integration)")
-            logger.info("🔄 GoogleProvider ↔ Legacy Tool Bridge active")
-            logger.info("🌉 Dual Auth Bridge initialized for multi-account support")
+            logger.debug("✅ Unified authentication enabled (FastMCP GoogleProvider integration)")
+            logger.debug("🔄 GoogleProvider ↔ Legacy Tool Bridge active")
+            logger.debug("🌉 Dual Auth Bridge initialized for multi-account support")
         else:
-            logger.info("⭕ Unified authentication disabled (no GoogleProvider or enable_unified_auth=False)")
+            logger.debug("⭕ Unified authentication disabled (no GoogleProvider or enable_unified_auth=False)")
         
         # Log security recommendations
         if storage_mode == CredentialStorageMode.FILE_PLAINTEXT:
@@ -111,7 +112,7 @@ class AuthMiddleware(Middleware):
         existing_session = get_session_context()
         if existing_session:
             session_id = existing_session
-            logger.info(f"✅ Reusing existing session context: {session_id}")
+            logger.debug(f"✅ Reusing existing session context: {session_id}")
         else:
             # Try to extract session ID from various possible locations
             session_id = None
@@ -131,23 +132,23 @@ class AuthMiddleware(Middleware):
                 if active_sessions:
                     # Use the most recently used session
                     session_id = active_sessions[-1]
-                    logger.info(f"♻️ Reusing most recent active session: {session_id}")
+                    logger.debug(f"♻️ Reusing most recent active session: {session_id}")
                 else:
                     # Generate a new session ID only if absolutely necessary
                     import uuid
                     session_id = str(uuid.uuid4())
-                    logger.info(f"🆕 Generated new session ID (no active sessions found): {session_id}")
+                    logger.debug(f"🆕 Generated new session ID (no active sessions found): {session_id}")
         
         set_session_context(session_id)
-        logger.info(f"🔍 DEBUG: Set session context: {session_id}")
+        logger.debug(f"🔍 DEBUG: Set session context: {session_id}")
         
         # Check if we have a stored user email for this session (from OAuth)
         user_email = get_session_data(session_id, "user_email")
         if user_email:
             set_user_email_context(user_email)
-            logger.info(f"🔍 DEBUG: Restored user email context from session: {user_email}")
+            logger.debug(f"🔍 DEBUG: Restored user email context from session: {user_email}")
         else:
-            logger.info(f"🔍 DEBUG: No stored user email found for session: {session_id}")
+            logger.debug(f"🔍 DEBUG: No stored user email found for session: {session_id}")
         
         # Periodic cleanup of expired sessions
         now = datetime.now()
@@ -204,7 +205,7 @@ class AuthMiddleware(Middleware):
             if active_sessions:
                 session_id = active_sessions[-1]
                 set_session_context(session_id)
-                logger.info(f"♻️ Reactivated session for tool {tool_name}: {session_id}")
+                logger.debug(f"♻️ Reactivated session for tool {tool_name}: {session_id}")
             else:
                 # Only generate new if absolutely necessary
                 import uuid
@@ -212,16 +213,16 @@ class AuthMiddleware(Middleware):
                 set_session_context(session_id)
                 logger.warning(f"⚠️ Had to generate new session for tool {tool_name}: {session_id}")
         else:
-            logger.info(f"✅ Using existing session for tool {tool_name}: {session_id}")
+            logger.debug(f"✅ Using existing session for tool {tool_name}: {session_id}")
         
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
-        logger.info(f"🔍 Starting user extraction for tool {tool_name}")
+        logger.debug(f"🔍 Starting user extraction for tool {tool_name}")
         
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
         if user_email:
-            logger.info(f"🎫 Extracted user from JWT token for tool {tool_name}: {user_email}")
+            logger.debug(f"🎫 Extracted user from JWT token for tool {tool_name}: {user_email}")
             # Register as primary account in dual auth bridge
             self._dual_auth_bridge.set_primary_account(user_email)
             # Store in session for future use
@@ -238,7 +239,7 @@ class AuthMiddleware(Middleware):
         if not user_email and self._unified_auth_enabled:
             user_email = await self._extract_user_from_google_provider()
             if user_email:
-                logger.info(f"🔑 Extracted user from GoogleProvider for tool {tool_name}: {user_email}")
+                logger.debug(f"🔑 Extracted user from GoogleProvider for tool {tool_name}: {user_email}")
                 # Store in session for future use
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
@@ -253,19 +254,19 @@ class AuthMiddleware(Middleware):
         if not user_email and session_id:
             user_email = get_session_data(session_id, "user_email")
             if user_email:
-                logger.info(f"✅ Retrieved user email from session storage for tool {tool_name}: {user_email}")
+                logger.debug(f"✅ Retrieved user email from session storage for tool {tool_name}: {user_email}")
                 # Also set it in context for immediate use
                 set_user_email_context(user_email)
                 # Auto-inject into tool arguments
                 await self._auto_inject_email_parameter(context, user_email)
             else:
-                logger.info(f"⚠️ No user email in session storage for session {session_id}")
+                logger.debug(f"⚠️ No user email in session storage for session {session_id}")
         
         # OAUTH FILE FALLBACK: Check for stored OAuth authentication data
         if not user_email:
             user_email = self._load_oauth_authentication_data()
             if user_email:
-                logger.info(f"✅ Retrieved user email from OAuth authentication file for tool {tool_name}: {user_email}")
+                logger.debug(f"✅ Retrieved user email from OAuth authentication file for tool {tool_name}: {user_email}")
                 # Register as secondary account in dual auth bridge
                 self._dual_auth_bridge.add_secondary_account(user_email)
                 # Store in session for future use
@@ -282,7 +283,7 @@ class AuthMiddleware(Middleware):
         if not user_email:
             user_email = self._extract_user_email(context)
             if user_email:
-                logger.info(f"🔍 DEBUG: Extracted user email from tool arguments for tool {tool_name}: {user_email}")
+                logger.debug(f"🔍 DEBUG: Extracted user email from tool arguments for tool {tool_name}: {user_email}")
                 # Check if this is a known account or register as secondary
                 if not (self._dual_auth_bridge.is_primary_account(user_email) or
                         self._dual_auth_bridge.is_secondary_account(user_email)):
@@ -291,18 +292,18 @@ class AuthMiddleware(Middleware):
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
             else:
-                logger.info(f"🔍 DEBUG: No user email found in tool arguments for tool {tool_name}")
+                logger.debug(f"🔍 DEBUG: No user email found in tool arguments for tool {tool_name}")
         
         # Set user email context if found
         if user_email:
             set_user_email_context(user_email)
-            logger.info(f"🔍 DEBUG: Set user email context for tool {tool_name}: {user_email}")
+            logger.debug(f"🔍 DEBUG: Set user email context for tool {tool_name}: {user_email}")
             
             # Bridge credentials if needed (GoogleProvider → Legacy)
             if self._unified_auth_enabled:
                 await self._bridge_credentials_if_needed(user_email)
         else:
-            logger.info(f"🔍 DEBUG: No user email available for tool {tool_name}")
+            logger.debug(f"🔍 DEBUG: No user email available for tool {tool_name}")
         
         # Handle service injection if enabled
         if self._service_injection_enabled:
@@ -345,7 +346,7 @@ class AuthMiddleware(Middleware):
             if active_sessions:
                 session_id = active_sessions[-1]
                 set_session_context(session_id)
-                logger.info(f"♻️ Reactivated session for resource {resource_uri}: {session_id}")
+                logger.debug(f"♻️ Reactivated session for resource {resource_uri}: {session_id}")
             else:
                 # Only generate new if absolutely necessary
                 import uuid
@@ -353,16 +354,16 @@ class AuthMiddleware(Middleware):
                 set_session_context(session_id)
                 logger.warning(f"⚠️ Had to generate new session for resource {resource_uri}: {session_id}")
         else:
-            logger.info(f"✅ Using existing session for resource {resource_uri}: {session_id}")
+            logger.debug(f"✅ Using existing session for resource {resource_uri}: {session_id}")
         
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
-        logger.info(f"🔍 Starting user extraction for resource {resource_uri}")
+        logger.debug(f"🔍 Starting user extraction for resource {resource_uri}")
         
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
         if user_email:
-            logger.info(f"🎫 Extracted user from JWT token for resource {resource_uri}: {user_email}")
+            logger.debug(f"🎫 Extracted user from JWT token for resource {resource_uri}: {user_email}")
             # Store in session for future use
             if session_id:
                 store_session_data(session_id, "user_email", user_email)
@@ -375,7 +376,7 @@ class AuthMiddleware(Middleware):
         if not user_email and self._unified_auth_enabled:
             user_email = await self._extract_user_from_google_provider()
             if user_email:
-                logger.info(f"🔑 Extracted user from GoogleProvider for resource {resource_uri}: {user_email}")
+                logger.debug(f"🔑 Extracted user from GoogleProvider for resource {resource_uri}: {user_email}")
                 # Store in session for future use
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
@@ -388,17 +389,17 @@ class AuthMiddleware(Middleware):
         if not user_email and session_id:
             user_email = get_session_data(session_id, "user_email")
             if user_email:
-                logger.info(f"✅ Retrieved user email from session storage for resource {resource_uri}: {user_email}")
+                logger.debug(f"✅ Retrieved user email from session storage for resource {resource_uri}: {user_email}")
                 # Also set it in context for immediate use
                 set_user_email_context(user_email)
             else:
-                logger.info(f"⚠️ No user email in session storage for session {session_id}")
+                logger.debug(f"⚠️ No user email in session storage for session {session_id}")
         
         # OAUTH FILE FALLBACK: Check for stored OAuth authentication data
         if not user_email:
             user_email = self._load_oauth_authentication_data()
             if user_email:
-                logger.info(f"✅ Retrieved user email from OAuth authentication file for resource {resource_uri}: {user_email}")
+                logger.debug(f"✅ Retrieved user email from OAuth authentication file for resource {resource_uri}: {user_email}")
                 # Store in session for future use
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
@@ -410,13 +411,13 @@ class AuthMiddleware(Middleware):
         # Set user email context if found
         if user_email:
             set_user_email_context(user_email)
-            logger.info(f"🔍 DEBUG: Set user email context for resource {resource_uri}: {user_email}")
+            logger.debug(f"🔍 DEBUG: Set user email context for resource {resource_uri}: {user_email}")
             
             # Bridge credentials if needed (GoogleProvider → Legacy)
             if self._unified_auth_enabled:
                 await self._bridge_credentials_if_needed(user_email)
         else:
-            logger.info(f"🔍 DEBUG: No user email available for resource {resource_uri}")
+            logger.debug(f"🔍 DEBUG: No user email available for resource {resource_uri}")
         
         try:
             result = await call_next(context)
@@ -468,7 +469,7 @@ class AuthMiddleware(Middleware):
             logger.debug(f"No pending service requests for tool: {tool_name}")
             return
         
-        logger.info(f"🔧 Injecting {len(pending_requests)} Google services for tool: {tool_name} (storage: {self._storage_mode.value})")
+        logger.debug(f"🔧 Injecting {len(pending_requests)} Google services for tool: {tool_name} (storage: {self._storage_mode.value})")
         
         # Fulfill each service request
         for service_key, service_data in pending_requests.items():
@@ -492,7 +493,7 @@ class AuthMiddleware(Middleware):
                 # Inject the service into context
                 _set_injected_service(service_key, service)
                 
-                logger.info(
+                logger.debug(
                     f"✅ Successfully injected {service_type} service "
                     f"for {user_email} in tool {tool_name}"
                 )
@@ -510,7 +511,7 @@ class AuthMiddleware(Middleware):
     def enable_service_injection(self, enabled: bool = True):
         """Enable or disable automatic service injection."""
         self._service_injection_enabled = enabled
-        logger.info(f"Service injection {'enabled' if enabled else 'disabled'}")
+        logger.debug(f"Service injection {'enabled' if enabled else 'disabled'}")
     
     def _setup_encryption(self):
         """Setup encryption for secure credential storage."""
@@ -542,15 +543,15 @@ class AuthMiddleware(Middleware):
             # Import here to avoid dependency issues if cryptography not installed
             from cryptography.fernet import Fernet
             self._fernet = Fernet(key_bytes)
-            logger.info("✅ Encryption initialized for secure credential storage")
+            logger.debug("✅ Encryption initialized for secure credential storage")
             
         except ImportError:
             logger.error("❌ cryptography package required for encrypted storage. Install with: pip install cryptography")
-            logger.info("🔄 Falling back to plaintext storage...")
+            logger.debug("🔄 Falling back to plaintext storage...")
             self._storage_mode = CredentialStorageMode.FILE_PLAINTEXT
         except Exception as e:
             logger.error(f"❌ Failed to setup encryption: {e}")
-            logger.info("🔄 Falling back to plaintext storage...")
+            logger.debug("🔄 Falling back to plaintext storage...")
             self._storage_mode = CredentialStorageMode.FILE_PLAINTEXT
     
     def _encrypt_credentials(self, credentials: Credentials) -> str:
@@ -610,7 +611,7 @@ class AuthMiddleware(Middleware):
             user_email: User's email address
             credentials: Google OAuth credentials
         """
-        logger.info(f"💾 Saving credentials for {user_email} using {self._storage_mode.value}")
+        logger.debug(f"💾 Saving credentials for {user_email} using {self._storage_mode.value}")
         
         if self._storage_mode == CredentialStorageMode.MEMORY_ONLY:
             # Store only in memory
@@ -639,7 +640,7 @@ class AuthMiddleware(Middleware):
             except (OSError, AttributeError):
                 logger.warning("Could not set restrictive permissions on credential file")
             
-            logger.info(f"✅ Saved encrypted credentials for {user_email}")
+            logger.debug(f"✅ Saved encrypted credentials for {user_email}")
             
         elif self._storage_mode == CredentialStorageMode.MEMORY_WITH_BACKUP:
             # Store in memory + encrypted backup
@@ -660,7 +661,7 @@ class AuthMiddleware(Middleware):
             except (OSError, AttributeError):
                 pass
             
-            logger.info(f"✅ Saved credentials in memory + encrypted backup for {user_email}")
+            logger.debug(f"✅ Saved credentials in memory + encrypted backup for {user_email}")
     
     def load_credentials(self, user_email: str) -> Optional[Credentials]:
         """
@@ -692,7 +693,7 @@ class AuthMiddleware(Middleware):
                     credentials = self._decrypt_credentials(encrypted_data)
                     # Restore to memory
                     self._memory_credentials[user_email] = credentials
-                    logger.info(f"🔄 Restored credentials from backup for {user_email}")
+                    logger.debug(f"🔄 Restored credentials from backup for {user_email}")
                     return credentials
                     
                 except Exception as e:
@@ -783,7 +784,7 @@ class AuthMiddleware(Middleware):
         for file_info in current_summary.get("file_credentials", []):
             all_users.add(file_info["email"])
         
-        logger.info(f"🔄 Migrating {len(all_users)} users to {target_mode.value}")
+        logger.debug(f"🔄 Migrating {len(all_users)} users to {target_mode.value}")
         
         # Migrate each user
         for user_email in all_users:
@@ -812,7 +813,7 @@ class AuthMiddleware(Middleware):
         
         # Update to target mode
         self._storage_mode = target_mode
-        logger.info(f"✅ Migration completed. New storage mode: {target_mode.value}")
+        logger.debug(f"✅ Migration completed. New storage mode: {target_mode.value}")
         
         return results
     
@@ -866,7 +867,7 @@ class AuthMiddleware(Middleware):
             
         except Exception as e:
             # No valid token - this means we need to authenticate
-            logger.info(f"🔍 GoogleProvider: No valid token ({e}), service selection needed")
+            logger.debug(f"🔍 GoogleProvider: No valid token ({e}), service selection needed")
             
             # Store indication that service selection is needed
             self._set_service_selection_needed(True)
@@ -894,12 +895,12 @@ class AuthMiddleware(Middleware):
             
             # If no valid legacy credentials, try to bridge from GoogleProvider
             if settings.credential_migration:
-                logger.info(f"🔄 Bridging GoogleProvider credentials to legacy system for {user_email}")
+                logger.debug(f"🔄 Bridging GoogleProvider credentials to legacy system for {user_email}")
                 
                 # Use dual auth bridge for credential bridging
                 bridged_credentials = self._dual_auth_bridge.bridge_credentials(user_email, "memory")
                 if bridged_credentials:
-                    logger.info(f"✅ Successfully bridged credentials for {user_email}")
+                    logger.debug(f"✅ Successfully bridged credentials for {user_email}")
                 else:
                     logger.debug(f"⚠️ Could not bridge credentials for {user_email}")
             
@@ -919,14 +920,14 @@ class AuthMiddleware(Middleware):
             user_email: User's email address to inject
         """
         try:
-            logger.info(f"🔧 DEBUG: _auto_inject_email_parameter called with user_email: {user_email}")
-            logger.info(f"🔧 DEBUG: Context type: {type(context)}")
-            logger.info(f"🔧 DEBUG: Message type: {type(getattr(context, 'message', None))}")
+            logger.debug(f"🔧 DEBUG: _auto_inject_email_parameter called with user_email: {user_email}")
+            logger.debug(f"🔧 DEBUG: Context type: {type(context)}")
+            logger.debug(f"🔧 DEBUG: Message type: {type(getattr(context, 'message', None))}")
             
             # Comprehensive debugging of the context structure
             if hasattr(context, 'message'):
                 message = context.message
-                logger.info(f"🔧 DEBUG: Message attributes: {[attr for attr in dir(message) if not attr.startswith('_')]}")
+                logger.debug(f"🔧 DEBUG: Message attributes: {[attr for attr in dir(message) if not attr.startswith('_')]}")
                 
                 # Check for arguments in various possible locations
                 arguments = None
@@ -936,43 +937,43 @@ class AuthMiddleware(Middleware):
                 if hasattr(message, 'arguments') and message.arguments is not None:
                     arguments = message.arguments
                     arguments_source = "message.arguments"
-                    logger.info(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments} (type: {type(arguments)})")
+                    logger.debug(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments} (type: {type(arguments)})")
                 
                 # Method 2: Check for params attribute
                 elif hasattr(message, 'params') and message.params is not None:
                     arguments = message.params
                     arguments_source = "message.params"
-                    logger.info(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments} (type: {type(arguments)})")
+                    logger.debug(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments} (type: {type(arguments)})")
                 
                 # Method 3: Check content attribute
                 elif hasattr(message, 'content'):
                     content = message.content
-                    logger.info(f"🔧 DEBUG: Found message.content: {content} (type: {type(content)})")
+                    logger.debug(f"🔧 DEBUG: Found message.content: {content} (type: {type(content)})")
                     if hasattr(content, 'arguments'):
                         arguments = content.arguments
                         arguments_source = "message.content.arguments"
-                        logger.info(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments}")
+                        logger.debug(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments}")
                 
                 # Log what we found for each possible attribute
                 for attr in ['arguments', 'params', 'args', 'data', 'payload', 'body', 'input']:
                     if hasattr(message, attr):
                         value = getattr(message, attr)
-                        logger.info(f"🔧 DEBUG: message.{attr} = {value} (type: {type(value)})")
+                        logger.debug(f"🔧 DEBUG: message.{attr} = {value} (type: {type(value)})")
                 
                 # Try to inject if we found arguments
                 if arguments is not None:
-                    logger.info(f"🔧 DEBUG: Working with {arguments_source}: {arguments}")
+                    logger.debug(f"🔧 DEBUG: Working with {arguments_source}: {arguments}")
                     
                     # Handle different argument types
                     if isinstance(arguments, dict):
                         # Auto-inject user_google_email if not provided or is None
                         current_value = arguments.get('user_google_email')
-                        logger.info(f"🔧 DEBUG: Current user_google_email value: {current_value}")
+                        logger.debug(f"🔧 DEBUG: Current user_google_email value: {current_value}")
                         
                         if 'user_google_email' not in arguments or current_value is None:
                             try:
                                 arguments['user_google_email'] = user_email
-                                logger.info(f"🔧 DEBUG: ✅ Auto-injected user_google_email={user_email} into {arguments_source}")
+                                logger.debug(f"🔧 DEBUG: ✅ Auto-injected user_google_email={user_email} into {arguments_source}")
                                 
                                 # Also try to update the original location if different
                                 if arguments_source == "message.arguments":
@@ -985,14 +986,14 @@ class AuthMiddleware(Middleware):
                             except Exception as inject_error:
                                 logger.error(f"🔧 DEBUG: ❌ Failed to inject: {inject_error}")
                         else:
-                            logger.info(f"🔧 DEBUG: user_google_email already has value: {current_value}")
+                            logger.debug(f"🔧 DEBUG: user_google_email already has value: {current_value}")
                     else:
-                        logger.info(f"🔧 DEBUG: ❌ Arguments is not a dict: {type(arguments)}")
+                        logger.debug(f"🔧 DEBUG: ❌ Arguments is not a dict: {type(arguments)}")
                 else:
-                    logger.info(f"🔧 DEBUG: ❌ No arguments found in any expected location")
+                    logger.debug(f"🔧 DEBUG: ❌ No arguments found in any expected location")
                     
             else:
-                logger.info(f"🔧 DEBUG: ❌ Context has no message attribute")
+                logger.debug(f"🔧 DEBUG: ❌ Context has no message attribute")
             
         except Exception as e:
             logger.error(f"⚠️ DEBUG: Could not auto-inject email parameter: {e}", exc_info=True)
@@ -1008,9 +1009,9 @@ class AuthMiddleware(Middleware):
         self._unified_auth_enabled = bool(google_provider and settings.enable_unified_auth)
         
         if self._unified_auth_enabled:
-            logger.info("✅ GoogleProvider updated - unified authentication enabled")
+            logger.debug("✅ GoogleProvider updated - unified authentication enabled")
         else:
-            logger.info("⭕ GoogleProvider cleared - unified authentication disabled")
+            logger.debug("⭕ GoogleProvider cleared - unified authentication disabled")
     
     def is_unified_auth_enabled(self) -> bool:
         """Check if unified authentication is enabled."""
@@ -1030,7 +1031,7 @@ class AuthMiddleware(Middleware):
     def enable_service_selection(self, enabled: bool = True):
         """Enable or disable service selection interface."""
         self._enable_service_selection = enabled
-        logger.info(f"Service selection {'enabled' if enabled else 'disabled'}")
+        logger.debug(f"Service selection {'enabled' if enabled else 'disabled'}")
     
     def _extract_user_from_jwt_token(self) -> Optional[str]:
         """
@@ -1125,7 +1126,7 @@ class AuthMiddleware(Middleware):
                 except Exception as e:
                     logger.debug(f"Could not parse authentication timestamp: {e}")
             
-            logger.info(f"📂 Loaded OAuth authentication data for: {authenticated_email}")
+            logger.debug(f"📂 Loaded OAuth authentication data for: {authenticated_email}")
             return authenticated_email
             
         except Exception as e:
@@ -1159,11 +1160,11 @@ def create_enhanced_auth_middleware(
     )
     
     if middleware.is_unified_auth_enabled():
-        logger.info("🎯 Unified OAuth Architecture Active:")
-        logger.info("  ✅ FastMCP GoogleProvider → Legacy Tool Bridge")
-        logger.info("  ✅ Automatic user context injection")
-        logger.info("  ✅ Backward compatibility maintained")
-        logger.info("  ✅ No tool signature changes required")
-        logger.info("  🔄 Phase 1 migration successfully implemented")
+        logger.debug("🎯 Unified OAuth Architecture Active:")
+        logger.debug("  ✅ FastMCP GoogleProvider → Legacy Tool Bridge")
+        logger.debug("  ✅ Automatic user context injection")
+        logger.debug("  ✅ Backward compatibility maintained")
+        logger.debug("  ✅ No tool signature changes required")
+        logger.debug("  🔄 Phase 1 migration successfully implemented")
     
     return middleware

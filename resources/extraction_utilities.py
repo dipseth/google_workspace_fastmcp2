@@ -9,7 +9,8 @@ import logging
 from typing import Dict, List, Any, Optional, Callable
 from fastmcp import FastMCP
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 def get_tools_for_service(mcp_server: FastMCP, service_name: str) -> Dict[str, Callable]:

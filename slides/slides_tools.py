@@ -35,7 +35,8 @@ from .slides_types import (
     FileDownloadInfo
 )
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 # ============================================================================

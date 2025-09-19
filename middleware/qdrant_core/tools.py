@@ -44,7 +44,8 @@ from middleware.qdrant_types import (
 )
 from tools.common_types import UserGoogleEmail
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, search_manager=None):

@@ -23,7 +23,8 @@ from pathlib import Path
 from datetime import datetime, UTC
 from urllib.parse import urlparse
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 def parse_qdrant_url(url: str) -> Dict[str, Union[str, int, bool]]:
     """

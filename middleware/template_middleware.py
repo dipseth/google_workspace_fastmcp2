@@ -38,7 +38,9 @@ from .template_core import (
 from .filters import register_all_filters
 from .namespace_converter import convert_to_namespace
 
-logger = logging.getLogger(__name__)
+
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class EnhancedTemplateMiddleware(Middleware):
@@ -173,13 +175,13 @@ class EnhancedTemplateMiddleware(Middleware):
         tool_name = getattr(context.message, 'name', 'unknown')
         
         if self.enable_debug_logging:
-            logger.debug(f"🔧 Processing tool call: {tool_name}")
+            logger.info(f"🔧 Processing tool call: {tool_name}")
         
-        # Check if we have FastMCP context for resource resolution
-        if not hasattr(context, 'fastmcp_context') or not context.fastmcp_context:
-            if self.enable_debug_logging:
-                logger.debug(f"⚠️ No FastMCP context available for tool: {tool_name}")
-            return await call_next(context)
+        # # Check if we have FastMCP context for resource resolution
+        # if not hasattr(context, 'fastmcp_context') or not context.fastmcp_context:
+        #     if self.enable_debug_logging:
+        #         logger.info(f"⚠️ No FastMCP context available for tool: {tool_name}")
+        #     return await call_next(context)
         
         try:
             # Track if templates were applied
@@ -201,7 +203,7 @@ class EnhancedTemplateMiddleware(Middleware):
                     context.message.arguments = resolved_args
                     template_applied = True
                     if self.enable_debug_logging:
-                        logger.debug(f"✅ Resolved templates for tool: {tool_name}")
+                        logger.info(f"✅ Resolved templates for tool: {tool_name}")
             
             # Execute the tool and get the result
             result = await call_next(context)
@@ -211,10 +213,10 @@ class EnhancedTemplateMiddleware(Middleware):
                 try:
                     result.structured_content["templateApplied"] = True
                     if self.enable_debug_logging:
-                        logger.debug(f"✅ Injected templateApplied=True into {tool_name} structured_content")
+                        logger.info(f"✅ Injected templateApplied=True into {tool_name} structured_content")
                 except Exception as e:
                     if self.enable_debug_logging:
-                        logger.debug(f"⚠️ Failed to inject template tracking into structured_content: {e}")
+                        logger.info(f"⚠️ Failed to inject template tracking into structured_content: {e}")
             elif result:
                 result.structured_content["templateApplied"] = False
             
@@ -314,7 +316,7 @@ class EnhancedTemplateMiddleware(Middleware):
         prompt_name = getattr(context.message, 'name', '')
         
         if self.enable_debug_logging:
-            logger.debug(f"🎭 Processing prompt request: {prompt_name}")
+            logger.info(f"🎭 Processing prompt request: {prompt_name}")
         
         # Check if this is a request for a random template
         if prompt_name == "random_template" or prompt_name.startswith("random_"):
@@ -348,7 +350,7 @@ class EnhancedTemplateMiddleware(Middleware):
                 
                 if has_templates:
                     if self.enable_debug_logging:
-                        logger.debug(f"🎯 Applying template resolution to prompt: {prompt_name}")
+                        logger.info(f"🎯 Applying template resolution to prompt: {prompt_name}")
                     
                     # Apply template resolution using modular template processor
                     resolved_text = await self.template_processor.resolve_string_templates(
@@ -361,7 +363,7 @@ class EnhancedTemplateMiddleware(Middleware):
                     prompt_result.content.text = resolved_text
                     
                     if self.enable_debug_logging:
-                        logger.debug(f"✅ Template variables resolved in prompt: {prompt_name}")
+                        logger.info(f"✅ Template variables resolved in prompt: {prompt_name}")
                 
             except Exception as e:
                 logger.error(f"❌ Template resolution failed for prompt {prompt_name}: {e}")
@@ -379,7 +381,7 @@ class EnhancedTemplateMiddleware(Middleware):
         resource_uri = str(context.message.uri) if hasattr(context.message, 'uri') and context.message.uri else ''
         
         if self.enable_debug_logging:
-            logger.debug(f"🔍 Checking resource URI: {resource_uri}")
+            logger.info(f"🔍 Checking resource URI: {resource_uri}")
         
         # Check if this is a template:// URI that the macro manager should handle
         if await self.macro_manager.handle_template_resource(resource_uri, context.fastmcp_context):
@@ -406,7 +408,7 @@ class EnhancedTemplateMiddleware(Middleware):
         """Generate a random template from available prompts and template files."""
         if not context.fastmcp_context:
             if self.enable_debug_logging:
-                logger.debug("⚠️ No FastMCP context available for random template generation")
+                logger.info("⚠️ No FastMCP context available for random template generation")
             return None
         
         try:
@@ -421,7 +423,7 @@ class EnhancedTemplateMiddleware(Middleware):
             selected = random.choice(available_options)
             
             if self.enable_debug_logging:
-                logger.debug(f"🎲 Randomly selected: {selected['type']} → {selected['name']}")
+                logger.info(f"🎲 Randomly selected: {selected['type']} → {selected['name']}")
             
             # Render the selected template
             if selected['type'] == 'prompt_function':
@@ -468,7 +470,7 @@ class EnhancedTemplateMiddleware(Middleware):
             template_content = template_file_path.read_text(encoding='utf-8')
             
             if self.enable_debug_logging:
-                logger.debug(f"📄 Loaded template file: {selected['relative_path']}")
+                logger.info(f"📄 Loaded template file: {selected['relative_path']}")
             
             # Use modular template processor for rendering
             rendered_content = await self.template_processor.resolve_string_templates(
@@ -486,7 +488,7 @@ class EnhancedTemplateMiddleware(Middleware):
             )
             
             if self.enable_debug_logging:
-                logger.debug(f"✅ Template file rendered successfully using modular processor")
+                logger.info(f"✅ Template file rendered successfully using modular processor")
             
             return result
             

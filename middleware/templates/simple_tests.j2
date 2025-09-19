@@ -1,0 +1,17 @@
+{% macro render_beautiful_email1(title="Hello World") %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ title }}</title>
+</head>
+<body>
+    <h1>{{ title }}</h1>
+    <p>This is a simple email template that works.</p>
+</body>
+</html>
+{%- endmacro %}
+
+{#
+MACRO USAGE EXAMPLE:
+{{ render_beautiful_email1(title="Hello World") }}
+#}

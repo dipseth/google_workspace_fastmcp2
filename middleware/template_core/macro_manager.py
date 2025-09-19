@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from .jinja_environment import JinjaEnvironmentManager
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class MacroManager:
@@ -79,7 +80,9 @@ class MacroManager:
             logger.debug(f"🔍 Scanning {len(template_files)} template files for macros")
         
         # Regex patterns for macro detection
-        macro_pattern = re.compile(r'{% macro (\w+)\([^%]*%}', re.MULTILINE)
+        # macro_pattern = re.compile(r'{% macro (\w+)\([^%]*%}', re.MULTILINE)
+        macro_pattern = re.compile(r'{% macro (\w+)\s*\([^}]*?\) %?}', re.MULTILINE | re.DOTALL)
+
         usage_example_pattern = re.compile(r'{#[^#]*MACRO USAGE EXAMPLE:[^#]*{{ (\w+)\([^}]*\) }}[^#]*#}', re.DOTALL)
         
         for template_file in template_files:

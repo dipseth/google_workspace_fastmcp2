@@ -1,0 +1,102 @@
+{% macro render_beautiful_email2(albums_data, title='My Google Photos Albums', subtitle='Explore your photo collections') -%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 40px 20px; }
+.container { max-width: 800px; margin: 0 auto; background: white; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; }
+.header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 60px 40px; text-align: center; position: relative; overflow: hidden; }
+.header::before { content: ''; position: absolute; top: -50%; right: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%); animation: shimmer 3s ease-in-out infinite; }
+@keyframes shimmer { 0%, 100% { transform: translateX(-50%); } 50% { transform: translateX(50%); } }
+.header h1 { font-size: 2.5em; margin-bottom: 10px; position: relative; z-index: 1; text-shadow: 2px 2px 4px rgba(0,0,0,0.2); }
+.header p { font-size: 1.2em; opacity: 0.95; position: relative; z-index: 1; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; padding: 30px; background: #f8f9fa; }
+.stat-card { text-align: center; padding: 20px; background: white; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.3s ease, box-shadow 0.3s ease; }
+.stat-card:hover { transform: translateY(-5px); box-shadow: 0 8px 12px rgba(0,0,0,0.15); }
+.stat-number { font-size: 2em; font-weight: bold; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.stat-label { color: #666; font-size: 0.9em; margin-top: 5px; }
+.albums-grid { padding: 40px; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 30px; }
+.album-card { background: white; border-radius: 15px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.3s ease; cursor: pointer; position: relative; }
+.album-card:hover { transform: translateY(-10px); box-shadow: 0 12px 24px rgba(0,0,0,0.2); }
+.album-card:hover .album-overlay { opacity: 1; }
+.album-image { width: 100%; height: 200px; object-fit: cover; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 3em; position: relative; }
+.album-image img { width: 100%; height: 100%; object-fit: cover; }
+.album-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(135deg, rgba(102, 126, 234, 0.8), rgba(118, 75, 162, 0.8)); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s ease; }
+.album-overlay-text { color: white; font-size: 1.2em; font-weight: bold; }
+.album-info { padding: 20px; }
+.album-title { font-size: 1.3em; font-weight: 600; color: #333; margin-bottom: 8px; }
+.album-meta { display: flex; justify-content: space-between; align-items: center; color: #666; font-size: 0.9em; }
+.album-count { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 4px 12px; border-radius: 20px; font-weight: 500; }
+.no-albums { text-align: center; padding: 60px; color: #666; }
+.no-albums-icon { font-size: 4em; margin-bottom: 20px; opacity: 0.3; }
+.footer { padding: 30px; text-align: center; background: #f8f9fa; color: #666; font-size: 0.9em; }
+.footer a { color: #667eea; text-decoration: none; font-weight: 500; }
+.footer a:hover { text-decoration: underline; }
+@media (max-width: 768px) { .header h1 { font-size: 2em; } .albums-grid { grid-template-columns: 1fr; padding: 20px; } .stats { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1>{{ title }}</h1>
+<p>{{ subtitle }}</p>
+</div>
+{%- if albums_data and albums_data.albums %}
+<div class="stats">
+<div class="stat-card">
+<div class="stat-number">{{ albums_data.albums|length }}</div>
+<div class="stat-label">Total Albums</div>
+</div>
+<div class="stat-card">
+<div class="stat-number">{{ albums_data.albums|map(attribute='mediaItemsCount')|select|map('int')|sum }}</div>
+<div class="stat-label">Total Photos</div>
+</div>
+<div class="stat-card">
+<div class="stat-number">{{ albums_data.albums|selectattr('mediaItemsCount', 'gt', '0')|list|length }}</div>
+<div class="stat-label">Active Albums</div>
+</div>
+</div>
+<div class="albums-grid">
+{%- for album in albums_data.albums %}
+<div class="album-card" onclick="window.open('{{ album.productUrl }}', '_blank')">
+<div class="album-image">
+{%- if album.coverPhotoBaseUrl %}
+<img src="{{ album.coverPhotoBaseUrl }}=w400-h300-c" alt="{{ album.title }}">
+<div class="album-overlay">
+<div class="album-overlay-text">View Album →</div>
+</div>
+{%- else %}
+📸
+{%- endif %}
+</div>
+<div class="album-info">
+<div class="album-title">{{ album.title }}</div>
+<div class="album-meta">
+<span>{{ album.mediaItemsCount or 0 }} items</span>
+<span class="album-count">{{ album.mediaItemsCount or 0 }}</span>
+</div>
+</div>
+</div>
+{%- endfor %}
+</div>
+{%- else %}
+<div class="no-albums">
+<div class="no-albums-icon">📷</div>
+<h2>No Albums Found</h2>
+<p>Start creating albums to organize your photos!</p>
+</div>
+{%- endif %}
+<div class="footer">
+<p>Powered by Google Photos API</p>
+<p><a href="https://photos.google.com" target="_blank">Open Google Photos</a></p>
+</div>
+</div>
+</body>
+</html>
+{%- endmacro %}
+
+{# MACRO USAGE EXAMPLE: {{ render_beautiful_email2(albums_data, 'My Albums', 'Browse your collection') }} #}

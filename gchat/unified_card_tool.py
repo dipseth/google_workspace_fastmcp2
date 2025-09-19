@@ -64,6 +64,10 @@ from gchat.chat_types import (
     CardTemplateInfo
 )
 
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
+logger.info("Card Framework v2 is available for rich card creation")
+
 # Try to import Card Framework with graceful fallback
 try:
     from card_framework.v2 import Card, Section, Widget, CardHeader, Message
@@ -73,11 +77,9 @@ try:
         DecoratedText, Icon, Column, Columns, OpenLink, OnClick, ButtonList
     )
     CARD_FRAMEWORK_AVAILABLE = True
-    logger = logging.getLogger(__name__)
-    logger.info("Card Framework v2 is available for rich card creation")
+
 except ImportError:
     CARD_FRAMEWORK_AVAILABLE = False
-    logger = logging.getLogger(__name__)
     logger.warning("Card Framework v2 not available. Falling back to REST API format.")
     
     # Define placeholder classes for type hints when Card Framework is not available

@@ -11,12 +11,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from .utils import SilentUndefined
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Jinja2 imports - optional dependency
 try:
     from jinja2 import Environment, DictLoader, FileSystemLoader, select_autoescape, BaseLoader
-    from jinja2 import Undefined, ChoiceLoader
+    from jinja2 import Undefined, ChoiceLoader, Template
     JINJA2_AVAILABLE = True
 except ImportError:
     Environment = None
@@ -26,7 +27,95 @@ except ImportError:
     BaseLoader = None
     Undefined = None
     ChoiceLoader = None
+    Template = None
     JINJA2_AVAILABLE = False
+
+
+class ContextPreservingEnvironment(Environment):
+    """
+    Custom Jinja2 Environment that preserves global functions in imported macro contexts.
+    
+    This fixes the issue where macros imported via {% from 'template.j2' import macro_name %}
+    don't have access to global functions like now() defined in the environment globals.
+    
+    The fix works by overriding get_template to ensure that when templates are loaded
+    for macro imports, their make_module method is enhanced to inject globals into
+    the module's namespace, making functions like now() available within imported macros.
+    """
+    
+    def _enhance_template_make_module(self, template):
+        """
+        Enhance a template's make_module method to inject globals.
+        
+        Args:
+            template: Template object to enhance
+            
+        Returns:
+            Template with enhanced make_module method
+        """
+        # Store reference to original make_module method
+        original_make_module = template.make_module
+        
+        def enhanced_make_module(vars=None, shared=True):
+            """
+            Enhanced make_module that injects environment globals into the module.
+            
+            This ensures that when macros are imported via {% from %}, they have
+            access to all global functions defined in the environment, including
+            critical functions like now(), utcnow(), etc.
+            """
+            # Create the module using the original method
+            module = original_make_module(vars, shared)
+            
+            # Inject environment globals into the module's namespace
+            # Only inject if the attribute doesn't already exist to avoid overwrites
+            for key, value in self.globals.items():
+                if not hasattr(module, key):
+                    setattr(module, key, value)
+            
+            return module
+        
+        # Replace the template's make_module method with our enhanced version
+        template.make_module = enhanced_make_module
+        
+        return template
+    
+    def get_template(self, name, parent=None, globals=None):
+        """
+        Override get_template to inject globals into imported macro contexts.
+        
+        Args:
+            name: Template name to load
+            parent: Parent template (for inheritance)
+            globals: Additional globals for this template
+            
+        Returns:
+            Template with enhanced make_module that preserves globals
+        """
+        if not JINJA2_AVAILABLE:
+            return None
+            
+        # Get the template using the standard method
+        template = super().get_template(name, parent, globals)
+        
+        # Enhance the template's make_module method
+        return self._enhance_template_make_module(template)
+    
+    def from_string(self, source, globals=None, template_class=None):
+        """
+        Override from_string to inject globals into macro contexts.
+        
+        This ensures that even dynamically created templates (like in tests)
+        have access to environment globals in their modules.
+        """
+        if not JINJA2_AVAILABLE:
+            return None
+            
+        # Create template using the standard method
+        template = super().from_string(source, globals, template_class)
+        
+        # Enhance the template's make_module method
+        return self._enhance_template_make_module(template)
 
 
 class JinjaEnvironmentManager:
@@ -116,17 +205,19 @@ class JinjaEnvironmentManager:
         # Use ChoiceLoader to combine multiple loaders
         combined_loader = ChoiceLoader(loaders) if len(loaders) > 1 else loaders[0]
         
-        # Create environment
-        self.jinja2_env = Environment(
+        # Create environment using our custom ContextPreservingEnvironment
+        # that ensures globals are accessible in imported macros
+        self.jinja2_env = ContextPreservingEnvironment(
             loader=combined_loader,
             **env_options
         )
-        
+
+        # Set up resource functions and filters FIRST (before loading macros)
+        # This ensures functions like now() are available when macros are loaded
+        self._setup_resource_functions()
+
         # Load and register macros from template files
         self._load_template_macros()
-        
-        # Set up resource functions and filters
-        self._setup_resource_functions()
         
         if self.enable_debug_logging:
             logger.debug("🎭 Jinja2 environment configured with custom functions, filters, and template macros")

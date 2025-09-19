@@ -134,20 +134,47 @@ class QdrantUnifiedMiddleware(Middleware):
         self._initialized = False
         
         logger.info("🚀 Qdrant Unified Middleware created (delegating to qdrant_core managers)")
+        logger.debug(f"📊 Initialization state - enabled: {self.config.enabled}")
         if not self.config.enabled:
             logger.warning("⚠️ Qdrant middleware disabled by configuration")
         else:
+            logger.debug("✅ Qdrant middleware enabled - initializing control variables")
             # Track if we've attempted early background initialization
             self._early_init_started = False
+            logger.debug(f"📊 Set _early_init_started = {self._early_init_started}")
+            
+            # Background reindexing control
+            self._reindexing_task = None
+            self._reindexing_enabled = True
+            logger.debug(f"📊 Reindexing controls initialized - enabled: {self._reindexing_enabled}, task: {self._reindexing_task}")
+    
+    async def initialize_middleware_and_reindexing(self):
+        """
+        Initialize middleware with full async components (embedding model, auto-discovery, reindexing).
+        This method performs complete middleware initialization including background reindexing scheduler.
+        Should be called on first tool use to ensure all middleware features are active.
+        """
+        logger.info("🔄 Middleware initialization called - starting full async component initialization")
+        success = await self.client_manager.initialize()
+        self._initialized = success
+        logger.debug(f"📊 Client manager initialization result: {success}")
+        
+        # Start background reindexing scheduler if initialization successful
+        if success and self._reindexing_enabled:
+            logger.info("✅ Starting background reindexing scheduler...")
+            await self._start_background_reindexing()
+        else:
+            logger.debug(f"⏹️ Background reindexing not started - success: {success}, enabled: {getattr(self, '_reindexing_enabled', False)}")
+        
+        return success
     
     async def initialize(self):
         """
-        Initialize async components (embedding model, auto-discovery).
-        This method can be called explicitly or will be called on first tool use.
+        Backward compatibility method - delegates to the more specific initialization method.
+        Use initialize_middleware_and_reindexing() for clarity in new code.
         """
-        success = await self.client_manager.initialize()
-        self._initialized = success
-        return success
+        logger.debug("🔄 Legacy initialize() called - delegating to initialize_middleware_and_reindexing()")
+        return await self.initialize_middleware_and_reindexing()
     
     async def _ensure_initialization(self, context_name: str = "unknown"):
         """
@@ -156,9 +183,9 @@ class QdrantUnifiedMiddleware(Middleware):
         """
         if not self._early_init_started and self.config.enabled:
             self._early_init_started = True
-            logger.info(f"🚀 Starting background Qdrant initialization from {context_name} (embedding model loading)")
-            # Start initialization in background - don't wait for it
-            asyncio.create_task(self.client_manager.initialize())
+            logger.info(f"🚀 Starting background middleware initialization from {context_name} (embedding model and reindexing)")
+            # Start full middleware initialization in background - don't wait for it
+            asyncio.create_task(self.initialize_middleware_and_reindexing())
     
     async def on_list_tools(self, context, call_next):
         """
@@ -186,9 +213,9 @@ class QdrantUnifiedMiddleware(Middleware):
         - Execution time tracking
         - Non-blocking async response storage via storage manager
         """
-        # Initialize on first tool call if not already done
+        # Initialize middleware and reindexing on first tool call if not already done
         if not self.client_manager.is_initialized:
-            await self.client_manager.initialize()
+            await self.initialize_middleware_and_reindexing()
         
         # If no client available, just pass through
         if not self.client_manager.is_available:
@@ -264,10 +291,10 @@ class QdrantUnifiedMiddleware(Middleware):
         # Ensure initialization for Qdrant resources
         await self._ensure_initialization("on_read_resource")
         
-        # Initialize synchronously for resource reads to ensure data availability
+        # Initialize middleware synchronously for resource reads to ensure data availability
         if not self.client_manager.is_initialized:
-            logger.info("🔄 Initializing Qdrant synchronously for resource access...")
-            await self.client_manager.initialize()
+            logger.info("🔄 Initializing middleware synchronously for resource access...")
+            await self.initialize_middleware_and_reindexing()
         
         # Process Qdrant resources via resource handler and cache results
         try:
@@ -345,13 +372,170 @@ class QdrantUnifiedMiddleware(Middleware):
         """Store tool response (delegates to storage manager)."""
         return await self.storage_manager.store_response(context, response, **kwargs)
     
-    async def _store_response_with_params(self, tool_name: str, tool_args: Dict[str, Any], response: Any, 
-                                         execution_time_ms: int = 0, session_id: Optional[str] = None, 
+    async def _store_response_with_params(self, tool_name: str, tool_args: Dict[str, Any], response: Any,
+                                         execution_time_ms: int = 0, session_id: Optional[str] = None,
                                          user_email: Optional[str] = None):
         """Store tool response with parameters (delegates to storage manager)."""
         return await self.storage_manager._store_response_with_params(
             tool_name, tool_args, response, execution_time_ms, session_id, user_email
         )
+    
+    async def _start_background_reindexing(self):
+        """
+        Start the background reindexing scheduler with intelligent frequency adjustment.
+        
+        This scheduler:
+        - Monitors collection health every 6 hours
+        - Performs automatic reindexing when needed
+        - Adjusts reindexing frequency based on collection size and activity
+        - Runs collection optimization during low-activity periods
+        """
+        if not self.config.enabled or not self.client_manager.is_available:
+            logger.info("⏰ Background reindexing disabled (Qdrant not available)")
+            return
+        
+        logger.info("⏰ Starting intelligent background reindexing scheduler...")
+        
+        async def background_reindexing_loop():
+            """Main background reindexing loop with adaptive scheduling."""
+            
+            # Initial delay to let the system stabilize
+            await asyncio.sleep(300)  # 5 minutes
+            
+            # Adaptive scheduling parameters
+            base_interval_hours = 6   # Base check interval
+            min_interval_hours = 2    # Minimum interval (high activity)
+            max_interval_hours = 24   # Maximum interval (low activity)
+            
+            consecutive_healthy_checks = 0
+            last_reindex_timestamp = None
+            
+            while True:
+                try:
+                    # Calculate adaptive interval based on collection health history
+                    current_interval = base_interval_hours
+                    
+                    if consecutive_healthy_checks > 5:
+                        # Collection has been healthy for a while, reduce frequency
+                        current_interval = min(max_interval_hours, base_interval_hours * 2)
+                    elif consecutive_healthy_checks < 2:
+                        # Collection needs frequent monitoring
+                        current_interval = max(min_interval_hours, base_interval_hours // 2)
+                    
+                    logger.debug(f"🔄 Next reindexing check in {current_interval} hours (healthy checks: {consecutive_healthy_checks})")
+                    await asyncio.sleep(current_interval * 3600)  # Convert to seconds
+                    
+                    logger.info("🏥 Running scheduled collection health check...")
+                    
+                    # Analyze collection health via storage manager
+                    health_stats = await self.storage_manager._analyze_collection_health()
+                    
+                    if health_stats.get("needs_reindex", False):
+                        reindex_reasons = health_stats.get("reindex_reasons", [])
+                        logger.info(f"🔧 Collection health check indicates reindexing needed: {reindex_reasons}")
+                        
+                        # Determine reindexing strategy based on reasons
+                        force_complete_rebuild = any(
+                            reason.startswith("collection_growth") or reason.startswith("high_fragmentation")
+                            for reason in reindex_reasons
+                        )
+                        
+                        if force_complete_rebuild:
+                            logger.info("🏗️ Performing complete collection rebuild due to significant changes")
+                            result = await self.client_manager.rebuild_collection_completely()
+                        else:
+                            logger.info("🔧 Performing standard collection reindexing")
+                            result = await self.storage_manager.reindex_collection(force=False)
+                        
+                        if result.get("status") == "completed":
+                            logger.info("✅ Scheduled reindexing completed successfully")
+                            last_reindex_timestamp = datetime.now(timezone.utc)
+                            consecutive_healthy_checks = 0  # Reset counter after successful reindex
+                            
+                            # Start background scheduler for storage manager periodic reindexing
+                            await self.storage_manager.schedule_background_reindexing(interval_hours=12)
+                            
+                        else:
+                            logger.warning(f"⚠️ Scheduled reindexing result: {result}")
+                            consecutive_healthy_checks = 0  # Reset on issues
+                    else:
+                        logger.debug("✅ Collection healthy, no reindexing needed")
+                        consecutive_healthy_checks += 1
+                        
+                        # Even for healthy collections, run light optimization periodically
+                        hours_since_last_reindex = 48  # Default assumption
+                        if last_reindex_timestamp:
+                            hours_since_last_reindex = (
+                                datetime.now(timezone.utc) - last_reindex_timestamp
+                            ).total_seconds() / 3600
+                        
+                        if hours_since_last_reindex > 72:  # 3 days since last optimization
+                            logger.info("🚀 Running periodic collection optimization (preventive maintenance)")
+                            result = await self.client_manager.optimize_collection_performance()
+                            
+                            if result.get("status") == "completed":
+                                logger.info("✅ Periodic optimization completed")
+                                last_reindex_timestamp = datetime.now(timezone.utc)
+                        
+                except asyncio.CancelledError:
+                    logger.info("⏹️ Background reindexing scheduler cancelled")
+                    break
+                except Exception as e:
+                    logger.warning(f"⚠️ Background reindexing error (will retry): {e}")
+                    consecutive_healthy_checks = 0  # Reset on errors
+                    # Continue the loop despite errors, with a short backoff
+                    await asyncio.sleep(600)  # 10 minute backoff on errors
+        
+        # Start the background task
+        self._reindexing_task = asyncio.create_task(background_reindexing_loop())
+        logger.info("✅ Background reindexing scheduler started")
+    
+    async def stop_background_reindexing(self):
+        """Stop the background reindexing scheduler gracefully."""
+        if self._reindexing_task and not self._reindexing_task.done():
+            logger.info("⏹️ Stopping background reindexing scheduler...")
+            self._reindexing_task.cancel()
+            try:
+                await self._reindexing_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("✅ Background reindexing scheduler stopped")
+    
+    # Reindexing control methods
+    async def trigger_immediate_reindexing(self, force_complete_rebuild: bool = False) -> Dict[str, Any]:
+        """
+        Trigger immediate collection reindexing.
+        
+        Args:
+            force_complete_rebuild: If True, perform complete collection rebuild
+            
+        Returns:
+            Dict with reindexing results
+        """
+        if not self.client_manager.is_available:
+            return {"status": "skipped", "reason": "client_unavailable"}
+        
+        logger.info("🚀 Triggering immediate collection reindexing...")
+        
+        if force_complete_rebuild:
+            result = await self.client_manager.rebuild_collection_completely()
+        else:
+            result = await self.storage_manager.reindex_collection(force=True)
+        
+        logger.info(f"✅ Immediate reindexing result: {result.get('status')}")
+        return result
+    
+    async def get_collection_health_status(self) -> Dict[str, Any]:
+        """
+        Get current collection health status and reindexing recommendations.
+        
+        Returns:
+            Dict with health statistics and recommendations
+        """
+        if not self.client_manager.is_available:
+            return {"status": "unavailable", "reason": "client_unavailable"}
+        
+        return await self.storage_manager._analyze_collection_health()
 
 
 # Backward compatibility aliases

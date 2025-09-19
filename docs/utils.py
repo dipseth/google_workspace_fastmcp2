@@ -6,7 +6,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 from typing_extensions import List, Optional
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 def extract_office_xml_text(file_bytes: bytes, mime_type: str) -> Optional[str]:

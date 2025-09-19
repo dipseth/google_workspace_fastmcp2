@@ -38,7 +38,8 @@ try:
 except ImportError:
     ADAPTERS_AVAILABLE = False
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Initialize card manager if available
 if CARDS_AVAILABLE:

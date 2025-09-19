@@ -33,7 +33,8 @@ from drive.drive_enums import MimeTypeFilter
 # Import centralized scope registry for dynamic service discovery
 from auth.scope_registry import ScopeRegistry
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Dynamic type definition based on scope registry - builds supported services list
 def _get_supported_services() -> List[str]:
@@ -182,7 +183,7 @@ async def _get_recent_items(service: str, user_email: str, days_back: int = 30, 
     if service == "drive" and service_info.get("exclude_folders"):
         mime_filter = MimeTypeFilter.EXCLUDE_FOLDERS
     
-    logger.info(f"📊 Searching {service} with MIME filter: {mime_filter}, date query: {date_query}")
+    logger.debug(f"📊 Searching {service} with MIME filter: {mime_filter}, date query: {date_query}")
     
     try:
         # Call the search_drive_files tool with the new enum-based approach
@@ -195,7 +196,7 @@ async def _get_recent_items(service: str, user_email: str, days_back: int = 30, 
         )
         
         # Handle the structured response - it's a TypedDict (returns dict, not object)
-        logger.info(f"✅ Tool returned {result.get('resultCount', 0)} results for {service}")
+        logger.debug(f"✅ Tool returned {result.get('resultCount', 0)} results for {service}")
         
         # Check for errors in the structured response
         if result.get("error"):
@@ -305,7 +306,7 @@ async def _get_recent_photos_items(service: str, service_info: Dict[str, Any], u
                 "timestamp": datetime.now().isoformat()
             }
         
-        logger.info(f"📷 Getting recent {service} albums via {tool_name} from tool registry")
+        logger.debug(f"📷 Getting recent {service} albums via {tool_name} from tool registry")
         
         # Get the tool and call it (following middleware pattern)
         tool_instance = tools_dict[tool_name]
@@ -401,7 +402,7 @@ def setup_service_recent_resources(mcp: FastMCP) -> None:
     Resources are data providers that USE tools - they don't transform them.
     """
     
-    logger.info("🔧 SETUP: Setting up service recent resources that call search_drive_files tool")
+    logger.debug("🔧 SETUP: Setting up service recent resources that call search_drive_files tool")
     
     @mcp.resource(
         uri="recent://{service}",
@@ -529,6 +530,6 @@ Note: Photos service returns albums (day range affects Drive services only).""",
             "timestamp": datetime.now().isoformat()
         }
     
-    logger.info("✅ Service recent resources registered for Drive-based services")
-    logger.info(f"  Available services: {', '.join(SERVICE_INFO.keys())}")
-    logger.info("  Resources call search_drive_files tool directly and return structured results")
+    logger.debug("✅ Service recent resources registered for Drive-based services")
+    logger.debug(f"  Available services: {', '.join(SERVICE_INFO.keys())}")
+    logger.debug("  Resources call search_drive_files tool directly and return structured results")

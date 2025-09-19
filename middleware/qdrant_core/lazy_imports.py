@@ -9,7 +9,8 @@ are loaded only when first needed.
 import logging
 from typing import Optional, Dict, Any
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Global variables for lazy-loaded imports
 _qdrant_client = None
@@ -48,16 +49,37 @@ def get_qdrant_imports():
     if _qdrant_client is None:
         logger.info("🔗 Loading Qdrant client (first use)...")
         from qdrant_client import QdrantClient, models
-        from qdrant_client.models import Distance, VectorParams, PointStruct, PayloadSchemaType
+        from qdrant_client.models import (
+            Distance, VectorParams, PointStruct, PayloadSchemaType,
+            # Index parameter classes for optimized reindexing
+            KeywordIndexParams, KeywordIndexType,
+            IntegerIndexParams, IntegerIndexType,
+            BoolIndexParams, BoolIndexType,
+            DatetimeIndexParams, DatetimeIndexType,
+            # Configuration classes
+            HnswConfigDiff, OptimizersConfigDiff
+        )
         _qdrant_client = QdrantClient
         _qdrant_models = {
             'models': models,
             'Distance': Distance,
             'VectorParams': VectorParams,
             'PointStruct': PointStruct,
-            'PayloadSchemaType': PayloadSchemaType
+            'PayloadSchemaType': PayloadSchemaType,
+            # Index parameter classes
+            'KeywordIndexParams': KeywordIndexParams,
+            'KeywordIndexType': KeywordIndexType,
+            'IntegerIndexParams': IntegerIndexParams,
+            'IntegerIndexType': IntegerIndexType,
+            'BoolIndexParams': BoolIndexParams,
+            'BoolIndexType': BoolIndexType,
+            'DatetimeIndexParams': DatetimeIndexParams,
+            'DatetimeIndexType': DatetimeIndexType,
+            # Configuration classes
+            'HnswConfigDiff': HnswConfigDiff,
+            'OptimizersConfigDiff': OptimizersConfigDiff
         }
-        logger.info("✅ Qdrant client loaded")
+        logger.info("✅ Qdrant client loaded with enhanced indexing support")
     return _qdrant_client, _qdrant_models
 
 

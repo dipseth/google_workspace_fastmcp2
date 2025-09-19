@@ -16,7 +16,8 @@ from .security_patch import get_security_manager
 from .middleware import CredentialStorageMode
 from .context import set_auth_middleware
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class SecureServerConfig:

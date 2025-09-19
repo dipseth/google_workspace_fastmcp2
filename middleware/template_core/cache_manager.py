@@ -9,7 +9,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class CacheManager:

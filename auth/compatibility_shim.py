@@ -9,7 +9,8 @@ import logging
 from typing_extensions import Dict, List, Any, Optional, Union
 from .scope_registry import ScopeRegistry, ServiceScopeManager
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class CompatibilityShim:

@@ -28,7 +28,8 @@ from .gmail_types import (
     CreateGmailFilterResponse, GetGmailFilterResponse, DeleteGmailFilterResponse, RetroactiveResults
 )
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 async def apply_filter_to_existing_messages(
     gmail_service: Any,

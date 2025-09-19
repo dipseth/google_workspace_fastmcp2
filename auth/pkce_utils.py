@@ -11,7 +11,8 @@ import secrets
 import logging
 from typing_extensions import Tuple, Dict, Any
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 def generate_code_verifier(length: int = 128) -> str:
     """

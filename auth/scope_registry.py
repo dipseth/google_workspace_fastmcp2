@@ -12,7 +12,8 @@ logger = setup_logger()
 from typing_extensions import Dict, List, Optional, Set, Union, Any
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 @dataclass
 class ValidationResult:
@@ -482,7 +483,7 @@ class ScopeRegistry:
         
         # Remove duplicates while preserving order
         unique_scopes = list(dict.fromkeys(resolved_scopes))
-        logger.info(f"SCOPE_REGISTRY: Group '{group_name}' resolved to {len(unique_scopes)} scopes")
+        logger.debug(f"SCOPE_REGISTRY: Group '{group_name}' resolved to {len(unique_scopes)} scopes")
         
         return unique_scopes
     

@@ -39,7 +39,8 @@ class CacheEntry:
         """Check if cache entry has expired."""
         return datetime.now() - self.timestamp > timedelta(seconds=self.ttl_seconds)
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class TagBasedResourceMiddleware(Middleware):
@@ -255,21 +256,21 @@ class TagBasedResourceMiddleware(Middleware):
         self.cache = {}  # In-memory cache storage
         self._cached_service_metadata = None  # Will be built dynamically
         
-        logger.info("✨ TagBasedResourceMiddleware initialized")
-        logger.info("   Building service metadata dynamically from ScopeRegistry...")
+        logger.debug("✨ TagBasedResourceMiddleware initialized")
+        logger.debug("   Building service metadata dynamically from ScopeRegistry...")
         
         # Get initial metadata to show supported services
         try:
             metadata = self._get_service_metadata()
             supported_services = list(metadata.keys())
-            logger.info(f"   Supported services: {', '.join(supported_services)}")
+            logger.debug(f"   Supported services: {', '.join(supported_services)}")
         except Exception as e:
             logger.warning(f"   Could not build initial service metadata: {e}")
-            logger.info("   Service metadata will be built on first request")
+            logger.debug("   Service metadata will be built on first request")
         
-        logger.info(f"   Cache TTL: {cache_ttl_seconds} seconds")
+        logger.debug(f"   Cache TTL: {cache_ttl_seconds} seconds")
         if enable_debug_logging:
-            logger.info("🔧 Debug logging enabled for TagBasedResourceMiddleware")
+            logger.debug("🔧 Debug logging enabled for TagBasedResourceMiddleware")
 
     async def on_read_resource(self, context: MiddlewareContext, call_next):
         """
@@ -302,7 +303,7 @@ class TagBasedResourceMiddleware(Middleware):
             #     logger.debug(f"🔄 Call next returned type: {type(result)}")
             return await call_next(context)
 
-        logger.info(f"🎯 Attempting to match service URI pattern: {resource_uri}")
+        logger.debug(f"🎯 Attempting to match service URI pattern: {resource_uri}")
 
         # Parse the service URI
         match = self.SERVICE_URI_PATTERN.match(resource_uri)
@@ -312,7 +313,7 @@ class TagBasedResourceMiddleware(Middleware):
                 f"Invalid service URI format: {resource_uri}",
                 "Expected format: service://{service}/{list_type?}/{id?}"
             )
-            logger.info(f"🔍 Pattern mismatch error response type: {type(error_response)}")
+            logger.debug(f"🔍 Pattern mismatch error response type: {type(error_response)}")
             return error_response
         
         service = match.group('service')
@@ -322,39 +323,39 @@ class TagBasedResourceMiddleware(Middleware):
         # Normalize service name to handle singular/plural variants
         normalized_service = self._normalize_service_name(service)
         if normalized_service != service:
-            logger.info(f"🔄 Normalized service name: {service} -> {normalized_service}")
+            logger.debug(f"🔄 Normalized service name: {service} -> {normalized_service}")
             service = normalized_service
 
-        logger.info(f"🎯 Parsed service URI: service={service}, list_type={list_type}, item_id={item_id}")
+        logger.debug(f"🎯 Parsed service URI: service={service}, list_type={list_type}, item_id={item_id}")
 
         try:
             # Handle the different URI patterns
             if list_type is None:
                 # service://{service} - return service info (not implemented yet)
-                logger.info("📝 Service root access not implemented")
+                logger.debug("📝 Service root access not implemented")
                 error_response = self._create_error_response(
                     f"Service root access not implemented: {resource_uri}",
                     "Use service://{service}/lists to see available list types"
                 )
-                logger.info(f"🔍 Error response type: {type(error_response)}")
+                logger.debug(f"🔍 Error response type: {type(error_response)}")
                 return error_response
             elif list_type == 'lists':
                 # service://{service}/lists - return available list types
-                logger.info(f"📋 Handling service lists for: {service}")
+                logger.debug(f"📋 Handling service lists for: {service}")
                 await self._handle_service_lists(service, context)
-                logger.info(f"✅ Service lists stored in context state")
+                logger.debug(f"✅ Service lists stored in context state")
                 return await call_next(context)
             elif item_id is None:
                 # service://{service}/{list_type} - return all items for list type
-                logger.info(f"📋 Handling list items for: {service}/{list_type}")
+                logger.debug(f"📋 Handling list items for: {service}/{list_type}")
                 await self._handle_list_items(service, list_type, context)
-                logger.info(f"✅ Service list items stored in context state")
+                logger.debug(f"✅ Service list items stored in context state")
                 return await call_next(context)
             else:
                 # service://{service}/{list_type}/{id} - return specific item
-                logger.info(f"🎯 Handling specific item: {service}/{list_type}/{item_id}")
+                logger.debug(f"🎯 Handling specific item: {service}/{list_type}/{item_id}")
                 await self._handle_specific_item(service, list_type, item_id, context)
-                logger.info(f"✅ Specific item stored in context state")
+                logger.debug(f"✅ Specific item stored in context state")
                 return await call_next(context)
 
         except Exception as e:
@@ -363,7 +364,7 @@ class TagBasedResourceMiddleware(Middleware):
                 f"Error processing service resource: {str(e)}",
                 "Check logs for detailed error information"
             )
-            logger.info(f"🔍 Exception error response type: {type(error_response)}")
+            logger.debug(f"🔍 Exception error response type: {type(error_response)}")
             return error_response
 
     async def on_tool_call(self, context: MiddlewareContext, call_next):
@@ -405,7 +406,7 @@ class TagBasedResourceMiddleware(Middleware):
                         timestamp=datetime.now(),
                         ttl_seconds=self.cache_ttl_seconds
                     )
-                    logger.info(f"📦 Cached result from direct tool call: {tool_name}")
+                    logger.debug(f"📦 Cached result from direct tool call: {tool_name}")
 
         return result
 
@@ -518,7 +519,7 @@ class TagBasedResourceMiddleware(Middleware):
 
         cache_key = f"service_lists_response_{service}"
         context.fastmcp_context.set_state(cache_key, response_model)
-        logger.info(f"📦 Stored ServiceListsResponse in context state with key: {cache_key}")
+        logger.debug(f"📦 Stored ServiceListsResponse in context state with key: {cache_key}")
 
     async def _handle_list_items(self, service: str, list_type: str, context: MiddlewareContext) -> None:
         """
@@ -570,17 +571,17 @@ class TagBasedResourceMiddleware(Middleware):
         if cache_key in self.cache:
             cache_entry = self.cache[cache_key]
             if not cache_entry.is_expired():
-                logger.info(f"✅ Using cached data for {service}/{list_type}")
+                logger.debug(f"✅ Using cached data for {service}/{list_type}")
                 # Get the cached response model
                 cached_response = cache_entry.data
                 serializable_result = cached_response.result
             else:
-                logger.info(f"🔄 Cache expired for {service}/{list_type}, removing entry")
+                logger.debug(f"🔄 Cache expired for {service}/{list_type}, removing entry")
                 del self.cache[cache_key]
                 cached_response = None
                 serializable_result = None
         else:
-            logger.info(f"🔄 No cached data found for {service}/{list_type}")
+            logger.debug(f"🔄 No cached data found for {service}/{list_type}")
             cached_response = None
             serializable_result = None
 
@@ -611,7 +612,7 @@ class TagBasedResourceMiddleware(Middleware):
                     timestamp=datetime.now(),
                     ttl_seconds=self.cache_ttl_seconds
                 )
-                logger.info(f"📦 Cached ServiceListResponse for {service}/{list_type}")
+                logger.debug(f"📦 Cached ServiceListResponse for {service}/{list_type}")
 
             except Exception as e:
                 logger.error(f"❌ Error calling tool {list_tool_name}: {e}")
@@ -619,12 +620,12 @@ class TagBasedResourceMiddleware(Middleware):
 
         # Store in FastMCP context state for resource handler (matches resource handler expectations)
         context.fastmcp_context.set_state(cache_key, cached_response)
-        logger.info(f"📦 Stored ServiceListResponse in FastMCP context state with key: {cache_key}")
+        logger.debug(f"📦 Stored ServiceListResponse in FastMCP context state with key: {cache_key}")
 
         # ALSO cache the raw result for specific item extraction
         raw_cache_key = f"service_list_raw_{service}_{list_type}_{user_email}"
         context.fastmcp_context.set_state(raw_cache_key, serializable_result)
-        logger.info(f"📦 Cached raw list data for item extraction with key: {raw_cache_key}")
+        logger.debug(f"📦 Cached raw list data for item extraction with key: {raw_cache_key}")
 
     async def _handle_specific_item(self, service: str, list_type: str, item_id: str, context: MiddlewareContext) -> None:
         """
@@ -673,11 +674,11 @@ class TagBasedResourceMiddleware(Middleware):
 
         if get_tool_name:
             # Strategy 1: Use dedicated get tool
-            logger.info(f"🔧 Using dedicated get tool: {get_tool_name}")
+            logger.debug(f"🔧 Using dedicated get tool: {get_tool_name}")
             await self._handle_specific_item_with_get_tool(service, list_type, item_id, context, get_tool_name, list_type_info, user_email)
         else:
             # Strategy 2: Extract from list data (for Gmail labels, etc.)
-            logger.info(f"📋 Extracting from list data (no dedicated get tool for {service}/{list_type})")
+            logger.debug(f"📋 Extracting from list data (no dedicated get tool for {service}/{list_type})")
             await self._handle_specific_item_from_list(service, list_type, item_id, context, list_type_info, user_email)
 
     async def _handle_specific_item_with_get_tool(self, service: str, list_type: str, item_id: str,
@@ -691,14 +692,14 @@ class TagBasedResourceMiddleware(Middleware):
         if cache_key in self.cache:
             cache_entry = self.cache[cache_key]
             if not cache_entry.is_expired():
-                logger.info(f"✅ Using cached data for {service}/{list_type}/{item_id}")
+                logger.debug(f"✅ Using cached data for {service}/{list_type}/{item_id}")
                 serializable_result = cache_entry.data
             else:
-                logger.info(f"🔄 Cache expired for {service}/{list_type}/{item_id}, removing entry")
+                logger.debug(f"🔄 Cache expired for {service}/{list_type}/{item_id}, removing entry")
                 del self.cache[cache_key]
                 serializable_result = None
         else:
-            logger.info(f"🔄 No cached data found for {service}/{list_type}/{item_id}")
+            logger.debug(f"🔄 No cached data found for {service}/{list_type}/{item_id}")
             serializable_result = None
 
         # If no valid cached data, call the tool
@@ -723,7 +724,7 @@ class TagBasedResourceMiddleware(Middleware):
                     timestamp=datetime.now(),
                     ttl_seconds=self.cache_ttl_seconds
                 )
-                logger.info(f"📦 Cached result for {service}/{list_type}/{item_id}")
+                logger.debug(f"📦 Cached result for {service}/{list_type}/{item_id}")
 
             except Exception as e:
                 logger.error(f"❌ Error calling get tool {get_tool_name}: {e}")
@@ -742,7 +743,7 @@ class TagBasedResourceMiddleware(Middleware):
 
         context_cache_key = f"service_item_details_{service}_{list_type}_{item_id}_{user_email}"
         context.fastmcp_context.set_state(context_cache_key, response_model)
-        logger.info(f"📦 Stored ServiceItemDetailsResponse (via get tool) with key: {context_cache_key}")
+        logger.debug(f"📦 Stored ServiceItemDetailsResponse (via get tool) with key: {context_cache_key}")
 
     async def _handle_specific_item_from_list(self, service: str, list_type: str, item_id: str,
                                               context: MiddlewareContext, list_type_info: dict, user_email: str) -> None:
@@ -754,7 +755,7 @@ class TagBasedResourceMiddleware(Middleware):
 
         if not cached_list_data:
             # No cached data, fetch fresh list data
-            logger.info(f"🔄 No cached list data found, fetching fresh data for {service}/{list_type}")
+            logger.debug(f"🔄 No cached list data found, fetching fresh data for {service}/{list_type}")
 
             list_tool_name = list_type_info.get("list_tool")
             if not list_tool_name:
@@ -774,13 +775,13 @@ class TagBasedResourceMiddleware(Middleware):
 
                 # Cache the fresh data
                 context.fastmcp_context.set_state(raw_cache_key, cached_list_data)
-                logger.info(f"📦 Cached fresh list data with key: {raw_cache_key}")
+                logger.debug(f"📦 Cached fresh list data with key: {raw_cache_key}")
 
             except Exception as e:
                 logger.error(f"❌ Error fetching fresh list data: {e}")
                 return
         else:
-            logger.info(f"✅ Using cached list data for {service}/{list_type}")
+            logger.debug(f"✅ Using cached list data for {service}/{list_type}")
 
         # Extract the specific item from the list data
         specific_item = self._extract_item_from_list(cached_list_data, item_id, list_type_info)
@@ -793,7 +794,7 @@ class TagBasedResourceMiddleware(Middleware):
                 "available_ids": self._get_available_ids_from_list(cached_list_data, list_type_info)
             }
         else:
-            logger.info(f"✅ Found item '{item_id}' in {service}/{list_type} list")
+            logger.debug(f"✅ Found item '{item_id}' in {service}/{list_type} list")
             error_result = specific_item
 
         # Create ServiceItemDetailsResponse and store in context state
@@ -809,7 +810,7 @@ class TagBasedResourceMiddleware(Middleware):
 
         cache_key = f"service_item_details_{service}_{list_type}_{item_id}_{user_email}"
         context.fastmcp_context.set_state(cache_key, response_model)
-        logger.info(f"📦 Stored ServiceItemDetailsResponse (via list extraction) with key: {cache_key}")
+        logger.debug(f"📦 Stored ServiceItemDetailsResponse (via list extraction) with key: {cache_key}")
 
     def _extract_item_from_list(self, list_data: Any, item_id: str, list_type_info: dict) -> Any:
         """Extract a specific item from list data by ID."""
@@ -1013,7 +1014,7 @@ class TagBasedResourceMiddleware(Middleware):
     def clear_cache(self):
         """Clear all cached entries."""
         self.cache.clear()
-        logger.info("🧹 Cache cleared")
+        logger.debug("🧹 Cache cleared")
 
     def invalidate_cache(self, pattern: str = None):
         """Invalidate cache entries matching pattern."""
@@ -1021,7 +1022,7 @@ class TagBasedResourceMiddleware(Middleware):
             keys_to_delete = [k for k in self.cache.keys() if pattern in k]
             for key in keys_to_delete:
                 del self.cache[key]
-            logger.info(f"🧹 Invalidated {len(keys_to_delete)} cache entries")
+            logger.debug(f"🧹 Invalidated {len(keys_to_delete)} cache entries")
         else:
             self.clear_cache()
 

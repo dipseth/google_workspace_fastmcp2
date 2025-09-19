@@ -15,7 +15,8 @@ from fastmcp import FastMCP, Context
 from resources.user_resources import get_current_user_email_simple
 from auth.context import get_user_email_context
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Simple cache for tool outputs with TTL
 _tool_output_cache: Dict[str, Dict[str, Any]] = {}
@@ -217,123 +218,124 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 "timestamp": datetime.now().isoformat()
             }
     
-    @mcp.resource(
-        uri="cache://status",
-        name="Tool Output Cache Status",
-        description="Comprehensive status of the tool output cache including total entries, valid/expired counts, TTL information, and detailed cache key analysis for performance monitoring",
-        mime_type="application/json",
-        tags={"cache", "status", "performance", "monitoring", "ttl", "analytics", "system"},
-        annotations={
-            "readOnlyHint": True,
-            "idempotentHint": True  # Status reporting is idempotent
-        }
-    )
-    async def get_cache_status(ctx: Context) -> dict:
-        """Internal implementation for tool output cache status resource."""
-        try:
-            user_email = get_current_user_email_simple()
-            
-            # Analyze cache entries
-            cache_info = []
-            total_entries = 0
-            valid_entries = 0
-            
-            for cache_key, cache_entry in _tool_output_cache.items():
-                total_entries += 1
-                is_valid = _is_cache_valid(cache_entry)
-                if is_valid:
-                    valid_entries += 1
-                
-                # Extract user email and tool name from cache key
-                parts = cache_key.split('_', 2)
-                if len(parts) >= 2:
-                    key_user_email = parts[0] + '@' + parts[1].split('@')[0] if '@' in parts[1] else 'unknown'
-                    tool_name = parts[2] if len(parts) > 2 else 'unknown'
-                else:
-                    key_user_email = 'unknown'
-                    tool_name = 'unknown'
-                
-                cache_info.append({
-                    "cache_key": cache_key,
-                    "user_email": key_user_email,
-                    "tool_name": tool_name,
-                    "timestamp": cache_entry.get("timestamp", "unknown"),
-                    "valid": is_valid,
-                    "ttl_minutes": cache_entry.get("ttl_minutes", _cache_ttl_minutes)
-                })
-            
-            return {
-                "user_email": user_email,
-                "total_cache_entries": total_entries,
-                "valid_cache_entries": valid_entries,
-                "expired_cache_entries": total_entries - valid_entries,
-                "default_ttl_minutes": _cache_ttl_minutes,
-                "cache_entries": cache_info,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-        except ValueError as e:
-            return {
-                "error": f"Authentication error: {str(e)}",
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Error getting cache status: {e}")
-            return {
-                "error": f"Failed to get cache status: {str(e)}",
-                "timestamp": datetime.now().isoformat()
-            }
+    # COMMENTED OUT: Original cache://status resource - replaced with qdrant://cache
+    # @mcp.resource(
+    #     uri="cache://status",
+    #     name="Tool Output Cache Status",
+    #     description="Comprehensive status of the tool output cache including total entries, valid/expired counts, TTL information, and detailed cache key analysis for performance monitoring",
+    #     mime_type="application/json",
+    #     tags={"cache", "status", "performance", "monitoring", "ttl", "analytics", "system"},
+    #     annotations={
+    #         "readOnlyHint": True,
+    #         "idempotentHint": True  # Status reporting is idempotent
+    #     }
+    # )
+    # async def get_cache_status(ctx: Context) -> dict:
+    #     """Internal implementation for tool output cache status resource."""
+    #     try:
+    #         user_email = get_current_user_email_simple()
+    #
+    #         # Analyze cache entries
+    #         cache_info = []
+    #         total_entries = 0
+    #         valid_entries = 0
+    #
+    #         for cache_key, cache_entry in _tool_output_cache.items():
+    #             total_entries += 1
+    #             is_valid = _is_cache_valid(cache_entry)
+    #             if is_valid:
+    #                 valid_entries += 1
+    #
+    #             # Extract user email and tool name from cache key
+    #             parts = cache_key.split('_', 2)
+    #             if len(parts) >= 2:
+    #                 key_user_email = parts[0] + '@' + parts[1].split('@')[0] if '@' in parts[1] else 'unknown'
+    #                 tool_name = parts[2] if len(parts) > 2 else 'unknown'
+    #             else:
+    #                 key_user_email = 'unknown'
+    #                 tool_name = 'unknown'
+    #
+    #         cache_info.append({
+    #             "cache_key": cache_key,
+    #             "user_email": key_user_email,
+    #             "tool_name": tool_name,
+    #             "timestamp": cache_entry.get("timestamp", "unknown"),
+    #             "valid": is_valid,
+    #             "ttl_minutes": cache_entry.get("ttl_minutes", _cache_ttl_minutes)
+    #         })
+    #
+    #         return {
+    #             "user_email": user_email,
+    #             "total_cache_entries": total_entries,
+    #             "valid_cache_entries": valid_entries,
+    #             "expired_cache_entries": total_entries - valid_entries,
+    #             "default_ttl_minutes": _cache_ttl_minutes,
+    #             "cache_entries": cache_info,
+    #             "timestamp": datetime.now().isoformat()
+    #         }
+    #
+    #     except ValueError as e:
+    #         return {
+    #             "error": f"Authentication error: {str(e)}",
+    #             "timestamp": datetime.now().isoformat()
+    #         }
+    #     except Exception as e:
+    #         logger.error(f"Error getting cache status: {e}")
+    #         return {
+    #             "error": f"Failed to get cache status: {str(e)}",
+    #             "timestamp": datetime.now().isoformat()
+    #         }
     
-    @mcp.resource(
-        uri="cache://clear",
-        name="Clear Tool Output Cache",
-        description="Administrative resource to clear the tool output cache for the current user, forcing fresh API calls and removing stale cached data with detailed operation statistics",
-        mime_type="application/json",
-        tags={"cache", "clear", "admin", "reset", "performance", "maintenance", "system"},
-        annotations={
-            "readOnlyHint": False,  # This resource modifies state (clears cache)
-            "idempotentHint": True  # Clearing an already empty cache is safe
-        }
-    )
-    async def clear_cache(ctx: Context) -> dict:
-        """Internal implementation for cache clearing resource."""
-        try:
-            user_email = get_current_user_email_simple()
+    # @mcp.resource(
+    #     uri="cache://clear",
+    #     name="Clear Tool Output Cache",
+    #     description="Administrative resource to clear the tool output cache for the current user, forcing fresh API calls and removing stale cached data with detailed operation statistics",
+    #     mime_type="application/json",
+    #     tags={"cache", "clear", "admin", "reset", "performance", "maintenance", "system"},
+    #     annotations={
+    #         "readOnlyHint": False,  # This resource modifies state (clears cache)
+    #         "idempotentHint": True  # Clearing an already empty cache is safe
+    #     }
+    # )
+    # async def clear_cache(ctx: Context) -> dict:
+    #     """Internal implementation for cache clearing resource."""
+    #     try:
+    #         user_email = get_current_user_email_simple()
             
-            # Count entries before clearing
-            entries_before = len(_tool_output_cache)
+    #         # Count entries before clearing
+    #         entries_before = len(_tool_output_cache)
             
-            # Clear cache entries for this user
-            keys_to_remove = []
-            for cache_key in _tool_output_cache.keys():
-                if cache_key.startswith(user_email.replace('@', '_at_')):
-                    keys_to_remove.append(cache_key)
+    #         # Clear cache entries for this user
+    #         keys_to_remove = []
+    #         for cache_key in _tool_output_cache.keys():
+    #             if cache_key.startswith(user_email.replace('@', '_at_')):
+    #                 keys_to_remove.append(cache_key)
             
-            for key in keys_to_remove:
-                del _tool_output_cache[key]
+    #         for key in keys_to_remove:
+    #             del _tool_output_cache[key]
             
-            entries_after = len(_tool_output_cache)
-            entries_cleared = entries_before - entries_after
+    #         entries_after = len(_tool_output_cache)
+    #         entries_cleared = entries_before - entries_after
             
-            return {
-                "user_email": user_email,
-                "entries_cleared": entries_cleared,
-                "entries_before": entries_before,
-                "entries_after": entries_after,
-                "timestamp": datetime.now().isoformat(),
-                "status": "Cache cleared successfully"
-            }
+    #         return {
+    #             "user_email": user_email,
+    #             "entries_cleared": entries_cleared,
+    #             "entries_before": entries_before,
+    #             "entries_after": entries_after,
+    #             "timestamp": datetime.now().isoformat(),
+    #             "status": "Cache cleared successfully"
+    #         }
             
-        except ValueError as e:
-            return {
-                "error": f"Authentication error: {str(e)}",
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Error clearing cache: {e}")
-            return {
-                "error": f"Failed to clear cache: {str(e)}",
-                "timestamp": datetime.now().isoformat()
-            }
+    #     except ValueError as e:
+    #         return {
+    #             "error": f"Authentication error: {str(e)}",
+    #             "timestamp": datetime.now().isoformat()
+    #         }
+    #     except Exception as e:
+    #         logger.error(f"Error clearing cache: {e}")
+    #         return {
+    #             "error": f"Failed to clear cache: {str(e)}",
+    #             "timestamp": datetime.now().isoformat()
+    #         }
     
-    logger.info("✅ Tool output resources registered with caching (Qdrant resources handled by middleware)")
+    # logger.info("✅ Tool output resources registered with caching (Qdrant resources handled by middleware)")

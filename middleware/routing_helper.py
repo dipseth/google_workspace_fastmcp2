@@ -13,7 +13,8 @@ from resources.service_categorization_logic import ServiceCategorizer
 from middleware.mcp_metadata_handler import MCPMetadataHandler
 from auth.scope_registry import ScopeRegistry
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class RoutingConfidence:

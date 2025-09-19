@@ -28,7 +28,8 @@ from .gmail_types import (
     GetGmailThreadContentResponse, ThreadMessageInfo
 )
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 async def search_gmail_messages(

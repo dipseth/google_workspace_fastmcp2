@@ -22,7 +22,8 @@ from email.utils import make_msgid
 import re
 import html
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 # Gmail API supported colors (from official documentation)

@@ -21,7 +21,8 @@ from datetime import datetime, timezone
 from .lazy_imports import get_qdrant_imports, get_sentence_transformer
 from .config import QdrantConfig
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class QdrantClientManager:
@@ -414,6 +415,378 @@ class QdrantClientManager:
                 
         except Exception as e:
             logger.warning(f"⚠️ Background cleanup failed (non-critical): {e}")
+    
+    async def optimize_collection_performance(self) -> Dict[str, Any]:
+        """
+        Optimize collection performance by rebuilding indexes and optimizing segments.
+        
+        Returns:
+            Dict with optimization results
+        """
+        if not self.is_available:
+            return {"status": "skipped", "reason": "client_unavailable"}
+        
+        try:
+            start_time = datetime.now(timezone.utc)
+            logger.info("🚀 Starting collection performance optimization...")
+            
+            _, qdrant_models = get_qdrant_imports()
+            
+            # Get collection info
+            collection_info = await asyncio.to_thread(
+                self.client.get_collection,
+                self.config.collection_name
+            )
+            
+            optimization_results = {}
+            
+            # Step 1: Update collection optimization config
+            try:
+                optimization_params = self.config.get_optimization_params()
+                
+                # Update optimizer config
+                await asyncio.to_thread(
+                    self.client.update_collection,
+                    collection_name=self.config.collection_name,
+                    optimizer_config=qdrant_models['OptimizersConfigDiff'](
+                        **optimization_params["optimizer_config"]
+                    )
+                )
+                
+                optimization_results["optimizer_config_updated"] = True
+                logger.info("✅ Updated collection optimizer configuration")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Could not update optimizer config: {e}")
+                optimization_results["optimizer_config_updated"] = False
+                optimization_results["optimizer_error"] = str(e)
+            
+            # Step 2: Trigger collection optimization
+            try:
+                # Force optimization of vectors (consolidates segments, rebuilds indexes)
+                if hasattr(self.client, 'optimize_vectors'):
+                    await asyncio.to_thread(
+                        self.client.optimize_vectors,
+                        collection_name=self.config.collection_name
+                    )
+                    optimization_results["vectors_optimized"] = True
+                    logger.info("✅ Triggered vector optimization")
+                else:
+                    optimization_results["vectors_optimized"] = False
+                    optimization_results["vectors_note"] = "optimize_vectors method not available"
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Vector optimization failed: {e}")
+                optimization_results["vectors_optimized"] = False
+                optimization_results["vectors_error"] = str(e)
+            
+            # Step 3: Refresh collection statistics
+            try:
+                refreshed_info = await asyncio.to_thread(
+                    self.client.get_collection,
+                    self.config.collection_name
+                )
+                
+                optimization_results["collection_stats"] = {
+                    "points_count": getattr(refreshed_info, 'points_count', 0),
+                    "indexed_vectors_count": getattr(refreshed_info, 'indexed_vectors_count', 0),
+                    "vectors_count": getattr(refreshed_info, 'vectors_count', 0)
+                }
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Could not refresh collection stats: {e}")
+                optimization_results["stats_error"] = str(e)
+            
+            end_time = datetime.now(timezone.utc)
+            execution_time_ms = int((end_time - start_time).total_seconds() * 1000)
+            
+            logger.info(f"✅ Collection performance optimization completed in {execution_time_ms}ms")
+            
+            return {
+                "status": "completed",
+                "execution_time_ms": execution_time_ms,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "optimization_profile": self.config.optimization_profile.value,
+                "results": optimization_results,
+                "collection_name": self.config.collection_name
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Collection performance optimization failed: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "collection_name": self.config.collection_name,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def rebuild_collection_completely(self) -> Dict[str, Any]:
+        """
+        Completely rebuild collection with current optimization settings.
+        This is a more aggressive operation that recreates indexes from scratch.
+        
+        WARNING: This can be time-intensive for large collections.
+        
+        Returns:
+            Dict with rebuild results
+        """
+        if not self.is_available:
+            return {"status": "skipped", "reason": "client_unavailable"}
+        
+        try:
+            start_time = datetime.now(timezone.utc)
+            logger.info("🏗️ Starting complete collection rebuild...")
+            
+            _, qdrant_models = get_qdrant_imports()
+            
+            # Get current collection statistics
+            old_collection_info = await asyncio.to_thread(
+                self.client.get_collection,
+                self.config.collection_name
+            )
+            
+            old_stats = {
+                "points_count": getattr(old_collection_info, 'points_count', 0),
+                "indexed_vectors_count": getattr(old_collection_info, 'indexed_vectors_count', 0)
+            }
+            
+            logger.info(f"📊 Current collection: {old_stats['points_count']} points, {old_stats['indexed_vectors_count']} indexed")
+            
+            # Step 1: Create new optimized collection configuration
+            optimization_params = self.config.get_optimization_params()
+            
+            # Vector configuration
+            vector_config = qdrant_models['VectorParams'](
+                size=self.embedding_dim,
+                distance=getattr(qdrant_models['Distance'], self.config.distance.upper()),
+                **optimization_params["vector_config"]
+            )
+            
+            # HNSW configuration
+            hnsw_config = qdrant_models['HnswConfigDiff'](
+                **optimization_params["hnsw_config"]
+            )
+            
+            # Optimizer configuration
+            optimizer_config = qdrant_models['OptimizersConfigDiff'](
+                **optimization_params["optimizer_config"]
+            )
+            
+            # Step 2: Update collection with new configuration
+            try:
+                await asyncio.to_thread(
+                    self.client.update_collection,
+                    collection_name=self.config.collection_name,
+                    vectors_config=vector_config,
+                    hnsw_config=hnsw_config,
+                    optimizers_config=optimizer_config
+                )
+                
+                logger.info("✅ Updated collection configuration")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Could not update collection config (may not be supported): {e}")
+            
+            # Step 3: Rebuild all payload indexes with optimized configurations
+            index_rebuild_results = []
+            
+            # Define optimized index configurations based on Qdrant best practices
+            index_configs = {
+                # Tenant-based indexes (for multi-user data)
+                "user_email": {
+                    "schema": qdrant_models['KeywordIndexParams'](
+                        type=qdrant_models['KeywordIndexType'].KEYWORD,
+                        is_tenant=True,  # Optimize for tenant-based searches
+                        on_disk=False    # Keep in memory for fast access
+                    ),
+                    "description": "Tenant-optimized user email index"
+                },
+                "user_id": {
+                    "schema": qdrant_models['KeywordIndexParams'](
+                        type=qdrant_models['KeywordIndexType'].KEYWORD,
+                        is_tenant=True,  # Also treat as tenant boundary
+                        on_disk=False
+                    ),
+                    "description": "Tenant-optimized user ID index"
+                },
+                
+                # Principal index for time-based data
+                "timestamp_unix": {
+                    "schema": qdrant_models['IntegerIndexParams'](
+                        type=qdrant_models['IntegerIndexType'].INTEGER,
+                        lookup=False,    # Only range queries for timestamps
+                        range=True,      # Enable range filtering
+                        is_principal=True # Optimize storage for time-based queries
+                    ),
+                    "description": "Principal time-based index for efficient range queries"
+                },
+                
+                # Performance metrics with range support
+                "execution_time_ms": {
+                    "schema": qdrant_models['IntegerIndexParams'](
+                        type=qdrant_models['IntegerIndexType'].INTEGER,
+                        lookup=False,    # Unlikely to do exact matches
+                        range=True,      # Enable range filtering for performance analysis
+                        on_disk=True     # Less frequently accessed, save memory
+                    ),
+                    "description": "Range-optimized execution time index"
+                },
+                
+                # Keyword indexes for exact matches
+                "tool_name": {
+                    "schema": qdrant_models['KeywordIndexParams'](
+                        type=qdrant_models['KeywordIndexType'].KEYWORD,
+                        on_disk=False    # Frequently accessed
+                    ),
+                    "description": "Tool name keyword index"
+                },
+                "payload_type": {
+                    "schema": qdrant_models['KeywordIndexParams'](
+                        type=qdrant_models['KeywordIndexType'].KEYWORD,
+                        on_disk=True     # Limited values, less frequently filtered
+                    ),
+                    "description": "Payload type classification index"
+                },
+                "session_id": {
+                    "schema": qdrant_models['KeywordIndexParams'](
+                        type=qdrant_models['KeywordIndexType'].KEYWORD,
+                        on_disk=True     # Session-based queries are less common
+                    ),
+                    "description": "Session identifier index"
+                },
+                
+                # Boolean index for compression flag
+                "compressed": {
+                    "schema": qdrant_models['BoolIndexParams'](
+                        type=qdrant_models['BoolIndexType'].BOOL,
+                        on_disk=True     # Simple boolean, infrequent filtering
+                    ),
+                    "description": "Compression status boolean index"
+                },
+                
+                # Datetime index for ISO timestamps
+                "timestamp": {
+                    "schema": qdrant_models['DatetimeIndexParams'](
+                        type=qdrant_models['DatetimeIndexType'].DATETIME,
+                        on_disk=True     # timestamp_unix is preferred for range queries
+                    ),
+                    "description": "ISO datetime index (secondary to timestamp_unix)"
+                },
+                
+                # Additional service-based indexes for semantic search enhancement
+                "service": {
+                    "schema": qdrant_models['KeywordIndexParams'](
+                        type=qdrant_models['KeywordIndexType'].KEYWORD,
+                        on_disk=False    # Frequently used in service-specific searches
+                    ),
+                    "description": "Service classification index"
+                },
+                "tool": {
+                    "schema": qdrant_models['KeywordIndexParams'](
+                        type=qdrant_models['KeywordIndexType'].KEYWORD,
+                        on_disk=False    # Alias for tool_name, frequently accessed
+                    ),
+                    "description": "Tool classification alias index"
+                }
+            }
+            
+            # Rebuild indexes with optimized configurations
+            for field, config in index_configs.items():
+                try:
+                    # Delete existing index (if it exists)
+                    try:
+                        await asyncio.to_thread(
+                            self.client.delete_payload_index,
+                            collection_name=self.config.collection_name,
+                            field_name=field
+                        )
+                        logger.debug(f"🗑️ Deleted existing index for field: {field}")
+                    except Exception:
+                        pass  # Index might not exist
+                    
+                    # Create new optimized index with specific schema
+                    await asyncio.to_thread(
+                        self.client.create_payload_index,
+                        collection_name=self.config.collection_name,
+                        field_name=field,
+                        field_schema=config["schema"]
+                    )
+                    
+                    index_rebuild_results.append({
+                        "field": field,
+                        "status": "success",
+                        "description": config["description"],
+                        "config": str(config["schema"])
+                    })
+                    logger.debug(f"✅ Rebuilt optimized index for field: {field} - {config['description']}")
+                    
+                except Exception as e:
+                    index_rebuild_results.append({
+                        "field": field,
+                        "status": "failed",
+                        "error": str(e),
+                        "description": config["description"]
+                    })
+                    logger.warning(f"⚠️ Failed to rebuild index for {field}: {e}")
+            
+            # Step 4: Force complete optimization
+            try:
+                if hasattr(self.client, 'optimize_vectors'):
+                    await asyncio.to_thread(
+                        self.client.optimize_vectors,
+                        collection_name=self.config.collection_name
+                    )
+                    vectors_optimized = True
+                else:
+                    vectors_optimized = False
+                    
+            except Exception as e:
+                vectors_optimized = False
+                logger.warning(f"⚠️ Vector optimization failed during rebuild: {e}")
+            
+            # Step 5: Get final statistics
+            new_collection_info = await asyncio.to_thread(
+                self.client.get_collection,
+                self.config.collection_name
+            )
+            
+            new_stats = {
+                "points_count": getattr(new_collection_info, 'points_count', 0),
+                "indexed_vectors_count": getattr(new_collection_info, 'indexed_vectors_count', 0)
+            }
+            
+            end_time = datetime.now(timezone.utc)
+            execution_time_ms = int((end_time - start_time).total_seconds() * 1000)
+            
+            successful_indexes = len([r for r in index_rebuild_results if r["status"] == "success"])
+            
+            logger.info(f"✅ Complete collection rebuild finished in {execution_time_ms}ms")
+            logger.info(f"📊 Indexes rebuilt: {successful_indexes}/{len(index_fields)}")
+            
+            return {
+                "status": "completed",
+                "execution_time_ms": execution_time_ms,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "optimization_profile": self.config.optimization_profile.value,
+                "old_stats": old_stats,
+                "new_stats": new_stats,
+                "index_results": index_rebuild_results,
+                "indexes_rebuilt": successful_indexes,
+                "total_indexes": len(index_fields),
+                "vectors_optimized": vectors_optimized,
+                "collection_name": self.config.collection_name
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Complete collection rebuild failed: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "collection_name": self.config.collection_name,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
     
     def get_connection_info(self) -> Dict[str, Any]:
         """

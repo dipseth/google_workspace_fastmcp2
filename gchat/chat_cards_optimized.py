@@ -7,7 +7,8 @@ import logging
 from typing_extensions import Dict, Any, List, Optional, Union, cast
 import json
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Try to import Card Framework with graceful fallback
 try:

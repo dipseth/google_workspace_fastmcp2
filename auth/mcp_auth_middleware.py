@@ -13,7 +13,8 @@ from typing_extensions import Any
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from config.settings import settings
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class MCPAuthMiddleware(Middleware):

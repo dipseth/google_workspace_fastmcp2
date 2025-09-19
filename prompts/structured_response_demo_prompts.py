@@ -31,7 +31,8 @@ except ImportError:
 from fastmcp import FastMCP, Context
 from fastmcp.prompts.prompt import Message, PromptMessage, TextContent, PromptResult
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class StructuredResponseDemoPrompts:

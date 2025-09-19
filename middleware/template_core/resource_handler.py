@@ -12,7 +12,8 @@ from typing import Any, Optional
 from .utils import TemplateResolutionError
 from .cache_manager import CacheManager
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class ResourceHandler:

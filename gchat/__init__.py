@@ -4,7 +4,8 @@ Google Chat MCP Tools Package
 import logging
 from . import chat_tools
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
+
 
 __all__ = ['chat_tools']

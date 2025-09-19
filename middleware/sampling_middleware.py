@@ -50,7 +50,8 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 # Configure logging
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # ============================================================================
 # SAMPLING TYPES AND SCHEMAS

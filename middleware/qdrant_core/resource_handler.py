@@ -35,7 +35,8 @@ from middleware.qdrant_types import (
     QdrantSearchResult
 )
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class QdrantResourceHandler:
@@ -129,7 +130,11 @@ class QdrantResourceHandler:
         elif resource_type == "status":
             # qdrant://status
             return await self._handle_status(uri)
-        
+
+        elif resource_type == "cache":
+            # qdrant://cache
+            return await self._handle_cache(uri)
+
         return self._error_response(uri, f"Unknown Qdrant resource type: {resource_type}")
     
     def _error_response(self, uri: str, error_message: str):
@@ -409,7 +414,7 @@ class QdrantResourceHandler:
     def get_supported_uris(self) -> List[str]:
         """
         Get list of supported URI patterns.
-        
+
         Returns:
             List of supported URI pattern descriptions
         """
@@ -418,16 +423,107 @@ class QdrantResourceHandler:
             "qdrant://collection/{name}/info",
             "qdrant://collection/{name}/responses/recent",
             "qdrant://search/{collection}/{query}",
-            "qdrant://search/{query}"
+            "qdrant://search/{query}",
+            "qdrant://cache",
+            "qdrant://status"
         ]
     
+    async def _handle_cache(self, uri: str):
+        """
+        Handle qdrant://cache resource.
+
+        Returns a dictionary organized by tool name with arrays of point metadata
+        containing point_id, timestamp, and user_email.
+
+        Args:
+            uri: The original URI
+
+        Returns:
+            dict: {tool_name: [{point_id, timestamp, user_email}, ...], ...}
+        """
+        try:
+            # Get the main collection name from config
+            collection_name = self.config.collection_name
+
+            # Check if collection exists
+            collections_response = await asyncio.to_thread(self.client_manager.client.get_collections)
+            available_collections = [c.name for c in collections_response.collections]
+
+            if collection_name not in available_collections:
+                return {
+                    "error": f"Collection '{collection_name}' not found",
+                    "available_collections": available_collections,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+
+            # Scroll through all points in the collection
+            all_points = []
+            next_page_offset = None
+
+            while True:
+                scroll_result = await asyncio.to_thread(
+                    self.client_manager.client.scroll,
+                    collection_name=collection_name,
+                    limit=100,  # Get points in batches
+                    offset=next_page_offset,
+                    with_payload=True,
+                    with_vector=False
+                )
+
+                points, next_page_offset = scroll_result
+                all_points.extend(points)
+
+                # Break if no more points or we've collected enough
+                if next_page_offset is None or len(all_points) >= 1000:
+                    break
+
+            # Group points by tool_name
+            cache_by_tool = {}
+
+            for point in all_points:
+                payload = point.payload or {}
+
+                tool_name = payload.get("tool_name", "unknown")
+                timestamp = payload.get("timestamp", "unknown")
+                user_email = payload.get("user_email", "unknown")
+
+                # Initialize tool array if not exists
+                if tool_name not in cache_by_tool:
+                    cache_by_tool[tool_name] = []
+
+                # Add point metadata
+                cache_by_tool[tool_name].append({
+                    "point_id": str(point.id),
+                    "timestamp": timestamp,
+                    "user_email": user_email
+                })
+
+            # Sort each tool's points by timestamp (most recent first)
+            for tool_name in cache_by_tool:
+                cache_by_tool[tool_name].sort(
+                    key=lambda x: x["timestamp"] if x["timestamp"] != "unknown" else "",
+                    reverse=True
+                )
+
+            return {
+                "collection_name": collection_name,
+                "total_points": len(all_points),
+                "tools_count": len(cache_by_tool),
+                "cache_data": cache_by_tool,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting cache data: {e}")
+            return self._error_response(uri, f"Failed to get cache data: {str(e)}")
+
     async def _handle_status(self, uri: str):
         """
         Handle qdrant://status resource.
-        
+
         Args:
             uri: The original URI
-            
+
         Returns:
             QdrantStatusResponse: Pydantic response with middleware status
         """
@@ -440,7 +536,7 @@ class QdrantResourceHandler:
                     collections_count = len(collections.collections)
                 except Exception:
                     collections_count = 0
-            
+
             return QdrantStatusResponse(
                 qdrant_enabled=self.client_manager.config.enabled,
                 qdrant_url=self.client_manager.discovered_url,

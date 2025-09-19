@@ -30,7 +30,8 @@ from config.settings import settings
 from tools.common_types import UserGoogleEmail
 
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 @dataclass

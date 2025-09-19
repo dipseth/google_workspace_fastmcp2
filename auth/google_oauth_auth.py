@@ -12,7 +12,8 @@ from fastmcp.server.auth import BearerAuthProvider
 from config.settings import settings
 from auth.compatibility_shim import CompatibilityShim
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Global auth provider
 _auth_provider: Optional[BearerAuthProvider] = None

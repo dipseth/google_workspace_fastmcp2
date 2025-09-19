@@ -42,7 +42,8 @@ from .drive_enums import MimeTypeFilter
 from tools.common_types import UserGoogleEmail, UserGoogleEmailDrive
 
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Precompiled regex patterns for Drive query detection
 DRIVE_QUERY_PATTERNS = [
@@ -338,7 +339,7 @@ async def search_drive_files(
         HttpError: If Drive API returns an error
         RuntimeError: If authentication fails or service unavailable
     """
-    logger.info(f"[search_drive_files] Email: '{user_google_email}', Query: '{query}', MimeType: '{mime_type}'")
+    logger.debug(f"[search_drive_files] Email: '{user_google_email}', Query: '{query}', MimeType: '{mime_type}'")
         
     try:
         # Get Drive service with fallback support

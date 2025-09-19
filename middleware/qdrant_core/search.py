@@ -17,6 +17,7 @@ with client management and query parsing modules.
 import json
 import uuid
 import asyncio
+import base64
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -31,7 +32,8 @@ from .query_parser import (
 from .config import QdrantConfig
 from .lazy_imports import get_qdrant_imports
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class QdrantSearchManager:
@@ -274,7 +276,18 @@ class QdrantSearchManager:
                 
                 # Decompress data if needed
                 if payload.get("compressed", False):
-                    data = self.client_manager._decompress_data(payload["compressed_data"])
+                    compressed_data = payload["compressed_data"]
+                    # Ensure compressed_data is bytes (handle string encoding if necessary)
+                    if isinstance(compressed_data, str):
+                        # If it's a string, it might be base64 encoded or need to be encoded as bytes
+                        import base64
+                        try:
+                            # Try base64 decode first (common for binary data stored as string)
+                            compressed_data = base64.b64decode(compressed_data)
+                        except:
+                            # Fallback to encoding as UTF-8 bytes
+                            compressed_data = compressed_data.encode('utf-8')
+                    data = self.client_manager._decompress_data(compressed_data)
                 else:
                     data = payload.get("data", "{}")
                 
@@ -434,7 +447,18 @@ class QdrantSearchManager:
             
             # Decompress data if needed
             if payload.get("compressed", False):
-                data = self.client_manager._decompress_data(payload["compressed_data"])
+                compressed_data = payload["compressed_data"]
+                # Ensure compressed_data is bytes (handle string encoding if necessary)
+                if isinstance(compressed_data, str):
+                    # If it's a string, it might be base64 encoded or need to be encoded as bytes
+                    import base64
+                    try:
+                        # Try base64 decode first (common for binary data stored as string)
+                        compressed_data = base64.b64decode(compressed_data)
+                    except:
+                        # Fallback to encoding as UTF-8 bytes
+                        compressed_data = compressed_data.encode('utf-8')
+                data = self.client_manager._decompress_data(compressed_data)
             else:
                 data = payload.get("data", "{}")
             

@@ -125,6 +125,164 @@ result = await processor.resolve_string_templates(
 - Provides usage examples for discovered macros
 - Caches macro information
 
+### Template Loading and Service Process
+
+The template system follows a structured initialization and service flow orchestrated by the main middleware:
+
+#### 1. Initialization Flow ([`template_middleware.py`](../middleware/template_middleware.py#L110))
+
+```python
+def _initialize_components(self, jinja2_options: Dict[str, Any]) -> None:
+    # Component initialization in dependency order:
+    
+    # 1. Cache Manager (no dependencies)
+    self.cache_manager = CacheManager(...)
+    
+    # 2. Resource Handler (depends on cache manager) 
+    self.resource_handler = ResourceHandler(cache_manager=self.cache_manager, ...)
+    
+    # 3. Jinja Environment Manager (independent)
+    self.jinja_env_manager = JinjaEnvironmentManager(templates_dir=self.templates_dir, ...)
+    
+    # 4. Register custom filters
+    register_all_filters(jinja_env)
+    
+    # 5. Template Processor (depends on resource handler + jinja env)
+    self.template_processor = TemplateProcessor(
+        resource_handler=self.resource_handler,
+        jinja_env_manager=self.jinja_env_manager, ...
+    )
+    
+    # 6. Macro Manager (depends on jinja env manager)
+    self.macro_manager = MacroManager(
+        templates_dir=self.templates_dir,
+        jinja_env_manager=self.jinja_env_manager, ...
+    )
+    
+    # 7. Scan and register all macros
+    self.macro_manager.scan_and_register_macros()
+```
+
+#### 2. Macro Discovery ([`macro_manager.py`](../middleware/template_core/macro_manager.py#L51))
+
+```python
+def scan_and_register_macros(self) -> None:
+    # Regex patterns for macro detection
+    macro_pattern = re.compile(r'{% macro (\w+)\s*\([^}]*?\) %?}', re.MULTILINE | re.DOTALL)
+    usage_example_pattern = re.compile(r'{#[^#]*MACRO USAGE EXAMPLE:[^#]*{{ (\w+)\([^}]*\) }}[^#]*#}')
+    
+    # Scan all .j2 files in templates directory
+    for template_file in self.templates_dir.glob('*.j2'):
+        template_content = template_file.read_text(encoding='utf-8')
+        
+        # Find macro definitions and usage examples
+        macro_matches = macro_pattern.findall(template_content)
+        usage_matches = usage_example_pattern.findall(template_content)
+        
+        # Register each discovered macro in _macro_registry
+        for macro_name in macro_matches:
+            self._macro_registry[macro_name] = {
+                "name": macro_name,
+                "template_file": template_file.name,
+                "usage_example": usage_examples.get(macro_name, f"{{{{ {macro_name}() }}}}"),
+                # ... additional metadata
+            }
+```
+
+#### 3. Template Service During Tool Calls ([`template_middleware.py`](../middleware/template_middleware.py#L160))
+
+```python
+async def on_call_tool(self, context: MiddlewareContext, call_next) -> Any:
+    # 1. Intercept tool call and extract parameters
+    original_args = getattr(context.message, 'arguments', {})
+    
+    # 2. Resolve template parameters using TemplateProcessor
+    resolved_args = await self._resolve_parameters(original_args, context.fastmcp_context, tool_name)
+    
+    # 3. Update tool arguments with resolved templates
+    if resolved_args != original_args:
+        context.message.arguments = resolved_args
+        
+    # 4. Continue with original tool execution
+    result = await call_next(context)
+```
+
+#### 4. Template Processing ([`template_processor.py`](../middleware/template_core/template_processor.py#L70))
+
+```python
+async def resolve_string_templates(self, text: str, fastmcp_context, param_path: str) -> Any:
+    # 1. Detect template type
+    has_jinja2 = self._has_jinja2_syntax(text)
+    has_simple = bool(self.SIMPLE_TEMPLATE_PATTERN.search(text))
+    
+    # 2. Route to appropriate engine
+    if has_jinja2 and self.jinja_env_manager.is_available():
+        return await self._resolve_jinja2_template(text, fastmcp_context, param_path)
+    elif has_simple:
+        return await self._resolve_simple_template(text, fastmcp_context, param_path)
+    else:
+        return text
+```
+
+#### 5. Resource Resolution Integration
+
+Templates access FastMCP resources through the [`ResourceHandler`](../middleware/template_core/resource_handler.py):
+
+```python
+# Simple template resolution
+resource_data = await self.resource_handler.fetch_resource(resource_uri, fastmcp_context)
+
+# Jinja2 template context building
+context = await self._build_template_context(fastmcp_context)
+template = jinja_env.from_string(processed_template_text)
+result = template.render(**context)
+```
+
+#### 6. Template Resource URIs ([`macro_manager.py`](../middleware/template_core/macro_manager.py#L131))
+
+The macro manager handles `template://macros` resource URIs:
+
+```python
+async def handle_template_resource(self, resource_uri: str, fastmcp_context) -> bool:
+    if resource_uri == 'template://macros':
+        # Return all available macros with usage examples
+        await self._handle_all_macros(fastmcp_context)
+        
+    elif resource_uri.startswith('template://macros/'):
+        # Return specific macro usage example
+        macro_name = resource_uri.replace('template://macros/', '')
+        await self._handle_specific_macro(macro_name, fastmcp_context)
+```
+
+#### 7. Error Handling and Fallbacks
+
+The system implements graceful degradation:
+
+- **Template Loading Errors**: Invalid templates are logged and skipped ([`macro_manager.py:127`](../middleware/template_core/macro_manager.py#L127))
+- **Jinja2 Unavailable**: Falls back to simple template processing ([`template_processor.py:167`](../middleware/template_core/template_processor.py#L167))
+- **Resource Resolution Fails**: Uses cached data or empty fallbacks ([`template_processor.py:342`](../middleware/template_core/template_processor.py#L342))
+- **Syntax Errors**: Detailed logging with fallback to original values ([`template_processor.py:212`](../middleware/template_core/template_processor.py#L212))
+
+#### 8. Component Dependencies
+
+```
+template_middleware.py (Main Orchestrator)
+├── macro_manager.py (Template Discovery)
+│   └── jinja_environment.py (Jinja2 Setup)
+├── template_processor.py (Template Resolution)
+│   ├── resource_handler.py (Resource Fetching)
+│   │   └── cache_manager.py (Caching)
+│   └── jinja_environment.py (Jinja2 Setup)
+└── filters/ (Custom Jinja2 Filters)
+```
+
+### Template Loading Process
+
+1. **Discovery**: [`MacroManager.scan_and_register_macros()`](../middleware/template_core/macro_manager.py#L51) scans `middleware/templates/*.j2`
+2. **Loading**: [`JinjaEnvironmentManager._load_template_macros()`](../middleware/template_core/jinja_environment.py) loads template files
+3. **Registration**: Macros are registered in `jinja_env.globals` for use
+4. **Validation**: Templates with syntax errors are logged and skipped
+5. **Caching**: Macro information cached for `template://macros` resources
 ## Custom Filters
 
 ### Date Filters (`filters/date_filters.py`)
@@ -141,6 +299,186 @@ result = await processor.resolve_string_templates(
 
 ### Drive Filters (`filters/drive_filters.py`)
 - `format_drive_image_url(url)`: Convert Drive URLs to direct image URLs
+
+## Template Usage and Construction
+
+### Template File Organization
+
+Templates are stored in the `middleware/templates/` directory and automatically discovered by the [`MacroManager`](../middleware/template_core/macro_manager.py). The system supports two types of templates:
+
+```
+middleware/templates/
+├── beautiful_email.j2         # Email template with themes and styling
+├── email_card.j2              # Gmail labels visualization template
+├── document_templates.j2       # Professional document templates
+├── photo_album_email.j2        # Photo gallery email templates
+└── *.j2                       # Additional Jinja2 template files
+```
+
+### Template Macro Definition
+
+Templates must define macros using proper Jinja2 syntax. The [`JinjaEnvironmentManager`](../middleware/template_core/jinja_environment.py) loads these templates and registers macros globally.
+
+**✅ Correct Macro Definition**:
+```jinja2
+{% macro render_beautiful_email(title="Hello World") -%}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ title }}</title>
+</head>
+<body>
+    <h1>{{ title }}</h1>
+    <p>This is a simple email template.</p>
+</body>
+</html>
+{%- endmacro %}
+```
+
+**❌ Common Mistakes**:
+```jinja2
+{# DON'T: Single-line macro definitions cause parsing errors #}
+{% macro broken_macro() %}<!DOCTYPE html><html>...</html>{% endmacro %}
+
+{# DON'T: Using undefined functions or filters #}
+{% macro broken_dates() %}{{ now().strftime('%Y-%m-%d') }}{% endmacro %}
+
+{# DON'T: Using custom filters that aren't registered #}
+{% macro broken_filter() %}{{ image.url | format_drive_image_url }}{% endmacro %}
+```
+
+### Template Syntax Requirements
+
+Based on fixes applied to [`beautiful_email.j2`](../middleware/templates/beautiful_email.j2) and [`document_templates.j2`](../middleware/templates/document_templates.j2):
+
+**Safe Jinja2 Features** (Always work):
+- Basic control structures: `{% if %}`, `{% for %}`, `{% set %}`
+- Built-in filters: `default`, `upper`, `lower`, `length`, `defined`
+- Python operators: `%` for string formatting
+- Simple variable access: `{{ variable.property }}`
+
+**Avoid These Patterns** (Cause undefined errors):
+- `now()` function - Use static dates instead
+- `strftime` filter - Use static date strings
+- Custom filters without registration - Only use registered filters
+- Python methods in templates - `{{ string.endswith('x') }}`
+- Complex calculations - Pre-compute in Python
+
+### Macro Discovery and Registration
+
+The [`MacroManager`](../middleware/template_core/macro_manager.py) automatically scans template files using regex patterns:
+
+```python
+# Regex pattern used for macro detection
+macro_pattern = re.compile(r'{% macro (\w+)\s*\([^}]*?\) %?}', re.MULTILINE | re.DOTALL)
+usage_example_pattern = re.compile(r'{#[^#]*MACRO USAGE EXAMPLE:[^#]*{{ (\w+)\([^}]*\) }}[^#]*#}', re.DOTALL)
+```
+
+**Adding Usage Examples**:
+```jinja2
+{% macro my_template(title="Default") -%}
+<!-- template content -->
+{%- endmacro %}
+
+{# MACRO USAGE EXAMPLE: {{ my_template(title="Custom Title") }} #}
+```
+
+### Working Template Examples
+
+#### Email Template ([`email_card.j2`](../middleware/templates/email_card.j2))
+```jinja2
+{% macro render_gmail_labels_chips(labels_data, title="Gmail Labels") %}
+<!-- Handles nested data structures safely -->
+{% if labels_data and labels_data.result %}
+  {% set all_labels = labels_data.result.labels or [] %}
+{% endif %}
+
+<!-- Uses only built-in filters -->
+{% for label in all_labels | sort(attribute='name') %}
+  <div class="label-chip">{{ label.name }}</div>
+{% endfor %}
+{% endmacro %}
+```
+
+#### Document Template ([`document_templates.j2`](../middleware/templates/document_templates.j2))
+```jinja2
+{% macro generate_invoice_doc(invoice_number="", total=0) %}
+<!DOCTYPE html>
+<html>
+<body>
+  <!-- Uses safe string formatting -->
+  <p>Invoice #: {{ invoice_number }}</p>
+  <p>Total: ${{ "%.2f" % total }}</p>
+  
+  <!-- Uses static dates instead of now() -->
+  <p>Date: {{ invoice_date or '2024-12-19' }}</p>
+</body>
+</html>
+{% endmacro %}
+```
+
+### Template Construction Best Practices
+
+1. **Keep Macros Simple**: Avoid complex logic, use Python for data preparation
+2. **Use Static Fallbacks**: Replace dynamic functions with static defaults
+3. **Test Incrementally**: Start simple, add complexity gradually
+4. **Document Parameters**: Include clear usage examples in comments
+5. **Validate Syntax**: Ensure templates load without Jinja2 errors
+
+### Integration with Resource System
+
+Templates can access FastMCP resources using the established URI patterns:
+
+```jinja2
+{% macro user_dashboard() %}
+<!-- Access user information -->
+<h1>Welcome {{ user://current/profile.name | default('User') }}!</h1>
+
+<!-- Access service data -->
+{% for label in service://gmail/labels %}
+  <span class="label">{{ label.name }}</span>
+{% endfor %}
+
+<!-- Access recent items -->
+{% for file in recent://drive/5 %}
+  <div class="file">{{ file.name }}</div>
+{% endfor %}
+{% endmacro %}
+```
+
+### Template Loading Process
+
+1. **Discovery**: [`MacroManager.scan_and_register_macros()`](../middleware/template_core/macro_manager.py#L51) scans `middleware/templates/*.j2`
+2. **Loading**: [`JinjaEnvironmentManager._load_template_macros()`](../middleware/template_core/jinja_environment.py) loads template files
+3. **Registration**: Macros are registered in `jinja_env.globals` for use
+4. **Validation**: Templates with syntax errors are logged and skipped
+5. **Caching**: Macro information cached for `template://macros` resources
+
+### Debugging Template Issues
+
+**Enable Debug Logging**:
+```python
+middleware = EnhancedTemplateMiddleware(enable_debug_logging=True)
+```
+
+**Check Template Loading**:
+```bash
+# Look for these log messages during startup
+⚠️ Failed to load template beautiful_email.j2: [error details]
+📚 Discovered X macros from Y template files
+```
+
+**Test Template Syntax**:
+```python
+from jinja2 import Environment, FileSystemLoader
+env = Environment(loader=FileSystemLoader('middleware/templates'))
+try:
+    template = env.get_template('your_template.j2')
+    module = template.make_module()
+    print("✅ Template loaded successfully")
+except Exception as e:
+    print(f"❌ Template error: {e}")
+```
 
 ## Usage Examples
 

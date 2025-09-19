@@ -59,7 +59,8 @@ from typing_extensions import Annotated
 from middleware.service_list_response import ServiceListResponse, ServiceListsResponse, ServiceItemDetailsResponse
 from auth.context import get_user_email_context
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 def get_supported_services() -> List[str]:

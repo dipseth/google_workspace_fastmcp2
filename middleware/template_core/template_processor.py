@@ -15,7 +15,8 @@ from .resource_handler import ResourceHandler
 from .jinja_environment import JinjaEnvironmentManager
 from ..namespace_converter import convert_to_namespace
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class TemplateProcessor:

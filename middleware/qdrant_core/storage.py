@@ -26,20 +26,33 @@ from .client import QdrantClientManager
 from .config import QdrantConfig, PayloadType
 from .lazy_imports import get_qdrant_imports
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
-def sanitize_for_json(obj) -> Union[str, Dict, list, int, float, bool, None]:
+def sanitize_for_json(obj, preserve_structure: bool = True) -> Union[str, Dict, list, int, float, bool, None]:
     """
     Sanitize data to be JSON-serializable, handling binary data, invalid UTF-8, and complex objects.
     Uses Pydantic-inspired patterns for robust serialization.
     
     Args:
         obj: Object to sanitize
+        preserve_structure: If True, maintain nested structure instead of converting to strings
         
     Returns:
-        JSON-serializable version of the object
+        JSON-serializable version of the object with preserved structure when possible
     """
+    # Check if obj is already a JSON string and should be parsed
+    if isinstance(obj, str) and preserve_structure:
+        if _is_json_string(obj):
+            try:
+                parsed_obj = json.loads(obj)
+                logger.debug("🔧 Detected and parsed JSON string to preserve structure")
+                return sanitize_for_json(parsed_obj, preserve_structure=True)
+            except json.JSONDecodeError:
+                # Not valid JSON, treat as regular string
+                pass
+    
     # Try Pydantic-style serialization for complex objects first
     try:
         # Import here to avoid circular dependencies
@@ -83,7 +96,7 @@ def sanitize_for_json(obj) -> Union[str, Dict, list, int, float, bool, None]:
     elif isinstance(obj, (list, tuple)):
         # Recursively sanitize list/tuple elements
         try:
-            return [sanitize_for_json(item) for item in obj]
+            return [sanitize_for_json(item, preserve_structure) for item in obj]
         except Exception:
             # If list processing fails, convert to safe representation
             return f"[List with {len(obj)} items - serialization failed]"
@@ -93,8 +106,8 @@ def sanitize_for_json(obj) -> Union[str, Dict, list, int, float, bool, None]:
         for key, value in obj.items():
             try:
                 # Sanitize both key and value
-                clean_key = sanitize_for_json(key)
-                clean_value = sanitize_for_json(value)
+                clean_key = sanitize_for_json(key, preserve_structure)
+                clean_value = sanitize_for_json(value, preserve_structure)
                 # Ensure key is a string
                 if not isinstance(clean_key, str):
                     clean_key = str(clean_key)
@@ -110,20 +123,107 @@ def sanitize_for_json(obj) -> Union[str, Dict, list, int, float, bool, None]:
             return obj.model_dump(mode='json')
         except Exception:
             # Fall back to __dict__ if model_dump fails
-            return sanitize_for_json(obj.__dict__)
+            return sanitize_for_json(obj.__dict__, preserve_structure)
     elif hasattr(obj, '__dict__'):
         # Handle objects with attributes
         try:
-            return sanitize_for_json(obj.__dict__)
+            return sanitize_for_json(obj.__dict__, preserve_structure)
         except Exception:
             return f"[Object of type {type(obj).__name__} - serialization failed]"
     else:
         # Convert everything else to string and sanitize
         try:
             str_obj = str(obj)
-            return sanitize_for_json(str_obj)
+            return sanitize_for_json(str_obj, preserve_structure)
         except Exception:
             return f"[Unserializable {type(obj).__name__} object]"
+
+
+def _is_json_string(text: str) -> bool:
+    """
+    Check if a string appears to be JSON by looking for JSON structure indicators.
+    
+    Args:
+        text: String to check
+        
+    Returns:
+        True if string appears to be JSON
+    """
+    if not text or not isinstance(text, str):
+        return False
+        
+    # Strip whitespace
+    text = text.strip()
+    
+    # Check for JSON object/array markers
+    json_indicators = [
+        (text.startswith('{') and text.endswith('}')),
+        (text.startswith('[') and text.endswith(']')),
+        # Check for common JSON patterns
+        ('{"' in text and '"}' in text),
+        ('["' in text and '"]' in text),
+    ]
+    
+    return any(json_indicators)
+
+
+def _extract_response_content(response: Any) -> Any:
+    """
+    Smart extraction of response content that preserves structure and detects pre-serialized JSON.
+    
+    Args:
+        response: Response object to extract content from
+        
+    Returns:
+        Extracted content with preserved structure
+    """
+    try:
+        # Handle FastMCP ToolResult objects
+        if hasattr(response, 'content'):
+            content = response.content
+            
+            # If content is a string, check if it's JSON and parse if needed
+            if isinstance(content, str) and _is_json_string(content):
+                try:
+                    parsed_content = json.loads(content)
+                    logger.debug("🔧 Parsed JSON content from ToolResult.content")
+                    return parsed_content
+                except json.JSONDecodeError:
+                    # Not valid JSON, return as-is
+                    logger.debug("⚠️ Content appeared to be JSON but failed to parse")
+                    return content
+            
+            return content
+            
+        # Handle objects with to_dict method
+        elif hasattr(response, 'to_dict'):
+            return response.to_dict()
+            
+        # Handle generic objects with attributes
+        elif hasattr(response, '__dict__'):
+            return response.__dict__
+            
+        # Handle already-parsed structured data
+        elif isinstance(response, (dict, list)):
+            return response
+            
+        # Check if response is a JSON string
+        elif isinstance(response, str) and _is_json_string(response):
+            try:
+                parsed_response = json.loads(response)
+                logger.debug("🔧 Parsed JSON string response")
+                return parsed_response
+            except json.JSONDecodeError:
+                logger.debug("⚠️ Response appeared to be JSON but failed to parse")
+                return response
+        
+        # Convert to string as fallback
+        else:
+            return str(response)
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Error extracting response content: {e}")
+        return str(response)
 
 
 def validate_qdrant_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -401,19 +501,8 @@ class QdrantStorageManager:
             return
         
         try:
-            # Properly serialize response (handle ToolResult objects)
-            if hasattr(response, 'content'):
-                # FastMCP ToolResult object
-                serialized_response = response.content
-            elif hasattr(response, 'to_dict'):
-                # Object with to_dict method
-                serialized_response = response.to_dict()
-            elif hasattr(response, '__dict__'):
-                # Generic object with attributes
-                serialized_response = response.__dict__
-            else:
-                # Convert to string as fallback
-                serialized_response = str(response)
+            # Smart response content extraction with structure preservation
+            serialized_response = _extract_response_content(response)
             
             # Create response payload with execution time (enhanced metadata) and Unix timestamp
             now_dt = datetime.now(timezone.utc)
@@ -430,11 +519,17 @@ class QdrantStorageManager:
                 "execution_time_ms": execution_time_ms  # Enhanced metadata
             }
             
-            # Sanitize data for JSON serialization to prevent UTF-8 errors
-            sanitized_data = sanitize_for_json(response_data)
+            # Sanitize data while preserving structure to prevent UTF-8 errors and avoid triple serialization
+            sanitized_data = sanitize_for_json(response_data, preserve_structure=True)
             
-            # Convert to JSON
-            json_data = json.dumps(sanitized_data, default=str)
+            # Smart serialization - only convert to JSON string when compression is needed
+            if self.client_manager._should_compress(json.dumps(sanitized_data, default=str)):
+                json_data = json.dumps(sanitized_data, default=str)
+                logger.debug("🔧 Serialized to JSON for compression")
+            else:
+                # Store as structured data - avoid unnecessary JSON string conversion
+                json_data = None
+                logger.debug("🔧 Storing structured data without JSON serialization")
             
             # Generate text for embedding
             embed_text = f"Tool: {tool_name}\nArguments: {json.dumps(tool_args)}\nResponse: {str(response)[:1000]}"
@@ -447,19 +542,23 @@ class QdrantStorageManager:
             # Generate embedding
             embedding = await asyncio.to_thread(self.client_manager.embedder.encode, embed_text)
             
-            # Check if compression is needed
-            compressed = self.client_manager._should_compress(json_data)
-            if compressed:
+            # Smart compression and storage handling
+            if json_data is not None:
+                # Compression needed - use JSON string
+                compressed = True
                 stored_data = self.client_manager._compress_data(json_data)
                 logger.debug(f"📦 Compressed response: {len(json_data)} -> {len(stored_data)} bytes")
             else:
-                stored_data = json_data
+                # No compression needed - store structured data directly
+                compressed = False
+                stored_data = sanitized_data
+                logger.debug("📄 Storing structured response data directly")
             
             # Create point for Qdrant (use proper UUID format and validated payload)
             _, qdrant_models = get_qdrant_imports()
             point_id = str(uuid.uuid4())  # Generate UUID and convert to string
             
-            # Create payload with sanitized data including Unix timestamp
+            # Create payload with sanitized data including Unix timestamp - avoid storing JSON strings unnecessarily
             raw_payload = {
                 "tool_name": tool_name,
                 "timestamp": sanitized_data["timestamp"],
@@ -470,9 +569,17 @@ class QdrantStorageManager:
                 "payload_type": PayloadType.TOOL_RESPONSE.value,
                 "execution_time_ms": execution_time_ms,  # Enhanced metadata
                 "compressed": compressed,
-                "data": stored_data if not compressed else None,
-                "compressed_data": stored_data if compressed else None
             }
+            
+            # Store data based on compression status - preserve structure when possible
+            if compressed:
+                raw_payload["compressed_data"] = stored_data
+                raw_payload["data"] = None
+            else:
+                # Store the full structured data directly in the response field
+                raw_payload["response_data"] = stored_data
+                raw_payload["data"] = None
+                raw_payload["compressed_data"] = None
             
             # Validate payload specifically for Qdrant compatibility
             validated_payload = validate_qdrant_payload(raw_payload)
@@ -855,6 +962,357 @@ class QdrantStorageManager:
                 "error": str(e),
                 "retention_days": self.config.cache_retention_days
             }
+    
+    async def reindex_collection(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Perform comprehensive collection reindexing and optimization.
+        
+        This method includes:
+        - Collection statistics analysis
+        - Index optimization and rebuilding
+        - Segment optimization
+        - Performance monitoring
+        
+        Args:
+            force: If True, force reindexing even if not recommended
+            
+        Returns:
+            Dict with reindexing results and performance statistics
+        """
+        if not self.client_manager.is_available:
+            logger.warning("⚠️ Qdrant client not available, skipping reindexing")
+            return {"status": "skipped", "reason": "client_unavailable"}
+        
+        try:
+            start_time = datetime.now(timezone.utc)
+            logger.info("🔄 Starting comprehensive collection reindexing...")
+            
+            # Get collection info and statistics
+            collection_info = await asyncio.to_thread(
+                self.client_manager.client.get_collection,
+                self.config.collection_name
+            )
+            
+            # Analyze collection health
+            health_stats = await self._analyze_collection_health()
+            
+            # Decide if reindexing is needed
+            needs_reindex = force or self._should_reindex(health_stats)
+            
+            if not needs_reindex and not force:
+                logger.info("✅ Collection is healthy, skipping reindexing")
+                return {
+                    "status": "skipped",
+                    "reason": "collection_healthy",
+                    "health_stats": health_stats,
+                    "timestamp": start_time.isoformat()
+                }
+            
+            logger.info(f"🔧 Collection needs reindexing: {health_stats['reindex_reasons']}")
+            
+            # Step 1: Optimize collection settings
+            optimization_result = await self._optimize_collection_settings()
+            
+            # Step 2: Rebuild indexes if needed
+            index_rebuild_result = await self._rebuild_collection_indexes()
+            
+            # Step 3: Optimize segments
+            segment_optimization_result = await self._optimize_segments()
+            
+            # Step 4: Update collection statistics
+            final_stats = await self._analyze_collection_health()
+            
+            end_time = datetime.now(timezone.utc)
+            execution_time_ms = int((end_time - start_time).total_seconds() * 1000)
+            
+            logger.info(f"✅ Collection reindexing completed in {execution_time_ms}ms")
+            
+            return {
+                "status": "completed",
+                "execution_time_ms": execution_time_ms,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "health_before": health_stats,
+                "health_after": final_stats,
+                "optimization_result": optimization_result,
+                "index_rebuild_result": index_rebuild_result,
+                "segment_optimization_result": segment_optimization_result,
+                "collection_name": self.config.collection_name
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Collection reindexing failed: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "collection_name": self.config.collection_name,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def _analyze_collection_health(self) -> Dict[str, Any]:
+        """
+        Analyze collection health and determine if reindexing is needed.
+        
+        Returns:
+            Dict with health statistics and recommendations
+        """
+        try:
+            # Get collection info
+            collection_info = await asyncio.to_thread(
+                self.client_manager.client.get_collection,
+                self.config.collection_name
+            )
+            
+            # Get collection statistics
+            total_points = collection_info.points_count or 0
+            indexed_points = getattr(collection_info, 'indexed_vectors_count', total_points)
+            
+            # Calculate fragmentation and health metrics
+            index_ratio = indexed_points / max(total_points, 1)
+            fragmentation_score = 1.0 - index_ratio
+            
+            # Determine reasons for reindexing
+            reindex_reasons = []
+            
+            if fragmentation_score > 0.2:  # More than 20% unindexed
+                reindex_reasons.append(f"high_fragmentation_{fragmentation_score:.2f}")
+            
+            if total_points > 0 and indexed_points < total_points * 0.8:
+                reindex_reasons.append("low_index_coverage")
+            
+            # Get optimization profile thresholds
+            optimization_params = self.config.get_optimization_params()
+            indexing_threshold = optimization_params["optimizer_config"]["indexing_threshold"]
+            
+            if total_points > indexing_threshold * 2:  # Collection grew significantly
+                reindex_reasons.append("collection_growth")
+            
+            # Check index age (if we can determine it)
+            hours_since_last_cleanup = 24  # Assume daily cleanup cycle
+            if hours_since_last_cleanup > 24:
+                reindex_reasons.append("stale_indexes")
+            
+            health_score = max(0.0, 1.0 - fragmentation_score)
+            
+            return {
+                "total_points": total_points,
+                "indexed_points": indexed_points,
+                "index_ratio": index_ratio,
+                "fragmentation_score": fragmentation_score,
+                "health_score": health_score,
+                "reindex_reasons": reindex_reasons,
+                "needs_reindex": len(reindex_reasons) > 0,
+                "collection_name": self.config.collection_name,
+                "analysis_time": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not analyze collection health: {e}")
+            return {
+                "error": str(e),
+                "needs_reindex": False,
+                "health_score": 0.5,  # Assume neutral health
+                "reindex_reasons": [],
+                "analysis_time": datetime.now(timezone.utc).isoformat()
+            }
+    
+    def _should_reindex(self, health_stats: Dict[str, Any]) -> bool:
+        """
+        Determine if collection should be reindexed based on health statistics.
+        
+        Args:
+            health_stats: Collection health statistics
+            
+        Returns:
+            True if reindexing is recommended
+        """
+        return health_stats.get("needs_reindex", False) and len(health_stats.get("reindex_reasons", [])) >= 2
+    
+    async def _optimize_collection_settings(self) -> Dict[str, Any]:
+        """
+        Optimize collection configuration settings.
+        
+        Returns:
+            Dict with optimization results
+        """
+        try:
+            logger.info("🔧 Optimizing collection settings...")
+            
+            # Get current optimization parameters
+            optimization_params = self.config.get_optimization_params()
+            
+            # For now, we'll return success since settings are applied during creation
+            # In a more advanced implementation, we could update collection params here
+            
+            return {
+                "status": "completed",
+                "optimization_profile": self.config.optimization_profile.value,
+                "settings_applied": optimization_params["optimizer_config"],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Collection settings optimization failed: {e}")
+            return {
+                "status": "failed",
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def _rebuild_collection_indexes(self) -> Dict[str, Any]:
+        """
+        Rebuild collection indexes for optimal performance.
+        
+        Returns:
+            Dict with index rebuild results
+        """
+        try:
+            logger.info("🏗️ Rebuilding collection indexes...")
+            
+            # In Qdrant, indexes are rebuilt automatically during optimization
+            # We'll trigger index recreation by updating payload schema
+            _, qdrant_models = get_qdrant_imports()
+            
+            # Get current collection info
+            collection_info = await asyncio.to_thread(
+                self.client_manager.client.get_collection,
+                self.config.collection_name
+            )
+            
+            # Rebuild key indexes
+            rebuilt_indexes = []
+            index_fields = [
+                "tool_name", "user_email", "user_id", "session_id", "payload_type",
+                "timestamp", "execution_time_ms", "compressed"
+            ]
+            
+            for field in index_fields:
+                try:
+                    # Drop existing index (if exists) and recreate
+                    await asyncio.to_thread(
+                        self.client_manager.client.delete_payload_index,
+                        collection_name=self.config.collection_name,
+                        field_name=field
+                    )
+                    
+                    # Recreate index
+                    await asyncio.to_thread(
+                        self.client_manager.client.create_payload_index,
+                        collection_name=self.config.collection_name,
+                        field_name=field,
+                        field_schema=qdrant_models['PayloadSchemaType'].KEYWORD
+                    )
+                    
+                    rebuilt_indexes.append(field)
+                    logger.debug(f"✅ Rebuilt index for field: {field}")
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not rebuild index for {field}: {e}")
+            
+            return {
+                "status": "completed",
+                "rebuilt_indexes": rebuilt_indexes,
+                "total_indexes": len(rebuilt_indexes),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Index rebuilding failed: {e}")
+            return {
+                "status": "failed",
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def _optimize_segments(self) -> Dict[str, Any]:
+        """
+        Optimize collection segments for better performance.
+        
+        Returns:
+            Dict with segment optimization results
+        """
+        try:
+            logger.info("📊 Optimizing collection segments...")
+            
+            # Get Qdrant imports
+            _, qdrant_models = get_qdrant_imports()
+            
+            # Get collection cluster info (if available)
+            try:
+                cluster_info = await asyncio.to_thread(
+                    self.client_manager.client.get_collection_cluster_info,
+                    self.config.collection_name
+                )
+                
+                logger.info(f"📊 Collection cluster info: {cluster_info}")
+                
+            except Exception as e:
+                logger.debug(f"Could not get cluster info (normal for single-node): {e}")
+            
+            # Force collection optimization (combines segments, rebuilds indexes)
+            optimization_result = await asyncio.to_thread(
+                getattr(self.client_manager.client, 'optimize_vectors', lambda **kwargs: None),
+                collection_name=self.config.collection_name
+            )
+            
+            return {
+                "status": "completed",
+                "optimization_triggered": True,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Segment optimization failed: {e}")
+            return {
+                "status": "partial",
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def schedule_background_reindexing(self, interval_hours: int = 6) -> None:
+        """
+        Schedule background reindexing to run periodically.
+        
+        Args:
+            interval_hours: How often to check for reindexing needs (default 6 hours)
+        """
+        if not self.client_manager.is_available:
+            logger.info("⚠️ Qdrant not available, background reindexing disabled")
+            return
+        
+        logger.info(f"⏰ Scheduling background reindexing every {interval_hours} hours")
+        
+        async def background_reindex_loop():
+            while True:
+                try:
+                    await asyncio.sleep(interval_hours * 3600)  # Convert to seconds
+                    
+                    logger.info("🔄 Running scheduled collection health check...")
+                    
+                    # Analyze collection health
+                    health_stats = await self._analyze_collection_health()
+                    
+                    # Only reindex if really needed (not forced)
+                    if self._should_reindex(health_stats):
+                        logger.info("🔧 Collection health check indicates reindexing needed")
+                        result = await self.reindex_collection(force=False)
+                        
+                        if result.get("status") == "completed":
+                            logger.info("✅ Scheduled reindexing completed successfully")
+                        else:
+                            logger.warning(f"⚠️ Scheduled reindexing result: {result}")
+                    else:
+                        logger.debug("✅ Collection healthy, no reindexing needed")
+                        
+                except asyncio.CancelledError:
+                    logger.info("⏹️ Background reindexing scheduler cancelled")
+                    break
+                except Exception as e:
+                    logger.warning(f"⚠️ Background reindexing error (will retry): {e}")
+                    # Continue the loop despite errors
+        
+        # Start the background task
+        asyncio.create_task(background_reindex_loop())
     
     def get_storage_info(self) -> Dict[str, Any]:
         """

@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 
 from fastmcp import FastMCP, Context
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
@@ -262,6 +263,49 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
         else:
             return cached_result
     
+    @mcp.resource(
+        uri="qdrant://cache",
+        name="Qdrant Tool Response Cache",
+        description="Get cached tool responses from Qdrant organized by tool name with point metadata including IDs, timestamps, and user emails",
+        mime_type="application/json",
+        tags={"qdrant", "cache", "tool-responses", "metadata", "analytics"},
+        meta={
+            "handler": "QdrantResourceHandler",
+            "middleware_delegated": True,
+            "requires_client": True
+        }
+    )
+    async def get_qdrant_cache(ctx: Context):
+        """Get tool response cache from Qdrant organized by tool name.
+
+        Returns a dictionary where keys are tool names and values are arrays of
+        point metadata objects containing point_id, timestamp, and user_email.
+
+        Returns:
+            dict: {tool_name: [{point_id, timestamp, user_email}, ...], ...}
+        """
+        from middleware.qdrant_types import QdrantErrorResponse
+
+        # Try to get cached result from middleware context
+        cache_key = "qdrant_resource_qdrant://cache"
+        cached_result = ctx.get_state(cache_key)
+
+        if cached_result is None:
+            # Fallback - middleware didn't process this request
+            logger.warning("No cached Qdrant cache data found - middleware may not have processed this request")
+            return QdrantErrorResponse(
+                error="Qdrant cache data not available - middleware not initialized",
+                uri="qdrant://cache",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                qdrant_enabled=False
+            )
+
+        # Return cached result
+        if isinstance(cached_result, dict):
+            return cached_result
+        else:
+            return cached_result
+
     # Register validation resource for testing middleware integration
     @mcp.resource(
         uri="qdrant://status",
@@ -309,11 +353,12 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
     logger.info("✅ Qdrant resources registered with FastMCP (handled by QdrantUnifiedMiddleware)")
     
     # Log resource registration summary
-    resource_count = 6
+    resource_count = 7
     logger.info(f"📊 Registered {resource_count} qdrant:// resources:")
     logger.info("   • qdrant://collections/list - List all collections")
     logger.info("   • qdrant://collection/{name}/info - Collection details")
     logger.info("   • qdrant://collection/{name}/responses/recent - Recent responses")
     logger.info("   • qdrant://search/{query} - Global semantic search")
     logger.info("   • qdrant://search/{collection}/{query} - Collection search")
+    logger.info("   • qdrant://cache - Tool response cache metadata")
     logger.info("   • qdrant://status - Middleware status and health")

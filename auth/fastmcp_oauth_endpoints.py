@@ -67,7 +67,8 @@ def _get_oauth_endpoint_scopes():
         logger.warning("Compatibility shim not available, using fallback scopes")
         return _FALLBACK_OAUTH_SCOPES
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 async def _store_oauth_user_data_async(client_id: str, token_data: Dict[str, Any]) -> None:

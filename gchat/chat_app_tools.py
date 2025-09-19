@@ -17,7 +17,8 @@ from googleapiclient.errors import HttpError
 
 from config.settings import Settings
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Load settings
 settings = Settings()
@@ -269,7 +270,8 @@ except ImportError:
     CARD_FRAMEWORK_AVAILABLE = False
 
 app = FastAPI(title="{app_name} Chat Bot")
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 @app.post('/webhook')
 async def handle_chat_event(request: Request):

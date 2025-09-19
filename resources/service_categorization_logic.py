@@ -11,7 +11,8 @@ from fastmcp import FastMCP
 from auth.scope_registry import ScopeRegistry
 from middleware.mcp_metadata_handler import MCPMetadataHandler
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class ServiceCategorizer:

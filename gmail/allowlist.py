@@ -23,7 +23,8 @@ from config.settings import settings
 from .utils import _parse_email_addresses
 from .gmail_types import GmailAllowListResponse, AllowedEmailInfo
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 async def manage_gmail_allow_list(

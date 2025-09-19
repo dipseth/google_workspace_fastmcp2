@@ -61,7 +61,8 @@ from tools.common_types import UserGoogleEmail
 from .utils import extract_office_xml_text
 from .docs_types import DocsListResponse, DocInfo, CreateDocResponse
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 async def search_docs(

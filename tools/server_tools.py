@@ -23,7 +23,8 @@ from config.settings import settings
 from auth.middleware import CredentialStorageMode
 from tools.common_types import UserGoogleEmail
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 async def check_oauth_flows_health(google_auth_provider=None) -> str:

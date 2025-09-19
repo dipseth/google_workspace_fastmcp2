@@ -31,7 +31,8 @@ from .gmail_types import (
 from tools.common_types import UserGoogleEmail
 
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Constants
 MAX_BATCH_SIZE = 50
@@ -1141,10 +1142,6 @@ def setup_label_tools(mcp: FastMCP) -> None:
     ) -> ManageGmailLabelResponse:
         """
         Manage Gmail labels with structured output.
-        
-        Returns both:
-        - Traditional content: Human-readable formatted text with operation results (automatic via FastMCP)
-        - Structured content: Machine-readable JSON with detailed label management results
         
         Args:
             action: Action to perform - 'create', 'update', or 'delete'

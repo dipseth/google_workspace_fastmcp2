@@ -18,7 +18,8 @@ from tools.common_types import UserGoogleEmailPhotos
 from .photos_types import AlbumListResponse, PhotoListResponse, AlbumInfo, PhotoInfo
 
 # Configure module logger
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 async def _get_photos_service_with_fallback(user_google_email: str):

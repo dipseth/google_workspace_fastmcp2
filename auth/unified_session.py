@@ -16,7 +16,8 @@ import jwt
 from fastmcp import Context
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class SessionState(BaseModel):

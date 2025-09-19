@@ -1,6 +1,3 @@
-{# Document Generation Templates for Google Docs #}
-{# These macros integrate with docs/doc_template_helper.py to create dynamic Google Docs #}
-
 {% macro generate_report_doc(
     report_title="Quarterly Report",
     generation_date="",
@@ -165,7 +162,7 @@
 <body>
     <div class="header">
         <h1>📊 {{ report_title }}</h1>
-        <p>🗓️ Generated: {{ generation_date or now().strftime('%Y-%m-%d') }}</p>
+        <p>🗓️ Generated: {{ generation_date or '2024-12-19' }}</p>
         {% if start_date and end_date %}
         <p>📅 Period: {{ start_date }} to {{ end_date }}</p>
         {% endif %}
@@ -420,7 +417,7 @@
             <h1 class="invoice-title">INVOICE</h1>
             <div class="invoice-meta">
                 <p><strong>Invoice #:</strong> {{ invoice_number }}</p>
-                <p><strong>Date:</strong> {{ invoice_date or now().strftime('%Y-%m-%d') }}</p>
+                <p><strong>Date:</strong> {{ invoice_date or '2024-12-19' }}</p>
                 <p><strong>Due Date:</strong> {{ due_date }}</p>
             </div>
         </div>
@@ -456,8 +453,8 @@
                 <tr>
                     <td>{{ item.description }}</td>
                     <td style="text-align: center;">{{ item.quantity }}</td>
-                    <td style="text-align: right;">${{ "%.2f" | format(item.rate) }}</td>
-                    <td style="text-align: right;"><strong>${{ "%.2f" | format(item.quantity * item.rate) }}</strong></td>
+                    <td style="text-align: right;">${{ "%.2f" % item.rate }}</td>
+                    <td style="text-align: right;"><strong>${{ "%.2f" % (item.quantity * item.rate) }}</strong></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -465,14 +462,14 @@
     </div>
     
     <div class="total-section">
-        <p>Subtotal: <strong>${{ "%.2f" | format(subtotal) }}</strong></p>
+        <p>Subtotal: <strong>${{ "%.2f" % subtotal }}</strong></p>
         {% if tax_rate %}
-        <p>Tax ({{ tax_rate }}%): <strong>${{ "%.2f" | format(tax_amount) }}</strong></p>
+        <p>Tax ({{ tax_rate }}%): <strong>${{ "%.2f" % tax_amount }}</strong></p>
         {% endif %}
         {% if discount %}
-        <p>Discount: <strong>-${{ "%.2f" | format(discount) }}</strong></p>
+        <p>Discount: <strong>-${{ "%.2f" % discount }}</strong></p>
         {% endif %}
-        <p class="total-row">Total Due: ${{ "%.2f" | format(total) }}</p>
+        <p class="total-row">Total Due: ${{ "%.2f" % total }}</p>
     </div>
     
     <div class="payment-info">
@@ -668,7 +665,7 @@
         <h1>📋 {{ meeting_title }}</h1>
         <div class="meeting-meta">
             <div class="meeting-meta-item">
-                📅 <strong>Date:</strong> {{ meeting_date or now().strftime('%Y-%m-%d') }}
+                📅 <strong>Date:</strong> {{ meeting_date or '2024-12-19' }}
             </div>
             {% if meeting_time %}
             <div class="meeting-meta-item">
@@ -935,7 +932,7 @@
         <h1>{{ proposal_title }}</h1>
         <div class="proposal-meta">
             <p><strong>Prepared for:</strong> {{ client_name }}</p>
-            <p><strong>Date:</strong> {{ date or now().strftime('%B %d, %Y') }}</p>
+            <p><strong>Date:</strong> {{ date or 'December 19, 2024' }}</p>
             {% if company_info.name %}
             <p><strong>Prepared by:</strong> {{ company_info.name }}</p>
             {% endif %}
@@ -1006,13 +1003,13 @@
                 <tr>
                     <td><strong>{{ item.item }}</strong></td>
                     <td>{{ item.description or '-' }}</td>
-                    <td style="text-align: right;">${{ "%.2f" | format(item.cost) }}</td>
+                    <td style="text-align: right;">${{ "%.2f" % item.cost }}</td>
                 </tr>
                 {% set total_cost.value = total_cost.value + item.cost %}
                 {% endfor %}
                 <tr class="budget-total">
                     <td colspan="2">Total Project Cost</td>
-                    <td style="text-align: right;">${{ "%.2f" | format(total_cost.value) }}</td>
+                    <td style="text-align: right;">${{ "%.2f" % total_cost.value }}</td>
                 </tr>
             </tbody>
         </table>

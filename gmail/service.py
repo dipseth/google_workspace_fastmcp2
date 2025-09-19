@@ -16,7 +16,8 @@ from fastmcp import FastMCP
 
 from auth.service_helpers import request_service, get_injected_service, get_service
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 async def _get_gmail_service_with_fallback(user_google_email: str) -> Any:

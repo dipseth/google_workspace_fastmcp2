@@ -19,7 +19,8 @@ from auth.context import (
 )
 from auth.google_auth import get_valid_credentials
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 # ============================================================================

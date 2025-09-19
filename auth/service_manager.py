@@ -24,7 +24,8 @@ except ImportError:
     _COMPATIBILITY_AVAILABLE = False
     logging.warning("Compatibility shim not available, using fallback scopes")
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Service configuration mapping - defines how to build each Google service
 SERVICE_CONFIGS = {
@@ -198,28 +199,28 @@ def _cache_service(cache_key: str, service: Any, user_email: str) -> None:
 def _resolve_scopes(scopes: Union[str, List[str]]) -> List[str]:
     """Resolve scope names to actual scope URLs."""
     # DIAGNOSTIC LOG: OAuth scope inconsistency debugging - scope resolution
-    logger.info(f"OAUTH_SCOPE_DEBUG: _resolve_scopes called with input: {scopes}")
+    logger.debug(f"OAUTH_SCOPE_DEBUG: _resolve_scopes called with input: {scopes}")
     
     if isinstance(scopes, str):
         if scopes in SCOPE_GROUPS:
             resolved = [SCOPE_GROUPS[scopes]]
-            logger.info(f"OAUTH_SCOPE_DEBUG: Single string scope '{scopes}' resolved to: {resolved}")
+            logger.debug(f"OAUTH_SCOPE_DEBUG: Single string scope '{scopes}' resolved to: {resolved}")
             return resolved
         else:
-            logger.info(f"OAUTH_SCOPE_DEBUG: Single string scope '{scopes}' used as-is (not in SCOPE_GROUPS)")
+            logger.debug(f"OAUTH_SCOPE_DEBUG: Single string scope '{scopes}' used as-is (not in SCOPE_GROUPS)")
             return [scopes]
 
     resolved = []
     for scope in scopes:
         if scope in SCOPE_GROUPS:
             resolved_scope = SCOPE_GROUPS[scope]
-            logger.info(f"OAUTH_SCOPE_DEBUG: Scope '{scope}' resolved to '{resolved_scope}'")
+            # logger.debug(f"OAUTH_SCOPE_DEBUG: Scope '{scope}' resolved to '{resolved_scope}'")
             resolved.append(resolved_scope)
         else:
-            logger.info(f"OAUTH_SCOPE_DEBUG: Scope '{scope}' used as-is (not in SCOPE_GROUPS)")
+            # logger.debug(f"OAUTH_SCOPE_DEBUG: Scope '{scope}' used as-is (not in SCOPE_GROUPS)")
             resolved.append(scope)
     
-    logger.info(f"OAUTH_SCOPE_DEBUG: Final resolved scopes: {resolved}")
+    logger.debug(f"OAUTH_SCOPE_DEBUG: Final resolved scopes: {resolved}")
     return resolved
 
 
@@ -335,10 +336,10 @@ async def get_google_service(
             discovery_url = f"https://photoslibrary.googleapis.com/$discovery/rest?version={service_version}"
             discovery_doc = requests.get(discovery_url).json()
             service = build_from_document(discovery_doc, credentials=credentials)
-            logger.info(f"Created Photos Library service (v{service_version}) for {user_email} using custom discovery")
+            logger.debug(f"Created Photos Library service (v{service_version}) for {user_email} using custom discovery")
         else:
             service = build(service_name, service_version, credentials=credentials)
-            logger.info(f"Created {service_type} service (v{service_version}) for {user_email}")
+            logger.debug(f"Created {service_type} service (v{service_version}) for {user_email}")
         
         # Cache the service
         if cache_enabled:
@@ -419,14 +420,14 @@ def clear_service_cache(user_email: Optional[str] = None) -> int:
     if user_email is None:
         count = len(_service_cache)
         _service_cache.clear()
-        logger.info(f"Cleared all {count} service cache entries")
+        logger.debug(f"Cleared all {count} service cache entries")
         return count
     
     keys_to_remove = [key for key in _service_cache.keys() if key.startswith(f"{user_email}:")]
     for key in keys_to_remove:
         del _service_cache[key]
     
-    logger.info(f"Cleared {len(keys_to_remove)} service cache entries for user {user_email}")
+    logger.debug(f"Cleared {len(keys_to_remove)} service cache entries for user {user_email}")
     return len(keys_to_remove)
 
 
@@ -475,7 +476,7 @@ async def get_drive_service(user_email: str):
     Returns:
         Authenticated Google Drive service
     """
-    logger.info(f"Using legacy get_drive_service for {user_email} - consider upgrading to get_google_service")
+    logger.debug(f"Using legacy get_drive_service for {user_email} - consider upgrading to get_google_service")
     return await get_google_service(
         user_email=user_email,
         service_type="drive",

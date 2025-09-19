@@ -1,13 +1,62 @@
 """
-Google Forms MCP Tools for FastMCP2.
+Google Forms MCP Tools for FastMCP2 - Comprehensive Form Management Suite.
 
-This module provides MCP tools for interacting with Google Forms API.
-Migrated from decorator-based pattern to FastMCP2 architecture.
+This module provides a complete set of MCP tools for creating, managing, and analyzing
+Google Forms. It supports the full form lifecycle from creation to response analysis.
+
+KEY WORKFLOWS:
+1. CREATE FORM → ADD QUESTIONS → PUBLISH → COLLECT RESPONSES → ANALYZE
+2. Forms can be shared publicly or with specific users via email
+3. Responses can be retrieved individually or in batches with pagination
+4. Questions support multiple types: text, multiple choice, scale, date, etc.
+
+TOOL RELATIONSHIPS:
+- create_form: Creates the base form structure
+- add_questions_to_form: Adds interactive questions (use after create_form)
+- get_form: Retrieves form details and structure for inspection
+- set_form_publish_state/publish_form_publicly: Controls access and sharing
+- list_form_responses/get_form_response: Retrieves submitted responses
+- update_form_questions: Modifies existing questions
+
+AUTHENTICATION:
+All tools use unified authentication via user_google_email parameter.
+When using middleware injection, this parameter can be omitted.
+
+SUPPORTED QUESTION TYPES:
+- TEXT_QUESTION: Short/long text responses
+- MULTIPLE_CHOICE_QUESTION: Radio button selections
+- CHECKBOX_QUESTION: Multiple selection checkboxes
+- SCALE_QUESTION: Numeric rating scales (1-5, 1-10, etc.)
+- DATE_QUESTION: Date picker with optional time
+- TIME_QUESTION: Time picker with optional duration
+- RATING_QUESTION: Star rating systems
+- FILE_UPLOAD_QUESTION: File attachment uploads
+
+HTML FORMATTING SUPPORT:
+Google Forms API has LIMITED HTML support for rich content:
+
+SUPPORTED HTML ELEMENTS:
+- Form/Question Descriptions: Basic HTML tags like <b>, <i>, <u>, <br>, <p>
+- Links: <a href="...">text</a> for clickable links
+- Lists: <ul>, <ol>, <li> for bullet and numbered lists
+
+RICH CONTENT ALTERNATIVES:
+- Images: Use imageItem type (not HTML <img> tags)
+- Videos: Use videoItem type (YouTube videos)
+- Formatted Text: Use textItem type for rich text sections
+- HTML limitations: No CSS, JavaScript, or complex HTML structures
+
+FORMATTING EXAMPLES:
+- Description with HTML: "Please fill out <b>all required</b> fields.<br>Visit <a href='https://example.com'>our website</a> for help."
+- Text Item HTML: "<p>Welcome to our survey!</p><ul><li>Be honest</li><li>Take your time</li></ul>"
+
+Note: Full HTML web forms require custom web development - Google Forms API is designed for structured surveys with limited formatting.
 """
 
 import logging
 import asyncio
-from typing_extensions import List, Optional, Dict, Any, Union, Tuple
+from typing_extensions import List, Optional, Dict, Any, Union, Tuple, Annotated, Literal
+from pydantic import Field
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
 
@@ -16,9 +65,20 @@ from tools.common_types import UserGoogleEmailForms
 
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
-from .forms_types import FormResponsesListResponse, FormResponseInfo, FormResponseAnswer
+from .forms_types import (
+    FormResponsesListResponse,
+    FormResponseInfo,
+    FormResponseAnswer,
+    FormCreationResult,
+    FormUpdateResult,
+    FormQuestion,
+    FormDetails,
+    FormPublishResult,
+    FormResponseDetails
+)
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 # ============================================================================
@@ -157,6 +217,7 @@ def format_response_answers(response: Dict[str, Any], form_metadata: Dict[str, A
 def validate_question_structure(question: Dict[str, Any]) -> bool:
     """
     Validate that a question dict has the required structure.
+    Accepts both simplified format and Google API format.
     
     Args:
         question: Question dictionary to validate
@@ -176,11 +237,17 @@ def validate_question_structure(question: Dict[str, Any]) -> bool:
     if q_type == "TEXT_QUESTION":
         return "title" in question
     elif q_type == "MULTIPLE_CHOICE_QUESTION":
-        return "title" in question and "options" in question
+        # Accept both simplified format and API format
+        has_options = "options" in question
+        has_choice_question = "choiceQuestion" in question and "options" in question.get("choiceQuestion", {})
+        return "title" in question and (has_options or has_choice_question)
     elif q_type == "SCALE_QUESTION":
         return all(key in question for key in ["title", "low", "high"])
     elif q_type == "CHECKBOX_QUESTION":
-        return "title" in question and "options" in question
+        # Accept both simplified format and API format
+        has_options = "options" in question
+        has_choice_question = "choiceQuestion" in question and "options" in question.get("choiceQuestion", {})
+        return "title" in question and (has_options or has_choice_question)
     elif q_type == "DATE_QUESTION":
         return "title" in question
     elif q_type == "TIME_QUESTION":
@@ -433,7 +500,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
     
     @mcp.tool(
         name="create_form",
-        description="Create a new Google Form with title, description, and document title",
+        description="Create a new Google Form with customizable title, description, and document title. Returns form ID and URLs for editing and responses.",
         tags={"forms", "create", "google"},
         annotations={
             "title": "Create Google Form",
@@ -448,21 +515,18 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         description: Optional[str] = None,
         document_title: Optional[str] = None,
         user_google_email: UserGoogleEmailForms = None
-    ) -> str:
+    ) -> FormCreationResult:
         """
-        Create a new Google Form - UPDATED WITH API BEST PRACTICES.
-
-        This function creates a basic Google Form with title, description, and document title.
-        To add questions to the form, use the add_questions_to_form tool after creation.
+        Create a new Google Form with customizable title, description, and document title.
 
         Args:
-            user_google_email (str): The user's Google email address. Required.
-            title (str): The title of the form.
-            description (Optional[str]): The description of the form.
-            document_title (Optional[str]): The document title (shown in browser tab).
+            title: Form title displayed at the top
+            description: Optional description explaining the form's purpose
+            document_title: Title shown in browser tab (defaults to main title)
+            user_google_email: Google account for authentication
 
         Returns:
-            str: Success message with form ID and edit URL.
+            FormCreationResult: Contains form ID, edit URL, and response URL
         """
         # Log the tool request
 
@@ -470,16 +534,14 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             # Get the Forms service via middleware injection
             forms_service = await _get_forms_service_with_fallback(user_google_email)
             
-            # Build the form data according to the API best practices
+            # Build the initial form data - include title and documentTitle on creation
             form_data = {
                 "info": {
                     "title": title,
                 }
             }
             
-            if description:
-                form_data["info"]["description"] = description
-                
+            # documentTitle must be set on creation (read-only afterward)
             if document_title:
                 form_data["info"]["documentTitle"] = document_title
             
@@ -488,32 +550,72 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                 forms_service.forms().create(body=form_data).execute
             )
             
+            # If description provided, update via batchUpdate (description can be updated later)
             form_id = created_form.get("formId")
+            if description:
+                update_requests = [{
+                    "updateFormInfo": {
+                        "info": {"description": description},
+                        "updateMask": "description"
+                    }
+                }]
+                
+                batch_update_body = {"requests": update_requests}
+                await asyncio.to_thread(
+                    forms_service.forms().batchUpdate(
+                        formId=form_id,
+                        body=batch_update_body
+                    ).execute
+                )
+                
+                # Get updated form to return the final state
+                created_form = await asyncio.to_thread(
+                    forms_service.forms().get(formId=form_id).execute
+                )
+            
             edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
-            responder_uri = created_form.get("responderUri", "Not yet available")
+            responder_uri = created_form.get("responderUri")
             
-            success_msg = (
-                f"✅ Successfully created form '{title}'\n"
-                f"Form ID: {form_id}\n"
-                f"Edit URL: {edit_url}\n"
-                f"Response URL: {responder_uri}"
-            )
-            
+            success_msg = f"✅ Successfully created form '{title}'"
             logger.info(f"[create_form] {success_msg}")
-            return success_msg
+            
+            return FormCreationResult(
+                success=True,
+                message=success_msg,
+                formId=form_id,
+                title=title,
+                editUrl=edit_url,
+                responseUrl=responder_uri
+            )
             
         except HttpError as e:
             error_msg = f"❌ Failed to create form: {e}"
             logger.error(f"[create_form] HTTP error: {e}")
-            return error_msg
+            return FormCreationResult(
+                success=False,
+                message=error_msg,
+                formId=None,
+                title=title,
+                editUrl=None,
+                responseUrl=None,
+                error=str(e)
+            )
         except Exception as e:
             error_msg = f"❌ Unexpected error creating form: {str(e)}"
             logger.error(f"[create_form] Unexpected error: {e}")
-            return error_msg
+            return FormCreationResult(
+                success=False,
+                message=error_msg,
+                formId=None,
+                title=title,
+                editUrl=None,
+                responseUrl=None,
+                error=str(e)
+            )
 
     @mcp.tool(
         name="add_questions_to_form",
-        description="Add multiple questions to an existing Google Form",
+        description="Add multiple interactive questions to an existing Google Form. Supports all question types including text, multiple choice, scales, dates, and file uploads with comprehensive formatting options.",
         tags={"forms", "questions", "update", "google"},
         annotations={
             "title": "Add Questions to Form",
@@ -524,23 +626,23 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def add_questions_to_form(
-        form_id: str,
-        questions: List[Dict[str, Any]],
+        form_id: Annotated[str, Field(description="The ID of the form to add questions to. Get this from create_form output.")],
+        questions: Annotated[List[Dict[str, Any]], Field(description="List of question dictionaries using SIMPLIFIED format. Examples: {'type': 'TEXT_QUESTION', 'title': 'Name', 'required': True} or {'type': 'MULTIPLE_CHOICE_QUESTION', 'title': 'Pick one', 'options': ['A', 'B', 'C'], 'required': True}")],
         user_google_email: UserGoogleEmailForms = None
-    ) -> str:
+    ) -> FormUpdateResult:
         """
-        Add multiple questions to an existing Google Form - BATCH OPERATIONS.
+        Add multiple interactive questions to an existing Google Form using batch operations.
 
-        This function adds questions to an existing form using batch operations
-        for efficiency. Supports all standard question types.
+        Use simplified format: Text: {"type": "TEXT_QUESTION", "title": "Name", "required": True}
+        Multiple choice: {"type": "MULTIPLE_CHOICE_QUESTION", "title": "Pick", "options": ["A", "B"]}
 
         Args:
-            user_google_email (str): The user's Google email address.
-            form_id (str): The ID of the form to add questions to.
-            questions (List[Dict]): List of question dictionaries.
+            form_id: Form ID from create_form output
+            questions: List of simplified question dictionaries
+            user_google_email: Google account for authentication
 
         Returns:
-            str: Success message with number of questions added.
+            FormUpdateResult: Success status, number of questions added, form details
         """
 
         try:
@@ -562,7 +664,15 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                     continue
             
             if not requests:
-                return "❌ No valid questions to add"
+                error_msg = "❌ No valid questions to add"
+                return FormUpdateResult(
+                    success=False,
+                    message=error_msg,
+                    formId=form_id,
+                    title=None,
+                    editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                    error=error_msg
+                )
             
             batch_update_body = {"requests": requests}
             
@@ -580,30 +690,45 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             )
             
             edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
-            responder_uri = form.get("responderUri", "Not yet available")
-            
-            success_msg = (
-                f"✅ Successfully added {len(requests)} questions to form\n"
-                f"Form ID: {form_id}\n"
-                f"Edit URL: {edit_url}\n"
-                f"Response URL: {responder_uri}"
-            )
+            title = form.get("info", {}).get("title", "Untitled Form")
+            success_msg = f"✅ Successfully added {len(requests)} questions to form"
             
             logger.info(f"[add_questions_to_form] {success_msg}")
-            return success_msg
+            return FormUpdateResult(
+                success=True,
+                message=success_msg,
+                formId=form_id,
+                title=title,
+                editUrl=edit_url,
+                questionsUpdated=len(requests)
+            )
             
         except HttpError as e:
             error_msg = f"❌ Failed to add questions: {e}"
             logger.error(f"[add_questions_to_form] HTTP error: {e}")
-            return error_msg
+            return FormUpdateResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title=None,
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                error=str(e)
+            )
         except Exception as e:
             error_msg = f"❌ Unexpected error: {str(e)}"
             logger.error(f"[add_questions_to_form] {error_msg}")
-            return error_msg
+            return FormUpdateResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title=None,
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                error=str(e)
+            )
 
     @mcp.tool(
         name="get_form",
-        description="Get details of a Google Form including all questions and settings",
+        description="Retrieve comprehensive details of a Google Form including metadata, all questions with their types and settings, and access URLs. Perfect for form inspection and analysis.",
         tags={"forms", "read", "google", "get"},
         annotations={
             "title": "Get Form Details",
@@ -614,21 +739,21 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_form(
-        form_id: str,
+        form_id: Annotated[str, Field(description="The unique ID of the form to retrieve. Get this from create_form output or from a Google Forms URL: https://docs.google.com/forms/d/FORM_ID_HERE/edit")],
         user_google_email: UserGoogleEmailForms = None
-    ) -> str:
+    ) -> FormDetails:
         """
-        Get details of a Google Form - COMPREHENSIVE INFO.
+        Retrieve comprehensive details and structure of a Google Form.
 
-        Retrieves complete form information including title, description,
-        questions, and settings.
+        Read-only tool that provides complete form information including metadata,
+        question details, and access URLs for inspection and analysis.
 
         Args:
-            user_google_email (str): The user's Google email address.
-            form_id (str): The ID of the form to retrieve.
+            form_id: Form ID from create_form output or Google Forms URL
+            user_google_email: Google account for authentication
 
         Returns:
-            str: Form details including title, description, and questions.
+            FormDetails: Form metadata, questions list, URLs, and configuration details
         """
 
         
@@ -648,43 +773,72 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             
             # Extract questions
             items = form.get("items", [])
-            questions = []
+            questions: List[FormQuestion] = []
             
             for item in items:
                 item_type = extract_item_type(item)
                 if item_type == "questionItem":
-                    questions.append(format_question_details(item))
+                    question_item = item.get("questionItem", {})
+                    q_question = question_item.get("question", {})
+                    
+                    form_question = FormQuestion(
+                        itemId=item.get("itemId", ""),
+                        title=item.get("title", "No title"),
+                        type=q_question.get("type", "Unknown"),
+                        required=q_question.get("required", False),
+                        details=format_question_details(item)
+                    )
+                    questions.append(form_question)
             
-            # Build response
-            response_parts = [
-                f"📋 Form: {title}",
-                f"Document Title: {document_title}",
-                f"Description: {description}",
-                f"Form ID: {form_id}",
-                f"Edit URL: https://docs.google.com/forms/d/{form_id}/edit",
-                f"Response URL: {form.get('responderUri', 'Not yet available')}",
-                f"\nQuestions ({len(questions)}):"
-            ]
+            edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
+            response_url = form.get("responderUri")
             
-            if questions:
-                response_parts.extend(questions)
-            else:
-                response_parts.append("No questions found")
-            
-            return "\n".join(response_parts)
+            return FormDetails(
+                success=True,
+                formId=form_id,
+                title=title,
+                description=description if description != "No description" else None,
+                documentTitle=document_title,
+                editUrl=edit_url,
+                responseUrl=response_url,
+                questions=questions,
+                questionCount=len(questions)
+            )
             
         except HttpError as e:
             error_msg = f"❌ Failed to get form: {e}"
             logger.error(f"[get_form] HTTP error: {e}")
-            return error_msg
+            return FormDetails(
+                success=False,
+                formId=form_id,
+                title="Unknown",
+                description=None,
+                documentTitle="Unknown",
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                responseUrl=None,
+                questions=[],
+                questionCount=0,
+                error=str(e)
+            )
         except Exception as e:
             error_msg = f"❌ Unexpected error: {str(e)}"
             logger.error(f"[get_form] {error_msg}")
-            return error_msg
+            return FormDetails(
+                success=False,
+                formId=form_id,
+                title="Unknown",
+                description=None,
+                documentTitle="Unknown",
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                responseUrl=None,
+                questions=[],
+                questionCount=0,
+                error=str(e)
+            )
 
     @mcp.tool(
         name="set_form_publish_state",
-        description="Publish or unpublish a Google Form (make it accepting responses or not)",
+        description="Control whether a Google Form is accepting responses. Configures basic form settings and provides guidance for full response control via the Forms UI.",
         tags={"forms", "settings", "publish", "google"},
         annotations={
             "title": "Set Form Publish State",
@@ -695,24 +849,20 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def set_form_publish_state(
-        form_id: str,
+        form_id: Annotated[str, Field(description="The unique ID of the form to configure. Get this from create_form output.")],
         user_google_email: UserGoogleEmailForms = None,
-        accepting_responses: bool = True
-    ) -> str:
+        accepting_responses: Annotated[bool, Field(description="Desired response acceptance state. True = Form should accept responses (default), False = Form should not accept responses. Note: Final control requires manual UI configuration.")] = True
+    ) -> FormPublishResult:
         """
-        Set whether a form is accepting responses - FORM SETTINGS.
-
-        Updates form settings to control response acceptance.
-        Note: Full control over response settings requires manual configuration
-        in the Forms UI.
+        Control whether a Google Form is accepting responses. Limited API control - manual UI steps may be needed.
 
         Args:
-            user_google_email (str): The user's Google email address.
-            form_id (str): The ID of the form.
-            accepting_responses (bool): Whether to accept responses.
+            form_id: Form ID to configure
+            user_google_email: Google account for authentication
+            accepting_responses: Whether form should accept responses (True by default)
 
         Returns:
-            str: Success message with form state.
+            FormPublishResult: Configuration status, URLs, and manual setup instructions
         """
 
         try:
@@ -749,29 +899,60 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             )
             
             state = "accepting responses" if accepting_responses else "not accepting responses"
+            title = form.get('info', {}).get('title', 'Untitled')
+            edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
+            response_url = form.get('responderUri', 'Not yet available')
+            success_msg = "✅ Form settings updated"
             
-            return (
-                f"✅ Form settings updated\n"
-                f"Form ID: {form_id}\n"
-                f"Title: {form.get('info', {}).get('title', 'Untitled')}\n"
-                f"Desired state: {state}\n"
-                f"Edit URL: https://docs.google.com/forms/d/{form_id}/edit\n"
-                f"Response URL: {form.get('responderUri', 'Not yet available')}\n\n"
-                f"Note: To fully control response acceptance, visit the form editor and use Settings > Responses"
+            return FormPublishResult(
+                success=True,
+                message=success_msg,
+                formId=form_id,
+                title=title,
+                editUrl=edit_url,
+                responseUrl=response_url,
+                publishState=state,
+                sharingResults=[f"Desired state: {state}", "Note: To fully control response acceptance, visit the form editor and use Settings > Responses"],
+                publicAccess=accepting_responses,
+                sharedWith=[]
             )
             
         except HttpError as e:
             error_msg = f"❌ Failed to update form settings: {e}"
             logger.error(f"[set_form_publish_state] HTTP error: {e}")
-            return error_msg
+            return FormPublishResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title="Unknown",
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                responseUrl="Unknown",
+                publishState="error",
+                sharingResults=[error_msg],
+                publicAccess=accepting_responses,
+                sharedWith=[],
+                error=str(e)
+            )
         except Exception as e:
             error_msg = f"❌ Unexpected error: {str(e)}"
             logger.error(f"[set_form_publish_state] {error_msg}")
-            return error_msg
+            return FormPublishResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title="Unknown",
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                responseUrl="Unknown",
+                publishState="error",
+                sharingResults=[error_msg],
+                publicAccess=accepting_responses,
+                sharedWith=[],
+                error=str(e)
+            )
 
     @mcp.tool(
-        name="publish_form_publicly", 
-        description="Make a Google Form publicly accessible (no sign-in required) and share with specific permissions",
+        name="publish_form_publicly",
+        description="Make a Google Form publicly accessible without sign-in requirements and share with specific users. Uses both Forms and Drive APIs for comprehensive permission management.",
         tags={"forms", "share", "publish", "google", "permissions"},
         annotations={
             "title": "Publish Form Publicly",
@@ -782,25 +963,22 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def publish_form_publicly(
-        form_id: str,
-        anyone_can_respond: bool = True,
-        share_with_emails: Optional[List[str]] = None,
+        form_id: Annotated[str, Field(description="The unique ID of the form to publish. Get this from create_form output.")],
+        anyone_can_respond: Annotated[bool, Field(description="Enable public access to the form. True = Anyone with the link can respond (no sign-in required) - DEFAULT, False = Only shared users can access. Note: May require domain admin permissions in some organizations")] = True,
+        share_with_emails: Annotated[Optional[List[str]], Field(description="List of email addresses to share with. These users will get edit access to the form and receive email notifications. Example: ['colleague@company.com', 'manager@company.com']")] = None,
         user_google_email: UserGoogleEmailForms = None
-    ) -> str:
+    ) -> FormPublishResult:
         """
-        Make a form publicly accessible - MULTI-SERVICE OPERATION.
-
-        Uses both Forms and Drive APIs to manage sharing permissions.
-        Allows public access and sharing with specific users.
+        Make a Google Form publicly accessible and share with specific users using Drive API permissions.
 
         Args:
-            user_google_email (str): The user's Google email address.
-            form_id (str): The ID of the form.
-            anyone_can_respond (bool): Whether anyone can respond.
-            share_with_emails (List[str]): Emails to share with.
+            form_id: Form ID to publish
+            anyone_can_respond: Enable public access (no sign-in required)
+            share_with_emails: Email addresses to share with (get edit access)
+            user_google_email: Google account for authentication
 
         Returns:
-            str: Success message with sharing details.
+            FormPublishResult: Publishing status, sharing results, URLs
         """
 
         
@@ -864,30 +1042,59 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                         results.append(f"⚠️ Failed to share with {email}: {e}")
             
             # Build final response
-            response_parts = [
-                f"📋 Form: {title}",
-                f"Form ID: {form_id}",
-                f"Response URL: {form.get('responderUri', 'Not yet available')}",
-                f"Edit URL: https://docs.google.com/forms/d/{form_id}/edit",
-                "",
-                "Sharing Results:"
-            ]
-            response_parts.extend(results)
+            success_msg = f"✅ Successfully published form '{title}'"
+            edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
+            response_url = form.get('responderUri', 'Not yet available')
             
-            return "\n".join(response_parts)
+            return FormPublishResult(
+                success=True,
+                message=success_msg,
+                formId=form_id,
+                title=title,
+                editUrl=edit_url,
+                responseUrl=response_url,
+                publishState="published",
+                sharingResults=results,
+                publicAccess=anyone_can_respond,
+                sharedWith=share_with_emails or []
+            )
             
         except HttpError as e:
             error_msg = f"❌ Failed to publish form: {e}"
             logger.error(f"[publish_form_publicly] HTTP error: {e}")
-            return error_msg
+            return FormPublishResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title="Unknown",
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                responseUrl="Unknown",
+                publishState="error",
+                sharingResults=[error_msg],
+                publicAccess=anyone_can_respond,
+                sharedWith=share_with_emails or [],
+                error=str(e)
+            )
         except Exception as e:
             error_msg = f"❌ Unexpected error: {str(e)}"
             logger.error(f"[publish_form_publicly] {error_msg}")
-            return error_msg
+            return FormPublishResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title="Unknown",
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                responseUrl="Unknown",
+                publishState="error",
+                sharingResults=[error_msg],
+                publicAccess=anyone_can_respond,
+                sharedWith=share_with_emails or [],
+                error=str(e)
+            )
 
     @mcp.tool(
         name="get_form_response",
-        description="Get a specific response from a Google Form by response ID",
+        description="Retrieve a specific response from a Google Form with detailed answer mappings to questions. Perfect for analyzing individual submissions in detail.",
         tags={"forms", "responses", "get", "google"},
         annotations={
             "title": "Get Form Response",
@@ -898,23 +1105,20 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def get_form_response(
-        form_id: str,
-        response_id: str,
+        form_id: Annotated[str, Field(description="The unique ID of the form containing the response. Get this from create_form output or from list_form_responses.")],
+        response_id: Annotated[str, Field(description="The unique ID of the specific response to retrieve. Get this from list_form_responses output - each response has a unique ID. Format: Usually a long alphanumeric string from Google Forms API.")],
         user_google_email: UserGoogleEmailForms = None
-    ) -> str:
+    ) -> FormResponseDetails:
         """
-        Get a specific response from a form - RESPONSE DETAILS.
-
-        Retrieves a single response with full answer details mapped
-        to the corresponding questions.
+        Retrieve a specific response from a Google Form with detailed answer mappings to questions.
 
         Args:
-            user_google_email (str): The user's Google email address.
-            form_id (str): The ID of the form.
-            response_id (str): The ID of the response.
+            form_id: Form ID containing the response
+            response_id: Unique response ID from list_form_responses
+            user_google_email: Google account for authentication
 
         Returns:
-            str: Response details with answers.
+            FormResponseDetails: Response metadata, answers mapped to questions
         """
 
         
@@ -934,21 +1138,49 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                 forms_service.forms().get(formId=form_id).execute
             )
             
-            # Format response details
-            response_parts = [
-                f"📋 Response Details",
-                f"Response ID: {response_id}",
-                f"Submitted: {response.get('lastSubmittedTime', 'Unknown')}",
-                f"Respondent Email: {response.get('respondentEmail', 'Anonymous')}",
-                "",
-                "Answers:"
-            ]
-            
             # Format answers with question context
-            formatted_answers = format_response_answers(response, form)
-            response_parts.extend(formatted_answers)
+            answers = response.get("answers", {})
+            items = form.get("items", [])
             
-            return "\n".join(response_parts)
+            # Create a mapping of question IDs to questions
+            question_map = {}
+            for item in items:
+                if "questionItem" in item:
+                    question_map[item["itemId"]] = item
+            
+            # Convert to structured format
+            structured_answers: List[FormResponseAnswer] = []
+            for question_id, answer_data in answers.items():
+                question = question_map.get(question_id, {})
+                question_title = question.get("title", f"Question {question_id}")
+                
+                text_answers = answer_data.get("textAnswers", {})
+                answer_text = ""
+                if text_answers and "answers" in text_answers:
+                    answer_values = [ans.get("value", "") for ans in text_answers["answers"]]
+                    answer_text = ", ".join(answer_values)
+                else:
+                    answer_text = "[No answer]"
+                
+                answer_info: FormResponseAnswer = {
+                    "questionId": question_id,
+                    "questionTitle": question_title,
+                    "answer": answer_text
+                }
+                structured_answers.append(answer_info)
+            
+            success_msg = f"✅ Retrieved response {response_id}"
+            
+            return FormResponseDetails(
+                success=True,
+                message=success_msg,
+                responseId=response_id,
+                formId=form_id,
+                submittedTime=response.get('lastSubmittedTime', 'Unknown'),
+                respondentEmail=response.get('respondentEmail'),
+                answers=structured_answers,
+                answerCount=len(structured_answers)
+            )
             
         except HttpError as e:
             if e.resp.status == 404:
@@ -956,15 +1188,35 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             else:
                 error_msg = f"❌ Failed to get response: {e}"
             logger.error(f"[get_form_response] HTTP error: {e}")
-            return error_msg
+            return FormResponseDetails(
+                success=False,
+                message=error_msg,
+                responseId=response_id,
+                formId=form_id,
+                submittedTime="Unknown",
+                respondentEmail=None,
+                answers=[],
+                answerCount=0,
+                error=str(e)
+            )
         except Exception as e:
             error_msg = f"❌ Unexpected error: {str(e)}"
             logger.error(f"[get_form_response] {error_msg}")
-            return error_msg
+            return FormResponseDetails(
+                success=False,
+                message=error_msg,
+                responseId=response_id,
+                formId=form_id,
+                submittedTime="Unknown",
+                respondentEmail=None,
+                answers=[],
+                answerCount=0,
+                error=str(e)
+            )
 
     @mcp.tool(
         name="list_form_responses",
-        description="List all responses for a Google Form with pagination support",
+        description="Retrieve all responses from a Google Form with efficient pagination support and structured answer mapping. Returns comprehensive response data ready for analysis.",
         tags={"forms", "responses", "list", "google"},
         annotations={
             "title": "List Form Responses",
@@ -975,25 +1227,22 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_form_responses(
-        form_id: str,
-        page_size: int = 10,
-        page_token: Optional[str] = None,
+        form_id: Annotated[str, Field(description="The unique ID of the form to retrieve responses from. Get this from create_form output.")],
+        page_size: Annotated[int, Field(description="Number of responses to return per page. Range: 1-100 responses per page. Recommendations: Small forms: 10-25, Large surveys: 25-50, Bulk export: 100", ge=1, le=100)] = 10,
+        page_token: Annotated[Optional[str], Field(description="Token for pagination continuation. Use nextPageToken from previous response for subsequent pages. Set to None to start over from the beginning.")] = None,
         user_google_email: UserGoogleEmailForms = None
     ) -> FormResponsesListResponse:
         """
-        List responses for a form - PAGINATED RESULTS.
-
-        Retrieves form responses with pagination support for handling
-        large numbers of submissions.
+        Retrieve all responses from a Google Form with pagination support and structured answer mapping.
 
         Args:
-            user_google_email (str): The user's Google email address.
-            form_id (str): The ID of the form.
-            page_size (int): Number of responses per page.
-            page_token (str): Pagination token.
+            form_id: Form ID to retrieve responses from
+            page_size: Number of responses per page (1-100, default 10)
+            page_token: Pagination token from previous response (None to start over)
+            user_google_email: Google account for authentication
 
         Returns:
-            FormResponsesListResponse: Structured response with form responses
+            FormResponsesListResponse: List of responses with answers mapped to questions, pagination info
         """
         
         try:
@@ -1105,7 +1354,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             )
     @mcp.tool(
         name="update_form_questions",
-        description="Update existing questions in a Google Form (modify titles, descriptions, or settings)",
+        description="Modify existing questions in a Google Form including titles, descriptions, required status, and other settings. Uses efficient batch operations for multiple updates.",
         tags={"forms", "update", "questions", "google"},
         annotations={
             "title": "Update Form Questions",
@@ -1116,23 +1365,22 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         }
     )
     async def update_form_questions(
-        form_id: str,
-        questions_to_update: List[Dict[str, Any]],
+        form_id: Annotated[str, Field(description="The unique ID of the form containing questions to update. Get this from create_form output.")],
+        questions_to_update: Annotated[List[Dict[str, Any]], Field(description="List of update dictionaries. Each dictionary must include: item_id (the ID of the question to update from get_form), and one or more fields to update (title, description, required). Example: [{'item_id': '12345', 'title': 'Updated Question', 'required': True}]")],
         user_google_email: UserGoogleEmailForms = None
-    ) -> str:
+    ) -> FormUpdateResult:
         """
-        Update existing questions in a form - BATCH UPDATES.
+        Modify existing questions in a Google Form using efficient batch operations.
 
-        Modifies question titles, descriptions, or settings using
-        batch operations for efficiency.
+        Use get_form first to get item_ids. Supported updates: title, description, required status.
 
         Args:
-            user_google_email (str): The user's Google email address.
-            form_id (str): The ID of the form.
-            questions_to_update (List[Dict]): List of question updates.
+            form_id: Form ID containing questions to update
+            questions_to_update: List of update dicts with item_id + fields to change
+            user_google_email: Google account for authentication
 
         Returns:
-            str: Success message with update details.
+            FormUpdateResult: Update summary, number of questions modified, URLs
         """
 
         
@@ -1149,7 +1397,15 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                     logger.warning(f"Skipping invalid update: {error}")
             
             if not valid_updates:
-                return "❌ No valid updates to apply"
+                error_msg = "❌ No valid updates to apply"
+                return FormUpdateResult(
+                    success=False,
+                    message=error_msg,
+                    formId=form_id,
+                    title=None,
+                    editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                    error=error_msg
+                )
             
             # Build batch update request
             batch_update_body = build_batch_update_request(valid_updates)
@@ -1167,22 +1423,49 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                 forms_service.forms().get(formId=form_id).execute
             )
             
-            return (
-                f"✅ Successfully updated {len(valid_updates)} questions\n"
-                f"Form: {form.get('info', {}).get('title', 'Untitled')}\n"
-                f"Form ID: {form_id}\n"
-                f"Edit URL: https://docs.google.com/forms/d/{form_id}/edit"
+            success_msg = f"✅ Successfully updated {len(valid_updates)} questions"
+            title = form.get('info', {}).get('title', 'Untitled')
+            edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
+            
+            return FormUpdateResult(
+                success=True,
+                message=success_msg,
+                formId=form_id,
+                title=title,
+                editUrl=edit_url,
+                questionsUpdated=len(valid_updates)
             )
             
         except HttpError as e:
             error_msg = f"❌ Failed to update questions: {e}"
             logger.error(f"[update_form_questions] HTTP error: {e}")
-            return error_msg
+            return FormUpdateResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title=None,
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                error=str(e)
+            )
         except Exception as e:
             error_msg = f"❌ Unexpected error: {str(e)}"
             logger.error(f"[update_form_questions] {error_msg}")
-            return error_msg
+            return FormUpdateResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title=None,
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                error=str(e)
+            )
     
     # Log successful setup
     tool_count = 8  # Total number of Forms tools
-    logger.info(f"Successfully registered {tool_count} Google Forms tools")
+    logger.info(f"Successfully registered {tool_count} Google Forms tools with enhanced documentation")
+    
+    # Parameter defaults validation summary:
+    # - create_form: description=None, document_title=None (optional fields)
+    # - set_form_publish_state: accepting_responses=True (forms should accept by default)
+    # - publish_form_publicly: anyone_can_respond=True (public by default), share_with_emails=None (optional)
+    # - list_form_responses: page_size=10 (reasonable for most use cases), page_token=None (start from beginning)
+    # All parameter defaults are validated and reasonable for typical use cases.

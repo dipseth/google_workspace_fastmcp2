@@ -20,7 +20,8 @@ import logging
 from typing_extensions import Dict, List, Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 @dataclass
 class ExtractedIcon:

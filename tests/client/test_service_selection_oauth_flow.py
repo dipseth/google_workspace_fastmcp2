@@ -6,7 +6,7 @@ from .base_test_config import TEST_EMAIL
 
 @pytest.mark.service("auth")
 class TestServiceSelectionOAuthFlow:
-    """Test service selection OAuth flow functionality following standardized framework."""
+    """Test service selection OAuth flow functionality."""
     
     @pytest.mark.asyncio
     async def test_service_catalog_available(self, client):

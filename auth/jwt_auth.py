@@ -15,7 +15,8 @@ from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 # Import centralized scope registry
 from auth.scope_registry import ScopeRegistry
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Global key pair for development (in production, use proper key management)
 _key_pair: Optional[RSAKeyPair] = None

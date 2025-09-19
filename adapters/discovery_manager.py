@@ -13,7 +13,8 @@ logger = setup_logger()
 from typing_extensions import Dict, Any, Optional, List
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class DiscoveryManager:

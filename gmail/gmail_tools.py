@@ -43,7 +43,8 @@ import logging
 
 from fastmcp import FastMCP
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 def setup_gmail_tools(mcp: FastMCP) -> None:

@@ -25,7 +25,8 @@ from config.settings import settings
 from .context import store_session_data, get_session_data, get_session_context
 from .pkce_utils import generate_pkce_pair, pkce_manager
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # OAuth state to user email mapping (since callback comes outside of FastMCP session)
 _oauth_state_map: dict[str, dict[str, Any]] = {}

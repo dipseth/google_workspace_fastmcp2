@@ -17,7 +17,8 @@ from middleware.mcp_metadata_handler import MCPMetadataHandler
 from auth.scope_registry import ScopeRegistry
 from auth.service_manager import get_google_service, get_available_services
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 class ServiceDispatchResult:

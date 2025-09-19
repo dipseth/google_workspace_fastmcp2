@@ -24,7 +24,8 @@ import hashlib
 import json
 import requests
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 @dataclass

@@ -8,7 +8,8 @@ lists/attributes in template processing.
 from typing import Any, List
 import logging
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 
 def extract_filter(data: Any, path: str) -> Any:

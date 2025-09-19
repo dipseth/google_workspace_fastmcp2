@@ -8,7 +8,8 @@ import threading
 from fastmcp import Context
 from fastmcp.server.dependencies import get_context
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 # Thread-safe storage for session data (this remains as it's not context-specific)
 _session_store: Dict[str, Dict[str, Any]] = {}

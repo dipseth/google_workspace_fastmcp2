@@ -39,7 +39,8 @@ def _get_dcr_default_scope() -> str:
         # Minimal fallback scopes
         return "openid email profile"
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+logger = setup_logger()
 
 class DynamicClientRegistry:
     """In-memory dynamic client registration store"""
