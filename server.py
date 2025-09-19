@@ -50,6 +50,7 @@ from resources.service_list_resources import setup_service_list_resources
 from resources.service_recent_resources import setup_service_recent_resources
 from resources.template_resources import register_template_resources
 from tools.server_tools import setup_server_tools
+from tools.template_macro_tools import setup_template_macro_tools
 
 # Authentication setup - choose between Google OAuth and custom JWT
 use_google_oauth = os.getenv("USE_GOOGLE_OAUTH", "true").lower() == "true"
@@ -325,6 +326,11 @@ logger.info("✅ Template macro resources registered - URIs handled by EnhancedT
 logger.info("🔧 Registering server management tools...")
 setup_server_tools(mcp)
 logger.info("✅ Server management tools registered")
+
+# Register template macro management tools
+logger.info("🎨 Registering template macro management tools...")
+setup_template_macro_tools(mcp)
+logger.info("✅ Template macro management tools registered")
 
 
 # Register Qdrant tools and resources if middleware is available

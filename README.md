@@ -16,7 +16,7 @@
 
 ### What is RiversUnlimited?
 
-RiversUnlimited provides AI assistants with access to Google Workspace services through the Model Context Protocol (MCP). It supports **71+ tools** across **9 Google services**, enabling seamless integration between AI workflows and Google Workspace applications with revolutionary performance improvements.
+RiversUnlimited provides AI assistants with access to Google Workspace services through the Model Context Protocol (MCP). It supports **72+ tools** across **9 Google services**, enabling seamless integration between AI workflows and Google Workspace applications with revolutionary performance improvements.
 
 ```mermaid
 graph TB
@@ -162,53 +162,124 @@ graph TD
 
 RiversUnlimited features powerful **Jinja2 template macros** that transform raw Google Workspace data into visually stunning, AI-optimized formats.
 
-### 🎯 Available Templates
+### 🎯 Available Template Macros
 
-| Template | Purpose | Features |
-|----------|---------|----------|
-| **`beautiful_email.j2`** | Rich HTML emails | CSS styling, themes, signatures |
-| **`email_card.j2`** | Gmail label visualization | Interactive chips, unread counts |
-| **`calendar_dashboard.j2`** | Event visualization | Timeline views, scheduling |
-| **`document_templates.j2`** | Document formatting | Structure, metadata |
-| **`drive_enhanced_email.j2`** | File integration | Drive links in emails |
+| Template File | Macro | Purpose | Key Features |
+|---------------|-------|---------|--------------|
+| **`email_card.j2`** | `render_gmail_labels_chips()` | Gmail label visualization | Interactive chips, unread counts, direct Gmail links |
+| **`calendar_dashboard.j2`** | `render_calendar_dashboard()` | Calendar & events dashboard | Primary/shared calendars, upcoming events, dark theme |
+| **`dynamic_macro.j2`** | `render_calendar_events_dashboard()` | Calendar events dashboard | Event cards, time/location details, clickable links, dark theme |
+| **`document_templates.j2`** | `generate_report_doc()` | Professional reports | Metrics, tables, charts, company branding |
+| **`colorfuL_email.j2`** | `render_beautiful_email3()` | Rich HTML emails | Multiple signatures, gradients, responsive design |
 
-### 💡 Template Macro Example
+### 💡 Template Macro Examples
 
-**Gmail Labels Visualization** - Transform boring label lists into beautiful interactive chips:
+**Gmail Labels Visualization** - Transform label lists into beautiful interactive chips:
 
 ```jinja2
 {{ render_gmail_labels_chips( service://gmail/labels , 'Label summary for: ' + user://current/email ) }}
 ```
 
-This macro produces a beautiful dark-themed interface with:
-- 🏷️ **Interactive label chips** with hover effects
-- 📊 **Unread message counts**
-- 🔗 **Direct Gmail links** for instant access
-- 📱 **Mobile-responsive design**
+**Calendar Dashboard** - Create comprehensive calendar overviews:
 
-![Gmail Labels Visualization](documentation/Untitled.png)
+```jinja2
+{{ render_calendar_dashboard( service://calendar/calendars, service://calendar/events, 'My Calendar Overview' ) }}
+```
+
+**Calendar Events Dashboard** - Transform calendar events into beautiful, interactive event cards:
+
+```jinja2
+{{ render_calendar_events_dashboard( service://calendar/events , 'Upcoming Events for: ' + user://current/email.email ) }}
+```
+
+![Calendar Events Dashboard Example](prompt_to_dashboard.png)
+
+This macro creates a stunning dark-themed dashboard featuring:
+- 📅 **Interactive Event Cards**: Each event is rendered as a clickable card that opens in Google Calendar
+- 🕐 **Smart Time Display**: Automatically formats all-day events vs. timed events with timezone support
+- 📍 **Location Integration**: Displays meeting locations and virtual meeting links
+- 👥 **Attendee Information**: Shows attendee counts and participant details
+- ✅ **Status Indicators**: Color-coded status (confirmed, tentative, cancelled) with visual feedback
+- 📱 **Responsive Design**: Mobile-optimized layout with touch-friendly interactions
+- 🎨 **Dark Theme Styling**: Professional appearance with gradient backgrounds and hover effects
+
+**Professional Documents** - Generate reports with metrics and charts:
+
+```jinja2
+{{ generate_report_doc(
+    report_title='Q4 Performance Report',
+    metrics=[{'value': '$1.2M', 'label': 'Revenue', 'change': 15}],
+    company_name='Your Company'
+) }}
+```
+
+### 🔍 Macro Discovery & Dynamic Creation
+
+Explore all available macros using the template resource system:
+
+```python
+# Access the template://macros resource to discover all available macros
+macros = await access_resource("template://macros")
+# Returns comprehensive macro information with usage examples
+
+# Access specific macro details
+macro_details = await access_resource("template://macros/render_gmail_labels_chips")
+```
+
+### 🎯 Dynamic Macro Creation
+
+Create custom macros at runtime using the `create_template_macro` tool:
+
+```python
+# Create a new macro dynamically
+await create_template_macro(
+    macro_name="render_task_status_badge",
+    macro_content='''
+    {% macro render_task_status_badge(status, size='small') %}
+    {% if status == 'completed' %}
+    <span class="status-badge status-completed {{ size }}">✅ Complete</span>
+    {% elif status == 'in_progress' %}
+    <span class="status-badge status-in-progress {{ size }}">🔄 In Progress</span>
+    {% else %}
+    <span class="status-badge status-pending {{ size }}">⏳ {{ status|title }}</span>
+    {% endif %}
+    {% endmacro %}
+    ''',
+    description="Renders visual status badges for task states with appropriate icons",
+    usage_example="{{ render_task_status_badge('completed', 'large') }}",
+    persist_to_file=True
+)
+
+# Immediately use the newly created macro
+await send_gmail_message(
+    html_body="Task Status: {{ render_task_status_badge('completed', 'large') }}"
+)
+```
+
+**Key Features:**
+- ⚡ **Immediate Availability**: Macros are instantly available after creation
+- 🎯 **Resource Integration**: Automatically available via `template://macros/macro_name`
+- 💾 **Optional Persistence**: Save macros to disk for permanent availability
+- 🔄 **Template Processing**: Full Jinja2 syntax validation and error handling
 
 ### 🚀 Real-World Usage
 
 Templates can be directly used in tool calls for beautiful, structured output:
 
 ```python
-# Send a beautiful email with calendar dashboard using template macros
+# Send a beautiful email with calendar dashboard
 await send_gmail_message(
     to="manager@company.com",
     subject="Weekly Schedule Update",
-    html_body="{{ render_calendar_dashboard( recent://calendar/7 , 'My upcoming events') }}",
+    html_body="{{ render_calendar_events_dashboard( service://calendar/events, 'My upcoming events') }}",
     content_type="mixed"
 )
 
-# Or use the beautiful email template with dynamic data
-await send_gmail_message(
-    to="team@company.com",
-    subject="Gmail Labels Summary",
-    html_body="{{ render_gmail_labels_chips( service://gmail/labels , 'Current label status: ' + user://current/email ) }}",
-    content_type="html"
+# Generate and send a professional report
+await create_doc(
+    title="Q4 Performance Report",
+    content="{{ generate_report_doc( report_title='Quarterly Results', company_name='RiversUnlimited' ) }}"
 )
-# Returns professionally styled emails with interactive elements
 ```
 
 > 📚 **Template System Resources:**
@@ -294,28 +365,36 @@ events = await access_resource("recent://calendar")
 
 ## 🧪 Testing Framework
 
-RiversUnlimited features an enterprise-grade testing framework with **real resource integration** and comprehensive validation.
+RiversUnlimited includes comprehensive testing with **client tests** that validate MCP usage exactly as an LLM would experience it, plus additional testing suites.
 
-### 🎯 Framework Features
+### 🎯 Client Testing Focus
 
 ```mermaid
-pie title Testing Coverage Distribution
-    "Service Integration Tests" : 35
-    "Authentication Tests" : 25
-    "Real Resource Tests" : 20
-    "Performance Tests" : 20
+flowchart LR
+    A[🤖 LLM Client] --> B[📧 Gmail Tests]
+    A --> C[📁 Drive Tests]
+    A --> D[📊 Sheets Tests]
+    A --> E[📅 Calendar Tests]
+    
+    B --> F[✅ Real Resource Integration]
+    C --> F
+    D --> F
+    E --> F
+    
+    F --> G[🔄 Authentication Patterns]
+    F --> H[📊 Service Validation]
+    
+    style A fill:#e1f5fe
+    style F fill:#e8f5e8
+    style G fill:#f3e5f5
 ```
 
-- **🔧 Standardized Patterns**: Consistent testing across all **71+ tools**
-- **🌐 Real Resource Integration**: Tests against actual user data when available
-- **🔐 Authentication Validation**: Explicit email vs middleware injection patterns
-- **📊 Service Coverage**: Complete validation across all 9 Google services
-- **🎯 Real ID Fixtures**: Dynamic fetching from `service://` resources
+The **client tests** are the most important component - they provide deterministic testing of MCP operations using real resource integration and standardized patterns across all **71+ tools** and **9 Google services**. These tests validate both explicit email authentication and middleware injection patterns.
 
 ### 🚀 Quick Test Commands
 
 ```bash
-# 🧪 Run all client tests
+# 🧪 Run all client tests (primary test suite)
 uv run pytest tests/client/ -v
 
 # 📧 Test specific service
@@ -323,17 +402,13 @@ uv run pytest tests/client/ -k "gmail" -v
 
 # 🔐 Authentication required tests
 uv run pytest tests/client/ -m "auth_required" -v
-
-# ⚡ Performance benchmarks
-uv run pytest tests/client/ -m "performance" -v
 ```
 
-> 📚 **Testing Framework Resources:**
-> - 📋 **[Complete Testing Guide](tests/client/TESTING_FRAMEWORK.md)** - Enterprise-grade testing framework documentation
-> - 🧪 **[Client Tests Directory](tests/client/)** - Real resource integration tests for all 71+ tools
-> - 🔐 **[Authentication Test Patterns](tests/client/)** - Email vs middleware injection validation
-> - ⚡ **[Performance Benchmarks](tests/client/)** - Speed and efficiency testing across all services
-> - 🎯 **[Service Coverage Tests](tests/client/)** - Complete validation across 9 Google Workspace services
+> 📚 **Testing Resources:**
+> - 📋 **[Client Testing Framework Guide](tests/client/TESTING_FRAMEWORK.md)** - Complete client testing documentation and patterns
+> - 🧪 **[Client Tests Directory](tests/client/)** - Real resource integration tests for deterministic MCP validation
+> - 🤖 **[MCP Client Integration](https://gofastmcp.com/clients/client)** - Learn more about MCP client patterns and usage
+> - 🔐 **[Authentication Patterns](tests/client/)** - Email vs middleware injection validation testing
 
 ## 🔒 Security & Authentication
 

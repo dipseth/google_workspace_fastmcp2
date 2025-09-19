@@ -184,26 +184,43 @@ class EnhancedTemplateMiddleware(Middleware):
         #     return await call_next(context)
         
         try:
-            # Track if templates were applied
-            template_applied = False
+            # Check if this is a template macro tool and store middleware reference
+            template_macro_tools = {
+                'create_template_macro', 'list_template_macros', 'remove_template_macro'
+            }
             
-            # Get the tool arguments
-            original_args = getattr(context.message, 'arguments', {})
-            
-            if original_args:
-                # Resolve template parameters using the modular template processor
-                resolved_args = await self._resolve_parameters(
-                    original_args,
-                    context.fastmcp_context,
-                    tool_name
-                )
-                
-                # Update the message arguments if anything was resolved
-                if resolved_args != original_args:
-                    context.message.arguments = resolved_args
-                    template_applied = True
+            if tool_name in template_macro_tools:
+                if context.fastmcp_context:
+                    # Store reference to this middleware for template macro tools
+                    context.fastmcp_context.set_state("template_middleware_instance", self)
                     if self.enable_debug_logging:
-                        logger.info(f"✅ Resolved templates for tool: {tool_name}")
+                        logger.debug(f"🎯 Stored template middleware reference for tool: {tool_name}")
+                
+                # Skip template processing for template macro tools (they handle raw templates)
+                if self.enable_debug_logging:
+                    logger.info(f"⚠️ Skipping template processing for template macro tool: {tool_name}")
+                    return await call_next(context)
+            else:
+                # Track if templates were applied
+                template_applied = False
+                
+                # Get the tool arguments
+                original_args = getattr(context.message, 'arguments', {})
+                
+                if original_args:
+                    # Resolve template parameters using the modular template processor
+                    resolved_args = await self._resolve_parameters(
+                        original_args,
+                        context.fastmcp_context,
+                        tool_name
+                    )
+                    
+                    # Update the message arguments if anything was resolved
+                    if resolved_args != original_args:
+                        context.message.arguments = resolved_args
+                        template_applied = True
+                        if self.enable_debug_logging:
+                            logger.info(f"✅ Resolved templates for tool: {tool_name}")
             
             # Execute the tool and get the result
             result = await call_next(context)

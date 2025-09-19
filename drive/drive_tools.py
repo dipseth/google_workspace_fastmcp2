@@ -954,6 +954,8 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         }
     )
     async def share_drive_files(
+        file_ids: Annotated[List[str], Field(description="List of Google Drive file IDs to share")],
+        email_addresses: Annotated[List[str], Field(description="List of email addresses to share files with")],
         role: Annotated[str, Field(description="Permission role: 'reader' (view only), 'writer' (edit), 'commenter' (comment only)")] = "reader",
         send_notification: Annotated[bool, Field(description="Whether to send email notifications to shared users")] = True,
         message: Annotated[Optional[str], Field(description="Optional message to include in the sharing notification email")] = None,

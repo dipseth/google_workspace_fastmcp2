@@ -1,0 +1,166 @@
+{% macro render_calendar_events_dashboard(events_data, title="Upcoming Calendar Events") %}
+{# 
+  Calendar Events Dashboard Macro
+  Accepts: service://calendar/events data
+  Returns: Complete HTML visualization with dark theme event cards
+#}
+
+{# Handle the nested result structure from service://calendar/events #}
+{% if events_data and events_data.result %}
+  {# Nested structure: namespace(result=namespace(events=[...])) #}
+  {% set events = events_data.result.events or [] %}
+{% elif events_data and events_data.events %}
+  {# Direct structure: namespace(events=[...]) #}
+  {% set events = events_data.events or [] %}
+{% elif events_data is sequence and events_data is not string %}
+  {# It's a direct array of events #}
+  {% set events = events_data %}
+{% else %}
+  {# Empty fallback #}
+  {% set events = [] %}
+{% endif %}
+
+<!-- Calendar Events Dark Theme Dashboard -->
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,sans-serif; line-height:1.45; color:#e5e7eb; background:#0b1220;">
+  <div style="max-width:1200px; margin:0 auto; padding:20px;">
+    
+    <h2 style="margin:0 0 12px 0; color:#f1f5f9; font-size:28px; font-weight:800; letter-spacing:-0.02em;">
+      {{ title }} ({{ events|length }})
+    </h2>
+    
+    {% if events %}
+      <div class="calendar-events-grid">
+        {% for event in events %}
+          <a href="{{ event.htmlLink }}"
+             target="_blank"
+             style="text-decoration: none;">
+            <div class="calendar-event-card"
+                 title="{{ event.summary }} - Click to open in Google Calendar"
+                 style="
+                  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+                  border: 1px solid #475569;
+                  border-radius: 12px;
+                  padding: 20px;
+                  margin-bottom: 16px;
+                  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+                  transition: all .3s ease;
+                  cursor: pointer;">
+              
+              <!-- Event Title -->
+              <h3 style="margin:0 0 8px 0; color:#f1f5f9; font-size:18px; font-weight:700; line-height:1.3;">
+                📅 {{ event.summary }}
+              </h3>
+              
+              <!-- Event Time -->
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <span style="color:#60a5fa; font-size:14px; font-weight:600;">🕐</span>
+                <span style="color:#cbd5e1; font-size:14px;">
+                  {% if event.start and event.end %}
+                    {% if ':' in event.start %}
+                      {# Has time component #}
+                      {{ event.start | strftime('%a, %b %d at %I:%M %p') }}
+                      {% if event.start != event.end %}
+                        - {{ event.end | strftime('%I:%M %p') }}
+                      {% endif %}
+                    {% else %}
+                      {# All-day event #}
+                      {{ event.start | strftime('%a, %b %d') }} (All day)
+                    {% endif %}
+                  {% else %}
+                    Time not specified
+                  {% endif %}
+                </span>
+              </div>
+              
+              <!-- Event Location -->
+              {% if event.location %}
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                  <span style="color:#34d399; font-size:14px; font-weight:600;">📍</span>
+                  <span style="color:#a7f3d0; font-size:14px;">{{ event.location }}</span>
+                </div>
+              {% endif %}
+              
+              <!-- Event Description -->
+              {% if event.description %}
+                <div style="margin-bottom:12px;">
+                  <p style="color:#94a3b8; font-size:14px; line-height:1.4; margin:0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">
+                    {{ event.description }}
+                  </p>
+                </div>
+              {% endif %}
+              
+              <!-- Event Attendees -->
+              {% if event.attendees and event.attendees|length > 0 %}
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                  <span style="color:#fbbf24; font-size:14px; font-weight:600;">👥</span>
+                  <span style="color:#fde68a; font-size:13px;">
+                    {{ event.attendees|length }} attendee{{ 's' if event.attendees|length != 1 else '' }}
+                  </span>
+                </div>
+              {% endif %}
+              
+              <!-- Event Status -->
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <span style="
+                  color: {% if event.status == 'confirmed' %}#34d399{% elif event.status == 'tentative' %}#fbbf24{% else %}#f87171{% endif %};
+                  font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">
+                  {{ event.status or 'unknown' }}
+                </span>
+                <span style="color:#64748b; font-size:12px;">Click to view →</span>
+              </div>
+              
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div style="text-align:center; padding:40px; color:#64748b;">
+        <div style="font-size:48px; margin-bottom:16px;">📅</div>
+        <p style="font-size:18px; margin:0;">No upcoming events found</p>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+{# --- Calendar Events Grid Styles --- #}
+<style>
+  .calendar-events-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 16px;
+  }
+  .calendar-event-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,.4) !important;
+    border-color: #60a5fa !important;
+  }
+  @media (max-width: 768px) {
+    .calendar-events-grid {
+      grid-template-columns: 1fr;
+    }
+    .calendar-event-card {
+      padding: 16px !important;
+    }
+    .calendar-event-card h3 {
+      font-size: 16px !important;
+    }
+  }
+  @media print {
+    .calendar-events-grid {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .calendar-event-card {
+      padding: 12px !important;
+      margin-bottom: 8px !important;
+      box-shadow: none !important;
+      border: 1px solid #ccc !important;
+    }
+  }
+</style>
+{% endmacro %}
+
+{#
+MACRO USAGE EXAMPLE:
+{{ render_calendar_events_dashboard( service://calendar/events , 'Upcoming Events for: ' + user://current/email.email ) }}
+#}

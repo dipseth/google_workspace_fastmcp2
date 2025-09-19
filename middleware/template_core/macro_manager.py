@@ -9,7 +9,7 @@ import re
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from .jinja_environment import JinjaEnvironmentManager
 
 from config.enhanced_logging import setup_logger
@@ -257,3 +257,226 @@ class MacroManager:
         self._macro_registry.clear()
         if self.enable_debug_logging:
             logger.debug("🧹 Macro registry cleared")
+    
+    def add_dynamic_macro(
+        self,
+        macro_name: str,
+        macro_content: str,
+        description: str = "",
+        usage_example: str = "",
+        persist_to_file: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Add a macro dynamically to the Jinja environment and registry.
+        
+        Args:
+            macro_name: Name of the macro to create
+            macro_content: Complete Jinja2 macro definition (including {% macro %} and {% endmacro %})
+            description: Optional description of the macro's purpose
+            usage_example: Optional usage example for documentation
+            persist_to_file: Whether to write the macro to a .j2 file for persistence
+            
+        Returns:
+            Dictionary with success status, macro info, and any errors
+            
+        Example:
+            add_dynamic_macro(
+                "my_macro",
+                "{% macro my_macro(title='Hello') %}<h1>{{ title }}</h1>{% endmacro %}",
+                "Simple title macro",
+                "{{ my_macro(title='Welcome') }}"
+            )
+        """
+        result = {
+            "success": False,
+            "macro_name": macro_name,
+            "errors": []
+        }
+        
+        try:
+            # 1. Validate macro name
+            if not macro_name or not macro_name.isidentifier():
+                result["errors"].append(f"Invalid macro name: '{macro_name}'. Must be a valid Python identifier.")
+                return result
+            
+            # 2. Validate macro content contains proper Jinja2 syntax
+            if not self._validate_macro_syntax(macro_name, macro_content):
+                result["errors"].append(f"Invalid macro syntax. Must contain '{{% macro {macro_name}(...) %}}' and '{{% endmacro %}}'")
+                return result
+            
+            # 3. Check if macro already exists
+            if macro_name in self._macro_registry:
+                if self.enable_debug_logging:
+                    logger.warning(f"⚠️ Macro '{macro_name}' already exists, will be overwritten")
+            
+            # 4. Register in Jinja2 environment if available
+            if self.jinja_env_manager and self.jinja_env_manager.get_environment():
+                jinja_env = self.jinja_env_manager.get_environment()
+                
+                try:
+                    # Create a template from the macro content
+                    template = jinja_env.from_string(macro_content)
+                    module = template.make_module()
+                    
+                    # Extract the macro function from the module
+                    if hasattr(module, macro_name):
+                        macro_function = getattr(module, macro_name)
+                        
+                        # Register the macro in the global Jinja2 namespace
+                        jinja_env.globals[macro_name] = macro_function
+                        
+                        if self.enable_debug_logging:
+                            logger.info(f"✅ Dynamic macro '{macro_name}' registered in Jinja2 environment")
+                    else:
+                        result["errors"].append(f"Macro function '{macro_name}' not found in compiled template")
+                        return result
+                        
+                except Exception as e:
+                    result["errors"].append(f"Failed to compile macro: {str(e)}")
+                    return result
+            
+            # 5. Add to macro registry for template://macros resources
+            macro_info = {
+                "name": macro_name,
+                "template_file": "dynamic_macro.j2",
+                "template_path": f"dynamic/{macro_name}.j2",
+                "usage_example": usage_example or f"{{{{ {macro_name}() }}}}",
+                "description": description or f"Dynamically created macro: {macro_name}",
+                "discovered_at": datetime.now().isoformat(),
+                "source": "dynamic",
+                "content": macro_content
+            }
+            
+            self._macro_registry[macro_name] = macro_info
+            
+            # 6. Optionally persist to file
+            if persist_to_file and self.templates_dir:
+                try:
+                    self._persist_macro_to_file(macro_name, macro_content, usage_example)
+                    macro_info["persisted"] = True
+                    if self.enable_debug_logging:
+                        logger.info(f"💾 Macro '{macro_name}' persisted to file")
+                except Exception as e:
+                    result["errors"].append(f"Failed to persist macro to file: {str(e)}")
+                    macro_info["persisted"] = False
+            
+            result["success"] = True
+            result["macro_info"] = macro_info
+            
+            if self.enable_debug_logging:
+                logger.info(f"🎉 Successfully created dynamic macro '{macro_name}'")
+            
+            return result
+            
+        except Exception as e:
+            result["errors"].append(f"Unexpected error creating macro: {str(e)}")
+            logger.error(f"❌ Failed to create dynamic macro '{macro_name}': {e}")
+            return result
+    
+    def _validate_macro_syntax(self, macro_name: str, macro_content: str) -> bool:
+        """
+        Validate that macro content contains proper Jinja2 macro syntax.
+        
+        Args:
+            macro_name: Expected name of the macro
+            macro_content: Macro content to validate
+            
+        Returns:
+            True if syntax is valid, False otherwise
+        """
+        # Check for macro start tag
+        macro_start_pattern = re.compile(rf'{{% macro {re.escape(macro_name)}\s*\([^}}]*\)\s*%?}}', re.MULTILINE | re.DOTALL)
+        has_start = bool(macro_start_pattern.search(macro_content))
+        
+        # Check for macro end tag
+        has_end = '{%- endmacro %}' in macro_content or '{% endmacro %}' in macro_content
+        
+        return has_start and has_end
+    
+    def _persist_macro_to_file(self, macro_name: str, macro_content: str, usage_example: str = "") -> None:
+        """
+        Persist a dynamic macro to a template file for permanent availability.
+        
+        Args:
+            macro_name: Name of the macro
+            macro_content: Complete macro definition
+            usage_example: Optional usage example to include in comments
+        """
+        if not self.templates_dir:
+            raise ValueError("No templates directory configured for persistence")
+        
+        # Create dynamic macros subdirectory if needed
+        dynamic_dir = self.templates_dir / "dynamic"
+        dynamic_dir.mkdir(exist_ok=True)
+        
+        # Create template file
+        template_file = dynamic_dir / f"{macro_name}.j2"
+        
+        # Prepare content with usage example comment
+        file_content = macro_content
+        if usage_example:
+            file_content += f"\n\n{{#\nMACRO USAGE EXAMPLE:\n{usage_example}\n#}}\n"
+        
+        # Write to file
+        template_file.write_text(file_content, encoding='utf-8')
+        
+        if self.enable_debug_logging:
+            logger.debug(f"💾 Persisted macro '{macro_name}' to {template_file}")
+    
+    def list_dynamic_macros(self) -> List[Dict[str, Any]]:
+        """
+        Get list of dynamically created macros.
+        
+        Returns:
+            List of macro info dictionaries for macros with source='dynamic'
+        """
+        return [
+            macro_info for macro_info in self._macro_registry.values()
+            if macro_info.get("source") == "dynamic"
+        ]
+    
+    def remove_dynamic_macro(self, macro_name: str) -> bool:
+        """
+        Remove a dynamically created macro.
+        
+        Args:
+            macro_name: Name of the macro to remove
+            
+        Returns:
+            True if macro was found and removed, False otherwise
+        """
+        if macro_name not in self._macro_registry:
+            return False
+        
+        macro_info = self._macro_registry[macro_name]
+        
+        # Only allow removal of dynamic macros
+        if macro_info.get("source") != "dynamic":
+            if self.enable_debug_logging:
+                logger.warning(f"⚠️ Cannot remove non-dynamic macro '{macro_name}'")
+            return False
+        
+        # Remove from registry
+        del self._macro_registry[macro_name]
+        
+        # Remove from Jinja2 environment if available
+        if self.jinja_env_manager and self.jinja_env_manager.get_environment():
+            jinja_env = self.jinja_env_manager.get_environment()
+            if macro_name in jinja_env.globals:
+                del jinja_env.globals[macro_name]
+        
+        # Remove persisted file if it exists
+        if macro_info.get("persisted") and self.templates_dir:
+            try:
+                dynamic_file = self.templates_dir / "dynamic" / f"{macro_name}.j2"
+                if dynamic_file.exists():
+                    dynamic_file.unlink()
+                    if self.enable_debug_logging:
+                        logger.debug(f"🗑️ Removed persisted file for macro '{macro_name}'")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to remove persisted file for macro '{macro_name}': {e}")
+        
+        if self.enable_debug_logging:
+            logger.info(f"🗑️ Removed dynamic macro '{macro_name}'")
+        
+        return True
