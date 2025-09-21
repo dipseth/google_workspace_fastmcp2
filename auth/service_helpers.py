@@ -95,19 +95,21 @@ SERVICE_DEFAULTS = ServiceDefaultsProxy()
 
 async def get_service(
     service_type: str,
-    user_email: str,
+    user_email: Optional[str] = None,
     scopes: Union[str, List[str]] = None,
     version: Optional[str] = None
 ) -> Any:
     """
-    Universal function to get any Google service with smart defaults.
+    Universal function to get any Google service with smart defaults and unified auth.
     
-    This is the ONE function you need for all Google services. It automatically
-    uses sensible defaults for each service type while allowing full customization.
+    This function leverages the existing middleware infrastructure for user authentication:
+    - If user_email is provided, uses it directly (legacy/explicit auth)
+    - If user_email is None, uses get_user_email_context() which is set by middleware
+    - The middleware handles GoogleProvider, JWT, and session-based auth automatically
     
     Args:
         service_type: Type of service ("drive", "gmail", "calendar", etc.)
-        user_email: User's email address
+        user_email: User's email address (optional - middleware provides it)
         scopes: Custom scopes (uses service defaults if None)
         version: API version (uses service default if None)
     
@@ -115,23 +117,33 @@ async def get_service(
         Authenticated Google service instance
         
     Examples:
-        # Use defaults - most common case
-        drive_service = await get_service("drive", user_email)
-        gmail_service = await get_service("gmail", user_email)
+        # Unified auth (middleware provides email) - no email needed
+        drive_service = await get_service("drive")
+        gmail_service = await get_service("gmail")
         
-        # Custom scopes
-        drive_service = await get_service("drive", user_email, ["drive_full"])
+        # Explicit auth (legacy) - email required
+        drive_service = await get_service("drive", "user@example.com")
         
-        # Custom version
-        old_gmail = await get_service("gmail", user_email, version="v1beta")
+        # Custom scopes with unified auth
+        drive_service = await get_service("drive", scopes=["drive_full"])
     """
+    # Use provided email or get from context (set by middleware)
+    final_user_email = user_email or get_user_email_context()
+    
+    if not final_user_email:
+        raise ValueError(
+            "No user email available. Either:\n"
+            "1. Provide user_email parameter explicitly, or\n"
+            "2. Ensure you're authenticated (middleware will set context automatically)"
+        )
+    
     # Get defaults for this service type
     defaults = SERVICE_DEFAULTS.get(service_type)
     if not defaults:
         # If no defaults, let the underlying service_manager handle it
         logger.warning(f"No defaults found for service type: {service_type}")
         return await get_google_service(
-            user_email=user_email,
+            user_email=final_user_email,
             service_type=service_type,
             scopes=scopes,
             version=version
@@ -141,10 +153,10 @@ async def get_service(
     final_scopes = scopes if scopes is not None else defaults["default_scopes"]
     final_version = version if version is not None else defaults["version"]
     
-    logger.debug(f"Getting {service_type} service for {user_email} with scopes: {final_scopes}")
+    logger.debug(f"Getting {service_type} service for {final_user_email} with scopes: {final_scopes}")
     
     return await get_google_service(
-        user_email=user_email,
+        user_email=final_user_email,
         service_type=service_type,
         scopes=final_scopes,
         version=final_version
@@ -327,18 +339,18 @@ async def create_multi_service_session(
 
 
 # Convenience aliases for backward compatibility and ease of use
-async def get_drive_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
-    """Get Drive service - convenience alias."""
+async def get_drive_service(user_email: Optional[str] = None, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Drive service - supports both explicit and GoogleProvider auth."""
     return await get_service("drive", user_email, scopes)
 
 
-async def get_gmail_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
-    """Get Gmail service - convenience alias."""
+async def get_gmail_service(user_email: Optional[str] = None, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Gmail service - supports both explicit and GoogleProvider auth."""
     return await get_service("gmail", user_email, scopes)
 
 
-async def get_calendar_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
-    """Get Calendar service - convenience alias."""
+async def get_calendar_service(user_email: Optional[str] = None, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Calendar service - supports both explicit and GoogleProvider auth."""
     return await get_service("calendar", user_email, scopes)
 
 
@@ -352,8 +364,8 @@ def request_gmail_service(scopes: Union[str, List[str]] = None) -> str:
     return request_service("gmail", scopes)
 
 
-async def get_photos_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
-    """Get Photos service - convenience alias."""
+async def get_photos_service(user_email: Optional[str] = None, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Photos service - supports both explicit and GoogleProvider auth."""
     return await get_service("photos", user_email, scopes)
 
 
@@ -363,8 +375,8 @@ def request_photos_service(scopes: Union[str, List[str]] = None) -> str:
 
 
 
-async def get_tasks_service(user_email: str, scopes: Union[str, List[str]] = None) -> Any:
-    """Get Tasks service - convenience alias."""
+async def get_tasks_service(user_email: Optional[str] = None, scopes: Union[str, List[str]] = None) -> Any:
+    """Get Tasks service - supports both explicit and GoogleProvider auth."""
     return await get_service("tasks", user_email, scopes)
 
 
