@@ -53,8 +53,8 @@ SERVER_PORT = os.getenv("MCP_SERVER_PORT", os.getenv("SERVER_PORT", "8002"))
 # FastMCP servers in HTTP mode use the /mcp/ endpoint
 SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://{SERVER_HOST}:{SERVER_PORT}/mcp/")
 
-# Test email address from environment variable - use valid tokens
-TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test@example.com")
+# Test email address from environment variable - using your configured variable
+TEST_EMAIL = os.getenv("TEST_CHAT_WEBHOOK_EMAIL", "srivers@groupon.com")
 # Test webhook URLs for Google Chat
 TEST_CHAT_WEBHOOK = os.getenv("TEST_CHAT_WEBHOOK", "")
 TEST_WEBHOOK_URL = os.getenv("TEST_CHAT_WEBHOOK_URL", TEST_CHAT_WEBHOOK or "https://chat.googleapis.com/v1/spaces/AAAAAAAAAAA/messages?key=test&token=test")
