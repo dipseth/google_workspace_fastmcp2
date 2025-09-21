@@ -119,30 +119,46 @@ async def lifespan_manager(app: FastMCP):
 google_auth_provider = None
 
 if ENABLE_UNIFIED_AUTH and settings.fastmcp_server_auth == "GOOGLE":
-    # Use FastMCP 2.12.0's GoogleProvider with environment variables
+    # Use FastMCP 2.12.0's GoogleProvider with proper configuration
     logger.info("🔑 Configuring FastMCP 2.12.0 GoogleProvider...")
     try:
-        # GoogleProvider automatically reads from environment variables:
-        # FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID
-        # FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET
-        # FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL
-        google_auth_provider = GoogleProvider()
-        logger.info("✅ FastMCP 2.12.0 GoogleProvider configured from environment variables")
+        # Import scope registry for required scopes
+        from auth.scope_registry import ScopeRegistry
+        
+        # Get essential scopes for GoogleProvider (basic user info + core services)
+        required_scopes = ScopeRegistry.resolve_scope_group("oauth_basic")
+        
+        # Configure GoogleProvider according to FastMCP 2.12.0 documentation
+        # Use the redirect path that matches your existing Google OAuth client configuration
+        from urllib.parse import urlparse
+        redirect_uri = settings.dynamic_oauth_redirect_uri
+        redirect_path = urlparse(redirect_uri).path
+        
+        google_auth_provider = GoogleProvider(
+            client_id=settings.fastmcp_server_auth_google_client_id,
+            client_secret=settings.fastmcp_server_auth_google_client_secret,
+            base_url=settings.fastmcp_server_auth_google_base_url or settings.base_url,
+            required_scopes=required_scopes,  # Essential: Required scopes for authentication
+            redirect_path=redirect_path        # Use YOUR configured redirect path
+        )
+        logger.info("✅ FastMCP 2.12.0 GoogleProvider configured correctly")
         logger.info(f"  Client ID: {settings.fastmcp_server_auth_google_client_id[:20] if settings.fastmcp_server_auth_google_client_id else 'Not set'}...")
-        logger.info(f"  Base URL: {settings.fastmcp_server_auth_google_base_url or 'Not set'}")
-        # Phase 1: Don't immediately enforce authentication to maintain backward compatibility
-        logger.info("🔄 Phase 1: GoogleProvider configured but not enforced (dual-flow mode)")
+        logger.info(f"  Base URL: {settings.fastmcp_server_auth_google_base_url or settings.base_url}")
+        logger.info(f"  Required Scopes: {len(required_scopes)} scopes configured")
+        logger.info(f"  Redirect Path: {redirect_path} (from your OAuth config)")
+        logger.info(f"  Full Redirect URI: {redirect_uri}")
+        
     except Exception as e:
         logger.error(f"❌ Failed to configure GoogleProvider: {e}")
         logger.warning("⚠️ Falling back to legacy OAuth flow")
         google_auth_provider = None
 
-# Create FastMCP2 instance WITHOUT immediate authentication enforcement during Phase 1
-# This maintains backward compatibility while allowing us to test the new auth system
+# Create FastMCP2 instance with GoogleProvider if configured
+# Use GoogleProvider when available for proper FastMCP 2.12.0 authentication
 mcp = FastMCP(
     name=settings.server_name,
     version="1.0.0",
-    auth=None,  # Phase 1: Keep auth=None for dual-flow compatibility
+    auth=google_auth_provider,  # Use GoogleProvider when configured, None for legacy mode
     lifespan=lifespan_manager  # Add lifespan manager to properly initialize StreamableHTTPSessionManager
 )
 
@@ -152,13 +168,11 @@ if google_auth_provider:
 else:
     logger.info("⚠️ FastMCP running without GoogleProvider - using legacy flow only")
 
-# Add enhanced authentication middleware with GoogleProvider integration
 from auth.middleware import create_enhanced_auth_middleware
 auth_middleware = create_enhanced_auth_middleware(
     storage_mode=credential_storage_mode,
     google_provider=google_auth_provider  # Pass the GoogleProvider instance
 )
-
 # Enable service selection for GoogleProvider
 if google_auth_provider:
     logger.info("🔧 Configuring GoogleProvider with service selection support")
@@ -177,7 +191,7 @@ mcp.add_middleware(auth_middleware)
 from auth.context import set_auth_middleware
 set_auth_middleware(auth_middleware)
 
-# Add MCP spec-compliant auth middleware for WWW-Authenticate headers
+# 2. MCP spec-compliant auth middleware for WWW-Authenticate headers
 mcp.add_middleware(MCPAuthMiddleware())
 
 # Setup Enhanced Template Parameter Middleware with full Jinja2 support (MUST be before tools are registered)
@@ -202,7 +216,7 @@ sampling_middleware = setup_enhanced_sampling_middleware(
 )
 logger.info("✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context")
 
-# Initialize Qdrant unified middleware (completely non-blocking)
+# 5. Initialize Qdrant unified middleware (completely non-blocking)
 logger.info("🔄 Initializing Qdrant unified middleware...")
 qdrant_middleware = QdrantUnifiedMiddleware(
     qdrant_host=settings.qdrant_host,
@@ -223,7 +237,7 @@ if hasattr(sampling_middleware, 'qdrant_middleware'):
     sampling_middleware.qdrant_middleware = qdrant_middleware
     logger.info("🔗 Enhanced Sampling Middleware connected to Qdrant for historical context")
 
-# Add TagBasedResourceMiddleware for service list resource handling
+# 6. Add TagBasedResourceMiddleware for service list resource handling (LAST)
 logger.info("🏷️ Setting up TagBasedResourceMiddleware for service:// resource handling...")
 tag_based_middleware = TagBasedResourceMiddleware(enable_debug_logging=True)
 mcp.add_middleware(tag_based_middleware)
@@ -267,13 +281,13 @@ setup_unified_card_tool(mcp)
 
 # Register ModuleWrapper middleware with custom collection name to match unified_card_tool.py
 logger.info("🔄 Initializing ModuleWrapper middleware...")
-middleware = setup_module_wrapper_middleware(mcp, modules_to_wrap=["card_framework.v2"])
+middleware = setup_module_wrapper_middleware(mcp, modules_to_wrap=["card_framework.v2"], tool_pushdown=True)
 # Override the collection name to match what unified_card_tool.py expects
 if "card_framework.v2" in middleware.wrappers:
     wrapper = middleware.wrappers["card_framework.v2"]
     wrapper.collection_name = "card_framework_components_fastembed"
     logger.info("✅ Updated ModuleWrapper to use FastEmbed collection: card_framework_components_fastembed")
-logger.info("✅ ModuleWrapper middleware initialized")
+logger.info("✅ ModuleWrapper middleware initialized with tools enabled")
 
 # Register JWT-enhanced Chat tools (demonstration)
 # setup_jwt_chat_tools(mcp)
@@ -345,7 +359,6 @@ try:
         logger.info("✅ Qdrant resources registered - qdrant:// URIs available")
 except Exception as e:
     logger.warning(f"⚠️ Could not register Qdrant tools and resources: {e}")
-
 
 
 # Setup OAuth discovery endpoints for MCP Inspector

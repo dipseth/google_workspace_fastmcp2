@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     service_caching: bool = True
     enhanced_logging: bool = True
     
+    # Security Configuration
+    auth_security_level: str = "standard"  # "standard" or "enhanced"
+    
     # FastMCP 2.12.0 GoogleProvider Configuration
     fastmcp_server_auth: str = ""
     fastmcp_server_auth_google_client_id: str = ""
