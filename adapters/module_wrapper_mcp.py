@@ -57,39 +57,33 @@ class ModuleWrapperMiddleware(Middleware):
         modules_to_wrap: Optional[List[str]] = None
     ):
         """
-        Initialize the ModuleWrapper middleware.
+        Initialize the ModuleWrapper middleware using unified settings.
         
         Args:
-            qdrant_host: Qdrant server hostname (overrides environment variables)
-            qdrant_port: Qdrant server port (overrides environment variables)
-            qdrant_url: Full Qdrant URL (overrides host/port, reads from QDRANT_URL env var if not provided)
-            qdrant_api_key: API key for Qdrant authentication (reads from QDRANT_KEY env var if not provided)
+            qdrant_host: Qdrant server hostname (overrides settings)
+            qdrant_port: Qdrant server port (overrides settings)
+            qdrant_url: Full Qdrant URL (overrides settings)
+            qdrant_api_key: API key for Qdrant authentication (overrides settings)
             collection_prefix: Prefix for Qdrant collections
             embedding_model: Model to use for generating embeddings
             auto_discovery: Whether to auto-discover modules
             modules_to_wrap: List of module names to wrap
         """
-        # Import here to avoid circular imports
-        from .module_wrapper import get_qdrant_config_from_env
+        # Import unified settings - same source as QdrantUnifiedMiddleware
+        from config.settings import settings
         
-        # Get environment configuration
-        env_config = get_qdrant_config_from_env()
+        logger.info("🔧 MODULEWRAPPER DEBUG: Initializing ModuleWrapper with unified settings")
+        logger.debug(f"🔧   Settings values: host={settings.qdrant_host}, port={settings.qdrant_port}, url='{settings.qdrant_url}', api_key={'***' if settings.qdrant_api_key else 'None'}")
         
-        # Use provided parameters or fall back to environment
-        if qdrant_url:
-            from .module_wrapper import parse_qdrant_url
-            url_config = parse_qdrant_url(qdrant_url)
-            self.qdrant_host = url_config["host"]
-            self.qdrant_port = url_config["port"]
-            self.qdrant_url = qdrant_url
-            self.qdrant_use_https = url_config["use_https"]
-        else:
-            self.qdrant_host = qdrant_host if qdrant_host is not None else env_config["host"]
-            self.qdrant_port = qdrant_port if qdrant_port is not None else env_config["port"]
-            self.qdrant_url = env_config.get("url")
-            self.qdrant_use_https = env_config.get("use_https", False)
+        # Use provided parameters or fall back to unified settings (same as QdrantUnifiedMiddleware)
+        self.qdrant_host = qdrant_host if qdrant_host is not None else settings.qdrant_host
+        self.qdrant_port = qdrant_port if qdrant_port is not None else settings.qdrant_port
+        self.qdrant_url = qdrant_url if qdrant_url is not None else settings.qdrant_url
+        self.qdrant_api_key = qdrant_api_key if qdrant_api_key is not None else settings.qdrant_api_key
         
-        self.qdrant_api_key = qdrant_api_key if qdrant_api_key is not None else env_config.get("api_key")
+        # Log final configuration for debugging
+        logger.debug(f"🔧 MODULEWRAPPER DEBUG: Final config: host={self.qdrant_host}, port={self.qdrant_port}, url='{self.qdrant_url}', api_key={'***' if self.qdrant_api_key else 'None'}")
+        
         self.collection_prefix = collection_prefix
         self.embedding_model = embedding_model
         self.auto_discovery = auto_discovery
@@ -101,6 +95,8 @@ class ModuleWrapperMiddleware(Middleware):
         # Initialize if modules are provided
         if self.modules_to_wrap:
             self._initialize_wrappers()
+        
+        logger.info(f"✅ ModuleWrapper middleware initialized with unified settings - same Qdrant instance as main middleware")
     
     def _initialize_wrappers(self):
         """Initialize wrappers for specified modules."""

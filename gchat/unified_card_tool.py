@@ -217,27 +217,35 @@ def _reset_card_framework_wrapper():
     logger.info("🔄 Card framework wrapper reset")
 
 def _initialize_card_framework_wrapper(force_reset: bool = False):
-    """Initialize the ModuleWrapper for the card_framework module."""
+    """Initialize the ModuleWrapper for the card_framework module with comprehensive debugging."""
     global _card_framework_wrapper
     
     if not CARD_FRAMEWORK_AVAILABLE:
-        logger.warning("Card Framework not available - cannot initialize wrapper")
+        logger.warning("❌ Card Framework not available - cannot initialize wrapper")
         return None
     
     if force_reset:
+        logger.info("🔄 Force reset requested - clearing existing wrapper")
         _reset_card_framework_wrapper()
     
     if _card_framework_wrapper is None:
         try:
             import card_framework
             
-            logger.info("🔍 Initializing ModuleWrapper for card_framework...")
+            logger.info("🔍 COMPREHENSIVE DEBUG: Initializing ModuleWrapper for card_framework...")
+            logger.info(f"📦 Card Framework module location: {card_framework.__file__}")
             
             # Import settings to pass Qdrant configuration
             from config.settings import settings
             
+            logger.info(f"🌐 QDRANT CONFIG DEBUG:")
+            logger.info(f"  - URL: {settings.qdrant_url}")
+            logger.info(f"  - Host: {settings.qdrant_host}")
+            logger.info(f"  - Port: {settings.qdrant_port}")
+            logger.info(f"  - API Key: {'***' if settings.qdrant_api_key else 'None'}")
+            
             # Create wrapper with optimized settings - use FastEmbed-compatible collection
-            # Pass Qdrant configuration from settings to ensure cloud connection
+            logger.info("🔧 Creating ModuleWrapper with comprehensive settings...")
             _card_framework_wrapper = ModuleWrapper(
                 module_or_name="card_framework.v2",
                 qdrant_url=settings.qdrant_url,  # Pass cloud URL from settings
@@ -253,19 +261,61 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
                 clear_collection=False  # Set to True to clear duplicates on restart
             )
             
-            logger.info(f"✅ ModuleWrapper configured with Qdrant: {settings.qdrant_url or f'{settings.qdrant_host}:{settings.qdrant_port}'}")
+            logger.info(f"✅ ModuleWrapper created successfully!")
+            logger.info(f"🌐 Connected to Qdrant: {settings.qdrant_url or f'{settings.qdrant_host}:{settings.qdrant_port}'}")
             
-            # Initialize Qdrant (but don't cache card types - defer until first use)
-            _get_qdrant_client()
+            # CRITICAL: Validate component indexing immediately after creation
+            component_count = len(_card_framework_wrapper.components) if _card_framework_wrapper.components else 0
+            logger.info(f"📊 COMPONENT CACHE VALIDATION:")
+            logger.info(f"  - Total components indexed: {component_count}")
             
-            logger.info("✅ ModuleWrapper initialized for card_framework")
+            if component_count == 0:
+                logger.error("❌ CRITICAL: ModuleWrapper has ZERO components indexed!")
+                logger.error("❌ This will cause all component searches to fail.")
+                logger.error("❌ Possible causes: Qdrant connection issues, indexing failures, empty module")
+                
+                # Try to get more diagnostic info
+                try:
+                    if hasattr(_card_framework_wrapper, 'collection_name'):
+                        logger.error(f"❌ Collection name: {_card_framework_wrapper.collection_name}")
+                    if hasattr(_card_framework_wrapper, 'qdrant_client'):
+                        logger.error(f"❌ Qdrant client available: {_card_framework_wrapper.qdrant_client is not None}")
+                except Exception as diag_error:
+                    logger.error(f"❌ Diagnostic error: {diag_error}")
+            else:
+                logger.info(f"✅ Component indexing successful - {component_count} components available")
+                
+                # Log sample of indexed components for verification
+                sample_components = list(_card_framework_wrapper.components.keys())[:10]
+                logger.info(f"📋 Sample indexed components: {sample_components}")
+                
+                # Count components by type for additional validation
+                try:
+                    class_count = sum(1 for comp_data in _card_framework_wrapper.components.values()
+                                    if hasattr(comp_data, 'obj') and inspect.isclass(comp_data.obj))
+                    function_count = sum(1 for comp_data in _card_framework_wrapper.components.values()
+                                       if hasattr(comp_data, 'obj') and inspect.isfunction(comp_data.obj))
+                    logger.info(f"📊 Component breakdown: {class_count} classes, {function_count} functions")
+                except Exception as count_error:
+                    logger.warning(f"⚠️ Error counting component types: {count_error}")
             
-        except ImportError:
-            logger.error("❌ Could not import card_framework module")
+            # Initialize Qdrant client for template storage
+            qdrant_client = _get_qdrant_client()
+            if qdrant_client:
+                logger.info("✅ Qdrant client initialized for template storage")
+            else:
+                logger.warning("⚠️ Qdrant client initialization failed - template features disabled")
+            
+            logger.info("✅ ModuleWrapper initialization complete")
+            
+        except ImportError as import_error:
+            logger.error(f"❌ Could not import card_framework module: {import_error}")
             return None
         except Exception as e:
             logger.error(f"❌ Failed to initialize ModuleWrapper: {e}", exc_info=True)
             return None
+    else:
+        logger.info(f"♻️ Using existing ModuleWrapper with {len(_card_framework_wrapper.components) if _card_framework_wrapper.components else 0} components")
     
     return _card_framework_wrapper
 
@@ -307,10 +357,19 @@ async def _find_card_component(query: str, limit: int = 5, score_threshold: floa
         logger.error("❌ ModuleWrapper not available")
         return []
     
-    # Check if we have components, if not, force reinitialize
+    # ENHANCED VALIDATION: Check if we have components, if not, force reinitialize
     if len(_card_framework_wrapper.components) == 0:
-        logger.info("🔄 Existing wrapper has no components, forcing reinitialization...")
+        logger.error("❌ CRITICAL: Existing wrapper has ZERO components! This will cause all searches to fail.")
+        logger.info("🔄 Forcing reinitialization to attempt component recovery...")
         _initialize_card_framework_wrapper(force_reset=True)
+        
+        # Validate reinitialization worked
+        if not _card_framework_wrapper or len(_card_framework_wrapper.components) == 0:
+            logger.error("❌ REINITIALIZATION FAILED: Still no components available!")
+            logger.error("❌ ModuleWrapper is non-functional - all component searches will return empty results")
+            return []
+        else:
+            logger.info(f"✅ Reinitialization successful: {len(_card_framework_wrapper.components)} components available")
     
     # On-demand caching: check if query matches a common card type
     common_card_types = [
@@ -357,39 +416,59 @@ async def _find_card_component(query: str, limit: int = 5, score_threshold: floa
             results = _card_framework_wrapper.search(query, limit=limit, score_threshold=score_threshold)
             logger.info(f"✅ ModuleWrapper sync search for '{query}' returned {len(results)} results")
         
-        # FIXED: Resolve component paths using direct access pattern
+        # SIMPLIFIED: Resolve component paths with better error handling
         def _map_search_path_to_actual_path(search_path: str) -> str:
-            """Map search index path to actual component path."""
+            """Map search index path to actual component path with enhanced error handling."""
             if not search_path:
+                logger.warning("⚠️ Empty search path provided")
                 return search_path
-                
+            
+            logger.info(f"🔧 Mapping search path: {search_path}")
+            
             # Strategy 1: Direct match (path exists as-is)
             if search_path in _card_framework_wrapper.components:
+                logger.info(f"✅ Direct path match: {search_path}")
                 return search_path
             
-            # Strategy 2: Map to v2.widgets path (most common case)
-            if search_path.startswith('card_framework.'):
-                component_name = search_path.split('.')[-1]
-                v2_path = f'card_framework.v2.widgets.{component_name}'
-                if v2_path in _card_framework_wrapper.components:
-                    return v2_path
-            
-            # Strategy 3: Look for paths ending with same component name in v2
+            # Strategy 2: Common Card Framework v2 patterns
             component_name = search_path.split('.')[-1]
-            for path in _card_framework_wrapper.components.keys():
-                if path.endswith(f'.{component_name}') and 'v2' in path and 'widgets' in path:
+            common_patterns = [
+                f'card_framework.v2.widgets.{component_name}',
+                f'card_framework.v2.{component_name}',
+                f'card_framework.widgets.{component_name}',
+                f'card_framework.{component_name}'
+            ]
+            
+            for pattern in common_patterns:
+                if pattern in _card_framework_wrapper.components:
+                    logger.info(f"✅ Pattern match: {search_path} -> {pattern}")
+                    return pattern
+            
+            # Strategy 3: Fuzzy match on component name
+            available_paths = list(_card_framework_wrapper.components.keys())
+            for path in available_paths:
+                if path.endswith(f'.{component_name}'):
+                    logger.info(f"✅ Fuzzy match: {search_path} -> {path}")
                     return path
             
-            # Strategy 4: Fallback - return original path
+            # Strategy 4: Log available options for debugging
+            logger.warning(f"⚠️ No path mapping found for: {search_path}")
+            logger.info(f"🔍 Available component paths: {len(available_paths)} total")
+            if len(available_paths) <= 20:  # Only log if reasonable number
+                logger.info(f"🔍 Sample paths: {available_paths[:10]}")
+            
+            # Fallback - return original path
             return search_path
         
-        # Resolve component objects using direct access pattern
+        # ENHANCED: Resolve component objects with comprehensive error handling and fallback extraction
         filtered_results = []
-        for result in results:
+        for i, result in enumerate(results):
             search_path = result.get("path", "")
             component = result.get("component")
             
-            # CRITICAL FIX: Use ModuleWrapper's built-in component resolution instead of manual extraction
+            logger.info(f"🔍 Processing search result {i+1}/{len(results)}: {search_path}")
+            
+            # ENHANCED COMPONENT RESOLUTION: Handle all component types including modules
             if not component and search_path:
                 # Map search path to actual component path
                 actual_path = _map_search_path_to_actual_path(search_path)
@@ -404,22 +483,54 @@ async def _find_card_component(query: str, limit: int = 5, score_threshold: floa
                     if component:
                         result["component"] = component
                         logger.info(f"✅ ModuleWrapper resolved component: {actual_path} -> {type(component).__name__}")
+                        
+                        # ENHANCED: If component is a module, extract usable classes/functions
+                        if inspect.ismodule(component):
+                            logger.info(f"🔍 Component is module, extracting usable members...")
+                            module_members = inspect.getmembers(component)
+                            
+                            for name, member in module_members:
+                                if (not name.startswith('_') and
+                                    (inspect.isclass(member) or callable(member)) and
+                                    any(keyword in name.lower() for keyword in ['card', 'widget', 'button', 'text', 'decorated'])):
+                                    
+                                    # Use the first suitable member found
+                                    result["component"] = member
+                                    result["extracted_from_module"] = component.__name__
+                                    result["extracted_member"] = name
+                                    logger.info(f"✅ Extracted {type(member).__name__} '{name}' from module {component.__name__}")
+                                    component = member
+                                    break
                     else:
                         logger.warning(f"⚠️ ModuleWrapper could not resolve component: {actual_path}")
                         
-                        # FALLBACK: Try direct access pattern only if wrapper method fails
+                        # ENHANCED FALLBACK: Try direct access with module extraction
                         if actual_path in _card_framework_wrapper.components:
                             component_data = _card_framework_wrapper.components[actual_path]
                             if hasattr(component_data, 'obj') and component_data.obj:
-                                module = component_data.obj
+                                obj = component_data.obj
                                 
                                 # Check if it's already a class/callable we can use directly
-                                if inspect.isclass(module) or callable(module):
-                                    component = module
+                                if inspect.isclass(obj) or callable(obj):
+                                    component = obj
                                     result["component"] = component
-                                    logger.info(f"✅ Direct fallback resolution: {type(module).__name__}")
+                                    logger.info(f"✅ Direct fallback resolution: {type(obj).__name__}")
+                                
+                                # If it's a module, extract components from it
+                                elif inspect.ismodule(obj):
+                                    logger.info(f"🔍 Fallback: Extracting from module {obj.__name__}")
+                                    module_members = inspect.getmembers(obj)
+                                    
+                                    for name, member in module_members:
+                                        if (not name.startswith('_') and
+                                            (inspect.isclass(member) or callable(member))):
+                                            component = member
+                                            result["component"] = component
+                                            result["fallback_extracted"] = f"{obj.__name__}.{name}"
+                                            logger.info(f"✅ Fallback extracted: {type(member).__name__} '{name}'")
+                                            break
                                 else:
-                                    logger.warning(f"⚠️ Component data object is not usable: {type(module)}")
+                                    logger.warning(f"⚠️ Component data object is not usable: {type(obj)}")
                             else:
                                 logger.warning(f"⚠️ Component data has no usable obj: {component_data}")
                         else:
@@ -430,24 +541,39 @@ async def _find_card_component(query: str, limit: int = 5, score_threshold: floa
                     # Don't let resolution errors break the search
                     component = None
             
-            # Now filter for instantiable components
-            if component and (inspect.isclass(component) or callable(component)):
-                # Additional filtering for methods (keep the UI filtering logic)
+            # ENHANCED FILTERING: Better component validation
+            if component:
                 component_path = result.get("path", "")
-                if inspect.ismethod(component) or (hasattr(component, '__self__') and component.__self__ is not None):
-                    logger.debug(f"❌ Skipping method reference: {component_path}")
-                    continue
-                    
-                if any(method_pattern in component_path.lower() for method_pattern in ['.add_', '.set_', '.get_', '.remove_', '.update_', '.create_']):
-                    logger.debug(f"❌ Skipping likely method: {component_path}")
-                    continue
                 
-                filtered_results.append(result)
-                logger.debug(f"✅ Added resolved component: {component_path}")
+                # Check for usable component types
+                if inspect.isclass(component) or callable(component):
+                    # Skip bound methods
+                    if inspect.ismethod(component) or (hasattr(component, '__self__') and component.__self__ is not None):
+                        logger.debug(f"❌ Skipping bound method: {component_path}")
+                        continue
+                    
+                    # Skip likely utility methods based on naming patterns
+                    if any(pattern in component_path.lower() for pattern in ['.add_', '.set_', '.get_', '.remove_', '.update_', '.create_']):
+                        logger.debug(f"❌ Skipping utility method: {component_path}")
+                        continue
+                    
+                    # This is a valid component
+                    filtered_results.append(result)
+                    logger.info(f"✅ Added valid component: {component_path} ({type(component).__name__})")
+                
+                elif inspect.ismodule(component):
+                    # Module was not successfully processed - keep for fallback but note the issue
+                    filtered_results.append(result)
+                    logger.warning(f"⚠️ Module component not processed, keeping for fallback: {component_path}")
+                
+                else:
+                    # Unknown component type - keep for fallback
+                    filtered_results.append(result)
+                    logger.warning(f"⚠️ Unknown component type, keeping for fallback: {component_path} ({type(component)})")
             else:
-                # Keep results for fallback but log the issue
-                logger.debug(f"⚠️ No component resolved for: {search_path}")
+                # No component resolved - keep for fallback
                 filtered_results.append(result)
+                logger.warning(f"⚠️ No component resolved, keeping for fallback: {search_path}")
         
         # Log top results for debugging
         if filtered_results:
@@ -1837,20 +1963,73 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 best_match = results[0]
                 component = best_match.get("component")
                 
-                # CRITICAL FIX: Check if component is actually usable (not a module)
-                if component and not inspect.ismodule(component):
-                    logger.info(f"✅ Found valid component: {best_match.get('path')} (score: {best_match.get('score'):.4f})")
+                # ENHANCED COMPONENT VALIDATION: Handle module objects and extract usable classes/functions
+                usable_component = None
+                component_type = "unknown"
+                
+                if component:
+                    if inspect.ismodule(component):
+                        logger.info(f"🔍 Component is a module, extracting usable classes/functions...")
+                        
+                        # Extract usable classes and functions from the module
+                        module_members = inspect.getmembers(component)
+                        potential_components = []
+                        
+                        for name, member in module_members:
+                            # Skip private members and built-in types
+                            if name.startswith('_'):
+                                continue
+                                
+                            # Look for classes that might be card components
+                            if inspect.isclass(member):
+                                # Check if it's likely a card component (has relevant methods or attributes)
+                                if (hasattr(member, 'to_dict') or
+                                    hasattr(member, '__init__') or
+                                    any(keyword in name.lower() for keyword in ['card', 'widget', 'button', 'text', 'image', 'decorated'])):
+                                    potential_components.append((name, member, 'class'))
+                                    logger.info(f"🔍 Found potential class component: {name}")
+                            
+                            # Look for functions that might create cards
+                            elif inspect.isfunction(member) or callable(member):
+                                if any(keyword in name.lower() for keyword in ['create', 'make', 'build', 'card', 'widget']):
+                                    potential_components.append((name, member, 'function'))
+                                    logger.info(f"🔍 Found potential function component: {name}")
+                        
+                        if potential_components:
+                            # Use the first potential component (could be enhanced with better selection logic)
+                            component_name, usable_component, component_type = potential_components[0]
+                            logger.info(f"✅ Extracted {component_type} component '{component_name}' from module")
+                            best_match["extracted_component"] = component_name
+                            best_match["type"] = "class" if component_type == "class" else "function"
+                        else:
+                            logger.warning(f"⚠️ Module contains no usable card components")
+                            usable_component = None
+                    
+                    elif inspect.isclass(component) or callable(component):
+                        # Component is already a usable class or function
+                        usable_component = component
+                        component_type = "class" if inspect.isclass(component) else "function"
+                        logger.info(f"✅ Component is directly usable {component_type}")
+                        best_match["type"] = component_type
+                    
+                    else:
+                        logger.warning(f"⚠️ Component is neither module, class, nor callable: {type(component)}")
+                        usable_component = None
+                
+                # Use component if we found a usable one
+                if usable_component:
+                    logger.info(f"✅ Using {component_type} component: {best_match.get('path')} (score: {best_match.get('score'):.4f})")
                     
                     # TRUST MODULEWRAPPER: Use hybrid approach for component-based card creation
                     logger.info("🔧 Using trusted ModuleWrapper with hybrid approach")
                     google_format_card = _create_card_with_hybrid_approach(
-                        card_component=component,
+                        card_component=usable_component,
                         params=card_params,
                         sections=None
                     )
                     logger.info("✅ Successfully created card using ModuleWrapper hybrid approach")
                 else:
-                    logger.warning(f"⚠️ Component is module or invalid, using simple card structure")
+                    logger.warning(f"⚠️ No usable component found, using simple card structure")
                     google_format_card = _build_simple_card_structure(card_params)
                     best_match = {"type": "simple_fallback", "name": "simple_card", "score": 0.0}
             else:
