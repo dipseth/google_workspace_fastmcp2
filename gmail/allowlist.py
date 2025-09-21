@@ -18,10 +18,10 @@ from fastmcp import FastMCP
 
 # Import our custom type for consistent parameter definition
 from tools.common_types import UserGoogleEmail
+from .gmail_types import GmailAllowListResponse, AllowedEmailInfo, GmailRecipientsOptional
 
 from config.settings import settings
 from .utils import _parse_email_addresses
-from .gmail_types import GmailAllowListResponse, AllowedEmailInfo
 
 from config.enhanced_logging import setup_logger
 logger = setup_logger()
@@ -29,7 +29,7 @@ logger = setup_logger()
 
 async def manage_gmail_allow_list(
     action: str,
-    email: Optional[Union[str, List[str]]] = None,
+    email: GmailRecipientsOptional = None,
     user_google_email: UserGoogleEmail = None
 ) -> Union[str, GmailAllowListResponse]:
     """
@@ -273,7 +273,7 @@ def setup_allowlist_tools(mcp: FastMCP) -> None:
     )
     async def manage_gmail_allow_list_tool(
         action: str,
-        email: Optional[Union[str, List[str]]] = None,
+        email: GmailRecipientsOptional = None,
         user_google_email: UserGoogleEmail = None
     ) -> Union[str, GmailAllowListResponse]:
         return await manage_gmail_allow_list(action, email, user_google_email)

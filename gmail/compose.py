@@ -21,10 +21,11 @@ from fastmcp import FastMCP, Context
 from googleapiclient.errors import HttpError
 
 from .service import _get_gmail_service_with_fallback
-from .utils import _create_mime_message, _prepare_reply_subject, _quote_original_message, _html_to_plain_text, _extract_headers, _extract_message_body, extract_email_addresses, _prepare_forward_subject, _extract_html_body, _format_forward_content, _generate_gmail_web_url
+from .utils import _create_mime_message, _prepare_reply_subject, _quote_original_message, _html_to_plain_text, _extract_headers, _extract_message_body, extract_email_addresses, _prepare_forward_subject, _extract_html_body, _format_forward_content, _generate_gmail_web_url, count_recipients
 from .gmail_types import (
     SendGmailMessageResponse, DraftGmailMessageResponse, ReplyGmailMessageResponse,
-    DraftGmailReplyResponse, ForwardGmailMessageResponse, DraftGmailForwardResponse
+    DraftGmailReplyResponse, ForwardGmailMessageResponse, DraftGmailForwardResponse,
+    GmailRecipients, GmailRecipientsOptional
 )
 from config.settings import settings
 from tools.common_types import UserGoogleEmail
@@ -140,14 +141,14 @@ async def _handle_elicitation_fallback(
 
 async def send_gmail_message(
     ctx: Context,
-    to: Union[str, List[str]],
+    to: GmailRecipients,
     subject: str,
     body: str,
     user_google_email: UserGoogleEmail = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
-    cc: Optional[Union[str, List[str]]] = None,
-    bcc: Optional[Union[str, List[str]]] = None
+    cc: GmailRecipientsOptional = None,
+    bcc: GmailRecipientsOptional = None
 ) -> SendGmailMessageResponse:
     """
     Sends an email using the user's Gmail account with support for HTML formatting and multiple recipients.
@@ -236,10 +237,14 @@ async def send_gmail_message(
             error="Parameter validation error: missing html_body for mixed content"
         )
 
-    # Format recipients for logging
-    to_str = to if isinstance(to, str) else f"{len(to)} recipients"
-    cc_str = f", CC: {cc if isinstance(cc, str) else f'{len(cc)} recipients'}" if cc else ""
-    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{len(bcc)} recipients'}" if bcc else ""
+    # Format recipients for logging using shared utility function
+    to_count = count_recipients(to)
+    cc_count = count_recipients(cc) if cc else 0
+    bcc_count = count_recipients(bcc) if bcc else 0
+    
+    to_str = to if isinstance(to, str) else f"{to_count} recipients"
+    cc_str = f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
+    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}" if bcc else ""
 
     logger.info(f"[send_gmail_message] Sending to: {to_str}{cc_str}{bcc_str}, from: {user_google_email}, content_type: {content_type}")
 
@@ -540,10 +545,8 @@ async def send_gmail_message(
         )
         message_id = sent_message.get("id")
 
-        # Count total recipients for confirmation
-        total_recipients = (len(to) if isinstance(to, list) else 1) + \
-                          (len(cc) if isinstance(cc, list) else (1 if cc else 0)) + \
-                          (len(bcc) if isinstance(bcc, list) else (1 if bcc else 0))
+        # Count total recipients for confirmation using shared utility function
+        total_recipients = count_recipients(to, cc, bcc)
 
         # Get thread ID from the sent message
         thread_id = sent_message.get("threadId")
@@ -593,11 +596,11 @@ async def draft_gmail_message(
     subject: str,
     body: str,
     user_google_email: UserGoogleEmail = None,
-    to: Optional[Union[str, List[str]]] = None,
+    to: GmailRecipientsOptional = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
-    cc: Optional[Union[str, List[str]]] = None,
-    bcc: Optional[Union[str, List[str]]] = None
+    cc: GmailRecipientsOptional = None,
+    bcc: GmailRecipientsOptional = None
 ) -> DraftGmailMessageResponse:
     """
     Creates a draft email in the user's Gmail account with support for HTML formatting and multiple recipients.
@@ -675,10 +678,14 @@ async def draft_gmail_message(
             error="Parameter validation error: missing html_body for mixed content"
         )
 
-    # Format recipients for logging
-    to_str = "no recipients" if not to else (to if isinstance(to, str) else f"{len(to)} recipients")
-    cc_str = f", CC: {cc if isinstance(cc, str) else f'{len(cc)} recipients'}" if cc else ""
-    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{len(bcc)} recipients'}" if bcc else ""
+    # Format recipients for logging using shared utility function
+    to_count = count_recipients(to) if to else 0
+    cc_count = count_recipients(cc) if cc else 0
+    bcc_count = count_recipients(bcc) if bcc else 0
+    
+    to_str = "no recipients" if not to else (to if isinstance(to, str) else f"{to_count} recipients")
+    cc_str = f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
+    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}" if bcc else ""
 
     logger.info(f"[draft_gmail_message] Email: '{user_google_email}', Subject: '{subject}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}")
 
@@ -706,14 +713,8 @@ async def draft_gmail_message(
         )
         draft_id = created_draft.get("id")
 
-        # Count total recipients for confirmation (if any)
-        total_recipients = 0
-        if to:
-            total_recipients += len(to) if isinstance(to, list) else 1
-        if cc:
-            total_recipients += len(cc) if isinstance(cc, list) else 1
-        if bcc:
-            total_recipients += len(bcc) if isinstance(bcc, list) else 1
+        # Count total recipients for confirmation using shared utility function
+        total_recipients = count_recipients(to, cc, bcc)
 
         # Get message ID from the draft
         message_id = created_draft.get("message", {}).get("id")
@@ -749,9 +750,9 @@ async def reply_to_gmail_message(
     body: str,
     user_google_email: UserGoogleEmail = None,
     reply_mode: Literal["sender_only", "reply_all", "custom"] = "sender_only",
-    to: Optional[Union[str, List[str]]] = None,
-    cc: Optional[Union[str, List[str]]] = None,
-    bcc: Optional[Union[str, List[str]]] = None,
+    to: GmailRecipientsOptional = None,
+    cc: GmailRecipientsOptional = None,
+    bcc: GmailRecipientsOptional = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None
 ) -> ReplyGmailMessageResponse:
@@ -961,9 +962,9 @@ async def draft_gmail_reply(
     body: str,
     user_google_email: UserGoogleEmail = None,
     reply_mode: Literal["sender_only", "reply_all", "custom"] = "sender_only",
-    to: Optional[Union[str, List[str]]] = None,
-    cc: Optional[Union[str, List[str]]] = None,
-    bcc: Optional[Union[str, List[str]]] = None,
+    to: GmailRecipientsOptional = None,
+    cc: GmailRecipientsOptional = None,
+    bcc: GmailRecipientsOptional = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None
 ) -> DraftGmailReplyResponse:
@@ -1172,13 +1173,13 @@ async def draft_gmail_reply(
 async def forward_gmail_message(
     ctx: Context,
     message_id: str,
-    to: Union[str, List[str]],
+    to: GmailRecipients,
     user_google_email: UserGoogleEmail = None,
     body: Optional[str] = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
-    cc: Optional[Union[str, List[str]]] = None,
-    bcc: Optional[Union[str, List[str]]] = None
+    cc: GmailRecipientsOptional = None,
+    bcc: GmailRecipientsOptional = None
 ) -> ForwardGmailMessageResponse:
     """
     Forward a Gmail message to specified recipients with HTML formatting preservation and elicitation support.
@@ -1221,10 +1222,14 @@ async def forward_gmail_message(
         forward_gmail_message(ctx, "msg_123", ["user1@example.com", "user2@example.com"],
                             cc="manager@example.com")
     """
-    # Format recipients for logging
-    to_str = to if isinstance(to, str) else f"{len(to)} recipients"
-    cc_str = f", CC: {cc if isinstance(cc, str) else f'{len(cc)} recipients'}" if cc else ""
-    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{len(bcc)} recipients'}" if bcc else ""
+    # Format recipients for logging using shared utility function
+    to_count = count_recipients(to)
+    cc_count = count_recipients(cc) if cc else 0
+    bcc_count = count_recipients(bcc) if bcc else 0
+    
+    to_str = to if isinstance(to, str) else f"{to_count} recipients"
+    cc_str = f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
+    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}" if bcc else ""
 
     logger.info(f"[forward_gmail_message] Email: '{user_google_email}', Forwarding Message ID: '{message_id}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}")
 
@@ -1674,13 +1679,13 @@ async def forward_gmail_message(
 
 async def draft_gmail_forward(
     message_id: str,
-    to: Union[str, List[str]],
+    to: GmailRecipients,
     user_google_email: UserGoogleEmail = None,
     body: Optional[str] = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
-    cc: Optional[Union[str, List[str]]] = None,
-    bcc: Optional[Union[str, List[str]]] = None
+    cc: GmailRecipientsOptional = None,
+    bcc: GmailRecipientsOptional = None
 ) -> DraftGmailForwardResponse:
     """
     Create a draft forward of a Gmail message with HTML formatting preservation.
@@ -1718,10 +1723,14 @@ async def draft_gmail_forward(
                           content_type="mixed",
                           html_body="<p>Please review this email.</p>")
     """
-    # Format recipients for logging
-    to_str = to if isinstance(to, str) else f"{len(to)} recipients"
-    cc_str = f", CC: {cc if isinstance(cc, str) else f'{len(cc)} recipients'}" if cc else ""
-    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{len(bcc)} recipients'}" if bcc else ""
+    # Format recipients for logging using shared utility function
+    to_count = count_recipients(to)
+    cc_count = count_recipients(cc) if cc else 0
+    bcc_count = count_recipients(bcc) if bcc else 0
+    
+    to_str = to if isinstance(to, str) else f"{to_count} recipients"
+    cc_str = f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
+    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}" if bcc else ""
 
     logger.info(f"[draft_gmail_forward] Email: '{user_google_email}', Drafting forward of Message ID: '{message_id}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}")
 
@@ -1877,14 +1886,14 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     )
     async def send_gmail_message_tool(
         ctx: Annotated[Context, Field(description="FastMCP context for elicitation support and user interaction")],
-        to: Annotated[Union[str, List[str]], Field(description="Recipient email address(es). Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")],
+        to: GmailRecipients,
         subject: Annotated[str, Field(description="Email subject line")],
         body: Annotated[str, Field(description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)")],
         user_google_email: UserGoogleEmail = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)")] = "mixed",
         html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. Ignored for 'plain' and 'html' types")] = None,
-        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s). Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
-        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s). Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None
+        cc: GmailRecipientsOptional = None,
+        bcc: GmailRecipientsOptional = None
     ) -> SendGmailMessageResponse:
         """
         Send Gmail message with structured output and elicitation support.
@@ -1932,11 +1941,11 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         subject: Annotated[str, Field(description="Email subject line for the draft")],
         body: Annotated[str, Field(description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)")],
         user_google_email: UserGoogleEmail = None,
-        to: Annotated[Optional[Union[str, List[str]]], Field(description="Optional recipient email address(es). Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']. Can be None for recipient-less drafts")] = None,
+        to: GmailRecipientsOptional = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)")] = "mixed",
         html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. Ignored for 'plain' and 'html' types")] = None,
-        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s). Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
-        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s). Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None
+        cc: GmailRecipientsOptional = None,
+        bcc: GmailRecipientsOptional = None
     ) -> DraftGmailMessageResponse:
         """
         Create Gmail draft with structured output.
@@ -1983,9 +1992,9 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         body: Annotated[str, Field(description="Reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted")],
         user_google_email: UserGoogleEmail = None,
         reply_mode: Annotated[Literal["sender_only", "reply_all", "custom"], Field(description="Who receives the reply: 'sender_only' = only original sender (default), 'reply_all' = all original recipients, 'custom' = use provided to/cc/bcc parameters")] = "sender_only",
-        to: Annotated[Optional[Union[str, List[str]]], Field(description="Recipient(s) when reply_mode='custom'. Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")] = None,
-        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s) when reply_mode='custom'. Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
-        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s) when reply_mode='custom'. Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None,
+        to: GmailRecipientsOptional = None,
+        cc: GmailRecipientsOptional = None,
+        bcc: GmailRecipientsOptional = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)")] = "mixed",
         html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types")] = None
     ) -> ReplyGmailMessageResponse:
@@ -2037,9 +2046,9 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         body: Annotated[str, Field(description="Draft reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted")],
         user_google_email: UserGoogleEmail = None,
         reply_mode: Annotated[Literal["sender_only", "reply_all", "custom"], Field(description="Who receives the reply: 'sender_only' = only original sender (default), 'reply_all' = all original recipients, 'custom' = use provided to/cc/bcc parameters")] = "sender_only",
-        to: Annotated[Optional[Union[str, List[str]]], Field(description="Recipient(s) when reply_mode='custom'. Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")] = None,
-        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s) when reply_mode='custom'. Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
-        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s) when reply_mode='custom'. Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None,
+        to: GmailRecipientsOptional = None,
+        cc: GmailRecipientsOptional = None,
+        bcc: GmailRecipientsOptional = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)")] = "mixed",
         html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types")] = None
     ) -> DraftGmailReplyResponse:
@@ -2089,13 +2098,13 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     async def forward_gmail_message_tool(
         ctx: Annotated[Context, Field(description="FastMCP context for elicitation support and user interaction")],
         message_id: Annotated[str, Field(description="The ID of the Gmail message to forward. This will include the original message content and headers")],
-        to: Annotated[Union[str, List[str]], Field(description="Recipient email address(es). Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")],
+        to: GmailRecipients,
         user_google_email: UserGoogleEmail = None,
         body: Annotated[Optional[str], Field(description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)")] = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)")] = "mixed",
         html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. This will be added before the forwarded HTML content. Ignored for 'plain' and 'html' types")] = None,
-        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s). Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
-        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s). Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None
+        cc: GmailRecipientsOptional = None,
+        bcc: GmailRecipientsOptional = None
     ) -> ForwardGmailMessageResponse:
         """
         Forward Gmail message with structured output, HTML preservation, and elicitation support.
@@ -2148,13 +2157,13 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     )
     async def draft_gmail_forward_tool(
         message_id: Annotated[str, Field(description="The ID of the Gmail message to create a forward draft for. This will include the original message content and headers")],
-        to: Annotated[Union[str, List[str]], Field(description="Recipient email address(es). Single: 'user@example.com' or Multiple: ['user1@example.com', 'user2@example.com']")],
+        to: GmailRecipients,
         user_google_email: UserGoogleEmail = None,
         body: Annotated[Optional[str], Field(description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)")] = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)")] = "mixed",
         html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. This will be added before the forwarded HTML content. Ignored for 'plain' and 'html' types")] = None,
-        cc: Annotated[Optional[Union[str, List[str]]], Field(description="CC recipient(s). Single: 'cc@example.com' or Multiple: ['cc1@example.com', 'cc2@example.com']")] = None,
-        bcc: Annotated[Optional[Union[str, List[str]]], Field(description="BCC recipient(s). Single: 'bcc@example.com' or Multiple: ['bcc1@example.com', 'bcc2@example.com']")] = None
+        cc: GmailRecipientsOptional = None,
+        bcc: GmailRecipientsOptional = None
     ) -> DraftGmailForwardResponse:
         """
         Create Gmail forward draft with structured output and HTML preservation.

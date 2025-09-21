@@ -380,6 +380,34 @@ def _parse_email_addresses(email_input: Union[str, List[str]]) -> List[str]:
         return []
 
 
+def count_recipients(*recipient_fields: Optional[Union[str, List[str]]]) -> int:
+    """
+    Count total recipients across multiple recipient fields (to, cc, bcc).
+    
+    Handles all recipient formats consistently:
+    - Single email string: "user@example.com" → 1 recipient
+    - List of emails: ["user1@example.com", "user2@example.com"] → 2 recipients
+    - Comma-separated string: "user1@example.com,user2@example.com" → 2 recipients
+    - None/empty → 0 recipients
+    
+    Args:
+        *recipient_fields: Variable number of recipient fields (to, cc, bcc, etc.)
+        
+    Returns:
+        Total count of unique recipients across all fields
+        
+    Example:
+        count_recipients(to, cc, bcc)
+        count_recipients("user1@example.com,user2@example.com", ["user3@example.com"])
+    """
+    total_count = 0
+    for field in recipient_fields:
+        if field:
+            parsed_emails = _parse_email_addresses(field)
+            total_count += len(parsed_emails)
+    return total_count
+
+
 def extract_email_addresses(header_value: str) -> List[str]:
     """
     Extract email addresses from an email header value.

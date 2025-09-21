@@ -5,7 +5,7 @@ These TypedDict classes define the structure of data returned by Gmail tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional, Dict, Any, NotRequired
+from typing_extensions import TypedDict, List, Optional, Dict, Any, NotRequired, Union
 
 
 class FilterCriteria(TypedDict):
@@ -353,6 +353,25 @@ class DraftGmailForwardResponse(TypedDict):
     html_preserved: NotRequired[bool]  # Whether original HTML formatting was preserved
     userEmail: str
     error: NotRequired[Optional[str]]
+
+
+# Gmail Recipient Types
+
+# Standardized types for Gmail recipient fields
+GmailRecipients = Union[str, List[str]]
+"""
+Standardized type for required Gmail recipient fields (to field).
+Supports three formats:
+- Single email string: "user@example.com"
+- List of emails: ["user1@example.com", "user2@example.com"]
+- Comma-separated string: "user1@example.com,user2@example.com"
+"""
+
+GmailRecipientsOptional = Optional[Union[str, List[str]]]
+"""
+Standardized type for optional Gmail recipient fields (cc, bcc fields).
+Supports same formats as GmailRecipients but can also be None.
+"""
 
 
 # Unified Gmail Message Content Types
