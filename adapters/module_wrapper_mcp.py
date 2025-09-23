@@ -216,7 +216,7 @@ class ModuleWrapperMiddleware(Middleware):
         module_name: str, 
         query: str, 
         limit: int = 5,
-        score_threshold: float = 0.7
+        score_threshold: float = 0.3
     ) -> List[Dict[str, Any]]:
         """
         Search for components in a module.

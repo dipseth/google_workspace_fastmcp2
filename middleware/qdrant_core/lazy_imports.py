@@ -16,6 +16,7 @@ logger = setup_logger()
 _qdrant_client = None
 _qdrant_models = None
 _sentence_transformer = None
+_fastembed = None
 _numpy = None
 
 
@@ -99,14 +100,31 @@ def get_sentence_transformer():
     return _sentence_transformer
 
 
+def get_fastembed():
+    """
+    Lazy load FastEmbed when first needed.
+    
+    Returns:
+        TextEmbedding class from FastEmbed
+    """
+    global _fastembed
+    if _fastembed is None:
+        logger.info("🤖 Loading FastEmbed (first use)...")
+        from fastembed import TextEmbedding
+        _fastembed = TextEmbedding
+        logger.info("✅ FastEmbed loaded")
+    return _fastembed
+
+
 def reset_imports():
     """
     Reset all lazy imports. Useful for testing or reinitialization.
     """
-    global _qdrant_client, _qdrant_models, _sentence_transformer, _numpy
+    global _qdrant_client, _qdrant_models, _sentence_transformer, _fastembed, _numpy
     _qdrant_client = None
     _qdrant_models = None
     _sentence_transformer = None
+    _fastembed = None
     _numpy = None
     logger.debug("🔄 All lazy imports reset")
 
@@ -121,7 +139,8 @@ def get_import_status() -> Dict[str, bool]:
     return {
         "numpy": _numpy is not None and _numpy is not False,
         "qdrant_client": _qdrant_client is not None,
-        "sentence_transformer": _sentence_transformer is not None
+        "sentence_transformer": _sentence_transformer is not None,
+        "fastembed": _fastembed is not None
     }
 
 

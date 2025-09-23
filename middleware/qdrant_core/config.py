@@ -50,7 +50,7 @@ class QdrantConfig:
     
     # Search settings
     default_search_limit: int = 10
-    score_threshold: float = 0.7
+    score_threshold: float = 0.3  # Lower threshold for better semantic search results
     
     # Middleware settings
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -251,8 +251,50 @@ def get_default_config() -> QdrantConfig:
     return QdrantConfig()
 
 
+def load_config_from_settings() -> QdrantConfig:
+    """Load configuration from centralized settings (preferred method)."""
+    try:
+        from config.settings import settings
+        
+        config = QdrantConfig()
+        
+        # Use centralized settings for cache retention
+        config.cache_retention_days = settings.mcp_tool_responses_collection_cache_days
+        
+        # Use centralized Qdrant settings
+        if settings.qdrant_host:
+            config.host = settings.qdrant_host
+        
+        if settings.qdrant_port:
+            config.ports = [settings.qdrant_port] + [p for p in config.ports if p != settings.qdrant_port]
+        
+        # Additional overrides from environment variables if present
+        import os
+        if os.getenv("QDRANT_COLLECTION"):
+            config.collection_name = os.getenv("QDRANT_COLLECTION")
+        
+        if os.getenv("QDRANT_EMBEDDING_MODEL"):
+            config.embedding_model = os.getenv("QDRANT_EMBEDDING_MODEL")
+        
+        if os.getenv("QDRANT_ENABLED"):
+            config.enabled = os.getenv("QDRANT_ENABLED").lower() in ["true", "1", "yes"]
+        
+        if os.getenv("QDRANT_OPTIMIZATION_PROFILE"):
+            try:
+                config.optimization_profile = OptimizationProfile(os.getenv("QDRANT_OPTIMIZATION_PROFILE"))
+            except ValueError:
+                # Invalid profile name, keep default
+                pass
+        
+        return config
+        
+    except ImportError:
+        # Fallback to legacy environment-only loading
+        return load_config_from_env()
+
+
 def load_config_from_env() -> QdrantConfig:
-    """Load configuration from environment variables."""
+    """Load configuration from environment variables (legacy method)."""
     import os
     
     config = QdrantConfig()

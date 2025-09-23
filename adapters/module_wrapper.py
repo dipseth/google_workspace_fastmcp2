@@ -1256,7 +1256,7 @@ class ModuleWrapper:
         
         return "\n".join(text_parts)
     
-    async def search_async(self, query: str, limit: int = 5, score_threshold: float = 0.7) -> List[Dict[str, Any]]:
+    async def search_async(self, query: str, limit: int = 5, score_threshold: float = 0.3) -> List[Dict[str, Any]]:
         """
         Search for components in the module asynchronously.
         
@@ -1392,7 +1392,7 @@ class ModuleWrapper:
             logger.error(f"❌ Search failed: {e}", exc_info=True)
             raise
     
-    def search(self, query: str, limit: int = 5, score_threshold: float = 0.7) -> List[Dict[str, Any]]:
+    def search(self, query: str, limit: int = 5, score_threshold: float = 0.3) -> List[Dict[str, Any]]:
         """
         Search for components in the module.
         

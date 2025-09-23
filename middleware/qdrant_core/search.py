@@ -18,6 +18,7 @@ import json
 import uuid
 import asyncio
 import base64
+import gzip
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -60,6 +61,59 @@ class QdrantSearchManager:
         self.config = client_manager.config
         
         logger.debug("🔍 QdrantSearchManager initialized")
+    
+    def _is_gzipped_data(self, data: bytes) -> bool:
+        """
+        Check if data is actually gzip compressed by examining magic bytes.
+        
+        Args:
+            data: Raw bytes to check
+            
+        Returns:
+            bool: True if data appears to be gzipped
+        """
+        return len(data) >= 2 and data[:2] == b'\x1f\x8b'
+    
+    def _safe_decompress_data(self, compressed_data: bytes) -> Optional[str]:
+        """
+        Safely decompress data with proper gzip detection and fallback handling.
+        
+        Args:
+            compressed_data: Potentially compressed bytes data
+            
+        Returns:
+            Decompressed string data or None if decompression fails
+        """
+        try:
+            # First check if this is actually gzipped data
+            if not self._is_gzipped_data(compressed_data):
+                logger.debug("🔍 Data not gzipped (missing magic bytes), treating as plain data")
+                # Try to decode as UTF-8 string directly
+                try:
+                    return compressed_data.decode('utf-8')
+                except UnicodeDecodeError:
+                    logger.debug("🔍 Data not UTF-8, attempting base64 decode")
+                    try:
+                        return base64.b64decode(compressed_data).decode('utf-8')
+                    except:
+                        return None
+            
+            # Data appears to be gzipped, attempt decompression
+            logger.debug("🔍 Detected gzipped data, decompressing")
+            return gzip.decompress(compressed_data).decode('utf-8')
+            
+        except gzip.BadGzipFile:
+            logger.debug("🔍 Invalid gzip format, treating as plain data")
+            try:
+                return compressed_data.decode('utf-8')
+            except UnicodeDecodeError:
+                return None
+        except Exception as e:
+            logger.debug(f"🔍 Decompression failed: {e}, treating as plain data")
+            try:
+                return compressed_data.decode('utf-8')
+            except UnicodeDecodeError:
+                return None
     
     @property
     def is_initialized(self) -> bool:
@@ -205,11 +259,16 @@ class QdrantSearchManager:
                 if parsed_query["semantic_query"]:
                     logger.debug(f"🧠 Performing semantic search: '{parsed_query['semantic_query']}'")
                     
-                    # Generate embedding for the semantic query
-                    query_embedding = await asyncio.to_thread(
-                        self.client_manager.embedder.encode,
+                    # Generate embedding for the semantic query using FastEmbed
+                    embedding_list = await asyncio.to_thread(
+                        lambda q: list(self.client_manager.embedder.embed([q])),
                         parsed_query["semantic_query"]
                     )
+                    query_embedding = embedding_list[0] if embedding_list else None
+                    
+                    if query_embedding is None:
+                        logger.error(f"Failed to generate embedding for semantic query: {parsed_query['semantic_query']}")
+                        return []
                     
                     # Use helper method for consistent query_points usage
                     search_results = await self._execute_semantic_search(
@@ -247,8 +306,16 @@ class QdrantSearchManager:
                 else:
                     logger.debug(f"🧠 Pure semantic search: '{query}'")
                     
-                    # Generate embedding for the entire query
-                    query_embedding = await asyncio.to_thread(self.client_manager.embedder.encode, query)
+                    # Generate embedding for the entire query using FastEmbed
+                    embedding_list = await asyncio.to_thread(
+                        lambda q: list(self.client_manager.embedder.embed([q])),
+                        query
+                    )
+                    query_embedding = embedding_list[0] if embedding_list else None
+                    
+                    if query_embedding is None:
+                        logger.error(f"Failed to generate embedding for query: {query}")
+                        return []
                     
                     # Use helper method for consistent query_points usage
                     search_results = await self._execute_semantic_search(
@@ -274,28 +341,55 @@ class QdrantSearchManager:
                     result_id = str(result.get('id', 'unknown'))
                     score = result.get('score', 0.0)
                 
-                # Decompress data if needed
-                if payload.get("compressed", False):
+                # Get response data from payload - handle different storage formats
+                response_data = None
+                
+                # Check for compressed data first
+                if payload.get("compressed", False) and payload.get("compressed_data"):
                     compressed_data = payload["compressed_data"]
                     # Ensure compressed_data is bytes (handle string encoding if necessary)
                     if isinstance(compressed_data, str):
                         # If it's a string, it might be base64 encoded or need to be encoded as bytes
-                        import base64
                         try:
                             # Try base64 decode first (common for binary data stored as string)
                             compressed_data = base64.b64decode(compressed_data)
                         except:
                             # Fallback to encoding as UTF-8 bytes
                             compressed_data = compressed_data.encode('utf-8')
-                    data = self.client_manager._decompress_data(compressed_data)
-                else:
-                    data = payload.get("data", "{}")
+                    
+                    # Use safe decompression with intelligent detection
+                    decompressed_data = self._safe_decompress_data(compressed_data)
+                    if decompressed_data:
+                        try:
+                            response_data = json.loads(decompressed_data)
+                        except json.JSONDecodeError:
+                            response_data = {"error": "Failed to parse decompressed JSON data"}
+                    else:
+                        # Decompression failed, try fallback data sources
+                        if payload.get("data"):
+                            try:
+                                response_data = json.loads(payload["data"])
+                            except json.JSONDecodeError:
+                                response_data = {"error": "Failed to parse fallback data"}
+                        elif payload.get("response_data"):
+                            response_data = payload["response_data"]
+                        else:
+                            response_data = {"error": "Decompression failed and no fallback data available"}
                 
-                # Parse response data
-                try:
-                    response_data = json.loads(data)
-                except json.JSONDecodeError:
-                    response_data = {"error": "Failed to parse stored data"}
+                # Check for JSON string data
+                elif payload.get("data"):
+                    try:
+                        response_data = json.loads(payload["data"])
+                    except json.JSONDecodeError:
+                        response_data = {"error": "Failed to parse JSON data"}
+                
+                # Check for already structured response_data (new format)
+                elif payload.get("response_data"):
+                    response_data = payload["response_data"]
+                
+                # Fallback to empty response
+                else:
+                    response_data = {"error": "No response data found", "available_keys": list(payload.keys())}
                
                 results.append({
                    "id": result_id,
@@ -352,15 +446,15 @@ class QdrantSearchManager:
 
     async def get_analytics(self, start_date=None, end_date=None, group_by="tool_name") -> Dict:
         """
-        Get analytics on stored tool responses.
+        Get comprehensive analytics on stored tool responses including point IDs and detailed metrics.
         
         Args:
-            start_date: Start date filter
-            end_date: End date filter
-            group_by: Field to group results by
+            start_date: Start date filter (datetime object)
+            end_date: End date filter (datetime object)
+            group_by: Field to group results by (tool_name, user_email, etc.)
             
         Returns:
-            Analytics data dictionary
+            Enhanced analytics data dictionary with point_ids and detailed metrics
         """
         # Ensure client is initialized
         if not self.client_manager.is_initialized:
@@ -373,32 +467,199 @@ class QdrantSearchManager:
             # Get all points from the collection
             _, qdrant_models = get_qdrant_imports()
             
-            # Scroll through all points in the collection
-            points = await asyncio.to_thread(
-                self.client_manager.client.scroll,
-                collection_name=self.config.collection_name,
-                limit=1000  # Adjust as needed
-            )
+            # Scroll through all points in the collection (get more if needed)
+            all_points = []
+            next_page_offset = None
             
+            # Paginate through all points
+            while True:
+                points_result = await asyncio.to_thread(
+                    self.client_manager.client.scroll,
+                    collection_name=self.config.collection_name,
+                    limit=1000,
+                    offset=next_page_offset,
+                    with_payload=True
+                )
+                
+                points_batch = points_result[0]
+                next_page_offset = points_result[1]
+                
+                all_points.extend(points_batch)
+                
+                # Break if no more points or if we got less than requested (last page)
+                if not points_batch or len(points_batch) < 1000 or next_page_offset is None:
+                    break
+            
+            # Enhanced analytics structure
             analytics = {
-                "total_responses": len(points[0]),
+                "total_responses": len(all_points),
                 "group_by": group_by,
-                "groups": {}
+                "groups": {},
+                "collection_name": self.config.collection_name,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "date_range": {
+                    "start_date": start_date.isoformat() if start_date else None,
+                    "end_date": end_date.isoformat() if end_date else None,
+                    "filtered": bool(start_date or end_date)
+                }
             }
             
-            for point in points[0]:
-                payload = point.payload
+            # Process each point with enhanced data collection
+            for point in all_points:
+                payload = point.payload or {}
+                point_id = str(point.id)
+                
+                # Apply date filtering if specified
+                if start_date or end_date:
+                    timestamp_str = payload.get("timestamp")
+                    if timestamp_str:
+                        try:
+                            # Parse timestamp (handle different formats)
+                            if 'T' in timestamp_str:
+                                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                            else:
+                                timestamp = datetime.fromisoformat(timestamp_str)
+                            
+                            # Apply date filters
+                            if start_date and timestamp < start_date:
+                                continue
+                            if end_date and timestamp > end_date:
+                                continue
+                        except (ValueError, TypeError):
+                            # Skip points with invalid timestamps if filtering by date
+                            if start_date or end_date:
+                                continue
+                
                 group_key = payload.get(group_by, "unknown")
                 
+                # Initialize group if it doesn't exist
                 if group_key not in analytics["groups"]:
                     analytics["groups"][group_key] = {
                         "count": 0,
-                        "timestamps": []
+                        "point_ids": [],
+                        "timestamps": [],
+                        "users": set(),
+                        "payload_types": set(),
+                        "session_ids": set(),
+                        "response_sizes": [],
+                        "has_errors": 0,
+                        "compressed_responses": 0,
+                        "latest_timestamp": None,
+                        "earliest_timestamp": None
                     }
                 
-                analytics["groups"][group_key]["count"] += 1
+                group_data = analytics["groups"][group_key]
+                
+                # Increment count and add point ID
+                group_data["count"] += 1
+                group_data["point_ids"].append(point_id)
+                
+                # Collect timestamp data
                 if "timestamp" in payload:
-                    analytics["groups"][group_key]["timestamps"].append(payload["timestamp"])
+                    timestamp_str = payload["timestamp"]
+                    group_data["timestamps"].append(timestamp_str)
+                    
+                    # Track earliest/latest timestamps
+                    if group_data["latest_timestamp"] is None or timestamp_str > group_data["latest_timestamp"]:
+                        group_data["latest_timestamp"] = timestamp_str
+                    if group_data["earliest_timestamp"] is None or timestamp_str < group_data["earliest_timestamp"]:
+                        group_data["earliest_timestamp"] = timestamp_str
+                
+                # Collect user information
+                if "user_email" in payload:
+                    group_data["users"].add(payload["user_email"])
+                if "user_id" in payload:
+                    group_data["users"].add(payload["user_id"])
+                
+                # Collect payload type information
+                if "payload_type" in payload:
+                    group_data["payload_types"].add(payload["payload_type"])
+                
+                # Collect session information
+                if "session_id" in payload:
+                    group_data["session_ids"].add(payload["session_id"])
+                
+                # Analyze response data for size and errors
+                if "data" in payload:
+                    try:
+                        data_str = payload["data"]
+                        group_data["response_sizes"].append(len(data_str))
+                        
+                        # Check for errors in the response
+                        if isinstance(data_str, str):
+                            try:
+                                parsed_data = json.loads(data_str)
+                                if isinstance(parsed_data, dict) and ("error" in parsed_data or "status" in parsed_data):
+                                    if parsed_data.get("error") or parsed_data.get("status", "").lower() == "error":
+                                        group_data["has_errors"] += 1
+                            except json.JSONDecodeError:
+                                pass
+                    except (TypeError, AttributeError):
+                        pass
+                
+                # Track compressed responses
+                if payload.get("compressed", False):
+                    group_data["compressed_responses"] += 1
+            
+            # Convert sets to lists and add computed metrics for each group
+            for group_key, group_data in analytics["groups"].items():
+                # Convert sets to sorted lists
+                group_data["users"] = sorted(list(group_data["users"]))
+                group_data["payload_types"] = sorted(list(group_data["payload_types"]))
+                group_data["session_ids"] = sorted(list(group_data["session_ids"]))
+                
+                # Add computed metrics
+                group_data["unique_users"] = len(group_data["users"])
+                group_data["unique_payload_types"] = len(group_data["payload_types"])
+                group_data["unique_sessions"] = len(group_data["session_ids"])
+                group_data["error_rate"] = group_data["has_errors"] / group_data["count"] if group_data["count"] > 0 else 0
+                group_data["compression_rate"] = group_data["compressed_responses"] / group_data["count"] if group_data["count"] > 0 else 0
+                
+                # Response size statistics
+                if group_data["response_sizes"]:
+                    group_data["avg_response_size"] = sum(group_data["response_sizes"]) / len(group_data["response_sizes"])
+                    group_data["min_response_size"] = min(group_data["response_sizes"])
+                    group_data["max_response_size"] = max(group_data["response_sizes"])
+                else:
+                    group_data["avg_response_size"] = 0
+                    group_data["min_response_size"] = 0
+                    group_data["max_response_size"] = 0
+                
+                # Activity timeline (recent activity in last 24 hours, 7 days, 30 days)
+                if group_data["timestamps"]:
+                    now = datetime.now(timezone.utc)
+                    recent_activity = {"last_24h": 0, "last_7d": 0, "last_30d": 0}
+                    
+                    for ts in group_data["timestamps"]:
+                        try:
+                            if 'T' in ts:
+                                timestamp = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                            else:
+                                timestamp = datetime.fromisoformat(ts)
+                            
+                            age_days = (now - timestamp).days
+                            if age_days <= 1:
+                                recent_activity["last_24h"] += 1
+                            if age_days <= 7:
+                                recent_activity["last_7d"] += 1
+                            if age_days <= 30:
+                                recent_activity["last_30d"] += 1
+                        except (ValueError, TypeError):
+                            continue
+                    
+                    group_data["recent_activity"] = recent_activity
+                else:
+                    group_data["recent_activity"] = {"last_24h": 0, "last_7d": 0, "last_30d": 0}
+            
+            # Add summary statistics
+            analytics["summary"] = {
+                "total_groups": len(analytics["groups"]),
+                "total_unique_users": len(set().union(*[g["users"] for g in analytics["groups"].values()])),
+                "total_unique_payload_types": len(set().union(*[g["payload_types"] for g in analytics["groups"].values()])),
+                "total_unique_sessions": len(set().union(*[g["session_ids"] for g in analytics["groups"].values()])),
+                "overall_error_rate": sum(g["has_errors"] for g in analytics["groups"].values()) / analytics["total_responses"] if analytics["total_responses"] > 0 else 0,
+                "overall_compression_rate": sum(g["compressed_responses"] for g in analytics["groups"].values()) / analytics["total_responses"] if analytics["total_responses"] > 0 else 0
+            }
             
             return analytics
             
@@ -445,29 +706,49 @@ class QdrantSearchManager:
             
             payload = point[0].payload
             
-            # Decompress data if needed
-            if payload.get("compressed", False):
-                compressed_data = payload["compressed_data"]
-                # Ensure compressed_data is bytes (handle string encoding if necessary)
-                if isinstance(compressed_data, str):
-                    # If it's a string, it might be base64 encoded or need to be encoded as bytes
-                    import base64
-                    try:
-                        # Try base64 decode first (common for binary data stored as string)
-                        compressed_data = base64.b64decode(compressed_data)
-                    except:
-                        # Fallback to encoding as UTF-8 bytes
-                        compressed_data = compressed_data.encode('utf-8')
-                data = self.client_manager._decompress_data(compressed_data)
-            else:
-                data = payload.get("data", "{}")
+            # Get response data from payload - handle different storage formats
+            response_data = None
             
-            # Parse and return response data
-            try:
-                response_data = json.loads(data)
-                return response_data
-            except json.JSONDecodeError:
-                return {"error": "Failed to parse stored data", "raw_data": data}
+            # Check for compressed data first
+            if payload.get("compressed", False):
+                compressed_data = payload.get("compressed_data")
+                if compressed_data:
+                    # Ensure compressed_data is bytes (handle string encoding if necessary)
+                    if isinstance(compressed_data, str):
+                        # If it's a string, it might be base64 encoded or need to be encoded as bytes
+                        try:
+                            # Try base64 decode first (common for binary data stored as string)
+                            compressed_data = base64.b64decode(compressed_data)
+                        except:
+                            # Fallback to encoding as UTF-8 bytes
+                            compressed_data = compressed_data.encode('utf-8')
+                    
+                    # Use safe decompression with intelligent detection
+                    decompressed_data = self._safe_decompress_data(compressed_data)
+                    if decompressed_data:
+                        try:
+                            response_data = json.loads(decompressed_data)
+                        except json.JSONDecodeError:
+                            response_data = {"error": "Failed to parse decompressed JSON data", "raw_data": decompressed_data}
+                    else:
+                        response_data = {"error": "Failed to decompress data"}
+            
+            # Check for JSON string data
+            elif payload.get("data"):
+                try:
+                    response_data = json.loads(payload["data"])
+                except json.JSONDecodeError:
+                    response_data = {"error": "Failed to parse JSON data", "raw_data": payload["data"]}
+            
+            # Check for already structured response_data (new format)
+            elif payload.get("response_data"):
+                response_data = payload["response_data"]
+            
+            # Fallback to empty response
+            else:
+                response_data = {"error": "No response data found in payload", "payload_keys": list(payload.keys())}
+            
+            return response_data
                 
         except Exception as e:
             logger.error(f"❌ Failed to get response by ID: {e}")

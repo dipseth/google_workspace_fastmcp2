@@ -147,33 +147,21 @@ Run: `start_google_auth('your.email@gmail.com')`
         in the on_get_prompt hook after this function returns.
         """
         try:
-            # Return template content with resource variables - middleware will resolve them!
-            if JINJA2_AVAILABLE and self.jinja_env:
-                try:
-                    template = self.jinja_env.get_template('quick_demo_simple.txt')
-                    # Return raw template content with resource variables
-                    template_content = template.source
-                except Exception:
-                    template_content = self._get_template_content_with_resources()
-            else:
-                template_content = self._get_template_content_with_resources()
+            # Get template content with resource variables that middleware will resolve
+            template_content = self._get_template_content_with_resources()
             
-            # Basic template context that doesn't require resource resolution
+            # Basic template context for non-resource variables only
             basic_context = {
                 'request_id': context.request_id,
                 'current_time': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
                 'current_date': datetime.now(timezone.utc).strftime("%Y-%m-%d")
             }
             
-            # Do basic Jinja2 rendering for non-resource variables only
-            if JINJA2_AVAILABLE and self.jinja_env:
-                template_obj = self.jinja_env.from_string(template_content)
-                content = template_obj.render(**basic_context)
-            else:
-                # Simple string replacement for basic variables
-                content = template_content
-                for key, value in basic_context.items():
-                    content = content.replace(f"{{{{ {key} }}}}", str(value))
+            # Do ONLY basic string replacement for non-resource variables
+            # Let Template Parameter Middleware handle {{resource://uri}} and Jinja2 syntax
+            content = template_content
+            for key, value in basic_context.items():
+                content = content.replace(f"{{{{ {key} }}}}", str(value))
             
             return PromptMessage(
                 role="user",
@@ -186,25 +174,25 @@ Run: `start_google_auth('your.email@gmail.com')`
     
     def _get_template_content_with_resources(self) -> str:
         """Get template content with resource variables that middleware will resolve."""
-        return """# ⚡ Template Middleware Resource Resolution Demo
+        return """# ⚡ Quick Email Demo - Template Middleware Resource Resolution
 *Request ID: {{ request_id }} | Generated: {{ current_time }}*
 
-## 🎯 Template Parameter Middleware Integration Demo
+## 🎯 Zero-Configuration Demo with Live Gmail Data
 
-### 📊 **MIDDLEWARE RESOURCE RESOLUTION:**
-- **Your Email**: `{{user://current/email}}` (resolved by middleware)
-- **Gmail Labels**: `{{service://gmail/labels}}` (resolved by middleware)
-- **System Status**: Template Parameter Middleware processing
+### 📊 **GMAIL RESOURCE INTEGRATION:**
+- **Your Email**: `{{user://current/email}}` (from middleware)
+- **Gmail Labels**: `{{service://gmail/labels}}` (from middleware)
+- **Auth Status**: Template Parameter Middleware active
 
-### 🔧 **How This Works:**
+### 🔧 **How Template Middleware Works:**
 1. **Prompt Function**: Returns content with `{{resource://uri}}` variables
 2. **Middleware Hook**: `on_get_prompt` processes the result
-3. **Resource Resolution**: Same system as tool parameters
-4. **Final Result**: Variables resolved automatically
+3. **Resource Resolution**: Fetches live Gmail data via FastMCP resources
+4. **Final Result**: Variables automatically resolved to real data
 
-## 📧 **Template Middleware Tool Call Demo**
+## 📧 **Instant Send Example**
 
-This tool call will also have its `{{resource://uri}}` resolved by the same middleware:
+This tool call will also have its resource URIs resolved by the middleware:
 
 ```xml
 <mcp_tool_call>
@@ -212,35 +200,36 @@ This tool call will also have its `{{resource://uri}}` resolved by the same midd
   <params>
     <user_google_email>{{user://current/email}}</user_google_email>
     <to>demo@example.com</to>
-    <subject>Template Middleware Demo - {{ current_date }}</subject>
+    <subject>FastMCP2 Email Demo - {{ current_date }}</subject>
     <body><![CDATA[
 Hello!
 
-This demonstrates Template Parameter Middleware working for BOTH:
-1. PROMPT content (this message you're reading)
-2. TOOL parameters (the user_google_email field above)
+This is a FastMCP2 email demo with live Gmail integration via Template Middleware.
 
-Resource Variables Resolved:
-- Email: {{user://current/email}}
-- Labels: {{service://gmail/labels}}
+🔥 Real Gmail Data (resolved by middleware):
+- Your email: {{user://current/email}}
+- Gmail labels available: {{service://gmail/labels}}
 
-Same middleware, same resolution system!
+✨ Benefits:
+- Live data from your actual Gmail account
+- Zero configuration required
+- Template Parameter Middleware handles everything
 
 Best regards,
-Template Parameter Middleware Demo
+FastMCP2 Team
     ]]></body>
   </params>
 </mcp_tool_call>
 ```
 
-## ✅ **Unified Resource Resolution**
-- **Prompts**: Resource variables resolved via `on_get_prompt` hook
-- **Tools**: Resource variables resolved via `on_call_tool` hook
-- **Same System**: Both use Template Parameter Middleware
-- **Consistent**: `{{resource://uri}}` syntax works everywhere
+## 🚀 **Benefits**
+- **Live Gmail Data**: Template middleware fetches real labels, email, etc.
+- **Zero Setup**: No manual configuration needed
+- **Unified System**: Same `{{resource://uri}}` syntax for prompts AND tools
+- **Professional Look**: Clean design with real data
 
 ---
-*Template Parameter Middleware • Same system for tools AND prompts!*"""
+*Template Parameter Middleware • Live Gmail data in prompts!*"""
     
     def _create_error_prompt(self, error: str) -> PromptMessage:
         """Create error prompt."""

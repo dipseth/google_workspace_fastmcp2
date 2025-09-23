@@ -411,8 +411,16 @@ class QdrantStorageManager:
                 # Generate text for embedding
                 embed_text = f"Tool: {tool_name}\nArguments: {json.dumps(arguments)}\nResponse: {str(response)[:1000]}"
                 
-                # Generate embedding
-                embedding = await asyncio.to_thread(self.client_manager.embedder.encode, embed_text)
+                # Generate embedding using FastEmbed
+                embedding_list = await asyncio.to_thread(
+                    lambda q: list(self.client_manager.embedder.embed([q])),
+                    embed_text
+                )
+                embedding = embedding_list[0] if embedding_list else None
+                
+                if embedding is None:
+                    logger.error(f"Failed to generate embedding for store_response: {embed_text[:100]}...")
+                    return
                 
                 # Check if compression is needed
                 compressed = self.client_manager._should_compress(json_data)
@@ -539,8 +547,16 @@ class QdrantStorageManager:
                 logger.warning("⚠️ Embedder not available, skipping storage")
                 return
             
-            # Generate embedding
-            embedding = await asyncio.to_thread(self.client_manager.embedder.encode, embed_text)
+            # Generate embedding using FastEmbed
+            embedding_list = await asyncio.to_thread(
+                lambda q: list(self.client_manager.embedder.embed([q])),
+                embed_text
+            )
+            embedding = embedding_list[0] if embedding_list else None
+            
+            if embedding is None:
+                logger.error(f"Failed to generate embedding for text: {embed_text[:100]}...")
+                return
             
             # Smart compression and storage handling
             if json_data is not None:
@@ -648,8 +664,16 @@ class QdrantStorageManager:
             sanitized_payload = sanitize_for_json(payload_data)
             json_data = json.dumps(sanitized_payload, default=str)
             
-            # Generate embedding
-            embedding = await asyncio.to_thread(self.client_manager.embedder.encode, embedding_text)
+            # Generate embedding using FastEmbed
+            embedding_list = await asyncio.to_thread(
+                lambda q: list(self.client_manager.embedder.embed([q])),
+                embedding_text
+            )
+            embedding = embedding_list[0] if embedding_list else None
+            
+            if embedding is None:
+                logger.error(f"Failed to generate embedding for custom payload: {embedding_text[:100]}...")
+                raise RuntimeError("Failed to generate embedding for custom payload")
             
             # Check if compression is needed
             compressed = self.client_manager._should_compress(json_data)
@@ -754,7 +778,17 @@ class QdrantStorageManager:
                     
                     # Generate embedding text and embedding
                     embed_text = f"Tool: {tool_name}\nArguments: {json.dumps(tool_args)}\nResponse: {str(response)[:1000]}"
-                    embedding = await asyncio.to_thread(self.client_manager.embedder.encode, embed_text)
+                    
+                    # Generate embedding using FastEmbed
+                    embedding_list = await asyncio.to_thread(
+                        lambda q: list(self.client_manager.embedder.embed([q])),
+                        embed_text
+                    )
+                    embedding = embedding_list[0] if embedding_list else None
+                    
+                    if embedding is None:
+                        logger.error(f"Failed to generate embedding for bulk store: {embed_text[:100]}...")
+                        continue
                     
                     # Sanitize and handle compression
                     sanitized_payload = sanitize_for_json(payload_data)
@@ -890,29 +924,6 @@ class QdrantStorageManager:
                     "cutoff_date": cutoff_iso,
                     "retention_days": self.config.cache_retention_days
                 }
-            
-            # First, count how many points will be deleted (for reporting)
-            try:
-                count_result = await asyncio.to_thread(
-                    self.client_manager.client.count,
-                    collection_name=self.config.collection_name,
-                    count_filter=filter_condition
-                )
-                points_to_delete = count_result.count
-                logger.info(f"🗑️ Found {points_to_delete} points to clean up")
-                
-                if points_to_delete == 0:
-                    logger.info("✅ No stale data found, cleanup complete")
-                    return {
-                        "status": "completed",
-                        "points_deleted": 0,
-                        "cutoff_date": cutoff_iso,
-                        "retention_days": self.config.cache_retention_days
-                    }
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Could not count points for cleanup: {e}")
-                points_to_delete = "unknown"
             
             # Delete the old points using the collected IDs
             if old_point_ids:

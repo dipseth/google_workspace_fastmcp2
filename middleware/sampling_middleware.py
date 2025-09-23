@@ -231,7 +231,7 @@ class QdrantHistoryEnhancer:
             results = await self.qdrant_middleware.search(
                 query=search_query,
                 limit=limit,
-                score_threshold=0.6  # Slightly lower threshold for broader context
+                score_threshold=0.3  # Slightly lower threshold for broader context
             )
             
             if self.enable_debug:

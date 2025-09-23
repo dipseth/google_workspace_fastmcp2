@@ -18,7 +18,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
-from .lazy_imports import get_qdrant_imports, get_sentence_transformer
+from .lazy_imports import get_qdrant_imports, get_fastembed
 from .config import QdrantConfig
 
 from config.enhanced_logging import setup_logger
@@ -240,22 +240,35 @@ class QdrantClientManager:
         self.config.enabled = False
     
     async def _ensure_model_loaded(self):
-        """Load the embedding model if not already loaded."""
+        """Load the FastEmbed embedding model if not already loaded."""
         if self.embedder is None:
             try:
-                logger.info(f"🤖 Loading embedding model: {self.config.embedding_model}")
+                logger.info(f"🤖 Loading FastEmbed model: {self.config.embedding_model}")
                 
                 def load_model():
-                    SentenceTransformer = get_sentence_transformer()
-                    return SentenceTransformer(self.config.embedding_model)
+                    TextEmbedding = get_fastembed()
+                    return TextEmbedding(model_name=self.config.embedding_model)
                 
                 self.embedder = await asyncio.to_thread(load_model)
-                self.embedding_dim = self.embedder.get_sentence_embedding_dimension()
-                logger.info(f"✅ Embedding model loaded (dim: {self.embedding_dim})")
+                
+                # Get embedding dimension by generating a test embedding
+                try:
+                    test_embedding_list = list(self.embedder.embed(["test"]))
+                    test_embedding = test_embedding_list[0] if test_embedding_list else None
+                    self.embedding_dim = len(test_embedding) if test_embedding else 384
+                except Exception:
+                    # Fallback to known dimensions for common models
+                    model_dims = {
+                        "sentence-transformers/all-MiniLM-L6-v2": 384,
+                        "sentence-transformers/all-mpnet-base-v2": 768,
+                    }
+                    self.embedding_dim = model_dims.get(self.config.embedding_model, 384)
+                
+                logger.info(f"✅ FastEmbed model loaded (dim: {self.embedding_dim})")
                 
             except Exception as e:
-                logger.error(f"❌ Failed to load embedding model: {e}")
-                raise RuntimeError(f"Failed to load embedding model: {e}")
+                logger.error(f"❌ Failed to load FastEmbed model: {e}")
+                raise RuntimeError(f"Failed to load FastEmbed model: {e}")
     
     async def _ensure_collection(self):
         """Ensure the Qdrant collection exists with proper configuration and indexes."""

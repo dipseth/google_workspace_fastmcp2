@@ -43,6 +43,7 @@ from .config import (
     QdrantConfig,
     get_default_config,
     load_config_from_env,
+    load_config_from_settings,
 )
 
 from .client import (

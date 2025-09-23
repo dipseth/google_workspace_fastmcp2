@@ -100,16 +100,33 @@ class QdrantUnifiedMiddleware(Middleware):
             ports: List of ports to try for auto-discovery
         """
         # Create configuration
-        self.config = QdrantConfig(
-            host=qdrant_host,
-            ports=ports or [qdrant_port, 6333, 6335, 6334],
-            collection_name=collection_name,
-            embedding_model=embedding_model,
-            summary_max_tokens=summary_max_tokens,
-            verbose_param=verbose_param,
-            enabled=enabled,
-            compression_threshold=compression_threshold
-        )
+        # Use centralized configuration from settings
+        try:
+            from middleware.qdrant_core.config import load_config_from_settings
+            self.config = load_config_from_settings()
+        except ImportError:
+            # Fallback to direct creation if settings not available
+            self.config = QdrantConfig()
+        
+        # Override with explicitly provided parameters
+        if qdrant_host:
+            self.config.host = qdrant_host
+        if ports:
+            self.config.ports = ports
+        elif qdrant_port:
+            self.config.ports = [qdrant_port, 6333, 6335, 6334]
+        if collection_name:
+            self.config.collection_name = collection_name
+        if embedding_model:
+            self.config.embedding_model = embedding_model
+        if summary_max_tokens:
+            self.config.summary_max_tokens = summary_max_tokens
+        if verbose_param:
+            self.config.verbose_param = verbose_param
+        if enabled is not None:
+            self.config.enabled = enabled
+        if compression_threshold:
+            self.config.compression_threshold = compression_threshold
         
         # Initialize managers
         self.client_manager = QdrantClientManager(

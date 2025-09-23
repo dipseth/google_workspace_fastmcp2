@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     gmail_enable_elicitation: bool = True  # Enable elicitation for untrusted recipients
     gmail_elicitation_fallback: str = "block"  # What to do if elicitation fails: "block", "allow", "draft"
     
+    # Qdrant Tool Response Collection Cache Configuration
+    mcp_tool_responses_collection_cache_days: int = 5  # Default to 14 days retention
+    
     # Phase 1 OAuth Migration Feature Flags
     enable_unified_auth: bool = True
     legacy_compat_mode: bool = True

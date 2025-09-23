@@ -126,8 +126,9 @@ if ENABLE_UNIFIED_AUTH and settings.fastmcp_server_auth == "GOOGLE":
         from auth.scope_registry import ScopeRegistry
         
         # Get essential scopes for GoogleProvider (basic user info + core services)
+        # required_scopes = ScopeRegistry.resolve_scope_group("base")
         required_scopes = ScopeRegistry.resolve_scope_group("oauth_basic")
-        
+
         # Configure GoogleProvider according to FastMCP 2.12.0 documentation
         # Use the redirect path that matches your existing Google OAuth client configuration
         from urllib.parse import urlparse

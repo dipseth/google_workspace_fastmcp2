@@ -98,7 +98,7 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
     async def search(
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.0,
+        score_threshold: float = 0.3,
         user_google_email: UserGoogleEmail = None
     ) -> QdrantToolSearchResponse:
         """
@@ -469,7 +469,7 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
 
     @mcp.tool(
         name="get_tool_analytics",
-        description="Get comprehensive analytics on tool usage, performance metrics, and patterns",
+        description="Get comprehensive analytics on tool usage, performance metrics, and patterns. By default returns a concise summary with sample point IDs for fetching specific results - set summary_only=false for detailed data.",
         tags={"qdrant", "analytics", "metrics", "performance", "usage", "legacy"},
         annotations={
             "title": "Tool Analytics Dashboard (Legacy)",
@@ -483,6 +483,7 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         group_by: str = "tool_name",
+        summary_only: bool = True,
         user_google_email: Optional[str] = None
     ) -> str:
         """
@@ -492,9 +493,10 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
             start_date: ISO format start date (e.g., "2024-01-01T00:00:00")
             end_date: ISO format end date
             group_by: Field to group by (tool_name, user_email)
+            summary_only: If True, return concise summary (default). If False, return full detailed analytics
             
         Returns:
-            JSON string with analytics data
+            JSON string with analytics data (summarized by default to reduce token usage)
         """
         try:
             from datetime import datetime
@@ -502,38 +504,77 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
             end_dt = datetime.fromisoformat(end_date) if end_date else None
             
             analytics = await _search_manager.get_analytics(start_dt, end_dt, group_by)
-            return json.dumps(analytics, indent=2)
+            
+            if summary_only and isinstance(analytics, dict) and "groups" in analytics:
+                # Create a summarized version to reduce token usage
+                summarized = {
+                    "total_responses": analytics.get("total_responses", 0),
+                    "group_by": analytics.get("group_by", group_by),
+                    "collection_name": analytics.get("collection_name", "unknown"),
+                    "generated_at": analytics.get("generated_at"),
+                    "date_range": analytics.get("date_range", {}),
+                    "summary": analytics.get("summary", {}),
+                    "groups_summary": {}
+                }
+                
+                # Summarize each group with only key metrics and sample point IDs
+                for group_name, group_data in analytics.get("groups", {}).items():
+                    # Get a sample of recent point IDs (limit to 5 most recent)
+                    point_ids = group_data.get("point_ids", [])
+                    sample_point_ids = point_ids[-5:] if len(point_ids) > 5 else point_ids
+                    
+                    summarized["groups_summary"][group_name] = {
+                        "count": group_data.get("count", 0),
+                        "unique_users": group_data.get("unique_users", 0),
+                        "unique_sessions": group_data.get("unique_sessions", 0),
+                        "error_rate": round(group_data.get("error_rate", 0), 3),
+                        "compression_rate": round(group_data.get("compression_rate", 0), 3),
+                        "avg_response_size": round(group_data.get("avg_response_size", 0), 1),
+                        "recent_activity": group_data.get("recent_activity", {}),
+                        "latest_timestamp": group_data.get("latest_timestamp"),
+                        "earliest_timestamp": group_data.get("earliest_timestamp"),
+                        "sample_point_ids": sample_point_ids,
+                        "total_point_ids": len(point_ids)
+                    }
+                
+                summarized["note"] = "This is a summarized view with sample point IDs for fetching specific results. Set summary_only=false for full details including all point IDs, timestamps arrays, etc."
+                return json.dumps(summarized, indent=2)
+            else:
+                # Return full analytics (existing behavior)
+                return json.dumps(analytics, indent=2)
         except Exception as e:
             return f"Analytics failed: {str(e)}"
 
     @mcp.tool(
         name="get_response_details",
-        description="Retrieve full details and metadata of a specific stored tool response by its unique ID",
+        description="Retrieve full details and metadata of a specific stored tool response by its unique ID. LEGACY TOOL - Use 'fetch' tool instead for better formatting and structured output.",
         tags={"qdrant", "details", "response", "lookup", "metadata", "legacy"},
         annotations={
-            "title": "Get Response Details (Legacy)",
+            "title": "Get Response Details (Legacy - Use 'fetch' instead)",
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
             "openWorldHint": False
         }
     )
-    async def get_response_details(response_id: str, user_google_email: Optional[str] = None) -> str:
+    async def get_response_details(point_id: str, user_google_email: Optional[str] = None) -> str:
         """
-        Get full details of a stored response by ID.
+        Get full details of a stored response by point ID.
+        
+        LEGACY TOOL: Use the 'fetch' tool instead for better formatting and structured output.
         
         Args:
-            response_id: UUID of the stored response
+            point_id: Qdrant point ID (UUID) - same identifier used in 'fetch' tool
             
         Returns:
-            JSON string with full response details
+            JSON string with full response details (raw format)
         """
         try:
-            details = await _search_manager.get_response_by_id(response_id)
+            details = await _search_manager.get_response_by_id(point_id)
             if details:
                 return json.dumps(details, indent=2)
             else:
-                return f"Response with ID {response_id} not found"
+                return f"Response with point ID {point_id} not found"
         except Exception as e:
             return f"Failed to get response details: {str(e)}"
 
