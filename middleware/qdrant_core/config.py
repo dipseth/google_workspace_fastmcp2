@@ -179,7 +179,6 @@ class QdrantConfig:
                     "indexing_threshold": 1000,        # Index immediately for small datasets
                     "memmap_threshold": 50000,         # Use memory for small datasets
                     "default_segment_number": 2,       # Fewer segments for small data
-                    "max_segment_size_kb": 10000,      # Smaller segments
                     "deleted_threshold": 0.1,          # Clean up sooner
                     "vacuum_min_vector_number": 100    # Lower threshold
                 }
@@ -198,7 +197,6 @@ class QdrantConfig:
                     "indexing_threshold": 10000,       # Standard indexing threshold
                     "memmap_threshold": 20000,         # Standard memmap threshold (same as indexing)
                     "default_segment_number": 0,       # Auto-detect based on CPUs
-                    "max_segment_size_kb": None,       # Auto-detect
                     "deleted_threshold": 0.2,          # Default cleanup threshold
                     "vacuum_min_vector_number": 1000   # Default
                 }
@@ -217,7 +215,6 @@ class QdrantConfig:
                     "indexing_threshold": 20000,       # Higher threshold for large data
                     "memmap_threshold": 10000,         # Lower memmap threshold (disk first)
                     "default_segment_number": 0,       # Auto-detect
-                    "max_segment_size_kb": 50000,      # Larger segments for efficiency
                     "deleted_threshold": 0.3,          # Less aggressive cleanup
                     "vacuum_min_vector_number": 5000   # Higher threshold
                 }
@@ -236,7 +233,6 @@ class QdrantConfig:
                     "indexing_threshold": 100,         # Very low threshold for immediate indexing
                     "memmap_threshold": 100000,        # High threshold to stay in memory
                     "default_segment_number": 1,       # Single segment for simplicity
-                    "max_segment_size_kb": 5000,       # Small segments
                     "deleted_threshold": 0.05,         # Aggressive cleanup
                     "vacuum_min_vector_number": 10     # Very low threshold
                 }

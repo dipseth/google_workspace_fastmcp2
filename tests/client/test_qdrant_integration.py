@@ -44,8 +44,9 @@ class TestQdrantStorageIntegration:
         initial_count = await self.get_qdrant_point_count(qdrant_client)
         
         # Call a tool that should generate a response
-        result = await client.call_tool("server_info", {})
-        assert len(result) > 0
+        result = await client.call_tool("health_check", {})
+        assert result is not None
+        assert len(result.content) > 0
         
         # Wait for async storage to complete
         await asyncio.sleep(2)
@@ -59,7 +60,6 @@ class TestQdrantStorageIntegration:
         """Test searching stored responses."""
         # First, ensure we have some data by calling tools
         await client.call_tool("health_check", {})
-        await client.call_tool("server_info", {})
         
         # Wait for storage
         await asyncio.sleep(2)
@@ -70,8 +70,9 @@ class TestQdrantStorageIntegration:
             "limit": 5
         })
         
-        assert len(result) > 0
-        content = result[0].text
+        assert result is not None
+        assert len(result.content) > 0
+        content = result.content[0].text
         assert "results" in content.lower() or "found" in content.lower()
     
     @pytest.mark.asyncio
@@ -81,11 +82,12 @@ class TestQdrantStorageIntegration:
         
         # Call a Gmail tool
         result = await client.call_tool("list_gmail_labels", {
-            "user_google_email": "test@example.com"
+            "user_google_email": TEST_EMAIL
         })
         
         # The tool might fail due to auth, but response should still be stored
-        assert len(result) > 0
+        assert result is not None
+        assert len(result.content) > 0
         
         # Wait for storage
         await asyncio.sleep(2)
@@ -99,17 +101,27 @@ class TestQdrantStorageIntegration:
         """Test analytics functionality."""
         # Generate some tool usage
         await client.call_tool("health_check", {})
-        await client.call_tool("server_info", {})
         
         # Get analytics
         result = await client.call_tool("get_tool_analytics", {})
-        assert len(result) > 0
+        assert result is not None
+        assert not result.is_error, f"Analytics tool returned error: {result}"
+        assert len(result.content) > 0, "Analytics result has no content"
         
-        content = result[0].text
+        # Extract the text content from the first content block
+        content_block = result.content[0]
+        assert hasattr(content_block, 'text'), "Content block missing text attribute"
+        content = content_block.text
+        
+        print("Analytics result type:", type(result))
+        print("Analytics content length:", len(content))
+        print("Analytics JSON preview:", content[:500] + "..." if len(content) > 500 else content)
+        
         # Check for expected analytics fields
         assert "total_responses" in content
         assert "group_by" in content
         assert "groups" in content
+        # Note: Enhanced fields like point_ids will be available after server restart
     
     @pytest.mark.asyncio
     async def test_response_by_id(self, client):
@@ -121,12 +133,14 @@ class TestQdrantStorageIntegration:
         })
         
         # If we have results, try to get one by ID
-        if search_result and "id" in search_result[0].text:
-            # This test would need to parse the ID from the search result
-            # For now, we just verify the tool exists
-            tools = await client.list_tools()
-            tool_names = [tool.name for tool in tools]
-            assert "get_response_details" in tool_names
+        if search_result and len(search_result.content) > 0:
+            content = search_result.content[0].text
+            if "id" in content:
+                # This test would need to parse the ID from the search result
+                # For now, we just verify the tool exists
+                tools = await client.list_tools()
+                tool_names = [tool.name for tool in tools]
+                assert "get_response_details" in tool_names
 
 
 @pytest.mark.service("qdrant")
@@ -147,7 +161,7 @@ class TestQdrantSemanticSearch:
             try:
                 print(f"🔧 Calling tool: {tool_name} with params: {params}")
                 result = await client.call_tool(tool_name, params)
-                print(f"✅ Tool {tool_name} succeeded: {len(result)} results")
+                print(f"✅ Tool {tool_name} succeeded: {len(result.content)} content blocks")
             except Exception as e:
                 print(f"❌ Tool {tool_name} failed: {str(e)}")
                 pass  # Some tools might fail, that's ok
@@ -162,9 +176,9 @@ class TestQdrantSemanticSearch:
             "limit": 10
         })
         
-        print(f"🔍 Search result length: {len(result)}")
-        assert len(result) > 0
-        content = result[0].text
+        print(f"🔍 Search result length: {len(result.content)}")
+        assert len(result.content) > 0
+        content = result.content[0].text
         print(f"🔍 Search content: {content}")
         
         # Should find auth-related tools
@@ -179,9 +193,10 @@ class TestQdrantSemanticSearch:
             "limit": 3
         })
         
-        assert len(result) > 0
+        assert result is not None
+        assert len(result.content) > 0
         # The result should mention the limit or show limited results
-        content = result[0].text
+        content = result.content[0].text
         assert content is not None
 
 
@@ -198,7 +213,8 @@ class TestQdrantErrorHandling:
             "limit": 5
         })
         
-        assert len(result) > 0
+        assert result is not None
+        assert len(result.content) > 0
         # Should either return results or indicate empty query
     
     @pytest.mark.asyncio
@@ -210,7 +226,8 @@ class TestQdrantErrorHandling:
             "limit": 0
         })
         
-        assert len(result) > 0
+        assert result is not None
+        assert len(result.content) > 0
         
         # Test with very high limit - should cap at reasonable value
         result = await client.call_tool("search_tool_history", {
@@ -218,4 +235,5 @@ class TestQdrantErrorHandling:
             "limit": 10000
         })
         
-        assert len(result) > 0
+        assert result is not None
+        assert len(result.content) > 0

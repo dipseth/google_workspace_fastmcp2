@@ -96,3 +96,4 @@ localhost+2.pem
 middleware/templates/dynamic/*
 # But allow this specific file
 !middleware/templates/dynamic/render_calendar_events_dashboard.j2
+logs/

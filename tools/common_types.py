@@ -25,10 +25,10 @@ from pydantic import Field
 #
 # So this type with default=None ensures auto-injection works correctly
 UserGoogleEmail = Annotated[
-    Optional[str], 
+    Optional[str],
     Field(
         default=None,
-        description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware)."
+        description="Use 'me' or 'myself' for auto-resolution to authenticated user, or provide specific email address. If None, uses current authenticated user (auto-injected by middleware)."
     )
 ]
 

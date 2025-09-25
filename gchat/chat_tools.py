@@ -4,6 +4,12 @@ Google Chat MCP Tools for FastMCP2.
 This module provides MCP tools for interacting with Google Chat API.
 Enhanced with Card Framework integration and adapter system support.
 Migrated from decorator-based pattern to FastMCP2 architecture.
+
+📝 IMPORTANT FORMATTING REMINDER:
+Google Chat uses its own markdown syntax, NOT HTML:
+- ✅ Use: *bold*, _italic_, ~strikethrough~, `code`, <url|text>
+- ❌ Avoid: <b>bold</b>, <i>italic</i>, <a href="url">text</a>
+HTML tags display as literal text and don't render formatting.
 """
 import logging
 import asyncio
@@ -11,6 +17,7 @@ import json
 from typing_extensions import Optional, Dict, Any, List, Union
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
+from tools.common_types import UserGoogleEmail
 
 from auth.service_helpers import get_service, request_service
 from auth.context import get_injected_service
@@ -52,7 +59,7 @@ else:
 
 
 
-async def _get_chat_service_with_fallback(user_google_email: str):
+async def _get_chat_service_with_fallback(user_google_email: UserGoogleEmail):
     """
     Get Google Chat service with fallback to direct creation if middleware injection fails.
     
@@ -96,10 +103,11 @@ async def _get_chat_service_with_fallback(user_google_email: str):
 
 
 async def _send_text_message_helper(
-    user_google_email: str,
+    
     space_id: str,
     message_text: str,
-    thread_key: Optional[str] = None
+    thread_key: Optional[str] = None,
+    user_google_email: UserGoogleEmail= None,
 ) -> str:
     """
     Helper function to send a text message to Google Chat.
@@ -168,9 +176,9 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_spaces(
-        user_google_email: UserGoogleEmailChat = None,
         page_size: int = 100,
-        space_type: str = "all"  # "all", "room", "dm"
+        space_type: str = "all",  # "all", "room", "dm"
+        user_google_email: UserGoogleEmail = None
     ) -> SpaceListResponse:
         """
         Lists Google Chat spaces (rooms and direct messages) accessible to the user.
@@ -293,10 +301,10 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         }
     )
     async def list_messages(
-        user_google_email: str,
         space_id: str,
         page_size: int = 50,
-        order_by: str = "createTime desc"
+        order_by: str = "createTime desc",
+        user_google_email: UserGoogleEmail = None
     ) -> MessageListResponse:
         """
         Lists messages from a Google Chat space.
@@ -386,8 +394,8 @@ def setup_chat_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="send_message",
-        description="Sends a message to a Google Chat space",
-        tags={"chat", "message", "send", "google"},
+        description="Sends a message to a Google Chat space with full markdown formatting support",
+        tags={"chat", "message", "send", "google", "markdown", "formatting"},
         annotations={
             "title": "Send Chat Message",
             "readOnlyHint": False,
@@ -397,22 +405,32 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         }
     )
     async def send_message(
-        user_google_email: str,
         space_id: str,
         message_text: str,
-        thread_key: Optional[str] = None
+        thread_key: Optional[str] = None,
+        user_google_email: UserGoogleEmail = None
     ) -> SendMessageResponse:
         """
-        Sends a message to a Google Chat space.
+        Sends a message to a Google Chat space with full markdown formatting support.
+
+        🎨 **Google Chat Markdown Support:**
+        - *Bold*: `*text*` → *text*
+        - _Italic_: `_text_` → _text_
+        - ~Strikethrough~: `~text~` → ~~text~~
+        - `Monospace`: backticks → `code`
+        - Bulleted lists: `* item` or `- item`
+        - Custom links: `<https://example.com|Display Text>`
+        - User mentions: `<users/{user_id}>`
+        - Code blocks: triple backticks (```)
 
         Args:
-            user_google_email (str): The user's Google email address. Required.
-            space_id (str): The ID of the Chat space. Required.
-            message_text (str): The message text to send. Required.
-            thread_key (Optional[str]): Thread key for threaded replies.
+            user_google_email (str): Google email for authentication. Required.
+            space_id (str): Chat space ID (format: "spaces/{id}"). Required.
+            message_text (str): Message content with markdown support. Max ~4096 chars. Required.
+            thread_key (Optional[str]): Thread key for replies. Creates new thread if None.
 
         Returns:
-            SendMessageResponse: Structured response with sent message details.
+            SendMessageResponse: Structured response with message details and success status.
         """
         logger.info(f"[send_message] Email: '{user_google_email}', Space: '{space_id}'")
         
@@ -503,9 +521,10 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         }
     )
     async def search_messages(
-        user_google_email: str,
+        
         query: str,
         space_id: Optional[str] = None,
+        user_google_email: UserGoogleEmail=None,
         page_size: int = 25
     ) -> SearchMessagesResponse:
         """

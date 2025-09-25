@@ -127,6 +127,10 @@ async def get_service(
         # Custom scopes with unified auth
         drive_service = await get_service("drive", scopes=["drive_full"])
     """
+    # Handle 'me'/'myself' aliases by treating them as None for auto-resolution
+    if user_email in ['me', 'myself']:
+        user_email = None
+    
     # Use provided email or get from context (set by middleware)
     final_user_email = user_email or get_user_email_context()
     

@@ -40,6 +40,70 @@ class EmailAction:
     action: Literal["send", "save_draft", "cancel"]
 
 
+async def _resolve_recipients_and_check_allow_list(
+    to: Union[str, List[str]],
+    cc: Optional[Union[str, List[str]]],
+    bcc: Optional[Union[str, List[str]]],
+    user_google_email: str,
+    allow_list: List[str]
+) -> List[str]:
+    """
+    Resolve 'me'/'myself' aliases and check recipients against allow list.
+    
+    Returns:
+        List of recipients that are NOT on the allow list
+    """
+    # Collect all recipient emails for the message
+    all_recipients = []
+
+    # Process 'to' recipients
+    if isinstance(to, str):
+        all_recipients.extend([email.strip() for email in to.split(',')])
+    elif isinstance(to, list):
+        all_recipients.extend(to)
+
+    # Process 'cc' recipients
+    if cc:
+        if isinstance(cc, str):
+            all_recipients.extend([email.strip() for email in cc.split(',')])
+        elif isinstance(cc, list):
+            all_recipients.extend(cc)
+
+    # Process 'bcc' recipients
+    if bcc:
+        if isinstance(bcc, str):
+            all_recipients.extend([email.strip() for email in bcc.split(',')])
+        elif isinstance(bcc, list):
+            all_recipients.extend(bcc)
+
+    # Resolve 'me'/'myself' aliases to actual user email before elicitation check
+    # This prevents elicitation when user sends emails to themselves
+    resolved_recipients = []
+    for email in all_recipients:
+        if email.strip().lower() in ['me', 'myself']:
+            # Resolve to actual user email address
+            if user_google_email:
+                resolved_recipients.append(user_google_email.strip().lower())
+            # If user_google_email not available yet, skip elicitation for 'me'/'myself'
+            # The middleware will resolve it properly later
+        else:
+            resolved_recipients.append(email.strip().lower())
+
+    # Normalize resolved recipient emails (lowercase, strip whitespace)
+    all_recipients = [email for email in resolved_recipients if email]
+
+    # Normalize allow list emails
+    normalized_allow_list = [email.lower() for email in allow_list]
+
+    # Check if any recipient is NOT on the allow list
+    recipients_not_allowed = [
+        email for email in all_recipients
+        if email not in normalized_allow_list
+    ]
+    
+    return recipients_not_allowed
+
+
 async def _handle_elicitation_fallback(
     fallback_mode: str,
     to: Union[str, List[str]],
@@ -141,9 +205,9 @@ async def _handle_elicitation_fallback(
 
 async def send_gmail_message(
     ctx: Context,
-    to: GmailRecipients,
     subject: str,
     body: str,
+    to: GmailRecipients = 'myself',
     user_google_email: UserGoogleEmail = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
@@ -275,8 +339,21 @@ async def send_gmail_message(
             elif isinstance(bcc, list):
                 all_recipients.extend(bcc)
 
-        # Normalize all recipient emails (lowercase, strip whitespace)
-        all_recipients = [email.strip().lower() for email in all_recipients if email]
+        # Resolve 'me'/'myself' aliases to actual user email before elicitation check
+        # This prevents elicitation when user sends emails to themselves
+        resolved_recipients = []
+        for email in all_recipients:
+            if email.strip().lower() in ['me', 'myself']:
+                # Resolve to actual user email address
+                if user_google_email:
+                    resolved_recipients.append(user_google_email.strip().lower())
+                # If user_google_email not available yet, skip elicitation for 'me'/'myself'
+                # The middleware will resolve it properly later
+            else:
+                resolved_recipients.append(email.strip().lower())
+
+        # Normalize resolved recipient emails (lowercase, strip whitespace)
+        all_recipients = [email for email in resolved_recipients if email]
 
         # Normalize allow list emails
         normalized_allow_list = [email.lower() for email in allow_list]
@@ -1173,7 +1250,7 @@ async def draft_gmail_reply(
 async def forward_gmail_message(
     ctx: Context,
     message_id: str,
-    to: GmailRecipients,
+    to: GmailRecipients = 'myself',
     user_google_email: UserGoogleEmail = None,
     body: Optional[str] = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
@@ -1237,40 +1314,10 @@ async def forward_gmail_message(
     allow_list = settings.get_gmail_allow_list()
 
     if allow_list:
-        # Collect all recipient emails for the message
-        all_recipients = []
-
-        # Process 'to' recipients
-        if isinstance(to, str):
-            all_recipients.extend([email.strip() for email in to.split(',')])
-        elif isinstance(to, list):
-            all_recipients.extend(to)
-
-        # Process 'cc' recipients
-        if cc:
-            if isinstance(cc, str):
-                all_recipients.extend([email.strip() for email in cc.split(',')])
-            elif isinstance(cc, list):
-                all_recipients.extend(cc)
-
-        # Process 'bcc' recipients
-        if bcc:
-            if isinstance(bcc, str):
-                all_recipients.extend([email.strip() for email in bcc.split(',')])
-            elif isinstance(bcc, list):
-                all_recipients.extend(bcc)
-
-        # Normalize all recipient emails (lowercase, strip whitespace)
-        all_recipients = [email.strip().lower() for email in all_recipients if email]
-
-        # Normalize allow list emails
-        normalized_allow_list = [email.lower() for email in allow_list]
-
-        # Check if any recipient is NOT on the allow list
-        recipients_not_allowed = [
-            email for email in all_recipients
-            if email not in normalized_allow_list
-        ]
+        # Use consolidated function to resolve recipients and check allow list
+        recipients_not_allowed = await _resolve_recipients_and_check_allow_list(
+            to, cc, bcc, user_google_email, allow_list
+        )
 
         if recipients_not_allowed:
             # Check if elicitation is enabled in settings
@@ -1679,7 +1726,7 @@ async def forward_gmail_message(
 
 async def draft_gmail_forward(
     message_id: str,
-    to: GmailRecipients,
+    to: GmailRecipients = 'myself',
     user_google_email: UserGoogleEmail = None,
     body: Optional[str] = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
@@ -1886,10 +1933,10 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     )
     async def send_gmail_message_tool(
         ctx: Annotated[Context, Field(description="FastMCP context for elicitation support and user interaction")],
-        to: GmailRecipients,
         subject: Annotated[str, Field(description="Email subject line")],
         body: Annotated[str, Field(description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)")],
         user_google_email: UserGoogleEmail = None,
+        to: GmailRecipients = 'myself',
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)")] = "mixed",
         html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. Ignored for 'plain' and 'html' types")] = None,
         cc: GmailRecipientsOptional = None,
@@ -1911,10 +1958,10 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         
         Args:
             ctx: FastMCP context for user interactions and elicitation
-            to: Recipient email address(es)
             subject: Email subject line
             body: Email body content (usage varies by content_type)
             user_google_email: User's email address (auto-injected if None)
+            to: Recipient email address(es) - defaults to 'myself' (authenticated user)
             content_type: How to handle body/html_body content
             html_body: HTML content for mixed-type emails
             cc: CC recipients (optional)
@@ -2098,7 +2145,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     async def forward_gmail_message_tool(
         ctx: Annotated[Context, Field(description="FastMCP context for elicitation support and user interaction")],
         message_id: Annotated[str, Field(description="The ID of the Gmail message to forward. This will include the original message content and headers")],
-        to: GmailRecipients,
+        to: GmailRecipients = 'myself',
         user_google_email: UserGoogleEmail = None,
         body: Annotated[Optional[str], Field(description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)")] = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)")] = "mixed",
@@ -2157,7 +2204,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     )
     async def draft_gmail_forward_tool(
         message_id: Annotated[str, Field(description="The ID of the Gmail message to create a forward draft for. This will include the original message content and headers")],
-        to: GmailRecipients,
+        to: GmailRecipients = 'myself',
         user_google_email: UserGoogleEmail = None,
         body: Annotated[Optional[str], Field(description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)")] = None,
         content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)")] = "mixed",

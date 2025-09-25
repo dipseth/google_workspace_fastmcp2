@@ -970,7 +970,7 @@ class AuthMiddleware(Middleware):
                         current_value = arguments.get('user_google_email')
                         logger.debug(f"🔧 DEBUG: Current user_google_email value: {current_value}")
                         
-                        if 'user_google_email' not in arguments or current_value is None:
+                        if current_value in ['me', 'myself'] or 'user_google_email' not in arguments or current_value is None:
                             try:
                                 arguments['user_google_email'] = user_email
                                 logger.debug(f"🔧 DEBUG: ✅ Auto-injected user_google_email={user_email} into {arguments_source}")
