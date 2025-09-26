@@ -97,3 +97,5 @@ middleware/templates/dynamic/*
 # But allow this specific file
 !middleware/templates/dynamic/render_calendar_events_dashboard.j2
 logs/
+demo_video.png
+Screen Recording 2025-09-26 at 2.34.50 PM.mov
