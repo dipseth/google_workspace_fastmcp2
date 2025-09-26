@@ -1,6 +1,6 @@
-# FastMCP2 Google Workspace Platform - API Reference
+# Groupon Google MCP Server - API Reference
 
-This comprehensive API reference provides detailed documentation for all 60+ tools available in the FastMCP2 Google Workspace Platform, organized by service category.
+This comprehensive API reference provides detailed documentation for all 60+ tools available in the Groupon Google MCP Server, organized by service category.
 
 ## Quick Navigation
 

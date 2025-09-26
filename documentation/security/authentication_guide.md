@@ -1,4 +1,4 @@
-# FastMCP2 OAuth Authentication Guide
+# Groupon Google MCP OAuth Authentication Guide
 
 ## Table of Contents
 1. [Architecture Overview](#architecture-overview)
@@ -358,7 +358,7 @@ BASE_URL=http://localhost:8002
 
 # MCP Authentication
 MCP_AUTH_ENABLED=true
-MCP_AUTH_REALM=FastMCP2
+MCP_AUTH_REALM=Groupon_Google_MCP
 
 # ============================================
 # OAUTH PROXY CONFIGURATION
@@ -398,7 +398,7 @@ MAX_PROXY_CLIENTS=100
    - `http://localhost:6274/oauth/callback/debug`
 5. Download the credentials JSON file
 
-#### Step 4: Configure FastMCP2
+#### Step 4: Configure Groupon Google MCP
 Save the credentials file as `credentials.json` in your project root or set individual environment variables.
 
 ### Credential Storage Modes
@@ -1176,8 +1176,7 @@ if __name__ == "__main__":
 - [Migration Script](scripts/migrate_credentials.py)
 
 ### Support
-- GitHub Issues: [FastMCP2 Issues](https://github.com/yourusername/fastmcp2/issues)
-- Discord: [FastMCP Community](https://discord.gg/fastmcp)
+- Contact your Groupon development team for issues and community support
 
 ---
 

@@ -1,6 +1,6 @@
 # Gmail API Reference
 
-Complete API documentation for all Gmail tools in the FastMCP2 platform.
+Complete API documentation for all Gmail tools in the Groupon Google MCP Server.
 
 ## 🎉 Recent Updates & Improvements
 
@@ -355,7 +355,7 @@ result = await send_gmail_message(
             <h1>Advanced HTML Email</h1>
             <p>CSS gradients, animations, and responsive design!</p>
         </div>
-        <p style="margin-top: 20px;">This email demonstrates FastMCP2's advanced HTML capabilities.</p>
+        <p style="margin-top: 20px;">This email demonstrates Groupon Google MCP's advanced HTML capabilities.</p>
     </div>
     """,
     content_type="html"
@@ -364,7 +364,7 @@ result = await send_gmail_message(
 
 ### 🛡️ Email Security & Elicitation System
 
-FastMCP2 includes a sophisticated email security system that protects against sending emails to untrusted recipients. When attempting to send to recipients not on the allow list, the system provides user control through elicitation prompts.
+Groupon Google MCP includes a sophisticated email security system that protects against sending emails to untrusted recipients. When attempting to send to recipients not on the allow list, the system provides user control through elicitation prompts.
 
 #### How It Works
 

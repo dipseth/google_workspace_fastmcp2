@@ -1,6 +1,6 @@
 # Google Sheets API Reference
 
-Complete API documentation for all Google Sheets tools in the FastMCP2 platform.
+Complete API documentation for all Google Sheets tools in the Groupon Google MCP Server.
 
 ## Overview
 

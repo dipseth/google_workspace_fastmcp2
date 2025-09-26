@@ -1,8 +1,8 @@
-# Enhanced Sampling Middleware for FastMCP2 Google Workspace Platform
+# Enhanced Sampling Middleware for Groupon Google MCP Server
 
 ## Overview
 
-The Enhanced Sampling Middleware extends the base sampling capabilities by making the client LLM **resource-aware** and **context-intelligent**. Instead of generic sampling, this middleware dynamically enriches sampling requests with relevant data from the FastMCP2 platform's extensive resource ecosystem, Qdrant knowledge base, and template system.
+The Enhanced Sampling Middleware extends the base sampling capabilities by making the client LLM **resource-aware** and **context-intelligent**. Instead of generic sampling, this middleware dynamically enriches sampling requests with relevant data from the Groupon Google MCP Server's extensive resource ecosystem, Qdrant knowledge base, and template system.
 
 ## 🎯 Core Philosophy
 
@@ -464,4 +464,4 @@ Available next steps:
 # Response creates personalized email draft with specific project details
 ```
 
-This Enhanced Sampling Middleware transforms the FastMCP2 platform from a simple tool provider into an **intelligent workspace assistant** that understands user context, learns from patterns, and provides contextually-aware AI assistance powered by the full ecosystem of resources and capabilities.
+This Enhanced Sampling Middleware transforms the Groupon Google MCP Server from a simple tool provider into an **intelligent workspace assistant** that understands user context, learns from patterns, and provides contextually-aware AI assistance powered by the full ecosystem of resources and capabilities.

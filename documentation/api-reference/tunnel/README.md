@@ -1,6 +1,6 @@
 # Tunnel Services API Reference
 
-Complete API documentation for all tunnel management tools in the FastMCP2 platform.
+Complete API documentation for all tunnel management tools in the Groupon Google MCP Server.
 
 ## Overview
 
