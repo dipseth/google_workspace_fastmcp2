@@ -269,6 +269,9 @@ class SendGmailMessageResponse(TypedDict):
     elicitationRequired: NotRequired[bool]
     elicitationNotSupported: NotRequired[bool]
     recipientsNotAllowed: NotRequired[List[str]]
+    # Jinja2 template processing fields (from template middleware)
+    jinjaTemplateApplied: NotRequired[bool]
+    jinjaTemplateError: NotRequired[Optional[str]]
 
 
 class DraftGmailMessageResponse(TypedDict):

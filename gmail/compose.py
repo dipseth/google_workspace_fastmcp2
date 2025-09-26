@@ -411,7 +411,11 @@ async def send_gmail_message(
 
             # Trigger elicitation with graceful fallback for unsupported clients
             try:
-                response = await asyncio.wait_for(
+                # response = await ctx.elicit(
+                #         message=elicitation_message,
+                #         response_type=EmailAction
+                #     )
+                response = asyncio.wait_for(
                     ctx.elicit(
                         message=elicitation_message,
                         response_type=EmailAction
@@ -433,12 +437,32 @@ async def send_gmail_message(
                     recipientsNotAllowed=recipients_not_allowed
                 )
             except Exception as elicit_error:
-                # Handle clients that don't support elicitation
+                # Enhanced client support detection - broader patterns to catch more unsupported clients
                 error_msg = str(elicit_error).lower()
-                if ("method not found" in error_msg or "not found" in error_msg or
-                    "not supported" in error_msg or "unsupported" in error_msg):
-                    
-                    logger.warning(f"Client doesn't support elicitation - applying fallback: {settings.gmail_elicitation_fallback}")
+                error_type = type(elicit_error).__name__
+                
+                # Check for indicators that elicitation is not supported by the client
+                # Using broader patterns to catch various client implementations
+                is_unsupported_client = (
+                    # Method/feature not found errors
+                    "method not found" in error_msg or
+                    "unknown method" in error_msg or
+                    "unsupported method" in error_msg or
+                    "not found" in error_msg or  # Broader pattern
+                    "not supported" in error_msg or  # Broader pattern
+                    "unsupported" in error_msg or  # Broader pattern
+                    # FastMCP/MCP-specific indicators
+                    "elicit not supported" in error_msg or
+                    "elicitation not supported" in error_msg or
+                    "elicitation not available" in error_msg or
+                    # Exception types that commonly indicate missing functionality
+                    error_type in ["AttributeError", "NotImplementedError", "TypeError"] or
+                    # Common client error patterns
+                    "elicit" in error_msg and ("error" in error_msg or "fail" in error_msg)
+                )
+                
+                if is_unsupported_client:
+                    logger.warning(f"Client doesn't support elicitation (error: {error_type}: {error_msg}) - applying fallback: {settings.gmail_elicitation_fallback}")
                     fallback_result = await _handle_elicitation_fallback(
                         settings.gmail_elicitation_fallback, to, subject, body, user_google_email,
                         content_type, html_body, cc, bcc, recipients_not_allowed
@@ -447,11 +471,11 @@ async def send_gmail_message(
                         return fallback_result
                     # If fallback_result is None (allow mode), continue with normal sending
                 else:
-                    # Other elicitation errors
-                    logger.error(f"Elicitation failed: {elicit_error}")
+                    # Very specific errors that indicate client should support elicitation
+                    logger.error(f"Elicitation failed for supporting client: {error_type}: {elicit_error}")
                     return SendGmailMessageResponse(
                         success=False,
-                        message=f"❌ Email confirmation failed: {elicit_error}",
+                        message=f"❌ Email confirmation failed: {elicit_error}\n\n🔧 **Client appears to support elicitation but encountered an error**",
                         messageId=None,
                         threadId=None,
                         recipientCount=0,
@@ -1412,12 +1436,32 @@ async def forward_gmail_message(
                     recipientsNotAllowed=recipients_not_allowed
                 )
             except Exception as elicit_error:
-                # Handle clients that don't support elicitation
+                # Enhanced client support detection - broader patterns to catch more unsupported clients
                 error_msg = str(elicit_error).lower()
-                if ("method not found" in error_msg or "not found" in error_msg or
-                    "not supported" in error_msg or "unsupported" in error_msg):
-                    
-                    logger.warning(f"Client doesn't support elicitation - applying fallback: {settings.gmail_elicitation_fallback}")
+                error_type = type(elicit_error).__name__
+                
+                # Check for indicators that elicitation is not supported by the client
+                # Using broader patterns to catch various client implementations
+                is_unsupported_client = (
+                    # Method/feature not found errors
+                    "method not found" in error_msg or
+                    "unknown method" in error_msg or
+                    "unsupported method" in error_msg or
+                    "not found" in error_msg or  # Broader pattern
+                    "not supported" in error_msg or  # Broader pattern
+                    "unsupported" in error_msg or  # Broader pattern
+                    # FastMCP/MCP-specific indicators
+                    "elicit not supported" in error_msg or
+                    "elicitation not supported" in error_msg or
+                    "elicitation not available" in error_msg or
+                    # Exception types that commonly indicate missing functionality
+                    error_type in ["AttributeError", "NotImplementedError", "TypeError"] or
+                    # Common client error patterns
+                    "elicit" in error_msg and ("error" in error_msg or "fail" in error_msg)
+                )
+                
+                if is_unsupported_client:
+                    logger.warning(f"Client doesn't support elicitation (error: {error_type}: {error_msg}) - applying fallback: {settings.gmail_elicitation_fallback}")
                     fallback_result = await _handle_elicitation_fallback(
                         settings.gmail_elicitation_fallback, to, f"Fwd: Original Message",
                         body or "Forwarded message", user_google_email,
@@ -1446,8 +1490,8 @@ async def forward_gmail_message(
                         )
                     # If fallback_result is None (allow mode), continue with normal forwarding
                 else:
-                    # Other elicitation errors
-                    logger.error(f"Elicitation failed: {elicit_error}")
+                    # Very specific errors that indicate client should support elicitation
+                    logger.error(f"Forward elicitation failed for supporting client: {error_type}: {elicit_error}")
                     return ForwardGmailMessageResponse(
                         success=False,
                         forward_message_id="",
@@ -1460,7 +1504,7 @@ async def forward_gmail_message(
                         bcc_recipients=[],
                         html_preserved=False,
                         userEmail=user_google_email or "",
-                        error=f"Forward confirmation failed: {elicit_error}",
+                        error=f"Forward confirmation failed: {elicit_error}\n\n🔧 **Client appears to support elicitation but encountered an error**",
                         elicitationRequired=True,
                         recipientsNotAllowed=recipients_not_allowed
                     )
@@ -1580,8 +1624,9 @@ async def forward_gmail_message(
                     recipientsNotAllowed=recipients_not_allowed
                 )
         else:
-            # All recipients are on allow list
-            logger.info(f"All {len(all_recipients)} recipient(s) are on allow list - forwarding without elicitation")
+            # All recipients are on allow list - get count safely
+            total_recipients = count_recipients(to, cc, bcc)
+            logger.info(f"All {total_recipients} recipient(s) are on allow list - forwarding without elicitation")
     else:
         # No allow list configured
         logger.debug("No Gmail allow list configured - forwarding without elicitation")
@@ -1932,7 +1977,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         }
     )
     async def send_gmail_message_tool(
-        ctx: Annotated[Context, Field(description="FastMCP context for elicitation support and user interaction")],
+        ctx: Context,
         subject: Annotated[str, Field(description="Email subject line")],
         body: Annotated[str, Field(description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)")],
         user_google_email: UserGoogleEmail = None,
@@ -1970,7 +2015,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         Returns:
         SendGmailMessageResponse: Structured response with send status and details
         """
-        return await send_gmail_message(ctx, to, subject, body, user_google_email, content_type, html_body, cc, bcc)
+        return await send_gmail_message(ctx, subject, body, to, user_google_email, content_type, html_body, cc, bcc)
 
     @mcp.tool(
         name="draft_gmail_message",
@@ -2143,7 +2188,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         }
     )
     async def forward_gmail_message_tool(
-        ctx: Annotated[Context, Field(description="FastMCP context for elicitation support and user interaction")],
+        ctx: Context,
         message_id: Annotated[str, Field(description="The ID of the Gmail message to forward. This will include the original message content and headers")],
         to: GmailRecipients = 'myself',
         user_google_email: UserGoogleEmail = None,
