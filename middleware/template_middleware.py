@@ -37,6 +37,7 @@ from .template_core import (
 )
 from .filters import register_all_filters
 from .namespace_converter import convert_to_namespace
+from .common_types import add_middleware_fields_to_response
 
 
 from config.enhanced_logging import setup_logger
@@ -183,6 +184,10 @@ class EnhancedTemplateMiddleware(Middleware):
         #         logger.info(f"⚠️ No FastMCP context available for tool: {tool_name}")
         #     return await call_next(context)
         
+        # Track if templates were applied and any errors
+        template_applied = False
+        template_error = None
+        
         try:
             # Check if this is a template macro tool and store middleware reference
             template_macro_tools = {
@@ -199,57 +204,87 @@ class EnhancedTemplateMiddleware(Middleware):
                 # Skip template processing for template macro tools (they handle raw templates)
                 if self.enable_debug_logging:
                     logger.info(f"⚠️ Skipping template processing for template macro tool: {tool_name}")
-                    return await call_next(context)
+                return await call_next(context)
             else:
-                # Track if templates were applied
-                template_applied = False
-                
                 # Get the tool arguments
                 original_args = getattr(context.message, 'arguments', {})
                 
                 if original_args:
                     # Resolve template parameters using the modular template processor
-                    resolved_args = await self._resolve_parameters(
+                    resolved_args, error = await self._resolve_parameters(
                         original_args,
                         context.fastmcp_context,
                         tool_name
                     )
                     
-                    # Update the message arguments if anything was resolved
-                    if resolved_args != original_args:
-                        context.message.arguments = resolved_args
-                        template_applied = True
+                    if error:
+                        # Template resolution failed - capture the error but continue with original args
+                        template_error = error
                         if self.enable_debug_logging:
-                            logger.info(f"✅ Resolved templates for tool: {tool_name}")
-            
-            # Execute the tool and get the result
-            result = await call_next(context)
-            
-            # TEMPLATE TRACKING: Inject into structured_content
-            if template_applied and result:
-                try:
-                    result.structured_content["templateApplied"] = True
-                    if self.enable_debug_logging:
-                        logger.info(f"✅ Injected templateApplied=True into {tool_name} structured_content")
-                except Exception as e:
-                    if self.enable_debug_logging:
-                        logger.info(f"⚠️ Failed to inject template tracking into structured_content: {e}")
-            elif result:
-                result.structured_content["templateApplied"] = False
-            
-            return result
+                            logger.error(f"❌ Template resolution failed for {tool_name}: {error}")
+                    else:
+                        # Update the message arguments if anything was resolved
+                        if resolved_args != original_args:
+                            context.message.arguments = resolved_args
+                            template_applied = True
+                            if self.enable_debug_logging:
+                                logger.info(f"✅ Resolved templates for tool: {tool_name}")
             
         except Exception as e:
-            logger.error(f"❌ Template resolution failed for tool {tool_name}: {e}")
-            # Continue without template resolution on error
-            return await call_next(context)
+            # Capture any middleware-level errors as template errors
+            template_error = f"Template middleware failed for tool {tool_name}: {e}"
+            logger.error(f"❌ {template_error}")
+
+        # Execute the tool and get the result (always execute, even on template errors)
+        result = await call_next(context)
+        
+        # DEBUG: Check result object structure
+        if self.enable_debug_logging:
+            logger.info(f"🔍 DEBUG result object for {tool_name}: type={type(result)}, has_structured_content={hasattr(result, 'structured_content') if result else False}")
+            if result and hasattr(result, 'structured_content'):
+                logger.info(f"🔍 DEBUG structured_content type: {type(result.structured_content)}")
+
+        # JINJA2 TEMPLATE TRACKING & ERROR INJECTION: Inject into the ACTUAL response content
+        if result:
+            # Check if this is a FastMCP ToolResult with content (what clients actually receive)
+            if hasattr(result, 'content') and isinstance(result.content, dict):
+                # Transform the actual response content (this is what clients see)
+                result.content = add_middleware_fields_to_response(
+                    result.content,
+                    jinja_template_applied=template_applied,
+                    jinja_template_error=template_error
+                )
+                
+                if self.enable_debug_logging:
+                    if template_error:
+                        logger.error(f"✅ Injected Jinja2 template error into {tool_name} CONTENT: {template_error}")
+                    logger.info(f"✅ Injected Jinja2 template tracking into {tool_name} CONTENT (applied={template_applied}, error={bool(template_error)})")
+                    
+            # Also inject into structured_content for internal use
+            elif hasattr(result, 'structured_content') and isinstance(result.structured_content, dict):
+                # Use the same helper function for consistency
+                result.structured_content = add_middleware_fields_to_response(
+                    result.structured_content,
+                    jinja_template_applied=template_applied,
+                    jinja_template_error=template_error
+                )
+                
+                if self.enable_debug_logging:
+                    if template_error:
+                        logger.error(f"✅ Injected Jinja2 template error into {tool_name} structured_content (fallback): {template_error}")
+                    logger.info(f"✅ Injected Jinja2 template tracking into {tool_name} structured_content (fallback)")
+                    
+            elif self.enable_debug_logging:
+                logger.warning(f"⚠️ Cannot inject template tracking for {tool_name}: result type={type(result)}, content type={type(getattr(result, 'content', None))}")
+        
+        return result
     
     async def _resolve_parameters(
         self,
         parameters: Dict[str, Any],
         fastmcp_context,
         tool_name: str
-    ) -> Dict[str, Any]:
+    ) -> tuple[Dict[str, Any], Optional[str]]:
         """
         Recursively resolve template expressions in all tool parameters.
         
@@ -259,25 +294,28 @@ class EnhancedTemplateMiddleware(Middleware):
             tool_name: Name of the tool being called (for debugging/logging)
                 
         Returns:
-            Dictionary with same structure as input but with resolved template values
+            Tuple of (resolved_parameters, error_message)
         """
         resolved = {}
         
         for key, value in parameters.items():
-            resolved[key] = await self._resolve_value(
+            resolved_value, error = await self._resolve_value(
                 value,
                 fastmcp_context,
                 f"{tool_name}.{key}"
             )
+            if error:
+                return parameters, error  # Return original parameters and first error
+            resolved[key] = resolved_value
         
-        return resolved
+        return resolved, None
     
     async def _resolve_value(
         self,
         value: Any,
         fastmcp_context,
         param_path: str
-    ) -> Any:
+    ) -> tuple[Any, Optional[str]]:
         """
         Resolve a single value using the modular template processor.
         
@@ -287,7 +325,7 @@ class EnhancedTemplateMiddleware(Middleware):
             param_path: Path identifier for debugging
             
         Returns:
-            Processed value with template expressions resolved
+            Tuple of (processed_value, error_message)
         """
         if isinstance(value, str):
             return await self.template_processor.resolve_string_templates(
@@ -298,27 +336,32 @@ class EnhancedTemplateMiddleware(Middleware):
             # Recursively resolve dictionary values
             resolved_dict = {}
             for k, v in value.items():
-                resolved_dict[k] = await self._resolve_value(
+                resolved_item, error = await self._resolve_value(
                     v,
                     fastmcp_context,
                     f"{param_path}.{k}"
                 )
-            return resolved_dict
+                if error:
+                    return value, error  # Return original value and first error encountered
+                resolved_dict[k] = resolved_item
+            return resolved_dict, None
             
         elif isinstance(value, list):
             # Recursively resolve list items
             resolved_list = []
             for i, item in enumerate(value):
-                resolved_item = await self._resolve_value(
+                resolved_item, error = await self._resolve_value(
                     item,
                     fastmcp_context,
                     f"{param_path}[{i}]"
                 )
+                if error:
+                    return value, error  # Return original value and first error encountered
                 resolved_list.append(resolved_item)
-            return resolved_list
+            return resolved_list, None
             
         else:
-            return value
+            return value, None
     
     async def on_get_prompt(self, context: MiddlewareContext, call_next):
         """
@@ -370,17 +413,25 @@ class EnhancedTemplateMiddleware(Middleware):
                         logger.info(f"🎯 Applying template resolution to prompt: {prompt_name}")
                     
                     # Apply template resolution using modular template processor
-                    resolved_text = await self.template_processor.resolve_string_templates(
+                    resolved_text, error = await self.template_processor.resolve_string_templates(
                         original_text,
                         context.fastmcp_context,
                         f"prompt.{prompt_name}"
                     )
                     
+                    if error:
+                        # Log the error but continue with original text
+                        logger.error(f"❌ Template resolution failed for prompt {prompt_name}: {error}")
+                        resolved_text = original_text
+                    
                     # Update the prompt result with resolved content
                     prompt_result.content.text = resolved_text
                     
                     if self.enable_debug_logging:
-                        logger.info(f"✅ Template variables resolved in prompt: {prompt_name}")
+                        if error:
+                            logger.info(f"⚠️ Used original text for prompt {prompt_name} due to template error")
+                        else:
+                            logger.info(f"✅ Template variables resolved in prompt: {prompt_name}")
                 
             except Exception as e:
                 logger.error(f"❌ Template resolution failed for prompt {prompt_name}: {e}")
@@ -490,11 +541,16 @@ class EnhancedTemplateMiddleware(Middleware):
                 logger.info(f"📄 Loaded template file: {selected['relative_path']}")
             
             # Use modular template processor for rendering
-            rendered_content = await self.template_processor.resolve_string_templates(
+            rendered_content, error = await self.template_processor.resolve_string_templates(
                 template_content,
                 context.fastmcp_context,
                 f"template_file_{selected['name']}"
             )
+            
+            if error:
+                # Log error and use original content
+                logger.error(f"❌ Template file rendering failed for {selected['name']}: {error}")
+                rendered_content = template_content
             
             # Wrap in PromptMessage format
             from fastmcp.prompts.prompt import PromptMessage, TextContent
@@ -505,7 +561,10 @@ class EnhancedTemplateMiddleware(Middleware):
             )
             
             if self.enable_debug_logging:
-                logger.info(f"✅ Template file rendered successfully using modular processor")
+                if error:
+                    logger.info(f"⚠️ Used original template content due to rendering error")
+                else:
+                    logger.info(f"✅ Template file rendered successfully using modular processor")
             
             return result
             

@@ -1,6 +1,7 @@
 """Application configuration using Pydantic Settings."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 from typing_extensions import Optional, List,Literal
 import os
 from pathlib import Path
@@ -75,7 +76,18 @@ class Settings(BaseSettings):
     enhanced_logging: bool = True
     
     # Security Configuration
-    auth_security_level: str = "standard"  # "standard" or "enhanced"
+    auth_security_level: str = Field(
+        default="standard",
+        env="AUTH_SECURITY_LEVEL",
+        description="Authentication security level: 'standard', 'high', or 'custom'"
+    )
+    
+    # Template Configuration
+    jinja_template_strict_mode: bool = Field(
+        default=True,
+        env="JINJA_TEMPLATE_STRICT_MODE",
+        description="When enabled, template processing errors will cause tool execution to fail instead of just logging the error"
+    )
     
     # FastMCP 2.12.0 GoogleProvider Configuration
     fastmcp_server_auth: str = ""
