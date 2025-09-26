@@ -72,7 +72,7 @@ class TemplateProcessor:
         text: str,
         fastmcp_context,
         param_path: str
-    ) -> Any:
+    ) -> Tuple[Any, Optional[str]]:
         """
         Resolve template expressions in a string using the appropriate engine.
         
@@ -87,10 +87,12 @@ class TemplateProcessor:
             param_path: Path identifier for debugging
             
         Returns:
-            Resolved text with template expressions substituted
+            Tuple of (resolved_text, error_message)
+            - resolved_text: Resolved text with template expressions substituted
+            - error_message: Error message if template resolution failed, None if successful
         """
         if not text or not isinstance(text, str):
-            return text
+            return text, None
         
         # Detect template type
         has_jinja2 = self._has_jinja2_syntax(text)
@@ -109,7 +111,7 @@ class TemplateProcessor:
             return await self._resolve_simple_template(text, fastmcp_context, param_path)
         else:
             # No templates found
-            return text
+            return text, None
     
     def _has_jinja2_syntax(self, text: str) -> bool:
         """
@@ -143,7 +145,7 @@ class TemplateProcessor:
         template_text: str,
         fastmcp_context,
         param_path: str
-    ) -> Any:
+    ) -> Tuple[Any, Optional[str]]:
         """
         Resolve template using Jinja2 engine.
         
@@ -160,11 +162,12 @@ class TemplateProcessor:
             param_path: Path identifier for debugging
             
         Returns:
-            Rendered template result
+            Tuple of (rendered_result, error_message)
         """
         jinja_env = self.jinja_env_manager.get_environment()
         if not jinja_env:
-            logger.error("❌ Jinja2 not available - falling back to simple template")
+            error_msg = "Jinja2 not available - falling back to simple template"
+            logger.error(f"❌ {error_msg}")
             return await self._resolve_simple_template(template_text, fastmcp_context, param_path)
         
         try:
@@ -207,14 +210,17 @@ class TemplateProcessor:
             if self.enable_debug_logging:
                 logger.debug(f"✅ Jinja2 template resolved: {param_path}")
             
-            return result
+            return result, None
             
         except Exception as e:
-            logger.error(f"❌ Jinja2 template resolution failed for {param_path}: {e}")
+            error_msg = f"Jinja2 template resolution failed for {param_path}: {e}"
+            logger.error(f"❌ {error_msg}")
             if self.enable_debug_logging:
                 logger.debug(f"🔄 Falling back to simple template resolution")
-            # Fall back to simple template resolution
-            return await self._resolve_simple_template(template_text, fastmcp_context, param_path)
+            # Fall back to simple template resolution but preserve the Jinja2 error
+            fallback_result, fallback_error = await self._resolve_simple_template(template_text, fastmcp_context, param_path)
+            # Return the fallback result but with the original Jinja2 error (since it was detected first)
+            return fallback_result, error_msg
     
     async def _preprocess_mixed_template(self, template_text: str, fastmcp_context) -> str:
         """
@@ -501,7 +507,7 @@ class TemplateProcessor:
         text: str,
         fastmcp_context,
         param_path: str
-    ) -> Any:
+    ) -> Tuple[Any, Optional[str]]:
         """
         Resolve template using the simple regex-based engine (v2 compatibility).
         
@@ -513,60 +519,70 @@ class TemplateProcessor:
             param_path: Path identifier for debugging
             
         Returns:
-            Resolved text or extracted value
+            Tuple of (resolved_text, error_message)
         """
         # Find all template expressions
         matches = list(self.SIMPLE_TEMPLATE_PATTERN.finditer(text))
         
         if not matches:
-            return text
+            return text, None
         
         if self.enable_debug_logging:
             logger.debug(f"🔧 Resolving simple template: {param_path}")
         
-        # Special case: if the entire string is a single template, 
-        # we might return a non-string value
-        if len(matches) == 1 and matches[0].group(0) == text.strip():
-            # The entire string is a single template
-            template_expr = matches[0].group(1)
-            resolved = await self._resolve_simple_template_expression(
-                template_expr,
-                fastmcp_context,
-                param_path
-            )
-            return resolved
-        
-        # Multiple templates or template is part of a larger string
-        result = text
-        for match in reversed(matches):  # Process in reverse to maintain positions
-            template_expr = match.group(1)
-            resolved = await self._resolve_simple_template_expression(
-                template_expr,
-                fastmcp_context,
-                param_path
-            )
+        try:
+            # Special case: if the entire string is a single template,
+            # we might return a non-string value
+            if len(matches) == 1 and matches[0].group(0) == text.strip():
+                # The entire string is a single template
+                template_expr = matches[0].group(1)
+                resolved, error = await self._resolve_simple_template_expression(
+                    template_expr,
+                    fastmcp_context,
+                    param_path
+                )
+                return resolved, error
             
-            # Convert to string for replacement
-            if isinstance(resolved, str):
-                replacement = resolved
-            elif isinstance(resolved, bool):
-                replacement = str(resolved).lower()  # Convert True/False to 'true'/'false'
-            elif resolved is None:
-                replacement = ''
-            else:
-                replacement = json.dumps(resolved)
+            # Multiple templates or template is part of a larger string
+            result = text
+            for match in reversed(matches):  # Process in reverse to maintain positions
+                template_expr = match.group(1)
+                resolved, error = await self._resolve_simple_template_expression(
+                    template_expr,
+                    fastmcp_context,
+                    param_path
+                )
+                
+                # If any expression fails, return the error
+                if error:
+                    return result, error
+                
+                # Convert to string for replacement
+                if isinstance(resolved, str):
+                    replacement = resolved
+                elif isinstance(resolved, bool):
+                    replacement = str(resolved).lower()  # Convert True/False to 'true'/'false'
+                elif resolved is None:
+                    replacement = ''
+                else:
+                    replacement = json.dumps(resolved)
+                
+                # Replace the template expression
+                result = result[:match.start()] + replacement + result[match.end():]
             
-            # Replace the template expression
-            result = result[:match.start()] + replacement + result[match.end():]
+            return result, None
         
-        return result
+        except Exception as e:
+            error_msg = f"Simple template resolution failed for {param_path}: {e}"
+            logger.error(f"❌ {error_msg}")
+            return text, error_msg
     
     async def _resolve_simple_template_expression(
         self,
         expression: str,
         fastmcp_context,
         param_path: str
-    ) -> Any:
+    ) -> Tuple[Any, Optional[str]]:
         """
         Resolve a single simple template expression.
         
@@ -576,37 +592,43 @@ class TemplateProcessor:
             param_path: Path identifier for debugging
             
         Returns:
-            Resolved value
+            Tuple of (resolved_value, error_message)
         """
-        # Split expression into resource URI and property path
-        if '.' in expression and '://' in expression:
-            scheme_end = expression.index('://')
-            first_dot_after_scheme = expression.find('.', scheme_end)
-            
-            if first_dot_after_scheme != -1:
-                resource_uri = expression[:first_dot_after_scheme]
-                property_path = expression[first_dot_after_scheme + 1:]
+        try:
+            # Split expression into resource URI and property path
+            if '.' in expression and '://' in expression:
+                scheme_end = expression.index('://')
+                first_dot_after_scheme = expression.find('.', scheme_end)
+                
+                if first_dot_after_scheme != -1:
+                    resource_uri = expression[:first_dot_after_scheme]
+                    property_path = expression[first_dot_after_scheme + 1:]
+                else:
+                    resource_uri = expression
+                    property_path = None
             else:
                 resource_uri = expression
                 property_path = None
-        else:
-            resource_uri = expression
-            property_path = None
-        
-        if self.enable_debug_logging:
-            logger.debug(f"📍 Resolving: {resource_uri}")
-            if property_path:
-                logger.debug(f"   Property path: {property_path}")
-        
-        # Fetch the resource
-        resource_data = await self.resource_handler.fetch_resource(resource_uri, fastmcp_context)
-        
-        # Extract property if specified
-        if property_path:
-            result = self.resource_handler.extract_property(resource_data, property_path)
+            
             if self.enable_debug_logging:
-                logger.debug(f"   Extracted value: {repr(result)}")
-        else:
-            result = resource_data
-        
-        return result
+                logger.debug(f"📍 Resolving: {resource_uri}")
+                if property_path:
+                    logger.debug(f"   Property path: {property_path}")
+            
+            # Fetch the resource
+            resource_data = await self.resource_handler.fetch_resource(resource_uri, fastmcp_context)
+            
+            # Extract property if specified
+            if property_path:
+                result = self.resource_handler.extract_property(resource_data, property_path)
+                if self.enable_debug_logging:
+                    logger.debug(f"   Extracted value: {repr(result)}")
+            else:
+                result = resource_data
+            
+            return result, None
+            
+        except Exception as e:
+            error_msg = f"Failed to resolve template expression '{expression}': {e}"
+            logger.error(f"❌ {error_msg}")
+            return None, error_msg
