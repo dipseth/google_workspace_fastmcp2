@@ -1,4 +1,4 @@
-# 🔒 HTTPS Setup Guide for FastMCP2 Drive Upload Server
+# 🔒 HTTPS Setup Guide for Groupon Google MCP Server
 
 ## ✅ SSL Certificates Generated
 Your SSL certificates have been created successfully:

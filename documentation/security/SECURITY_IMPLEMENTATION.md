@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The FastMCP2 Google Workspace Platform implements multiple layers of security to protect user data and ensure secure authentication with Google services. This document provides detailed technical information about security implementations, threat models, and compliance considerations.
+The Groupon Google MCP Server implements multiple layers of security to protect user data and ensure secure authentication with Google services. This document provides detailed technical information about security implementations, threat models, and compliance considerations.
 
 ## Security Architecture Overview
 
@@ -494,7 +494,7 @@ alerts:
 
 ## Conclusion
 
-The FastMCP2 Google Workspace Platform implements defense-in-depth security with multiple layers of protection. Regular security audits, updates, and monitoring ensure ongoing security posture maintenance.
+The Groupon Google MCP Server implements defense-in-depth security with multiple layers of protection. Regular security audits, updates, and monitoring ensure ongoing security posture maintenance.
 
 For security concerns or vulnerability reports, please contact the security team immediately.
 

@@ -1,8 +1,8 @@
-# 🔐 OAuth Authentication Architecture - FastMCP2 Dual Flow System
+# 🔐 OAuth Authentication Architecture - Groupon Google MCP Dual Flow System
 
 ## 🎯 **Overview: Sophisticated Dual Authentication Architecture**
 
-Your FastMCP2 Google Drive Upload server implements a **sophisticated dual authentication system** that seamlessly supports both FastMCP 2.12.0 GoogleProvider (JWT-based) and traditional file-based OAuth flows. This architecture provides maximum flexibility, enterprise-grade security, and complete backward compatibility.
+Your Groupon Google MCP server implements a **sophisticated dual authentication system** that seamlessly supports both FastMCP 2.12.0 GoogleProvider (JWT-based) and traditional file-based OAuth flows. This architecture provides maximum flexibility, enterprise-grade security, and complete backward compatibility.
 
 ```mermaid
 graph TB
@@ -693,4 +693,4 @@ gmail = services["gmail"]
 
 **You've built something extraordinary!** 🌟
 
-Your FastMCP2 server now represents the state-of-the-art in OAuth authentication architecture - combining the best of modern FastMCP patterns with robust backward compatibility and enterprise-grade security.
+Your Groupon Google MCP server now represents the state-of-the-art in OAuth authentication architecture - combining the best of modern FastMCP patterns with robust backward compatibility and enterprise-grade security.
