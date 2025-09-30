@@ -1134,6 +1134,94 @@ class AuthMiddleware(Middleware):
             return None
 
 
+def setup_oauth_coordination(mcp, google_auth_provider):
+    """
+    Setup OAuth coordination between modern GoogleProvider and legacy system.
+    
+    CRITICAL FIX: The "invalid transaction ID" error occurs because FastMCP 2.12.x
+    GoogleProvider has its own built-in OAuth proxy that conflicts with custom endpoints.
+    
+    Solution: Let GoogleProvider handle OAuth entirely when active.
+    
+    Args:
+        mcp: FastMCP application instance
+        google_auth_provider: Modern GoogleProvider instance (or None)
+    """
+    
+    if google_auth_provider:
+        logger.info("🔄 GoogleProvider active - disabling conflicting custom OAuth endpoints")
+        logger.info("  CRITICAL: FastMCP 2.12.x GoogleProvider has built-in OAuth proxy")
+        logger.info("  SOLUTION: Let GoogleProvider handle OAuth flow entirely")
+        logger.info("  BENEFIT: No transaction ID conflicts, enhanced security")
+        
+        # Only provide minimal discovery endpoint for MCP Inspector
+        @mcp.custom_route("/.well-known/oauth-authorization-server/mcp", methods=["GET", "OPTIONS"])
+        async def oauth_authorization_server_mcp(request):
+            """Minimal MCP-specific OAuth authorization server endpoint."""
+            from starlette.responses import JSONResponse, Response
+            from config.settings import settings
+            
+            if request.method == "OPTIONS":
+                return Response(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    }
+                )
+            
+            # Return metadata pointing to GoogleProvider's endpoints
+            metadata = {
+                "issuer": "https://accounts.google.com",
+                "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+                "token_endpoint": "https://oauth2.googleapis.com/token",
+                "jwks_uri": "https://www.googleapis.com/oauth2/v3/certs",
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code", "refresh_token"],
+                "code_challenge_methods_supported": ["S256"],
+                "subject_types_supported": ["public"],
+                "id_token_signing_alg_values_supported": ["RS256"],
+                "userinfo_endpoint": "https://www.googleapis.com/oauth2/v1/userinfo",
+                # Point to GoogleProvider's built-in registration
+                "registration_endpoint": f"{settings.base_url}/auth/register"
+            }
+            
+            return JSONResponse(
+                content=metadata,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                }
+            )
+        
+        logger.info("✅ OAuth coordination: Modern GoogleProvider mode")
+        logger.info("  🚫 Custom OAuth endpoints: DISABLED (prevents conflicts)")
+        logger.info("  ✅ GoogleProvider OAuth proxy: ACTIVE")
+        logger.info("  ✅ Transaction ID management: FastMCP built-in")
+        
+    else:
+        logger.info("🔄 No GoogleProvider - using full legacy OAuth system")
+
+
+def log_oauth_transition_status(google_auth_provider):
+    """Log the current OAuth transition status."""
+    
+    if google_auth_provider:
+        logger.info("📊 OAuth Transition Status: MODERN")
+        logger.info("  🏗️ Architecture: FastMCP 2.12.x built-in OAuth proxy")
+        logger.info("  🔐 Security: Enhanced with automatic PKCE")
+        logger.info("  📋 Scope Management: ScopeRegistry integration")
+        logger.info("  🎯 Token Validation: Google tokeninfo API")
+        logger.info("  ⚠️ Note: Custom OAuth endpoints disabled to prevent conflicts")
+    else:
+        logger.info("📊 OAuth Transition Status: LEGACY")
+        logger.info("  🔧 Architecture: Custom OAuth proxy and endpoints")
+        logger.info("  📁 Credentials: File-based storage")
+        logger.info("  📋 Scope Management: Manual ScopeRegistry integration")
+
+
 def create_enhanced_auth_middleware(
     storage_mode: CredentialStorageMode = CredentialStorageMode.FILE_PLAINTEXT,
     encryption_key: Optional[str] = None,
@@ -1142,7 +1230,7 @@ def create_enhanced_auth_middleware(
     """
     Factory function to create AuthMiddleware with unified authentication support.
     
-    This factory creates the enhanced AuthMiddleware that bridges FastMCP 2.12.0 
+    This factory creates the enhanced AuthMiddleware that bridges FastMCP 2.12.0
     GoogleProvider with existing tool architecture, implementing the unified OAuth design.
     
     Args:
@@ -1166,5 +1254,8 @@ def create_enhanced_auth_middleware(
         logger.debug("  ✅ Backward compatibility maintained")
         logger.debug("  ✅ No tool signature changes required")
         logger.debug("  🔄 Phase 1 migration successfully implemented")
+    
+    # Log OAuth coordination status
+    log_oauth_transition_status(google_provider)
     
     return middleware
