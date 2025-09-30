@@ -332,7 +332,7 @@ class UnifiedSession:
             logger.info(f"   client_id: {custom_client_id[:10]}..." if custom_client_id else "   client_id: None")
             logger.info(f"   client_secret: {'PROVIDED' if custom_client_secret else 'NOT_PROVIDED'}")
     
-    def retrieve_custom_oauth_credentials(self, state: str) -> tuple[str, str, str]:
+    def retrieve_custom_oauth_credentials(self, state: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Retrieve custom OAuth credentials from session metadata.
         
         Args:
