@@ -458,7 +458,7 @@ def store_custom_oauth_credentials(state: str, custom_client_id: str, custom_cli
         logger.debug("Cannot store custom credentials in context - not in FastMCP request")
 
 
-def retrieve_custom_oauth_credentials(state: str) -> tuple[str, str, str]:
+def retrieve_custom_oauth_credentials(state: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Retrieve custom OAuth credentials from context."""
     try:
         ctx = get_context()
