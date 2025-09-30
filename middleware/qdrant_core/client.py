@@ -775,7 +775,7 @@ class QdrantClientManager:
             successful_indexes = len([r for r in index_rebuild_results if r["status"] == "success"])
             
             logger.info(f"✅ Complete collection rebuild finished in {execution_time_ms}ms")
-            logger.info(f"📊 Indexes rebuilt: {successful_indexes}/{len(index_fields)}")
+            logger.info(f"📊 Indexes rebuilt: {successful_indexes}/{len(index_configs)}")
             
             return {
                 "status": "completed",
@@ -787,7 +787,7 @@ class QdrantClientManager:
                 "new_stats": new_stats,
                 "index_results": index_rebuild_results,
                 "indexes_rebuilt": successful_indexes,
-                "total_indexes": len(index_fields),
+                "total_indexes": len(index_configs),
                 "vectors_optimized": vectors_optimized,
                 "collection_name": self.config.collection_name
             }

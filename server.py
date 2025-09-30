@@ -86,105 +86,38 @@ except KeyError:
     logger.warning(f"⚠️ Invalid CREDENTIAL_STORAGE_MODE '{storage_mode_str}', defaulting to FILE_ENCRYPTED")
     credential_storage_mode = CredentialStorageMode.FILE_ENCRYPTED
 
-# Import contextlib for proper async context manager implementation
-import contextlib
+# FastMCP 2.12.x handles lifespan management automatically - no custom lifespan needed
 
-# Define a proper lifespan context manager for the FastMCP instance
-@contextlib.asynccontextmanager
-async def lifespan_manager(app: FastMCP):
-    """Lifespan context manager for the FastMCP instance."""
-    logger.info("🚀 Starting FastMCP server lifespan...")
-    # Properly initialize the StreamableHTTPSessionManager task group
-    # from fastmcp.server.http import get_session_manager
-    # session_manager = get_session_manager()
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-    session_manager = StreamableHTTPSessionManager(
-        app=app._mcp_server,
-        event_store=None,
-        json_response=False,
-        stateless=False,
-    )    
-    # Use a nested context manager to ensure proper cleanup
-    async with session_manager.run():
-        try:
-            yield
-        except Exception as e:
-            logger.error(f"❌ Error in lifespan: {e}", exc_info=True)
-    
-    logger.info("🛑 Shutting down FastMCP server lifespan...")
-
-# Configure authentication based on feature flags
-# During Phase 1, we configure GoogleProvider but don't immediately enforce it
-# to maintain dual-flow compatibility
+# Temporary: Disable GoogleProvider to fix MCP Inspector OAuth conflicts
 google_auth_provider = None
 
-if ENABLE_UNIFIED_AUTH and settings.fastmcp_server_auth == "GOOGLE":
-    # Use FastMCP 2.12.0's GoogleProvider with proper configuration
-    logger.info("🔑 Configuring FastMCP 2.12.0 GoogleProvider...")
-    try:
-        # Import scope registry for required scopes
-        from auth.scope_registry import ScopeRegistry
-        
-        # Get essential scopes for GoogleProvider (basic user info + core services)
-        # required_scopes = ScopeRegistry.resolve_scope_group("base")
-        required_scopes = ScopeRegistry.resolve_scope_group("oauth_basic")
+logger.info("🔄 GoogleProvider temporarily disabled for MCP Inspector compatibility")
+logger.info("  Using proven legacy OAuth system")
+logger.info("  All discovery endpoints will be available")
+logger.info("  No transaction ID conflicts")
 
-        # Configure GoogleProvider according to FastMCP 2.12.0 documentation
-        # Use the redirect path that matches your existing Google OAuth client configuration
-        from urllib.parse import urlparse
-        redirect_uri = settings.dynamic_oauth_redirect_uri
-        redirect_path = urlparse(redirect_uri).path
-        
-        google_auth_provider = GoogleProvider(
-            client_id=settings.fastmcp_server_auth_google_client_id,
-            client_secret=settings.fastmcp_server_auth_google_client_secret,
-            base_url=settings.fastmcp_server_auth_google_base_url or settings.base_url,
-            required_scopes=required_scopes,  # Essential: Required scopes for authentication
-            redirect_path=redirect_path        # Use YOUR configured redirect path
-        )
-        logger.info("✅ FastMCP 2.12.0 GoogleProvider configured correctly")
-        logger.info(f"  Client ID: {settings.fastmcp_server_auth_google_client_id[:20] if settings.fastmcp_server_auth_google_client_id else 'Not set'}...")
-        logger.info(f"  Base URL: {settings.fastmcp_server_auth_google_base_url or settings.base_url}")
-        logger.info(f"  Required Scopes: {len(required_scopes)} scopes configured")
-        logger.info(f"  Redirect Path: {redirect_path} (from your OAuth config)")
-        logger.info(f"  Full Redirect URI: {redirect_uri}")
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to configure GoogleProvider: {e}")
-        logger.warning("⚠️ Falling back to legacy OAuth flow")
-        google_auth_provider = None
+# Removed modern_google_provider imports - using existing auth system
 
-# Create FastMCP2 instance with GoogleProvider if configured
-# Use GoogleProvider when available for proper FastMCP 2.12.0 authentication
+# Create FastMCP instance without GoogleProvider (using legacy OAuth system)
 mcp = FastMCP(
     name=settings.server_name,
     version="1.0.0",
-    auth=google_auth_provider,  # Use GoogleProvider when configured, None for legacy mode
-    lifespan=lifespan_manager  # Add lifespan manager to properly initialize StreamableHTTPSessionManager
+    auth=None  # No GoogleProvider - use legacy OAuth system
 )
 
-# Log authentication status
-if google_auth_provider:
-    logger.info("🔐 GoogleProvider configured but not enforced (Phase 1 dual-flow mode)")
-else:
-    logger.info("⚠️ FastMCP running without GoogleProvider - using legacy flow only")
+logger.info("🔐 FastMCP running with legacy OAuth system")
+logger.info("  All existing OAuth endpoints active")
+logger.info("  MCP Inspector discovery available")
 
 from auth.middleware import create_enhanced_auth_middleware
 auth_middleware = create_enhanced_auth_middleware(
     storage_mode=credential_storage_mode,
-    google_provider=google_auth_provider  # Pass the GoogleProvider instance
+    google_provider=None  # No GoogleProvider - use legacy system
 )
-# Enable service selection for GoogleProvider
-if google_auth_provider:
-    logger.info("🔧 Configuring GoogleProvider with service selection support")
-    
-    # Store reference for middleware access
-    from auth.context import set_google_provider
-    set_google_provider(google_auth_provider)
-    
-    # Enable service selection
-    auth_middleware.enable_service_selection(enabled=True)
-    logger.info("✅ Service selection interface enabled for OAuth flows")
+# Enable service selection for existing OAuth system
+logger.info("🔧 Configuring service selection for legacy OAuth system")
+auth_middleware.enable_service_selection(enabled=True)
+logger.info("✅ Service selection interface enabled for OAuth flows")
 
 mcp.add_middleware(auth_middleware)
 
@@ -362,60 +295,24 @@ except Exception as e:
     logger.warning(f"⚠️ Could not register Qdrant tools and resources: {e}")
 
 
-# Setup OAuth discovery endpoints for MCP Inspector
-# Setup OAuth discovery endpoints for MCP Inspector (always available)
-logger.info("🔍 Setting up OAuth discovery endpoints for MCP Inspector...")
+# Setup OAuth endpoints (now using legacy system)
+logger.info("🔍 Setting up OAuth discovery endpoints...")
 try:
-    # Test imports before setting up endpoints
-    logger.info("🔍 DIAGNOSTIC: Testing OAuth endpoint dependencies...")
-    try:
-        from auth.dynamic_client_registration import handle_client_registration
-        logger.info("✅ DIAGNOSTIC: dynamic_client_registration import successful")
-    except Exception as import_error:
-        logger.error(f"❌ DIAGNOSTIC: dynamic_client_registration import failed: {import_error}")
-        raise
-    
-    try:
-        from auth.oauth_proxy import oauth_proxy
-        logger.info("✅ DIAGNOSTIC: oauth_proxy import successful")
-    except Exception as import_error:
-        logger.error(f"❌ DIAGNOSTIC: oauth_proxy import failed: {import_error}")
-        raise
-    
-    try:
-        from auth.scope_registry import ScopeRegistry
-        logger.info("✅ DIAGNOSTIC: scope_registry import successful")
-    except Exception as import_error:
-        logger.error(f"❌ DIAGNOSTIC: scope_registry import failed: {import_error}")
-        raise
-    
-    logger.info("🔍 DIAGNOSTIC: All dependencies imported successfully, setting up endpoints...")
     setup_oauth_endpoints_fastmcp(mcp)
-    logger.info("✅ OAuth discovery endpoints configured via FastMCP custom routes")
-    
-    logger.info("🔍 MCP Inspector can discover OAuth at:")
-    logger.info(f"  {settings.base_url}/.well-known/oauth-protected-resource/mcp")
-    logger.info(f"  {settings.base_url}/.well-known/oauth-authorization-server")
-    logger.info(f"  {settings.base_url}/oauth/register")
-    
-    # DIAGNOSTIC: Test endpoint registration by accessing MCP routes
-    logger.info("🔍 DIAGNOSTIC: Checking FastMCP route registration...")
-    if hasattr(mcp, '_app') and hasattr(mcp._app, 'routes'):
-        oauth_routes = [str(route) for route in mcp._app.routes if 'oauth' in str(route)]
-        logger.info(f"🔍 DIAGNOSTIC: Found {len(oauth_routes)} OAuth routes: {oauth_routes}")
-    else:
-        logger.warning("⚠️ DIAGNOSTIC: Cannot access MCP routes for verification")
+    logger.info("✅ OAuth discovery endpoints configured")
+    logger.info(f"  Discovery: {settings.base_url}/.well-known/oauth-protected-resource/mcp")
+    logger.info(f"  Authorization: {settings.base_url}/.well-known/oauth-authorization-server")
+    logger.info(f"  Registration: {settings.base_url}/oauth/register")
+    logger.info(f"  Callback: {settings.base_url}/oauth2callback")
     
 except Exception as e:
-    logger.error(f"❌ Failed to setup OAuth discovery endpoints: {e}", exc_info=True)
+    logger.error(f"❌ Failed to setup OAuth endpoints: {e}", exc_info=True)
 
-# NOW setup authentication AFTER custom routes are registered to avoid conflicts
-logger.info("🔑 Setting up authentication...")
-jwt_auth_provider = None
-
+# Legacy Authentication System Setup
 if use_google_oauth:
     # Setup real Google OAuth authentication
     jwt_auth_provider = setup_google_oauth_auth()
+    mcp._auth = jwt_auth_provider
     logger.info("🔐 Google OAuth Bearer Token authentication enabled")
     logger.info("🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs")
     logger.info("🎯 OAuth issuer: https://accounts.google.com")
@@ -423,30 +320,11 @@ if use_google_oauth:
 elif enable_jwt_auth:
     # Fallback to custom JWT for development/testing
     jwt_auth_provider = setup_jwt_auth()
+    mcp._auth = jwt_auth_provider
     logger.info("🔐 Custom JWT Bearer Token authentication enabled (development mode)")
     
-    # Generate test tokens for development
-    logger.info("🎫 Generating test JWT tokens...")
-    test_tokens = create_test_tokens()
-    for email, token in test_tokens.items():
-        logger.info(f"Test token for {email}: {token[:30]}...")
-    
-    # Save test tokens to file for tests to use
-    import json
-    test_tokens_file = "test_tokens.json"
-    try:
-        with open(test_tokens_file, "w") as f:
-            json.dump(test_tokens, f, indent=2)
-        logger.info(f"💾 Test tokens saved to {test_tokens_file}")
-    except Exception as e:
-        logger.error(f"❌ Failed to save test tokens: {e}")
 else:
     logger.info("⚠️ Authentication DISABLED (for testing)")
-
-# Apply the auth provider to the MCP instance
-if jwt_auth_provider:
-    mcp._auth = jwt_auth_provider
-    logger.info("✅ Authentication provider applied to MCP instance")
 
 
 def main():

@@ -440,3 +440,36 @@ def is_service_selection_needed(session_id: str = None) -> bool:
         return get_session_data(session_id, "service_selection_needed", False)
     
     return False
+
+
+def store_custom_oauth_credentials(state: str, custom_client_id: str, custom_client_secret: str = None, auth_method: str = None) -> None:
+    """Store custom OAuth credentials in both state map and context for persistence."""
+    try:
+        ctx = get_context()
+        # Store in FastMCP context for cross-request persistence
+        ctx.set_state(f"custom_client_id_{state}", custom_client_id)
+        if custom_client_secret:
+            ctx.set_state(f"custom_client_secret_{state}", custom_client_secret)
+        if auth_method:
+            ctx.set_state(f"auth_method_{state}", auth_method)
+        
+        logger.info(f"🔗 Stored custom OAuth credentials in FastMCP context for state: {state}")
+    except RuntimeError:
+        logger.debug("Cannot store custom credentials in context - not in FastMCP request")
+
+
+def retrieve_custom_oauth_credentials(state: str) -> tuple[str, str, str]:
+    """Retrieve custom OAuth credentials from context."""
+    try:
+        ctx = get_context()
+        custom_client_id = ctx.get_state(f"custom_client_id_{state}")
+        custom_client_secret = ctx.get_state(f"custom_client_secret_{state}")
+        auth_method = ctx.get_state(f"auth_method_{state}")
+        
+        if custom_client_id:
+            logger.info(f"🔗 Retrieved custom OAuth credentials from FastMCP context for state: {state}")
+        
+        return custom_client_id, custom_client_secret, auth_method
+    except RuntimeError:
+        logger.debug("Cannot retrieve custom credentials from context - not in FastMCP request")
+        return None, None, None

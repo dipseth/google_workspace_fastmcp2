@@ -92,6 +92,59 @@ graph TB
 > - 🔒 **[HTTPS Setup Guide](documentation/config/https_setup_guide.md)** - SSL certificate configuration for secure connections
 > - ⚙️ **[MCP JSON Configuration Guide](documentation/config/mcp_config_fastmcp.md)** - Standard MCP configuration for any compatible client
 
+## 🔗 Client Connections
+
+RiversUnlimited supports multiple connection methods. Here are the two most popular ways to get started:
+
+### 🎯 Quick Setup Options
+
+**Option 1: Cursor IDE** (STDIO - Community Verified ✅):
+```json
+{
+  "mcpServers": {
+    "google-workspace": {
+      "command": "uv",
+      "args": [
+        "--directory", "/path/to/google_workspace_fastmcp2",
+        "run", "python", "server.py"
+      ],
+      "env": {
+        "GOOGLE_CLIENT_SECRETS_FILE": "/path/to/client_secrets.json",
+        "MCP_TRANSPORT": "stdio"
+      }
+    }
+  }
+}
+```
+
+**Option 2: HTTP Streamable** (VS Code Roo, Claude Desktop, etc.):
+```bash
+# 1. Start server in HTTP mode
+uv run python server.py --transport http --port 8002
+
+# 2. Configure your client with:
+```
+```json
+{
+  "rivers_unlimited": {
+    "type": "streamable-http",
+    "url": "https://localhost:8002/mcp",
+    "disabled": false
+  }
+}
+```
+
+### 📚 Complete Connection Guide
+
+For detailed setup instructions, troubleshooting, and configurations for all supported clients including:
+- Claude Code CLI (HTTP & STDIO)
+- Claude Desktop
+- VS Code/GitHub Copilot
+- Claude.ai with Cloudflare Tunnel
+- And more...
+
+> 🔗 **[Complete Client Connection Guide](documentation/config/MCP_CLIENT_CONNECTIONS.md)** - Comprehensive setup instructions, troubleshooting, and advanced configurations for all supported AI clients and development environments
+
 ## 🎯 Service Capabilities
 
 RiversUnlimited supports **9 Google Workspace services** with **71+ specialized tools**:
@@ -437,14 +490,16 @@ flowchart TD
 2. **🖥️ Direct Server OAuth**: Web-based authentication for direct access
 3. **🔧 Development JWT**: Testing mode with generated tokens
 4. **📁 Enhanced File Credentials**: Persistent storage with encryption options
+5. **🔑 Custom OAuth Clients**: Bring your own OAuth credentials with automatic fallback
 
 ### ✨ Security Features
 
-- **🔐 OAuth 2.1 + PKCE**: Modern authentication with proof-of-key exchange
+- **🔐 OAuth 2.1 + PKCE**: Modern authentication with proof-of-key exchange (supports public clients)
 - **🔒 Session Isolation**: Multi-tenant support preventing data leaks
 - **🏷️ 27+ API Scopes**: Granular permission management across all services
 - **📊 Audit Logging**: Complete security event tracking
 - **🔐 AES-256 Encryption**: Machine-specific keys for credential storage
+- **🔄 Three-Tier Fallback**: Robust credential persistence across server restarts (State Map → UnifiedSession → Context Storage)
 
 ### ⚙️ Security Configuration
 
