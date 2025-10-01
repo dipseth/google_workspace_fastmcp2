@@ -30,6 +30,7 @@ from middleware.qdrant_types import (
     QdrantSearchResponse,
     QdrantErrorResponse,
     QdrantStatusResponse,
+    QdrantPointDetailsResponse,
     QdrantCollectionInfo,
     QdrantStoredResponse,
     QdrantSearchResult
@@ -115,6 +116,11 @@ class QdrantResourceHandler:
             elif parts[2] == "responses" and len(parts) == 4 and parts[3] == "recent":
                 # qdrant://collection/{collection}/responses/recent
                 return await self._handle_collection_responses(uri, collection_name)
+            
+            elif len(parts) == 3:
+                # qdrant://collection/{collection}/{point_id}
+                point_id = parts[2]
+                return await self._handle_point_details(uri, collection_name, point_id)
                 
         elif resource_type == "search":
             if len(parts) == 3:
@@ -329,6 +335,120 @@ class QdrantResourceHandler:
         except Exception as e:
             logger.error(f"Error getting collection responses: {e}")
             return self._error_response(uri, f"Failed to get collection responses: {str(e)}")
+    
+    async def _handle_point_details(self, uri: str, collection_name: str, point_id: str):
+        """
+        Handle qdrant://collection/{collection}/{point_id} resource.
+        
+        Args:
+            uri: The original URI
+            collection_name: Name of the collection
+            point_id: ID of the point to retrieve
+            
+        Returns:
+            QdrantPointDetailsResponse: Pydantic response with point details
+        """
+        
+        
+        try:
+            # Check if collection exists
+            collections_response = await asyncio.to_thread(self.client_manager.client.get_collections)
+            available_collections = [c.name for c in collections_response.collections]
+            
+            if collection_name not in available_collections:
+                return self._error_response(
+                    uri,
+                    f"Collection '{collection_name}' not found. Available: {', '.join(available_collections)}"
+                )
+            
+            # Retrieve the specific point
+            try:
+                points = await asyncio.to_thread(
+                    self.client_manager.client.retrieve,
+                    collection_name=collection_name,
+                    ids=[point_id],
+                    with_payload=True,
+                    with_vectors=False
+                )
+                
+                if not points or len(points) == 0:
+                    return QdrantPointDetailsResponse(
+                        qdrant_enabled=True,
+                        collection_name=collection_name,
+                        point_id=point_id,
+                        point_exists=False,
+                        retrieved_at=datetime.now(timezone.utc).isoformat()
+                    )
+                
+                point = points[0]
+                payload = point.payload or {}
+                
+                # Parse and clean the payload using the client manager's parser
+                # This automatically extracts nested JSON from FastMCP tool responses
+                parsed_payload = self.client_manager.parse_tool_response_payload(payload)
+                
+                # Extract common fields from parsed payload
+                tool_name = parsed_payload.get("tool_name")
+                user_email = parsed_payload.get("user_email")
+                timestamp = parsed_payload.get("timestamp")
+                session_id = parsed_payload.get("session_id")
+                payload_type = parsed_payload.get("payload_type")
+                compressed = parsed_payload.get("compressed", False)
+                
+                # Decompress data if needed
+                response_data = None
+                if compressed and parsed_payload.get("compressed_data"):
+                    try:
+                        decompressed = self.client_manager._decompress_data(parsed_payload["compressed_data"])
+                        try:
+                            response_data = json.loads(decompressed)
+                        except json.JSONDecodeError:
+                            response_data = decompressed
+                    except Exception as e:
+                        logger.warning(f"Failed to decompress data for point {point_id}: {e}")
+                        response_data = {"error": "Failed to decompress data", "details": str(e)}
+                elif parsed_payload.get("data"):
+                    try:
+                        response_data = json.loads(parsed_payload["data"])
+                    except json.JSONDecodeError:
+                        response_data = parsed_payload["data"]
+                
+                # If we have response_data in the parsed payload (from the parser), use that
+                if parsed_payload.get("response_data") and not response_data:
+                    response_data = parsed_payload.get("response_data")
+                
+                # Return as dict for MCP resource format
+                # Return Pydantic model directly - middleware will handle it
+                return QdrantPointDetailsResponse(
+                    qdrant_enabled=True,
+                    collection_name=collection_name,
+                    point_id=str(point.id),
+                    point_exists=True,
+                    payload=payload,
+                    vector_available=False,
+                    tool_name=tool_name,
+                    user_email=user_email,
+                    timestamp=timestamp,
+                    session_id=session_id,
+                    payload_type=payload_type,
+                    compressed=compressed,
+                    response_data=response_data,
+                    retrieved_at=datetime.now(timezone.utc).isoformat()
+                )
+                
+            except Exception as e:
+                logger.error(f"Error retrieving point {point_id}: {e}")
+                return QdrantPointDetailsResponse(
+                    qdrant_enabled=True,
+                    collection_name=collection_name,
+                    point_id=point_id,
+                    point_exists=False,
+                    retrieved_at=datetime.now(timezone.utc).isoformat()
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in _handle_point_details: {e}")
+            return self._error_response(uri, f"Failed to retrieve point details: {str(e)}")
     
     async def _handle_collection_search(self, uri: str, collection_name: str, query: str):
         """

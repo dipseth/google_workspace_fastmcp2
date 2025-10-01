@@ -16,10 +16,13 @@ load_dotenv()
 
 # Test configuration from environment variables
 TEST_CHAT_WEBHOOK = os.getenv("TEST_CHAT_WEBHOOK", "")
+TEST_CHAT_WEBHOOK_SPACE = os.getenv("TEST_CHAT_WEBHOOK_SPACE", "")
+TEST_CHAT_SPACE_ID = os.getenv("TEST_CHAT_SPACE_ID", "")
+TEST_CHAT_WEBHOOK_EMAIL = os.getenv("TEST_CHAT_WEBHOOK_EMAIL", "")
 
-# Extract space ID from webhook URL for direct API testing
-TEST_SPACE_ID = ""
-if TEST_CHAT_WEBHOOK:
+# Use environment variables directly (preferred) or extract from webhook URL as fallback
+TEST_SPACE_ID = TEST_CHAT_SPACE_ID or TEST_CHAT_WEBHOOK_SPACE
+if not TEST_SPACE_ID and TEST_CHAT_WEBHOOK:
     # Extract space ID from URL like: https://chat.googleapis.com/v1/spaces/AAQAvreVqfs/messages?...
     try:
         import re
@@ -28,6 +31,72 @@ if TEST_CHAT_WEBHOOK:
             TEST_SPACE_ID = match.group(1)
     except Exception:
         pass
+
+# Use Chat-specific email if provided, otherwise fall back to default
+CHAT_TEST_EMAIL = TEST_CHAT_WEBHOOK_EMAIL or TEST_EMAIL
+
+print(f"🔧 CHAT TEST CONFIG:")
+print(f"  - Webhook URL: {'✅ Configured' if TEST_CHAT_WEBHOOK else '❌ Missing'}")
+print(f"  - Space ID: {TEST_SPACE_ID or '❌ Missing'}")
+print(f"  - Email: {CHAT_TEST_EMAIL or '❌ Missing'}")
+
+
+@pytest.fixture(scope="class")
+async def real_thread_id(request):
+    """Fixture to get a real thread ID by sending a message and extracting the thread."""
+    if not TEST_CHAT_WEBHOOK or not TEST_SPACE_ID:
+        pytest.skip("Real webhook config required for thread ID extraction")
+    
+    # Import MCP client setup
+    from ..test_auth_utils import get_client_auth_config
+    from fastmcp import Client
+    
+    # Get client configuration
+    auth_config = await get_client_auth_config()
+    
+    async with Client(**auth_config) as client:
+        # Send an initial message to create a thread
+        result = await client.call_tool("send_message", {
+            "user_google_email": CHAT_TEST_EMAIL,
+            "space_id": f"spaces/{TEST_SPACE_ID}",
+            "message_text": "🧵 THREAD STARTER: Initial message to create thread for testing"
+        })
+        
+        if result and result.content:
+            response_text = result.content[0].text
+            print(f"🧵 Initial message response: {response_text}")
+        
+        # Get messages from the space to find the thread ID
+        messages_result = await client.call_tool("list_messages", {
+            "user_google_email": CHAT_TEST_EMAIL,
+            "space_id": f"spaces/{TEST_SPACE_ID}",
+            "page_size": 10
+        })
+        
+        if messages_result and messages_result.content:
+            # Try to extract thread ID from the messages response
+            import json
+            try:
+                messages_content = messages_result.content[0].text
+                print(f"🔍 Messages response: {messages_content}")
+                
+                # Parse the response to extract thread IDs
+                if "threadId" in messages_content or "thread" in messages_content:
+                    # Look for thread ID patterns in the response
+                    import re
+                    thread_matches = re.findall(r'spaces/[^/]+/threads/([^"\s,]+)', messages_content)
+                    if thread_matches:
+                        thread_id = f"spaces/{TEST_SPACE_ID}/threads/{thread_matches[0]}"
+                        print(f"✅ Extracted real thread ID: {thread_id}")
+                        return thread_id
+                
+            except Exception as e:
+                print(f"⚠️ Could not parse messages for thread ID: {e}")
+        
+        # Fallback: return a constructed thread ID for the space
+        fallback_thread = f"spaces/{TEST_SPACE_ID}/threads/test_thread_123"
+        print(f"📝 Using fallback thread ID: {fallback_thread}")
+        return fallback_thread
 
 
 @pytest.mark.service("chat")
@@ -75,10 +144,8 @@ class TestChatTools:
             "send_simple_card",
             "send_interactive_card",
             "send_form_card",
-            "get_card_framework_status",
-            "get_adapter_system_status",
-            "list_available_card_types",
-            "send_rich_card"
+            "send_rich_card",
+            "send_dynamic_card"  # New unified card tool
         ]
         
         for tool in expected_chat_tools:
@@ -268,7 +335,7 @@ class TestChatTools:
         ]
         
         submit_action = {
-            "actionMethodName": "submit_feedback",
+            "function": "submit_feedback",
             "parameters": [{"key": "action", "value": "submit"}]
         }
         
@@ -340,44 +407,49 @@ class TestChatTools:
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
     
     @pytest.mark.asyncio
-    async def test_get_card_framework_status(self, client):
-        """Test getting card framework status."""
-        result = await client.call_tool("get_card_framework_status", {})
+    async def test_send_dynamic_card(self, client):
+        """Test sending a dynamic card with natural language processing."""
+        # Use test space ID if available, otherwise use placeholder
+        space_id = TEST_SPACE_ID or "spaces/test_space"
+        
+        result = await client.call_tool("send_dynamic_card", {
+            "user_google_email": TEST_EMAIL,
+            "space_id": space_id,
+            "card_description": "Create a simple notification card with title 'Test Alert' and message 'This is a test'",
+            "card_params": {"title": "MCP Dynamic Card Test"}
+        })
         
         assert result is not None and result.content
         content = result.content[0].text
-        # Should return status information
+        # Should either succeed or return authentication/middleware/permission error
         valid_responses = [
-            "card framework", "available", "initialized", "not available",
-            "status", "version", "manager", "❌", "unexpected error"
+            "requires authentication", "no valid credentials", "successfully sent",
+            "card sent", "❌", "failed to send", "unexpected error",
+            "middleware", "service", "not yet fulfilled", "permission denied",
+            "dynamic card", "card message sent"
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
     
     @pytest.mark.asyncio
-    async def test_get_adapter_system_status(self, client):
-        """Test getting adapter system status."""
-        result = await client.call_tool("get_adapter_system_status", {})
+    async def test_send_message_with_threading(self, client):
+        """Test sending a message with thread_key parameter for threading support."""
+        # Use test space ID if available, otherwise use placeholder
+        space_id = TEST_SPACE_ID or "spaces/test_space"
+        
+        result = await client.call_tool("send_message", {
+            "user_google_email": TEST_EMAIL,
+            "space_id": space_id,
+            "message_text": "🧵 Test threaded message from MCP Chat Tools",
+            "thread_key": "spaces/test_space/threads/test_thread_123"
+        })
         
         assert result is not None and result.content
         content = result.content[0].text
-        # Should return adapter system status
+        # Should either succeed or return authentication/middleware/permission error
         valid_responses = [
-            "adapter", "system", "available", "initialized", "not available",
-            "status", "discovery", "factory", "registry", "❌", "unexpected error"
-        ]
-        assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
-    
-    @pytest.mark.asyncio
-    async def test_list_available_card_types(self, client):
-        """Test listing available card types."""
-        result = await client.call_tool("list_available_card_types", {})
-        
-        assert result is not None and result.content
-        content = result.content[0].text
-        # Should return list of card types
-        valid_responses = [
-            "card types", "available", "simple", "interactive", "form", "rich",
-            "basic", "hero", "list", "types", "❌", "unexpected error"
+            "requires authentication", "no valid credentials", "successfully sent",
+            "message sent", "❌", "failed to send", "unexpected error",
+            "middleware", "service", "not yet fulfilled", "permission denied"
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
 
@@ -421,7 +493,7 @@ class TestChatToolsIntegration:
             pytest.skip("Could not extract space ID from webhook URL")
         
         result = await client.call_tool("send_simple_card", {
-            "user_google_email": TEST_EMAIL,
+            "user_google_email": CHAT_TEST_EMAIL,
             "space_id": f"spaces/{TEST_SPACE_ID}",
             "title": "🧪 MCP Integration Test",
             "text": "This card was sent from the MCP Chat Tools integration test suite.",
@@ -440,3 +512,40 @@ class TestChatToolsIntegration:
         is_expected_error = any(indicator in content.lower() for indicator in error_indicators)
         
         assert is_success or is_expected_error, f"Unexpected response: {content}"
+    
+    @pytest.mark.skipif(not TEST_CHAT_WEBHOOK, reason="TEST_CHAT_WEBHOOK not configured")
+    @pytest.mark.asyncio
+    async def test_webhook_threading_fix(self, client):
+        """Test that webhook URLs properly handle thread_key parameter for threading."""
+        if not TEST_SPACE_ID:
+            pytest.skip("Could not extract space ID from webhook URL")
+        
+        # Test sending a card with thread_key using webhook delivery
+        result = await client.call_tool("send_dynamic_card", {
+            "user_google_email": TEST_EMAIL,
+            "space_id": f"spaces/{TEST_SPACE_ID}",
+            "card_description": "simple test notification",
+            "card_params": {"title": "🧵 Threading Test", "text": "Testing webhook threading fix"},
+            "thread_key": "spaces/test_space/threads/dOVx-Q4HcSA",
+            "webhook_url": TEST_CHAT_WEBHOOK
+        })
+        
+        assert result is not None and result.content
+        content = result.content[0].text
+        
+        # For webhook threading test, check that it either succeeds or fails gracefully
+        # The key is that thread parameters should be processed without errors
+        success_indicators = ["successfully sent", "card sent", "webhook", "status: 200"]
+        error_indicators = ["requires authentication", "permission denied", "webhook delivery failed", "rate limited"]
+        
+        is_success = any(indicator in content.lower() for indicator in success_indicators)
+        is_expected_error = any(indicator in content.lower() for indicator in error_indicators)
+        
+        # The test passes if either the threading worked OR we got an expected error
+        # What we're testing is that thread_key processing doesn't cause crashes
+        assert is_success or is_expected_error, f"Threading test failed - unexpected response: {content}"
+        
+        # If it's a success, verify that the thread information was logged
+        if is_success:
+            # The response should indicate threading was processed
+            assert "thread" in content.lower() or "webhook" in content.lower(), f"Success response should mention threading or webhook: {content}"
