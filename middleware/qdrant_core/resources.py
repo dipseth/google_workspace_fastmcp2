@@ -306,6 +306,74 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
         else:
             return cached_result
 
+    @mcp.resource(
+        uri="qdrant://collection/{collection_name}/{point_id}",
+        name="Qdrant Point Details",
+        description="Retrieve complete point data including payload, metadata, and decompressed tool response content from a Qdrant collection by UUID point ID",
+        mime_type="application/json",
+        tags={"qdrant", "collection", "point", "details", "metadata", "tool-response"},
+        meta={
+            "handler": "QdrantResourceHandler",
+            "middleware_delegated": True,
+            "requires_client": True,
+            "supports_parameters": True,
+            "note": "Processed by QdrantUnifiedMiddleware.on_read_resource with automatic cache coordination"
+        }
+    )
+    async def get_qdrant_point_details(collection_name: str, point_id: str, ctx: Context):
+        """Retrieve detailed information about a specific stored tool response point.
+        
+        This resource fetches a complete point from Qdrant including all metadata,
+        payload data, and automatically decompressed response content. The middleware
+        handles caching through FastMCP's context state management.
+        
+        Args:
+            collection_name: Name of the Qdrant collection (e.g., 'mcp_tool_responses')
+            point_id: UUID identifier of the point to retrieve (e.g., '378d763e-39ac-409a-a616-769bad39e71c')
+            ctx: FastMCP Context with state management for caching
+            
+        Returns:
+            QdrantPointDetailsResponse: Pydantic model containing:
+                - point_exists: Whether the point was found
+                - payload: Complete point metadata and tool response data
+                - tool_name: Extracted tool name for convenience
+                - user_email: Associated user email
+                - timestamp: When the response was stored
+                - response_data: Decompressed tool response content
+                - compressed: Whether original data was compressed
+                
+        Example URI:
+            qdrant://collection/mcp_tool_responses/378d763e-39ac-409a-a616-769bad39e71c
+            
+        Note:
+            The middleware caches results in FastMCP context state using the pattern:
+            `qdrant_resource_qdrant://collection/{collection_name}/{point_id}`
+        """
+        from middleware.qdrant_types import QdrantErrorResponse
+        
+        # Try to get cached result from middleware context using FastMCP context pattern
+        cache_key = f"qdrant_resource_qdrant://collection/{collection_name}/{point_id}"
+        logger.info(f"🔍 Resource handler looking up cache key: {cache_key}")
+        
+        # IMPORTANT: Must use ctx directly (Context object is the FastMCP context)
+        # Context has get_state/set_state methods - this is different from MiddlewareContext!
+        cached_result = ctx.get_state(cache_key)
+        logger.info(f"📦 Cache lookup result: {type(cached_result).__name__ if cached_result else 'None'}")
+        
+        if cached_result is None:
+            # Fallback - middleware didn't process this request
+            logger.warning(f"⚠️ No cached Qdrant point details found for '{collection_name}/{point_id}' - middleware may not have processed this request")
+            return QdrantErrorResponse(
+                error=f"Point details for '{collection_name}/{point_id}' not available - middleware not initialized",
+                uri=f"qdrant://collection/{collection_name}/{point_id}",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                qdrant_enabled=False
+            )
+        
+        logger.info(f"✅ Returning cached result from resource handler")
+        # Return cached result directly - FastMCP2 handles Pydantic models
+        return cached_result
+    
     # Register validation resource for testing middleware integration
     @mcp.resource(
         uri="qdrant://status",
@@ -353,11 +421,12 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
     logger.info("✅ Qdrant resources registered with FastMCP (handled by QdrantUnifiedMiddleware)")
     
     # Log resource registration summary
-    resource_count = 7
+    resource_count = 8
     logger.info(f"📊 Registered {resource_count} qdrant:// resources:")
     logger.info("   • qdrant://collections/list - List all collections")
     logger.info("   • qdrant://collection/{name}/info - Collection details")
     logger.info("   • qdrant://collection/{name}/responses/recent - Recent responses")
+    logger.info("   • qdrant://collection/{name}/{point_id} - Point details by UUID")
     logger.info("   • qdrant://search/{query} - Global semantic search")
     logger.info("   • qdrant://search/{collection}/{query} - Collection search")
     logger.info("   • qdrant://cache - Tool response cache metadata")

@@ -544,8 +544,10 @@ This fix restores the semantic search capabilities that make the Qdrant middlewa
 | `qdrant://collections/list` | List all collections | `QdrantCollectionsListResponse` |
 | `qdrant://collection/{name}/info` | Collection details | `QdrantCollectionDetailsResponse` |
 | `qdrant://collection/{name}/responses/recent` | Recent responses | `QdrantRecentResponsesResponse` |
+| `qdrant://collection/{name}/{point_id}` | Get specific point by UUID | `QdrantPointDetailsResponse` |
 | `qdrant://search/{query}` | Global search | `QdrantSearchResponse` |
 | `qdrant://search/{collection}/{query}` | Collection search | `QdrantSearchResponse` |
+| `qdrant://cache` | Tool response cache metadata | `Dict[str, List[Dict]]` |
 | `qdrant://status` | Middleware status | `QdrantStatusResponse` |
 
 ### Pydantic Models
@@ -1020,6 +1022,430 @@ await middleware.stop_background_reindexing()
 - [ ] Advanced analytics dashboards
 - [ ] Real-time search suggestions
 - [ ] Export/import functionality
+
+## 🔍 Point Details Resource
+
+### Overview
+
+The `qdrant://collection/{collection_name}/{point_id}` resource provides direct access to individual stored tool responses by their UUID point ID. This is the primary way to retrieve complete response data after discovering points through search operations.
+
+### Resource Pattern
+
+```
+qdrant://collection/{collection_name}/{point_id}
+```
+
+**Parameters:**
+- `collection_name`: Name of the Qdrant collection (typically `mcp_tool_responses`)
+- `point_id`: UUID identifier for the specific point (e.g., `378d763e-39ac-409a-a616-769bad39e71c`)
+
+### Use Cases
+
+1. **Search → Fetch Workflow**
+```python
+# Step 1: Search for relevant responses
+search_results = await search(query="email")
+
+# Step 2: Get point ID from search results
+point_id = search_results['results'][0]['id']
+
+# Step 3: Fetch complete response data
+full_response = await read_resource(
+    f"qdrant://collection/mcp_tool_responses/{point_id}"
+)
+```
+
+2. **Direct Point Retrieval**
+```python
+# When you have a known point ID from logs or analytics
+response = await read_resource(
+    "qdrant://collection/mcp_tool_responses/378d763e-39ac-409a-a616-769bad39e71c"
+)
+```
+
+3. **Response Inspection**
+```python
+# Examine full tool response details for debugging
+point_data = await read_resource(f"qdrant://collection/mcp_tool_responses/{point_id}")
+print(f"Tool: {point_data['tool_name']}")
+print(f"User: {point_data['user_email']}")
+print(f"Response: {point_data['response_data']}")
+```
+
+### Response Structure
+
+The resource returns a [`QdrantPointDetailsResponse`](middleware/qdrant_types.py:166) Pydantic model with the following structure:
+
+```python
+{
+ "qdrant_enabled": true,
+ "collection_name": "mcp_tool_responses",
+ "point_id": "378d763e-39ac-409a-a616-769bad39e71c",
+ "point_exists": true,
+ 
+ # Complete payload with all metadata
+ "payload": {
+     "tool_name": "search",
+     "timestamp": "2025-09-30T21:52:57.260679+00:00",
+     "timestamp_unix": 1759269177,
+     "user_id": "srivers@groupon.com",
+     "user_email": "srivers@groupon.com",
+     "session_id": "2c388c3f1b824089b6fd602dbafbf88c",
+     "payload_type": "tool_response",
+     "execution_time_ms": 251,
+     "compressed": false,
+     "response_data": { /* full tool response */ }
+ },
+ 
+ # Extracted convenience fields
+ "tool_name": "search",
+ "user_email": "srivers@groupon.com",
+ "timestamp": "2025-09-30T21:52:57.260679+00:00",
+ "session_id": "2c388c3f1b824089b6fd602dbafbf88c",
+ "payload_type": "tool_response",
+ "compressed": false,
+ 
+ # Decompressed response data (if applicable)
+ "response_data": {
+     "tool_name": "search",
+     "arguments": { /* tool arguments */ },
+     "response": [ /* tool response content */ ]
+ },
+ 
+ # Vector information
+ "vector_available": false,
+ "vector_size": null,
+ 
+ # Retrieval metadata
+ "retrieved_at": "2025-10-01T03:07:53.110251+00:00"
+}
+```
+
+### Key Features
+
+#### 1. Automatic Decompression
+- Compressed response data is automatically decompressed
+- Base64-encoded compressed data is properly decoded
+- Returns structured data ready for use
+
+#### 2. FastMCP Context Caching
+- Results are cached in FastMCP context state
+- Cache key pattern: `qdrant_resource_qdrant://collection/{collection_name}/{point_id}`
+- Middleware handles cache coordination transparently
+
+#### 3. Comprehensive Metadata
+- Full payload with all original metadata preserved
+- Extracted convenience fields for common attributes
+- Timestamp information in both ISO and Unix formats
+
+#### 4. Error Handling
+- Returns `QdrantErrorResponse` if point not found
+- Clear error messages for debugging
+- Graceful handling of missing or corrupted data
+
+### Integration with Search
+
+The point details resource complements the search tools:
+
+```python
+# 1. Use search tool to find relevant responses
+search_results = await mcp_call_tool("search", {
+ "query": "gmail messages",
+ "limit": 10
+})
+
+# 2. Extract point IDs from search results
+for result in search_results['results']:
+ point_id = result['id']
+ score = result['score']
+ 
+ # 3. Fetch full details for interesting results
+ if score > 0.7:
+     details = await read_resource(
+         f"qdrant://collection/mcp_tool_responses/{point_id}"
+     )
+     # Process full response data
+     process_response(details['response_data'])
+```
+
+### Performance Considerations
+
+- **Caching**: Results are cached in context to avoid repeated fetches
+- **Selective Fetching**: Only fetch points you need after filtering with search
+- **Batch Operations**: Consider using search with pagination for bulk analysis
+- **Memory**: Full responses can be large; fetch only what you need
+
+### Example Real Response
+
+From the provided example (point ID `378d763e-39ac-409a-a616-769bad39e71c`):
+
+```json
+{
+"qdrant_enabled": true,
+"collection_name": "mcp_tool_responses",
+"point_id": "378d763e-39ac-409a-a616-769bad39e71c",
+"point_exists": true,
+"payload": {
+ "tool_name": "search",
+ "timestamp": "2025-09-30T21:52:57.260679+00:00",
+ "user_email": "srivers@groupon.com",
+ "response_data": {
+   "results": [
+     {
+       "id": "56a4dfe5-3e02-4dd5-b5f1-49170de316bc",
+       "title": "📧 Gmail - send_gmail_message",
+       "score": 0.4324019,
+       "tool_name": "send_gmail_message"
+     }
+     // ... more results
+   ],
+   "query": "email",
+   "total_results": 10,
+   "processing_time_ms": 251.03
+ }
+},
+"tool_name": "search",
+"user_email": "srivers@groupon.com",
+"timestamp": "2025-09-30T21:52:57.260679+00:00",
+"compressed": false,
+"retrieved_at": "2025-10-01T03:07:53.110251+00:00"
+}
+```
+
+### Related Resources
+
+- [`qdrant://search/{query}`](#resource-uris) - Search for points to get IDs
+- [`qdrant://cache`](#resource-uris) - Browse cached responses by tool name
+- [`QdrantPointDetailsResponse`](middleware/qdrant_types.py:166) - Response model definition
+
+## 🎭 Template Integration with Jinja2
+
+### Overview
+
+Qdrant resources integrate seamlessly with the Template Parameter Middleware, enabling powerful dynamic content generation. You can embed Qdrant resource URIs directly in templates to fetch and display stored tool responses, making it easy to reference historical data in emails, reports, and other generated content.
+
+### Template Syntax
+
+```python
+# Direct resource embedding in templates
+"{{ qdrant://collection/mcp_tool_responses/{point_id} }}"
+
+# Access specific fields from the resource
+"{{ qdrant://collection/mcp_tool_responses/{point_id} }}['tool_name']"
+"{{ qdrant://collection/mcp_tool_responses/{point_id} }}['response_data']"
+"{{ qdrant://collection/mcp_tool_responses/{point_id} }}['user_email']"
+```
+
+### Real-World Example
+
+**Tool Call:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "send_gmail_message",
+    "arguments": {
+      "subject": "test",
+      "body": "{{ qdrant://collection/mcp_tool_responses/01d61daf-ab9d-4dc1-9f54-80c317cef056 }}",
+      "to": "myself"
+    }
+  }
+}
+```
+
+**Rendered Email Body:**
+```json
+{
+  "qdrant_enabled": true,
+  "collection_name": "mcp_tool_responses",
+  "point_id": "01d61daf-ab9d-4dc1-9f54-80c317cef056",
+  "point_exists": true,
+  "payload": {
+    "tool_name": "get_doc_content",
+    "timestamp": "2025-09-26T14:06:39.230441+00:00",
+    "timestamp_unix": 1758895599,
+    "user_id": "sethrivers@gmail.com",
+    "user_email": "sethrivers@gmail.com",
+    "session_id": "d1fb8fb254334ff5a07844fd3b3a5fc5",
+    "payload_type": "tool_response",
+    "execution_time_ms": 15,
+    "compressed": false,
+    "response_data": {
+      "tool_name": "get_doc_content",
+      "arguments": {
+        "document_id": "1y_e3GBzQI2YPAHX4kvLFCVx06EO2Tr7b7jkA0h8z7XI",
+        "user_google_email": "sethrivers@gmail.com"
+      },
+      "response": [
+        {
+          "type": "text",
+          "text": "❌ **No Credentials Found**..."
+        }
+      ]
+    }
+  },
+  "retrieved_at": "2025-10-01T05:09:29.758713+00:00"
+}
+```
+
+### Use Cases
+
+#### 1. Email Report Generation
+```python
+@mcp.tool()
+async def send_tool_response_summary(
+    recipient: str,
+    point_id: str,
+    # Template automatically fetches and embeds the complete Qdrant point data
+    response_data: str = "{{ qdrant://collection/mcp_tool_responses/{{point_id}} }}",
+    subject: str = "Tool Response Summary - {{ qdrant://collection/mcp_tool_responses/{{point_id}} }}['tool_name']"
+) -> str:
+    """Send email with embedded tool response data from Qdrant."""
+    # response_data contains the full QdrantPointDetailsResponse structure
+    # subject contains the tool name extracted from the point
+    return f"Email sent to {recipient}"
+```
+
+#### 2. Historical Data References
+```python
+@mcp.tool()
+async def create_status_report(
+    user_email: str = "{{template://user_email}}",
+    # Reference specific previous tool responses in the report
+    last_search: str = "{{ qdrant://collection/mcp_tool_responses/{search_point_id} }}['response_data']['query']",
+    last_email: str = "{{ qdrant://collection/mcp_tool_responses/{email_point_id} }}['response_data']['subject']"
+) -> str:
+    """Generate report referencing historical tool responses."""
+    return f"""
+    Status Report for {user_email}
+    Last Search: {last_search}
+    Last Email Sent: {last_email}
+    """
+```
+
+#### 3. Debugging and Audit Trails
+```python
+@mcp.tool()
+async def audit_tool_execution(
+    point_id: str,
+    # Full point data for audit analysis
+    execution_data: str = "{{ qdrant://collection/mcp_tool_responses/{{point_id}} }}"
+) -> str:
+    """Audit a specific tool execution using stored Qdrant data."""
+    import json
+    data = json.loads(execution_data)
+    
+    return f"""
+    Audit Report:
+    Tool: {data['tool_name']}
+    User: {data['user_email']}
+    Execution Time: {data['execution_time_ms']}ms
+    Timestamp: {data['timestamp']}
+    Session: {data['session_id']}
+    """
+```
+
+### Template Features
+
+#### Automatic Decompression
+- Compressed Qdrant data is automatically decompressed before template rendering
+- No need to handle compression/decompression in templates
+
+#### Nested Property Access
+```python
+# Access nested response data
+"{{ qdrant://collection/mcp_tool_responses/{point_id} }}['response_data']['tool_name']"
+"{{ qdrant://collection/mcp_tool_responses/{point_id} }}['payload']['execution_time_ms']"
+"{{ qdrant://collection/mcp_tool_responses/{point_id} }}['response_data']['arguments']['document_id']"
+```
+
+#### Conditional Rendering
+```jinja2
+{% set point_data = qdrant://collection/mcp_tool_responses/{point_id} %}
+{% if point_data.point_exists %}
+Tool Response from {{ point_data.tool_name }}:
+Executed by: {{ point_data.user_email }}
+At: {{ point_data.timestamp }}
+{% else %}
+Point not found
+{% endif %}
+```
+
+### Performance Considerations
+
+- **Caching**: Qdrant resources are cached by the template middleware (default: 5 minutes)
+- **Selective Fetching**: Only fetch points you need - use search first to find relevant IDs
+- **Payload Size**: Full responses can be large; extract only needed fields in templates
+- **Template Complexity**: Complex nested access may impact rendering time
+
+### Integration Pattern
+
+```mermaid
+sequenceDiagram
+    participant Tool
+    participant Template as Template Middleware
+    participant Qdrant as Qdrant Resource
+    participant VectorDB
+    
+    Tool->>Template: Parameter with {{ qdrant://... }}
+    Template->>Template: Detect Qdrant URI
+    Template->>Qdrant: Fetch Resource
+    Qdrant->>VectorDB: Query Point
+    VectorDB-->>Qdrant: Point Data
+    Qdrant->>Qdrant: Parse & Structure
+    Qdrant-->>Template: QdrantPointDetailsResponse
+    Template->>Template: Render Template
+    Template-->>Tool: Resolved Parameter
+    
+    rect rgb(248, 255, 240)
+        Note over Template,Qdrant: Automatic Resource Resolution
+    end
+```
+
+### Best Practices
+
+#### 1. Use Search First
+```python
+# ✅ Efficient: Search first, then fetch details
+search_results = await search(query="recent emails")
+point_id = search_results['results'][0]['id']
+
+# Then use in template
+email_body = f"{{ qdrant://collection/mcp_tool_responses/{point_id} }}"
+```
+
+#### 2. Extract Specific Fields
+```python
+# ✅ Efficient: Extract only what you need
+tool_name = "{{ qdrant://collection/mcp_tool_responses/{point_id} }}['tool_name']"
+
+# ❌ Less efficient: Fetch entire response when you only need one field
+full_data = "{{ qdrant://collection/mcp_tool_responses/{point_id} }}"
+# then parse to get tool_name
+```
+
+#### 3. Handle Missing Data
+```jinja2
+# ✅ Graceful: Use Jinja2 defaults
+{{ point_data.tool_name | default('Unknown Tool') }}
+{{ point_data.execution_time_ms | default(0) }}
+```
+
+### Debugging Template Integration
+
+Enable debug logging to see template resolution:
+
+```python
+# Enable debug logging for both middleware
+import logging
+logging.getLogger('middleware.template_core').setLevel(logging.DEBUG)
+logging.getLogger('middleware.qdrant_core').setLevel(logging.DEBUG)
+
+# You'll see logs like:
+# 📦 Adding Qdrant resource to context: qdrant_collection_mcp_tool_responses_01d61daf_ab9d_4dc1_9f54_80c317cef056
+# 🎭 Rendering template with context keys: [...]
+# ✅ Template rendered successfully
+```
 
 ### Integration Opportunities
 - [ ] Slack/Teams notification integration

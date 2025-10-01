@@ -318,10 +318,21 @@ class QdrantUnifiedMiddleware(Middleware):
             result = await self.resource_handler.handle_qdrant_resource(uri, context)
             
             # Cache the result for the registered resource handlers to access
+            # Use FastMCP context pattern (same as TagBasedResourceMiddleware)
             cache_key = f"qdrant_resource_{uri}"
-            if hasattr(context, 'set_state'):
-                context.set_state(cache_key, result)
-                logger.debug(f"🔍 Cached Qdrant resource result for key: {cache_key}")
+            if hasattr(context, 'fastmcp_context') and context.fastmcp_context:
+                context.fastmcp_context.set_state(cache_key, result)
+                logger.info(f"✅ Cached Qdrant resource result for key: {cache_key}")
+                logger.debug(f"📦 Cached result type: {type(result).__name__}")
+                
+                # Verify the cache was set
+                verify = context.fastmcp_context.get_state(cache_key)
+                if verify is None:
+                    logger.error(f"❌ Cache verification FAILED - value not found immediately after set_state!")
+                else:
+                    logger.debug(f"✓ Cache verification SUCCESS - value found: {type(verify).__name__}")
+            else:
+                logger.warning(f"⚠️ Context does not have fastmcp_context!")
             
             # Let the registered resource handlers process the request with cached data
             return await call_next(context)

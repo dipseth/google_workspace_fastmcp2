@@ -180,12 +180,18 @@ class ResourceHandler:
         """
         Extract the actual data from the resource response structure.
         
+        Handles:
+        - Pydantic models (converts to dict for template compatibility)
+        - ReadResourceContents dataclass
+        - Standard MCP resource response structure
+        - Plain dicts and nested structures
+        
         Args:
             resource_result: Raw resource result from FastMCP
             depth: Current recursion depth (for safety)
             
         Returns:
-            Extracted resource data
+            Extracted resource data as plain dict/list/primitive for template safety
         """
         MAX_DEPTH = 10
         if depth > MAX_DEPTH:
@@ -194,6 +200,19 @@ class ResourceHandler:
         
         try:
             extracted = None
+            
+            # Handle Pydantic models FIRST - convert to dict for template compatibility
+            # This prevents Jinja2 syntax errors from colons in JSON fields
+            try:
+                from pydantic import BaseModel
+                if isinstance(resource_result, BaseModel):
+                    if self.enable_debug_logging:
+                        logger.debug(f"🔄 Converting Pydantic model to dict: {type(resource_result).__name__}")
+                    extracted = resource_result.model_dump()
+                    # Recursively extract to ensure nested Pydantic models are also converted
+                    return self.extract_resource_data(extracted, depth + 1)
+            except ImportError:
+                pass  # Pydantic not available, continue with other handlers
             
             # Handle ReadResourceContents dataclass
             if hasattr(resource_result, 'content'):
