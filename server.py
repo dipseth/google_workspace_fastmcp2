@@ -23,13 +23,13 @@ from auth.jwt_auth import setup_jwt_auth, create_test_tokens  # Keep for fallbac
 from auth.fastmcp_oauth_endpoints import setup_oauth_endpoints_fastmcp
 from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
 from drive.drive_tools import setup_drive_comprehensive_tools
+from drive.file_management_tools import setup_file_management_tools
 from gmail.gmail_tools import setup_gmail_tools
 from docs.docs_tools import setup_docs_tools
 from forms.forms_tools import setup_forms_tools
 from slides.slides_tools import setup_slides_tools
 from gcalendar.calendar_tools import setup_calendar_tools
 from gchat.chat_tools import setup_chat_tools
-# from delete_later.jwt_chat_tools import setup_jwt_chat_tools
 from gchat.chat_app_tools import setup_chat_app_tools
 from prompts.chat_app_prompts import setup_chat_app_prompts
 from prompts.gmail_prompts import setup_gmail_prompts
@@ -182,6 +182,9 @@ setup_drive_tools(mcp)
 
 # Register comprehensive Drive tools (search, list, get content, create)
 setup_drive_comprehensive_tools(mcp)
+
+# Register Drive file management tools (move, copy, rename, delete)
+setup_file_management_tools(mcp)
 
 # Register Gmail tools
 setup_gmail_tools(mcp)
