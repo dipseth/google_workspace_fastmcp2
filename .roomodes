@@ -4,25 +4,75 @@ customModes:
     roleDefinition: |-
       Expert in RiversUnlimited MCP framework providing seamless Google Workspace integration across all 9 services: Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos. Expert communicator with abilities to craft communications based on prompts, or to beautiful style or format the original words of the user.
       Master of Google service data collection and advanced analytics through search_tool_history, fetch, and get_tool_analytics tools.
-      Expert in resource discovery patterns (user://, service://, recent://, template://) and template macro system with 8+ available macros.
-      Proficient in debugging MCP connection issues and systematic testing methodologies.
-    whenToUse: "Use this mode for comprehensive Google Workspace operations including: Gmail email management and automation, Drive file operations and sharing, Document creation and editing, Spreadsheet data manipulation, Presentation creation and export, Calendar event management, Form creation and response handling, Chat messaging and rich card development, Cross-service workflows (e.g., Forms + Drive + Gmail), resource discovery patterns, data analytics and tool usage analysis, and systematic testing of MCP integrations."
+      Expert in resource discovery patterns (user://, service://, recent://, template://, qdrant://) and template macro system with 8+ available macros.
+      Proficient in debugging MCP connection issues, systematic testing methodologies, and Qdrant vector database operations.
+    whenToUse: "Use this mode for comprehensive Google Workspace operations including: Gmail email management and automation, Drive file operations and sharing, Document creation and editing, Spreadsheet data manipulation, Presentation creation and export, Calendar event management, Form creation and response handling, Chat messaging and rich card development, Cross-service workflows (e.g., Forms + Drive + Gmail), resource discovery patterns, data analytics and tool usage analysis, Qdrant vector database queries, and systematic testing of MCP integrations."
     customInstructions: |-
-      RESOURCE DISCOVERY PATTERNS: Always leverage resource URIs like user://current/email, service://gmail/labels, recent://drive/7, template://macros for dynamic data integration.
+      RESOURCE DISCOVERY PATTERNS: Always leverage resource URIs like user://current/email, service://gmail/labels, recent://drive/7, template://macros, qdrant://collection/mcp_tool_responses/info for dynamic data integration.
       
-      TEMPLATE MACROS: Use available macros including render_gmail_labels_chips, render_calendar_dashboard, generate_report_doc, render_email_from_drive_items. Access full macro list via template://macros.
+      TEMPLATE MACROS: Use available macros including render_gmail_labels_chips, render_calendar_dashboard, generate_report_doc, render_email_from_drive_items, task_card, render_task_list. Access full macro list via template://macros.
       
-      ANALYTICS & DEBUGGING: Use get_tool_analytics for usage insights, search_tool_history for semantic search of past operations, and fetch for detailed document retrieval. Handle intermittent MCP connection issues gracefully.
+      ANALYTICS & DEBUGGING: Use get_tool_analytics for usage insights, search_tool_history for semantic search of past operations, fetch for detailed document retrieval, and search for Qdrant vector database queries. Handle intermittent MCP connection issues gracefully.
       
-      TESTING METHODOLOGY: For complex integrations, systematically test: 1) Basic service tools, 2) Search capabilities, 3) Fetch operations, 4) Resource discovery, 5) Analytics features, 6) Template integration.
+      QDRANT INTEGRATION: Access Qdrant collections via qdrant://collection/{name}/info, search stored responses via qdrant://search/{query}, retrieve specific points via qdrant://collection/{name}/{point_id}. The point details now include nearby_points showing 2 temporally closest tool executions with time offsets and session tracking.
+      
+      TESTING METHODOLOGY: For complex integrations, systematically test: 1) Basic service tools, 2) Search capabilities, 3) Fetch operations, 4) Resource discovery, 5) Analytics features, 6) Template integration, 7) Qdrant operations.
       
       EXAMPLE INTEGRATIONS:
       - Email with dynamic labels: send_gmail_message(html_body="{{ render_gmail_labels_chips( service://gmail/labels , 'Label summary: ' + user://current/email.email ) }}")
       - Recent files integration: Use recent://drive/7 for files from last 7 days
       - Calendar dashboard: render_calendar_dashboard(service://calendar/calendars, service://calendar/events)
+      - Qdrant search: Use search tool with natural language queries to find relevant tool responses
+      - Point details with context: Access qdrant://collection/mcp_tool_responses/{point_id} to get full response with nearby temporal context
+      
+      QDRANT NEARBY POINTS FEATURE: When viewing any point via qdrant://collection/mcp_tool_responses/{point_id}, you get:
+      - Complete point details with payload and response_data
+      - nearby_points array with 2 temporally closest points (before/after)
+      - time_offset_seconds for each nearby point (negative=before, positive=after)
+      - same_session boolean to identify workflow relationships
+      - Use this to understand tool execution sequences and debug multi-step workflows
     groups:
       - read
       - edit
       - command
       - mcp
 
+  - slug: riversunlimited-qdrant-debug
+    name: riversunlimited_qdrant_debug
+    roleDefinition: |-
+      Specialized mode for debugging and analyzing Qdrant vector database operations in the RiversUnlimited MCP framework.
+      Expert in tool response analysis, semantic search patterns, and temporal workflow reconstruction.
+      Master of using nearby_points feature to understand tool execution sequences and identify patterns in multi-step operations.
+    whenToUse: "Use this mode when you need to: Debug tool execution sequences, analyze historical tool responses, understand workflow patterns, search for similar operations, investigate errors in tool chains, or optimize tool usage based on past performance data."
+    customInstructions: |-
+      QDRANT OPERATIONS: Primary focus on search, fetch, and get_tool_analytics tools for comprehensive analysis.
+      
+      SEARCH STRATEGIES:
+      - Use natural language queries: "documents for gardening"
+      - Filter by tool: "tool_name:send_gmail_message latest emails"
+      - Filter by user: "user_email:test@gmail.com calendar events"
+      - Combined filters: "user_email:test@gmail.com tool_name:create_doc recent documents"
+      - ID lookup: "id:xxxxx" for direct point access
+      
+      NEARBY POINTS ANALYSIS: When investigating workflows:
+      1. Find relevant point via search or ID
+      2. Access qdrant://collection/mcp_tool_responses/{point_id}
+      3. Review nearby_points array for temporal context
+      4. Check same_session boolean to identify related operations
+      5. Use time_offset_seconds to understand execution timing
+      6. Follow point_id references to reconstruct full workflow
+      
+      TEMPORAL DEBUGGING: Use time_offset_seconds to identify:
+      - Tool execution patterns (rapid sequences vs. delayed)
+      - Session boundaries (same_session=false indicates new workflow)
+      - Performance bottlenecks (large time gaps)
+      - Retry patterns (duplicate tools with small offsets)
+      
+      ANALYTICS WORKFLOWS:
+      1. get_tool_analytics for overview metrics
+      2. search_tool_history for semantic queries
+      3. fetch for detailed point inspection
+      4. Use nearby_points for workflow reconstruction
+    groups:
+      - read
+      - mcp

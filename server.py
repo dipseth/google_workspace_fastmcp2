@@ -42,7 +42,7 @@ from photos.advanced_tools import setup_advanced_photos_tools
 from middleware.qdrant_middleware import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools, setup_qdrant_resources
 # from middleware.template_middleware import setup_template_middleware
 from middleware.template_middleware import setup_enhanced_template_middleware as setup_template_middleware
-from middleware.sampling_middleware import setup_enhanced_sampling_middleware, EnhancementLevel
+from middleware.sampling_middleware import setup_enhanced_sampling_middleware, EnhancementLevel, setup_enhanced_sampling_demo_tools
 from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
 from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
@@ -138,17 +138,21 @@ template_middleware = setup_template_middleware(
 )
 logger.info("✅ Enhanced Template Parameter Middleware enabled - modular architecture with 12 focused components active")
 
-# Setup Enhanced Sampling Middleware with tag-based elicitation
-logger.info("🎯 Setting up Enhanced Sampling Middleware...")
-sampling_middleware = setup_enhanced_sampling_middleware(
-    mcp,
-    enable_debug=True,  # Enable for testing and development
-    target_tags=["gmail", "compose", "elicitation"],  # Tools with these tags get enhanced sampling
-    qdrant_middleware=None,  # Will be set after Qdrant middleware is initialized
-    template_middleware=template_middleware,
-    default_enhancement_level=EnhancementLevel.CONTEXTUAL
-)
-logger.info("✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context")
+# Setup Enhanced Sampling Middleware with tag-based elicitation (conditional based on SAMPLING_TOOLS setting)
+sampling_middleware = None  # Initialize to None for later checks
+if settings.sampling_tools:
+    logger.info("🎯 Setting up Enhanced Sampling Middleware...")
+    sampling_middleware = setup_enhanced_sampling_middleware(
+        mcp,
+        enable_debug=True,  # Enable for testing and development
+        target_tags=["gmail", "compose", "elicitation"],  # Tools with these tags get enhanced sampling
+        qdrant_middleware=None,  # Will be set after Qdrant middleware is initialized
+        template_middleware=template_middleware,
+        default_enhancement_level=EnhancementLevel.CONTEXTUAL
+    )
+    logger.info("✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context")
+else:
+    logger.info("⏭️  Enhanced Sampling Middleware disabled - set SAMPLING_TOOLS=true in .env to enable")
 
 # 5. Initialize Qdrant unified middleware (completely non-blocking)
 logger.info("🔄 Initializing Qdrant unified middleware...")
@@ -167,9 +171,14 @@ logger.info(f"🔧 Qdrant URL: {settings.qdrant_url}")
 logger.info(f"🔧 API Key configured: {bool(settings.qdrant_api_key)}")
 
 # Update sampling middleware with Qdrant integration now that it's initialized
-if hasattr(sampling_middleware, 'qdrant_middleware'):
+if sampling_middleware and hasattr(sampling_middleware, 'qdrant_middleware'):
     sampling_middleware.qdrant_middleware = qdrant_middleware
     logger.info("🔗 Enhanced Sampling Middleware connected to Qdrant for historical context")
+    
+    # Register sampling demo tools
+    logger.info("🎯 Registering enhanced sampling demo tools...")
+    setup_enhanced_sampling_demo_tools(mcp)
+    logger.info("✅ Enhanced sampling demo tools registered (intelligent_email_composer, smart_workflow_assistant, template_rendering_demo, resource_discovery_assistant)")
 
 # 6. Add TagBasedResourceMiddleware for service list resource handling (LAST)
 logger.info("🏷️ Setting up TagBasedResourceMiddleware for service:// resource handling...")
@@ -218,7 +227,7 @@ setup_unified_card_tool(mcp)
 
 # Register ModuleWrapper middleware with custom collection name to match unified_card_tool.py
 logger.info("🔄 Initializing ModuleWrapper middleware...")
-middleware = setup_module_wrapper_middleware(mcp, modules_to_wrap=["card_framework.v2"], tool_pushdown=True)
+middleware = setup_module_wrapper_middleware(mcp, modules_to_wrap=["card_framework.v2"], tool_pushdown=False)
 # Override the collection name to match what unified_card_tool.py expects
 if "card_framework.v2" in middleware.wrappers:
     wrapper = middleware.wrappers["card_framework.v2"]

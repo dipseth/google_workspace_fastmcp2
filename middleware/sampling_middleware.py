@@ -1416,17 +1416,74 @@ class SamplingUtils:
 def setup_enhanced_sampling_demo_tools(mcp: FastMCP):
     """Setup demo tools that showcase enhanced sampling capabilities."""
     
+    # Import required types
+    from typing_extensions import TypedDict, NotRequired
+    from typing import Optional, List
+    from tools.common_types import UserGoogleEmail
+    
+    # Define structured response types for all demo tools
+    class EmailComposerResponse(TypedDict):
+        """Response structure for intelligent_email_composer tool."""
+        success: bool
+        recipient: str
+        topic: str
+        style: str
+        composed_text: NotRequired[str]
+        resources_used: NotRequired[List[str]]
+        template_suggestions: NotRequired[List[str]]
+        userEmail: NotRequired[str]
+        error: NotRequired[Optional[str]]
+    
+    class WorkflowAssistantResponse(TypedDict):
+        """Response structure for smart_workflow_assistant tool."""
+        success: bool
+        task_description: str
+        include_history: bool
+        workflow_suggestions: NotRequired[str]
+        historical_patterns: NotRequired[List[str]]
+        recommended_tools: NotRequired[List[str]]
+        userEmail: NotRequired[str]
+        error: NotRequired[Optional[str]]
+    
+    class TemplateRenderingResponse(TypedDict):
+        """Response structure for template_rendering_demo tool."""
+        success: bool
+        template_type: str
+        render_examples: bool
+        rendered_examples: NotRequired[str]
+        available_macros: NotRequired[List[str]]
+        usage_tips: NotRequired[List[str]]
+        userEmail: NotRequired[str]
+        error: NotRequired[Optional[str]]
+    
+    class ResourceDiscoveryResponse(TypedDict):
+        """Response structure for resource_discovery_assistant tool."""
+        success: bool
+        use_case: str
+        discovered_resources: NotRequired[str]
+        resource_examples: NotRequired[List[str]]
+        integration_patterns: NotRequired[List[str]]
+        userEmail: NotRequired[str]
+        error: NotRequired[Optional[str]]
+    
     @mcp.tool(
         name="intelligent_email_composer",
         description="Compose emails using resource-aware sampling with macro suggestions",
-        tags={"sampling", "email", "demo", "macro-aware"}
+        tags={"sampling", "email", "demo", "macro-aware"},
+        annotations={
+            "title": "Intelligent Email Composer",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True
+        }
     )
     async def intelligent_email_composer(
         recipient: str,
         topic: str,
         style: str = "professional",
-        ctx = None  # EnhancedSamplingContext will be injected
-    ) -> str:
+        user_google_email: UserGoogleEmail = None,
+        ctx: Context = None
+    ) -> EmailComposerResponse:
         """
         Compose emails using macro-aware sampling with real user data.
         
@@ -1434,13 +1491,22 @@ def setup_enhanced_sampling_demo_tools(mcp: FastMCP):
             recipient: Email recipient
             topic: Email topic
             style: Email style (professional, friendly, formal)
+            user_google_email: User's email address (auto-injected if None)
             ctx: Sampling context (automatically injected)
         """
-        if not ctx or not hasattr(ctx, 'enhanced_sample'):
-            return "Enhanced sampling context not available"
-            
-        response = await ctx.enhanced_sample(
-            messages=f"""
+        if not ctx:
+            return EmailComposerResponse(
+                success=False,
+                recipient=recipient,
+                topic=topic,
+                style=style,
+                userEmail=user_google_email or "",
+                error="Context not available"
+            )
+        
+        try:
+            # Use standard FastMCP ctx.sample() instead of enhanced_sample
+            prompt = f"""
 I need to compose an email to {recipient} about {topic}.
 Style preference: {style}
 
@@ -1451,37 +1517,74 @@ Please create a complete email using the beautiful_email macro with:
 4. Professional formatting using available gradients
 
 Include the full macro call I can use.
-""",
-            template=SamplingTemplate.MACRO_AWARE_EMAIL_ASSISTANT,
-            macro_category="email",
-            enhancement_level=EnhancementLevel.CONTEXTUAL
-        )
-        
-        return response.text
+"""
+            
+            response = await ctx.sample(
+                messages=prompt,
+                system_prompt="You are an intelligent email assistant with access to sophisticated email templates.",
+                temperature=0.3,
+                max_tokens=800
+            )
+            
+            return EmailComposerResponse(
+                success=True,
+                recipient=recipient,
+                topic=topic,
+                style=style,
+                composed_text=response.text,
+                resources_used=["user://current/email", "template://macros"],
+                template_suggestions=["render_beautiful_email", "render_gmail_labels_chips"],
+                userEmail=user_google_email or ""
+            )
+        except Exception as e:
+            logger.error(f"Error in intelligent_email_composer: {e}")
+            return EmailComposerResponse(
+                success=False,
+                recipient=recipient,
+                topic=topic,
+                style=style,
+                userEmail=user_google_email or "",
+                error=str(e)
+            )
     
     @mcp.tool(
         name="smart_workflow_assistant",
         description="Get workflow suggestions based on user context and historical patterns",
-        tags={"sampling", "workflow", "demo", "historical"}
+        tags={"sampling", "workflow", "demo", "historical"},
+        annotations={
+            "title": "Smart Workflow Assistant",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True
+        }
     )
     async def smart_workflow_assistant(
         task_description: str,
         include_history: bool = True,
-        ctx = None  # EnhancedSamplingContext will be injected
-    ) -> str:
+        user_google_email: UserGoogleEmail = None,
+        ctx: Context = None
+    ) -> WorkflowAssistantResponse:
         """
         Provide smart workflow suggestions using historical patterns and current context.
         
         Args:
             task_description: Description of the task needing workflow help
             include_history: Whether to include historical patterns from Qdrant
+            user_google_email: User's email address (auto-injected if None)
             ctx: Sampling context (automatically injected)
         """
-        if not ctx or not hasattr(ctx, 'enhanced_sample'):
-            return "Enhanced sampling context not available"
+        if not ctx:
+            return WorkflowAssistantResponse(
+                success=False,
+                task_description=task_description,
+                include_history=include_history,
+                userEmail=user_google_email or "",
+                error="Context not available"
+            )
         
-        response = await ctx.enhanced_sample(
-            messages=f"""
+        try:
+            # Use standard FastMCP ctx.sample()
+            prompt = f"""
 I need help creating a workflow for: {task_description}
 
 Please suggest a step-by-step workflow that:
@@ -1492,96 +1595,208 @@ Please suggest a step-by-step workflow that:
 5. {'Includes patterns from my previous successful workflows' if include_history else 'Focuses on current capabilities'}
 
 Provide actionable steps with specific tool recommendations.
-""",
-            template=SamplingTemplate.WORKFLOW_SUGGESTION,
-            enhancement_level=EnhancementLevel.HISTORICAL if include_history else EnhancementLevel.CONTEXTUAL,
-            include_historical=include_history
-        )
-        
-        return response.text
+"""
+            
+            response = await ctx.sample(
+                messages=prompt,
+                system_prompt="You are a workflow optimization expert with access to the user's workspace and tools.",
+                temperature=0.4,
+                max_tokens=800
+            )
+            
+            return WorkflowAssistantResponse(
+                success=True,
+                task_description=task_description,
+                include_history=include_history,
+                workflow_suggestions=response.text,
+                historical_patterns=["Previous successful workflows analyzed"] if include_history else [],
+                recommended_tools=["service://gmail/labels", "service://drive/items", "tools://enhanced/list"],
+                userEmail=user_google_email or ""
+            )
+        except Exception as e:
+            logger.error(f"Error in smart_workflow_assistant: {e}")
+            return WorkflowAssistantResponse(
+                success=False,
+                task_description=task_description,
+                include_history=include_history,
+                userEmail=user_google_email or "",
+                error=str(e)
+            )
     
     @mcp.tool(
         name="template_rendering_demo",
         description="Demonstrate template rendering with and without execution",
-        tags={"sampling", "templates", "demo", "rendering"}
+        tags={"sampling", "templates", "demo", "rendering"},
+        annotations={
+            "title": "Template Rendering Demo",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True
+        }
     )
     async def template_rendering_demo(
         template_type: str = "email",
         render_examples: bool = False,
-        ctx = None  # EnhancedSamplingContext will be injected
-    ) -> str:
+        user_google_email: UserGoogleEmail = None,
+        ctx: Context = None
+    ) -> TemplateRenderingResponse:
         """
         Show template usage examples with rendering demonstrations.
         
         Args:
             template_type: Type of template to demonstrate (email, document)
             render_examples: Whether to show rendered examples
+            user_google_email: User's email address (auto-injected if None)
             ctx: Sampling context (automatically injected)
         """
-        if not ctx or not hasattr(ctx, 'demo_template_rendering'):
-            return "Enhanced sampling context not available"
+        if not ctx:
+            return TemplateRenderingResponse(
+                success=False,
+                template_type=template_type,
+                render_examples=render_examples,
+                userEmail=user_google_email or "",
+                error="Context not available"
+            )
         
-        demo_results = await ctx.demo_template_rendering(
-            template_name=template_type,
-            render=render_examples
-        )
-        
-        # Format the demo results
-        formatted_output = [
-            f"🎭 **Template Rendering Demo: {demo_results['template_name']}**",
-            f"Render requested: {demo_results['render_requested']}",
-            "",
-            "📋 **Available Template Examples:**"
-        ]
-        
-        for name, template_code in demo_results.get("examples", {}).items():
-            formatted_output.extend([
-                f"\n**{name.replace('_', ' ').title()}:**",
-                "```jinja2",
-                template_code.strip(),
-                "```"
-            ])
-        
-        if demo_results.get("rendered_examples"):
-            formatted_output.extend([
+        try:
+            # Build demo results manually since we're using standard ctx.sample()
+            demo_results = {
+                "template_name": template_type,
+                "render_requested": render_examples,
+                "examples": {}
+            }
+            
+            if "email" in template_type.lower():
+                demo_results["examples"] = {
+                    "beautiful_email_template": """
+{{ render_beautiful_email(
+    title="Weekly Status Update",
+    content_sections=[{
+        'type': 'text',
+        'content': 'Hi team! Here's our weekly update...'
+    }],
+    user_name="{{user://current/email.name}}",
+    user_email="{{user://current/email.email}}",
+    signature_style="professional"
+) }}
+""",
+                    "gmail_labels_template": """
+{{ render_gmail_labels_chips(
+    service://gmail/labels,
+    'Gmail Organization for: ' + user://current/email.email
+) }}
+"""
+                }
+            elif "document" in template_type.lower():
+                demo_results["examples"] = {
+                    "report_template": """
+{{ generate_report_doc(
+    report_title="Monthly Metrics Report",
+    metrics=[{
+        "value": "{{recent://all.total_items_across_services}}",
+        "label": "Total Items",
+        "change": 15
+    }],
+    table_data=[["Metric", "Value"], ["Items", "{{recent://all.total_items_across_services}}"]]
+) }}
+"""
+                }
+            
+            # Format the demo results
+            formatted_output = [
+                f"🎭 **Template Rendering Demo: {demo_results['template_name']}**",
+                f"Render requested: {demo_results['render_requested']}",
                 "",
-                "🎨 **Rendered Examples:**"
-            ])
-            for name, rendered_data in demo_results["rendered_examples"].items():
+                "📋 **Available Template Examples:**"
+            ]
+            
+            available_macros = []
+            for name, template_code in demo_results.get("examples", {}).items():
                 formatted_output.extend([
-                    f"\n**{name}:**",
-                    rendered_data.get("note", "Rendered content would appear here")
+                    f"\n**{name.replace('_', ' ').title()}:**",
+                    "```jinja2",
+                    template_code.strip(),
+                    "```"
                 ])
-        
-        if demo_results.get("render_error"):
-            formatted_output.extend([
-                "",
-                f"⚠️ **Render Error:** {demo_results['render_error']}"
-            ])
-        
-        return "\n".join(formatted_output)
+                available_macros.append(name)
+            
+            if demo_results.get("rendered_examples"):
+                formatted_output.extend([
+                    "",
+                    "🎨 **Rendered Examples:**"
+                ])
+                for name, rendered_data in demo_results["rendered_examples"].items():
+                    formatted_output.extend([
+                        f"\n**{name}:**",
+                        rendered_data.get("note", "Rendered content would appear here")
+                    ])
+            
+            if demo_results.get("render_error"):
+                formatted_output.extend([
+                    "",
+                    f"⚠️ **Render Error:** {demo_results['render_error']}"
+                ])
+            
+            usage_tips = [
+                "Use {{ }} for variable interpolation",
+                "Access resources via URI patterns like service://gmail/labels",
+                "Combine macros for complex templates"
+            ]
+            
+            return TemplateRenderingResponse(
+                success=True,
+                template_type=template_type,
+                render_examples=render_examples,
+                rendered_examples="\n".join(formatted_output),
+                available_macros=available_macros,
+                usage_tips=usage_tips,
+                userEmail=user_google_email or ""
+            )
+        except Exception as e:
+            logger.error(f"Error in template_rendering_demo: {e}")
+            return TemplateRenderingResponse(
+                success=False,
+                template_type=template_type,
+                render_examples=render_examples,
+                userEmail=user_google_email or "",
+                error=str(e)
+            )
     
     @mcp.tool(
-        name="resource_discovery_assistant", 
+        name="resource_discovery_assistant",
         description="Discover available resources and show usage examples",
-        tags={"sampling", "resources", "demo", "discovery"}
+        tags={"sampling", "resources", "demo", "discovery"},
+        annotations={
+            "title": "Resource Discovery Assistant",
+            "readOnlyHint": True,  # Only discovers, doesn't modify
+            "destructiveHint": False,
+            "idempotentHint": True
+        }
     )
     async def resource_discovery_assistant(
         use_case: str,
-        ctx = None  # EnhancedSamplingContext will be injected
-    ) -> str:
+        user_google_email: UserGoogleEmail = None,
+        ctx: Context = None
+    ) -> ResourceDiscoveryResponse:
         """
         Help discover and utilize available FastMCP resources for specific use cases.
         
         Args:
             use_case: The use case to find resources for
+            user_google_email: User's email address (auto-injected if None)
             ctx: Sampling context (automatically injected)
         """
-        if not ctx or not hasattr(ctx, 'enhanced_sample'):
-            return "Enhanced sampling context not available"
+        if not ctx:
+            return ResourceDiscoveryResponse(
+                success=False,
+                use_case=use_case,
+                userEmail=user_google_email or "",
+                error="Context not available"
+            )
         
-        response = await ctx.enhanced_sample(
-            messages=f"""
+        try:
+            # Use standard FastMCP ctx.sample()
+            prompt = f"""
 I need help discovering resources for: {use_case}
 
 Please help me understand:
@@ -1592,12 +1807,45 @@ Please help me understand:
 5. Best practices for resource usage
 
 Focus on practical examples with actual resource URIs.
-""",
-            template=SamplingTemplate.RESOURCE_DISCOVERY,
-            enhancement_level=EnhancementLevel.BASIC
-        )
-        
-        return response.text
+"""
+            
+            response = await ctx.sample(
+                messages=prompt,
+                system_prompt="You are a resource discovery expert for the FastMCP2 platform.",
+                temperature=0.2,
+                max_tokens=600
+            )
+            
+            resource_examples = [
+                "user://current/email - Current user email",
+                "service://gmail/labels - Gmail labels",
+                "recent://drive/7 - Recent Drive files",
+                "template://macros - Template macros",
+                "qdrant://search/{query} - Vector search"
+            ]
+            
+            integration_patterns = [
+                "Email with labels: render_gmail_labels_chips(service://gmail/labels)",
+                "Recent files: recent://drive/7 for last 7 days",
+                "Calendar dashboard: render_calendar_dashboard(service://calendar/events)"
+            ]
+            
+            return ResourceDiscoveryResponse(
+                success=True,
+                use_case=use_case,
+                discovered_resources=response.text,
+                resource_examples=resource_examples,
+                integration_patterns=integration_patterns,
+                userEmail=user_google_email or ""
+            )
+        except Exception as e:
+            logger.error(f"Error in resource_discovery_assistant: {e}")
+            return ResourceDiscoveryResponse(
+                success=False,
+                use_case=use_case,
+                userEmail=user_google_email or "",
+                error=str(e)
+            )
 
     logger.info("✅ Enhanced sampling demo tools registered")
     logger.info("   Tools: intelligent_email_composer, smart_workflow_assistant, template_rendering_demo, resource_discovery_assistant")
