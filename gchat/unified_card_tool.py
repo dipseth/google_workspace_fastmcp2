@@ -68,6 +68,71 @@ from config.enhanced_logging import setup_logger
 logger = setup_logger()
 logger.info("Card Framework v2 is available for rich card creation")
 
+
+def _process_thread_key_for_request(request_params: Dict[str, Any], thread_key: Optional[str] = None) -> None:
+    """
+    Process thread key for Google Chat API request and update request parameters.
+    
+    This function handles the correct thread reply implementation by:
+    1. Extracting the thread ID from full resource name format
+    2. Setting threadKey parameter with just the thread ID
+    3. Adding messageReplyOption for proper thread reply behavior
+    
+    Args:
+        request_params: Dictionary of request parameters to modify in-place
+        thread_key: Optional thread key (can be full resource name or just thread ID)
+    """
+    if thread_key:
+        # Extract thread ID from the full thread resource name
+        # Format: "spaces/{space}/threads/{threadId}" -> use just the threadId
+        if 'threads/' in thread_key:
+            thread_id = thread_key.split('threads/')[-1]
+        else:
+            thread_id = thread_key
+        
+        # Add query parameters for thread reply
+        request_params['threadKey'] = thread_id
+        request_params['messageReplyOption'] = 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
+        
+        logger.debug(f"Thread key processed: {thread_key} -> {thread_id}")
+
+
+def _process_thread_key_for_webhook_url(webhook_url: str, thread_key: Optional[str] = None) -> str:
+    """
+    Process thread key for Google Chat webhook URL and append thread parameters.
+    
+    This function handles the correct thread reply implementation for webhook URLs by:
+    1. Extracting the thread ID from full resource name format
+    2. Appending threadKey and messageReplyOption as query parameters
+    
+    Args:
+        webhook_url: The original webhook URL
+        thread_key: Optional thread key (can be full resource name or just thread ID)
+        
+    Returns:
+        Modified webhook URL with thread parameters appended
+    """
+    if not thread_key:
+        return webhook_url
+    
+    # Extract thread ID from the full thread resource name
+    # Format: "spaces/{space}/threads/{threadId}" -> use just the threadId
+    if 'threads/' in thread_key:
+        thread_id = thread_key.split('threads/')[-1]
+    else:
+        thread_id = thread_key
+    
+    # Determine URL separator (& if already has query params, ? if not)
+    separator = "&" if "?" in webhook_url else "?"
+    
+    # Append thread parameters to webhook URL
+    threaded_webhook_url = f"{webhook_url}{separator}threadKey={thread_id}&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
+    
+    logger.debug(f"Webhook thread key processed: {thread_key} -> {thread_id}")
+    logger.debug(f"Webhook URL updated: {webhook_url} -> {threaded_webhook_url}")
+    
+    return threaded_webhook_url
+
 # Try to import Card Framework with graceful fallback
 try:
     from card_framework.v2 import Card, Section, Widget, CardHeader, Message
@@ -2084,6 +2149,12 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
 
             # Choose delivery method based on webhook_url
             if webhook_url:
+                # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
+                if thread_key:
+                    logger.info(f"🧵 THREADING FIX: Processing thread key for webhook: {thread_key}")
+                    webhook_url = _process_thread_key_for_webhook_url(webhook_url, thread_key)
+                    logger.info(f"🧵 THREADING FIX: Updated webhook URL with thread parameters")
+                
                 # CRITICAL FIX: Recursively convert ALL field names to snake_case for webhook API
                 # The Google Chat webhook API requires snake_case field names throughout the entire payload
                 logger.info("🔧 Converting ALL camelCase fields to snake_case for webhook API compatibility")
@@ -2179,8 +2250,7 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                     'parent': space_id,
                     'body': message_body
                 }
-                if thread_key:
-                    request_params['threadKey'] = thread_key
+                _process_thread_key_for_request(request_params, thread_key)
                 
                 message = await asyncio.to_thread(
                     chat_service.spaces().messages().create(**request_params).execute

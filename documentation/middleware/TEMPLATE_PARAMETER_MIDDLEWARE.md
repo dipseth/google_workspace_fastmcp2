@@ -319,6 +319,18 @@ graph TB
 | `tools://enhanced/list` | Enhanced tools collection | `{{tools://enhanced/list}}['enhanced_tools']` |
 | `tools://usage/guide` | Tools usage guide | `{{tools://usage/guide}}['quick_start']` |
 
+### Qdrant Resources
+
+> 💾 **Vector Database**: Access stored tool responses and historical data
+
+| Resource URI | Description | Example Usage |
+|-------------|-------------|---------------|
+| `qdrant://collection/{name}/{point_id}` | Get specific stored tool response by UUID | `{{qdrant://collection/mcp_tool_responses/01d61daf-ab9d-4dc1-9f54-80c317cef056}}` |
+| `qdrant://search/{query}` | Search across all tool responses | `{{qdrant://search/recent emails}}['results'][0]['id']` |
+| `qdrant://collection/{name}/responses/recent` | Recent tool responses in collection | `{{qdrant://collection/mcp_tool_responses/responses/recent}}['responses'][0]` |
+| `qdrant://cache` | Tool response cache metadata | `{{qdrant://cache}}['search'][0]['point_id']` |
+| `qdrant://status` | Qdrant middleware status | `{{qdrant://status}}['qdrant_enabled']` |
+
 ## 🛠️ Implementation Examples
 
 ### Basic Setup with Jinja2
@@ -559,6 +571,146 @@ async def create_smart_report(
     
     return report
 ```
+
+### Qdrant Vector Database Integration
+
+The template middleware seamlessly integrates with Qdrant resources, enabling dynamic content generation from stored tool responses:
+
+```python
+@mcp.tool()
+async def send_historical_data_email(
+    recipient: str,
+    point_id: str = "01d61daf-ab9d-4dc1-9f54-80c317cef056",
+    # 🔍 Automatically fetch complete Qdrant point data
+    response_data: str = "{{ qdrant://collection/mcp_tool_responses/01d61daf-ab9d-4dc1-9f54-80c317cef056 }}",
+    # Extract specific fields using JSON paths
+    tool_name: str = "{{ qdrant://collection/mcp_tool_responses/01d61daf-ab9d-4dc1-9f54-80c317cef056 }}['tool_name']",
+    execution_time: int = "{{ qdrant://collection/mcp_tool_responses/01d61daf-ab9d-4dc1-9f54-80c317cef056 }}['execution_time_ms']",
+    timestamp: str = "{{ qdrant://collection/mcp_tool_responses/01d61daf-ab9d-4dc1-9f54-80c317cef056 }}['timestamp']"
+) -> str:
+    """Send email with embedded Qdrant tool response data."""
+    
+    # Template middleware automatically resolves all Qdrant URIs:
+    # response_data: Full QdrantPointDetailsResponse as dict/JSON
+    # tool_name: "get_doc_content"
+    # execution_time: 15
+    # timestamp: "2025-09-26T14:06:39.230441+00:00"
+    
+    import json
+    data = json.loads(response_data) if isinstance(response_data, str) else response_data
+    
+    return f"""
+    📧 **Historical Tool Response Email**
+    
+    **To:** {recipient}
+    
+    **Tool Execution Details:**
+    - Tool: {tool_name}
+    - Executed at: {timestamp}
+    - Execution time: {execution_time}ms
+    - User: {data['user_email']}
+    - Session: {data['session_id']}
+    
+    **Complete Response Data:**
+    ```json
+    {json.dumps(data, indent=2)}
+    ```
+    
+    🎯 **Template Integration Benefits:**
+    - Direct Qdrant resource access in templates
+    - Automatic decompression of stored data
+    - JSON path extraction for specific fields
+    - Seamless integration with other FastMCP resources
+    """
+```
+
+**Real Example from Production:**
+
+This actual tool call successfully embedded Qdrant data in an email:
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "send_gmail_message",
+    "arguments": {
+      "subject": "test",
+      "body": "{{ qdrant://collection/mcp_tool_responses/01d61daf-ab9d-4dc1-9f54-80c317cef056 }}",
+      "to": "myself"
+    }
+  }
+}
+```
+
+The email body was automatically populated with the complete point data:
+- Full payload with all metadata
+- Tool execution details (name, timing, user)
+- Complete response data structure
+- Automatic decompression (if applicable)
+- Formatted as structured JSON
+
+**Key Features:**
+- ✅ **UUID Support**: Hyphens in point IDs automatically handled (converted to underscores in variable names)
+- ✅ **Auto-Decompression**: Compressed Qdrant data transparently decompressed
+- ✅ **Nested Access**: Extract specific fields using JSON path syntax
+- ✅ **Performance**: Resources cached with 5-minute TTL by default
+- ✅ **Error Handling**: Graceful fallback if point doesn't exist
+
+**Advanced Qdrant Workflow Example:**
+
+```python
+@mcp.tool()
+async def create_execution_audit_report(
+    user_email: str = "{{template://user_email}}",
+    # Step 1: Search for relevant tool executions
+    search_results: str = "{{ qdrant://search/email tool executions }}",
+    # Step 2: Get detailed data for top result
+    top_result_id: str = "{{ qdrant://search/email tool executions }}['results'][0]['id']",
+    top_result_data: str = "{{ qdrant://collection/mcp_tool_responses/{{top_result_id}} }}",
+    # Mix with other resources for complete context
+    workspace_files: int = "{{workspace://content/recent.total_files}}",
+    report_template: str = """
+# Tool Execution Audit Report
+**Generated:** {{now() | strftime('%Y-%m-%d %H:%M:%S')}}
+**User:** {{user_email}}
+
+## Recent Tool Activity
+Found {{search_results.total_results}} relevant tool executions.
+
+### Top Result Details
+- **Tool:** {{top_result_data.tool_name}}
+- **Executed:** {{top_result_data.timestamp}}
+- **Duration:** {{top_result_data.execution_time_ms}}ms
+- **Session:** {{top_result_data.session_id}}
+
+### Response Data
+```json
+{{top_result_data.response_data | json_pretty(2)}}
+```
+
+## Current Workspace Status
+Active files: {{workspace_files}}
+
+---
+*Powered by Qdrant Vector Database + Template Middleware*
+"""
+) -> str:
+    """Create comprehensive audit report combining Qdrant search with other resources."""
+    # All template URIs automatically resolved - ready to use!
+    return report_template
+```
+
+**Technical Details:**
+The template middleware handles Qdrant URIs through a sophisticated pipeline:
+1. **URI Detection**: Identifies `qdrant://collection/{name}/{uuid}` patterns
+2. **UUID Normalization**: Converts hyphens to underscores (e.g., `01d61daf-ab9d-4dc1` → `01d61daf_ab9d_4dc1`)
+3. **Resource Fetching**: Calls Qdrant resource handler to retrieve point data
+4. **Payload Parsing**: Automatically extracts nested JSON from `ToolResult.content` fields
+5. **Model Conversion**: Converts Pydantic models to plain dicts for Jinja2 compatibility
+6. **Variable Injection**: Adds to template context with safe variable names
+7. **Template Rendering**: Jinja2 renders with full access to structured Qdrant data
+
+See [`documentation/middleware/qdrant-middleware-architecture.md`](documentation/middleware/qdrant-middleware-architecture.md#-template-integration-with-jinja2) for complete Qdrant template integration architecture.
 
 ### Complex JSON Path Examples
 

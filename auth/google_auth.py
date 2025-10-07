@@ -10,6 +10,8 @@ import os
 from typing_extensions import Optional, Tuple, Any, Dict, List, Literal
 from pathlib import Path
 from datetime import datetime, UTC, timedelta
+from enum import Enum
+from dataclasses import dataclass
 
 # Allow insecure transport for local development
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -35,9 +37,230 @@ _oauth_state_map: dict[str, dict[str, Any]] = {}
 _service_selection_cache: Dict[str, Dict[str, Any]] = {}
 
 
+class AuthErrorType(Enum):
+    """Types of authentication errors in modern FastMCP system."""
+    
+    # Configuration errors
+    MISSING_CREDENTIALS = "missing_credentials"
+    INVALID_CONFIGURATION = "invalid_configuration"
+    
+    # OAuth flow errors
+    OAUTH_FLOW_FAILED = "oauth_flow_failed"
+    TOKEN_VALIDATION_FAILED = "token_validation_failed"
+    SCOPE_INSUFFICIENT = "scope_insufficient"
+    
+    # Provider errors
+    PROVIDER_INITIALIZATION_FAILED = "provider_init_failed"
+    PROVIDER_NOT_AVAILABLE = "provider_not_available"
+    
+    # Network/API errors
+    GOOGLE_API_ERROR = "google_api_error"
+    NETWORK_ERROR = "network_error"
+    
+    # Session errors
+    SESSION_EXPIRED = "session_expired"
+    INVALID_SESSION = "invalid_session"
+
+
+@dataclass
+class AuthError:
+    """Structured authentication error with modern context."""
+    
+    error_type: AuthErrorType
+    message: str
+    details: Optional[Dict[str, Any]] = None
+    user_message: Optional[str] = None
+    resolution_steps: Optional[list] = None
+
+
+class ModernAuthErrorHandler:
+    """Enhanced error handling for FastMCP 2.12.x authentication."""
+    
+    @staticmethod
+    def handle_provider_error(error: Exception, context: str = "") -> AuthError:
+        """Handle GoogleProvider initialization errors."""
+        
+        error_str = str(error).lower()
+        
+        if "client_id" in error_str or "client_secret" in error_str:
+            return AuthError(
+                error_type=AuthErrorType.MISSING_CREDENTIALS,
+                message=f"Google OAuth credentials missing or invalid: {error}",
+                user_message="Please configure your Google OAuth credentials",
+                details={"context": context, "original_error": str(error)},
+                resolution_steps=[
+                    "Set FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID environment variable",
+                    "Set FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET environment variable",
+                    "Verify credentials are correct in Google Cloud Console",
+                    "Ensure OAuth consent screen is configured"
+                ]
+            )
+        
+        if "timeout" in error_str or "connection" in error_str:
+            return AuthError(
+                error_type=AuthErrorType.NETWORK_ERROR,
+                message=f"Network error during provider initialization: {error}",
+                user_message="Authentication service temporarily unavailable",
+                details={"context": context, "original_error": str(error)},
+                resolution_steps=[
+                    "Check internet connection",
+                    "Verify Google OAuth endpoints are accessible",
+                    "Try again in a few moments",
+                    "Check firewall settings"
+                ]
+            )
+        
+        return AuthError(
+            error_type=AuthErrorType.PROVIDER_INITIALIZATION_FAILED,
+            message=f"GoogleProvider initialization failed: {error}",
+            user_message="Authentication system initialization failed",
+            details={"context": context, "original_error": str(error)},
+            resolution_steps=[
+                "Check server logs for detailed error information",
+                "Verify FastMCP 2.12.x is installed correctly",
+                "Check Google OAuth configuration",
+                "Contact system administrator if problem persists"
+            ]
+        )
+    
+    @staticmethod
+    def handle_oauth_flow_error(error: Exception, flow_context: str = "") -> AuthError:
+        """Handle OAuth flow errors with user-friendly messages."""
+        
+        error_str = str(error).lower()
+        
+        if "invalid_grant" in error_str:
+            return AuthError(
+                error_type=AuthErrorType.TOKEN_VALIDATION_FAILED,
+                message=f"OAuth token invalid or expired: {error}",
+                user_message="Your authentication session has expired",
+                details={"flow_context": flow_context, "original_error": str(error)},
+                resolution_steps=[
+                    "Re-authenticate using the start_google_auth tool",
+                    "Clear browser cookies and try again",
+                    "Ensure system clock is correct"
+                ]
+            )
+        
+        if "scope" in error_str:
+            return AuthError(
+                error_type=AuthErrorType.SCOPE_INSUFFICIENT,
+                message=f"OAuth scope error: {error}",
+                user_message="Additional permissions required",
+                details={"flow_context": flow_context, "original_error": str(error)},
+                resolution_steps=[
+                    "Re-authenticate with expanded permissions",
+                    "Contact administrator to verify required scopes",
+                    "Check Google OAuth consent screen configuration"
+                ]
+            )
+        
+        return AuthError(
+            error_type=AuthErrorType.OAUTH_FLOW_FAILED,
+            message=f"OAuth flow failed: {error}",
+            user_message="Authentication failed - please try again",
+            details={"flow_context": flow_context, "original_error": str(error)},
+            resolution_steps=[
+                "Try the authentication process again",
+                "Clear browser cache and cookies",
+                "Use an incognito/private browser window",
+                "Check if popup windows are being blocked"
+            ]
+        )
+    
+    @staticmethod
+    def log_auth_error(error: AuthError, logger_instance: logging.Logger = None):
+        """Log authentication error with appropriate level and context."""
+        
+        log = logger_instance or logger
+        
+        # Critical errors that require immediate attention
+        critical_types = {
+            AuthErrorType.MISSING_CREDENTIALS,
+            AuthErrorType.PROVIDER_INITIALIZATION_FAILED
+        }
+        
+        # Warning-level errors that might be temporary
+        warning_types = {
+            AuthErrorType.NETWORK_ERROR,
+            AuthErrorType.SESSION_EXPIRED,
+            AuthErrorType.TOKEN_VALIDATION_FAILED
+        }
+        
+        if error.error_type in critical_types:
+            log.error(f"🚨 CRITICAL AUTH ERROR: {error.message}")
+            log.error(f"   Type: {error.error_type.value}")
+            if error.details:
+                log.error(f"   Details: {error.details}")
+            if error.resolution_steps:
+                log.error("   Resolution Steps:")
+                for i, step in enumerate(error.resolution_steps, 1):
+                    log.error(f"     {i}. {step}")
+                    
+        elif error.error_type in warning_types:
+            log.warning(f"⚠️ AUTH WARNING: {error.message}")
+            log.warning(f"   Type: {error.error_type.value}")
+            if error.user_message:
+                log.warning(f"   User Message: {error.user_message}")
+                
+        else:
+            log.info(f"ℹ️ AUTH INFO: {error.message}")
+            log.info(f"   Type: {error.error_type.value}")
+    
+    @staticmethod
+    def create_user_friendly_response(error: AuthError) -> Dict[str, Any]:
+        """Create a user-friendly error response for API/UI consumption."""
+        
+        return {
+            "success": False,
+            "error_type": error.error_type.value,
+            "message": error.user_message or error.message,
+            "details": error.details,
+            "resolution_steps": error.resolution_steps,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "support_info": {
+                "documentation": "https://docs.fastmcp.com/auth",
+                "contact": "Check server logs for technical details"
+            }
+        }
+
+
+# Legacy exception for backward compatibility
 class GoogleAuthError(Exception):
-    """Custom exception for Google authentication errors."""
+    """Legacy exception for Google authentication errors. Use AuthError instead."""
     pass
+
+
+# Convenience functions for common error scenarios
+def handle_missing_credentials(service_name: str = "Google") -> AuthError:
+    """Handle missing OAuth credentials scenario."""
+    return ModernAuthErrorHandler.handle_provider_error(
+        Exception(f"{service_name} OAuth credentials not configured"),
+        context=f"{service_name}_credentials_check"
+    )
+
+
+def handle_network_timeout(service_name: str = "Google") -> AuthError:
+    """Handle network timeout during authentication."""
+    return ModernAuthErrorHandler.handle_provider_error(
+        Exception(f"Connection timeout to {service_name} OAuth servers"),
+        context=f"{service_name}_network_timeout"
+    )
+
+
+def handle_expired_session(user_email: str = "") -> AuthError:
+    """Handle expired authentication session."""
+    return AuthError(
+        error_type=AuthErrorType.SESSION_EXPIRED,
+        message=f"Authentication session expired for {user_email}",
+        user_message="Your session has expired. Please re-authenticate.",
+        details={"user_email": user_email},
+        resolution_steps=[
+            "Use the start_google_auth tool to re-authenticate",
+            "Clear browser cookies if authentication fails",
+            "Ensure system clock is correct"
+        ]
+    )
 
 
 def _get_credentials_path(user_email: str) -> Path:
@@ -372,12 +595,38 @@ async def initiate_oauth_flow(
         oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
         logger.info(f"Using oauth_comprehensive scopes: {len(oauth_scopes)} scopes")
     
-    # Get OAuth client configuration
-    oauth_config = settings.get_oauth_client_config()
+    # Get OAuth client configuration - create clean config for custom credentials
     if custom_client_id:
-        oauth_config['client_id'] = custom_client_id
-        if custom_client_secret:
-            oauth_config['client_secret'] = custom_client_secret
+        # For web applications, client_secret is always required, even with PKCE
+        # If no custom_client_secret provided, use default as fallback for mixed scenarios
+        final_client_secret = custom_client_secret
+        if not final_client_secret:
+            try:
+                default_config = settings.get_oauth_client_config()
+                final_client_secret = default_config.get('client_secret', '')
+                if final_client_secret:
+                    logger.info(f"🔑 INITIATE: Using default client_secret as fallback for custom client_id")
+                else:
+                    logger.warning(f"🔑 INITIATE: No client_secret available - this may cause 'client_secret is missing' error")
+            except Exception as e:
+                logger.warning(f"🔑 INITIATE: Could not get default client_secret: {e}")
+                final_client_secret = ''
+        
+        # Create a clean OAuth config for custom credentials to avoid redirect URI conflicts
+        oauth_config = {
+            'client_id': custom_client_id,
+            'client_secret': final_client_secret,
+            'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+            'token_uri': 'https://oauth2.googleapis.com/token',
+            'redirect_uris': [settings.dynamic_oauth_redirect_uri]  # Only use the configured redirect URI
+        }
+        logger.info(f"🔑 INITIATE: Created clean OAuth config for custom client: {custom_client_id[:10]}...")
+        logger.info(f"🔑 INITIATE: client_secret status: {'PROVIDED' if final_client_secret else 'MISSING'}")
+        logger.info(f"🔑 INITIATE: Using single redirect URI: {settings.dynamic_oauth_redirect_uri}")
+    else:
+        # Use default configuration for system credentials
+        oauth_config = settings.get_oauth_client_config()
+        logger.info(f"🔑 INITIATE: Using default OAuth configuration")
     
     # Verify no problematic scopes are included
     problematic_patterns = ['photoslibrary.sharing', 'cloud-platform', 'cloudfunctions', 'pubsub', 'iam']
@@ -410,6 +659,14 @@ async def initiate_oauth_flow(
         'custom_client_id': custom_client_id,
         'custom_client_secret': custom_client_secret
     }
+    
+    # Use enhanced context-based credential storage for persistence
+    if custom_client_id:
+        try:
+            from .context import store_custom_oauth_credentials
+            store_custom_oauth_credentials(state, custom_client_id, custom_client_secret, auth_method)
+        except Exception as e:
+            logger.debug(f"Could not store custom credentials via context functions: {e}")
     
     # Generate PKCE parameters if enabled
     pkce_params = {}
@@ -569,6 +826,56 @@ async def handle_oauth_callback(
     custom_client_id = state_info.get('custom_client_id')
     custom_client_secret = state_info.get('custom_client_secret')
     
+    # DIAGNOSTIC: Log custom credentials retrieval
+    logger.info(f"🔍 CUSTOM_CREDS_DEBUG: Retrieved from state:")
+    logger.info(f"   custom_client_id: {custom_client_id[:10] + '...' if custom_client_id else 'None'}")
+    logger.info(f"   custom_client_secret: {'PRESENT' if custom_client_secret else 'MISSING/NONE'}")
+    logger.info(f"   custom_client_secret length: {len(custom_client_secret) if custom_client_secret else 0}")
+    logger.info(f"   auth_method: {auth_method}")
+    
+    # Enhanced fallback: Try retrieving custom credentials from UnifiedSession
+    if not custom_client_id or not custom_client_secret:
+        try:
+            from .unified_session import UnifiedSession
+            unified_session = UnifiedSession()
+            fallback_client_id, fallback_client_secret, fallback_auth_method = unified_session.retrieve_custom_oauth_credentials(state)
+            
+            if fallback_client_id and not custom_client_id:
+                custom_client_id = fallback_client_id
+                logger.info(f"🔗 UNIFIED_SESSION_FALLBACK: Retrieved custom_client_id: {custom_client_id[:10]}...")
+            
+            if fallback_client_secret and not custom_client_secret:
+                custom_client_secret = fallback_client_secret
+                logger.info(f"🔗 UNIFIED_SESSION_FALLBACK: Retrieved custom_client_secret")
+            
+            if fallback_auth_method and not auth_method:
+                auth_method = fallback_auth_method
+                logger.info(f"🔗 UNIFIED_SESSION_FALLBACK: Retrieved auth_method: {auth_method}")
+                
+        except Exception as unified_error:
+            logger.debug(f"Could not retrieve credentials from UnifiedSession: {unified_error}")
+            # Fallback to basic session context
+            try:
+                session_id = get_session_context()
+                if session_id:
+                    fallback_client_id = get_session_data(session_id, f"custom_client_id_{state}")
+                    fallback_client_secret = get_session_data(session_id, f"custom_client_secret_{state}")
+                    fallback_auth_method = get_session_data(session_id, f"auth_method_{state}")
+                    
+                    if fallback_client_id and not custom_client_id:
+                        custom_client_id = fallback_client_id
+                        logger.info(f"🔗 CONTEXT_FALLBACK: Retrieved custom_client_id from session: {custom_client_id[:10]}...")
+                    
+                    if fallback_client_secret and not custom_client_secret:
+                        custom_client_secret = fallback_client_secret
+                        logger.info(f"🔗 CONTEXT_FALLBACK: Retrieved custom_client_secret from session")
+                    
+                    if fallback_auth_method and not auth_method:
+                        auth_method = fallback_auth_method
+                        logger.info(f"🔗 CONTEXT_FALLBACK: Retrieved auth_method from session: {auth_method}")
+            except Exception as e:
+                logger.debug(f"Could not retrieve fallback credentials from session context: {e}")
+    
     # Validate PKCE if code_verifier is provided
     if code_verifier:
         try:
@@ -583,11 +890,60 @@ async def handle_oauth_callback(
             raise GoogleAuthError("PKCE session not found or expired")
     
     # Create OAuth flow with same configuration used for authorization URL
-    oauth_config = settings.get_oauth_client_config()
     if custom_client_id:
-        oauth_config['client_id'] = custom_client_id
-        if custom_client_secret:
-            oauth_config['client_secret'] = custom_client_secret
+        # Handle client_secret for PKCE flows
+        # Google's OAuth quirk: "Web application" clients still require client_secret even with PKCE
+        # Only "Public application" or "Mobile" clients can use PKCE without client_secret
+        final_client_secret = custom_client_secret
+        
+        if not final_client_secret:
+            if code_verifier:
+                # True PKCE flow - should work without client_secret for public clients
+                logger.info(f"🔑 CALLBACK: PKCE flow without client_secret (public client)")
+                logger.info(f"🔑 CALLBACK: If this fails, your Google OAuth client type may need to be 'Public application'")
+                # Don't set final_client_secret - leave it None for public client behavior
+            else:
+                # Non-PKCE flow requires client_secret
+                try:
+                    default_config = settings.get_oauth_client_config()
+                    final_client_secret = default_config.get('client_secret', '')
+                    if final_client_secret:
+                        logger.info(f"🔑 CALLBACK: Using default client_secret for non-PKCE flow")
+                    else:
+                        logger.error(f"🔑 CALLBACK: Non-PKCE flow requires client_secret but none available")
+                except Exception as e:
+                    logger.error(f"🔑 CALLBACK: Could not get default client_secret: {e}")
+                    final_client_secret = ''
+        
+        # Create OAuth config that properly handles PKCE without client_secret
+        if code_verifier and not final_client_secret:
+            # True PKCE flow - configure as public client (no client_secret)
+            oauth_config = {
+                'client_id': custom_client_id,
+                'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+                'token_uri': 'https://oauth2.googleapis.com/token',
+                'redirect_uris': [settings.dynamic_oauth_redirect_uri]
+                # Deliberately omit client_secret for public client PKCE
+            }
+            logger.info(f"🔑 CALLBACK: Created public client config for PKCE: {custom_client_id[:10]}...")
+            logger.info(f"🔑 CALLBACK: PKCE mode - no client_secret (public client)")
+        else:
+            # Confidential client or non-PKCE flow
+            oauth_config = {
+                'client_id': custom_client_id,
+                'client_secret': final_client_secret or '',
+                'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+                'token_uri': 'https://oauth2.googleapis.com/token',
+                'redirect_uris': [settings.dynamic_oauth_redirect_uri]
+            }
+            logger.info(f"🔑 CALLBACK: Created confidential client config: {custom_client_id[:10]}...")
+            logger.info(f"🔑 CALLBACK: client_secret status: {'PROVIDED' if final_client_secret else 'MISSING'}")
+        
+        logger.info(f"🔑 CALLBACK: Using single redirect URI: {settings.dynamic_oauth_redirect_uri}")
+    else:
+        # Use default configuration for system credentials
+        oauth_config = settings.get_oauth_client_config()
+        logger.info(f"🔑 CALLBACK: Using default OAuth configuration")
     
     # Use centralized scope registry as single source of truth (same as initiate_oauth_flow)
     from .scope_registry import ScopeRegistry

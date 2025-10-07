@@ -161,3 +161,24 @@ class QdrantToolSearchResponse(BaseModel):
     processing_time_ms: float = Field(description="Time taken to process the search")
     collection_name: str = Field(description="Qdrant collection name")
     error: Optional[str] = Field(default=None, description="Error message if search failed")
+
+
+class QdrantPointDetailsResponse(BaseModel):
+    """Response for qdrant://collection/{collection}/{point_id} resource."""
+    qdrant_enabled: bool = Field(description="Whether Qdrant is available")
+    collection_name: str = Field(description="Name of the collection")
+    point_id: str = Field(description="ID of the retrieved point")
+    point_exists: bool = Field(description="Whether the point was found")
+    payload: Optional[Dict[str, Any]] = Field(default=None, description="Point payload/metadata")
+    vector_available: bool = Field(default=False, description="Whether vector data is included")
+    vector_size: Optional[int] = Field(default=None, description="Size of the vector if available")
+    # Extracted common fields for easy access
+    tool_name: Optional[str] = Field(default=None, description="Tool name from payload")
+    user_email: Optional[str] = Field(default=None, description="User email from payload")
+    timestamp: Optional[str] = Field(default=None, description="Timestamp from payload")
+    session_id: Optional[str] = Field(default=None, description="Session ID from payload")
+    payload_type: Optional[str] = Field(default=None, description="Payload type from payload")
+    compressed: bool = Field(default=False, description="Whether data is compressed")
+    # Decompressed data if available
+    response_data: Optional[Union[Dict[str, Any], str]] = Field(default=None, description="Decompressed response data")
+    retrieved_at: str = Field(description="When this point was retrieved")

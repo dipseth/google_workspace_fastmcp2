@@ -281,16 +281,36 @@ def _generate_service_selection_html(state: str, flow_type: str, use_pkce: bool 
                     </div>
                     
                     <!-- Custom Credentials Section -->
-                    <div class="custom-credentials-section">
-                        <label>
-                            <input type="checkbox" id="use_custom_creds" name="use_custom_creds">
-                            Use custom Google OAuth credentials
+                    <div class="custom-credentials-section" style="margin-bottom: 30px; padding: 20px; border: 2px solid #e8eaed; border-radius: 12px;">
+                        <label style="display: flex; align-items: center; margin-bottom: 15px;">
+                            <input type="checkbox" id="use_custom_creds" name="use_custom_creds" style="margin-right: 10px; transform: scale(1.2);">
+                            <span style="font-weight: 600; color: #1a73e8;">Use custom Google OAuth credentials</span>
                         </label>
-                        <div id="custom-creds-fields">
-                            <p style="color: red; font-weight: bold;">Warning: Providing client secret through UI is not recommended - use PKCE instead!</p>
-                            <p>Provide your own Google OAuth app credentials (from Google Cloud Console)</p>
-                            <input type="text" name="custom_client_id" placeholder="Custom Client ID (required)">
-                            <input type="text" name="custom_client_secret" placeholder="Custom Client Secret (optional for PKCE)">
+                        <div id="custom-creds-fields" style="display: none;">
+                            <div class="custom-creds-warning" style="background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                                <strong>⚠️ Important Setup Requirements:</strong><br>
+                                Your custom OAuth client must have this redirect URI configured:<br>
+                                <code style="background: #f8f9fa; padding: 4px 8px; border-radius: 4px; font-family: monospace;">https://localhost:8002/oauth2callback</code>
+                            </div>
+                            <div class="custom-creds-info" style="background: #e8f0fe; border: 1px solid #dadce0; color: #1a73e8; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                                <strong>🔧 Google Cloud Console Setup:</strong><br>
+                                1. Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → APIs & Services → Credentials</a><br>
+                                2. Create or edit your OAuth 2.0 Client ID<br>
+                                3. Add <code>https://localhost:8002/oauth2callback</code> to "Authorized redirect URIs"<br>
+                                4. Enable required APIs (Drive, Gmail, Calendar, etc.)
+                            </div>
+                            <p style="color: #d93025; font-weight: bold; margin-bottom: 15px;">Warning: Providing client secret through UI is not recommended for production!</p>
+                            <div style="display: flex; flex-direction: column; gap: 10px;">
+                                <input type="text" name="custom_client_id" placeholder="Custom Client ID (required)" style="padding: 12px; border: 1px solid #dadce0; border-radius: 8px; font-size: 14px; width: 100%; box-sizing: border-box;">
+                                <input type="text" name="custom_client_secret" placeholder="Custom Client Secret (optional for PKCE)" style="padding: 12px; border: 1px solid #dadce0; border-radius: 8px; font-size: 14px; width: 100%; box-sizing: border-box;">
+                            </div>
+                            <div class="custom-creds-troubleshooting" style="background: #fef7e0; border: 1px solid #fbcf33; color: #b7791f; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                                <strong>🔍 Troubleshooting:</strong><br>
+                                • If you get "invalid_client" error, check your redirect URI configuration<br>
+                                • Ensure your OAuth consent screen is configured<br>
+                                • Verify all required APIs are enabled in Google Cloud Console<br>
+                                • For PKCE flow, client_secret is optional but client_id is required
+                            </div>
                         </div>
                     </div>
                     
@@ -383,6 +403,52 @@ def _generate_service_selection_html(state: str, flow_type: str, use_pkce: bool 
                             }
                         });
                     });
+                    
+                    // Handle custom credentials checkbox
+                    const customCredsCheckbox = document.getElementById('use_custom_creds');
+                    const customCredsFields = document.getElementById('custom-creds-fields');
+                    
+                    if (customCredsCheckbox && customCredsFields) {
+                        customCredsCheckbox.addEventListener('change', function() {
+                            if (this.checked) {
+                                customCredsFields.style.display = 'block';
+                                // Scroll to show the fields
+                                customCredsFields.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                            } else {
+                                customCredsFields.style.display = 'none';
+                                // Clear the fields when hiding
+                                const inputs = customCredsFields.querySelectorAll('input');
+                                inputs.forEach(input => input.value = '');
+                            }
+                        });
+                    }
+                    
+                    // Form validation
+                    const form = document.querySelector('form');
+                    if (form) {
+                        form.addEventListener('submit', function(e) {
+                            const customCredsEnabled = customCredsCheckbox && customCredsCheckbox.checked;
+                            if (customCredsEnabled) {
+                                const clientIdInput = document.querySelector('input[name="custom_client_id"]');
+                                if (!clientIdInput || !clientIdInput.value.trim()) {
+                                    e.preventDefault();
+                                    alert('Please provide a Custom Client ID when using custom credentials.');
+                                    if (clientIdInput) clientIdInput.focus();
+                                    return false;
+                                }
+                                
+                                // Validate client ID format
+                                const clientId = clientIdInput.value.trim();
+                                if (!clientId.includes('.apps.googleusercontent.com')) {
+                                    const proceed = confirm('Warning: Your Client ID doesn\\'t look like a Google OAuth client ID.\\n\\nGoogle Client IDs usually end with \\".apps.googleusercontent.com\\"\\n\\nDo you want to continue anyway?');
+                                    if (!proceed) {
+                                        e.preventDefault();
+                                        return false;
+                                    }
+                                }
+                            }
+                        });
+                    }
                 });
             </script>
         </body>
@@ -809,6 +875,12 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 }
             )
     
+    # MCP Inspector compatibility - alias /register to /oauth/register
+    @mcp.custom_route("/register", methods=["POST", "OPTIONS"])
+    async def register_alias(request: Any):
+        """Alias for MCP Inspector compatibility - routes to dynamic_client_registration."""
+        return await dynamic_client_registration(request)
+    
     @mcp.custom_route("/oauth/token", methods=["POST", "OPTIONS"])
     async def oauth_token_endpoint(request: Any):
         """OAuth token endpoint that handles token exchange with OAuth Proxy.
@@ -941,13 +1013,60 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 
         except Exception as e:
             logger.error(f"❌ Token exchange failed: {e}")
-            error_response = {
-                "error": "invalid_request",
-                "error_description": str(e)
-            }
+            
+            # Enhanced error handling for common OAuth issues
+            error_str = str(e).lower()
+            
+            if "invalid_client" in error_str or "unauthorized" in error_str:
+                error_response = {
+                    "error": "invalid_client",
+                    "error_description": "OAuth client configuration error. Please check your Google Cloud Console setup.",
+                    "troubleshooting": {
+                        "likely_cause": "Redirect URI mismatch or invalid client credentials",
+                        "solution_steps": [
+                            "1. Go to Google Cloud Console → APIs & Services → Credentials",
+                            "2. Edit your OAuth 2.0 Client ID",
+                            "3. Add 'https://localhost:8002/oauth2callback' to 'Authorized redirect URIs'",
+                            "4. Save the changes and try authentication again",
+                            "5. If using custom client_id, verify it's correct and active"
+                        ]
+                    }
+                }
+                status_code = 401
+            elif "invalid_grant" in error_str:
+                error_response = {
+                    "error": "invalid_grant",
+                    "error_description": "Authorization code is invalid, expired, or already used.",
+                    "troubleshooting": {
+                        "likely_cause": "Authorization code reuse or expiration",
+                        "solution_steps": [
+                            "1. Start a fresh OAuth flow from the beginning",
+                            "2. Don't refresh the callback page",
+                            "3. Complete the flow within 10 minutes",
+                            "4. Ensure system clock is accurate"
+                        ]
+                    }
+                }
+                status_code = 400
+            else:
+                error_response = {
+                    "error": "token_exchange_failed",
+                    "error_description": f"Token exchange failed: {str(e)}",
+                    "troubleshooting": {
+                        "likely_cause": "General OAuth configuration or network issue",
+                        "solution_steps": [
+                            "1. Check Google Cloud Console OAuth client configuration",
+                            "2. Verify redirect URI matches exactly: https://localhost:8002/oauth2callback",
+                            "3. Ensure all required APIs are enabled",
+                            "4. Check server logs for more details"
+                        ]
+                    }
+                }
+                status_code = 500
+            
             return JSONResponse(
                 content=error_response,
-                status_code=400,
+                status_code=status_code,
                 headers={
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -1095,8 +1214,68 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 
             except Exception as oauth_error:
                 logger.error(f"❌ OAuth processing failed: {oauth_error}", exc_info=True)
-                return HTMLResponse(
-                    content=f"""
+                
+                # Enhanced error messaging for OAuth issues
+                error_str = str(oauth_error).lower()
+                
+                if "invalid_client" in error_str or "unauthorized" in error_str:
+                    error_html = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>OAuth Client Configuration Error</title>
+                        <style>
+                            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #fff5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
+                            .container {{ max-width: 700px; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+                            .error {{ color: #dc3545; font-size: 48px; margin-bottom: 20px; text-align: center; }}
+                            h1 {{ color: #333; margin-bottom: 20px; text-align: center; }}
+                            .error-details {{ background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 8px; margin: 20px 0; }}
+                            .solution-steps {{ background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+                            .solution-steps h3 {{ margin-top: 0; color: #155724; }}
+                            .solution-steps ol {{ text-align: left; padding-left: 20px; }}
+                            .solution-steps li {{ margin: 8px 0; }}
+                            .redirect-uri {{ background: #f8f9fa; padding: 8px 12px; border-radius: 4px; font-family: monospace; border: 1px solid #dee2e6; }}
+                            .important {{ font-weight: bold; color: #dc3545; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="error">❌</div>
+                            <h1>OAuth Client Configuration Error</h1>
+                            
+                            <div class="error-details">
+                                <strong>Error:</strong> {str(oauth_error)}<br><br>
+                                <strong>Most Likely Cause:</strong> Your OAuth client's redirect URI configuration doesn't match what the authentication system expects.
+                            </div>
+                            
+                            <div class="solution-steps">
+                                <h3>🔧 How to Fix This:</h3>
+                                <ol>
+                                    <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → APIs & Services → Credentials</a></li>
+                                    <li>Find and click on your OAuth 2.0 Client ID</li>
+                                    <li>In the "Authorized redirect URIs" section, add this exact URI:</li>
+                                    <div class="redirect-uri">https://localhost:8002/oauth2callback</div>
+                                    <li>Click "Save" to update your OAuth client configuration</li>
+                                    <li>Wait a few minutes for changes to propagate</li>
+                                    <li class="important">Try the authentication process again</li>
+                                </ol>
+                            </div>
+                            
+                            <div style="text-align: center; margin-top: 30px;">
+                                <p>If you continue having issues, verify that:</p>
+                                <ul style="text-align: left; display: inline-block;">
+                                    <li>Your OAuth consent screen is configured</li>
+                                    <li>Required APIs are enabled (Drive, Gmail, Calendar, etc.)</li>
+                                    <li>Your client ID and secret are correct</li>
+                                    <li>You're using the latest client credentials</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                else:
+                    error_html = f"""
                     <!DOCTYPE html>
                     <html>
                     <head>
@@ -1117,7 +1296,10 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         </div>
                     </body>
                     </html>
-                    """,
+                    """
+                
+                return HTMLResponse(
+                    content=error_html,
                     status_code=500,
                     headers={
                         "Content-Type": "text/html; charset=utf-8",

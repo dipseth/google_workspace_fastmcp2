@@ -57,6 +57,71 @@ else:
     logger.warning("Card Manager not available - cards will use fallback format")
 
 
+def _process_thread_key_for_request(request_params: Dict[str, Any], thread_key: Optional[str] = None) -> None:
+    """
+    Process thread key for Google Chat API request and update request parameters.
+    
+    This function handles the correct thread reply implementation by:
+    1. Extracting the thread ID from full resource name format
+    2. Setting threadKey parameter with just the thread ID
+    3. Adding messageReplyOption for proper thread reply behavior
+    
+    Args:
+        request_params: Dictionary of request parameters to modify in-place
+        thread_key: Optional thread key (can be full resource name or just thread ID)
+    """
+    if thread_key:
+        # Extract thread ID from the full thread resource name
+        # Format: "spaces/{space}/threads/{threadId}" -> use just the threadId
+        if 'threads/' in thread_key:
+            thread_id = thread_key.split('threads/')[-1]
+        else:
+            thread_id = thread_key
+        
+        # Add query parameters for thread reply
+        request_params['threadKey'] = thread_id
+        request_params['messageReplyOption'] = 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
+        
+        logger.debug(f"Thread key processed: {thread_key} -> {thread_id}")
+
+
+def _process_thread_key_for_webhook_url(webhook_url: str, thread_key: Optional[str] = None) -> str:
+    """
+    Process thread key for Google Chat webhook URL and append thread parameters.
+    
+    This function handles the correct thread reply implementation for webhook URLs by:
+    1. Extracting the thread ID from full resource name format
+    2. Appending threadKey and messageReplyOption as query parameters
+    
+    Args:
+        webhook_url: The original webhook URL
+        thread_key: Optional thread key (can be full resource name or just thread ID)
+        
+    Returns:
+        Modified webhook URL with thread parameters appended
+    """
+    if not thread_key:
+        return webhook_url
+    
+    # Extract thread ID from the full thread resource name
+    # Format: "spaces/{space}/threads/{threadId}" -> use just the threadId
+    if 'threads/' in thread_key:
+        thread_id = thread_key.split('threads/')[-1]
+    else:
+        thread_id = thread_key
+    
+    # Determine URL separator (& if already has query params, ? if not)
+    separator = "&" if "?" in webhook_url else "?"
+    
+    # Append thread parameters to webhook URL
+    threaded_webhook_url = f"{webhook_url}{separator}threadKey={thread_id}&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
+    
+    logger.debug(f"Webhook thread key processed: {thread_key} -> {thread_id}")
+    logger.debug(f"Webhook URL updated: {webhook_url} -> {threaded_webhook_url}")
+    
+    return threaded_webhook_url
+
+
 
 
 async def _get_chat_service_with_fallback(user_google_email: UserGoogleEmail):
@@ -130,8 +195,7 @@ async def _send_text_message_helper(
             'parent': space_id,
             'body': message_body
         }
-        if thread_key:
-            request_params['threadKey'] = thread_key
+        _process_thread_key_for_request(request_params, thread_key)
 
         message = await asyncio.to_thread(
             chat_service.spaces().messages().create(**request_params).execute
@@ -411,26 +475,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         user_google_email: UserGoogleEmail = None
     ) -> SendMessageResponse:
         """
-        Sends a message to a Google Chat space with full markdown formatting support.
-
-        🎨 **Google Chat Markdown Support:**
-        - *Bold*: `*text*` → *text*
-        - _Italic_: `_text_` → _text_
-        - ~Strikethrough~: `~text~` → ~~text~~
-        - `Monospace`: backticks → `code`
-        - Bulleted lists: `* item` or `- item`
-        - Custom links: `<https://example.com|Display Text>`
-        - User mentions: `<users/{user_id}>`
-        - Code blocks: triple backticks (```)
-
-        Args:
-            user_google_email (str): Google email for authentication. Required.
-            space_id (str): Chat space ID (format: "spaces/{id}"). Required.
-            message_text (str): Message content with markdown support. Max ~4096 chars. Required.
-            thread_key (Optional[str]): Thread key for replies. Creates new thread if None.
-
-        Returns:
-            SendMessageResponse: Structured response with message details and success status.
+        Sends a message to a Google Chat space with full markdown formatting support. - *Bold*: `*text*` → *text* - _Italic_: `_text_` → _text_ - ~Strikethrough~: `~text~` → ~~text~~ - `Monospace`: backticks → `code` - Bulleted lists: `* item` or `- item` - Custom links: `<https://example.com|Display Text>` - User mentions: `<users/{user_id}>` - Code blocks: triple backticks (```) Args: user_google_email (str): Google email for authentication. Required. space_id (str): Chat space ID (format: "spaces/{id}"). Required. message_text (str): Message content with markdown support. Max ~4096 chars. Required. thread_key (Optional[str]): Thread key for replies. Creates new thread if None. Returns: SendMessageResponse: Structured response with message details and success status.
         """
         logger.info(f"[send_message] Email: '{user_google_email}', Space: '{space_id}'")
         
@@ -454,13 +499,13 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 'text': message_text
             }
 
-            # Add thread key if provided (for threaded replies)
             request_params = {
                 'parent': space_id,
                 'body': message_body
             }
-            if thread_key:
-                request_params['threadKey'] = thread_key
+
+            # Process thread key for proper reply handling
+            _process_thread_key_for_request(request_params, thread_key)
 
             message = await asyncio.to_thread(
                 chat_service.spaces().messages().create(**request_params).execute
@@ -856,6 +901,12 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 logger.debug(f"Sending card message with webhook payload: {json.dumps(rendered_message, indent=2)}")
                 
                 try:
+                    # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
+                    if thread_key:
+                        logger.info(f"🧵 THREADING FIX: Processing thread key for webhook: {thread_key}")
+                        webhook_url = _process_thread_key_for_webhook_url(webhook_url, thread_key)
+                        logger.info(f"🧵 THREADING FIX: Updated webhook URL with thread parameters")
+                    
                     response = requests.post(
                         webhook_url,
                         json=rendered_message,
@@ -907,8 +958,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     'parent': space_id,
                     'body': message_body
                 }
-                if thread_key:
-                    request_params['threadKey'] = thread_key
+                _process_thread_key_for_request(request_params, thread_key)
 
                 try:
                     message = await asyncio.to_thread(
@@ -1036,6 +1086,12 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     "text": f"Simple card: {title}",
                     "cardsV2": [google_format_card]
                 }
+                
+                # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
+                if thread_key:
+                    logger.info(f"🧵 THREADING FIX: Processing thread key for webhook: {thread_key}")
+                    webhook_url = _process_thread_key_for_webhook_url(webhook_url, thread_key)
+                    logger.info(f"🧵 THREADING FIX: Updated webhook URL with thread parameters")
                 
                 # Send via webhook
                 import requests
@@ -1223,6 +1279,12 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     "text": f"Interactive card: {title}",
                     "cardsV2": [{"card": card_dict}]
                 }
+                
+                # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
+                if thread_key:
+                    logger.info(f"🧵 THREADING FIX: Processing thread key for webhook: {thread_key}")
+                    webhook_url = _process_thread_key_for_webhook_url(webhook_url, thread_key)
+                    logger.info(f"🧵 THREADING FIX: Updated webhook URL with thread parameters")
                 
                 # Send via webhook
                 import requests
@@ -1426,6 +1488,12 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     "text": f"Form card: {title}",
                     "cardsV2": [{"card": card_dict}]
                 }
+                
+                # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
+                if thread_key:
+                    logger.info(f"🧵 THREADING FIX: Processing thread key for webhook: {thread_key}")
+                    webhook_url = _process_thread_key_for_webhook_url(webhook_url, thread_key)
+                    logger.info(f"🧵 THREADING FIX: Updated webhook URL with thread parameters")
                 
                 # Send via webhook
                 import requests
@@ -1747,6 +1815,12 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             
             # Choose delivery method based on webhook_url
             if webhook_url:
+                # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
+                if thread_key:
+                    logger.info(f"🧵 THREADING FIX: Processing thread key for webhook: {thread_key}")
+                    webhook_url = _process_thread_key_for_webhook_url(webhook_url, thread_key)
+                    logger.info(f"🧵 THREADING FIX: Updated webhook URL with thread parameters")
+                
                 # Use webhook delivery (bypasses credential restrictions)
                 logger.info("Sending via webhook URL...")
                 import requests
@@ -1813,11 +1887,14 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 else:
                     parent_space = space_id
                     
-                result = service.spaces().messages().create(
-                    parent=parent_space,
-                    body=rendered_message,
-                    threadKey=thread_key
-                ).execute()
+                # Process thread key parameters
+                api_params = {
+                    'parent': parent_space,
+                    'body': rendered_message
+                }
+                _process_thread_key_for_request(api_params, thread_key)
+                
+                result = service.spaces().messages().create(**api_params).execute()
                 
                 logger.info(f"=== RICH CARD API SUCCESS ===")
                 return SendRichCardResponse(
