@@ -204,6 +204,22 @@ class TemplateProcessor:
             context = await self._build_template_context(fastmcp_context)
             context.update(resource_context)
             
+            # Debug logging to verify context contains our resources
+            if self.enable_debug_logging or resource_context:
+                logger.info(f"🎭 Rendering template with context keys: {list(context.keys())}")
+                if resource_context:
+                    logger.info(f"📦 Resource context keys added: {list(resource_context.keys())}")
+                    # Show first few items from each resource for debugging
+                    for key, value in list(resource_context.items())[:3]:
+                        value_type = type(value).__name__
+                        if isinstance(value, dict):
+                            value_preview = f"dict with {len(value)} keys: {list(value.keys())[:3]}"
+                        elif isinstance(value, list):
+                            value_preview = f"list with {len(value)} items"
+                        else:
+                            value_preview = f"{value_type}"
+                        logger.info(f"   - {key}: {value_preview}")
+            
             # Render template
             result = template.render(**context)
             
@@ -358,15 +374,38 @@ class TemplateProcessor:
                         if self.enable_debug_logging:
                             logger.debug(f"🔄 Using fallback empty data for {uri}")
 
-                # Convert dictionary to SimpleNamespace for dot notation support
-                resolved_data = convert_to_namespace(resolved_data)
-
                 # Generate a meaningful variable name from URI
                 # Convert user://current/email → user_current_email
-                var_name = uri.replace('://', '_').replace('/', '_').replace(':', '').replace('.', '_')
-
-                # Add to context - ensure the resolved data is properly accessible
-                resource_context[var_name] = resolved_data
+                # Also replace hyphens (from UUIDs) to avoid Jinja2 syntax errors
+                var_name = (uri.replace('://', '_')
+                           .replace('/', '_')
+                           .replace(':', '')
+                           .replace('.', '_')
+                           .replace('-', '_'))  # Critical for UUID support!
+                
+                # Convert to SimpleNamespace ONLY for small objects to preserve dot notation
+                # Keep large/complex objects (like Qdrant resources) as plain dicts for Jinja2 compatibility
+                if isinstance(resolved_data, dict):
+                    # Check if this is a large/complex Qdrant resource
+                    is_qdrant_resource = (
+                        'qdrant://' in uri or
+                        resolved_data.get('qdrant_enabled') is not None or
+                        resolved_data.get('collection_name') is not None or
+                        resolved_data.get('point_id') is not None
+                    )
+                    
+                    if is_qdrant_resource:
+                        # Keep as plain dict - Jinja2 handles dicts natively
+                        logger.info(f"📦 Adding Qdrant resource to context: {var_name} (keys: {list(resolved_data.keys())[:5]}...)")
+                        resource_context[var_name] = resolved_data
+                    else:
+                        # Convert to SimpleNamespace for dot notation
+                        logger.debug(f"📦 Converting to namespace: {var_name}")
+                        resource_context[var_name] = convert_to_namespace(resolved_data)
+                else:
+                    # Non-dict data - keep as-is
+                    logger.debug(f"📦 Adding non-dict data: {var_name} = {type(resolved_data).__name__}")
+                    resource_context[var_name] = resolved_data
 
                 # Also add direct email value if this is an email resource
                 if uri.endswith('/email') and hasattr(resolved_data, 'email'):
@@ -375,13 +414,53 @@ class TemplateProcessor:
                     resource_context[f"{var_name}_value"] = resolved_data['email']
 
                 # Replace URI with variable name in template
+                # IMPORTANT: Need to preserve {{ }} for Jinja2 variable reference
                 replacement = var_name
                 if property_path:
                     replacement += property_path
-
-                processed_text = (processed_text[:match.start()] +
-                                replacement +
-                                processed_text[match.end():])
+                
+                # Check if the match is already wrapped in {{ }}
+                match_start = match.start()
+                match_end = match.end()
+                
+                # Search backwards for {{ (allowing spaces/newlines)
+                jinja_start = None
+                for i in range(max(0, match_start - 10), match_start):
+                    if processed_text[i:i+2] == '{{':
+                        # Found opening braces - check if there's only whitespace between them and our match
+                        between = processed_text[i+2:match_start]
+                        if between.strip() == '':
+                            jinja_start = i
+                            break
+                
+                # Search forwards for }} (allowing spaces/newlines)
+                jinja_end = None
+                if jinja_start is not None:
+                    for i in range(match_end, min(len(processed_text), match_end + 10)):
+                        if processed_text[i:i+2] == '}}':
+                            # Found closing braces - check if there's only whitespace between match and them
+                            between = processed_text[match_end:i]
+                            if between.strip() == '':
+                                jinja_end = i + 2
+                                break
+                
+                if jinja_start is not None and jinja_end is not None:
+                    # Already wrapped in {{ }} - replace everything including wrappers
+                    processed_text = (processed_text[:jinja_start] +
+                                    '{{ ' + replacement + ' }}' +
+                                    processed_text[jinja_end:])
+                    
+                    if self.enable_debug_logging:
+                        logger.debug(f"✅ Replaced wrapped URI {uri} with {{ {replacement} }}")
+                else:
+                    # Not wrapped - this URI is probably in a string literal or other context
+                    # Just replace the URI itself without adding wrappers
+                    processed_text = (processed_text[:match_start] +
+                                    replacement +
+                                    processed_text[match_end:])
+                    
+                    if self.enable_debug_logging:
+                        logger.debug(f"⚠️ Replaced unwrapped URI {uri} with {replacement} (no Jinja2 wrappers)")
 
                 if self.enable_debug_logging:
                     logger.debug(f"✅ Replaced {uri}{property_path or ''} with {replacement}")

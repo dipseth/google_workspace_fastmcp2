@@ -392,6 +392,79 @@ class QdrantClientManager:
         """Decompress gzip-compressed data."""
         return gzip.decompress(data).decode('utf-8')
     
+    def parse_tool_response_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parse and clean FastMCP tool response payloads by automatically extracting
+        and parsing nested JSON strings in the response data.
+        
+        FastMCP tool responses have this structure:
+        {
+            "response_data": {
+                "response": [{"type": "text", "text": "{...json_string...}"}]
+            }
+        }
+        
+        This method:
+        1. Extracts the JSON string from the nested structure
+        2. Parses it into a proper Python dict
+        3. Flattens the structure for easier template access
+        4. Handles both parsed and unparsed payloads gracefully
+        
+        Args:
+            payload: Raw payload dict from Qdrant point
+            
+        Returns:
+            Cleaned payload with parsed response_data
+        """
+        import json
+        from copy import deepcopy
+        
+        # Work with a copy to avoid modifying the original
+        cleaned_payload = deepcopy(payload)
+        
+        try:
+            # Check if we have response_data with the FastMCP structure
+            response_data = cleaned_payload.get('response_data')
+            if not response_data or not isinstance(response_data, dict):
+                return cleaned_payload
+            
+            # Look for the nested response array
+            response_array = response_data.get('response')
+            if not response_array or not isinstance(response_array, list):
+                return cleaned_payload
+            
+            # Extract and parse the text content from the first response item
+            for item in response_array:
+                if isinstance(item, dict) and item.get('type') == 'text':
+                    text_content = item.get('text')
+                    if text_content and isinstance(text_content, str):
+                        try:
+                            # Parse the JSON string
+                            parsed_content = json.loads(text_content)
+                            
+                            # Replace the nested structure with the parsed content
+                            # Keep the original in case needed for debugging
+                            cleaned_payload['response_data_parsed'] = parsed_content
+                            cleaned_payload['response_data_raw'] = response_data
+                            
+                            # Make the parsed data the primary response_data for easy access
+                            cleaned_payload['response_data'] = parsed_content
+                            
+                            logger.debug(f"✅ Parsed nested JSON in response_data for tool: {cleaned_payload.get('tool_name', 'unknown')}")
+                            break
+                            
+                        except json.JSONDecodeError as e:
+                            logger.debug(f"⚠️ Could not parse text content as JSON: {e}")
+                            # Keep original structure if parsing fails
+                            pass
+            
+            return cleaned_payload
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Error parsing tool response payload: {e}")
+            # Return original payload if any error occurs
+            return payload
+    
     @property
     def is_initialized(self) -> bool:
         """Check if client manager is fully initialized."""
@@ -775,7 +848,7 @@ class QdrantClientManager:
             successful_indexes = len([r for r in index_rebuild_results if r["status"] == "success"])
             
             logger.info(f"✅ Complete collection rebuild finished in {execution_time_ms}ms")
-            logger.info(f"📊 Indexes rebuilt: {successful_indexes}/{len(index_fields)}")
+            logger.info(f"📊 Indexes rebuilt: {successful_indexes}/{len(index_configs)}")
             
             return {
                 "status": "completed",
@@ -787,7 +860,7 @@ class QdrantClientManager:
                 "new_stats": new_stats,
                 "index_results": index_rebuild_results,
                 "indexes_rebuilt": successful_indexes,
-                "total_indexes": len(index_fields),
+                "total_indexes": len(index_configs),
                 "vectors_optimized": vectors_optimized,
                 "collection_name": self.config.collection_name
             }

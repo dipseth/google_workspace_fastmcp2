@@ -298,3 +298,63 @@ class UnifiedSession:
         if data:
             session._session_state = SessionState(**data)
         return session
+    
+    def store_custom_oauth_credentials(self, state: str, custom_client_id: str,
+                                     custom_client_secret: str = None, auth_method: str = None) -> None:
+        """Store custom OAuth credentials in session metadata.
+        
+        Args:
+            state: OAuth state parameter
+            custom_client_id: Custom OAuth client ID
+            custom_client_secret: Custom OAuth client secret (optional for PKCE)
+            auth_method: Authentication method being used
+        """
+        if not self._session_state:
+            # Create a temporary session for credential storage
+            self._session_state = SessionState(
+                user_email="temp@oauth.flow",
+                session_id=self._generate_session_id(),
+                auth_provider="custom_oauth"
+            )
+        
+        # Store in metadata with state-specific keys
+        oauth_creds = {
+            "custom_client_id": custom_client_id,
+            "custom_client_secret": custom_client_secret,
+            "auth_method": auth_method,
+            "stored_at": datetime.now(UTC).isoformat()
+        }
+        
+        self._session_state.metadata[f"oauth_state_{state}"] = oauth_creds
+        
+        if self._enhanced_logging:
+            logger.info(f"🔗 Stored custom OAuth credentials in session metadata for state: {state}")
+            logger.info(f"   client_id: {custom_client_id[:10]}..." if custom_client_id else "   client_id: None")
+            logger.info(f"   client_secret: {'PROVIDED' if custom_client_secret else 'NOT_PROVIDED'}")
+    
+    def retrieve_custom_oauth_credentials(self, state: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Retrieve custom OAuth credentials from session metadata.
+        
+        Args:
+            state: OAuth state parameter
+            
+        Returns:
+            Tuple of (custom_client_id, custom_client_secret, auth_method)
+        """
+        if not self._session_state:
+            return None, None, None
+        
+        oauth_creds = self._session_state.metadata.get(f"oauth_state_{state}")
+        if not oauth_creds:
+            return None, None, None
+        
+        custom_client_id = oauth_creds.get("custom_client_id")
+        custom_client_secret = oauth_creds.get("custom_client_secret")
+        auth_method = oauth_creds.get("auth_method")
+        
+        if self._enhanced_logging and custom_client_id:
+            logger.info(f"🔗 Retrieved custom OAuth credentials from session metadata for state: {state}")
+            logger.info(f"   client_id: {custom_client_id[:10]}...")
+            logger.info(f"   client_secret: {'PROVIDED' if custom_client_secret else 'NOT_PROVIDED'}")
+        
+        return custom_client_id, custom_client_secret, auth_method

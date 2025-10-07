@@ -415,7 +415,7 @@ async def send_gmail_message(
                 #         message=elicitation_message,
                 #         response_type=EmailAction
                 #     )
-                response = asyncio.wait_for(
+                response = await asyncio.wait_for(
                     ctx.elicit(
                         message=elicitation_message,
                         response_type=EmailAction

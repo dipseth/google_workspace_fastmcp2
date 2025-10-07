@@ -114,7 +114,7 @@ GET /.well-known/oauth-authorization-server
 ```
 
 #### 3. Dynamic Client Registration
-The client registers itself and receives temporary credentials.
+The client registers itself and receives temporary credentials. **Public clients** can specify `token_endpoint_auth_method: "none"` for PKCE-only flows.
 
 ```http
 POST /oauth/register
@@ -123,7 +123,8 @@ Content-Type: application/json
 {
   "client_name": "MCP Inspector",
   "redirect_uris": ["http://localhost:3000/auth/callback"],
-  "grant_types": ["authorization_code", "refresh_token"]
+  "grant_types": ["authorization_code", "refresh_token"],
+  "token_endpoint_auth_method": "none"  // For public clients using PKCE
 }
 ```
 
@@ -135,9 +136,15 @@ Content-Type: application/json
   "client_id_issued_at": 1703123456,
   "client_secret_expires_at": 0,
   "registration_access_token": "reg_token_abc123",
-  "registration_client_uri": "http://localhost:8002/oauth/register/mcp_7f3a9b2c"
+  "registration_client_uri": "http://localhost:8002/oauth/register/mcp_7f3a9b2c",
+  "token_endpoint_auth_method": "none"  // Echoed for public clients
 }
 ```
+
+**Note for Public Clients:**
+- When `token_endpoint_auth_method: "none"` is specified, the proxy skips client_secret validation
+- This enables true public client PKCE flows without requiring client_secret
+- Your Google OAuth client type should be configured as "Public application" or "Mobile" for this to work
 
 #### 4. Authorization Flow
 The client redirects the user to Google's authorization endpoint.
@@ -214,21 +221,20 @@ sequenceDiagram
 
 ## OAuth Proxy Details
 
-### Temporary Credential Generation
+### Temporary Credential Generation with Public Client Support
 
-The OAuth Proxy generates unique temporary credentials for each MCP client:
+The OAuth Proxy generates unique temporary credentials for each MCP client and supports **public clients** (PKCE without client_secret):
 
 ```python
-# auth/oauth_proxy.py
+# auth/oauth_proxy.py - Enhanced with Public Client Support
 
-def register_proxy_client(self, real_client_id: str, real_client_secret: str, 
+def register_proxy_client(self, real_client_id: str, real_client_secret: str,
                          client_metadata: Dict[str, Any]) -> Dict[str, Any]:
     """Register a new proxy client with temporary credentials."""
     
     # Generate unique temporary credentials
-    temp_client_id = f"mcp_{uuid.uuid4().hex[:8]}"
-    temp_client_secret = f"temp_secret_{uuid.uuid4().hex[:12]}"
-    registration_token = f"reg_{uuid.uuid4().hex[:16]}"
+    temp_client_id = f"mcp_{secrets.token_urlsafe(16)}"
+    temp_client_secret = secrets.token_urlsafe(32)
     
     # Create proxy client mapping
     proxy_client = ProxyClient(
@@ -246,9 +252,26 @@ def register_proxy_client(self, real_client_id: str, real_client_secret: str,
     return {
         "client_id": temp_client_id,
         "client_secret": temp_client_secret,
-        "registration_access_token": registration_token,
+        "registration_access_token": proxy_client.registration_access_token,
         # ... other DCR fields
     }
+
+def get_real_credentials(self, temp_client_id: str, temp_client_secret: str):
+    """Get real credentials with public client support."""
+    proxy_client = self._proxy_clients.get(temp_client_id)
+    
+    # Check if this is a public client (no authentication required)
+    auth_method = proxy_client.client_metadata.get('token_endpoint_auth_method')
+    is_public_client = auth_method == 'none'
+    
+    # Skip client_secret validation for public clients
+    if is_public_client:
+        logger.info("✅ Public client - skipping client_secret validation")
+    elif proxy_client.temp_client_secret != temp_client_secret:
+        logger.warning("❌ Invalid temp secret for client")
+        return None
+    
+    return (proxy_client.real_client_id, proxy_client.real_client_secret)
 ```
 
 ### Credential Mapping Mechanism
@@ -391,7 +414,9 @@ MAX_PROXY_CLIENTS=100
 #### Step 3: Create OAuth Credentials
 1. Go to "APIs & Services" > "Credentials"
 2. Click "Create Credentials" > "OAuth client ID"
-3. Choose "Web application"
+3. **Choose application type:**
+   - **"Web application"** - For confidential clients (requires client_secret)
+   - **"Public application"** or **"Mobile"** - For public clients (PKCE without client_secret)
 4. Add authorized redirect URIs:
    - `http://localhost:3000/auth/callback`
    - `http://127.0.0.1:3000/auth/callback`
@@ -400,6 +425,96 @@ MAX_PROXY_CLIENTS=100
 
 #### Step 4: Configure Groupon Google MCP
 Save the credentials file as `credentials.json` in your project root or set individual environment variables.
+
+---
+
+## Custom OAuth Client Support
+
+FastMCP2 now supports **custom OAuth clients** with robust fallback mechanisms, enabling you to use your own OAuth credentials alongside the system defaults.
+
+### Using Custom OAuth Credentials
+
+```python
+# Initiate OAuth flow with custom credentials
+auth_url = await initiate_oauth_flow(
+    user_email="user@example.com",
+    custom_client_id="your-custom-client-id.apps.googleusercontent.com",
+    custom_client_secret="your-custom-secret",  # Optional for PKCE
+    use_pkce=True,
+    auth_method='pkce_file'  # or 'pkce_memory'
+)
+```
+
+### Credential Fallback Chain
+
+The system implements a **three-tier fallback mechanism** for maximum resilience:
+
+#### 1. State Map (Primary)
+```python
+# Credentials stored during OAuth initiation
+_oauth_state_map[state] = {
+    'user_email': user_email,
+    'custom_client_id': custom_client_id,
+    'custom_client_secret': custom_client_secret,
+    'auth_method': auth_method
+}
+```
+
+#### 2. UnifiedSession Metadata (Fallback 1)
+```python
+# Enhanced persistence via UnifiedSession
+unified_session = UnifiedSession()
+unified_session.store_custom_oauth_credentials(
+    state=state,
+    custom_client_id=custom_client_id,
+    custom_client_secret=custom_client_secret,
+    auth_method=auth_method
+)
+```
+
+#### 3. Context Storage (Fallback 2)
+```python
+# Context-based storage for cross-request persistence
+from auth.context import store_custom_oauth_credentials
+store_custom_oauth_credentials(state, custom_client_id, custom_client_secret)
+```
+
+### Public Client PKCE (No client_secret)
+
+For public clients, you can omit the `client_secret`:
+
+```python
+auth_url = await initiate_oauth_flow(
+    user_email="user@example.com",
+    custom_client_id="your-public-client-id.apps.googleusercontent.com",
+    # No custom_client_secret provided
+    use_pkce=True,
+    auth_method='pkce_memory'  # Ephemeral storage for public clients
+)
+```
+
+**Important:** Your Google OAuth client must be configured as **"Public application"** or **"Mobile"** type to use PKCE without client_secret.
+
+### Credential Resolution Flow
+
+```mermaid
+graph TD
+    A[OAuth Callback] --> B{State Map<br/>has credentials?}
+    B -->|Yes| F[Use State Map]
+    B -->|No| C{UnifiedSession<br/>has credentials?}
+    C -->|Yes| F
+    C -->|No| D{Context Storage<br/>has credentials?}
+    D -->|Yes| F
+    D -->|No| E[Use Default Credentials]
+    F --> G[Token Exchange]
+```
+
+### Benefits
+
+1. **Server Restart Resilience**: Multiple fallback layers ensure OAuth flows survive server restarts
+2. **Custom Client Support**: Use your own OAuth credentials without modifying system config
+3. **Public Client PKCE**: True public client support without requiring client_secret
+4. **Automatic Fallback**: Seamlessly falls back to default credentials when custom ones aren't complete
 
 ### Credential Storage Modes
 
