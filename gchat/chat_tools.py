@@ -5,11 +5,36 @@ This module provides MCP tools for interacting with Google Chat API.
 Enhanced with Card Framework integration and adapter system support.
 Migrated from decorator-based pattern to FastMCP2 architecture.
 
-📝 IMPORTANT FORMATTING REMINDER:
-Google Chat uses its own markdown syntax, NOT HTML:
-- ✅ Use: *bold*, _italic_, ~strikethrough~, `code`, <url|text>
-- ❌ Avoid: <b>bold</b>, <i>italic</i>, <a href="url">text</a>
-HTML tags display as literal text and don't render formatting.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 CRITICAL: GOOGLE CHAT MARKDOWN FORMAT REQUIREMENTS 🚨
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Google Chat uses its own markdown syntax, NOT HTML or standard Markdown!
+
+✅ CORRECT FORMATTING (Use these):
+  *bold text*           → renders as bold
+  _italic text_         → renders as italic
+  ~strikethrough~       → renders as strikethrough
+  `monospace code`      → renders as code
+  ```code block```      → renders as code block
+  <url|link text>       → custom link (e.g., <https://google.com|Click Here>)
+  <users/12345>         → user mention
+  * Bullet item         → bullet list
+  - Bullet item         → bullet list (alternative)
+
+❌ WRONG FORMATTING (Do NOT use):
+  <b>bold</b>           → displays literal text: "<b>bold</b>"
+  <i>italic</i>         → displays literal text: "<i>italic</i>"
+  <strong>text</strong> → displays literal text: "<strong>text</strong>"
+  <a href="url">text</a>→ displays literal text with broken link
+  **bold**              → displays literal text: "**bold**"
+  __italic__            → displays literal text: "__italic__"
+
+⚠️  HTML TAGS DISPLAY AS LITERAL TEXT - THEY DO NOT RENDER!
+⚠️  STANDARD MARKDOWN (**, __, etc.) DOES NOT WORK!
+
+For more details: https://developers.google.com/chat/format-messages
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 import logging
 import asyncio
@@ -475,7 +500,32 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         user_google_email: UserGoogleEmail = None
     ) -> SendMessageResponse:
         """
-        Sends a message to a Google Chat space with full markdown formatting support. - *Bold*: `*text*` → *text* - _Italic_: `_text_` → _text_ - ~Strikethrough~: `~text~` → ~~text~~ - `Monospace`: backticks → `code` - Bulleted lists: `* item` or `- item` - Custom links: `<https://example.com|Display Text>` - User mentions: `<users/{user_id}>` - Code blocks: triple backticks (```) Args: user_google_email (str): Google email for authentication. Required. space_id (str): Chat space ID (format: "spaces/{id}"). Required. message_text (str): Message content with markdown support. Max ~4096 chars. Required. thread_key (Optional[str]): Thread key for replies. Creates new thread if None. Returns: SendMessageResponse: Structured response with message details and success status.
+        Sends a message to a Google Chat space with full markdown formatting support.
+        
+        🚨 MARKDOWN FORMAT: Google Chat uses SPECIFIC markdown syntax!
+        
+        ✅ SUPPORTED FORMATS:
+          - *Bold*: `*text*` → displays as bold
+          - _Italic_: `_text_` → displays as italic
+          - ~Strikethrough~: `~text~` → displays as strikethrough
+          - `Monospace`: backticks → displays as code
+          - Bulleted lists: `* item` or `- item`
+          - Custom links: `<https://example.com|Display Text>`
+          - User mentions: `<users/{user_id}>`
+          - Code blocks: triple backticks (```)
+          
+        ❌ DO NOT USE:
+          - HTML tags: <b>, <i>, <a>, etc. (display as literal text!)
+          - Standard markdown: **, __, etc. (do not render!)
+        
+        Args:
+            space_id (str): Chat space ID (format: "spaces/{id}"). Required.
+            message_text (str): Message content with Google Chat markdown. Max ~4096 chars. Required.
+            thread_key (Optional[str]): Thread key for replies. Creates new thread if None.
+            user_google_email (str): Google email for authentication. Required.
+
+        Returns:
+            SendMessageResponse: Structured response with message details and success status.
         """
         logger.info(f"[send_message] Email: '{user_google_email}', Space: '{space_id}'")
         
