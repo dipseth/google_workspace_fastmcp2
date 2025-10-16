@@ -33,7 +33,8 @@ from middleware.qdrant_types import (
     QdrantPointDetailsResponse,
     QdrantCollectionInfo,
     QdrantStoredResponse,
-    QdrantSearchResult
+    QdrantSearchResult,
+    QdrantNearbyPoint
 )
 
 from config.enhanced_logging import setup_logger
@@ -288,7 +289,7 @@ class QdrantResourceHandler:
                 collection_name=collection_name,
                 limit=50,
                 with_payload=True,
-                with_vector=False
+                with_vectors=False
             )
             
             points = scroll_result[0] if scroll_result else []
@@ -301,15 +302,20 @@ class QdrantResourceHandler:
                 data = payload.get("data", "{}")
                 if payload.get("compressed", False) and payload.get("compressed_data"):
                     try:
-                        data = self.client_manager._decompress_data(payload["compressed_data"])
+                        decompressed = self.client_manager._decompress_data(payload["compressed_data"])
+                        if decompressed is not None:
+                            data = decompressed
                     except Exception as e:
                         logger.warning(f"Failed to decompress data for point {point.id}: {e}")
                 
-                # Parse response data
-                try:
-                    response_data = json.loads(data)
-                except json.JSONDecodeError:
-                    response_data = {"error": "Failed to parse stored data", "raw_data": data}
+                # Parse response data - ensure data is not None
+                if data is None or data == "":
+                    response_data = {"error": "No data available"}
+                else:
+                    try:
+                        response_data = json.loads(data)
+                    except (json.JSONDecodeError, TypeError):
+                        response_data = {"error": "Failed to parse stored data", "raw_data": str(data)}
                 
                 responses.append(QdrantStoredResponse(
                     id=str(point.id),
@@ -417,6 +423,14 @@ class QdrantResourceHandler:
                 if parsed_payload.get("response_data") and not response_data:
                     response_data = parsed_payload.get("response_data")
                 
+                # Find nearby points for context
+                nearby_points = await self._find_nearby_points(
+                    collection_name,
+                    timestamp,
+                    session_id,
+                    str(point.id)
+                )
+                
                 # Return as dict for MCP resource format
                 # Return Pydantic model directly - middleware will handle it
                 return QdrantPointDetailsResponse(
@@ -433,6 +447,7 @@ class QdrantResourceHandler:
                     payload_type=payload_type,
                     compressed=compressed,
                     response_data=response_data,
+                    nearby_points=nearby_points,
                     retrieved_at=datetime.now(timezone.utc).isoformat()
                 )
                 
@@ -587,7 +602,7 @@ class QdrantResourceHandler:
                     limit=100,  # Get points in batches
                     offset=next_page_offset,
                     with_payload=True,
-                    with_vector=False
+                    with_vectors=False
                 )
 
                 points, next_page_offset = scroll_result
@@ -673,6 +688,95 @@ class QdrantResourceHandler:
             logger.error(f"Error getting status: {e}")
             return self._error_response(uri, f"Failed to get status: {str(e)}")
 
+    async def _find_nearby_points(
+        self,
+        collection_name: str,
+        target_timestamp: Optional[str],
+        target_session_id: Optional[str],
+        exclude_point_id: str
+    ) -> List[QdrantNearbyPoint]:
+        """
+        Find the two nearest points by timestamp for context.
+        
+        Args:
+            collection_name: Collection to search in
+            target_timestamp: Timestamp of the main point
+            target_session_id: Session ID of the main point
+            exclude_point_id: Point ID to exclude (the main point itself)
+            
+        Returns:
+            List of up to 2 nearby points
+        """
+        if not target_timestamp:
+            return []
+        
+        try:
+            # Parse the target timestamp using built-in datetime
+            # Assuming ISO 8601 format: "2025-10-01T03:54:21.994071+00:00"
+            target_dt = datetime.fromisoformat(target_timestamp)
+            
+            # Scroll through collection to find nearby points
+            scroll_result = await asyncio.to_thread(
+                self.client_manager.client.scroll,
+                collection_name=collection_name,
+                limit=100,  # Get more points to find closest matches
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            points = scroll_result[0] if scroll_result else []
+            
+            # Calculate time differences and filter
+            candidates = []
+            for point in points:
+                if str(point.id) == exclude_point_id:
+                    continue
+                
+                payload = point.payload or {}
+                point_timestamp = payload.get("timestamp")
+                
+                if not point_timestamp:
+                    continue
+                
+                try:
+                    point_dt = datetime.fromisoformat(point_timestamp)
+                    time_diff = (point_dt - target_dt).total_seconds()
+                    
+                    candidates.append({
+                        "point_id": str(point.id),
+                        "timestamp": point_timestamp,
+                        "time_diff": time_diff,
+                        "abs_time_diff": abs(time_diff),
+                        "tool_name": payload.get("tool_name"),
+                        "user_email": payload.get("user_email"),
+                        "session_id": payload.get("session_id")
+                    })
+                except Exception as e:
+                    logger.debug(f"Failed to parse timestamp for point {point.id}: {e}")
+                    continue
+            
+            # Sort by absolute time difference
+            candidates.sort(key=lambda x: x["abs_time_diff"])
+            
+            # Take the 2 closest points
+            nearby = []
+            for candidate in candidates[:2]:
+                nearby.append(QdrantNearbyPoint(
+                    point_id=candidate["point_id"],
+                    tool_name=candidate["tool_name"],
+                    timestamp=candidate["timestamp"],
+                    time_offset_seconds=candidate["time_diff"],
+                    user_email=candidate["user_email"],
+                    session_id=candidate["session_id"],
+                    same_session=(candidate["session_id"] == target_session_id)
+                ))
+            
+            return nearby
+            
+        except Exception as e:
+            logger.warning(f"Failed to find nearby points: {e}")
+            return []
+    
     def get_handler_info(self) -> Dict[str, Any]:
         """
         Get information about the resource handler and its status.

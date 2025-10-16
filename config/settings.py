@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # Qdrant Tool Response Collection Cache Configuration
     mcp_tool_responses_collection_cache_days: int = 5  # Default to 14 days retention
     
+    # Sampling Tools Configuration
+    sampling_tools: bool = False  # Enable sampling middleware tools (default: False)
+    
     # Phase 1 OAuth Migration Feature Flags
     enable_unified_auth: bool = True
     legacy_compat_mode: bool = True

@@ -84,12 +84,20 @@ class DynamicClientRegistry:
         # Set defaults and validate metadata
         validated_metadata = self._validate_client_metadata(client_metadata)
         
+        # DIAGNOSTIC: Log oauth_proxy instance before registration
+        logger.info(f"🔍 DCR DEBUG: About to register with oauth_proxy instance: {id(oauth_proxy)}")
+        logger.info(f"🔍 DCR DEBUG: Current proxy clients count: {len(oauth_proxy._proxy_clients)}")
+        
         # Use OAuth Proxy to register the client with TEMPORARY credentials
         proxy_registration = oauth_proxy.register_proxy_client(
             real_client_id=real_client_id,
             real_client_secret=real_client_secret,
             client_metadata=validated_metadata
         )
+        
+        # DIAGNOSTIC: Verify registration succeeded
+        logger.info(f"🔍 DCR DEBUG: After registration, proxy clients count: {len(oauth_proxy._proxy_clients)}")
+        logger.info(f"🔍 DCR DEBUG: Registered client IDs: {list(oauth_proxy._proxy_clients.keys())}")
         
         # Store the proxy registration in our local registry
         temp_client_id = proxy_registration['client_id']
@@ -106,6 +114,7 @@ class DynamicClientRegistry:
         logger.info(f"🔍 PROXY_DEBUG: - Real credentials: NEVER EXPOSED ✅")
         logger.info(f"🔍 PROXY_DEBUG: - token_endpoint_auth_method: {proxy_registration.get('token_endpoint_auth_method')}")
         logger.info(f"🔍 PROXY_DEBUG: - Full response keys: {list(proxy_registration.keys())}")
+        logger.info(f"🔍 PROXY_DEBUG: - oauth_proxy instance ID: {id(oauth_proxy)}")
         
         return proxy_registration
     

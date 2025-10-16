@@ -163,6 +163,17 @@ class QdrantToolSearchResponse(BaseModel):
     error: Optional[str] = Field(default=None, description="Error message if search failed")
 
 
+class QdrantNearbyPoint(BaseModel):
+    """Information about a nearby point for context."""
+    point_id: str = Field(description="ID of the nearby point")
+    tool_name: Optional[str] = Field(default=None, description="Tool name")
+    timestamp: Optional[str] = Field(default=None, description="Timestamp")
+    time_offset_seconds: Optional[float] = Field(default=None, description="Time difference in seconds from the main point")
+    user_email: Optional[str] = Field(default=None, description="User email")
+    session_id: Optional[str] = Field(default=None, description="Session ID")
+    same_session: bool = Field(default=False, description="Whether this point is from the same session")
+
+
 class QdrantPointDetailsResponse(BaseModel):
     """Response for qdrant://collection/{collection}/{point_id} resource."""
     qdrant_enabled: bool = Field(description="Whether Qdrant is available")
@@ -181,4 +192,6 @@ class QdrantPointDetailsResponse(BaseModel):
     compressed: bool = Field(default=False, description="Whether data is compressed")
     # Decompressed data if available
     response_data: Optional[Union[Dict[str, Any], str]] = Field(default=None, description="Decompressed response data")
+    # Related points for context
+    nearby_points: Optional[List[QdrantNearbyPoint]] = Field(default=None, description="Two nearest points by timestamp for context")
     retrieved_at: str = Field(description="When this point was retrieved")
