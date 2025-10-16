@@ -716,17 +716,68 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 proxy_client = oauth_proxy.get_proxy_client(client_id)
                 
                 if not proxy_client:
-                    logger.error(f"❌ No proxy client found for temp_id: {client_id}")
-                    return JSONResponse(
-                        content={
-                            "error": "invalid_client",
-                            "error_description": f"Unknown client_id: {client_id}"
-                        },
-                        status_code=400,
-                        headers={
-                            "Access-Control-Allow-Origin": "*",
+                    logger.warning(f"⚠️ Proxy client not registered: {client_id}")
+                    logger.info(f"🔧 AUTO-REGISTERING proxy client for Quick OAuth Flow compatibility")
+                    
+                    # MCP Inspector's Quick OAuth Flow may skip /oauth/register
+                    # Auto-register this client on-the-fly using default credentials
+                    try:
+                        from config.settings import settings
+                        
+                        # Get default OAuth credentials
+                        if not settings.is_oauth_configured():
+                            raise ValueError("OAuth not configured - cannot auto-register client")
+                        
+                        oauth_config = settings.get_oauth_client_config()
+                        real_client_id = oauth_config.get('client_id')
+                        real_client_secret = oauth_config.get('client_secret')
+                        
+                        if not real_client_id or not real_client_secret:
+                            raise ValueError("OAuth configuration incomplete")
+                        
+                        # Auto-register with minimal metadata
+                        auto_metadata = {
+                            "client_name": "MCP Inspector (Auto-Registered)",
+                            "redirect_uris": [query_params.get('redirect_uri', 'http://localhost:6274/oauth/callback/debug')],
+                            "grant_types": ["authorization_code", "refresh_token"],
+                            "response_types": ["code"],
+                            "token_endpoint_auth_method": "client_secret_post",  # Will be updated if PKCE
+                            "scope": query_params.get('scope', '')
                         }
-                    )
+                        
+                        # Register the proxy client with the EXACT client_id from the request
+                        # This requires modifying oauth_proxy to accept custom temp_client_id
+                        from auth.oauth_proxy import ProxyClient
+                        from datetime import datetime, timezone
+                        import secrets
+                        
+                        proxy_client = ProxyClient(
+                            temp_client_id=client_id,  # Use the exact client_id from request
+                            temp_client_secret=secrets.token_urlsafe(32),
+                            real_client_id=real_client_id,
+                            real_client_secret=real_client_secret,
+                            client_metadata=auto_metadata,
+                            created_at=datetime.now(timezone.utc)
+                        )
+                        
+                        # Store directly in oauth_proxy
+                        oauth_proxy._proxy_clients[client_id] = proxy_client
+                        
+                        logger.info(f"✅ Auto-registered proxy client: {client_id}")
+                        logger.info(f"   Proxy clients count now: {len(oauth_proxy._proxy_clients)}")
+                        
+                    except Exception as reg_error:
+                        logger.error(f"❌ Auto-registration failed: {reg_error}")
+                        return JSONResponse(
+                            content={
+                                "error": "invalid_client",
+                                "error_description": f"Client not registered and auto-registration failed: {str(reg_error)}"
+                            },
+                            status_code=400,
+                            headers={
+                                "Access-Control-Allow-Origin": "*",
+                            }
+                        )
                 
                 # Store PKCE parameters if present (for later use in token exchange)
                 code_challenge = query_params.get("code_challenge")
@@ -920,6 +971,33 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 if isinstance(body, bytes):
                     body = body.decode('utf-8')
                 params = dict(urllib.parse.parse_qsl(body))
+            
+            # CRITICAL FIX: Extract client credentials from Authorization header (HTTP Basic Auth)
+            # Per RFC 6749, clients can send credentials via Authorization header OR request body
+            auth_header = request.headers.get('authorization', '')
+            if auth_header.startswith('Basic '):
+                try:
+                    import base64
+                    # Decode Basic auth: "Basic base64(client_id:client_secret)"
+                    encoded_credentials = auth_header[6:]  # Remove "Basic " prefix
+                    decoded = base64.b64decode(encoded_credentials).decode('utf-8')
+                    
+                    # Split on first colon (client_secret may contain colons)
+                    if ':' in decoded:
+                        header_client_id, header_client_secret = decoded.split(':', 1)
+                        
+                        # Use header credentials if not already in body
+                        if not params.get('client_id'):
+                            params['client_id'] = header_client_id
+                            logger.info(f"✅ Extracted client_id from Authorization header: {header_client_id[:20]}...")
+                        
+                        if not params.get('client_secret'):
+                            params['client_secret'] = header_client_secret
+                            logger.info(f"✅ Extracted client_secret from Authorization header")
+                    else:
+                        logger.warning(f"⚠️ Invalid Basic auth format in Authorization header (no colon)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to parse Authorization header: {e}")
             
             grant_type = params.get('grant_type')
             
