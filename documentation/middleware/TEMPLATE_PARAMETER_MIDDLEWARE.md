@@ -526,7 +526,7 @@ async def create_gmail_filter_report(
 ) -> str:
     """Create Gmail filter report with real label IDs from client tests."""
     # Based on our successful client test results:
-    # user_email: "srivers@groupon.com"
+    # user_email: "srivers@FastMCP.com"
     # inbox_label: "INBOX" 
     # work_label: "CHAT" (or other real label ID)
     # total_labels: 33

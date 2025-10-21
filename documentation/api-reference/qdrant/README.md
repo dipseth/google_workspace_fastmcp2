@@ -1,6 +1,6 @@
 # Qdrant Integration API Reference
 
-Complete API documentation for all Qdrant integration tools in the Groupon Google MCP Server.
+Complete API documentation for all Qdrant integration tools in the FastMCP Google MCP Server.
 
 ## Overview
 
@@ -256,7 +256,7 @@ export QDRANT_API_KEY=your_api_key
 
 ### Auto-Discovery
 
-Groupon Google MCP automatically discovers Qdrant on ports:
+FastMCP Google MCP automatically discovers Qdrant on ports:
 - 6333 (default)
 - 6334, 6335, 6336, 6337 (alternatives)
 

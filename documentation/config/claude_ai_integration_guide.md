@@ -2,9 +2,9 @@
 
 **⚠️ IMPORTANT: External Service Notice**
 This guide covers integration with Claude.ai, an external third-party service. Before proceeding with this integration:
-- Ensure Claude.ai is an approved vendor per Groupon's procurement policies
-- Review and comply with all Groupon security and data governance requirements
-- Contact your Groupon security team for approval before connecting to external services
+- Ensure Claude.ai is an approved vendor per FastMCP's procurement policies
+- Review and comply with all FastMCP security and data governance requirements
+- Contact your FastMCP security team for approval before connecting to external services
 
 ## Overview
 
@@ -39,7 +39,7 @@ wrangler deploy
 ```
 
 ### Option 2: ngrok Tunnel (Development/Testing)
-**Note**: Ensure tunneling services like ngrok are approved for use within Groupon's network security policies.
+**Note**: Ensure tunneling services like ngrok are approved for use within FastMCP's network security policies.
 
 Expose your localhost server with HTTPS:
 
@@ -55,7 +55,7 @@ ngrok http 8002 --domain=your-app.ngrok-free.app
 ```
 
 ### Option 3: Cloud Deployment
-**Note**: All cloud deployments must use Groupon-approved infrastructure and comply with data governance policies.
+**Note**: All cloud deployments must use FastMCP-approved infrastructure and comply with data governance policies.
 
 Deploy to any cloud service with HTTPS:
 
@@ -63,7 +63,7 @@ Deploy to any cloud service with HTTPS:
 - **Render**: Free tier with HTTPS (requires approval)
 - **Heroku**: Built-in HTTPS support (requires approval)
 - **DigitalOcean App Platform**: Managed HTTPS (requires approval)
-- **AWS/GCP/Azure**: With load balancer and certificates (use Groupon-approved accounts)
+- **AWS/GCP/Azure**: With load balancer and certificates (use FastMCP-approved accounts)
 
 ## Configuration for Claude.ai
 
@@ -87,7 +87,7 @@ SSL_CERT_PATH=""  # Let cloud provider handle certificates
 SSL_KEY_PATH=""
 
 # OAuth Configuration for Claude.ai
-OAUTH_BASE_URL=https://your-app.groupon.internal
+OAUTH_BASE_URL=https://your-app.FastMCP.internal
 OAUTH_CLIENT_NAME=Claude
 OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback
 
@@ -111,7 +111,7 @@ In your Google Cloud Console:
    - `https://claude.com/api/mcp/auth_callback`
 
 2. Add your production domain to authorized JavaScript origins:
-   - `https://your-app.groupon.internal`
+   - `https://your-app.FastMCP.internal`
 
 ### 3. Configure OAuth Endpoints
 
@@ -165,7 +165,7 @@ OAUTH_BASE_URL=https://localhost:8002
 ### 2. Claude.ai Testing
 1. Deploy your server to a public domain with HTTPS
 2. In Claude.ai, go to Settings > Connectors
-3. Add your server URL: `https://your-app.groupon.internal/mcp`
+3. Add your server URL: `https://your-app.FastMCP.internal/mcp`
 4. Complete OAuth authentication flow
 5. Test MCP tools and resources
 

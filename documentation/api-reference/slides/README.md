@@ -1,6 +1,6 @@
 # Google Slides API Reference
 
-Complete API documentation for all Google Slides tools in the Groupon Google MCP Server.
+Complete API documentation for all Google Slides tools in the FastMCP Google MCP Server.
 
 ## Overview
 
