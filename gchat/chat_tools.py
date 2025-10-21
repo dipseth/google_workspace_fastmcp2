@@ -86,28 +86,33 @@ def _process_thread_key_for_request(request_params: Dict[str, Any], thread_key: 
     """
     Process thread key for Google Chat API request and update request parameters.
     
-    This function handles the correct thread reply implementation by:
-    1. Extracting the thread ID from full resource name format
-    2. Setting threadKey parameter with just the thread ID
-    3. Adding messageReplyOption for proper thread reply behavior
+    CRITICAL FIX: This function now correctly handles thread replies by adding the thread
+    information to the message BODY (not just as query parameters).
+    
+    According to Google Chat API documentation, to reply to an existing thread, you must:
+    1. Include 'thread.name' in the request body with the full thread path
+    2. Add 'messageReplyOption' as a query parameter
     
     Args:
         request_params: Dictionary of request parameters to modify in-place
         thread_key: Optional thread key (can be full resource name or just thread ID)
     """
     if thread_key:
-        # Extract thread ID from the full thread resource name
-        # Format: "spaces/{space}/threads/{threadId}" -> use just the threadId
-        if 'threads/' in thread_key:
-            thread_id = thread_key.split('threads/')[-1]
-        else:
-            thread_id = thread_key
+        # Use the full thread path as provided
+        # The thread_key should be in format: "spaces/{space}/threads/{threadId}"
+        thread_path = thread_key
         
-        # Add query parameters for thread reply
-        request_params['threadKey'] = thread_id
+        # CRITICAL FIX: Add thread to the message body (this is what was missing!)
+        if 'body' in request_params:
+            request_params['body']['thread'] = {
+                'name': thread_path
+            }
+        
+        # Add query parameter for message reply option
         request_params['messageReplyOption'] = 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
         
-        logger.debug(f"Thread key processed: {thread_key} -> {thread_id}")
+        logger.debug(f"Thread reply configured: thread_path={thread_path}")
+        logger.debug(f"Request params updated with thread in body: {request_params.get('body', {}).get('thread')}")
 
 
 def _process_thread_key_for_webhook_url(webhook_url: str, thread_key: Optional[str] = None) -> str:
@@ -946,6 +951,11 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     "cardsV2": [card_dict]
                 }
                 
+                # CRITICAL FIX: Add thread to message body for webhook threading
+                if thread_key:
+                    rendered_message['thread'] = {'name': thread_key}
+                    logger.debug(f"Added thread to webhook message body: {thread_key}")
+                
                 logger.debug(f"Rendered message: {json.dumps(rendered_message, default=str)}")
                 
                 logger.debug(f"Sending card message with webhook payload: {json.dumps(rendered_message, indent=2)}")
@@ -1136,6 +1146,11 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     "text": f"Simple card: {title}",
                     "cardsV2": [google_format_card]
                 }
+                
+                # CRITICAL FIX: Add thread to message body for webhook threading
+                if thread_key:
+                    rendered_message['thread'] = {'name': thread_key}
+                    logger.debug(f"Added thread to webhook message body: {thread_key}")
                 
                 # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
                 if thread_key:
@@ -1329,6 +1344,11 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     "text": f"Interactive card: {title}",
                     "cardsV2": [{"card": card_dict}]
                 }
+                
+                # CRITICAL FIX: Add thread to message body for webhook threading
+                if thread_key:
+                    rendered_message['thread'] = {'name': thread_key}
+                    logger.debug(f"Added thread to webhook message body: {thread_key}")
                 
                 # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
                 if thread_key:
@@ -1538,6 +1558,11 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     "text": f"Form card: {title}",
                     "cardsV2": [{"card": card_dict}]
                 }
+                
+                # CRITICAL FIX: Add thread to message body for webhook threading
+                if thread_key:
+                    rendered_message['thread'] = {'name': thread_key}
+                    logger.debug(f"Added thread to webhook message body: {thread_key}")
                 
                 # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
                 if thread_key:
@@ -1859,6 +1884,11 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 "text": f"Rich card test: {title}",
                 "cardsV2": [google_format_card]
             }
+            
+            # CRITICAL FIX: Add thread to message body for webhook threading
+            if thread_key:
+                rendered_message['thread'] = {'name': thread_key}
+                logger.debug(f"Added thread to webhook message body: {thread_key}")
             
             logger.info(f"Final payload keys: {list(rendered_message.keys())}")
             logger.debug(f"Final payload: {json.dumps(rendered_message, indent=2)}")
