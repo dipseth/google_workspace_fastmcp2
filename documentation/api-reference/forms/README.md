@@ -1,6 +1,6 @@
 # Google Forms API Reference
 
-Complete API documentation for all Google Forms tools in the FastMCP2 platform with comprehensive documentation enhancements, structured return types, and extensive LLM-friendly examples.
+Complete API documentation for all Google Forms tools in the FastMCP Google MCP Server with comprehensive documentation enhancements, structured return types, and extensive LLM-friendly examples.
 
 ## Overview
 

@@ -1,6 +1,6 @@
 # Enhanced Tools API Reference
 
-The Enhanced Tools leverage FastMCP2's resource templating feature to automatically inject authentication credentials, eliminating the need for `user_google_email` parameters in every request. These tools provide a streamlined, more intuitive API experience.
+The Enhanced Tools leverage FastMCP Google MCP's resource templating feature to automatically inject authentication credentials, eliminating the need for `user_google_email` parameters in every request. These tools provide a streamlined, more intuitive API experience.
 
 ## 🚀 Recent Performance Achievements
 
@@ -363,7 +363,7 @@ if remaining < 10:
 
 ## Resource Templating System
 
-Enhanced tools use FastMCP2's resource templating system to automatically inject user context. Here's how it works:
+Enhanced tools use FastMCP Google MCP's resource templating system to automatically inject user context. Here's how it works:
 
 ### Architecture
 

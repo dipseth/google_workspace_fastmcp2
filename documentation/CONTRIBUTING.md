@@ -1,6 +1,6 @@
-# Contributing to FastMCP2 Google Workspace Platform
+# Contributing to FastMCP Google MCP Server
 
-Welcome to the FastMCP2 Google Workspace Platform! We're excited you're interested in contributing to this comprehensive Google service integration platform. This guide provides everything you need to get started.
+Welcome to the FastMCP Google MCP Server! We're excited you're interested in contributing to this comprehensive Google service integration platform. This guide provides everything you need to get started.
 
 ## Table of Contents
 
@@ -42,8 +42,8 @@ We are committed to providing a welcoming and inspiring community for all. Pleas
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/fastmcp2_google_workspace.git
-cd fastmcp2_google_workspace
+git clone git@github.FastMCPdev.com:srivers/google_mcp.git
+cd google_mcp
 
 # Create a virtual environment with uv
 uv venv
@@ -524,7 +524,7 @@ git commit -m "updates"
 ```bash
 # Fork the repository on GitHub
 # Clone your fork
-git clone https://github.com/yourusername/fastmcp2_google_workspace.git
+git clone git@github.FastMCPdev.com:srivers/google_mcp.git
 
 # Create feature branch
 git checkout -b feature/your-feature-name
@@ -705,13 +705,12 @@ uv publish
 
 - [Documentation](docs/): Complete platform documentation
 - [API Reference](docs/api-reference/): Detailed tool documentation
-- [Issue Tracker](https://github.com/yourusername/fastmcp2/issues): Report bugs
-- [Discussions](https://github.com/yourusername/fastmcp2/discussions): Q&A
+- Issue Tracker: Contact your FastMCP development team for bug reports
+- Discussions: Contact your FastMCP development team for Q&A
 
 ### Contact
 
-- Discord: [Join our server](https://discord.gg/fastmcp2)
-- Email: support@fastmcp2.com
+- Contact your FastMCP development team for support and collaboration
 - Stack Overflow: Tag with `fastmcp2`
 
 ## Recognition
@@ -721,4 +720,4 @@ Contributors are recognized in:
 - Release notes
 - Project documentation
 
-Thank you for contributing to FastMCP2! 🚀
+Thank you for contributing to FastMCP Google MCP! 🚀

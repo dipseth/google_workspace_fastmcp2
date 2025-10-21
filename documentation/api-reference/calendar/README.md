@@ -1,6 +1,6 @@
 # Calendar API Reference
 
-Complete API documentation for all Google Calendar tools in the FastMCP2 platform.
+Complete API documentation for all Google Calendar tools in the FastMCP Google MCP Server.
 
 ## 🎉 Recent Updates & Improvements
 

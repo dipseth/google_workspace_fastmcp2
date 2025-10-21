@@ -1,6 +1,6 @@
 # Google Drive API Reference
 
-Complete API documentation for all Google Drive tools in the FastMCP2 platform.
+Complete API documentation for all Google Drive tools in the FastMCP Google MCP Server.
 
 ## Available Tools
 

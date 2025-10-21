@@ -1,6 +1,6 @@
 # Google Chat API Reference
 
-Complete API documentation for all Google Chat tools in the FastMCP2 platform.
+Complete API documentation for all Google Chat tools in the FastMCP Google MCP Server.
 
 ## Overview
 

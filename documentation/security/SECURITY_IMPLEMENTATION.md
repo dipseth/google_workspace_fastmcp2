@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The FastMCP2 Google Workspace Platform implements multiple layers of security to protect user data and ensure secure authentication with Google services. This document provides detailed technical information about security implementations, threat models, and compliance considerations.
+The FastMCP Google MCP Server implements multiple layers of security to protect user data and ensure secure authentication with Google services. This document provides detailed technical information about security implementations, threat models, and compliance considerations.
 
 ## Security Architecture Overview
 
@@ -835,7 +835,7 @@ alerts:
 
 ## Conclusion
 
-The FastMCP2 Google Workspace Platform implements defense-in-depth security with multiple layers of protection across 24 authentication files organized in a hierarchical architecture. The system provides:
+The FastMCP Google MCP Server implements defense-in-depth security with multiple layers of protection across 24 authentication files organized in a hierarchical architecture. The system provides:
 
 - **Production-ready OAuth 2.0/2.1 + PKCE** with public and confidential client support
 - **Three-tier credential persistence** ensuring reliability across server restarts

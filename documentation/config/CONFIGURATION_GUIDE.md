@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide provides comprehensive documentation of all configuration options for the FastMCP2 Google Workspace Platform. Configuration is primarily managed through environment variables, with sensible defaults for development and production environments.
+This guide provides comprehensive documentation of all configuration options for the FastMCP Google MCP Server. Configuration is primarily managed through environment variables, with sensible defaults for development and production environments.
 
 ## Table of Contents
 
@@ -37,10 +37,10 @@ CREDENTIAL_STORAGE_MODE=FILE_ENCRYPTED
 # ============================================
 # CORE SERVER CONFIGURATION
 # ============================================
-SERVER_NAME=FastMCP2 Google Workspace Platform
-SERVER_HOST=localhost
+SERVER_NAME=FastMCP Google MCP Server
+SERVER_HOST=0.0.0.0
 SERVER_PORT=6339
-BASE_URL=http://localhost:6339
+BASE_URL=https://google-mcp.FastMCP.internal:6339
 LOG_LEVEL=INFO
 
 # ============================================
@@ -48,7 +48,7 @@ LOG_LEVEL=INFO
 # ============================================
 GOOGLE_CLIENT_ID=123456789012-abcdefghijklmnop.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-1234567890abcdef
-OAUTH_REDIRECT_URI=http://localhost:6339/oauth/callback
+OAUTH_REDIRECT_URI=https://google-mcp.FastMCP.internal:6339/oauth/callback
 USE_GOOGLE_OAUTH=true
 ENABLE_JWT_AUTH=false
 
@@ -209,10 +209,10 @@ ENABLE_RESOURCE_TEMPLATING=true
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `SERVER_NAME` | string | "FastMCP2 Google Workspace Platform" | Server display name | No |
+| `SERVER_NAME` | string | "FastMCP Google MCP Server" | Server display name | No |
 | `SERVER_HOST` | string | "localhost" | Server bind address | No |
 | `SERVER_PORT` | integer | 6339 | Server port | No |
-| `BASE_URL` | string | "http://localhost:6339" | Base URL for callbacks | Yes |
+| `BASE_URL` | string | "https://google-mcp.FastMCP.internal:6339" | Base URL for callbacks | Yes |
 | `LOG_LEVEL` | string | "INFO" | Logging level (DEBUG, INFO, WARNING, ERROR) | No |
 
 ### Google OAuth Settings
@@ -453,7 +453,7 @@ def validate_config():
 python -c "from config.settings import settings; settings.validate()"
 
 # Test OAuth configuration
-curl http://localhost:6339/health_check
+curl https://google-mcp.FastMCP.internal:6339/health_check
 
 # Verify SSL configuration
 openssl s_client -connect localhost:6339 -showcerts
@@ -474,7 +474,7 @@ openssl s_client -connect localhost:6339 -showcerts
 ### Environment Variable Debugging
 
 ```bash
-# Print all FastMCP2 environment variables
+# Print all FastMCP Google MCP environment variables
 env | grep -E '^(SERVER_|GOOGLE_|OAUTH_|CREDENTIAL_|SSL_|QDRANT_)'
 
 # Validate .env file

@@ -1,6 +1,6 @@
 # Module Wrapper API Reference
 
-Complete API documentation for all module wrapper and adapter tools in the FastMCP2 platform.
+Complete API documentation for all module wrapper and adapter tools in the FastMCP Google MCP Server.
 
 ## Overview
 
@@ -22,7 +22,7 @@ The Module Wrapper service provides Python module introspection, dynamic tool lo
 
 ### `list_available_modules`
 
-List all Python modules available in the FastMCP2 system with optional filtering.
+List all Python modules available in the FastMCP Google MCP system with optional filtering.
 
 **Parameters:**
 - `pattern` (string, optional): Module name pattern to filter results

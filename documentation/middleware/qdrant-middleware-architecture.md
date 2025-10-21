@@ -1088,8 +1088,8 @@ The resource returns a [`QdrantPointDetailsResponse`](middleware/qdrant_types.py
      "tool_name": "search",
      "timestamp": "2025-09-30T21:52:57.260679+00:00",
      "timestamp_unix": 1759269177,
-     "user_id": "srivers@groupon.com",
-     "user_email": "srivers@groupon.com",
+     "user_id": "srivers@FastMCP.com",
+     "user_email": "srivers@FastMCP.com",
      "session_id": "2c388c3f1b824089b6fd602dbafbf88c",
      "payload_type": "tool_response",
      "execution_time_ms": 251,
@@ -1099,7 +1099,7 @@ The resource returns a [`QdrantPointDetailsResponse`](middleware/qdrant_types.py
  
  # Extracted convenience fields
  "tool_name": "search",
- "user_email": "srivers@groupon.com",
+ "user_email": "srivers@FastMCP.com",
  "timestamp": "2025-09-30T21:52:57.260679+00:00",
  "session_id": "2c388c3f1b824089b6fd602dbafbf88c",
  "payload_type": "tool_response",
@@ -1188,7 +1188,7 @@ From the provided example (point ID `378d763e-39ac-409a-a616-769bad39e71c`):
 "payload": {
  "tool_name": "search",
  "timestamp": "2025-09-30T21:52:57.260679+00:00",
- "user_email": "srivers@groupon.com",
+ "user_email": "srivers@FastMCP.com",
  "response_data": {
    "results": [
      {
@@ -1205,7 +1205,7 @@ From the provided example (point ID `378d763e-39ac-409a-a616-769bad39e71c`):
  }
 },
 "tool_name": "search",
-"user_email": "srivers@groupon.com",
+"user_email": "srivers@FastMCP.com",
 "timestamp": "2025-09-30T21:52:57.260679+00:00",
 "compressed": false,
 "retrieved_at": "2025-10-01T03:07:53.110251+00:00"

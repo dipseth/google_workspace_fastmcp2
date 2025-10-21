@@ -1,6 +1,6 @@
 # Google Docs MCP Tools
 
-This module provides comprehensive Google Docs integration tools for FastMCP2 servers, enabling rich document creation and management through the Model Context Protocol (MCP).
+This module provides comprehensive Google Docs integration tools for FastMCP Google MCP servers, enabling rich document creation and management through the Model Context Protocol (MCP).
 
 ## Overview
 
@@ -334,4 +334,4 @@ The tools require Google OAuth2 authentication with the following scopes:
 
 ---
 
-*This documentation covers the Google Docs MCP tools in FastMCP2. For more information about setting up authentication or other MCP tools, see the main FastMCP2 documentation.*
+*This documentation covers the Google Docs MCP tools in FastMCP Google MCP. For more information about setting up authentication or other MCP tools, see the main FastMCP Google MCP documentation.*

@@ -1,6 +1,6 @@
 # Authentication API Reference
 
-Complete API documentation for all authentication tools in the FastMCP2 platform.
+Complete API documentation for all authentication tools in the FastMCP Google MCP Server.
 
 ## Overview
 
@@ -89,7 +89,7 @@ Enhanced authentication status check with resource templating support (no email 
 - Service capability matrix
 
 **Resource Templating:**
-- Leverages FastMCP2's resource templating system
+- Leverages FastMCP Google MCP's resource templating system
 - Automatically determines user context
 - Provides seamless authentication checking
 - Integration with Enhanced Tools ecosystem
@@ -100,7 +100,7 @@ Enhanced authentication status check with resource templating support (no email 
 
 ### Multi-Flow OAuth System
 
-FastMCP2 supports **four distinct authentication flows**:
+FastMCP Google MCP supports **four distinct authentication flows**:
 
 #### 1. MCP Inspector OAuth (MCP Spec Compliant)
 - **Purpose**: OAuth 2.1 + Dynamic Client Registration for MCP clients

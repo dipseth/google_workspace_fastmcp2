@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document provides a complete overview of all Qdrant-related resources, tools, middleware, and integrations in the FastMCP2 Google Workspace platform.
+This document provides a complete overview of all Qdrant-related resources, tools, middleware, and integrations in the FastMCP Google MCP Server.
 
 **Status**: ✅ **FULLY OPERATIONAL** - All critical issues resolved as of September 2024
 
@@ -30,7 +30,7 @@ The Qdrant integration follows a unified architecture with modular components:
   - Deferred initialization of embeddings model (sentence-transformers/all-MiniLM-L6-v2)  
   - Automatic compression for payloads >5KB
   - Support for multiple query types (ID lookup, filtered search, semantic search)
-  - FastMCP2 middleware integration for automatic tool response storage
+  - FastMCP Google MCP middleware integration for automatic tool response storage
   - Enhanced user email extraction with priority-based fallbacks
   - Execution time tracking and performance monitoring
 - **Key Hooks**:
@@ -279,7 +279,7 @@ User-friendly aliases map to actual field names:
 
 ## Integration Points
 
-### FastMCP2 Integration
+### FastMCP Google MCP Integration
 - Middleware hooks for automatic response storage
 - Resource system for cached data access with type safety
 - Tool registration for search and analytics capabilities
