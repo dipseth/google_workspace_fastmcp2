@@ -2160,6 +2160,11 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 logger.info("🔧 Converting ALL camelCase fields to snake_case for webhook API compatibility")
                 webhook_message_body = _convert_field_names_to_snake_case(message_body)
                 
+                # CRITICAL FIX: Add thread to message body for webhook threading
+                if thread_key:
+                    webhook_message_body['thread'] = {'name': thread_key}
+                    logger.debug(f"Added thread to webhook message body: {thread_key}")
+                
                 # ENHANCED DEBUGGING: Log everything before sending
                 logger.info(f"🔄 ENHANCED DEBUG - Sending via webhook URL: {webhook_url}")
                 logger.info(f"🧪 CARD DEBUG INFO:")
