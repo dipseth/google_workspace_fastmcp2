@@ -30,9 +30,10 @@ class Settings(BaseSettings):
     server_name: str = "Google Drive Upload Server"
     
     # HTTPS/SSL Configuration
-    enable_https: bool = True
-    ssl_cert_file: str = str(Path(__file__).parent.parent / "localhost+2.pem")
-    ssl_key_file: str = str(Path(__file__).parent.parent / "localhost+2-key.pem") 
+    # Default to False for Docker compatibility - explicitly enable via .env when needed
+    enable_https: bool = False
+    ssl_cert_file: str = ""  # Path to SSL certificate (e.g., "./localhost+2.pem")
+    ssl_key_file: str = ""  # Path to SSL private key (e.g., "./localhost+2-key.pem")
     ssl_ca_file: str = ""  # Optional CA file for client certificate verification
     
     # Storage Configuration

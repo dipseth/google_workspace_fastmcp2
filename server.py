@@ -282,6 +282,14 @@ logger.info("📚 Registering template macro resources...")
 register_template_resources(mcp)
 logger.info("✅ Template macro resources registered - URIs handled by EnhancedTemplateMiddleware")
 
+# Setup health check endpoints for Docker/Kubernetes monitoring
+from tools.health_endpoints import setup_health_endpoints
+setup_health_endpoints(
+    mcp,
+    google_auth_provider=google_auth_provider,
+    credential_storage_mode=credential_storage_mode
+)
+
 # Register server management tools
 logger.info("🔧 Registering server management tools...")
 setup_server_tools(mcp)

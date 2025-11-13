@@ -11,8 +11,8 @@ from pydantic import Field
 # Import our custom types for consistent parameter definitions
 from tools.common_types import ServiceTypeAnnotated
 
-# Import SupportedService type and validation utilities
-from resources.service_list_resources import SupportedService, get_supported_services
+# Import validation utilities
+from resources.service_list_resources import get_supported_services
 from auth.scope_registry import ScopeRegistry
 
 from config.enhanced_logging import setup_logger

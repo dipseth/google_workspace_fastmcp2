@@ -57,6 +57,9 @@ htmlcov/
 
 # Environment variables
 .env
+# Cloudflare Tunnel Configuration (contains secrets)
+.env.cloudflare
+credentials/tunnel-credentials.json
 
 # Temporary files
 *.tmp
@@ -101,3 +104,6 @@ logs/
 demo_video.png
 Screen Recording 2025-09-26 at 2.34.50 PM.mov
 
+.env.docker
+.rooignore
+.roomodes

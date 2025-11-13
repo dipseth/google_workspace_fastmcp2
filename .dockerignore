@@ -1,0 +1,75 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.roo/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# Credentials and sensitive data
+credentials/
+*.pem
+*.key
+*.crt
+.env
+.env_prod
+.env.local
+.auth_encryption_key
+test_tokens.json
+
+# Git
+.git/
+.gitignore
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+test_downloads/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+logs/
+
+# Documentation
+*.md
+!README.md
+!DOCKER.md
+
+# Development files
+delete_later/
+demo_video.png
+Screen Recording*
+prompt_to_dashboard.png
+dashboard_example.png
+
+# Specific exclusions
+fastmcp.json
+localhost+2*.pem
