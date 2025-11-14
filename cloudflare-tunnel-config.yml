@@ -1,0 +1,37 @@
+# Cloudflare Tunnel Configuration for FastMCP Google Workspace MCP Server
+# This file configures the cloudflared tunnel to expose your Docker service
+
+# The tunnel UUID will be set via environment variable TUNNEL_ID
+# Get this by running: cloudflared tunnel create fastmcp-server
+
+tunnel: ${TUNNEL_ID}
+credentials-file: /etc/cloudflared/credentials.json
+
+# Ingress rules - define how traffic is routed
+ingress:
+  # Route all traffic to the FastMCP server container
+  - hostname: ${TUNNEL_HOSTNAME}
+    service: http://fastmcp-server:8002
+    originRequest:
+      # Enable HTTP/2 for better performance
+      http2Origin: true
+      # Connection settings
+      noTLSVerify: false
+      connectTimeout: 30s
+      keepAliveTimeout: 90s
+      keepAliveConnections: 100
+      # Pass through original headers
+      httpHostHeader: ${TUNNEL_HOSTNAME}
+  
+  # Catch-all rule (required by cloudflared)
+  - service: http_status:404
+
+# Optional: Origin configuration
+originRequest:
+  # Pass through all headers
+  noHappyEyeballs: false
+  tcpKeepAlive: 30s
+  
+# Optional: Metrics and logging
+metrics: 0.0.0.0:2000
+loglevel: info

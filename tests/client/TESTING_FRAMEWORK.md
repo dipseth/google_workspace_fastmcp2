@@ -30,6 +30,247 @@ This directory contains a standardized testing framework for all FastMCP2 Google
 - **`create_test_client()`**: Creates properly configured clients with fallback
 - **`ResourceIDFetcher`**: Fetches real IDs from service:// resources for realistic testing
 
+## 🔌 How the Client Fixture Works (Under the Hood)
+
+### The Magic of Pytest Dependency Injection
+
+When you write a test like this:
+
+```python
+@pytest.mark.asyncio
+async def test_gmail_tools_available(self, client):
+    """Test that Gmail tools are available."""
+    tools = await client.list_tools()
+    tool_names = [tool.name for tool in tools]
+    assert "send_gmail_message" in tool_names
+```
+
+The `client` parameter is **automatically provided by pytest's fixture system**. Here's what happens:
+
+#### 1. Fixture Definition (in conftest.py)
+
+```python
+# In conftest.py
+@pytest.fixture(scope="function")  # One client per test
+async def client():
+    """Provide a configured FastMCP client for tests."""
+    # Create a properly configured client
+    test_client = await create_test_client(TEST_EMAIL)
+    
+    try:
+        yield test_client  # Provide the client to the test
+    finally:
+        await test_client.close()  # Clean up after test
+```
+
+#### 2. Automatic Injection
+
+When pytest sees a test parameter named `client`:
+1. It looks for a fixture with that name
+2. Calls the fixture function to get the instance
+3. Passes the instance to your test method
+4. Handles cleanup automatically (the `finally` block)
+
+#### 3. Scope Management
+
+The `scope="function"` means:
+- **New client for each test**: Each test gets a fresh, isolated client
+- **Automatic cleanup**: Client is closed after each test
+- **No state leakage**: Tests don't interfere with each other
+
+### When Tests Don't Use the Client Fixture
+
+Some tests, like `test_sheets_tools.py`, manually create clients:
+
+```python
+@pytest.fixture(scope="session")
+async def test_spreadsheet_data():
+    """Create a test spreadsheet once for all tests."""
+    # Manual client creation
+    client = await create_test_client(TEST_EMAIL)
+    try:
+        # Create spreadsheet (expensive operation)
+        result = await client.call_tool("create_spreadsheet", {...})
+        return result_data
+    finally:
+        await client.close()  # Manual cleanup
+```
+
+#### Why Manual Client Creation?
+
+Tests manually create clients when they need:
+
+1. **Session-scoped resources** (`scope="session"`):
+   - Create expensive resources once (like spreadsheets)
+   - Share results across all tests
+   - Example: `test_spreadsheet_data` creates one spreadsheet for all Sheets tests
+
+2. **Multiple clients**:
+   - Testing multi-user scenarios
+   - Comparing different authentication states
+   - Example: Testing file sharing between users
+
+3. **Custom configuration**:
+   - Different server URLs
+   - Special timeout settings
+   - Testing error conditions
+
+4. **Non-test fixtures**:
+   - Setup/teardown operations
+   - Resource creation that happens before tests run
+   - Data preparation
+
+#### Fixture Scope Comparison
+
+| Scope | Lifetime | Use Case | Example |
+|-------|----------|----------|---------|
+| `function` | One per test | Standard tests | `client` fixture (most tests) |
+| `class` | One per test class | Shared setup for class | N/A in current framework |
+| `module` | One per test file | Expensive file-level setup | N/A in current framework |
+| `session` | One per test run | Very expensive setup | `test_spreadsheet_data` fixture |
+
+### Pattern Comparison Examples
+
+#### ✅ Standard Pattern (Using client fixture)
+
+```python
+@pytest.mark.service("gmail")
+class TestGmailOperations:
+    """Tests using automatic client fixture."""
+    
+    @pytest.mark.asyncio
+    async def test_send_email(self, client):  # Client auto-injected
+        """Test sending email."""
+        result = await client.call_tool("send_gmail_message", {
+            "user_google_email": TEST_EMAIL,
+            "subject": "Test",
+            "body": "Hello"
+        })
+        assert result is not None
+```
+
+**Advantages:**
+- Clean, minimal code
+- Automatic cleanup
+- Standard pattern across tests
+- New client per test (isolation)
+
+#### ✅ Session-Scoped Fixture Pattern (Manual client)
+
+```python
+@pytest.fixture(scope="session")
+async def shared_spreadsheet():
+    """Create one spreadsheet for all tests in session."""
+    client = await create_test_client(TEST_EMAIL)  # Manual creation
+    try:
+        result = await client.call_tool("create_spreadsheet", {
+            "user_google_email": TEST_EMAIL,
+            "title": "Shared Test Spreadsheet"
+        })
+        spreadsheet_id = extract_id_from_result(result)
+        return {"id": spreadsheet_id}
+    finally:
+        await client.close()  # Manual cleanup
+        
+class TestSheetsOperations:
+    """Tests using shared spreadsheet."""
+    
+    @pytest.mark.asyncio
+    async def test_read_data(self, client, shared_spreadsheet):
+        """Test reading from shared spreadsheet."""
+        result = await client.call_tool("read_sheet_values", {
+            "user_google_email": TEST_EMAIL,
+            "spreadsheet_id": shared_spreadsheet["id"],
+            "range_name": "A1:D10"
+        })
+        assert result is not None
+```
+
+**Advantages:**
+- Expensive setup runs once
+- All tests share resource
+- Faster test suite execution
+- Useful for integration tests
+
+#### ❌ Anti-Pattern (Unnecessary manual creation)
+
+```python
+@pytest.mark.asyncio
+async def test_gmail_tools_available(self):  # Missing client parameter
+    """DON'T DO THIS - Unnecessarily manual."""
+    # Manually creating client when fixture would work
+    client = await create_test_client(TEST_EMAIL)
+    try:
+        tools = await client.list_tools()
+        assert len(tools) > 0
+    finally:
+        await client.close()
+```
+
+**Why it's wrong:**
+- More boilerplate code
+- Easy to forget cleanup
+- Doesn't leverage pytest's capabilities
+- Harder to maintain
+
+### Decision Tree: When to Use Which Pattern?
+
+```
+Do you need one resource shared across ALL tests in the file?
+├─ YES → Use session-scoped fixture with manual client
+│         Example: test_spreadsheet_data in test_sheets_tools.py
+│
+└─ NO → Do you need to test with MULTIPLE clients simultaneously?
+   ├─ YES → Manually create additional clients in test
+   │         Example: Testing file sharing between users
+   │
+   └─ NO → Use the standard `client` fixture
+             Example: 95% of tests in the framework
+```
+
+### Real-World Example Breakdown
+
+Let's examine `test_sheets_tools.py` in detail:
+
+```python
+# SESSION-SCOPED: Expensive spreadsheet creation
+@pytest.fixture(scope="session")
+async def test_spreadsheet_data():
+    """Create ONE spreadsheet for ALL tests."""
+    client = await create_test_client(TEST_EMAIL)  # Manual: need session scope
+    try:
+        result = await client.call_tool("create_spreadsheet", {
+            "user_google_email": TEST_EMAIL,
+            "title": "MCP Test Spreadsheet"
+        })
+        spreadsheet_id = extract_id(result)
+        sheet_id = get_sheet_id(result)
+        return {"spreadsheet_id": spreadsheet_id, "sheet_id": sheet_id}
+    finally:
+        await client.close()
+
+# FUNCTION-SCOPED: Individual test
+@pytest.mark.asyncio
+async def test_format_sheet_range(self, client, test_spreadsheet_data):
+    """Test using BOTH fixtures."""
+    # client: Auto-injected function-scoped fixture (fresh client)
+    # test_spreadsheet_data: Session-scoped fixture (shared data)
+    
+    result = await client.call_tool("format_sheet_range", {
+        "user_google_email": TEST_EMAIL,
+        "spreadsheet_id": test_spreadsheet_data["spreadsheet_id"],  # Shared resource
+        "sheet_id": test_spreadsheet_data["sheet_id"],
+        "bold": True
+    })
+    assert result is not None
+```
+
+**Why this pattern?**
+1. Create expensive spreadsheet once (`session` scope)
+2. Each test gets fresh client (`function` scope)
+3. Tests share the spreadsheet but don't interfere with each other
+4. Fast execution: 1 spreadsheet creation instead of N
+
 ## 🚀 Quick Start
 
 ### 1. Run Existing Tests
@@ -410,6 +651,7 @@ class TestYourServiceTools:
 8. **Document test purpose**: Include clear docstrings explaining what each test validates
 9. **Use real resource IDs**: Prefer real ID fixtures over hardcoded fake IDs for realistic testing
 10. **Handle fallback IDs**: Real ID fixtures provide fallbacks when actual resources aren't available
+11. **Choose correct fixture scope**: Use `function` scope (standard `client` fixture) unless you need shared session resources
 
 ## 📝 Practical Examples with Real Resources
 

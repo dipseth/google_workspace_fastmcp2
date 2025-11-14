@@ -24,14 +24,14 @@ class SessionState(BaseModel):
     """Session state model for tracking authentication status."""
     
     user_email: str = Field(..., description="User's email address")
-    access_token: Optional[str] = Field(None, description="OAuth access token")
-    refresh_token: Optional[str] = Field(None, description="OAuth refresh token")
-    token_expiry: Optional[datetime] = Field(None, description="Token expiration time")
+    access_token: Optional[str] = Field(default=None, description="OAuth access token")
+    refresh_token: Optional[str] = Field(default=None, description="OAuth refresh token")
+    token_expiry: Optional[datetime] = Field(default=None, description="Token expiration time")
     scopes: list[str] = Field(default_factory=list, description="Granted OAuth scopes")
     session_id: str = Field(..., description="Unique session identifier")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Session creation time")
     last_accessed: datetime = Field(default_factory=datetime.utcnow, description="Last access time")
-    auth_provider: str = Field("unknown", description="Authentication provider (google/legacy)")
+    auth_provider: str = Field(default="unknown", description="Authentication provider (google/legacy)")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional session metadata")
 
 

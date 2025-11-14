@@ -87,6 +87,11 @@ class AuthMiddleware(Middleware):
         # Initialize dual auth bridge
         self._dual_auth_bridge = get_dual_auth_bridge()
         
+        # PHASE 1 FIX: Instance-level session tracking (independent of FastMCP context)
+        import threading
+        self._active_sessions: Dict[int, str] = {}  # request_id -> session_id
+        self._session_lock = threading.Lock()
+        
         # Initialize encryption if needed
         if storage_mode in [CredentialStorageMode.FILE_ENCRYPTED, CredentialStorageMode.MEMORY_WITH_BACKUP]:
             self._setup_encryption()
@@ -104,51 +109,62 @@ class AuthMiddleware(Middleware):
         if storage_mode == CredentialStorageMode.FILE_PLAINTEXT:
             logger.warning("⚠️ Using plaintext file storage - consider upgrading to FILE_ENCRYPTED for production")
     
+    def _get_request_id(self, context: MiddlewareContext) -> int:
+        """
+        Get a unique identifier for this request.
+        
+        PHASE 1 FIX: Use Python's id() function on the context object itself
+        to create a stable request identifier without relying on FastMCP context.
+        """
+        return id(context)
+    
+    def _get_or_create_session(self, request_id: int) -> str:
+        """
+        Get existing session or create new one for this request.
+        
+        PHASE 1 FIX: Session management independent of FastMCP context.
+        Reuses existing sessions from thread-safe session store.
+        """
+        from .context import list_sessions
+        import uuid
+        
+        # Check if we already have a session for this request
+        with self._session_lock:
+            if request_id in self._active_sessions:
+                session_id = self._active_sessions[request_id]
+                logger.debug(f"♻️ Reusing session for request {request_id}: {session_id}")
+                return session_id
+        
+        # Try to reuse most recent active session from store
+        active_sessions = list_sessions()
+        if active_sessions:
+            session_id = active_sessions[-1]
+            logger.debug(f"♻️ Reusing most recent active session: {session_id}")
+        else:
+            # Generate new session only if necessary
+            session_id = str(uuid.uuid4())
+            logger.debug(f"🆕 Generated new session ID: {session_id}")
+        
+        # Track this session for this request
+        with self._session_lock:
+            self._active_sessions[request_id] = session_id
+        
+        return session_id
+    
     async def on_request(self, context: MiddlewareContext, call_next):
-        """Handle incoming requests and set session context."""
+        """
+        Handle incoming requests and set session context.
+        
+        PHASE 1 FIX: Uses instance-level session tracking instead of FastMCP context.
+        This avoids "Context is not available" errors during early request phases.
+        """
         from .context import store_session_data, get_session_data, list_sessions
         
-        # FIRST: Check if we already have a session context set
-        existing_session = get_session_context()
-        if existing_session:
-            session_id = existing_session
-            logger.debug(f"✅ Reusing existing session context: {session_id}")
-        else:
-            # Try to extract session ID from various possible locations
-            session_id = None
-            
-            # Try FastMCP context first
-            if hasattr(context, 'fastmcp_context') and context.fastmcp_context:
-                session_id = getattr(context.fastmcp_context, 'session_id', None)
-            
-            # Try to get from headers or other context
-            if not session_id and hasattr(context, 'request'):
-                # Try to extract from request headers or similar
-                session_id = getattr(context.request, 'session_id', None)
-            
-            # If still no session, check if we have any active sessions and use the most recent
-            if not session_id:
-                active_sessions = list_sessions()
-                if active_sessions:
-                    # Use the most recently used session
-                    session_id = active_sessions[-1]
-                    logger.debug(f"♻️ Reusing most recent active session: {session_id}")
-                else:
-                    # Generate a new session ID only if absolutely necessary
-                    import uuid
-                    session_id = str(uuid.uuid4())
-                    logger.debug(f"🆕 Generated new session ID (no active sessions found): {session_id}")
+        # PHASE 1 FIX: Get request ID and session without accessing FastMCP context
+        request_id = self._get_request_id(context)
+        session_id = self._get_or_create_session(request_id)
         
-        set_session_context(session_id)
-        logger.debug(f"🔍 DEBUG: Set session context: {session_id}")
-        
-        # Check if we have a stored user email for this session (from OAuth)
-        user_email = get_session_data(session_id, "user_email")
-        if user_email:
-            set_user_email_context(user_email)
-            logger.debug(f"🔍 DEBUG: Restored user email context from session: {user_email}")
-        else:
-            logger.debug(f"🔍 DEBUG: No stored user email found for session: {session_id}")
+        logger.debug(f"🔍 Request {request_id} using session: {session_id}")
         
         # Periodic cleanup of expired sessions
         now = datetime.now()
@@ -167,18 +183,16 @@ class AuthMiddleware(Middleware):
             logger.error(f"Error in request processing: {e}")
             raise
         finally:
-            # Don't clear session context - we need it to persist!
-            # Only clear service requests to avoid memory leaks
-            try:
-                ctx = get_context()
-                ctx.set_state("service_requests", {})
-            except RuntimeError:
-                pass
-            logger.debug(f"🔍 DEBUG: Preserving session context {session_id} for future requests")
+            # PHASE 1 FIX: Clean up request-session mapping after request completes
+            with self._session_lock:
+                self._active_sessions.pop(request_id, None)
+            logger.debug(f"🧹 Cleaned up request {request_id} (session preserved in store)")
     
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         """
         Handle tool execution with session context, service injection, and unified GoogleProvider authentication.
+        
+        PHASE 1 FIX: Uses instance-level session tracking for reliable session management.
         
         This method implements the unified OAuth architecture by:
         1. Extracting user context from GoogleProvider if available
@@ -195,25 +209,18 @@ class AuthMiddleware(Middleware):
         tool_name = getattr(context.message, 'name', 'unknown')
         logger.debug(f"Processing tool call: {tool_name}")
         
-        # Session context should already be set by on_request
-        session_id = get_session_context()
+        # PHASE 1 FIX: Get session from instance tracking (reliable and early-access safe)
+        request_id = self._get_request_id(context)
+        
+        with self._session_lock:
+            session_id = self._active_sessions.get(request_id)
+        
         if not session_id:
-            # This shouldn't happen, but handle gracefully
-            # Check for any active sessions first
-            from .context import list_sessions
-            active_sessions = list_sessions()
-            if active_sessions:
-                session_id = active_sessions[-1]
-                set_session_context(session_id)
-                logger.debug(f"♻️ Reactivated session for tool {tool_name}: {session_id}")
-            else:
-                # Only generate new if absolutely necessary
-                import uuid
-                session_id = str(uuid.uuid4())
-                set_session_context(session_id)
-                logger.warning(f"⚠️ Had to generate new session for tool {tool_name}: {session_id}")
+            # Fallback: create session if on_request didn't run (shouldn't happen normally)
+            session_id = self._get_or_create_session(request_id)
+            logger.debug(f"⚠️ Created session in on_call_tool for {tool_name}: {session_id}")
         else:
-            logger.debug(f"✅ Using existing session for tool {tool_name}: {session_id}")
+            logger.debug(f"✅ Using session for tool {tool_name}: {session_id}")
         
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
@@ -321,6 +328,8 @@ class AuthMiddleware(Middleware):
         """
         Handle resource access with session context and unified GoogleProvider authentication.
         
+        PHASE 1 FIX: Uses instance-level session tracking for reliable session management.
+        
         This method implements the unified OAuth architecture for resource access by:
         1. Extracting user context from GoogleProvider if available
         2. Setting user email context for resource authentication
@@ -336,25 +345,18 @@ class AuthMiddleware(Middleware):
         resource_uri = getattr(context, 'uri', 'unknown')
         logger.debug(f"Processing resource access: {resource_uri}")
         
-        # Session context should already be set by on_request
-        session_id = get_session_context()
+        # PHASE 1 FIX: Get session from instance tracking (reliable and context-independent)
+        request_id = self._get_request_id(context)
+        
+        with self._session_lock:
+            session_id = self._active_sessions.get(request_id)
+        
         if not session_id:
-            # This shouldn't happen, but handle gracefully
-            # Check for any active sessions first
-            from .context import list_sessions
-            active_sessions = list_sessions()
-            if active_sessions:
-                session_id = active_sessions[-1]
-                set_session_context(session_id)
-                logger.debug(f"♻️ Reactivated session for resource {resource_uri}: {session_id}")
-            else:
-                # Only generate new if absolutely necessary
-                import uuid
-                session_id = str(uuid.uuid4())
-                set_session_context(session_id)
-                logger.warning(f"⚠️ Had to generate new session for resource {resource_uri}: {session_id}")
+            # Fallback: create session if needed (shouldn't happen normally)
+            session_id = self._get_or_create_session(request_id)
+            logger.debug(f"⚠️ Created session in on_read_resource for {resource_uri}: {session_id}")
         else:
-            logger.debug(f"✅ Using existing session for resource {resource_uri}: {session_id}")
+            logger.debug(f"✅ Using session for resource {resource_uri}: {session_id}")
         
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
@@ -911,92 +913,36 @@ class AuthMiddleware(Middleware):
         """
         Automatically inject user_google_email parameter into tool calls.
         
-        This makes tools that require user_google_email work automatically
-        without the user having to provide the parameter manually. This is
-        a core feature of the unified OAuth architecture.
+        PHASE 2 FIX: Simplified injection - just check message.arguments (the standard location).
+        Reduces complexity from 90 lines to ~20 lines while maintaining core functionality.
         
         Args:
             context: The middleware context containing the tool call
             user_email: User's email address to inject
         """
         try:
-            logger.debug(f"🔧 DEBUG: _auto_inject_email_parameter called with user_email: {user_email}")
-            logger.debug(f"🔧 DEBUG: Context type: {type(context)}")
-            logger.debug(f"🔧 DEBUG: Message type: {type(getattr(context, 'message', None))}")
+            # Standard FastMCP pattern: arguments are in context.message.arguments
+            if not hasattr(context, 'message') or not hasattr(context.message, 'arguments'):
+                logger.debug(f"No arguments to inject for context")
+                return
             
-            # Comprehensive debugging of the context structure
-            if hasattr(context, 'message'):
-                message = context.message
-                logger.debug(f"🔧 DEBUG: Message attributes: {[attr for attr in dir(message) if not attr.startswith('_')]}")
-                
-                # Check for arguments in various possible locations
-                arguments = None
-                arguments_source = None
-                
-                # Method 1: Direct arguments access
-                if hasattr(message, 'arguments') and message.arguments is not None:
-                    arguments = message.arguments
-                    arguments_source = "message.arguments"
-                    logger.debug(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments} (type: {type(arguments)})")
-                
-                # Method 2: Check for params attribute
-                elif hasattr(message, 'params') and message.params is not None:
-                    arguments = message.params
-                    arguments_source = "message.params"
-                    logger.debug(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments} (type: {type(arguments)})")
-                
-                # Method 3: Check content attribute
-                elif hasattr(message, 'content'):
-                    content = message.content
-                    logger.debug(f"🔧 DEBUG: Found message.content: {content} (type: {type(content)})")
-                    if hasattr(content, 'arguments'):
-                        arguments = content.arguments
-                        arguments_source = "message.content.arguments"
-                        logger.debug(f"🔧 DEBUG: Found arguments via {arguments_source}: {arguments}")
-                
-                # Log what we found for each possible attribute
-                for attr in ['arguments', 'params', 'args', 'data', 'payload', 'body', 'input']:
-                    if hasattr(message, attr):
-                        value = getattr(message, attr)
-                        logger.debug(f"🔧 DEBUG: message.{attr} = {value} (type: {type(value)})")
-                
-                # Try to inject if we found arguments
-                if arguments is not None:
-                    logger.debug(f"🔧 DEBUG: Working with {arguments_source}: {arguments}")
-                    
-                    # Handle different argument types
-                    if isinstance(arguments, dict):
-                        # Auto-inject user_google_email if not provided or is None
-                        current_value = arguments.get('user_google_email')
-                        logger.debug(f"🔧 DEBUG: Current user_google_email value: {current_value}")
-                        
-                        if current_value in ['me', 'myself'] or 'user_google_email' not in arguments or current_value is None:
-                            try:
-                                arguments['user_google_email'] = user_email
-                                logger.debug(f"🔧 DEBUG: ✅ Auto-injected user_google_email={user_email} into {arguments_source}")
-                                
-                                # Also try to update the original location if different
-                                if arguments_source == "message.arguments":
-                                    message.arguments = arguments
-                                elif arguments_source == "message.params":
-                                    message.params = arguments
-                                elif arguments_source == "message.content.arguments":
-                                    message.content.arguments = arguments
-                                
-                            except Exception as inject_error:
-                                logger.error(f"🔧 DEBUG: ❌ Failed to inject: {inject_error}")
-                        else:
-                            logger.debug(f"🔧 DEBUG: user_google_email already has value: {current_value}")
-                    else:
-                        logger.debug(f"🔧 DEBUG: ❌ Arguments is not a dict: {type(arguments)}")
-                else:
-                    logger.debug(f"🔧 DEBUG: ❌ No arguments found in any expected location")
-                    
+            args = context.message.arguments
+            if not isinstance(args, dict):
+                logger.debug(f"Arguments is not a dict: {type(args)}")
+                return
+            
+            # Check current value
+            current_value = args.get('user_google_email')
+            
+            # Inject if missing, None, or is 'me'/'myself'
+            if current_value in ['me', 'myself', None] or 'user_google_email' not in args:
+                args['user_google_email'] = user_email
+                logger.debug(f"✅ Auto-injected user_google_email={user_email}")
             else:
-                logger.debug(f"🔧 DEBUG: ❌ Context has no message attribute")
+                logger.debug(f"user_google_email already set: {current_value}")
             
         except Exception as e:
-            logger.error(f"⚠️ DEBUG: Could not auto-inject email parameter: {e}", exc_info=True)
+            logger.warning(f"Could not auto-inject email parameter: {e}")
     
     def set_google_provider(self, google_provider: Optional['GoogleProvider']) -> None:
         """
@@ -1049,7 +995,14 @@ class AuthMiddleware(Middleware):
             # Follow the FastMCP pattern exactly as shown in examples
             from fastmcp.server.dependencies import get_access_token
             
-            access_token = get_access_token()
+            # MCP SDK 1.21.1 FIX: get_access_token() may fail during handshake
+            try:
+                access_token = get_access_token()
+            except RuntimeError as ctx_error:
+                if "context" in str(ctx_error).lower():
+                    # Context not available yet - this is normal during handshake
+                    return None
+                raise
             
             # Check if we have token claims (GoogleProvider or JWT)
             if hasattr(access_token, 'claims'):

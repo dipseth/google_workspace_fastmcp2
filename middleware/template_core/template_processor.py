@@ -291,7 +291,8 @@ class TemplateProcessor:
                     replacement = str(resolved)  # Numbers as-is
                 else:
                     # Complex objects - convert to JSON string
-                    replacement = f'"{json.dumps(resolved).replace('"', '\\"')}"'
+                    json_str = json.dumps(resolved).replace('"', r'\"')
+                    replacement = f'"{json_str}"'
                 
                 # Replace the v2 expression with the resolved value
                 processed_text = (processed_text[:match.start()] +

@@ -1,0 +1,87 @@
+services:
+  fastmcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastmcp-google-workspace
+    ports:
+      - "${SERVER_PORT:-8002}:8002"
+    env_file:
+      # Load .env first (if exists), then .env.docker overrides for Docker safety
+      # .env.docker ALWAYS disables HTTPS for container deployment
+      - .env  # Your local settings (optional, may not exist)
+      - .env.docker  # Docker defaults - OVERRIDES .env HTTPS settings
+    volumes:
+      # Mount credentials directory for OAuth tokens persistence
+      - ./credentials:/app/credentials
+      
+      # Optional: Mount SSL certificates if ENABLE_HTTPS=true in .env
+      # Uncomment these lines if you need HTTPS inside the container:
+      # - ./localhost+2.pem:/app/localhost+2.pem:ro
+      # - ./localhost+2-key.pem:/app/localhost+2-key.pem:ro
+      
+      # Optional: Mount local code for development (comment out for production)
+      # - .:/app
+    environment:
+      # Override specific environment variables if needed
+      - PYTHONUNBUFFERED=1
+      - SERVER_HOST=0.0.0.0
+    restart: unless-stopped
+    networks:
+      - fastmcp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Cloudflare Tunnel Service - Exposes FastMCP server behind a permanent URL
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   container_name: fastmcp-cloudflare-tunnel
+  #   command: tunnel --config /etc/cloudflared/config.yml run
+  #   env_file:
+  #     - .env.cloudflare
+  #   volumes:
+  #     # Mount tunnel configuration
+  #     - ./cloudflare-tunnel-config.yml:/etc/cloudflared/config.yml:ro
+  #     # Mount tunnel credentials (created during setup)
+  #     - ./credentials/tunnel-credentials.json:/etc/cloudflared/credentials.json:ro
+  #   environment:
+  #     - TUNNEL_METRICS=0.0.0.0:2000
+  #     - TUNNEL_LOGLEVEL=info
+  #   depends_on:
+  #     - fastmcp-server
+  #   networks:
+  #     - fastmcp-network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:2000/metrics"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 20s
+
+  # Optional: Qdrant vector database (uncomment if needed)
+  # qdrant:
+  #   image: qdrant/qdrant:latest
+  #   container_name: fastmcp-qdrant
+  #   ports:
+  #     - "6333:6333"
+  #     - "6334:6334"
+  #   volumes:
+  #     - qdrant_storage:/qdrant/storage
+  #   environment:
+  #     - QDRANT__SERVICE__HTTP_PORT=6333
+  #   networks:
+  #     - fastmcp-network
+  #   restart: unless-stopped
+
+networks:
+  fastmcp-network:
+    driver: bridge
+
+volumes:
+  qdrant_storage:
+    driver: local

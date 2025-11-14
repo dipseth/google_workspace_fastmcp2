@@ -40,6 +40,42 @@ class EmailAction:
     action: Literal["send", "save_draft", "cancel"]
 
 
+def _resolve_recipient_aliases(
+    recipient: Union[str, List[str], None],
+    user_google_email: str
+) -> Union[str, List[str], None]:
+    """
+    Resolve 'me'/'myself' aliases in recipient fields to actual user email.
+    
+    Args:
+        recipient: Recipient(s) that may contain 'me'/'myself' aliases
+        user_google_email: Actual user email to substitute for aliases
+    
+    Returns:
+        Resolved recipient(s) with aliases replaced by actual email
+    """
+    if not recipient:
+        return recipient
+    
+    if isinstance(recipient, str):
+        # Handle single string or comma-separated list
+        if ',' in recipient:
+            emails = [email.strip() for email in recipient.split(',')]
+            resolved = [user_google_email if email.lower() in ['me', 'myself'] else email for email in emails]
+            return ', '.join(resolved)
+        else:
+            # Single recipient
+            if recipient.strip().lower() in ['me', 'myself']:
+                return user_google_email
+            return recipient
+    
+    elif isinstance(recipient, list):
+        # List of recipients
+        return [user_google_email if email.strip().lower() in ['me', 'myself'] else email for email in recipient]
+    
+    return recipient
+
+
 async def _resolve_recipients_and_check_allow_list(
     to: Union[str, List[str]],
     cc: Optional[Union[str, List[str]]],
@@ -609,6 +645,14 @@ async def send_gmail_message(
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
+        # CRITICAL FIX: Resolve 'me'/'myself' aliases BEFORE creating MIME message
+        # The Gmail API expects valid email addresses, not keywords
+        resolved_to = _resolve_recipient_aliases(to, user_google_email)
+        resolved_cc = _resolve_recipient_aliases(cc, user_google_email)
+        resolved_bcc = _resolve_recipient_aliases(bcc, user_google_email)
+        
+        logger.debug(f"Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}")
+
         # Check for email templates for recipients
         template_applied = False
         template = None
@@ -618,24 +662,24 @@ async def send_gmail_message(
         
         # Get primary recipient for template lookup
         primary_recipient = None
-        if isinstance(to, str):
+        if isinstance(resolved_to, str):
             # Handle comma-separated string
-            recipients = [email.strip() for email in to.split(',') if email.strip()]
+            recipients = [email.strip() for email in resolved_to.split(',') if email.strip()]
             if recipients:
                 primary_recipient = recipients[0]
-        elif isinstance(to, list) and to:
-            primary_recipient = to[0]
+        elif isinstance(resolved_to, list) and resolved_to:
+            primary_recipient = resolved_to[0]
         
         # Create properly formatted MIME message using helper function
         raw_message = _create_mime_message(
-            to=to,
+            to=resolved_to,
             subject=subject,
             body=final_body,
             content_type=final_content_type,
             html_body=final_html_body,
             from_email=user_google_email,
-            cc=cc,
-            bcc=bcc
+            cc=resolved_cc,
+            bcc=resolved_bcc
         )
 
         send_body = {"raw": raw_message}
@@ -793,16 +837,23 @@ async def draft_gmail_message(
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
+        # CRITICAL FIX: Resolve 'me'/'myself' aliases BEFORE creating MIME message
+        resolved_to = _resolve_recipient_aliases(to, user_google_email) if to else ""
+        resolved_cc = _resolve_recipient_aliases(cc, user_google_email)
+        resolved_bcc = _resolve_recipient_aliases(bcc, user_google_email)
+        
+        logger.debug(f"[draft] Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}")
+
         # Create properly formatted MIME message using helper function
         raw_message = _create_mime_message(
-            to=to or "",  # Use empty string if no recipient for draft
+            to=resolved_to,
             subject=subject,
             body=body,
             content_type=content_type,
             html_body=html_body,
             from_email=user_google_email,
-            cc=cc,
-            bcc=bcc
+            cc=resolved_cc,
+            bcc=resolved_bcc
         )
 
         # Create a draft instead of sending
@@ -815,7 +866,7 @@ async def draft_gmail_message(
         draft_id = created_draft.get("id")
 
         # Count total recipients for confirmation using shared utility function
-        total_recipients = count_recipients(to, cc, bcc)
+        total_recipients = count_recipients(resolved_to, resolved_cc, resolved_bcc)
 
         # Get message ID from the draft
         message_id = created_draft.get("message", {}).get("id")
@@ -1634,6 +1685,13 @@ async def forward_gmail_message(
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
+        # CRITICAL FIX: Resolve 'me'/'myself' aliases BEFORE processing
+        resolved_to = _resolve_recipient_aliases(to, user_google_email)
+        resolved_cc = _resolve_recipient_aliases(cc, user_google_email)
+        resolved_bcc = _resolve_recipient_aliases(bcc, user_google_email)
+        
+        logger.debug(f"[forward] Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}")
+
         # Fetch the original message to get headers and body for forwarding
         original_message = await asyncio.to_thread(
             gmail_service.users().messages().get(userId="me", id=message_id, format="full").execute
@@ -1704,9 +1762,9 @@ async def forward_gmail_message(
 
         # Create properly formatted MIME message using helper function
         raw_message = _create_mime_message(
-            to=to,
-            cc=cc,
-            bcc=bcc,
+            to=resolved_to,
+            cc=resolved_cc,
+            bcc=resolved_bcc,
             subject=forward_subject,
             body=full_body,
             content_type=content_type,
@@ -1732,7 +1790,7 @@ async def forward_gmail_message(
                 return ", ".join(recipients)
             return ""
         
-        forwarded_to_str = format_recipient_string(to)
+        forwarded_to_str = format_recipient_string(resolved_to)
         
         return ForwardGmailMessageResponse(
             success=True,
@@ -1741,9 +1799,9 @@ async def forward_gmail_message(
             forwarded_to=forwarded_to_str,
             subject=forward_subject,
             content_type=content_type,
-            to_recipients=to if isinstance(to, list) else [to] if to else [],
-            cc_recipients=cc if isinstance(cc, list) else [cc] if cc else [],
-            bcc_recipients=bcc if isinstance(bcc, list) else [bcc] if bcc else [],
+            to_recipients=resolved_to if isinstance(resolved_to, list) else [resolved_to] if resolved_to else [],
+            cc_recipients=resolved_cc if isinstance(resolved_cc, list) else [resolved_cc] if resolved_cc else [],
+            bcc_recipients=resolved_bcc if isinstance(resolved_bcc, list) else [resolved_bcc] if resolved_bcc else [],
             html_preserved=html_preserved,
             userEmail=user_google_email or "",
             error=None,
@@ -1829,6 +1887,13 @@ async def draft_gmail_forward(
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
+        # CRITICAL FIX: Resolve 'me'/'myself' aliases BEFORE processing
+        resolved_to = _resolve_recipient_aliases(to, user_google_email)
+        resolved_cc = _resolve_recipient_aliases(cc, user_google_email)
+        resolved_bcc = _resolve_recipient_aliases(bcc, user_google_email)
+        
+        logger.debug(f"[draft_forward] Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}")
+
         # Fetch the original message to get headers and body for forwarding
         original_message = await asyncio.to_thread(
             gmail_service.users().messages().get(userId="me", id=message_id, format="full").execute
@@ -1896,9 +1961,9 @@ async def draft_gmail_forward(
 
         # Create properly formatted MIME message using helper function
         raw_message = _create_mime_message(
-            to=to,
-            cc=cc,
-            bcc=bcc,
+            to=resolved_to,
+            cc=resolved_cc,
+            bcc=resolved_bcc,
             subject=forward_subject,
             body=full_body,
             content_type=content_type,
@@ -1924,7 +1989,7 @@ async def draft_gmail_forward(
                 return ", ".join(recipients)
             return ""
         
-        forwarded_to_str = format_recipient_string(to)
+        forwarded_to_str = format_recipient_string(resolved_to)
         
         return DraftGmailForwardResponse(
             success=True,
@@ -1933,9 +1998,9 @@ async def draft_gmail_forward(
             forwarded_to=forwarded_to_str,
             subject=forward_subject,
             content_type=content_type,
-            to_recipients=to if isinstance(to, list) else [to] if to else [],
-            cc_recipients=cc if isinstance(cc, list) else [cc] if cc else [],
-            bcc_recipients=bcc if isinstance(bcc, list) else [bcc] if bcc else [],
+            to_recipients=resolved_to if isinstance(resolved_to, list) else [resolved_to] if resolved_to else [],
+            cc_recipients=resolved_cc if isinstance(resolved_cc, list) else [resolved_cc] if resolved_cc else [],
+            bcc_recipients=resolved_bcc if isinstance(resolved_bcc, list) else [resolved_bcc] if resolved_bcc else [],
             html_preserved=html_preserved,
             userEmail=user_google_email or "",
             error=None

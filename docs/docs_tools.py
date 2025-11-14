@@ -1,25 +1,13 @@
 """
 Google Docs tools for FastMCP2 with middleware-based service injection and fallback support.
 
-This module provides comprehensive Google Docs integrationasync def get_doc_content(
-    document_id: str,
-    user_google_email: UserGoogleEmail = None
-) -> str:ls for FastMCP2 servers,
+This module provides comprehensive Google Docs integration tools for FastMCP2 servers,
 using the new middleware-dependent pattern for Google service authentication with
 fallback to direct service creation when middleware injection is unavailable.
 
-    async def list_docs_in_folder_tool(
-        folder_id: str = 'root',
-        page_size: int = 100,
-        user_google_email: UserGoogleEmail = None
-    ) -> str:eatures:
-- Search for Google Docs by name using Dasync def create_doc(
-    title: str,
-    content: str = "",
-    user_google_email: UserGoogleEmail = None
-) -> str:API
-- R        ""List Google Docs within a specific Drive folder.""
-        return await list_docs_in_folder(folder_id, page_size, user_google_email)rieve content from Google Docs and Drive files
+Features:
+- Search for Google Docs by name using Drive API
+- Retrieve content from Google Docs and Drive files
 - List Google Docs within specific folders
 - Create new Google Docs with initial content
 - Support for both native Google Docs and Office files
@@ -27,11 +15,7 @@ fallback to direct service creation when middleware injection is unavailable.
 - Fallback to direct service creation when middleware unavailable
 
 Architecture:
-- Primary: Uses middleware-based servic    async def create_doc_tool(
-        title: str,
-        content: str = "",
-        user_google_email: UserGoogleEmail = None
-    ) -> str:ection (no decorators)
+- Primary: Uses middleware-based service injection (no decorators)
 - Fallback: Direct service creation when middleware unavailable
 - Automatic Google service authentication and caching
 - Consistent error handling and token refresh
@@ -47,7 +31,7 @@ import logging
 import asyncio
 import io
 import re
-from typing import List, Optional, Union
+from typing import List, Optional, Union, cast
 from pathlib import Path
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -59,7 +43,8 @@ from auth.service_helpers import request_service, get_injected_service, get_serv
 from auth.context import get_user_email_context
 from tools.common_types import UserGoogleEmail
 from .utils import extract_office_xml_text
-from .docs_types import DocsListResponse, DocInfo, CreateDocResponse
+from .docs_types import DocsListResponse, DocInfo, CreateDocResponse, EditConfig
+from .editing import apply_edit_config
 
 from config.enhanced_logging import setup_logger
 
@@ -496,7 +481,7 @@ async def list_docs_in_folder(
                     count=0,
                     folderId=folder_id,
                     folderName=None,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     error=error_msg,
                 )
         else:
@@ -531,7 +516,7 @@ async def list_docs_in_folder(
             count=len(docs),
             folderId=folder_id,
             folderName="root" if folder_id == "root" else None,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
         )
 
     except HttpError as e:
@@ -551,7 +536,7 @@ async def list_docs_in_folder(
             count=0,
             folderId=folder_id,
             folderName=None,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=error_msg,
         )
     except Exception as e:
@@ -561,7 +546,7 @@ async def list_docs_in_folder(
             count=0,
             folderId=folder_id,
             folderName=None,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=f"Unexpected error: {str(e)}",
         )
 
@@ -597,6 +582,9 @@ def detect_content_type(content: Union[str, bytes]) -> tuple[str, str]:
             content = content.decode("utf-8")
         except UnicodeDecodeError:
             return "binary", "application/octet-stream"
+
+    # Type guard: At this point, content must be str (bytes have been decoded or returned early)
+    assert isinstance(content, str), "Content should be str at this point"
 
     # Check for HTML (more comprehensive patterns)
     if re.search(
@@ -784,13 +772,23 @@ async def create_doc(
     content: Union[str, bytes] = "",
     user_google_email: UserGoogleEmail = None,
     content_mime_type: Optional[str] = None,
+    document_id: Optional[str] = None,
+    edit_config: Optional[EditConfig] = None,
 ) -> CreateDocResponse:
     """
-    Creates a new Google Doc with support for multiple content formats and rich formatting.
+    Creates a new Google Doc or edits an existing one with support for multiple content formats and rich formatting.
 
-    This enhanced function uses Google Drive API's automatic conversion feature to create
-    properly formatted Google Docs from various content types. It supports:
+    This enhanced function can either:
+    1. Create a new Google Doc using Drive API's automatic conversion feature
+    2. Edit an existing Google Doc with granular control via EditConfig
 
+    Editing Modes (via edit_config parameter):
+    - replace_all: Replace entire document content (default)
+    - insert_at_line: Insert content at a specific line number
+    - regex_replace: Apply regex search and replace operations
+    - append: Append content to the end of the document
+
+    Supported content formats:
     - Plain text: Direct conversion to Google Doc
     - Markdown: Converted to HTML then to Google Doc with formatting preserved
     - HTML: Direct upload with automatic conversion to Google Doc format
@@ -804,19 +802,221 @@ async def create_doc(
     for flexible content handling. It automatically detects content type if not specified.
 
     Args:
-        title: Title for the new document
-        content: Initial content (string or bytes) to insert into the document
+        title: Title for the new document (or new title for existing document when editing)
+        content: Content (string or bytes) to insert into the document
         user_google_email: The user's Google email address
         content_mime_type: Optional MIME type override. If not provided, auto-detected
+        document_id: Optional document ID. If provided, edits the existing document instead of creating a new one
+        edit_config: Optional EditConfig for granular editing control (insert_at_line, regex_replace, append)
 
     Returns:
         CreateDocResponse: Structured response with document details and metadata
     """
     logger.info(
-        f"[create_doc] Email: '{user_google_email}', Title='{title}', Content size: {len(content) if content else 0}"
+        f"[create_doc] Email: '{user_google_email}', Title='{title}', Content size: {len(content) if content else 0}, Document ID: {document_id or 'None (creating new)'}"
     )
 
-    # Handle empty content case
+    # If editing an existing document, handle it differently
+    if document_id:
+        logger.info(f"[create_doc] Editing existing document: {document_id}")
+
+        # Get both Docs and Drive services
+        docs_key = request_service("docs")
+        drive_key = request_service("drive")
+
+        # Get Docs service
+        try:
+            docs_service = get_injected_service(docs_key)
+            logger.info(f"[create_doc] Using injected Docs service for editing")
+        except RuntimeError as e:
+            logger.warning(f"[create_doc] Docs middleware injection failed: {e}")
+            if (
+                "not yet fulfilled" in str(e).lower()
+                or "service injection" in str(e).lower()
+            ):
+                docs_service = await get_service("docs", user_google_email)
+                logger.info(f"[create_doc] Using direct Docs service for editing")
+            else:
+                raise
+
+        # Get Drive service
+        try:
+            drive_service = get_injected_service(drive_key)
+            logger.info(f"[create_doc] Using injected Drive service for editing")
+        except RuntimeError as e:
+            logger.warning(f"[create_doc] Drive middleware injection failed: {e}")
+            if (
+                "not yet fulfilled" in str(e).lower()
+                or "service injection" in str(e).lower()
+            ):
+                drive_service = await get_service("drive", user_google_email)
+                logger.info(f"[create_doc] Using direct Drive service for editing")
+            else:
+                raise
+
+        try:
+            # Get document info first
+            doc = await asyncio.to_thread(
+                docs_service.documents().get(documentId=document_id).execute
+            )
+            current_title = doc.get("title", "Unknown")
+
+            # Prepare content for insertion
+            detected_type = "unknown"
+            upload_mime_type = "text/plain"
+            has_formatting = False
+            edit_message = "No content changes"
+
+            if content or edit_config:
+                # Detect or use provided content type
+                if content_mime_type:
+                    detected_type = (
+                        content_mime_type.split("/")[-1]
+                        if "/" in content_mime_type
+                        else content_mime_type
+                    )
+                    upload_mime_type = content_mime_type
+                else:
+                    detected_type, upload_mime_type = detect_content_type(content)
+
+                # Process content based on type - convert to plain text for editing
+                text_content = ""
+                if detected_type == "markdown":
+                    # Ensure string type
+                    if isinstance(content, bytes):
+                        content_text = content.decode("utf-8")
+                    else:
+                        content_text = cast(str, content)
+                    # For editing, use plain text from markdown
+                    text_content = content_text
+                    has_formatting = True
+                elif detected_type == "html":
+                    # Strip HTML tags for plain text insertion
+                    if isinstance(content, bytes):
+                        content_text = content.decode("utf-8")
+                    else:
+                        content_text = cast(str, content)
+                    text_content = re.sub(r"<[^>]+>", "", content_text)
+                    has_formatting = True
+                else:
+                    # Plain text
+                    if isinstance(content, bytes):
+                        text_content = content.decode("utf-8", errors="replace")
+                    else:
+                        text_content = cast(str, content)
+
+                # Use EditConfig if provided, otherwise default to replace_all
+                if not edit_config:
+                    edit_config = EditConfig(mode="replace_all")
+
+                # Apply the edit configuration
+                try:
+                    requests, edit_message = await apply_edit_config(
+                        docs_service, document_id, text_content, edit_config, doc
+                    )
+                except ValueError as ve:
+                    logger.error(f"[create_doc] EditConfig validation error: {ve}")
+                    return CreateDocResponse(
+                        docId=document_id,
+                        docName=title,
+                        webViewLink="",
+                        mimeType="",
+                        sourceContentType=detected_type,
+                        uploadMimeType=upload_mime_type,
+                        userEmail=user_google_email or "",
+                        success=False,
+                        message="",
+                        error=f"Invalid edit configuration: {str(ve)}",
+                    )
+
+                # Update the document
+                await asyncio.to_thread(
+                    docs_service.documents()
+                    .batchUpdate(documentId=document_id, body={"requests": requests})
+                    .execute
+                )
+
+                logger.info(
+                    f"[create_doc] Successfully updated document: {edit_message}"
+                )
+
+            # Update title if different
+            if title and title != current_title:
+                await asyncio.to_thread(
+                    drive_service.files()
+                    .update(fileId=document_id, body={"name": title})
+                    .execute
+                )
+                logger.info(f"[create_doc] Updated document title to: {title}")
+
+            # Get updated file metadata
+            file_metadata = await asyncio.to_thread(
+                drive_service.files()
+                .get(fileId=document_id, fields="id,name,webViewLink,mimeType")
+                .execute
+            )
+
+            return CreateDocResponse(
+                docId=document_id,
+                docName=file_metadata.get("name", title),
+                webViewLink=file_metadata.get(
+                    "webViewLink",
+                    f"https://docs.google.com/document/d/{document_id}/edit",
+                ),
+                mimeType=file_metadata.get(
+                    "mimeType", "application/vnd.google-apps.document"
+                ),
+                sourceContentType=detected_type,
+                uploadMimeType=upload_mime_type,
+                userEmail=user_google_email or "",
+                success=True,
+                message=f"Successfully edited Google Doc '{file_metadata.get('name', title)}': {edit_message}",
+                contentLength=len(content) if content else 0,
+                hasFormatting=has_formatting,
+            )
+
+        except HttpError as e:
+            logger.error(f"Google API error editing document: {e}")
+            error_msg = ""
+            if e.resp.status == 401:
+                error_msg = (
+                    "Authentication failed. Please check your Google credentials."
+                )
+            elif e.resp.status == 403:
+                error_msg = "Permission denied. Make sure you have edit access to this document."
+            elif e.resp.status == 404:
+                error_msg = f"Document not found: {document_id}"
+            else:
+                error_msg = f"Error editing document: {str(e)}"
+
+            return CreateDocResponse(
+                docId=document_id,
+                docName=title,
+                webViewLink="",
+                mimeType="",
+                sourceContentType="unknown",
+                uploadMimeType="",
+                userEmail=user_google_email or "",
+                success=False,
+                message="",
+                error=error_msg,
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error editing document: {e}", exc_info=True)
+            return CreateDocResponse(
+                docId=document_id,
+                docName=title,
+                webViewLink="",
+                mimeType="",
+                sourceContentType="unknown",
+                uploadMimeType="",
+                userEmail=user_google_email or "",
+                success=False,
+                message="",
+                error=f"Unexpected error: {str(e)}",
+            )
+
+    # Handle empty content case for new documents
     if not content:
         docs_key = request_service("docs")
 
@@ -958,8 +1158,10 @@ async def create_doc(
         if detected_type == "markdown":
             # Convert markdown to HTML for better formatting
             if isinstance(content, bytes):
-                content = content.decode("utf-8")
-            html_content = markdown_to_html(content)
+                md_text = content.decode("utf-8")
+            else:
+                md_text = cast(str, content)
+            html_content = markdown_to_html(md_text)
             content_bytes = html_content.encode("utf-8")
             upload_mime_type = "text/html"
             has_formatting = True
@@ -976,9 +1178,13 @@ async def create_doc(
         elif detected_type == "latex":
             # Convert LaTeX to HTML (basic conversion)
             if isinstance(content, bytes):
-                content = content.decode("utf-8")
+                latex_text = content.decode("utf-8")
+            else:
+                latex_text = cast(str, content)
             # Basic LaTeX to HTML conversion (can be enhanced)
-            html_content = content.replace("\\section{", "<h2>").replace("}", "</h2>")
+            html_content = latex_text.replace("\\section{", "<h2>").replace(
+                "}", "</h2>"
+            )
             html_content = html_content.replace("\\subsection{", "<h3>").replace(
                 "}", "</h3>"
             )
@@ -998,13 +1204,17 @@ async def create_doc(
         else:
             # Plain text or unknown - wrap in basic HTML for better display
             if isinstance(content, bytes):
-                content = content.decode("utf-8", errors="replace")
+                plain_text = content.decode("utf-8", errors="replace")
+            else:
+                plain_text = cast(str, content)
             # Escape HTML characters
-            content = (
-                content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            plain_text = (
+                plain_text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
             )
             # Convert newlines to paragraphs
-            paragraphs = content.split("\n\n")
+            paragraphs = plain_text.split("\n\n")
             html_content = "".join(
                 f'<p>{p.replace(chr(10), "<br>")}</p>' for p in paragraphs if p.strip()
             )
@@ -1081,10 +1291,8 @@ async def create_doc(
             docName=title,
             webViewLink="",
             mimeType="",
-            sourceContentType=(
-                detected_type if "detected_type" in locals() else "unknown"
-            ),
-            uploadMimeType=upload_mime_type if "upload_mime_type" in locals() else "",
+            sourceContentType="unknown",
+            uploadMimeType="",
             userEmail=user_google_email or "",
             success=False,
             message="",
@@ -1164,10 +1372,12 @@ def setup_docs_tools(mcp: FastMCP):
 
     @mcp.tool(
         name="create_doc",
-        description="Create a new Google Doc with support for multiple content formats. Accepts plain text, Markdown, HTML, RTF, DOCX, LaTeX, and other formats. Content type is automatically detected or can be specified via content_mime_type parameter. Returns structured response with document metadata.",
+        description="Create a new Google Doc or edit an existing one with support for multiple content formats and advanced editing modes. Supports replace_all, insert_at_line, regex_replace, and append modes via edit_config parameter. Accepts plain text, Markdown, HTML, RTF, DOCX, LaTeX formats with automatic detection. Returns structured response with document metadata.",
         tags={
             "docs",
             "create",
+            "edit",
+            "update",
             "google",
             "markdown",
             "html",
@@ -1175,14 +1385,18 @@ def setup_docs_tools(mcp: FastMCP):
             "docx",
             "rtf",
             "convert",
+            "regex",
+            "advanced",
         },
         annotations={
-            "title": "Create Google Doc with Multi-Format Support",
+            "title": "Create or Edit Google Doc with Advanced Editing Modes",
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
             "openWorldHint": True,
             "supportsMultipleFormats": True,
+            "supportsEdit": True,
+            "supportsAdvancedEditing": True,
         },
     )
     async def create_doc_tool(
@@ -1190,8 +1404,10 @@ def setup_docs_tools(mcp: FastMCP):
         content: Union[str, bytes] = "",
         user_google_email: UserGoogleEmail = None,
         content_mime_type: Optional[str] = None,
+        document_id: Optional[str] = None,
+        edit_config: Optional[EditConfig] = None,
     ) -> CreateDocResponse:
-        """Create a new Google Doc with automatic content format detection and conversion.
+        """Create a new Google Doc or edit an existing one with advanced editing capabilities.
 
         Supports:
         - Plain text, Markdown, HTML for rich formatting
@@ -1199,9 +1415,23 @@ def setup_docs_tools(mcp: FastMCP):
         - LaTeX for academic documents
         - Custom MIME types via content_mime_type parameter
         - Binary content as bytes
+        - Advanced editing modes: replace_all, insert_at_line, regex_replace, append
+
+        Edit Modes (via edit_config):
+        - replace_all: Replace entire document (default)
+        - insert_at_line: Insert at specific line number
+        - regex_replace: Apply regex search/replace operations
+        - append: Append to end of document
 
         Returns structured response with document ID, link, and metadata.
         """
-        return await create_doc(title, content, user_google_email, content_mime_type)
+        return await create_doc(
+            title,
+            content,
+            user_google_email,
+            content_mime_type,
+            document_id,
+            edit_config,
+        )
 
     logger.info("Google Docs tools registered successfully")

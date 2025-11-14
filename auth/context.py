@@ -4,6 +4,8 @@ import logging
 from typing_extensions import Optional, Dict, Any, Union, List
 from datetime import datetime, timedelta
 import threading
+import json
+from pathlib import Path
 
 from fastmcp import Context
 from fastmcp.server.dependencies import get_context
@@ -62,14 +64,89 @@ def set_user_email_context(user_email: str) -> None:
         logger.debug("Cannot set user email context - not in a FastMCP request context")
 
 
+def get_user_email_from_oauth() -> Optional[str]:
+    """
+    Get user email from OAuth credential files as a fallback when context is not available.
+    
+    This function reads the most recently modified OAuth credential file to extract the user email.
+    This provides an alternative authentication strategy when AuthMiddleware or FastMCP context
+    is not available (e.g., during MCP SDK 1.21.1+ incompatibilities).
+    
+    Returns:
+        Optional[str]: User email from OAuth credentials, or None if not found
+    """
+    try:
+        # Import settings to get credentials directory
+        from config.settings import settings
+        
+        credentials_dir = Path(settings.credentials_dir)
+        if not credentials_dir.exists():
+            logger.debug(f"OAuth credentials directory does not exist: {credentials_dir}")
+            return None
+        
+        # Find all credential files
+        credential_files = list(credentials_dir.glob("*_credentials.json"))
+        if not credential_files:
+            logger.debug(f"No OAuth credential files found in {credentials_dir}")
+            return None
+        
+        # Use the most recently modified credential file
+        # This assumes the most recent authentication is the active one
+        latest_file = max(credential_files, key=lambda p: p.stat().st_mtime)
+        
+        logger.debug(f"Reading OAuth credentials from: {latest_file.name}")
+        
+        # Read and parse the credential file
+        with open(latest_file, 'r') as f:
+            creds_data = json.load(f)
+        
+        # Extract user email from the credential file
+        user_email = creds_data.get("user_email")
+        
+        if user_email:
+            logger.info(f"✅ Retrieved user email from OAuth file: {user_email}")
+            return user_email
+        else:
+            logger.warning(f"OAuth credential file {latest_file.name} does not contain user_email field")
+            return None
+            
+    except FileNotFoundError as e:
+        logger.debug(f"OAuth credential file not found: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse OAuth credential file: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error reading user email from OAuth credentials: {e}")
+        return None
+
+
 def get_user_email_context() -> Optional[str]:
-    """Get the current user email from the FastMCP context."""
+    """
+    Get the current user email from the FastMCP context or OAuth files.
+    
+    This function first attempts to get the email from FastMCP context (if available),
+    and falls back to reading from OAuth credential files if context is not available.
+    This provides compatibility with MCP SDK 1.21.1+ where AuthMiddleware may not be available.
+    
+    Returns:
+        Optional[str]: User email from context or OAuth files, or None if not found
+    """
     try:
         ctx = get_context()
-        return ctx.get_state("user_email")
+        email = ctx.get_state("user_email")
+        if email:
+            logger.debug(f"Retrieved user email from FastMCP context: {email}")
+            return email
     except RuntimeError:
         logger.debug("Cannot get user email context - not in a FastMCP request context")
-        return None
+    
+    # Fallback to OAuth file-based authentication
+    logger.debug("Attempting OAuth file-based authentication fallback")
+    email = get_user_email_from_oauth()
+    if email:
+        logger.info(f"🔄 Using OAuth file-based authentication fallback for: {email}")
+    return email
 
 
 def clear_user_email_context() -> None:

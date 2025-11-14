@@ -1,0 +1,288 @@
+{% macro render_workspace_dashboard(labels_data, calendars_data, events_data, user_email, title="Google Workspace Dashboard") %}
+{#
+  Complete Workspace Dashboard Macro - Dark Theme with Improved Labels
+  Leverages URI resources: service://gmail/labels, service://calendar/calendars, service://calendar/events, user://current/email
+  Returns: Beautiful HTML dashboard with metrics, events, and improved label visualization
+#}
+
+{# Handle labels data structure #}
+{% if labels_data and labels_data.result %}
+  {% set all_labels = labels_data.result.labels or [] %}
+  {% set user_labels = labels_data.result.user_labels or [] %}
+{% elif labels_data and labels_data.labels %}
+  {% set all_labels = labels_data.labels or [] %}
+  {% set user_labels = labels_data.user_labels or [] %}
+{% elif labels_data is sequence and labels_data is not string %}
+  {% set all_labels = labels_data %}
+  {% set user_labels = labels_data | selectattr('type','equalto','user') | list %}
+{% else %}
+  {% set all_labels = [] %}
+  {% set user_labels = [] %}
+{% endif %}
+
+{# Handle calendars data structure #}
+{% if calendars_data and calendars_data.result %}
+  {% set calendars = calendars_data.result.calendars or [] %}
+{% elif calendars_data and calendars_data.calendars %}
+  {% set calendars = calendars_data.calendars or [] %}
+{% elif calendars_data is sequence and calendars_data is not string %}
+  {% set calendars = calendars_data %}
+{% else %}
+  {% set calendars = [] %}
+{% endif %}
+
+{# Handle events data structure #}
+{% if events_data and events_data.result %}
+  {% set events = events_data.result.events or [] %}
+{% elif events_data and events_data.events %}
+  {% set events = events_data.events or [] %}
+{% elif events_data is sequence and events_data is not string %}
+  {% set events = events_data %}
+{% else %}
+  {% set events = [] %}
+{% endif %}
+
+{# Calculate metrics #}
+{% set unread_labels = all_labels | selectattr('messagesUnread', 'gt', 0) | list %}
+{% set total_unread = all_labels | sum(attribute='messagesUnread') %}
+{% set top_unread = unread_labels | sort(attribute='messagesUnread', reverse=True) %}
+
+{# Sort user labels by unread count for better display #}
+{% set user_labels_sorted = user_labels | sort(attribute='messagesUnread', reverse=True) %}
+
+{# Get user email #}
+{% if user_email and user_email.email %}
+  {% set email = user_email.email %}
+{% elif user_email %}
+  {% set email = user_email %}
+{% else %}
+  {% set email = 'User' %}
+{% endif %}
+
+<!-- Google Workspace Dashboard - Dark Theme -->
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0; padding:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif; background:#0a0e1a; color:#e5e7eb;">
+
+<div style="max-width:1200px; margin:0 auto; padding:30px 20px;">
+  
+  {# ===== HEADER ===== #}
+  <div style="background:linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius:16px; padding:32px; margin-bottom:24px; box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+    <h1 style="margin:0 0 8px 0; color:#f1f5f9; font-size:36px; font-weight:900; letter-spacing:-0.02em;">
+      ✨ {{ title }}
+    </h1>
+    <p style="margin:0; color:#94a3b8; font-size:16px;">
+      {{ email }} • Generated with URI Resources
+    </p>
+  </div>
+
+  {# ===== KEY METRICS GRID ===== #}
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:16px; margin-bottom:24px;">
+    
+    {# Metric: Total Labels #}
+    <div style="background:#1e293b; border-radius:12px; padding:24px; border-left:4px solid #3b82f6; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+      <div style="color:#94a3b8; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
+        📧 Total Labels
+      </div>
+      <div style="color:#f1f5f9; font-size:42px; font-weight:900; line-height:1;">
+        {{ all_labels | length }}
+      </div>
+    </div>
+
+    {# Metric: Unread Messages #}
+    <div style="background:#1e293b; border-radius:12px; padding:24px; border-left:4px solid #ef4444; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+      <div style="color:#94a3b8; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
+        🔥 Total Unread
+      </div>
+      <div style="color:#f1f5f9; font-size:42px; font-weight:900; line-height:1;">
+        {{ total_unread|default(0) }}
+      </div>
+    </div>
+
+    {# Metric: Calendars #}
+    <div style="background:#1e293b; border-radius:12px; padding:24px; border-left:4px solid #22c55e; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+      <div style="color:#94a3b8; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
+        📅 Calendars
+      </div>
+      <div style="color:#f1f5f9; font-size:42px; font-weight:900; line-height:1;">
+        {{ calendars | length }}
+      </div>
+    </div>
+
+    {# Metric: Upcoming Events #}
+    <div style="background:#1e293b; border-radius:12px; padding:24px; border-left:4px solid #f59e0b; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+      <div style="color:#94a3b8; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
+        ⏰ Upcoming Events
+      </div>
+      <div style="color:#f1f5f9; font-size:42px; font-weight:900; line-height:1;">
+        {{ events | length }}
+      </div>
+    </div>
+
+  </div>
+
+  {# ===== TOP UNREAD LABELS ===== #}
+  {% if top_unread %}
+  <div style="background:#1e293b; border-radius:12px; padding:24px; margin-bottom:24px; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+    <h2 style="margin:0 0 20px 0; color:#f1f5f9; font-size:24px; font-weight:800; border-bottom:2px solid #334155; padding-bottom:12px;">
+      🔥 Top 8 Labels with Unread Messages
+    </h2>
+    
+    <div style="display:grid; gap:12px;">
+      {% for label in top_unread[:8] %}
+        {% set bg_color = (label.color.backgroundColor if label.color and label.color.backgroundColor else '#3b82f6') %}
+        {% set text_color = (label.color.textColor if label.color and label.color.textColor else '#ffffff') %}
+        
+        <div style="background:#0f172a; border-radius:8px; padding:16px; display:flex; align-items:center; justify-content:space-between; border-left:4px solid {{ bg_color }};">
+          <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
+            <div style="width:8px; height:8px; border-radius:50%; background:{{ bg_color }}; flex-shrink:0;"></div>
+            <span style="color:#e5e7eb; font-size:15px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              {{ label.name }}
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:16px; flex-shrink:0;">
+            <span style="color:#64748b; font-size:13px;">
+              {{ label.messagesTotal|default(0) }} total
+            </span>
+            <div style="background:{{ bg_color }}; color:{{ text_color }}; padding:6px 14px; border-radius:999px; font-size:13px; font-weight:700;">
+              {{ label.messagesUnread|default(0) }} unread
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ===== UPCOMING EVENTS ===== #}
+  {% if events %}
+  <div style="background:#1e293b; border-radius:12px; padding:24px; margin-bottom:24px; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+    <h2 style="margin:0 0 20px 0; color:#f1f5f9; font-size:24px; font-weight:800; border-bottom:2px solid #334155; padding-bottom:12px;">
+      📅 Next 7 Upcoming Events
+    </h2>
+    
+    <div style="display:grid; gap:12px;">
+      {% for event in events[:7] %}
+        <div style="background:#0f172a; border-radius:8px; padding:16px; border-left:4px solid #22c55e;">
+          <div style="display:flex; align-items:start; gap:16px;">
+            <div style="flex-shrink:0; text-align:center; min-width:80px;">
+              <div style="color:#22c55e; font-size:13px; font-weight:700; margin-bottom:4px;">
+                {{ event.start[:10] if event.start else 'TBD' }}
+              </div>
+              {% if event.start and 'T' in event.start %}
+                <div style="color:#64748b; font-size:12px;">
+                  {{ event.start[11:16] if event.start else '' }}
+                </div>
+              {% endif %}
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="color:#e5e7eb; font-size:15px; font-weight:600; margin-bottom:6px;">
+                {{ event.summary }}
+              </div>
+              {% if event.location %}
+                <div style="color:#64748b; font-size:13px; display:flex; align-items:center; gap:6px;">
+                  <span>📍</span>
+                  <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ event.location }}</span>
+                </div>
+              {% endif %}
+              {% if event.attendees %}
+                <div style="color:#64748b; font-size:12px; margin-top:4px;">
+                  👥 {{ event.attendees | length }} attendees
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    
+    {% if events | length > 7 %}
+      <div style="margin-top:16px; text-align:center; color:#64748b; font-size:13px;">
+        ...and {{ events | length - 7 }} more upcoming events
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ===== CALENDARS LIST ===== #}
+  {% if calendars %}
+  <div style="background:#1e293b; border-radius:12px; padding:24px; margin-bottom:24px; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+    <h2 style="margin:0 0 20px 0; color:#f1f5f9; font-size:24px; font-weight:800; border-bottom:2px solid #334155; padding-bottom:12px;">
+      📆 Your Calendars
+    </h2>
+    
+    <div style="display:grid; gap:12px;">
+      {% for calendar in calendars %}
+        <div style="background:#0f172a; border-radius:8px; padding:16px; border-left:4px solid #8b5cf6;">
+          <div style="color:#e5e7eb; font-size:15px; font-weight:600; margin-bottom:6px;">
+            {{ calendar.summary }}
+          </div>
+          <div style="color:#64748b; font-size:13px;">
+            🕐 {{ calendar.timeZone }}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ===== USER LABELS - IMPROVED CARD LAYOUT ===== #}
+  {% if user_labels_sorted %}
+  <div style="background:#1e293b; border-radius:12px; padding:24px; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+    <h2 style="margin:0 0 20px 0; color:#f1f5f9; font-size:24px; font-weight:800; border-bottom:2px solid #334155; padding-bottom:12px;">
+      🏷️ Your Custom Labels ({{ user_labels_sorted | length }})
+    </h2>
+    
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px;">
+      {% for label in user_labels_sorted %}
+        {% set bg_color = (label.color.backgroundColor if label.color and label.color.backgroundColor else '#3b82f6') %}
+        {% set text_color = (label.color.textColor if label.color and label.color.textColor else '#ffffff') %}
+        {% set unread = label.messagesUnread or 0 %}
+        {% set total = label.messagesTotal or 0 %}
+        
+        <div style="background:#0f172a; border-radius:8px; padding:14px; border-left:4px solid {{ bg_color }};">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
+              <div style="width:6px; height:6px; border-radius:50%; background:{{ bg_color }}; flex-shrink:0;"></div>
+              <span style="color:#e5e7eb; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                {{ label.name }}
+              </span>
+            </div>
+            {% if unread > 0 %}
+              <div style="background:{{ bg_color }}; color:{{ text_color }}; padding:3px 8px; border-radius:10px; font-size:11px; font-weight:700; flex-shrink:0;">
+                {{ unread }}
+              </div>
+            {% endif %}
+          </div>
+          <div style="color:#64748b; font-size:12px;">
+            {{ total|default(0) }} total messages
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ===== FOOTER ===== #}
+  <div style="margin-top:32px; padding:20px; text-align:center; color:#64748b; font-size:13px; border-top:1px solid #1e293b;">
+    <div style="margin-bottom:8px;">
+      🚀 <strong style="color:#94a3b8;">Powered by Google Workspace MCP</strong>
+    </div>
+    <div style="font-size:11px; color:#475569;">
+      Generated with Jinja2 macros + URI resources (30x faster than API calls!)
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
+{% endmacro %}
+
+{#
+MACRO USAGE EXAMPLE:
+{{ render_workspace_dashboard(service://gmail/labels, service://calendar/calendars, service://calendar/events, user://current/email, 'My Dashboard') }}
+#}
