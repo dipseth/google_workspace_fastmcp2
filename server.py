@@ -109,24 +109,31 @@ logger.info("🔐 FastMCP running with legacy OAuth system")
 logger.info("  All existing OAuth endpoints active")
 logger.info("  MCP Inspector discovery available")
 
-from auth.middleware import create_enhanced_auth_middleware
-auth_middleware = create_enhanced_auth_middleware(
-    storage_mode=credential_storage_mode,
-    google_provider=None  # No GoogleProvider - use legacy system
-)
-# Enable service selection for existing OAuth system
-logger.info("🔧 Configuring service selection for legacy OAuth system")
-auth_middleware.enable_service_selection(enabled=True)
-logger.info("✅ Service selection interface enabled for OAuth flows")
+# TEMPORARILY DISABLED AGAIN: Testing if our fixes work
+# from auth.middleware import create_enhanced_auth_middleware
+# auth_middleware = create_enhanced_auth_middleware(
+#     storage_mode=credential_storage_mode,
+#     google_provider=None  # No GoogleProvider - use legacy system
+# )
+# # Enable service selection for existing OAuth system
+# logger.info("🔧 Configuring service selection for legacy OAuth system")
+# auth_middleware.enable_service_selection(enabled=True)
+# logger.info("✅ Service selection interface enabled for OAuth flows")
 
-mcp.add_middleware(auth_middleware)
+# mcp.add_middleware(auth_middleware)
 
-# Register the AuthMiddleware instance in context for tool access
-from auth.context import set_auth_middleware
-set_auth_middleware(auth_middleware)
+# # Register the AuthMiddleware instance in context for tool access
+# from auth.context import set_auth_middleware
+# set_auth_middleware(auth_middleware)
+# logger.info("✅ AuthMiddleware re-enabled with MCP SDK 1.21.1 compatibility fixes")
+logger.info("⚠️ AuthMiddleware DISABLED - testing to isolate context error source")
+auth_middleware = None  # For health endpoint compatibility
 
 # 2. MCP spec-compliant auth middleware for WWW-Authenticate headers
-mcp.add_middleware(MCPAuthMiddleware())
+# TEMPORARILY DISABLED: MCPAuthMiddleware incompatible with MCP SDK 1.21.1 context handling
+# TODO: Fix MCPAuthMiddleware for new SDK or remove if GoogleProvider handles this
+# mcp.add_middleware(MCPAuthMiddleware())
+logger.info("⚠️ MCPAuthMiddleware temporarily disabled - incompatible with MCP SDK 1.21.1")
 
 # Setup Enhanced Template Parameter Middleware with full Jinja2 support (MUST be before tools are registered)
 logger.info("🎭 Setting up Enhanced Template Parameter Middleware with full modular architecture...")
@@ -226,14 +233,16 @@ setup_unified_card_tool(mcp)
 # setup_smart_card_tool(mcp)
 
 # Register ModuleWrapper middleware with custom collection name to match unified_card_tool.py
-logger.info("🔄 Initializing ModuleWrapper middleware...")
-middleware = setup_module_wrapper_middleware(mcp, modules_to_wrap=["card_framework.v2"], tool_pushdown=False)
-# Override the collection name to match what unified_card_tool.py expects
-if "card_framework.v2" in middleware.wrappers:
-    wrapper = middleware.wrappers["card_framework.v2"]
-    wrapper.collection_name = "card_framework_components_fastembed"
-    logger.info("✅ Updated ModuleWrapper to use FastEmbed collection: card_framework_components_fastembed")
-logger.info("✅ ModuleWrapper middleware initialized with tools enabled")
+# TEMPORARILY DISABLED: Testing MCP SDK 1.21.1 compatibility
+# logger.info("🔄 Initializing ModuleWrapper middleware...")
+# middleware = setup_module_wrapper_middleware(mcp, modules_to_wrap=["card_framework.v2"], tool_pushdown=False)
+# # Override the collection name to match what unified_card_tool.py expects
+# if "card_framework.v2" in middleware.wrappers:
+#     wrapper = middleware.wrappers["card_framework.v2"]
+#     wrapper.collection_name = "card_framework_components_fastembed"
+#     logger.info("✅ Updated ModuleWrapper to use FastEmbed collection: card_framework_components_fastembed")
+# logger.info("✅ ModuleWrapper middleware initialized with tools enabled")
+logger.info("⚠️ ModuleWrapper middleware temporarily disabled - testing MCP SDK 1.21.1 compatibility")
 
 # Register JWT-enhanced Chat tools (demonstration)
 # setup_jwt_chat_tools(mcp)

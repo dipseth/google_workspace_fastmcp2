@@ -1,4 +1,4 @@
-"""MCP Authentication Middleware implementing MCP spec 2025-06-18.
+"""MCP Authentication Middleware implementing MCP spec 2025-03-26.
 
 This middleware ensures proper WWW-Authenticate headers are returned
 on 401 responses to trigger OAuth discovery flow in MCP clients.

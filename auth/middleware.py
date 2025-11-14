@@ -108,47 +108,39 @@ class AuthMiddleware(Middleware):
         """Handle incoming requests and set session context."""
         from .context import store_session_data, get_session_data, list_sessions
         
-        # FIRST: Check if we already have a session context set
-        existing_session = get_session_context()
-        if existing_session:
-            session_id = existing_session
-            logger.debug(f"✅ Reusing existing session context: {session_id}")
-        else:
-            # Try to extract session ID from various possible locations
-            session_id = None
-            
-            # Try FastMCP context first
-            if hasattr(context, 'fastmcp_context') and context.fastmcp_context:
-                session_id = getattr(context.fastmcp_context, 'session_id', None)
-            
-            # Try to get from headers or other context
-            if not session_id and hasattr(context, 'request'):
-                # Try to extract from request headers or similar
-                session_id = getattr(context.request, 'session_id', None)
-            
-            # If still no session, check if we have any active sessions and use the most recent
-            if not session_id:
-                active_sessions = list_sessions()
-                if active_sessions:
-                    # Use the most recently used session
-                    session_id = active_sessions[-1]
-                    logger.debug(f"♻️ Reusing most recent active session: {session_id}")
-                else:
-                    # Generate a new session ID only if absolutely necessary
-                    import uuid
-                    session_id = str(uuid.uuid4())
-                    logger.debug(f"🆕 Generated new session ID (no active sessions found): {session_id}")
+        # MCP SDK 1.21.1 FIX: Don't access context during early request phases
+        # Just use session store directly to avoid "Context is not available" errors
+        session_id = None
         
-        set_session_context(session_id)
-        logger.debug(f"🔍 DEBUG: Set session context: {session_id}")
+        # Try FastMCP context first (but only if available)
+        if hasattr(context, 'fastmcp_context') and context.fastmcp_context:
+            session_id = getattr(context.fastmcp_context, 'session_id', None)
         
-        # Check if we have a stored user email for this session (from OAuth)
-        user_email = get_session_data(session_id, "user_email")
-        if user_email:
-            set_user_email_context(user_email)
-            logger.debug(f"🔍 DEBUG: Restored user email context from session: {user_email}")
-        else:
-            logger.debug(f"🔍 DEBUG: No stored user email found for session: {session_id}")
+        # Try to get from headers or other context
+        if not session_id and hasattr(context, 'request'):
+            session_id = getattr(context.request, 'session_id', None)
+        
+        # If still no session, check if we have any active sessions and use the most recent
+        if not session_id:
+            active_sessions = list_sessions()
+            if active_sessions:
+                # Use the most recently used session
+                session_id = active_sessions[-1]
+                logger.debug(f"♻️ Reusing most recent active session: {session_id}")
+            else:
+                # Generate a new session ID only if absolutely necessary
+                import uuid
+                session_id = str(uuid.uuid4())
+                logger.debug(f"🆕 Generated new session ID (no active sessions found): {session_id}")
+        
+        # MCP SDK 1.21.1: Do NOT set context in on_request - it's too early!
+        # Context access must be delayed until on_call_tool or on_read_resource
+        # Just use session_id directly without setting context
+        logger.debug(f"🔍 Using session ID: {session_id} (context setting delayed)")
+        
+        # Store session_id in MiddlewareContext for later access (not FastMCP context)
+        if hasattr(context, '__dict__'):
+            context.__dict__['_session_id'] = session_id
         
         # Periodic cleanup of expired sessions
         now = datetime.now()
@@ -167,14 +159,9 @@ class AuthMiddleware(Middleware):
             logger.error(f"Error in request processing: {e}")
             raise
         finally:
-            # Don't clear session context - we need it to persist!
-            # Only clear service requests to avoid memory leaks
-            try:
-                ctx = get_context()
-                ctx.set_state("service_requests", {})
-            except RuntimeError:
-                pass
-            logger.debug(f"🔍 DEBUG: Preserving session context {session_id} for future requests")
+            # MCP SDK 1.21.1 FIX: Don't access context in finally block
+            # Service requests will be cleared naturally when context is destroyed
+            logger.debug(f"🔍 Preserving session {session_id} for future requests")
     
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         """
@@ -195,25 +182,22 @@ class AuthMiddleware(Middleware):
         tool_name = getattr(context.message, 'name', 'unknown')
         logger.debug(f"Processing tool call: {tool_name}")
         
-        # Session context should already be set by on_request
-        session_id = get_session_context()
+        # MCP SDK 1.21.1 FIX: Get session from MiddlewareContext, not FastMCP context
+        session_id = getattr(context, '_session_id', None) if hasattr(context, '__dict__') else None
+        
         if not session_id:
-            # This shouldn't happen, but handle gracefully
-            # Check for any active sessions first
+            # Fallback to session store
             from .context import list_sessions
             active_sessions = list_sessions()
             if active_sessions:
                 session_id = active_sessions[-1]
-                set_session_context(session_id)
-                logger.debug(f"♻️ Reactivated session for tool {tool_name}: {session_id}")
+                logger.debug(f"♻️ Using active session for tool {tool_name}: {session_id}")
             else:
-                # Only generate new if absolutely necessary
                 import uuid
                 session_id = str(uuid.uuid4())
-                set_session_context(session_id)
-                logger.warning(f"⚠️ Had to generate new session for tool {tool_name}: {session_id}")
+                logger.debug(f"🆕 Generated session for tool {tool_name}: {session_id}")
         else:
-            logger.debug(f"✅ Using existing session for tool {tool_name}: {session_id}")
+            logger.debug(f"✅ Using session for tool {tool_name}: {session_id}")
         
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
@@ -1049,7 +1033,14 @@ class AuthMiddleware(Middleware):
             # Follow the FastMCP pattern exactly as shown in examples
             from fastmcp.server.dependencies import get_access_token
             
-            access_token = get_access_token()
+            # MCP SDK 1.21.1 FIX: get_access_token() may fail during handshake
+            try:
+                access_token = get_access_token()
+            except RuntimeError as ctx_error:
+                if "context" in str(ctx_error).lower():
+                    # Context not available yet - this is normal during handshake
+                    return None
+                raise
             
             # Check if we have token claims (GoogleProvider or JWT)
             if hasattr(access_token, 'claims'):
