@@ -238,3 +238,59 @@ class ServiceItemDetailsResponse(BaseModel):
             result=result,
             generated_at=generated_at
         )
+
+
+class ServiceErrorResponse(BaseModel):
+    """
+    Pydantic BaseModel for error responses from TagBasedResourceMiddleware.
+    
+    This structure is returned when errors occur during resource handling,
+    providing consistent error formatting across all service:// URI operations.
+    
+    Example usage:
+        # For invalid URI like service://gmail
+        {
+            "error": true,
+            "message": "Service root access not implemented: service://gmail",
+            "help": "Use service://gmail/lists to see available list types",
+            "uri": "service://gmail",
+            "generated_at": "2024-01-15T10:30:00.000Z"
+        }
+    """
+    
+    error: bool = Field(default=True, description="Always true for error responses")
+    message: str = Field(description="Main error description")
+    help: Optional[str] = Field(default=None, description="Optional help or suggestion message")
+    uri: Optional[str] = Field(default=None, description="The URI that caused the error")
+    generated_at: str = Field(description="ISO timestamp of when the error occurred")
+    
+    @classmethod
+    def from_error(
+        cls,
+        message: str,
+        help_message: Optional[str] = None,
+        uri: Optional[str] = None,
+        generated_at: Optional[str] = None
+    ) -> "ServiceErrorResponse":
+        """
+        Convenience method to create ServiceErrorResponse from error data.
+        
+        Args:
+            message: Main error description
+            help_message: Optional help or suggestion message
+            uri: Optional URI that caused the error
+            generated_at: Optional timestamp (defaults to current time)
+            
+        Returns:
+            ServiceErrorResponse instance
+        """
+        if generated_at is None:
+            generated_at = datetime.now().isoformat()
+            
+        return cls(
+            error=True,
+            message=message,
+            help=help_message,
+            uri=uri,
+            generated_at=generated_at
+        )

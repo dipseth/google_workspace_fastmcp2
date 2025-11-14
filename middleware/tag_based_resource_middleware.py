@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from auth.context import get_user_email_context
 from mcp.server.lowlevel.helper_types import ReadResourceContents
-from .service_list_response import ServiceListResponse, ServiceListsResponse, ServiceItemDetailsResponse
+from .service_list_response import ServiceListResponse, ServiceListsResponse, ServiceItemDetailsResponse, ServiceErrorResponse
 
 # Import centralized scope registry for dynamic service metadata
 from auth.scope_registry import ScopeRegistry
@@ -309,12 +309,13 @@ class TagBasedResourceMiddleware(Middleware):
         match = self.SERVICE_URI_PATTERN.match(resource_uri)
         if not match:
             logger.error(f"❌ Service URI pattern does not match: {resource_uri}")
-            error_response = self._create_error_response(
-                f"Invalid service URI format: {resource_uri}",
-                "Expected format: service://{service}/{list_type?}/{id?}"
+            return await self._create_error_response(
+                context=context,
+                call_next=call_next,
+                error_message=f"Invalid service URI format: {resource_uri}",
+                help_message="Expected format: service://{service}/{list_type?}/{id?}",
+                uri=resource_uri
             )
-            logger.debug(f"🔍 Pattern mismatch error response type: {type(error_response)}")
-            return error_response
         
         service = match.group('service')
         list_type = match.group('list_type')
@@ -333,12 +334,13 @@ class TagBasedResourceMiddleware(Middleware):
             if list_type is None:
                 # service://{service} - return service info (not implemented yet)
                 logger.debug("📝 Service root access not implemented")
-                error_response = self._create_error_response(
-                    f"Service root access not implemented: {resource_uri}",
-                    "Use service://{service}/lists to see available list types"
+                return await self._create_error_response(
+                    context=context,
+                    call_next=call_next,
+                    error_message=f"Service root access not implemented: {resource_uri}",
+                    help_message="Use service://{service}/lists to see available list types",
+                    uri=resource_uri
                 )
-                logger.debug(f"🔍 Error response type: {type(error_response)}")
-                return error_response
             elif list_type == 'lists':
                 # service://{service}/lists - return available list types
                 logger.debug(f"📋 Handling service lists for: {service}")
@@ -360,12 +362,13 @@ class TagBasedResourceMiddleware(Middleware):
 
         except Exception as e:
             logger.error(f"❌ Error handling service resource {resource_uri}: {e}", exc_info=True)
-            error_response = self._create_error_response(
-                f"Error processing service resource: {str(e)}",
-                "Check logs for detailed error information"
+            return await self._create_error_response(
+                context=context,
+                call_next=call_next,
+                error_message=f"Error processing service resource: {str(e)}",
+                help_message="Check logs for detailed error information",
+                uri=resource_uri
             )
-            logger.debug(f"🔍 Exception error response type: {type(error_response)}")
-            return error_response
 
     async def on_tool_call(self, context: MiddlewareContext, call_next):
         """
@@ -558,11 +561,15 @@ class TagBasedResourceMiddleware(Middleware):
             logger.error(f"No list tool configured for {service}/{list_type}")
             return
 
-        # Get user email from context
+        # Get user email from context (with OAuth file fallback)
         user_email = get_user_email_context()
         if not user_email:
-            logger.error("User email not found in context")
+            logger.error("❌ User email not found in context or OAuth files")
+            logger.error("   Please authenticate using start_google_auth or ensure OAuth credentials exist")
             return
+        
+        # Log authentication source for debugging
+        logger.debug(f"🔐 Using authentication for user: {user_email}")
 
         # Generate cache key (matches resource handler expectations)
         cache_key = f"service_list_response_{service}_{list_type}_{user_email}"
@@ -664,11 +671,15 @@ class TagBasedResourceMiddleware(Middleware):
             logger.error(f"Unsupported list type '{list_type}' for service '{service}'. Available: {', '.join(available_types)}")
             return
 
-        # Get user email from context
+        # Get user email from context (with OAuth file fallback)
         user_email = get_user_email_context()
         if not user_email:
-            logger.error("User email not found in context")
+            logger.error("❌ User email not found in context or OAuth files")
+            logger.error("   Please authenticate using start_google_auth or ensure OAuth credentials exist")
             return
+        
+        # Log authentication source for debugging
+        logger.debug(f"🔐 Using authentication for user: {user_email}")
 
         get_tool_name = list_type_info.get("get_tool")
 
@@ -989,27 +1000,41 @@ class TagBasedResourceMiddleware(Middleware):
             logger.error(f"❌ Tool {tool_name} call failed: {e}")
             raise
 
-    def _create_error_response(self, error_message: str, help_message: str = "") -> str:
+    async def _create_error_response(
+        self,
+        context: MiddlewareContext,
+        call_next,
+        error_message: str,
+        help_message: str = "",
+        uri: str = None
+    ):
         """
-        Create a standardized error response as JSON string.
+        Create a standardized error response and store in context.
 
         Args:
+            context: MiddlewareContext for storing the error response
+            call_next: Continuation function to proceed with middleware chain
             error_message: Main error description
             help_message: Optional help or suggestion message
+            uri: Optional URI that caused the error
 
         Returns:
-            JSON string with error information
+            Result from call_next after storing error response in context
         """
-        response_data = {
-            "error": True,
-            "message": error_message,
-            "timestamp": datetime.now().isoformat()
-        }
-
-        if help_message:
-            response_data["help"] = help_message
-
-        return json.dumps(response_data, indent=2)
+        error_response = ServiceErrorResponse.from_error(
+            message=error_message,
+            help_message=help_message if help_message else None,
+            uri=uri
+        )
+        
+        # Store error response in context state with a unique key
+        # Use timestamp to ensure uniqueness for multiple errors
+        error_key = f"service_error_response_{datetime.now().timestamp()}"
+        context.fastmcp_context.set_state(error_key, error_response)
+        logger.debug(f"📦 Stored ServiceErrorResponse in context state with key: {error_key}")
+        
+        # Let the resource handler convert it to proper MCP response
+        return await call_next(context)
 
     def clear_cache(self):
         """Clear all cached entries."""
