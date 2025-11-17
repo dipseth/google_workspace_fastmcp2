@@ -14,9 +14,12 @@ logger = setup_logger()
 
 # Now import the rest of the modules
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.google import GoogleProvider  # FastMCP 2.12.0 GoogleProvider
+from fastmcp.server.auth.providers.google import (
+    GoogleProvider,
+)  # FastMCP 2.12.0 GoogleProvider
 from config.settings import settings
 from auth.middleware import AuthMiddleware, CredentialStorageMode
+
 # MCPAuthMiddleware removed - deprecated due to architectural mismatch (see auth/mcp_auth_middleware.py)
 from auth.google_oauth_auth import setup_google_oauth_auth, get_google_oauth_metadata
 from auth.jwt_auth import setup_jwt_auth, create_test_tokens  # Keep for fallback
@@ -33,16 +36,29 @@ from gchat.chat_tools import setup_chat_tools
 from gchat.chat_app_tools import setup_chat_app_tools
 from prompts.chat_app_prompts import setup_chat_app_prompts
 from prompts.gmail_prompts import setup_gmail_prompts
-from prompts.structured_response_demo_prompts import setup_structured_response_demo_prompts
+from prompts.structured_response_demo_prompts import (
+    setup_structured_response_demo_prompts,
+)
 from gchat.unified_card_tool import setup_unified_card_tool
 from adapters.module_wrapper_mcp import setup_module_wrapper_middleware
 from sheets.sheets_tools import setup_sheets_tools
 from photos.photos_tools import setup_photos_tools
 from photos.advanced_tools import setup_advanced_photos_tools
-from middleware.qdrant_middleware import QdrantUnifiedMiddleware, setup_enhanced_qdrant_tools, setup_qdrant_resources
+from middleware.qdrant_middleware import (
+    QdrantUnifiedMiddleware,
+    setup_enhanced_qdrant_tools,
+    setup_qdrant_resources,
+)
+
 # from middleware.template_middleware import setup_template_middleware
-from middleware.template_middleware import setup_enhanced_template_middleware as setup_template_middleware
-from middleware.sampling_middleware import setup_enhanced_sampling_middleware, EnhancementLevel, setup_enhanced_sampling_demo_tools
+from middleware.template_middleware import (
+    setup_enhanced_template_middleware as setup_template_middleware,
+)
+from middleware.sampling_middleware import (
+    setup_enhanced_sampling_middleware,
+    EnhancementLevel,
+    setup_enhanced_sampling_demo_tools,
+)
 from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
 from resources.user_resources import setup_user_resources
 from resources.tool_output_resources import setup_tool_output_resources
@@ -60,7 +76,9 @@ enable_jwt_auth = os.getenv("ENABLE_JWT_AUTH", "false").lower() == "true"
 is_cloud_deployment = settings.is_cloud_deployment
 if is_cloud_deployment:
     logger.info("☁️ FastMCP Cloud deployment detected")
-    logger.info(f"☁️ Using cloud-optimized credential storage: {settings.credential_storage_mode}")
+    logger.info(
+        f"☁️ Using cloud-optimized credential storage: {settings.credential_storage_mode}"
+    )
     logger.info(f"☁️ Credentials directory: {settings.credentials_dir}")
 
 # Phase 1 Feature Flags for gradual rollout (loaded from .env via settings)
@@ -83,7 +101,9 @@ try:
     credential_storage_mode = CredentialStorageMode[storage_mode_str]
     logger.info(f"🔐 Credential storage mode: {credential_storage_mode.value}")
 except KeyError:
-    logger.warning(f"⚠️ Invalid CREDENTIAL_STORAGE_MODE '{storage_mode_str}', defaulting to FILE_ENCRYPTED")
+    logger.warning(
+        f"⚠️ Invalid CREDENTIAL_STORAGE_MODE '{storage_mode_str}', defaulting to FILE_ENCRYPTED"
+    )
     credential_storage_mode = CredentialStorageMode.FILE_ENCRYPTED
 
 # FastMCP 2.12.x handles lifespan management automatically - no custom lifespan needed
@@ -102,7 +122,7 @@ logger.info("  No transaction ID conflicts")
 mcp = FastMCP(
     name=settings.server_name,
     version="1.0.0",
-    auth=None  # No GoogleProvider - use legacy OAuth system
+    auth=None,  # No GoogleProvider - use legacy OAuth system
 )
 
 logger.info("🔐 FastMCP running with legacy OAuth system")
@@ -111,9 +131,10 @@ logger.info("  MCP Inspector discovery available")
 
 # PHASE 1 & 2 FIXES APPLIED: AuthMiddleware re-enabled with improved session management
 from auth.middleware import create_enhanced_auth_middleware
+
 auth_middleware = create_enhanced_auth_middleware(
     storage_mode=credential_storage_mode,
-    google_provider=None  # No GoogleProvider - use legacy system
+    google_provider=None,  # No GoogleProvider - use legacy system
 )
 # Enable service selection for existing OAuth system
 logger.info("🔧 Configuring service selection for legacy OAuth system")
@@ -124,6 +145,7 @@ mcp.add_middleware(auth_middleware)
 
 # Register the AuthMiddleware instance in context for tool access
 from auth.context import set_auth_middleware
+
 set_auth_middleware(auth_middleware)
 logger.info("✅ AuthMiddleware RE-ENABLED with Phase 1 & 2 fixes:")
 logger.info("  ✅ Instance-level session tracking (no FastMCP context dependency)")
@@ -132,15 +154,23 @@ logger.info("  ✅ All 18 unit tests passing")
 logger.info("  🔍 Monitoring for context lifecycle issues...")
 
 
+# Profile Enrichment Middleware will be initialized after Qdrant middleware
+# to enable optional Qdrant-backed persistent caching
+profile_middleware = None
+
 # Setup Enhanced Template Parameter Middleware with full Jinja2 support (MUST be before tools are registered)
-logger.info("🎭 Setting up Enhanced Template Parameter Middleware with full modular architecture...")
+logger.info(
+    "🎭 Setting up Enhanced Template Parameter Middleware with full modular architecture..."
+)
 template_middleware = setup_template_middleware(
     mcp,
     enable_debug=True,  # Force enable for testing
     enable_caching=True,
-    cache_ttl_seconds=300
+    cache_ttl_seconds=300,
 )
-logger.info("✅ Enhanced Template Parameter Middleware enabled - modular architecture with 12 focused components active")
+logger.info(
+    "✅ Enhanced Template Parameter Middleware enabled - modular architecture with 12 focused components active"
+)
 
 # Setup Enhanced Sampling Middleware with tag-based elicitation (conditional based on SAMPLING_TOOLS setting)
 sampling_middleware = None  # Initialize to None for later checks
@@ -149,14 +179,22 @@ if settings.sampling_tools:
     sampling_middleware = setup_enhanced_sampling_middleware(
         mcp,
         enable_debug=True,  # Enable for testing and development
-        target_tags=["gmail", "compose", "elicitation"],  # Tools with these tags get enhanced sampling
+        target_tags=[
+            "gmail",
+            "compose",
+            "elicitation",
+        ],  # Tools with these tags get enhanced sampling
         qdrant_middleware=None,  # Will be set after Qdrant middleware is initialized
         template_middleware=template_middleware,
-        default_enhancement_level=EnhancementLevel.CONTEXTUAL
+        default_enhancement_level=EnhancementLevel.CONTEXTUAL,
     )
-    logger.info("✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context")
+    logger.info(
+        "✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context"
+    )
 else:
-    logger.info("⏭️  Enhanced Sampling Middleware disabled - set SAMPLING_TOOLS=true in .env to enable")
+    logger.info(
+        "⏭️  Enhanced Sampling Middleware disabled - set SAMPLING_TOOLS=true in .env to enable"
+    )
 
 # 5. Initialize Qdrant unified middleware (completely non-blocking)
 logger.info("🔄 Initializing Qdrant unified middleware...")
@@ -167,7 +205,12 @@ qdrant_middleware = QdrantUnifiedMiddleware(
     qdrant_url=settings.qdrant_url,
     collection_name="mcp_tool_responses",
     auto_discovery=True,  # Enable auto-discovery to find available Qdrant instances
-    ports=[settings.qdrant_port, 6333, 6335, 6334]  # Try configured port first, then fallback
+    ports=[
+        settings.qdrant_port,
+        6333,
+        6335,
+        6334,
+    ],  # Try configured port first, then fallback
 )
 mcp.add_middleware(qdrant_middleware)
 logger.info("✅ Qdrant unified middleware enabled - configured for cloud instance")
@@ -175,20 +218,52 @@ logger.info(f"🔧 Qdrant URL: {settings.qdrant_url}")
 logger.info(f"🔧 API Key configured: {bool(settings.qdrant_api_key)}")
 
 # Update sampling middleware with Qdrant integration now that it's initialized
-if sampling_middleware and hasattr(sampling_middleware, 'qdrant_middleware'):
+if sampling_middleware and hasattr(sampling_middleware, "qdrant_middleware"):
     sampling_middleware.qdrant_middleware = qdrant_middleware
-    logger.info("🔗 Enhanced Sampling Middleware connected to Qdrant for historical context")
-    
+    logger.info(
+        "🔗 Enhanced Sampling Middleware connected to Qdrant for historical context"
+    )
+
     # Register sampling demo tools
     logger.info("🎯 Registering enhanced sampling demo tools...")
     setup_enhanced_sampling_demo_tools(mcp)
-    logger.info("✅ Enhanced sampling demo tools registered (intelligent_email_composer, smart_workflow_assistant, template_rendering_demo, resource_discovery_assistant)")
+    logger.info(
+        "✅ Enhanced sampling demo tools registered (intelligent_email_composer, smart_workflow_assistant, template_rendering_demo, resource_discovery_assistant)"
+    )
 
-# 6. Add TagBasedResourceMiddleware for service list resource handling (LAST)
-logger.info("🏷️ Setting up TagBasedResourceMiddleware for service:// resource handling...")
+# 6. Setup Profile Enrichment Middleware with optional Qdrant integration
+logger.info("👤 Setting up Profile Enrichment Middleware for People API integration...")
+from middleware.profile_enrichment_middleware import ProfileEnrichmentMiddleware
+
+# Enable Qdrant caching if middleware is available
+enable_qdrant_profile_cache = qdrant_middleware is not None and qdrant_middleware.client_manager.is_available
+
+profile_middleware = ProfileEnrichmentMiddleware(
+    enable_caching=True,
+    cache_ttl_seconds=300,
+    qdrant_middleware=qdrant_middleware if enable_qdrant_profile_cache else None,
+    enable_qdrant_cache=enable_qdrant_profile_cache
+)
+mcp.add_middleware(profile_middleware)
+
+if enable_qdrant_profile_cache:
+    logger.info("✅ Profile Enrichment Middleware enabled with TWO-TIER CACHING:")
+    logger.info("  📦 Tier 1: In-memory cache (5-minute TTL, ultra-fast)")
+    logger.info("  🗄️ Tier 2: Qdrant persistent cache (survives restarts)")
+else:
+    logger.info("✅ Profile Enrichment Middleware enabled with in-memory caching only")
+    logger.info("  📦 In-memory cache (5-minute TTL)")
+    logger.info("  ℹ️ Qdrant persistent cache: disabled (Qdrant not available)")
+
+# 7. Add TagBasedResourceMiddleware for service list resource handling (LAST)
+logger.info(
+    "🏷️ Setting up TagBasedResourceMiddleware for service:// resource handling..."
+)
 tag_based_middleware = TagBasedResourceMiddleware(enable_debug_logging=True)
 mcp.add_middleware(tag_based_middleware)
-logger.info("✅ TagBasedResourceMiddleware enabled - service:// URIs will be handled via tag-based tool discovery")
+logger.info(
+    "✅ TagBasedResourceMiddleware enabled - service:// URIs will be handled via tag-based tool discovery"
+)
 
 # Register drive upload tools
 setup_drive_tools(mcp)
@@ -239,7 +314,9 @@ setup_unified_card_tool(mcp)
 #     wrapper.collection_name = "card_framework_components_fastembed"
 #     logger.info("✅ Updated ModuleWrapper to use FastEmbed collection: card_framework_components_fastembed")
 # logger.info("✅ ModuleWrapper middleware initialized with tools enabled")
-logger.info("⚠️ ModuleWrapper middleware temporarily disabled - testing MCP SDK 1.21.1 compatibility")
+logger.info(
+    "⚠️ ModuleWrapper middleware temporarily disabled - testing MCP SDK 1.21.1 compatibility"
+)
 
 # Register JWT-enhanced Chat tools (demonstration)
 # setup_jwt_chat_tools(mcp)
@@ -278,7 +355,9 @@ setup_tool_output_resources(mcp, qdrant_middleware)
 # These resources define the URI patterns and documentation
 # TagBasedResourceMiddleware intercepts and handles the actual requests
 setup_service_list_resources(mcp)
-logger.info("✅ Service list resources registered - URIs handled by TagBasedResourceMiddleware")
+logger.info(
+    "✅ Service list resources registered - URIs handled by TagBasedResourceMiddleware"
+)
 
 # Setup service recent resources (recent files from Drive-based services)
 setup_service_recent_resources(mcp)
@@ -286,14 +365,17 @@ setup_service_recent_resources(mcp)
 # Setup template macro resources (discovery and usage examples)
 logger.info("📚 Registering template macro resources...")
 register_template_resources(mcp)
-logger.info("✅ Template macro resources registered - URIs handled by EnhancedTemplateMiddleware")
+logger.info(
+    "✅ Template macro resources registered - URIs handled by EnhancedTemplateMiddleware"
+)
 
 # Setup health check endpoints for Docker/Kubernetes monitoring
 from tools.health_endpoints import setup_health_endpoints
+
 setup_health_endpoints(
     mcp,
     google_auth_provider=google_auth_provider,
-    credential_storage_mode=credential_storage_mode
+    credential_storage_mode=credential_storage_mode,
 )
 
 # Register server management tools
@@ -313,7 +395,7 @@ try:
         logger.info("📊 Registering Qdrant search tools...")
         setup_enhanced_qdrant_tools(mcp, qdrant_middleware)
         logger.info("✅ Qdrant search and diagnostic tools registered")
-        
+
         logger.info("📋 Registering Qdrant resources...")
         setup_qdrant_resources(mcp, qdrant_middleware)
         logger.info("✅ Qdrant resources registered - qdrant:// URIs available")
@@ -326,29 +408,45 @@ logger.info("🔍 Setting up OAuth discovery endpoints...")
 try:
     setup_oauth_endpoints_fastmcp(mcp)
     logger.info("✅ OAuth discovery endpoints configured")
-    logger.info(f"  Discovery: {settings.base_url}/.well-known/oauth-protected-resource/mcp")
-    logger.info(f"  Authorization: {settings.base_url}/.well-known/oauth-authorization-server")
+    logger.info(
+        f"  Discovery: {settings.base_url}/.well-known/oauth-protected-resource/mcp"
+    )
+    logger.info(
+        f"  Authorization: {settings.base_url}/.well-known/oauth-authorization-server"
+    )
     logger.info(f"  Registration: {settings.base_url}/oauth/register")
     logger.info(f"  Callback: {settings.base_url}/oauth2callback")
-    
+
 except Exception as e:
     logger.error(f"❌ Failed to setup OAuth endpoints: {e}", exc_info=True)
 
-# Legacy Authentication System Setup
+# Authentication System Setup with Access Control
 if use_google_oauth:
-    # Setup real Google OAuth authentication
-    jwt_auth_provider = setup_google_oauth_auth()
+    # Setup Google OAuth with ACCESS CONTROL enforcement
+    from auth.token_validator import create_access_controlled_auth_provider
+
+    jwt_auth_provider = create_access_controlled_auth_provider(
+        jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+        issuer="https://accounts.google.com",
+        required_scopes=["openid", "email"],
+    )
     mcp._auth = jwt_auth_provider
-    logger.info("🔐 Google OAuth Bearer Token authentication enabled")
-    logger.info("🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs")
+    logger.info(
+        "🔐 Google OAuth Bearer Token authentication enabled WITH ACCESS CONTROL"
+    )
+    logger.info(
+        "🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs"
+    )
     logger.info("🎯 OAuth issuer: https://accounts.google.com")
-    
+    logger.info("🔒 Access enforcement: Only users with stored credentials can connect")
+
 elif enable_jwt_auth:
     # Fallback to custom JWT for development/testing
     jwt_auth_provider = setup_jwt_auth()
     mcp._auth = jwt_auth_provider
     logger.info("🔐 Custom JWT Bearer Token authentication enabled (development mode)")
-    
+    logger.info("⚠️  No access control on JWT tokens - for testing only")
+
 else:
     logger.info("⚠️ Authentication DISABLED (for testing)")
 
@@ -357,10 +455,12 @@ def main():
     """Main entry point for the server."""
     logger.info(f"Starting {settings.server_name}")
     logger.info(f"Configuration: {settings.base_url}")
-    logger.info(f"Protocol: {'HTTPS (SSL enabled)' if settings.enable_https else 'HTTP'}")
+    logger.info(
+        f"Protocol: {'HTTPS (SSL enabled)' if settings.enable_https else 'HTTP'}"
+    )
     logger.info(f"OAuth callback: {settings.dynamic_oauth_redirect_uri}")
     logger.info(f"Credentials directory: {settings.credentials_dir}")
-    
+
     # Validate SSL configuration if HTTPS is enabled (skip for cloud deployment)
     if settings.enable_https and not settings.is_cloud_deployment:
         try:
@@ -375,41 +475,44 @@ def main():
             raise
     elif settings.is_cloud_deployment:
         logger.info("☁️ Skipping SSL validation - handled by FastMCP Cloud")
-    
+
     # Ensure credentials directory exists
     Path(settings.credentials_dir).mkdir(parents=True, exist_ok=True)
-    
+
     try:
         # Prepare run arguments
-        run_args = {
-            "host": settings.server_host,
-            "port": settings.server_port
-        }
-        
+        run_args = {"host": settings.server_host, "port": settings.server_port}
+
         # Configure transport and SSL based on HTTPS setting and cloud deployment
         if settings.is_cloud_deployment:
             # FastMCP Cloud handles SSL automatically
             run_args["transport"] = "http"
-            logger.info("☁️ Cloud deployment - FastMCP Cloud handles HTTPS/SSL automatically")
+            logger.info(
+                "☁️ Cloud deployment - FastMCP Cloud handles HTTPS/SSL automatically"
+            )
         elif settings.enable_https:
             ssl_config = settings.get_uvicorn_ssl_config()
             if ssl_config:
-                run_args["transport"] = "http"  # FastMCP uses http transport with SSL via uvicorn_config
+                run_args["transport"] = (
+                    "http"  # FastMCP uses http transport with SSL via uvicorn_config
+                )
                 run_args["uvicorn_config"] = ssl_config
                 logger.info("🔒 Starting server with HTTPS/SSL support")
                 logger.info(f"Transport: http (with SSL)")
                 logger.info(f"SSL Certificate: {ssl_config['ssl_certfile']}")
                 logger.info(f"SSL Private Key: {ssl_config['ssl_keyfile']}")
             else:
-                logger.warning("⚠️ HTTPS enabled but SSL config unavailable, falling back to HTTP")
+                logger.warning(
+                    "⚠️ HTTPS enabled but SSL config unavailable, falling back to HTTP"
+                )
                 run_args["transport"] = "http"
         else:
             run_args["transport"] = "http"
             logger.info("🌐 Starting server with HTTP support")
-        
+
         # Run the server with appropriate transport and SSL configuration
         mcp.run(**run_args)
-        
+
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
     except Exception as e:

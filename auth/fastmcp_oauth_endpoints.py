@@ -119,6 +119,11 @@ async def _store_oauth_user_data_async(client_id: str, token_data: Dict[str, Any
         authenticated_email = user_info.get("email")
         
         if authenticated_email:
+            # SECURITY: Validate user access before storing OAuth data
+            from auth.access_control import validate_user_access
+            if not validate_user_access(authenticated_email):
+                logger.warning(f"🚫 OAuth Proxy: Access denied for user: {authenticated_email}")
+                return  # Don't store authentication data for unauthorized users
             # INTEGRATE WITH EXISTING INFRASTRUCTURE
             # 1. Use DualAuthBridge to register OAuth Proxy authentication
             dual_bridge = get_dual_auth_bridge()
@@ -1198,10 +1203,11 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             logger.info(f"✅ OAuth callback received - processing authorization code")
             
             try:
-                # Import OAuth handling
+                # Import OAuth handling and access control
                 from auth.google_auth import handle_oauth_callback
                 from auth.pkce_utils import pkce_manager
                 from auth.context import get_session_context, store_session_data
+                from auth.access_control import validate_user_access
                 
                 # Retrieve PKCE code verifier if available
                 code_verifier = None
@@ -1221,7 +1227,55 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 )
                 
                 logger.info(f"✅ OAuth callback processed successfully for user: {user_email}")
-                logger.info(f"✅ Credentials saved for user: {user_email}")
+                
+                # SECURITY: Validate user access before saving credentials
+                if not validate_user_access(user_email):
+                    logger.warning(f"🚫 Access denied for user: {user_email}")
+                    
+                    # Return access denied page
+                    denied_html = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Access Denied</title>
+                        <style>
+                            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #fff5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
+                            .container {{ max-width: 600px; background: white; border-radius: 20px; padding: 50px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }}
+                            .error-icon {{ font-size: 72px; margin-bottom: 20px; }}
+                            h1 {{ color: #dc3545; margin-bottom: 10px; font-size: 32px; }}
+                            .email {{ color: #6c757d; font-size: 18px; margin: 20px 0; }}
+                            .message {{ color: #495057; font-size: 16px; line-height: 1.5; margin: 20px 0; }}
+                            .info {{ background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ffeaa7; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="error-icon">🚫</div>
+                            <h1>Access Denied</h1>
+                            <div class="email">User: <strong>{user_email}</strong></div>
+                            <div class="message">
+                                You are not authorized to access this MCP server.
+                            </div>
+                            <div class="info">
+                                <strong>ℹ️ Access Restricted</strong><br>
+                                This server requires pre-authorization. Please contact the server administrator
+                                to request access for your email address.
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                    
+                    return HTMLResponse(
+                        content=denied_html,
+                        status_code=403,
+                        headers={
+                            "Content-Type": "text/html; charset=utf-8",
+                            "X-Access-Denied": "true"
+                        }
+                    )
+                
+                logger.info(f"✅ Access granted - credentials saved for user: {user_email}")
                 
                 # Store user email in session context
                 try:
