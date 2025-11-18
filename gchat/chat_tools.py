@@ -337,7 +337,13 @@ def setup_chat_tools(mcp: FastMCP) -> None:
 
             # Final check
             if not user_email:
-                return "❌ Authentication error: Could not determine user email. Please provide user_google_email parameter or ensure proper authentication is set up."
+                return SpaceListResponse(
+                    spaces=[],
+                    count=0,
+                    spaceType=space_type,
+                    userEmail="unknown",
+                    error="Authentication error: Could not determine user email. Please provide user_google_email parameter or ensure proper authentication is set up."
+                )
 
             logger.info(
                 f"🎯 [list_spaces] Using email: {user_email} (method: {auth_method}), Type={space_type}"
@@ -346,9 +352,15 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             chat_service = await _get_chat_service_with_fallback(user_email)
 
             if chat_service is None:
-                error_msg = f"❌ Failed to create Google Chat service for {user_google_email}. Please check your credentials and permissions."
+                error_msg = f"Failed to create Google Chat service for {user_email}. Please check your credentials and permissions."
                 logger.error(f"[list_spaces] {error_msg}")
-                return error_msg
+                return SpaceListResponse(
+                    spaces=[],
+                    count=0,
+                    spaceType=space_type,
+                    userEmail=user_email,
+                    error=error_msg
+                )
 
             # Build filter based on space_type
             filter_param = None
