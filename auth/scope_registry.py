@@ -377,6 +377,7 @@ class ScopeRegistry:
             "base.openid",
             "chat.messages_readonly",
             "chat.messages",
+            "chat.spaces",
             "chat.memberships_readonly",
             "people.readonly",
         ],
