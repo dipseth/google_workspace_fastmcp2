@@ -2,18 +2,18 @@
 Google Drive upload tools for FastMCP2.
 
 This module provides comprehensive Google Drive integration tools for FastMCP2 servers,
-including file upload capabilities, OAuth2 authentication management, and status veri        
+including file upload capabilities, OAuth2 authentication management, and status veri
         Upload a local file or folder to Google Drive with unified authentication support.
-        
+
         This tool demonstrates the unified OAuth architecture where user_google_email
         is automatically injected by the middleware when authenticated via GoogleProvider.
-        
+
         Args:
             path: Local filesystem path to the file or folder to upload (supports ~ expansion)
             folder_id: Google Drive folder ID destination (defaults to "root" folder)
             filename: Optional custom name for uploaded file/folder (preserves original if not provided)
             user_google_email: User's Google email (auto-injected by unified auth middleware)
-        
+
         Returns:
             UploadFileResponse: Structured response with upload results including file metadata Features:
 - Secure file upload to Google Drive with folder management
@@ -35,6 +35,7 @@ Dependencies:
 
 import logging
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
 import time
 from pathlib import Path
@@ -48,7 +49,11 @@ from tools.common_types import UserGoogleEmailDrive, GoogleServiceNames
 from config.settings import settings
 
 # Import service types for proper typing
-from auth.service_types import GoogleServiceDisplayName, AuthenticationMethod, GoogleServiceName
+from auth.service_types import (
+    GoogleServiceDisplayName,
+    AuthenticationMethod,
+    GoogleServiceName,
+)
 
 from auth.google_auth import initiate_oauth_flow, GoogleAuthError
 from auth.service_helpers import (
@@ -57,7 +62,7 @@ from auth.service_helpers import (
     get_injected_service,
     get_drive_service,
     list_supported_services,
-    get_service_defaults
+    get_service_defaults,
 )
 from .utils import upload_file_to_drive_api, format_upload_result, DriveUploadError
 from .upload_types import (
@@ -65,126 +70,192 @@ from .upload_types import (
     FileUploadInfo,
     FolderUploadSummary,
     StartAuthResponse,
-    CheckAuthResponse
+    CheckAuthResponse,
 )
 from .auth_models import GoogleAuthConfig
-
-
 
 
 def setup_drive_tools(mcp: FastMCP) -> None:
     """
     Register Google Drive tools with the FastMCP server.
-    
+
     This function registers three main tools:
     1. upload_file_to_drive: Core file upload functionality
     2. start_google_auth: OAuth2 authentication initiation
     3. check_drive_auth: Authentication status verification
-    
+
     Args:
         mcp: FastMCP server instance to register tools with
-        
+
     Returns:
         None: Tools are registered as side effects
     """
-    
 
     @mcp.tool(
         name="start_google_auth",
         description="Initiate Google OAuth2 authentication flow for Google services with automatic browser opening (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
-        tags={"auth", "oauth", "google", "services", "authentication", "setup", "browser"},
+        tags={
+            "auth",
+            "oauth",
+            "google",
+            "services",
+            "authentication",
+            "setup",
+            "browser",
+        },
         annotations={
             "title": "Google Services OAuth Setup with Browser Support",
             "readOnlyHint": False,  # Modifies authentication state
             "destructiveHint": False,  # Creates auth tokens, doesn't destroy data
             "idempotentHint": True,  # Can be called multiple times safely
-            "openWorldHint": True  # Interacts with external Google OAuth services
-        }
+            "openWorldHint": True,  # Interacts with external Google OAuth services
+        },
     )
-
     async def start_google_auth(
-        user_google_email: str = '',
-        service_name:  list[str] = ['drive', 'gmail', 'calendar', 'docs', 'sheets', 'slides', 'photos', 'chat', 'forms'],
-        auto_open_browser: Annotated[bool, Field(description="Automatically open browser for authentication (default: True)")] = True,
-        use_pkce: Annotated[bool, Field(description="Use PKCE for authentication (default: True, deprecated - use auth_method instead)")] = True,
-        show_service_selection: Annotated[bool, Field(description="Show service selection page before authentication (default: True)")] = True,
-        auth_method: Annotated[Literal['file_credentials', 'pkce_file', 'pkce_memory'], Field(description="Authentication method: 'file_credentials' (legacy), 'pkce_file' (PKCE + file storage), 'pkce_memory' (PKCE + session only)")] = 'pkce_file'
+        user_google_email: Annotated[
+            str, Field(description="Google email address for authentication")
+        ] = "",
+        service_name: Annotated[
+            Optional[Union[str, list[str]]],
+            Field(
+                description=(
+                    "Service specification for authentication. Can be:\n"
+                    "- List of service names: ['drive', 'gmail', 'calendar'] for pre-selected services\n"
+                    "- String display name: 'My Custom App' for custom labeling (no pre-selection)\n"
+                    "- None/empty: Uses common service defaults"
+                )
+            ),
+        ] = None,
+        auto_open_browser: Annotated[
+            bool, Field(description="Automatically open browser for authentication")
+        ] = True,
+        show_service_selection: Annotated[
+            bool, Field(description="Show service selection UI before authentication")
+        ] = True,
+        auth_method: Annotated[
+            Literal["file_credentials", "pkce_file", "pkce_memory"],
+            Field(
+                description=(
+                    "Authentication method:\n"
+                    "- 'pkce_file': PKCE with file storage (recommended, default)\n"
+                    "- 'pkce_memory': PKCE with session-only storage\n"
+                    "- 'file_credentials': Legacy credential file method"
+                )
+            ),
+        ] = "pkce_file",
     ) -> StartAuthResponse:
         """
-        Initiate Google OAuth2 authentication flow for Google services access with automatic browser opening.
-        
-        This tool generates an OAuth2 authorization URL and can automatically open the browser
-        for authentication. Supports both single services and service lists with PKCE or credential-based authentication.
-        
+        Initiate Google OAuth2 authentication flow for Google services access.
+
+        This tool generates an OAuth2 authorization URL and optionally opens a browser
+        for authentication. Supports service pre-selection and multiple auth methods.
+
+        Parameter Patterns:
+        ------------------
+        # Common usage - pre-select multiple services:
+        service_name=['drive', 'gmail', 'calendar']
+
+        # Custom display name (no pre-selection):
+        service_name='My Application Name'
+
+        # Use defaults (common services pre-selected):
+        service_name=None  # or omit parameter
+
+        Authentication Methods:
+        ----------------------
+        - pkce_file: Most secure, persists across sessions (default)
+        - pkce_memory: Secure, session-only (clears on server restart)
+        - file_credentials: Legacy method for backward compatibility
+
         Args:
             user_google_email: Target Google email address for authentication
-            service_name: Service name(s) for authentication. Defaults to all services if None.
-            auto_open_browser: Whether to automatically open the browser (default: True)
-        
+            service_name: Service specification (list, string display name, or None for defaults)
+            auto_open_browser: Whether to automatically open browser (default: True)
+            show_service_selection: Whether to show service selection UI (default: True)
+            auth_method: Authentication method to use (default: 'pkce_file')
+
         Returns:
-            StartAuthResponse: Structured response containing auth URL, instructions, and metadata
-            
-        Raises:
-            Handles generic exceptions during OAuth flow initiation
+            StartAuthResponse: Structured response with auth URL, instructions, and metadata
         """
         # DEBUG: Log all received parameters
         logger.info(f"🔧 TOOL DEBUG: start_google_auth called with parameters:")
-        logger.info(f"🔧 TOOL DEBUG:   user_google_email = {user_google_email} (type: {type(user_google_email)})")
-        logger.info(f"🔧 TOOL DEBUG:   service_name = {service_name} (type: {type(service_name)})")
-        logger.info(f"🔧 TOOL DEBUG:   auto_open_browser = {auto_open_browser} (type: {type(auto_open_browser)})")
-        
+        logger.info(
+            f"🔧 TOOL DEBUG:   user_google_email = {user_google_email} (type: {type(user_google_email)})"
+        )
+        logger.info(
+            f"🔧 TOOL DEBUG:   service_name = {service_name} (type: {type(service_name)})"
+        )
+        logger.info(
+            f"🔧 TOOL DEBUG:   auto_open_browser = {auto_open_browser} (type: {type(auto_open_browser)})"
+        )
+
         # Try to get user email from context if not provided
         if not user_google_email:
-            logger.info(f"🔧 TOOL DEBUG: user_google_email is None/empty, checking context")
+            logger.info(
+                f"🔧 TOOL DEBUG: user_google_email is None/empty, checking context"
+            )
             from auth.context import get_user_email_context
+
             context_email = get_user_email_context()
-            logger.info(f"🔧 TOOL DEBUG: get_user_email_context() returned: {context_email}")
-            
+            logger.info(
+                f"🔧 TOOL DEBUG: get_user_email_context() returned: {context_email}"
+            )
+
             if context_email:
                 user_google_email = context_email
-                logger.info(f"🔧 TOOL DEBUG: Using email from context: {user_google_email}")
+                logger.info(
+                    f"🔧 TOOL DEBUG: Using email from context: {user_google_email}"
+                )
             else:
                 logger.info(f"🔧 TOOL DEBUG: No email found in context either")
-        
-        logger.info(f"Starting OAuth flow for {user_google_email} (auto_open_browser={auto_open_browser})")
-        
+
+        logger.info(
+            f"Starting OAuth flow for {user_google_email} (auto_open_browser={auto_open_browser})"
+        )
+
         # Validate that user_google_email is provided
         if not user_google_email:
-            logger.error(f"🔧 TOOL DEBUG: ❌ Still no user_google_email after context check")
+            logger.error(
+                f"🔧 TOOL DEBUG: ❌ Still no user_google_email after context check"
+            )
             return StartAuthResponse(
                 status="error",
                 message="❌ Authentication Setup Failed",
                 userEmail="",
                 error="No user email provided. Please provide a Google email address to start authentication.",
-                templateApplied=False
             )
-        
-        try:
-            # Backward compatibility mapping for use_pkce
-            if use_pkce and auth_method == 'file_credentials':
-                logger.warning("Overriding auth_method to 'pkce_file' since use_pkce=True")
-                auth_method = 'pkce_file'
-            elif not use_pkce and auth_method in ['pkce_file', 'pkce_memory']:
-                logger.warning("Overriding auth_method to 'file_credentials' since use_pkce=False")
-                auth_method = 'file_credentials'
 
-            # ALWAYS show service selection UI, but use service_name for pre-selection
+        try:
+            # Handle service_name parameter for pre-selection and display
             if isinstance(service_name, list):
                 # List of specific services provided - these will be PRE-SELECTED in the UI
                 pre_selected_services = service_name
                 display_service_name = f"{len(service_name)} Pre-selected Services"
-                logger.info(f"🎯 Will pre-select services in UI: {pre_selected_services}")
-            elif service_name is None:
+                logger.info(
+                    f"🎯 Will pre-select services in UI: {pre_selected_services}"
+                )
+            elif service_name is None or service_name == "":
                 # No pre-selection - let user choose from common defaults
-                pre_selected_services = ['drive', 'gmail', 'calendar', 'docs', 'sheets']  # Common defaults
+                pre_selected_services = [
+                    "drive",
+                    "gmail",
+                    "calendar",
+                    "docs",
+                    "sheets",
+                    "people",
+                ]  # Common defaults
                 display_service_name = "Google Services (Common Pre-selected)"
-                logger.info(f"🎯 Will pre-select common services in UI: {pre_selected_services}")
+                logger.info(
+                    f"🎯 Will pre-select common services in UI: {pre_selected_services}"
+                )
             else:
                 # Single service display name (backward compatibility) - no pre-selection
                 pre_selected_services = []
                 display_service_name = str(service_name)
-                logger.info(f"🎯 Service display name, no pre-selection: {display_service_name}")
-            
+                logger.info(
+                    f"🎯 Service display name, no pre-selection: {display_service_name}"
+                )
+
             # ALWAYS force service selection UI (selected_services=None)
             # The UI will handle pre-selection with its existing JavaScript
             auth_url = await initiate_oauth_flow(
@@ -192,23 +263,26 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 service_name=display_service_name,
                 selected_services=None,  # Force UI to show
                 show_service_selection=show_service_selection,
-                use_pkce=(auth_method != 'file_credentials'),
-                auth_method=auth_method
+                use_pkce=(auth_method != "file_credentials"),
+                auth_method=auth_method,
             )
-            
+
             # Attempt to open browser automatically if requested
             browser_opened = False
             browser_error = None
-            
+
             if auto_open_browser:
                 try:
                     import webbrowser
+
                     browser_opened = webbrowser.open(auth_url)
-                    logger.info(f"✅ Browser opened automatically for OAuth authentication")
+                    logger.info(
+                        f"✅ Browser opened automatically for OAuth authentication"
+                    )
                 except Exception as e:
                     browser_error = str(e)
                     logger.warning(f"⚠️ Failed to open browser automatically: {e}")
-            
+
             # Build instructions based on whether browser was opened
             if browser_opened:
                 instructions = [
@@ -219,7 +293,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Return here and retry your operation",
                     "",
                     "💡 **For CLI clients**: You can also poll authentication status:",
-                    f"   GET {settings.base_url}/oauth/status"
+                    f"   GET {settings.base_url}/oauth/status",
                 ]
                 message = "🔐 **Browser Opened - Complete Authentication**"
             else:
@@ -231,19 +305,29 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Return here and retry your operation",
                     "",
                     "💡 **For CLI clients**: You can poll authentication status:",
-                    f"   GET {settings.base_url}/oauth/status"
+                    f"   GET {settings.base_url}/oauth/status",
                 ]
                 message = "🔐 **Google Services Authentication Required**"
                 if browser_error:
-                    instructions.insert(0, f"⚠️ Auto-browser open failed: {browser_error}")
-            
+                    instructions.insert(
+                        0, f"⚠️ Auto-browser open failed: {browser_error}"
+                    )
+
+            # Normalize service_name to list format for response
+            service_names_list: Optional[list[str]] = None
+            if isinstance(service_name, list):
+                service_names_list = service_name
+            elif isinstance(service_name, str) and service_name:
+                # If it's a display string, don't include it as service names
+                service_names_list = None
+
             response = StartAuthResponse(
                 status="success",
                 message=message,
                 authUrl=auth_url,
                 clickableLink=f"[🚀 Click here to authenticate]({auth_url})",
                 userEmail=user_google_email,
-                serviceName=service_name,
+                serviceName=service_names_list,
                 instructions=instructions,
                 scopesIncluded=[
                     "Google Drive (file management)",
@@ -252,20 +336,22 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Google Sheets (spreadsheet access)",
                     "Google Slides (presentation management)",
                     "Google Calendar (event management)",
-                    "And more Google services"
+                    "And more Google services",
                 ],
-                note="The authentication will be linked to your current session and provide access to all Google services."
+                note="The authentication will be linked to your current session and provide access to all Google services.",
             )
-            
+
             # Add browser-specific fields
-            if hasattr(response, '__dict__'):
-                response.__dict__['browserOpened'] = browser_opened
-                response.__dict__['pollingEndpoint'] = f"{settings.base_url}/oauth/status"
+            if hasattr(response, "__dict__"):
+                response.__dict__["browserOpened"] = browser_opened
+                response.__dict__["pollingEndpoint"] = (
+                    f"{settings.base_url}/oauth/status"
+                )
                 if browser_error:
-                    response.__dict__['browserError'] = browser_error
-            
+                    response.__dict__["browserError"] = browser_error
+
             return response
-            
+
         except Exception as e:
             error_msg = f"Failed to start authentication: {e}"
             logger.error(error_msg, exc_info=True)
@@ -273,9 +359,9 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 status="error",
                 message="❌ Authentication Setup Failed",
                 userEmail=user_google_email,
-                error=str(e)
+                error=str(e),
             )
-    
+
     @mcp.tool(
         name="check_drive_auth",
         description="Verify Google Drive authentication status for a specific user account",
@@ -285,59 +371,58 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             "readOnlyHint": True,  # Only reads authentication state, doesn't modify
             "destructiveHint": False,  # Safe read-only operation
             "idempotentHint": True,  # Multiple calls return same result
-            "openWorldHint": True  # Verifies against external Google services
-        }
+            "openWorldHint": True,  # Verifies against external Google services
+        },
     )
     async def check_drive_auth(
-        user_google_email: UserGoogleEmailDrive = None
+        user_google_email: UserGoogleEmailDrive = None,
     ) -> CheckAuthResponse:
         """
         Verify Google Drive authentication status for a specific user account.
-        
+
         This tool checks whether the specified user has valid, active Google Drive
         authentication credentials. It attempts to access the Drive service to
         validate the authentication state without performing any Drive operations.
-        
+
         Args:
             user_google_email: Google email address to verify authentication status for
-            
+
         Returns:
             CheckAuthResponse: Structured response indicating authentication state
-                 
+
         Raises:
             Handles GoogleAuthError for invalid/missing credentials and generic exceptions
         """
         logger.info(f"Checking authentication for {user_google_email}")
-        
+
         # Validate that user_google_email is provided
         if not user_google_email:
             return CheckAuthResponse(
                 authenticated=False,
                 userEmail="",
                 message="No user email provided. Please provide a Google email address to check authentication status.",
-                error="Missing user_google_email parameter"
+                error="Missing user_google_email parameter",
             )
-        
+
         try:
             # Use service helpers for better service management
             drive_service = await get_service("drive", user_google_email)
-            
+
             # Test basic Drive access to verify authentication
             import asyncio
-            await asyncio.to_thread(
-                drive_service.about().get(fields='user').execute
-            )
-            
+
+            await asyncio.to_thread(drive_service.about().get(fields="user").execute)
+
             return CheckAuthResponse(
                 authenticated=True,
                 userEmail=user_google_email,
-                message=f"{user_google_email} is authenticated for Google Drive"
+                message=f"{user_google_email} is authenticated for Google Drive",
             )
         except GoogleAuthError:
             return CheckAuthResponse(
                 authenticated=False,
                 userEmail=user_google_email,
-                message=f"{user_google_email} is not authenticated for Google Drive. Use the `start_google_auth` tool to authenticate."
+                message=f"{user_google_email} is not authenticated for Google Drive. Use the `start_google_auth` tool to authenticate.",
             )
         except Exception as e:
             error_msg = f"Error checking authentication: {e}"
@@ -346,7 +431,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 authenticated=False,
                 userEmail=user_google_email,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -358,37 +443,64 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def upload_to_drive(
-        path: Annotated[str, Field(description="Local filesystem path to the file or folder to upload (supports ~ expansion)")],
-        folder_id: Annotated[str, Field(description="Google Drive folder ID where file will be uploaded (default: 'root' for root folder)")] = 'root',
-        filename: Annotated[Optional[str], Field(description="Custom filename for the uploaded file (optional - uses original filename if not provided)")] = None,
-        user_google_email: UserGoogleEmailDrive = None
+        path: Annotated[
+            Optional[str],
+            Field(
+                description="Local filesystem path to the file or folder to upload (supports ~ expansion)"
+            ),
+        ] = None,
+        folder_id: Annotated[
+            str,
+            Field(
+                description="Google Drive folder ID where file will be uploaded (default: 'root' for root folder)"
+            ),
+        ] = "root",
+        filename: Annotated[
+            Optional[str],
+            Field(
+                description="Custom filename for the uploaded file (optional - uses original filename if not provided)"
+            ),
+        ] = None,
+        user_google_email: UserGoogleEmailDrive = None,
     ) -> UploadFileResponse:
         """
         Upload a local file or folder to Google Drive with unified authentication support.
-        
+
         This tool demonstrates the unified OAuth architecture where user_google_email
         is automatically injected by the middleware when authenticated via GoogleProvider.
-        
+
         Args:
             path: Local filesystem path to the file or folder to upload (supports ~ expansion)
             folder_id: Google Drive folder ID destination (defaults to "root" folder)
             filename: Optional custom name for uploaded file/folder (preserves original if not provided)
             user_google_email: User's Google email (auto-injected by unified auth middleware)
-        
+
         Returns:
             UploadFileResponse: Structured response with upload details or error information
-            
+
         Note:
             When authenticated via FastMCP GoogleProvider, the user_google_email parameter
             is automatically injected by the unified authentication middleware, so you don't
             need to provide it manually!
         """
         from auth.context import get_user_email_context
-        
+
+        # Validate required path parameter
+        if not path:
+            return UploadFileResponse(
+                success=False,
+                userEmail="",
+                message="",
+                error=(
+                    "Missing required parameter 'path'. Please provide the local file path to upload.\n"
+                    "Example: upload_to_drive(path='/path/to/file.txt', user_google_email='user@example.com')"
+                ),
+            )
+
         # Get user email from middleware context if not provided
         if not user_google_email:
             user_google_email = get_user_email_context()
@@ -402,22 +514,26 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                         "1. Authenticate via GoogleProvider (unified auth), or\n"
                         "2. Provide the user_google_email parameter, or\n"
                         "3. Use the start_google_auth tool to authenticate"
-                    )
+                    ),
                 )
-            logger.info(f"🔑 Using authenticated user from unified context: {user_google_email}")
-        
-        logger.info(f"Upload request: {path} -> Drive folder {folder_id} for {user_google_email}")
-        
+            logger.info(
+                f"🔑 Using authenticated user from unified context: {user_google_email}"
+            )
+
+        logger.info(
+            f"Upload request: {path} -> Drive folder {folder_id} for {user_google_email}"
+        )
+
         try:
             # Validate and convert path
             local_path = Path(path).expanduser().resolve()
-            
+
             if not local_path.exists():
                 raise FileNotFoundError(f"Path not found: {path}")
-            
+
             # Get authenticated Drive service using service helpers
             drive_service = await get_service("drive", user_google_email)
-            
+
             # Check if it's a directory
             if local_path.is_dir():
                 return await _upload_folder_to_drive(
@@ -425,7 +541,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     folder_path=local_path,
                     parent_folder_id=folder_id,
                     custom_folder_name=filename,
-                    user_email=user_google_email
+                    user_email=user_google_email,
                 )
             else:
                 # Single file upload
@@ -433,74 +549,62 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     service=drive_service,
                     file_path=local_path,
                     folder_id=folder_id,
-                    custom_filename=filename
+                    custom_filename=filename,
                 )
-                
+
                 # Build file info
                 file_info: FileUploadInfo = {
-                    "fileId": result['id'],
-                    "fileName": result['name'],
+                    "fileId": result["id"],
+                    "fileName": result["name"],
                     "filePath": str(local_path),
                     "fileSize": local_path.stat().st_size,
-                    "mimeType": result.get('mimeType', 'application/octet-stream'),
+                    "mimeType": result.get("mimeType", "application/octet-stream"),
                     "folderId": folder_id,
                     "driveUrl": f"https://drive.google.com/file/d/{result['id']}/view",
-                    "webViewLink": result.get('webViewLink', f"https://drive.google.com/file/d/{result['id']}/view")
+                    "webViewLink": result.get(
+                        "webViewLink",
+                        f"https://drive.google.com/file/d/{result['id']}/view",
+                    ),
                 }
-                
+
                 logger.info(f"Upload successful: {result['name']} (ID: {result['id']})")
-                
+
                 return UploadFileResponse(
                     success=True,
                     userEmail=user_google_email,
                     fileInfo=file_info,
-                    message=f"Successfully uploaded {result['name']} to Google Drive"
+                    message=f"Successfully uploaded {result['name']} to Google Drive",
                 )
-            
+
         except GoogleAuthError as e:
             error_msg = f"Authentication error: {e}"
             logger.error(f"❌ {error_msg}")
             return UploadFileResponse(
-                success=False,
-                userEmail=user_google_email,
-                message="",
-                error=error_msg
+                success=False, userEmail=user_google_email, message="", error=error_msg
             )
         except DriveUploadError as e:
             error_msg = f"Upload error: {e}"
             logger.error(f"❌ {error_msg}")
             return UploadFileResponse(
-                success=False,
-                userEmail=user_google_email,
-                message="",
-                error=error_msg
+                success=False, userEmail=user_google_email, message="", error=error_msg
             )
         except FileNotFoundError as e:
             error_msg = f"Path not found: {path}"
             logger.error(f"❌ {error_msg}")
             return UploadFileResponse(
-                success=False,
-                userEmail=user_google_email,
-                message="",
-                error=error_msg
+                success=False, userEmail=user_google_email, message="", error=error_msg
             )
         except PermissionError:
             error_msg = f"Permission denied accessing: {path}"
             logger.error(f"❌ {error_msg}")
             return UploadFileResponse(
-                success=False,
-                userEmail=user_google_email,
-                message="",
-                error=error_msg
+                success=False, userEmail=user_google_email, message="", error=error_msg
             )
         except Exception as e:
             error_msg = f"Unexpected error: {e}"
             logger.error(f"❌ {error_msg}", exc_info=True)
             return UploadFileResponse(
-                success=False,
-                userEmail=user_google_email,
-                message="",
-                error=error_msg
+                success=False, userEmail=user_google_email, message="", error=error_msg
             )
 
 
@@ -509,18 +613,18 @@ async def _upload_folder_to_drive(
     folder_path: Path,
     parent_folder_id: str,
     custom_folder_name: Optional[str],
-    user_email: str
+    user_email: str,
 ) -> UploadFileResponse:
     """
     Recursively upload a folder and its contents to Google Drive.
-    
+
     Args:
         drive_service: Authenticated Google Drive service
         folder_path: Path to the local folder
         parent_folder_id: Parent folder ID in Google Drive
         custom_folder_name: Optional custom name for the folder
         user_email: User's email address
-        
+
     Returns:
         UploadFileResponse: Response with all uploaded files information
     """
@@ -529,156 +633,156 @@ async def _upload_folder_to_drive(
     warnings: List[str] = []
     total_size = 0
     failed_count = 0
-    
+
     try:
         # Create the root folder in Drive
         folder_name = custom_folder_name or folder_path.name
         folder_metadata = {
-            'name': folder_name,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [parent_folder_id]
+            "name": folder_name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent_folder_id],
         }
-        
+
         import asyncio
+
         folder_result = await asyncio.to_thread(
-            drive_service.files().create(
-                body=folder_metadata,
-                fields='id, name, webViewLink'
-            ).execute
+            drive_service.files()
+            .create(body=folder_metadata, fields="id, name, webViewLink")
+            .execute
         )
-        
-        root_folder_id = folder_result['id']
+
+        root_folder_id = folder_result["id"]
         logger.info(f"Created folder '{folder_name}' with ID: {root_folder_id}")
-        
+
         # Walk through the folder structure
-        for item_path in folder_path.rglob('*'):
+        for item_path in folder_path.rglob("*"):
             if item_path.is_file():
                 try:
                     # Calculate relative path for folder structure
                     relative_path = item_path.relative_to(folder_path)
                     relative_parent = relative_path.parent
-                    
+
                     # Determine the parent folder ID (create nested folders if needed)
                     current_parent_id = root_folder_id
-                    if str(relative_parent) != '.':
+                    if str(relative_parent) != ".":
                         # Need to create nested folder structure
                         parts = relative_parent.parts
                         for part in parts:
                             # Check if folder exists or create it
                             query = f"name='{part}' and '{current_parent_id}' in parents and mimeType='application/vnd.google-apps.folder'"
                             existing = await asyncio.to_thread(
-                                drive_service.files().list(
-                                    q=query,
-                                    fields='files(id)'
-                                ).execute
+                                drive_service.files()
+                                .list(q=query, fields="files(id)")
+                                .execute
                             )
-                            
-                            if existing.get('files'):
-                                current_parent_id = existing['files'][0]['id']
+
+                            if existing.get("files"):
+                                current_parent_id = existing["files"][0]["id"]
                             else:
                                 # Create the folder
                                 folder_meta = {
-                                    'name': part,
-                                    'mimeType': 'application/vnd.google-apps.folder',
-                                    'parents': [current_parent_id]
+                                    "name": part,
+                                    "mimeType": "application/vnd.google-apps.folder",
+                                    "parents": [current_parent_id],
                                 }
                                 new_folder = await asyncio.to_thread(
-                                    drive_service.files().create(
-                                        body=folder_meta,
-                                        fields='id'
-                                    ).execute
+                                    drive_service.files()
+                                    .create(body=folder_meta, fields="id")
+                                    .execute
                                 )
-                                current_parent_id = new_folder['id']
-                    
+                                current_parent_id = new_folder["id"]
+
                     # Upload the file
                     result = await upload_file_to_drive_api(
                         service=drive_service,
                         file_path=item_path,
-                        folder_id=current_parent_id
+                        folder_id=current_parent_id,
                     )
-                    
+
                     file_size = item_path.stat().st_size
                     total_size += file_size
-                    
+
                     file_info: FileUploadInfo = {
-                        "fileId": result['id'],
-                        "fileName": result['name'],
+                        "fileId": result["id"],
+                        "fileName": result["name"],
                         "filePath": str(item_path),
                         "fileSize": file_size,
-                        "mimeType": result.get('mimeType', 'application/octet-stream'),
+                        "mimeType": result.get("mimeType", "application/octet-stream"),
                         "folderId": current_parent_id,
                         "driveUrl": f"https://drive.google.com/file/d/{result['id']}/view",
-                        "webViewLink": result.get('webViewLink', f"https://drive.google.com/file/d/{result['id']}/view")
+                        "webViewLink": result.get(
+                            "webViewLink",
+                            f"https://drive.google.com/file/d/{result['id']}/view",
+                        ),
                     }
                     uploaded_files.append(file_info)
                     logger.info(f"Uploaded: {item_path.name}")
-                    
+
                 except Exception as e:
                     failed_count += 1
                     warning = f"Failed to upload {item_path}: {str(e)}"
                     warnings.append(warning)
                     logger.warning(warning)
-        
+
         upload_duration = time.time() - start_time
-        
+
         # Build summary
         folder_summary: FolderUploadSummary = {
             "totalFiles": len(uploaded_files) + failed_count,
             "successfulUploads": len(uploaded_files),
             "failedUploads": failed_count,
             "totalSize": total_size,
-            "uploadDuration": upload_duration
+            "uploadDuration": upload_duration,
         }
-        
+
         return UploadFileResponse(
             success=True,
             userEmail=user_email,
             filesUploaded=uploaded_files,
             folderSummary=folder_summary,
             message=f"Successfully uploaded folder '{folder_name}' with {len(uploaded_files)} files to Google Drive",
-            warnings=warnings if warnings else None
+            warnings=warnings if warnings else None,
         )
-        
+
     except Exception as e:
         error_msg = f"Failed to upload folder: {str(e)}"
         logger.error(error_msg)
         return UploadFileResponse(
-            success=False,
-            userEmail=user_email,
-            message="",
-            error=error_msg
+            success=False, userEmail=user_email, message="", error=error_msg
         )
 
 
 def setup_oauth_callback_handler(mcp: FastMCP) -> None:
     """
     Setup OAuth2 callback route handler for FastMCP2 server.
-    
+
     NOTE: This function is now deprecated. The OAuth callback handler
     has been moved to auth/fastmcp_oauth_endpoints.py where it belongs
     with all other OAuth endpoints.
-    
+
     Args:
         mcp: FastMCP server instance to register the route with
-        
+
     Returns:
         None: No-op - callback handler is now in fastmcp_oauth_endpoints.py
     """
-    logger.info("ℹ️ OAuth callback handler registration skipped - now handled in fastmcp_oauth_endpoints.py")
+    logger.info(
+        "ℹ️ OAuth callback handler registration skipped - now handled in fastmcp_oauth_endpoints.py"
+    )
     pass
 
 
 def _create_success_response(user_email: str) -> str:
     """
     Create a success HTML response for completed OAuth2 authentication.
-    
+
     Generates a user-friendly HTML page confirming successful authentication
     with Google Drive. The page includes visual success indicators and
     clear instructions for the user to proceed.
-    
+
     Args:
         user_email: Authenticated Google email address to display
-        
+
     Returns:
         str: Complete HTML document with success message and styling
     """
@@ -708,14 +812,14 @@ def _create_success_response(user_email: str) -> str:
 def _create_error_response(error_message: str) -> str:
     """
     Create an error HTML response for failed OAuth2 authentication attempts.
-    
+
     Generates a user-friendly HTML error page when OAuth2 authentication fails.
     The page includes clear error messaging, visual error indicators, and
     guidance for retry attempts.
-    
+
     Args:
         error_message: Detailed error message to display to the user
-        
+
     Returns:
         str: Complete HTML document with error message and styling
     """

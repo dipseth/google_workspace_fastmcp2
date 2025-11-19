@@ -266,16 +266,90 @@ def handle_expired_session(user_email: str = "") -> AuthError:
     )
 
 
+def _normalize_email(email: str) -> str:
+    """Normalize email address to lowercase for consistent credential storage.
+
+    Args:
+        email: Email address to normalize
+
+    Returns:
+        Lowercase email address
+    """
+    return email.lower().strip() if email else ""
+
+
 def _get_credentials_path(user_email: str) -> Path:
-    """Get the path to store credentials for a specific user."""
+    """Get the path to store credentials for a specific user.
+
+    Email addresses are normalized to lowercase for consistent file naming.
+    """
     if not user_email:
         raise GoogleAuthError("Cannot get credentials path: user_email is required")
-    safe_email = user_email.replace("@", "_at_").replace(".", "_")
+    # Normalize email to lowercase for consistent credential storage
+    normalized_email = _normalize_email(user_email)
+    safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
     return Path(settings.credentials_dir) / f"{safe_email}_credentials.json"
 
 
+def _update_oauth_session_marker(
+    user_email: str,
+    credentials: Credentials,
+    auth_provider: str = "start_google_auth",
+    extra_data: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Update .oauth_authentication.json with latest authentication info.
+
+    This ensures 'me'/'myself' resolution always points to the most recently
+    authenticated user regardless of which OAuth flow was used.
+
+    Args:
+        user_email: The authenticated user's email address
+        credentials: The OAuth credentials for this user
+        auth_provider: The authentication provider/method used (default: "start_google_auth")
+        extra_data: Optional additional data to include in the marker file
+    """
+    try:
+        oauth_data_path = Path(settings.credentials_dir) / ".oauth_authentication.json"
+        oauth_data_path.parent.mkdir(parents=True, exist_ok=True)
+
+        oauth_data = {
+            "authenticated_email": user_email,
+            "authenticated_at": datetime.now().isoformat(),
+            "scopes": list(credentials.scopes) if credentials.scopes else [],
+            "token_received": True,
+            "auth_provider": auth_provider,
+        }
+
+        # Merge in any extra data provided
+        if extra_data:
+            oauth_data.update(extra_data)
+
+        with open(oauth_data_path, "w") as f:
+            json.dump(oauth_data, f, indent=2)
+
+        # Set restrictive permissions
+        try:
+            oauth_data_path.chmod(0o600)
+        except (OSError, AttributeError):
+            pass
+
+        logger.info(
+            f"✅ Updated .oauth_authentication.json for {user_email} (provider: {auth_provider})"
+        )
+
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to update .oauth_authentication.json: {e}")
+        # Don't fail the whole auth flow if this fails
+
+
 def _save_credentials(user_email: str, credentials: Credentials) -> None:
-    """Save credentials to disk with proper permissions and validation."""
+    """Save credentials to disk with proper permissions and validation.
+
+    Email addresses are normalized to lowercase for consistent credential storage.
+    """
+    # Normalize email to lowercase for consistent credential storage
+    normalized_email = _normalize_email(user_email)
+
     # Check if AuthMiddleware is available for encrypted storage
     try:
         from .context import get_auth_middleware
@@ -285,13 +359,16 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
             logger.info(
                 f"Using AuthMiddleware for credential storage (mode: {auth_middleware._storage_mode.value})"
             )
-            auth_middleware.save_credentials(user_email, credentials)
+            # Pass normalized email to middleware
+            auth_middleware.save_credentials(normalized_email, credentials)
+            # ALWAYS update .oauth_authentication.json for "me"/"myself" resolution
+            _update_oauth_session_marker(normalized_email, credentials)
             return
     except Exception as e:
         logger.debug(f"AuthMiddleware not available, using fallback: {e}")
 
     # Fallback to plaintext storage if middleware not available
-    creds_path = _get_credentials_path(user_email)
+    creds_path = _get_credentials_path(normalized_email)
 
     # Ensure directory exists with proper permissions
     creds_path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,7 +400,7 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
         "scopes": credentials.scopes,
         "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
         "saved_at": datetime.now().isoformat(),
-        "user_email": user_email,  # Store email for validation
+        "user_email": normalized_email,  # Store normalized email for validation
     }
 
     try:
@@ -340,8 +417,11 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
             )
 
         logger.info(
-            f"Successfully saved plaintext credentials for {user_email} to {creds_path}"
+            f"Successfully saved plaintext credentials for {normalized_email} to {creds_path}"
         )
+
+        # ALWAYS update .oauth_authentication.json for "me"/"myself" resolution
+        _update_oauth_session_marker(normalized_email, credentials)
 
     except (IOError, OSError) as e:
         logger.error(f"Failed to save credentials for {user_email}: {e}")
@@ -349,24 +429,31 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
 
 
 def _load_credentials(user_email: str) -> Optional[Credentials]:
-    """Load credentials from disk with validation and error recovery."""
+    """Load credentials from disk with validation and error recovery.
+
+    Email addresses are normalized to lowercase for consistent credential lookup.
+    """
+    # Normalize email to lowercase for consistent credential lookup
+    normalized_email = _normalize_email(user_email)
+
     # Check if AuthMiddleware is available for encrypted storage
     try:
         from .context import get_auth_middleware
 
         auth_middleware = get_auth_middleware()
         if auth_middleware:
-            creds = auth_middleware.load_credentials(user_email)
+            # Pass normalized email to middleware
+            creds = auth_middleware.load_credentials(normalized_email)
             if creds:
                 logger.info(
-                    f"Successfully loaded credentials via AuthMiddleware for {user_email}"
+                    f"Successfully loaded credentials via AuthMiddleware for {normalized_email}"
                 )
                 return creds
     except Exception as e:
         logger.debug(f"AuthMiddleware not available for loading, using fallback: {e}")
 
     # Fallback to plaintext storage if middleware not available or has no credentials
-    creds_path = _get_credentials_path(user_email)
+    creds_path = _get_credentials_path(normalized_email)
 
     if not creds_path.exists():
         logger.debug(
@@ -386,11 +473,11 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
         with open(creds_path, "r") as f:
             creds_data = json.load(f)
 
-        # Validate stored email matches requested email
+        # Validate stored email matches requested email (both normalized)
         stored_email = creds_data.get("user_email")
-        if stored_email and stored_email != user_email:
+        if stored_email and _normalize_email(stored_email) != normalized_email:
             logger.error(
-                f"Credential file mismatch: requested {user_email}, but file contains {stored_email}"
+                f"Credential file mismatch: requested {normalized_email}, but file contains {stored_email}"
             )
             return None
 
@@ -451,7 +538,16 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
 
         if creds_data.get("expiry"):
             try:
-                credentials.expiry = datetime.fromisoformat(creds_data["expiry"])
+                expiry = datetime.fromisoformat(creds_data["expiry"])
+                # Keep timezone-naive to match Google's Credentials.expired property
+                # which uses datetime.utcnow() internally
+                if expiry.tzinfo is not None:
+                    # Convert timezone-aware to naive UTC
+                    expiry = expiry.replace(tzinfo=None)
+                    logger.debug(
+                        f"Converting timezone-aware expiry to naive UTC for {user_email}"
+                    )
+                credentials.expiry = expiry
                 logger.debug(
                     f"Credential expiry for {user_email}: {credentials.expiry}"
                 )
@@ -470,7 +566,7 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
             except (ValueError, TypeError):
                 pass
 
-        logger.info(f"Successfully loaded credentials for {user_email}")
+        logger.info(f"Successfully loaded credentials for {normalized_email}")
         return credentials
 
     except json.JSONDecodeError as e:
@@ -523,7 +619,8 @@ def needs_refresh(credentials: Credentials, buffer_seconds: int = 300) -> bool:
         return True
 
     # Calculate the threshold time (now + buffer)
-    now = datetime.now(UTC)
+    # Use timezone-naive datetime to match Google's Credentials.expired property
+    now = datetime.utcnow()
     refresh_threshold = now + timedelta(seconds=buffer_seconds)
 
     # Need refresh if expiry is before or at the threshold
@@ -601,11 +698,16 @@ def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentia
 
 
 def get_valid_credentials(user_email: str) -> Optional[Credentials]:
-    """Get valid credentials for a user, refreshing proactively if needed."""
+    """Get valid credentials for a user, refreshing proactively if needed.
+
+    Email addresses are normalized to lowercase for consistent credential lookup.
+    """
     if not user_email:
         raise GoogleAuthError("Cannot get credentials: user_email is required")
 
-    credentials = _load_credentials(user_email)
+    # Normalize email for consistent credential lookup
+    normalized_email = _normalize_email(user_email)
+    credentials = _load_credentials(normalized_email)
 
     if not credentials:
         return None
@@ -614,12 +716,12 @@ def get_valid_credentials(user_email: str) -> Optional[Credentials]:
     if needs_refresh(credentials):
         try:
             logger.info(
-                f"Proactively refreshing credentials for {user_email} before expiry"
+                f"Proactively refreshing credentials for {normalized_email} before expiry"
             )
-            credentials = _refresh_credentials(credentials, user_email)
+            credentials = _refresh_credentials(credentials, normalized_email)
         except GoogleAuthError:
             # If refresh fails, credentials are invalid
-            logger.error(f"Proactive refresh failed for {user_email}")
+            logger.error(f"Proactive refresh failed for {normalized_email}")
             return None
 
     return credentials
@@ -628,23 +730,34 @@ def get_valid_credentials(user_email: str) -> Optional[Credentials]:
 def get_all_stored_users() -> list[str]:
     """Get a list of all users who have stored credentials.
 
+    Returns normalized (lowercase) email addresses for consistency.
+
+    CRITICAL FIX: Now searches for BOTH .json AND .enc credential files
+    since encrypted storage is the default mode.
+
     Returns:
-        List of user email addresses with stored credentials
+        List of normalized user email addresses with stored credentials
     """
     try:
         credentials_dir = Path(settings.credentials_dir)
         if not credentials_dir.exists():
             return []
 
-        users = []
-        for file_path in credentials_dir.glob("*_credentials.json"):
-            # Convert safe filename back to email
-            safe_email = file_path.stem.replace("_credentials", "")
-            email = safe_email.replace("_at_", "@").replace("_", ".")
-            users.append(email)
+        users = set()  # Use set to avoid duplicates
 
-        logger.debug(f"Found {len(users)} stored users: {users}")
-        return users
+        # Search for ALL credential file types
+        for pattern in ["*_credentials.json", "*_credentials.enc"]:
+            for file_path in credentials_dir.glob(pattern):
+                # Convert safe filename back to email
+                safe_email = file_path.stem.replace("_credentials", "")
+                email = safe_email.replace("_at_", "@").replace("_", ".")
+                # Email is already lowercase from filename, but ensure consistency
+                normalized_email = _normalize_email(email)
+                users.add(normalized_email)
+
+        users_list = sorted(list(users))
+        logger.debug(f"Found {len(users_list)} stored users: {users_list}")
+        return users_list
 
     except Exception as e:
         logger.error(f"Error getting stored users: {e}")
@@ -665,7 +778,7 @@ async def initiate_oauth_flow(
     Initiate OAuth flow for a user with optional service selection and PKCE support.
 
     Args:
-        user_email: User's email address
+        user_email: User's email address (will be normalized to lowercase)
         service_name: Service name for display purposes
         selected_services: Optional pre-selected services
         show_service_selection: Whether to show service selection page
@@ -677,8 +790,11 @@ async def initiate_oauth_flow(
     if not user_email:
         raise GoogleAuthError("Cannot initiate OAuth flow: user_email is required")
 
+    # Normalize email for consistent credential storage
+    normalized_email = _normalize_email(user_email)
+
     logger.info(
-        f"Initiating OAuth flow for {user_email} (auth_method: {auth_method}, PKCE: {'enabled' if use_pkce else 'disabled'})"
+        f"Initiating OAuth flow for {normalized_email} (auth_method: {auth_method}, PKCE: {'enabled' if use_pkce else 'disabled'})"
     )
 
     # If no services selected and service selection is enabled, return selection URL
