@@ -338,7 +338,7 @@ class ScopeRegistry:
         "drive_basic": [
             "base.userinfo_email",
             "base.openid",
-            "drive.file",
+            "drive.full",  # Full Drive access for MCP - required to access shared/organizational files
             "drive.readonly",
         ],
         "drive_full": ["base.userinfo_email", "base.openid", "drive.full"],

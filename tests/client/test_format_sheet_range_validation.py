@@ -485,6 +485,144 @@ class TestFormatSheetRangeValidation:
             "Should support at least one authentication pattern"
     
     @pytest.mark.asyncio
+    async def test_json_string_color_parameters(self, client, test_spreadsheet_id):
+        """Test that color parameters accept JSON strings as well as dicts."""
+        if not test_spreadsheet_id:
+            pytest.skip("No test spreadsheet ID available")
+        
+        # Test with JSON string color parameters (client sends strings)
+        result = await client.call_tool("format_sheet_range", {
+            "user_google_email": TEST_EMAIL,
+            "spreadsheet_id": test_spreadsheet_id,
+            "sheet_id": 0,
+            "range_start_row": 0,
+            "range_end_row": 2,
+            "range_start_col": 0,
+            "range_end_col": 3,
+            "text_color": '{"red": 1.0, "green": 1.0, "blue": 1.0}',  # JSON string
+            "background_color": '{"red": 0.2, "green": 0.4, "blue": 0.8}',  # JSON string
+            "bold": True
+        })
+        
+        assert result is not None and result.content
+        content = result.content[0].text
+        
+        # Should NOT get validation errors about dict types
+        assert "input should be a valid dictionary" not in content.lower(), \
+            f"Should accept JSON string color parameters: {content}"
+        
+        valid_responses = [
+            "successfully applied", "formatting operations", "range",
+            "requires authentication", "no valid credentials", "❌"
+        ]
+        assert any(keyword in content.lower() for keyword in valid_responses), \
+            f"JSON string colors should work: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_json_string_border_parameters(self, client, test_spreadsheet_id):
+        """Test that border parameters accept JSON strings."""
+        if not test_spreadsheet_id:
+            pytest.skip("No test spreadsheet ID available")
+        
+        # Test with JSON string border parameters
+        result = await client.call_tool("format_sheet_range", {
+            "user_google_email": TEST_EMAIL,
+            "spreadsheet_id": test_spreadsheet_id,
+            "sheet_id": 0,
+            "range_start_row": 2,
+            "range_end_row": 4,
+            "range_start_col": 0,
+            "range_end_col": 2,
+            "apply_borders": True,
+            "border_color": '{"red": 0.5, "green": 0.5, "blue": 0.5}',  # JSON string
+            "border_positions": '{"top": true, "bottom": true, "left": true, "right": true}',  # JSON string
+            "border_style": "SOLID"
+        })
+        
+        assert result is not None and result.content
+        content = result.content[0].text
+        
+        # Should NOT get validation errors
+        assert "input should be a valid dictionary" not in content.lower(), \
+            f"Should accept JSON string border parameters: {content}"
+        
+        valid_responses = [
+            "successfully applied", "formatting operations", "range",
+            "requires authentication", "no valid credentials", "❌"
+        ]
+        assert any(keyword in content.lower() for keyword in valid_responses), \
+            f"JSON string borders should work: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_json_string_conditional_format_parameters(self, client, test_spreadsheet_id):
+        """Test that conditional formatting color parameters accept JSON strings."""
+        if not test_spreadsheet_id:
+            pytest.skip("No test spreadsheet ID available")
+        
+        # Test with JSON string conditional format colors
+        result = await client.call_tool("format_sheet_range", {
+            "user_google_email": TEST_EMAIL,
+            "spreadsheet_id": test_spreadsheet_id,
+            "sheet_id": 0,
+            "range_start_row": 4,
+            "range_end_row": 6,
+            "range_start_col": 0,
+            "range_end_col": 2,
+            "condition_type": "NUMBER_GREATER",
+            "condition_value": 50,
+            "condition_format_background_color": '{"red": 0.9, "green": 0.9, "blue": 0.5}',  # JSON string
+            "condition_format_text_color": '{"red": 0.1, "green": 0.1, "blue": 0.1}'  # JSON string
+        })
+        
+        assert result is not None and result.content
+        content = result.content[0].text
+        
+        # Should NOT get validation errors
+        assert "input should be a valid dictionary" not in content.lower(), \
+            f"Should accept JSON string conditional format colors: {content}"
+        
+        valid_responses = [
+            "successfully applied", "formatting operations", "range",
+            "requires authentication", "no valid credentials", "❌"
+        ]
+        assert any(keyword in content.lower() for keyword in valid_responses), \
+            f"JSON string conditional colors should work: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_mixed_dict_and_json_parameters(self, client, test_spreadsheet_id):
+        """Test mixing dict and JSON string parameters in the same call."""
+        if not test_spreadsheet_id:
+            pytest.skip("No test spreadsheet ID available")
+        
+        # Mix dict and JSON string parameters
+        result = await client.call_tool("format_sheet_range", {
+            "user_google_email": TEST_EMAIL,
+            "spreadsheet_id": test_spreadsheet_id,
+            "sheet_id": 0,
+            "range_start_row": 6,
+            "range_end_row": 8,
+            "range_start_col": 0,
+            "range_end_col": 3,
+            "text_color": {"red": 1.0, "green": 0.0, "blue": 0.0},  # Dict
+            "background_color": '{"red": 1.0, "green": 1.0, "blue": 0.8}',  # JSON string
+            "bold": True
+        })
+        
+        assert result is not None and result.content
+        content = result.content[0].text
+        
+        # Should handle both formats in same call
+        assert "input should be a valid dictionary" not in content.lower(), \
+            f"Should handle mixed dict/JSON formats: {content}"
+        
+        valid_responses = [
+            "successfully applied", "formatting operations", "range",
+            "requires authentication", "no valid credentials", "❌"
+        ]
+        assert any(keyword in content.lower() for keyword in valid_responses), \
+            f"Mixed format parameters should work: {content}"
+    
+    @pytest.mark.asyncio
     async def test_error_handling_robustness(self, client):
         """Test robust error handling for various edge cases."""
         
@@ -507,6 +645,32 @@ class TestFormatSheetRangeValidation:
         error_indicators = ["error", "not found", "invalid", "authentication", "failed"]
         assert any(indicator in content.lower() for indicator in error_indicators), \
             f"Should handle invalid spreadsheet ID gracefully: {content}"
+    
+    @pytest.mark.asyncio
+    async def test_invalid_json_string_handling(self, client, test_spreadsheet_id):
+        """Test that invalid JSON strings are properly rejected with helpful errors."""
+        if not test_spreadsheet_id:
+            pytest.skip("No test spreadsheet ID available")
+        
+        # Test with malformed JSON string
+        result = await client.call_tool("format_sheet_range", {
+            "user_google_email": TEST_EMAIL,
+            "spreadsheet_id": test_spreadsheet_id,
+            "sheet_id": 0,
+            "range_start_row": 0,
+            "range_end_row": 1,
+            "range_start_col": 0,
+            "range_end_col": 1,
+            "text_color": '{red: 1.0, green: 1.0}'  # Invalid JSON (missing quotes)
+        })
+        
+        assert result is not None and result.content
+        content = result.content[0].text
+        
+        # Should get helpful JSON parsing error
+        error_indicators = ["invalid json", "json", "parse", "error"]
+        assert any(indicator in content.lower() for indicator in error_indicators), \
+            f"Should provide helpful error for invalid JSON: {content}"
 
 
 @pytest.mark.service("sheets")
