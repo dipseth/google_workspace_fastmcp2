@@ -52,9 +52,19 @@ class AllowedEmailInfo(TypedDict):
     masked_email: str  # Privacy-masked version of the email
 
 
+class AllowedGroupInfo(TypedDict):
+    """Structure for a single allowed group entry based on People API contact groups."""
+    raw: str  # Raw token from GMAIL_ALLOW_LIST (e.g., "group:Team A" or "groupId:contactGroups/123")
+    type: NotRequired[str]  # "name" or "id"
+    group_name: NotRequired[str]  # Human-friendly group name when available
+    group_id: NotRequired[str]  # Contact group resourceName when available (e.g., "contactGroups/123")
+
+
 class GmailAllowListResponse(TypedDict):
     """Response structure for view_gmail_allow_list tool."""
     allowed_emails: List[AllowedEmailInfo]
+    # Optional list of group-based allow list entries (People API contact groups)
+    allowed_groups: NotRequired[List[AllowedGroupInfo]]
     count: int
     userEmail: str
     is_configured: bool

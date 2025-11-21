@@ -13,13 +13,15 @@ import json
 import asyncio
 import html
 from datetime import datetime, UTC
-from typing_extensions import Optional, Literal, Any, List, Dict, Union,Annotated
+from typing_extensions import Optional, Literal, Any, List, Dict, Union, Annotated
 from pydantic import Field
 from dataclasses import dataclass
 
 from fastmcp import FastMCP, Context
 from googleapiclient.errors import HttpError
+from googleapiclient.discovery import build
 
+from auth.context import get_auth_middleware
 from .service import _get_gmail_service_with_fallback
 from .utils import _create_mime_message, _prepare_reply_subject, _quote_original_message, _html_to_plain_text, _extract_headers, _extract_message_body, extract_email_addresses, _prepare_forward_subject, _extract_html_body, _format_forward_content, _generate_gmail_web_url, count_recipients
 from .gmail_types import (
@@ -80,17 +82,32 @@ async def _resolve_recipients_and_check_allow_list(
     to: Union[str, List[str]],
     cc: Optional[Union[str, List[str]]],
     bcc: Optional[Union[str, List[str]]],
-    user_google_email: str,
+    user_google_email: UserGoogleEmail,
     allow_list: List[str]
 ) -> List[str]:
     """
     Resolve 'me'/'myself' aliases and check recipients against allow list.
-    
+
+    The allow list now supports:
+      - Explicit email addresses (existing behavior)
+      - Group specs based on People API contact groups:
+        * "group:Team A"           → contact group by display name
+        * "groupId:contactGroups/ID" → contact group by resourceName
+
+    Recipients are considered allowed if:
+      - Their email is explicitly in the allow list, OR
+      - They are a member of any allowed contact group (best-effort via People API).
+
     Returns:
-        List of recipients that are NOT on the allow list
+        List of recipients that are NOT on the allow list (after group checks).
     """
+    from .allowlist import split_allow_list_tokens  # Local import to avoid circular imports
+
+    # Split allow list into explicit email entries and group specs
+    email_entries, group_specs = split_allow_list_tokens(allow_list)
+
     # Collect all recipient emails for the message
-    all_recipients = []
+    all_recipients: List[str] = []
 
     # Process 'to' recipients
     if isinstance(to, str):
@@ -113,8 +130,7 @@ async def _resolve_recipients_and_check_allow_list(
             all_recipients.extend(bcc)
 
     # Resolve 'me'/'myself' aliases to actual user email before elicitation check
-    # This prevents elicitation when user sends emails to themselves
-    resolved_recipients = []
+    resolved_recipients: List[str] = []
     for email in all_recipients:
         if email.strip().lower() in ['me', 'myself']:
             # Resolve to actual user email address
@@ -128,16 +144,195 @@ async def _resolve_recipients_and_check_allow_list(
     # Normalize resolved recipient emails (lowercase, strip whitespace)
     all_recipients = [email for email in resolved_recipients if email]
 
-    # Normalize allow list emails
-    normalized_allow_list = [email.lower() for email in allow_list]
+    # Normalize allow list explicit email entries
+    normalized_allow_emails = [email.lower() for email in email_entries]
 
-    # Check if any recipient is NOT on the allow list
+    # Initial pass: recipients not covered by explicit email entries
     recipients_not_allowed = [
         email for email in all_recipients
-        if email not in normalized_allow_list
+        if email not in normalized_allow_emails
     ]
-    
+
+    # If there are group specs configured, try to allow some recipients via People API group membership
+    if group_specs and recipients_not_allowed and user_google_email:
+        group_allowed = await _filter_recipients_allowed_by_groups(
+            recipients_not_allowed, group_specs, user_google_email
+        )
+        # Keep only those still not allowed after group checks
+        recipients_not_allowed = [
+            email for email in recipients_not_allowed
+            if email not in group_allowed
+        ]
+
     return recipients_not_allowed
+
+
+async def _get_people_service_for_allow_list(user_email: UserGoogleEmail):
+    """
+    Create a People API service instance for allow list group resolution.
+
+    This uses the same AuthMiddleware-backed credential loading approach as the
+    profile enrichment middleware, but is scoped specifically for allow list checks.
+
+    Returns:
+        People API service instance or None on failure.
+    """
+    try:
+        if not user_email:
+            logger.warning("No user email provided for People API (allow list groups)")
+            return None
+
+        auth_middleware = get_auth_middleware()
+        if not auth_middleware:
+            logger.warning("No AuthMiddleware available for People API (allow list groups)")
+            return None
+
+        credentials = auth_middleware.load_credentials(user_email)
+        if not credentials:
+            logger.warning(f"No credentials found for People API (allow list groups) for user {user_email}")
+            return None
+
+        people_service = await asyncio.to_thread(
+            build, "people", "v1", credentials=credentials
+        )
+        return people_service
+    except Exception as e:
+        logger.error(f"Failed to create People API service for allow list groups: {e}", exc_info=True)
+        return None
+
+
+async def _resolve_allowed_group_ids(group_specs: List[str], people_service) -> List[str]:
+    """
+    Resolve configured group specs into concrete contact group resourceNames.
+
+    Supports:
+      - "group:Team A" → resolved via contactGroups.list() name matching
+      - "groupId:contactGroups/123" → used as-is
+
+    Returns:
+        List of contact group resourceNames to treat as trusted groups.
+    """
+    allowed_ids: List[str] = []
+    try:
+        # Fetch user's contact groups once for name → resourceName mapping
+        def _list_groups():
+            return people_service.contactGroups().list(pageSize=200).execute()
+
+        result = await asyncio.to_thread(_list_groups)
+        groups = result.get("contactGroups", []) or []
+        name_to_id = {
+            g.get("name", ""): g.get("resourceName")
+            for g in groups
+            if g.get("name") and g.get("resourceName")
+        }
+
+        for spec in group_specs:
+            value = spec.strip()
+            lower = value.lower()
+            if lower.startswith("groupid:"):
+                gid = value[len("groupId:"):].strip()
+                if gid:
+                    allowed_ids.append(gid)
+            elif lower.startswith("group:"):
+                group_name = value[len("group:"):].strip()
+                gid = name_to_id.get(group_name)
+                if gid:
+                    allowed_ids.append(gid)
+                else:
+                    logger.warning(f"[allow_list_groups] No contact group found with name '{group_name}'")
+            else:
+                logger.warning(f"[allow_list_groups] Unknown group spec format: {value}")
+
+    except Exception as e:
+        logger.error(f"Failed to resolve allow list group specs via People API: {e}", exc_info=True)
+
+    return allowed_ids
+
+
+async def _get_contact_group_ids_for_email(email: str, people_service) -> List[str]:
+    """
+    Fetch contact group resourceNames for a given email using People API.
+
+    This uses people.searchContacts with readMask including memberships.
+    Returns:
+        List of contact group resourceNames the person belongs to.
+    """
+    group_ids: List[str] = []
+    try:
+        def _search():
+            # searchContacts returns results containing person objects
+            return people_service.people().searchContacts(
+                query=email,
+                readMask="emailAddresses,memberships"
+            ).execute()
+
+        result = await asyncio.to_thread(_search)
+        # Handle both "results" (searchContacts) and possible "connections"/"people" structures
+        containers = (
+            result.get("results")
+            or result.get("connections")
+            or result.get("people")
+            or []
+        )
+
+        for item in containers:
+            person = item.get("person", item)
+            for membership in person.get("memberships", []):
+                cgm = membership.get("contactGroupMembership")
+                if cgm:
+                    gid = cgm.get("contactGroupResourceName")
+                    if gid:
+                        group_ids.append(gid)
+
+    except Exception as e:
+        logger.error(f"Failed to fetch contact group memberships for {email}: {e}", exc_info=True)
+
+    return group_ids
+
+
+async def _filter_recipients_allowed_by_groups(
+    recipients: List[str],
+    group_specs: List[str],
+    user_google_email: UserGoogleEmail
+) -> List[str]:
+    """
+    Determine which recipients should be considered allowed based on group specs.
+
+    Uses People API to:
+      1) Resolve configured group specs → contact group resourceNames
+      2) For each recipient, fetch memberships and see if they belong to any allowed group
+
+    Returns:
+        List of recipient emails that are allowed via contact group membership.
+    """
+    allowed_recipients: List[str] = []
+
+    people_service = await _get_people_service_for_allow_list(user_google_email)
+    if not people_service:
+        return allowed_recipients
+
+    allowed_group_ids = await _resolve_allowed_group_ids(group_specs, people_service)
+    if not allowed_group_ids:
+        return allowed_recipients
+
+    allowed_group_ids_set = set(allowed_group_ids)
+
+    # De-duplicate recipients for efficiency
+    unique_recipients = sorted(set(recipients))
+    for email in unique_recipients:
+        group_ids = await _get_contact_group_ids_for_email(email, people_service)
+        if not group_ids:
+            continue
+
+        if allowed_group_ids_set.intersection(group_ids):
+            allowed_recipients.append(email)
+
+    if allowed_recipients:
+        logger.info(
+            f"[allow_list_groups] Marked {len(allowed_recipients)} recipient(s) as allowed via contact group membership"
+        )
+
+    return allowed_recipients
 
 
 async def _handle_elicitation_fallback(
@@ -145,7 +340,7 @@ async def _handle_elicitation_fallback(
     to: Union[str, List[str]],
     subject: str,
     body: str,
-    user_google_email: str,
+    user_google_email: UserGoogleEmail,
     content_type: str,
     html_body: Optional[str],
     cc: Optional[Union[str, List[str]]],
@@ -350,64 +545,24 @@ async def send_gmail_message(
 
     # Check allow list and trigger elicitation if needed
     allow_list = settings.get_gmail_allow_list()
+    recipients_not_allowed: List[str] = []
 
     if allow_list:
-        # Collect all recipient emails for the message
-        all_recipients = []
-
-        # Process 'to' recipients
-        if isinstance(to, str):
-            all_recipients.extend([email.strip() for email in to.split(',')])
-        elif isinstance(to, list):
-            all_recipients.extend(to)
-
-        # Process 'cc' recipients
-        if cc:
-            if isinstance(cc, str):
-                all_recipients.extend([email.strip() for email in cc.split(',')])
-            elif isinstance(cc, list):
-                all_recipients.extend(cc)
-
-        # Process 'bcc' recipients
-        if bcc:
-            if isinstance(bcc, str):
-                all_recipients.extend([email.strip() for email in bcc.split(',')])
-            elif isinstance(bcc, list):
-                all_recipients.extend(bcc)
-
-        # Resolve 'me'/'myself' aliases to actual user email before elicitation check
-        # This prevents elicitation when user sends emails to themselves
-        resolved_recipients = []
-        for email in all_recipients:
-            if email.strip().lower() in ['me', 'myself']:
-                # Resolve to actual user email address
-                if user_google_email:
-                    resolved_recipients.append(user_google_email.strip().lower())
-                # If user_google_email not available yet, skip elicitation for 'me'/'myself'
-                # The middleware will resolve it properly later
-            else:
-                resolved_recipients.append(email.strip().lower())
-
-        # Normalize resolved recipient emails (lowercase, strip whitespace)
-        all_recipients = [email for email in resolved_recipients if email]
-
-        # Normalize allow list emails
-        normalized_allow_list = [email.lower() for email in allow_list]
-
-        # Check if any recipient is NOT on the allow list
-        recipients_not_allowed = [
-            email for email in all_recipients
-            if email not in normalized_allow_list
-        ]
+        # Use consolidated helper to resolve aliases and perform email + group checks
+        recipients_not_allowed = await _resolve_recipients_and_check_allow_list(
+            to, cc, bcc, user_google_email, allow_list
+        )
 
         if recipients_not_allowed:
             # Check if elicitation is enabled in settings
             if not settings.gmail_enable_elicitation:
                 logger.info(f"Elicitation disabled in settings - applying fallback: {settings.gmail_elicitation_fallback}")
-                return await _handle_elicitation_fallback(
+                fallback_result = await _handle_elicitation_fallback(
                     settings.gmail_elicitation_fallback, to, subject, body, user_google_email,
                     content_type, html_body, cc, bcc, recipients_not_allowed
                 )
+                if fallback_result is not None:
+                    return fallback_result
 
             # Log elicitation trigger
             logger.info(f"Elicitation triggered for {len(recipients_not_allowed)} recipient(s) not on allow list")
@@ -637,7 +792,8 @@ async def send_gmail_message(
                 )
         else:
             # All recipients are on allow list
-            logger.info(f"All {len(all_recipients)} recipient(s) are on allow list - sending without elicitation")
+            total_recipients = count_recipients(to, cc, bcc)
+            logger.info(f"All {total_recipients} recipient(s) are on allow list - sending without elicitation")
     else:
         # No allow list configured
         logger.debug("No Gmail allow list configured - sending without elicitation")

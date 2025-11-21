@@ -421,6 +421,14 @@ class ScopeRegistry:
             "base.userinfo_profile",
             "base.openid",
             "people.readonly",
+            "people.contacts",  # Write access needed for contact group management
+        ],
+        "people_full": [
+            "base.userinfo_email",
+            "base.userinfo_profile",
+            "base.openid",
+            "people.contacts",
+            "people.directory_readonly",
         ],
         # Multi-service combinations
         "office_suite": [
@@ -485,6 +493,8 @@ class ScopeRegistry:
             "tasks.readonly",
             "tasks.full",
             "people.readonly",
+            "people.contacts",
+            "people.directory_readonly",
         ],
     }
 

@@ -216,6 +216,16 @@ class TagBasedResourceMiddleware(Middleware):
                         "id_field": "album_id"
                     }
                 }
+            elif service_name == "people":
+                service_config["list_types"] = {
+                    "labels": {
+                        "display_name": "Contact Labels",
+                        "description": "Google People contact groups / labels",
+                        "list_tool": "list_people_contact_labels",
+                        "get_tool": "get_people_contact_group_members",  # ✅ Label-to-emails resolution
+                        "id_field": "label"  # Changed from resourceName to match the tool parameter
+                    }
+                }
             elif service_name == "tasks":
                 service_config["list_types"] = {
                     "task_lists": {
