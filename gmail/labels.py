@@ -553,12 +553,18 @@ async def list_gmail_labels( user_google_email: UserGoogleEmail = None,) -> Gmai
                 user_labels.append(label_info)
 
         logger.info(f"Found {len(all_labels)} labels for {user_google_email} (with unread counts for {len(label_details)} labels)")
-
+ 
+        # Build convenience ID -> name map
+        id_to_name: Dict[str, str] = {lbl["id"]: lbl["name"] for lbl in all_labels}
+ 
         return GmailLabelsResponse(
             labels=all_labels,
             total_count=len(all_labels),
             system_labels=system_labels,
             user_labels=user_labels,
+            system_count=len(system_labels),
+            user_count=len(user_labels),
+            id_to_name=id_to_name,
             error=None  # Explicitly set to None when no error
         )
 
@@ -574,6 +580,9 @@ async def list_gmail_labels( user_google_email: UserGoogleEmail = None,) -> Gmai
             total_count=0,
             system_labels=[],
             user_labels=[],
+            system_count=0,
+            user_count=0,
+            id_to_name={},
             error=error_msg  # Include the error message
         )
 
@@ -1039,28 +1048,38 @@ async def modify_gmail_message_labels(
             _validate_batch_size(parsed_remove_label_ids, "remove message labels")
 
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
-
+ 
         body = {}
         if parsed_add_label_ids:
             body["addLabelIds"] = parsed_add_label_ids
         if parsed_remove_label_ids:
             body["removeLabelIds"] = parsed_remove_label_ids
-
+ 
         await asyncio.to_thread(
             gmail_service.users().messages().modify(userId="me", id=message_id, body=body).execute
         )
-
-        actions = []
-        if parsed_add_label_ids:
-            actions.append(f"Added labels: {', '.join(parsed_add_label_ids)}")
-        if parsed_remove_label_ids:
-            actions.append(f"Removed labels: {', '.join(parsed_remove_label_ids)}")
-
+ 
+        # Build ID -> name map for labels so we can return human-readable names
+        labels_response = await asyncio.to_thread(
+            gmail_service.users().labels().list(userId="me").execute
+        )
+        labels_data = labels_response.get("labels", [])
+        id_to_name: Dict[str, str] = {
+            lbl.get("id", ""): lbl.get("name", lbl.get("id", ""))
+            for lbl in labels_data
+            if isinstance(lbl, dict) and lbl.get("id")
+        }
+ 
+        labels_added_names = [id_to_name.get(lid, lid) for lid in (parsed_add_label_ids or [])]
+        labels_removed_names = [id_to_name.get(lid, lid) for lid in (parsed_remove_label_ids or [])]
+ 
         return ModifyGmailMessageLabelsResponse(
             success=True,
             message_id=message_id,
             labels_added=parsed_add_label_ids or [],
             labels_removed=parsed_remove_label_ids or [],
+            labels_added_names=labels_added_names,
+            labels_removed_names=labels_removed_names,
             userEmail=user_google_email
         )
 
@@ -1071,6 +1090,8 @@ async def modify_gmail_message_labels(
             message_id=message_id,
             labels_added=[],
             labels_removed=[],
+            labels_added_names=[],
+            labels_removed_names=[],
             userEmail=user_google_email or "unknown",
             error=str(e)
         )
@@ -1081,6 +1102,8 @@ async def modify_gmail_message_labels(
             message_id=message_id,
             labels_added=[],
             labels_removed=[],
+            labels_added_names=[],
+            labels_removed_names=[],
             userEmail=user_google_email or "unknown",
             error=error_msg
         )

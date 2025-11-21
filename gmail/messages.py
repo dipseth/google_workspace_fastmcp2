@@ -63,6 +63,16 @@ async def search_gmail_messages(
         )
         messages_raw = response.get("messages", [])
 
+        # Fetch labels once so we can resolve label IDs to human-readable names
+        labels_response = await asyncio.to_thread(
+            gmail_service.users()
+            .labels()
+            .list(userId="me")
+            .execute
+        )
+        labels_data = labels_response.get("labels", [])
+        label_id_to_name = {lbl.get("id"): lbl.get("name", lbl.get("id")) for lbl in labels_data if isinstance(lbl, dict)}
+
         # Convert to structured format
         messages: List[GmailMessageInfo] = []
         for msg_raw in messages_raw:
@@ -82,7 +92,9 @@ async def search_gmail_messages(
                 
                 headers = _extract_headers(msg_metadata.get("payload", {}), ["Subject", "From", "Date"])
                 snippet = msg_metadata.get("snippet", "")
-                
+                label_ids = msg_metadata.get("labelIds", []) or msg_raw.get("labelIds", []) or []
+                label_names = [label_id_to_name.get(lid, lid) for lid in label_ids]
+
                 message_info: GmailMessageInfo = {
                     "id": msg_id,
                     "thread_id": thread_id,
@@ -90,14 +102,21 @@ async def search_gmail_messages(
                     "subject": headers.get("Subject"),
                     "sender": headers.get("From"),
                     "date": headers.get("Date"),
+                    "labels": label_ids,
+                    "label_names": label_names,
                     "web_url": _generate_gmail_web_url(msg_id)
                 }
             except Exception as e:
                 logger.warning(f"Could not get metadata for message {msg_id}: {e}")
                 # Fallback with minimal info
+                fallback_label_ids = msg_raw.get("labelIds", []) or []
+                fallback_label_names = [label_id_to_name.get(lid, lid) for lid in fallback_label_ids]
+
                 message_info: GmailMessageInfo = {
                     "id": msg_id,
                     "thread_id": thread_id,
+                    "labels": fallback_label_ids,
+                    "label_names": fallback_label_names,
                     "web_url": _generate_gmail_web_url(msg_id)
                 }
             
