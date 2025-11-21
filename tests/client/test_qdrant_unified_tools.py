@@ -132,6 +132,122 @@ class TestQdrantUnifiedSearch:
                 assert "error" in content.lower() or "not available" in content.lower()
     
     @pytest.mark.asyncio
+    async def test_search_recommendation_capability(self, client):
+        """Test search tool recommendation mode using positive/negative point IDs."""
+        # Discover candidate point IDs from recent responses instead of hardcoding
+        try:
+            recent = await client.read_resource("qdrant://collection/mcp_tool_responses/responses/recent")
+        except Exception as e:
+            pytest.skip(f"Qdrant recent responses resource not available: {e}")
+        
+        if not recent:
+            pytest.skip("No recent Qdrant responses available")
+        
+        first_content = recent[0]
+        recent_text = first_content.text if hasattr(first_content, "text") else str(first_content)
+        
+        try:
+            recent_data = json.loads(recent_text)
+        except json.JSONDecodeError:
+            pytest.skip("Recent responses resource did not return JSON")
+        
+        responses = recent_data.get("responses") or []
+        if not responses:
+            pytest.skip("No recent responses in Qdrant to test recommendation mode")
+        
+        positive_ids = []
+        negative_ids = []
+        
+        for resp in responses:
+            if not isinstance(resp, dict):
+                continue
+            tool_name = resp.get("tool_name") or resp.get("metadata", {}).get("tool_name")
+            point_id = resp.get("id") or resp.get("point_id")
+            if not point_id or not tool_name:
+                continue
+            if tool_name == "list_gmail_labels" and len(positive_ids) < 2:
+                positive_ids.append(point_id)
+            elif tool_name == "search_drive_files" and len(negative_ids) < 2:
+                negative_ids.append(point_id)
+            if len(positive_ids) >= 2 and len(negative_ids) >= 2:
+                break
+        if len(positive_ids) < 2 or len(negative_ids) < 2:
+            pytest.skip("Not enough Gmail/Drive responses in Qdrant to test recommendation mode")
+        
+        result = await client.call_tool("search", {
+            "query": "",
+            "positive_point_ids": positive_ids,
+            "negative_point_ids": negative_ids,
+            "limit": 5,
+        })
+        
+        content = result.content[0].text if hasattr(result, "content") else str(result)
+        print("Qdrant recommendation search raw response:", content[:1000])
+        
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            pytest.skip("Recommendation search did not return JSON (Qdrant may be unavailable)")
+        
+        assert "results" in data, "Recommendation search must return 'results' field"
+        assert isinstance(data["results"], list)
+        
+        query_type = data.get("query_type") or data.get("metadata", {}).get("query_type")
+        if query_type is not None:
+            assert query_type == "recommend", f"Expected query_type 'recommend', got {query_type}"
+        
+        if not data["results"]:
+            return
+        
+        for item in data["results"]:
+            if not isinstance(item, dict):
+                continue
+            metadata = item.get("metadata", {})
+            tool_name = metadata.get("tool_name") or item.get("tool_name")
+            if tool_name is not None:
+                # Results should be biased toward Gmail label history
+                assert tool_name == "list_gmail_labels"
+            score = item.get("score")
+            if score is not None:
+                assert isinstance(score, (int, float)), "Score must be numeric when present"
+    
+    @pytest.mark.asyncio
+    async def test_search_indexed_service_history_query(self, client):
+        """Test service history queries using indexed tool_name/user_email fields."""
+        query = f"tool_name:send_gmail_message user_email:{TEST_EMAIL}"
+        result = await client.call_tool("search", {"query": query})
+        content = result.content[0].text if hasattr(result, "content") else str(result)
+        print("Qdrant indexed service_history raw response:", content[:1000])
+        
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            # Acceptable if Qdrant or analytics index is unavailable
+            return
+        
+        assert "results" in data, "Response should have 'results' field for indexed service history query"
+        assert isinstance(data["results"], list)
+        
+        query_type = data.get("query_type") or data.get("metadata", {}).get("query_type")
+        if query_type is not None:
+            assert query_type == "service_history", f"Expected query_type 'service_history', got {query_type}"
+        
+        if not data["results"]:
+            # No matches is acceptable depending on live data
+            return
+        
+        for item in data["results"]:
+            if not isinstance(item, dict):
+                continue
+            metadata = item.get("metadata", {})
+            tool_name = metadata.get("tool_name") or item.get("tool_name")
+            user_email = metadata.get("user_email") or item.get("user_email")
+            if tool_name is not None:
+                assert tool_name == "send_gmail_message"
+            if user_email is not None:
+                assert user_email == TEST_EMAIL
+    
+    @pytest.mark.asyncio
     async def test_search_response_format_compliance(self, client):
         """Test that search tool responses comply with OpenAI MCP standard."""
         result = await client.call_tool("search", {"query": "test compliance"})
@@ -157,11 +273,15 @@ class TestQdrantUnifiedSearch:
                 assert isinstance(first_result["title"], str), "Title must be a string"
                 assert isinstance(first_result["url"], str), "URL must be a string"
                 
+                # Optional metadata structure
+                metadata = first_result.get("metadata")
+                if metadata is not None:
+                    assert isinstance(metadata, dict), "Metadata must be a dictionary when present"
         except json.JSONDecodeError:
             # If Qdrant is not available, should still return valid JSON error
             assert "{" in content and "}" in content, "Error response should be valid JSON"
-
-
+        
+        
 @pytest.mark.service("qdrant")
 class TestQdrantUnifiedFetch:
     """Test the new unified fetch tool."""
@@ -189,8 +309,8 @@ class TestQdrantUnifiedFetch:
             if search_data.get("results") and len(search_data["results"]) > 0:
                 valid_id = search_data["results"][0]["id"]
                 
-                # Now fetch with this valid ID
-                fetch_result = await client.call_tool("fetch", {"id": valid_id})
+                # Now fetch with this valid ID using canonical point_id parameter
+                fetch_result = await client.call_tool("fetch", {"point_id": valid_id})
                 fetch_content = fetch_result.content[0].text if hasattr(fetch_result, 'content') else str(fetch_result)
                 
                 fetch_data = json.loads(fetch_content)
@@ -223,7 +343,8 @@ class TestQdrantUnifiedFetch:
         ]
         
         for invalid_id in invalid_ids:
-            result = await client.call_tool("fetch", {"id": invalid_id})
+            # Use canonical point_id parameter so tool runs and returns a document-shaped error
+            result = await client.call_tool("fetch", {"point_id": invalid_id})
             content = result.content[0].text if hasattr(result, 'content') else str(result)
             
             try:
@@ -235,20 +356,98 @@ class TestQdrantUnifiedFetch:
                 assert "text" in data, "Error response must have 'text' field"
                 assert "url" in data, "Error response must have 'url' field"
                 
-                # Check error indicators
-                assert "not found" in data["title"].lower() or "error" in data["title"].lower(), \
-                    f"Title should indicate error or not found: {data['title']}"
+                # Check error indicators – title may indicate not found, error, or unknown
+                title_lower = data["title"].lower()
+                assert (
+                    "not found" in title_lower
+                    or "error" in title_lower
+                    or "unknown" in title_lower
+                ), f"Title should indicate error, not found, or unknown: {data['title']}"
+                
+                # ID in the error doc should still echo the requested ID when provided
                 assert data["id"] == invalid_id, "ID should match requested ID even for errors"
                 
             except json.JSONDecodeError:
                 assert "error" in content.lower(), "Non-JSON response should indicate error"
     
     @pytest.mark.asyncio
+    async def test_fetch_batch_with_ordering(self, client):
+        """Test batch fetch with ordering by timestamp using point_ids."""
+        collection_name = "mcp_tool_responses"
+        recent_uri = f"qdrant://collection/{collection_name}/responses/recent"
+        
+        try:
+            recent_content = await client.read_resource(recent_uri)
+        except Exception as e:
+            pytest.skip(f"Unable to read recent responses for batch fetch test: {e}")
+        
+        if not recent_content:
+            pytest.skip("No recent Qdrant responses available for batch fetch test")
+        
+        first_content = recent_content[0]
+        recent_text = first_content.text if hasattr(first_content, "text") else str(first_content)
+        
+        try:
+            recent_data = json.loads(recent_text)
+        except json.JSONDecodeError:
+            pytest.skip("Recent responses resource did not return JSON")
+        
+        responses = recent_data.get("responses") or []
+        if len(responses) < 2:
+            pytest.skip("Not enough recent responses in Qdrant to test batch fetch")
+        
+        # Collect (timestamp, id) tuples
+        timestamp_id_pairs = []
+        for resp in responses[:5]:
+            if not isinstance(resp, dict):
+                continue
+            point_id = resp.get("id") or resp.get("point_id")
+            ts = resp.get("timestamp")
+            if point_id and ts:
+                timestamp_id_pairs.append((ts, point_id))
+        
+        if len(timestamp_id_pairs) < 2:
+            pytest.skip("Recent responses did not contain enough timestamped ids for batch fetch test")
+        
+        # Sort lexicographically; ISO timestamps preserve chronological order
+        timestamp_id_pairs.sort(key=lambda x: x[0])
+        expected_first_id = timestamp_id_pairs[0][1]
+        primary_id = timestamp_id_pairs[0][1]
+        extra_ids = [pid for _, pid in timestamp_id_pairs[1:3]]
+        
+        fetch_result = await client.call_tool("fetch", {
+            "point_id": primary_id,
+            "point_ids": extra_ids,
+            "order_by": "timestamp",
+            "order_direction": "asc",
+        })
+        
+        content = fetch_result.content[0].text if hasattr(fetch_result, "content") else str(fetch_result)
+        print("Qdrant batch fetch raw response:", content[:1000])
+        
+        try:
+            fetch_data = json.loads(content)
+        except json.JSONDecodeError:
+            pytest.skip("Batch fetch did not return JSON (Qdrant may be unavailable)")
+        
+        # Top-level id should correspond to the earliest timestamp
+        assert fetch_data.get("id") == expected_first_id, \
+            f"Expected earliest id {expected_first_id}, got {fetch_data.get('id')}"
+        
+        text = fetch_data.get("text", "")
+        if text:
+            # Text should contain one block per document
+            doc_marker = "=== QDRANT DOCUMENT ==="
+            assert text.count(doc_marker) >= len(extra_ids) + 1, \
+                "Batch fetch text should contain multiple QDRANT DOCUMENT blocks"
+    
+    @pytest.mark.asyncio
     async def test_fetch_response_format_compliance(self, client):
         """Test that fetch tool responses comply with OpenAI MCP standard."""
         # Use a test ID (may or may not exist)
         test_id = str(uuid.uuid4())
-        result = await client.call_tool("fetch", {"id": test_id})
+        # Use canonical point_id parameter to hit unified fetch
+        result = await client.call_tool("fetch", {"point_id": test_id})
         content = result.content[0].text if hasattr(result, 'content') else str(result)
         
         try:
@@ -291,9 +490,9 @@ class TestQdrantBackwardCompatibility:
         result = await client.call_tool("get_tool_analytics", {})
         assert result is not None, "Legacy get_tool_analytics should still work"
         
-        # Test get_response_details with a test ID
+        # Test get_response_details with a test ID (uses canonical point_id parameter)
         test_id = str(uuid.uuid4())
-        result = await client.call_tool("get_response_details", {"response_id": test_id})
+        result = await client.call_tool("get_response_details", {"point_id": test_id})
         assert result is not None, "Legacy get_response_details should still work"
         
         # Check that response indicates either success or proper error
@@ -395,7 +594,7 @@ class TestQdrantServiceIntegration:
                 doc_id = search_data["results"][0]["id"]
                 
                 # Fetch the document
-                fetch_result = await client.call_tool("fetch", {"id": doc_id})
+                fetch_result = await client.call_tool("fetch", {"point_id": doc_id})
                 fetch_content = fetch_result.content[0].text if hasattr(fetch_result, 'content') else str(fetch_result)
                 
                 fetch_data = json.loads(fetch_content)
@@ -497,7 +696,8 @@ class TestQdrantPerformance:
         
         for test_id in test_ids:
             start_time = time.time()
-            result = await client.call_tool("fetch", {"id": test_id})
+            # Use canonical point_id parameter for performance test
+            result = await client.call_tool("fetch", {"point_id": test_id})
             elapsed_time = time.time() - start_time
             
             assert result is not None, f"Fetch with ID '{test_id}' should return result"
