@@ -52,7 +52,14 @@ class Settings(BaseSettings):
     qdrant_host: Optional[str] = None  # Will be set from qdrant_url
     qdrant_port: Optional[int] = None  # Will be set from qdrant_url
     qdrant_api_key: Optional[str] = None  # Will be set from qdrant_key
-    
+
+    # Primary Qdrant collection for MCP tool responses / analytics
+    tool_collection: str = Field(
+        default="mcp_tool_responses",
+        env="TOOL_COLLECTION",
+        description="Primary Qdrant collection for MCP tool responses and analytics",
+    )
+     
     # Logging
     log_level: str = "INFO"
     

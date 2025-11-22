@@ -24,6 +24,9 @@ from .config import QdrantConfig
 from config.enhanced_logging import setup_logger
 logger = setup_logger()
 
+# Global singleton instance for shared Qdrant client usage
+_global_client_manager = None  # type: Optional["QdrantClientManager"]
+
 
 class QdrantClientManager:
     """
@@ -901,3 +904,35 @@ class QdrantClientManager:
             "embedding_dim": self.embedding_dim,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+
+def get_or_create_client_manager(
+    config: Optional[QdrantConfig] = None,
+    qdrant_api_key: Optional[str] = None,
+    qdrant_url: Optional[str] = None,
+    auto_discovery: bool = True,
+) -> "QdrantClientManager":
+    """
+    Get a singleton QdrantClientManager instance.
+
+    The first caller may optionally provide config/credentials; subsequent callers
+    will receive the same instance regardless of arguments. This ensures a single
+    shared Qdrant client is used across middleware, tools, and resources.
+    """
+    global _global_client_manager
+
+    if _global_client_manager is not None:
+        return _global_client_manager
+
+    # Default to centralized settings-based config if none provided
+    if config is None:
+        from .config import load_config_from_settings
+        config = load_config_from_settings()
+
+    _global_client_manager = QdrantClientManager(
+        config=config,
+        qdrant_api_key=qdrant_api_key,
+        qdrant_url=qdrant_url,
+        auto_discovery=auto_discovery,
+    )
+    return _global_client_manager

@@ -25,13 +25,19 @@ by Chat tools as well.
 import logging
 import re
 import asyncio
-from typing_extensions import Optional, Union, List
+from typing_extensions import Optional, Union, List, Annotated
+from pydantic import Field
 
 from fastmcp import FastMCP
 
 # Import our custom type for consistent parameter definition
 from tools.common_types import UserGoogleEmail
-from .gmail_types import GmailAllowListResponse, AllowedEmailInfo, GmailRecipientsOptional, AllowedGroupInfo
+from .gmail_types import (
+    GmailAllowListResponse,
+    AllowedEmailInfo,
+    GmailRecipientsOptional,
+    AllowedGroupInfo,
+)
 
 from config.settings import settings
 from .utils import _parse_email_addresses
@@ -39,6 +45,7 @@ from auth.context import get_auth_middleware
 from googleapiclient.discovery import build
 
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
 
 
@@ -86,7 +93,9 @@ async def _get_people_service_for_labels(user_email: UserGoogleEmail):
     try:
         auth_middleware = get_auth_middleware()
     except Exception as exc:
-        logger.warning(f"AuthMiddleware lookup failed for People API (contact labels): {exc}")
+        logger.warning(
+            f"AuthMiddleware lookup failed for People API (contact labels): {exc}"
+        )
         return None
 
     if not auth_middleware:
@@ -96,11 +105,15 @@ async def _get_people_service_for_labels(user_email: UserGoogleEmail):
     try:
         credentials = auth_middleware.load_credentials(user_email)
     except Exception as exc:
-        logger.warning(f"Error loading credentials for People API (contact labels) for user {user_email}: {exc}")
+        logger.warning(
+            f"Error loading credentials for People API (contact labels) for user {user_email}: {exc}"
+        )
         return None
 
     if not credentials:
-        logger.warning(f"No credentials found for People API (contact labels) for user {user_email}")
+        logger.warning(
+            f"No credentials found for People API (contact labels) for user {user_email}"
+        )
         return None
 
     try:
@@ -122,6 +135,7 @@ async def _ensure_contact_group(people_service, label_name: str) -> Optional[str
         return None
 
     try:
+
         def _list_groups():
             return people_service.contactGroups().list(pageSize=200).execute()
 
@@ -135,14 +149,18 @@ async def _ensure_contact_group(people_service, label_name: str) -> Optional[str
 
         # Create group if not found
         def _create_group():
-            return people_service.contactGroups().create(
-                body={"contactGroup": {"name": label_name}}
-            ).execute()
+            return (
+                people_service.contactGroups()
+                .create(body={"contactGroup": {"name": label_name}})
+                .execute()
+            )
 
         created = await asyncio.to_thread(_create_group)
         resource_name = created.get("resourceName")
         if not resource_name:
-            logger.error(f"People API returned contactGroup without resourceName for label '{label_name}'")
+            logger.error(
+                f"People API returned contactGroup without resourceName for label '{label_name}'"
+            )
         return resource_name
     except Exception as exc:
         logger.error(f"Error ensuring contact group '{label_name}': {exc}")
@@ -162,11 +180,13 @@ async def _search_contacts_for_email(people_service, email: str) -> List[str]:
         return resource_names
 
     try:
+
         def _search():
-            return people_service.people().searchContacts(
-                query=normalized_email,
-                readMask="emailAddresses"
-            ).execute()
+            return (
+                people_service.people()
+                .searchContacts(query=normalized_email, readMask="emailAddresses")
+                .execute()
+            )
 
         result = await asyncio.to_thread(_search)
         containers = (
@@ -206,15 +226,20 @@ async def _create_contact_for_email(people_service, email: str) -> Optional[str]
         return None
 
     try:
+
         def _create():
-            return people_service.people().createContact(
-                body={"emailAddresses": [{"value": normalized_email}]}
-            ).execute()
+            return (
+                people_service.people()
+                .createContact(body={"emailAddresses": [{"value": normalized_email}]})
+                .execute()
+            )
 
         person = await asyncio.to_thread(_create)
         resource_name = person.get("resourceName")
         if not resource_name:
-            logger.error(f"People API returned contact without resourceName for email '{normalized_email}'")
+            logger.error(
+                f"People API returned contact without resourceName for email '{normalized_email}'"
+            )
         return resource_name
     except Exception as exc:
         logger.error(f"Error creating contact for email '{email}': {exc}")
@@ -224,14 +249,14 @@ async def _create_contact_for_email(people_service, email: str) -> Optional[str]
 def _chunked(items: List[str], chunk_size: int):
     """Yield successive chunks from a list."""
     for i in range(0, len(items), chunk_size):
-        yield items[i:i + chunk_size]
+        yield items[i : i + chunk_size]
 
 
 async def _manage_contact_labels(
     action: str,
     email: GmailRecipientsOptional,
     label: Optional[str],
-    user_google_email: UserGoogleEmail
+    user_google_email: UserGoogleEmail,
 ) -> str:
     """
     Handle People contact label operations for manage_gmail_allow_list.
@@ -299,11 +324,17 @@ async def _manage_contact_labels(
         batch_errors = 0
         for chunk in _chunked(resource_names_to_add, 200):
             try:
+
                 def _modify():
-                    return people_service.contactGroups().members().modify(
-                        resourceName=group_resource,
-                        body={"resourceNamesToAdd": chunk}
-                    ).execute()
+                    return (
+                        people_service.contactGroups()
+                        .members()
+                        .modify(
+                            resourceName=group_resource,
+                            body={"resourceNamesToAdd": chunk},
+                        )
+                        .execute()
+                    )
 
                 await asyncio.to_thread(_modify)
                 modified_count += len(chunk)
@@ -312,17 +343,25 @@ async def _manage_contact_labels(
                 logger.error(f"Error adding contacts to label '{label_name}': {exc}")
 
         lines: List[str] = []
-        lines.append(f"✅ Processed {len(emails)} email(s) for People contact label '{label_name}' ({group_resource})")
+        lines.append(
+            f"✅ Processed {len(emails)} email(s) for People contact label '{label_name}' ({group_resource})"
+        )
         lines.append(f"• Added {modified_count} contact(s) to label.")
         if created_contacts:
             lines.append(f"• Created {len(created_contacts)} new contact(s).")
         if existing_contacts:
-            lines.append(f"• Found existing contacts for {len(existing_contacts)} email(s).")
+            lines.append(
+                f"• Found existing contacts for {len(existing_contacts)} email(s)."
+            )
         if failed_emails:
             unique_failed = sorted(set(failed_emails))
-            lines.append(f"❌ Failed to process {len(unique_failed)} email(s): {', '.join(unique_failed)}")
+            lines.append(
+                f"❌ Failed to process {len(unique_failed)} email(s): {', '.join(unique_failed)}"
+            )
         if batch_errors:
-            lines.append(f"❌ {batch_errors} batch People API operation(s) encountered errors. See logs for details.")
+            lines.append(
+                f"❌ {batch_errors} batch People API operation(s) encountered errors. See logs for details."
+            )
 
         lines.append("")
         lines.append("Label details:")
@@ -355,11 +394,17 @@ async def _manage_contact_labels(
     batch_errors = 0
     for chunk in _chunked(resource_names_to_remove, 200):
         try:
+
             def _modify_remove():
-                return people_service.contactGroups().members().modify(
-                    resourceName=group_resource,
-                    body={"resourceNamesToRemove": chunk}
-                ).execute()
+                return (
+                    people_service.contactGroups()
+                    .members()
+                    .modify(
+                        resourceName=group_resource,
+                        body={"resourceNamesToRemove": chunk},
+                    )
+                    .execute()
+                )
 
             await asyncio.to_thread(_modify_remove)
             removed_count += len(chunk)
@@ -368,15 +413,23 @@ async def _manage_contact_labels(
             logger.error(f"Error removing contacts from label '{label_name}': {exc}")
 
     lines = []
-    lines.append(f"✅ Processed {len(emails)} email(s) for People contact label '{label_name}' ({group_resource})")
+    lines.append(
+        f"✅ Processed {len(emails)} email(s) for People contact label '{label_name}' ({group_resource})"
+    )
     lines.append(f"• Removed {removed_count} contact(s) from label.")
     if no_match_emails:
-        lines.append(f"ℹ️ No matching contacts found for {len(no_match_emails)} email(s): {', '.join(no_match_emails)}")
+        lines.append(
+            f"ℹ️ No matching contacts found for {len(no_match_emails)} email(s): {', '.join(no_match_emails)}"
+        )
     if failed_emails:
         unique_failed = sorted(set(failed_emails))
-        lines.append(f"❌ Failed to process {len(unique_failed)} email(s): {', '.join(unique_failed)}")
+        lines.append(
+            f"❌ Failed to process {len(unique_failed)} email(s): {', '.join(unique_failed)}"
+        )
     if batch_errors:
-        lines.append(f"❌ {batch_errors} batch People API operation(s) encountered errors. See logs for details.")
+        lines.append(
+            f"❌ {batch_errors} batch People API operation(s) encountered errors. See logs for details."
+        )
 
     lines.append("")
     lines.append("Label details:")
@@ -390,7 +443,7 @@ async def manage_gmail_allow_list(
     action: str,
     email: GmailRecipientsOptional = None,
     label: Optional[str] = None,
-    user_google_email: UserGoogleEmail = None
+    user_google_email: UserGoogleEmail = None,
 ) -> Union[str, GmailAllowListResponse]:
     """
     Manage the Gmail allow list and People contact labels.
@@ -422,22 +475,41 @@ async def manage_gmail_allow_list(
         f"action: '{action}' email(s): '{email}' label: '{label}'"
     )
 
-    valid_actions = {'add', 'remove', 'view', 'label_add', 'label_remove'}
+    valid_actions = {"add", "remove", "view", "label_add", "label_remove"}
     if action not in valid_actions:
         return "❌ Invalid action. Must be one of: 'add', 'remove', 'view', 'label_add', or 'label_remove'"
 
     # Delegate People contact label operations to People tools
-    if action in ('label_add', 'label_remove'):
+    if action in ("label_add", "label_remove"):
         try:
-            from people.people_tools import manage_people_contact_labels  # Local import to avoid circulars
+            from people.people_tools import (
+                manage_people_contact_labels,
+            )  # Local import to avoid circulars
         except Exception as exc:
-            logger.error(f"Failed to import manage_people_contact_labels from People tools: {exc}")
-            return "❌ People contact label management is not available in this deployment"
+            logger.error(
+                f"Failed to import manage_people_contact_labels from People tools: {exc}"
+            )
+            return (
+                "❌ People contact label management is not available in this deployment"
+            )
 
-        return await manage_people_contact_labels(action, email, label, user_google_email)
+        # Call the People tools function and ensure we return a string (not a dict or other type)
+        result = await manage_people_contact_labels(
+            action, email, label, user_google_email
+        )
+
+        # Ensure result is a string as expected by the Union[str, GmailAllowListResponse] return type
+        if isinstance(result, str):
+            return result
+        else:
+            # If result is not a string, convert it to one
+            logger.warning(
+                f"manage_people_contact_labels returned non-string type: {type(result)}"
+            )
+            return str(result)
 
     # Handle view action
-    if action == 'view':
+    if action == "view":
         try:
             # Get current allow list (raw tokens: emails + optional group specs)
             raw_allow_list = settings.get_gmail_allow_list()
@@ -449,8 +521,8 @@ async def manage_gmail_allow_list(
             allowed_emails: List[AllowedEmailInfo] = []
             for email_addr in email_entries:
                 # Create masked version for privacy
-                if '@' in email_addr:
-                    local, domain = email_addr.split('@', 1)
+                if "@" in email_addr:
+                    local, domain = email_addr.split("@", 1)
                     if len(local) > 3:
                         masked = f"{local[:2]}***@{domain}"
                     else:
@@ -460,7 +532,7 @@ async def manage_gmail_allow_list(
 
                 email_info: AllowedEmailInfo = {
                     "email": email_addr,
-                    "masked_email": masked
+                    "masked_email": masked,
                 }
                 allowed_emails.append(email_info)
 
@@ -469,23 +541,23 @@ async def manage_gmail_allow_list(
             for spec in group_specs:
                 value = spec.strip()
                 lower = value.lower()
-                group_entry: AllowedGroupInfo = {
-                    "raw": value
-                }
+                group_entry: AllowedGroupInfo = {"raw": value}
                 if lower.startswith("groupid:"):
                     group_entry["type"] = "id"
-                    group_entry["group_id"] = value[len("groupId:"):].strip()
+                    group_entry["group_id"] = value[len("groupId:") :].strip()
                 elif lower.startswith("group:"):
                     group_entry["type"] = "name"
-                    group_entry["group_name"] = value[len("group:"):].strip()
+                    group_entry["group_name"] = value[len("group:") :].strip()
                 else:
                     # Fallback - unknown format but still expose raw token
                     group_entry["type"] = "unknown"
                 allowed_groups.append(group_entry)
 
             total_entries = len(allowed_emails) + len(allowed_groups)
-            logger.info(f"Successfully retrieved {total_entries} allowed entries "
-                        f"({len(allowed_emails)} emails, {len(allowed_groups)} groups) for {user_google_email}")
+            logger.info(
+                f"Successfully retrieved {total_entries} allowed entries "
+                f"({len(allowed_emails)} emails, {len(allowed_groups)} groups) for {user_google_email}"
+            )
 
             response: GmailAllowListResponse = {
                 "allowed_emails": allowed_emails,
@@ -493,7 +565,7 @@ async def manage_gmail_allow_list(
                 "userEmail": user_google_email,
                 "is_configured": total_entries > 0,
                 "source": "GMAIL_ALLOW_LIST environment variable",
-                "error": None
+                "error": None,
             }
             # Only include allowed_groups key when we actually have group specs
             if allowed_groups:
@@ -510,7 +582,7 @@ async def manage_gmail_allow_list(
                 userEmail=user_google_email,
                 is_configured=False,
                 source="GMAIL_ALLOW_LIST environment variable",
-                error=f"Unexpected error: {e}"
+                error=f"Unexpected error: {e}",
             )
 
     # For add/remove actions, email parameter is required
@@ -530,8 +602,8 @@ async def manage_gmail_allow_list(
     valid_emails: List[str] = []
 
     # Validate email formats for add/remove operations (group specs bypass this)
-    if action in ['add', 'remove'] and email_like_tokens:
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if action in ["add", "remove"] and email_like_tokens:
+        email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
 
         for email_addr in email_like_tokens:
             if re.match(email_pattern, email_addr.lower()):
@@ -540,7 +612,7 @@ async def manage_gmail_allow_list(
                 invalid_emails.append(email_addr)
 
         # For add operation, ensure we have at least one valid email or group spec
-        if not valid_emails and not group_specs_to_process and action == 'add':
+        if not valid_emails and not group_specs_to_process and action == "add":
             return f"❌ No valid email or group entries found. Invalid: {', '.join(invalid_emails)}"
 
     # Combine validated emails and group specs into a single list for downstream processing
@@ -550,7 +622,7 @@ async def manage_gmail_allow_list(
         # Get current allow list
         current_list = settings.get_gmail_allow_list()
 
-        if action == 'add':
+        if action == "add":
             # Track which emails are already in the list and which are new
             already_in_list = []
             emails_added = []
@@ -569,6 +641,7 @@ async def manage_gmail_allow_list(
                 new_value = ",".join(updated_list)
                 settings.gmail_allow_list = new_value
                 import os
+
                 os.environ["GMAIL_ALLOW_LIST"] = new_value
 
             # Build response
@@ -576,39 +649,55 @@ async def manage_gmail_allow_list(
 
             if emails_added:
                 # Mask emails for privacy
-                masked_added = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in emails_added]
-                response_lines.append(f"✅ Successfully added {len(emails_added)} email(s) to Gmail allow list!")
+                masked_added = [
+                    f"{e[:3]}...@{e.split('@')[1]}" if "@" in e else e
+                    for e in emails_added
+                ]
+                response_lines.append(
+                    f"✅ Successfully added {len(emails_added)} email(s) to Gmail allow list!"
+                )
                 response_lines.append(f"Added: {', '.join(masked_added)}")
 
             if already_in_list:
-                masked_already = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in already_in_list]
-                response_lines.append(f"ℹ️ {len(already_in_list)} email(s) were already in the allow list: {', '.join(masked_already)}")
+                masked_already = [
+                    f"{e[:3]}...@{e.split('@')[1]}" if "@" in e else e
+                    for e in already_in_list
+                ]
+                response_lines.append(
+                    f"ℹ️ {len(already_in_list)} email(s) were already in the allow list: {', '.join(masked_already)}"
+                )
 
             if invalid_emails:
-                response_lines.append(f"❌ {len(invalid_emails)} invalid email(s) skipped: {', '.join(invalid_emails)}")
+                response_lines.append(
+                    f"❌ {len(invalid_emails)} invalid email(s) skipped: {', '.join(invalid_emails)}"
+                )
 
-            response_lines.extend([
-                "",
-                "**Current Status:**",
-                f"• Allow list now contains {len(updated_list)} entries (emails and/or groups)",
-                "• Added entries will skip elicitation confirmation when sending emails"
-            ])
+            response_lines.extend(
+                [
+                    "",
+                    "**Current Status:**",
+                    f"• Allow list now contains {len(updated_list)} entries (emails and/or groups)",
+                    "• Added entries will skip elicitation confirmation when sending emails",
+                ]
+            )
 
             if emails_added:
-                response_lines.extend([
-                    "",
-                    "**⚠️ IMPORTANT - Make this change permanent:**",
-                    "To persist this change across server restarts, update your .env file:",
-                    "```",
-                    f"GMAIL_ALLOW_LIST={','.join(updated_list)}",
-                    "```",
-                    "",
-                    "**Note:** The change is active for the current session but will be lost on restart unless updated in .env file."
-                ])
+                response_lines.extend(
+                    [
+                        "",
+                        "**⚠️ IMPORTANT - Make this change permanent:**",
+                        "To persist this change across server restarts, update your .env file:",
+                        "```",
+                        f"GMAIL_ALLOW_LIST={','.join(updated_list)}",
+                        "```",
+                        "",
+                        "**Note:** The change is active for the current session but will be lost on restart unless updated in .env file.",
+                    ]
+                )
 
             return "\n".join(response_lines)
 
-        elif action == 'remove':
+        elif action == "remove":
             # Track which emails are not in the list and which are removed
             not_in_list = []
             emails_removed = []
@@ -627,6 +716,7 @@ async def manage_gmail_allow_list(
                 new_value = ",".join(updated_list) if updated_list else ""
                 settings.gmail_allow_list = new_value
                 import os
+
                 os.environ["GMAIL_ALLOW_LIST"] = new_value
 
             # Build response
@@ -634,37 +724,53 @@ async def manage_gmail_allow_list(
 
             if emails_removed:
                 # Mask emails for privacy
-                masked_removed = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in emails_removed]
-                response_lines.append(f"✅ Successfully removed {len(emails_removed)} email(s) from Gmail allow list!")
+                masked_removed = [
+                    f"{e[:3]}...@{e.split('@')[1]}" if "@" in e else e
+                    for e in emails_removed
+                ]
+                response_lines.append(
+                    f"✅ Successfully removed {len(emails_removed)} email(s) from Gmail allow list!"
+                )
                 response_lines.append(f"Removed: {', '.join(masked_removed)}")
 
             if not_in_list:
-                masked_not_in_list = [f"{e[:3]}...@{e.split('@')[1]}" if '@' in e else e for e in not_in_list]
-                response_lines.append(f"ℹ️ {len(not_in_list)} email(s) were not in the allow list: {', '.join(masked_not_in_list)}")
+                masked_not_in_list = [
+                    f"{e[:3]}...@{e.split('@')[1]}" if "@" in e else e
+                    for e in not_in_list
+                ]
+                response_lines.append(
+                    f"ℹ️ {len(not_in_list)} email(s) were not in the allow list: {', '.join(masked_not_in_list)}"
+                )
 
-            response_lines.extend([
-                "",
-                "**Current Status:**",
-                f"• Allow list now contains {len(updated_list)} entries (emails and/or groups)",
-                "• Removed entries will now require elicitation confirmation when sending emails"
-            ])
+            response_lines.extend(
+                [
+                    "",
+                    "**Current Status:**",
+                    f"• Allow list now contains {len(updated_list)} entries (emails and/or groups)",
+                    "• Removed entries will now require elicitation confirmation when sending emails",
+                ]
+            )
 
             if emails_removed:
                 if updated_list:
                     env_instruction = f"GMAIL_ALLOW_LIST={','.join(updated_list)}"
                 else:
-                    env_instruction = "# GMAIL_ALLOW_LIST= (comment out or remove the line)"
+                    env_instruction = (
+                        "# GMAIL_ALLOW_LIST= (comment out or remove the line)"
+                    )
 
-                response_lines.extend([
-                    "",
-                    "**⚠️ IMPORTANT - Make this change permanent:**",
-                    "To persist this change across server restarts, update your .env file:",
-                    "```",
-                    env_instruction,
-                    "```",
-                    "",
-                    "**Note:** The change is active for the current session but will be lost on restart unless updated in .env file."
-                ])
+                response_lines.extend(
+                    [
+                        "",
+                        "**⚠️ IMPORTANT - Make this change permanent:**",
+                        "To persist this change across server restarts, update your .env file:",
+                        "```",
+                        env_instruction,
+                        "```",
+                        "",
+                        "**Note:** The change is active for the current session but will be lost on restart unless updated in .env file.",
+                    ]
+                )
 
             return "\n".join(response_lines)
 
@@ -687,19 +793,43 @@ def setup_allowlist_tools(mcp: FastMCP) -> None:
             "Trusted recipients/targets skip elicitation confirmation for Gmail sending "
             "operations today and (in future) selected Chat operations."
         ),
-        tags={"gmail", "allow-list", "security", "management", "trusted", "bulk", "unified", "workspace"},
+        tags={
+            "gmail",
+            "allow-list",
+            "security",
+            "management",
+            "trusted",
+            "bulk",
+            "unified",
+            "workspace",
+        },
         annotations={
             "title": "Manage Gmail Allow List",
             "readOnlyHint": False,  # Can modify list with add/remove actions
             "destructiveHint": False,  # Not truly destructive, manages trust settings
             "idempotentHint": True,  # Same operations have same effect
-            "openWorldHint": False  # Local configuration only
-        }
+            "openWorldHint": False,  # Local configuration only
+        },
     )
     async def manage_gmail_allow_list_tool(
-        action: str,
-        email: GmailRecipientsOptional = None,
-        label: Optional[str] = None,
-        user_google_email: UserGoogleEmail = None
+        action: Annotated[
+            str,
+            Field(
+                description="Action to perform: 'add' (add entries to trust list), 'remove' (remove entries from trust list), 'view' (show current trust list), 'label_add' (add emails to People contact label), 'label_remove' (remove emails from People contact label)"
+            ),
+        ],
+        email: Annotated[
+            GmailRecipientsOptional,
+            Field(
+                description="Email address(es) or group specs to add/remove. Supports: Single email ('user@example.com'), List of emails (['user1@example.com', 'user2@example.com']), Comma-separated string ('user1@example.com,user2@example.com'), Group specs ('group:Team Name', 'groupId:contactGroups/123'). Required for add/remove/label_add/label_remove actions, ignored for view action."
+            ),
+        ] = None,
+        label: Annotated[
+            Optional[str],
+            Field(
+                description="People contact group/label name for label_add/label_remove actions (e.g., 'Work Team', 'AI Tribe'). Required when action is 'label_add' or 'label_remove', ignored for other actions."
+            ),
+        ] = None,
+        user_google_email: UserGoogleEmail = None,
     ) -> Union[str, GmailAllowListResponse]:
         return await manage_gmail_allow_list(action, email, label, user_google_email)
