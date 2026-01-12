@@ -25,6 +25,7 @@ from fastmcp.server.middleware import MiddlewareContext
 from .client import QdrantClientManager
 from .config import QdrantConfig, PayloadType
 from .lazy_imports import get_qdrant_imports
+from .query_parser import extract_service_from_tool
 
 from config.enhanced_logging import setup_logger
 logger = setup_logger()
@@ -574,9 +575,13 @@ class QdrantStorageManager:
             _, qdrant_models = get_qdrant_imports()
             point_id = str(uuid.uuid4())  # Generate UUID and convert to string
             
+            # Extract service name from tool_name for filtering
+            service_name = extract_service_from_tool(tool_name)
+            
             # Create payload with sanitized data including Unix timestamp - avoid storing JSON strings unnecessarily
             raw_payload = {
                 "tool_name": tool_name,
+                "service": service_name,  # Add service field for filtering
                 "timestamp": sanitized_data["timestamp"],
                 "timestamp_unix": sanitized_data["timestamp_unix"],
                 "user_id": sanitized_data["user_id"],
@@ -1193,7 +1198,7 @@ class QdrantStorageManager:
             # Rebuild key indexes
             rebuilt_indexes = []
             index_fields = [
-                "tool_name", "user_email", "user_id", "session_id", "payload_type",
+                "tool_name", "user_email", "user_id", "session_id", "payload_type", "label",
                 "timestamp", "execution_time_ms", "compressed"
             ]
             

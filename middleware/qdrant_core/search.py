@@ -293,15 +293,58 @@ class QdrantSearchManager:
                                 logger.error(f"Failed to generate embedding for semantic query: {parsed_query['semantic_query']}")
                                 return []
                             
-                            # Use helper method for consistent query_points usage
-                            search_results = await self._execute_semantic_search(
-                                query_embedding=query_embedding,
-                                qdrant_filter=qdrant_filter,
-                                limit=limit,
-                                score_threshold=score_threshold
-                            )
-                            
-                            logger.debug(f"🎯 Semantic search found {len(search_results)} results")
+                            # Use helper method for consistent query_points usage with fallback for missing indexes
+                            try:
+                                search_results = await self._execute_semantic_search(
+                                    query_embedding=query_embedding,
+                                    qdrant_filter=qdrant_filter,
+                                    limit=limit,
+                                    score_threshold=score_threshold
+                                )
+                                
+                                logger.debug(f"🎯 Semantic search found {len(search_results)} results")
+                                
+                            except Exception as e:
+                                error_msg = str(e)
+                                # Check for missing index error specifically for label field
+                                if "Index required but not found" in error_msg and '"label"' in error_msg:
+                                    logger.warning(
+                                        f"⚠️ Missing label index detected, falling back to unfiltered search. "
+                                        f"Original error: {error_msg}"
+                                    )
+                                    
+                                    # Retry with full query embedding and no filters
+                                    try:
+                                        # Embed the full original query to preserve filter terms in semantic search
+                                        fallback_embedding_list = await asyncio.to_thread(
+                                            lambda q: list(self.client_manager.embedder.embed([q])),
+                                            query
+                                        )
+                                        fallback_embedding = fallback_embedding_list[0] if fallback_embedding_list else None
+                                        
+                                        if fallback_embedding is None:
+                                            logger.error("Failed to generate fallback embedding, returning empty results")
+                                            return []
+                                        
+                                        # Retry without filters
+                                        search_results = await self._execute_semantic_search(
+                                            query_embedding=fallback_embedding,
+                                            qdrant_filter=None,
+                                            limit=limit,
+                                            score_threshold=score_threshold
+                                        )
+                                        
+                                        logger.warning(
+                                            f"✅ Fallback search completed with {len(search_results)} results "
+                                            f"(filters dropped due to missing label index)"
+                                        )
+                                        
+                                    except Exception as fallback_error:
+                                        logger.error(f"❌ Fallback search also failed: {fallback_error}")
+                                        return []
+                                else:
+                                    # Re-raise other exceptions
+                                    raise
                         
                         # If no semantic query, just filter and return results
                         elif parsed_query["filters"]:
