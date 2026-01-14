@@ -6,7 +6,7 @@ enabling FastMCP to automatically generate JSON schemas for better MCP client in
 """
 
 from typing_extensions import TypedDict, List, Optional, NotRequired, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class RegexReplace(BaseModel):
@@ -52,10 +52,7 @@ class EditConfig(BaseModel):
         description="Whether to preserve existing document formatting when editing",
     )
 
-    class Config:
-        """Pydantic configuration."""
-
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class DocInfo(TypedDict):

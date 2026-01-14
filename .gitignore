@@ -55,17 +55,33 @@ credentials/
 .coverage
 htmlcov/
 
+# Google OAuth credential files (CRITICAL - never commit these)
+client_secret*.json
+client_secrets*.json
+credentials*.json
+*_credentials.json
+oauth_token*.json
+token*.json
+service_account*.json
+
 # Environment variables
 .env
+.env.*
+!.env.example
+!.env.local.example
+!.env.cloud.example
+!.env.cloudflare.template
+
 # Cloudflare Tunnel Configuration (contains secrets)
-.env.cloudflare
 credentials/tunnel-credentials.json
+
+# Email allowlist (may contain sensitive emails)
+.email_allowlist
+!.email_allowlist.example
 
 # Temporary files
 *.tmp
 *.temp
-/*.md
-!/README.md
 test_tokens.json
 test_downloads/** 
 # SSL/TLS Certificate files

@@ -3,32 +3,96 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "fastmcp2-drive-upload"
+name = "riversunlimited-google-workspace"
 version = "1.0.0"
-description = "FastMCP2 server for Google Drive file uploads with OAuth authentication"
+description = "Comprehensive MCP server for Google Workspace integration - 72+ tools across Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos with OAuth 2.1 + PKCE authentication"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.11"
+authors = [
+    { name = "RiversUnlimited", email = "contact@riversunlimited.com" }
+]
+maintainers = [
+    { name = "RiversUnlimited", email = "contact@riversunlimited.com" }
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "google-workspace",
+    "gmail",
+    "google-drive",
+    "google-docs",
+    "google-sheets",
+    "google-calendar",
+    "google-chat",
+    "fastmcp",
+    "ai-assistant",
+    "oauth2",
+    "llm",
+    "claude",
+    "anthropic"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Communications :: Email",
+    "Topic :: Office/Business",
+    "Framework :: FastAPI"
+]
 dependencies = [
-    "fastmcp~=2.14.3",
+    # Core MCP Framework
+    "fastmcp>=2.14.0,<3.0.0",
+    
+    # Google APIs
     "google-api-python-client>=2.168.0",
     "google-auth-httplib2>=0.2.0",
     "google-auth-oauthlib>=1.2.2",
-    "httpx>=0.28.1",
+    
+    # HTTP Clients
+    "httpx>=0.28.0",
     "aiohttp>=3.8.0",
     "aiofiles>=23.0.0",
+    
+    # Data Validation & Configuration
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    
+    # Google Chat Card Framework
     "python-card-framework>=2.2.5",
+    
+    # Vector Database & Embeddings
     "qdrant-client>=1.7.0",
     "sentence-transformers>=2.2.0",
-    "numpy>=1.24.0",
-    "pyjwt>=2.8.0",
-    "fastapi>=0.128.0",
     "fastembed>=0.7.2",
-    # Enhanced logging dependencies
+    "numpy>=1.24.0",
+    
+    # Authentication
+    "pyjwt>=2.8.0",
+    
+    # Web Framework
+    "fastapi>=0.128.0",
+    
+    # Template Engine
+    "jinja2>=3.1.0",
+    
+    # CLI & Output
     "rich>=13.0.0",
     "colorama>=0.4.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dipseth/google_workspace_fastmcp2"
+Documentation = "https://github.com/dipseth/google_workspace_fastmcp2#readme"
+Repository = "https://github.com/dipseth/google_workspace_fastmcp2.git"
+Issues = "https://github.com/dipseth/google_workspace_fastmcp2/issues"
+Changelog = "https://github.com/dipseth/google_workspace_fastmcp2/releases"
 
 [project.optional-dependencies]
 dev = [
@@ -68,4 +132,4 @@ target-version = ["py311"]
 line-length = 88
 
 [tool.hatch.build.targets.wheel]
-packages = ["auth", "config", "drive", "gmail", "photos", "middleware"]
+packages = ["auth", "config", "drive", "gmail", "photos", "middleware", "gcalendar", "gchat", "docs", "forms", "sheets", "slides", "resources", "prompts", "people", "adapters", "tools"]
