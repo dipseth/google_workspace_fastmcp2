@@ -398,7 +398,29 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
     async def read_sheet_values(
         spreadsheet_id: str,
         user_google_email: UserGoogleEmailSheets = None,
-        range_name: str = "A1:Z1000"
+        range_name: str = "A1:Z1000",
+        value_render_option: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description=(
+                    "How values should be rendered. One of: "
+                    "FORMATTED_VALUE (default), UNFORMATTED_VALUE, FORMULA. "
+                    "If omitted, the Google Sheets API default is used."
+                ),
+            ),
+        ] = None,
+        date_time_render_option: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description=(
+                    "How dates, times, and durations should be rendered. One of: "
+                    "SERIAL_NUMBER, FORMATTED_STRING. "
+                    "If omitted, the Google Sheets API default is used."
+                ),
+            ),
+        ] = None,
     ) -> SheetValuesResponse:
         """
         Reads values from a specific range in a Google Sheet.
@@ -411,16 +433,26 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         Returns:
             SheetValuesResponse: Structured response with the values from the specified range.
         """
-        logger.info(f"[read_sheet_values] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Range: {range_name}")
+        logger.info(
+            f"[read_sheet_values] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, "
+            f"Range: {range_name}, value_render_option: {value_render_option}, date_time_render_option: {date_time_render_option}"
+        )
 
         try:
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
 
+            # Optional rendering parameters (mirrors Google Sheets API Values.get)
+            request_kwargs: dict = {
+                "spreadsheetId": spreadsheet_id,
+                "range": range_name,
+            }
+            if value_render_option:
+                request_kwargs["valueRenderOption"] = value_render_option
+            if date_time_render_option:
+                request_kwargs["dateTimeRenderOption"] = date_time_render_option
+
             result = await asyncio.to_thread(
-                sheets_service.spreadsheets()
-                .values()
-                .get(spreadsheetId=spreadsheet_id, range=range_name)
-                .execute
+                sheets_service.spreadsheets().values().get(**request_kwargs).execute
             )
 
             values = result.get("values", [])
@@ -665,11 +697,12 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         """
         logger.info(f"[create_spreadsheet] Invoked. Email: '{user_google_email}', Title: {title}")
 
+        parsed_sheet_names: Optional[List[str]] = None
+
         try:
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
 
             # Parse sheet_names parameter to handle JSON strings from MCP clients
-            parsed_sheet_names = None
             if sheet_names is not None:
                 try:
                     parsed_sheet_names = _parse_json_list(sheet_names, "sheet_names")
@@ -731,7 +764,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 spreadsheetId="",
                 spreadsheetUrl="",
                 title=title,
-                sheets=parsed_sheet_names,
+                sheets=parsed_sheet_names or (sheet_names if isinstance(sheet_names, list) else None),
                 success=False,
                 message="",
                 error=error_msg
@@ -743,7 +776,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 spreadsheetId="",
                 spreadsheetUrl="",
                 title=title,
-                sheets=parsed_sheet_names,
+                sheets=parsed_sheet_names or (sheet_names if isinstance(sheet_names, list) else None),
                 success=False,
                 message="",
                 error=error_msg

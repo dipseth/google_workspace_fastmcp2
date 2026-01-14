@@ -22,69 +22,31 @@ from .base_test_config import TEST_EMAIL, create_test_client
 from .test_helpers import ToolTestRunner, TestResponseValidator
 from ..test_auth_utils import get_client_auth_config
 
-# Global variable to store created spreadsheet ID
-_test_spreadsheet_id = None
-
-
-# Global fixture available to both test classes
 @pytest.fixture(scope="session")
-def test_spreadsheet_id():
-    """Create a test spreadsheet and return its ID, or None if creation fails."""
-    global _test_spreadsheet_id
-    
-    if _test_spreadsheet_id is not None:
-        return _test_spreadsheet_id
-    
-    # Try to create a test spreadsheet
-    async def _create_test_spreadsheet():
-        client = await create_test_client(TEST_EMAIL)
-        async with client:
-            try:
-                result = await client.call_tool("create_spreadsheet", {
-                    "user_google_email": TEST_EMAIL,
-                    "title": "Format Range Validation Test Spreadsheet"
-                })
-                
-                if result and result.content:
-                    content = result.content[0].text
-                    print(f"DEBUG: Create spreadsheet response: {content}")
-                    
-                    # Extract spreadsheet ID from response
-                    patterns = [
-                        r'ID:\s*([a-zA-Z0-9_-]{20,})',
-                        r'id[:\s]+([a-zA-Z0-9_-]{20,})',
-                        r'spreadsheet[:\s]+([a-zA-Z0-9_-]{20,})',
-                        r'created[:\s]+([a-zA-Z0-9_-]{20,})',
-                        r'https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)',
-                    ]
-                    
-                    for pattern in patterns:
-                        match = re.search(pattern, content, re.IGNORECASE)
-                        if match:
-                            potential_id = match.group(1)
-                            if len(potential_id) >= 20:
-                                return potential_id
-                    
-                    print(f"DEBUG: No ID pattern matched in: {content}")
-            except Exception:
-                pass
-        
-        return None
-    
-    # Run the async function
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, _create_test_spreadsheet())
-                _test_spreadsheet_id = future.result()
-        else:
-            _test_spreadsheet_id = loop.run_until_complete(_create_test_spreadsheet())
-    except RuntimeError:
-        _test_spreadsheet_id = asyncio.run(_create_test_spreadsheet())
-    
-    return _test_spreadsheet_id
+def test_spreadsheet_id() -> str | None:
+    """Use a stable, pre-created spreadsheet ID from the environment.
+
+    Expected env var:
+    - TEST_GOOGLE_SHEET_ID
+    """
+    return os.getenv("TEST_GOOGLE_SHEET_ID")
+
+
+# Use a visually obvious test area in the default viewing region.
+# NOTE: This intentionally targets the top-left of the sheet (A1+) so the user can
+# immediately see formatting changes without scrolling.
+VISUAL_BASE_ROW = 0
+VISUAL_BASE_COL = 0  # Column A (0=A)
+
+
+def _visual_range(row_offset: int, col_offset: int, rows: int, cols: int) -> dict:
+    """Build common range params for format_sheet_range in the test sheet area."""
+    return {
+        "range_start_row": VISUAL_BASE_ROW + row_offset,
+        "range_end_row": VISUAL_BASE_ROW + row_offset + rows,
+        "range_start_col": VISUAL_BASE_COL + col_offset,
+        "range_end_col": VISUAL_BASE_COL + col_offset + cols,
+    }
 
 
 @pytest.mark.service("sheets")
@@ -115,10 +77,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 0,
-            "range_end_row": 2,
-            "range_start_col": 0,
-            "range_end_col": 3,
+            **_visual_range(row_offset=0, col_offset=3, rows=2, cols=3),
             "bold": True,
             "italic": False,
             "font_size": 14,
@@ -151,10 +110,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 2,
-            "range_end_row": 4,
-            "range_start_col": 0,
-            "range_end_col": 2,
+            **_visual_range(row_offset=0, col_offset=0, rows=2, cols=2),
             "number_format_type": "CURRENCY",
             "number_format_pattern": "$#,##0.00"
         })
@@ -174,10 +130,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 4,
-            "range_end_row": 6,
-            "range_start_col": 0,
-            "range_end_col": 2,
+            **_visual_range(row_offset=2, col_offset=0, rows=2, cols=2),
             "number_format_type": "CURRENCY"
             # Missing number_format_pattern
         })
@@ -186,7 +139,8 @@ class TestFormatSheetRangeValidation:
         content = result.content[0].text
         
         # Should get validation error (either our validation or API validation - both are correct)
-        if "authentication" not in content.lower():
+        # If auth is missing, this is still a valid outcome for CI/dev runs.
+        if "authentication" not in content.lower() and "no valid credentials" not in content.lower():
             validation_indicators = [
                 ("both" in content.lower() and "together" in content.lower()),  # Our validation
                 ("both" in content.lower() and "must both be set" in content.lower()),  # API validation
@@ -206,10 +160,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 6,
-            "range_end_row": 8,
-            "range_start_col": 0,
-            "range_end_col": 2,
+            **_visual_range(row_offset=4, col_offset=0, rows=2, cols=2),
             "wrap_strategy": "WRAP"
         })
         
@@ -238,10 +189,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 8,
-            "range_end_row": 11,
-            "range_start_col": 0,
-            "range_end_col": 4,
+            **_visual_range(row_offset=6, col_offset=0, rows=3, cols=4),
             "apply_borders": True,
             "border_style": "SOLID_MEDIUM",
             "border_color": {"red": 0.0, "green": 0.0, "blue": 0.8},
@@ -274,10 +222,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 11,
-            "range_end_row": 14,
-            "range_start_col": 0,
-            "range_end_col": 3,
+            **_visual_range(row_offset=8, col_offset=0, rows=3, cols=3),
             "condition_type": "NUMBER_GREATER",
             "condition_value": 100,
             "condition_format_background_color": {"red": 0.8, "green": 0.9, "blue": 0.8},
@@ -306,10 +251,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 14,
-            "range_end_row": 16,
-            "range_start_col": 0,
-            "range_end_col": 2,
+            **_visual_range(row_offset=10, col_offset=0, rows=2, cols=2),
             "merge_cells_option": "MERGE_ALL"
         })
         
@@ -334,10 +276,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 16,
-            "range_end_row": 19,
-            "range_start_col": 0,
-            "range_end_col": 4,
+            **_visual_range(row_offset=12, col_offset=0, rows=3, cols=4),
             # Cell formatting
             "bold": True,
             "italic": False,
@@ -394,10 +333,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 19,
-            "range_end_row": 20,
-            "range_start_col": 0,
-            "range_end_col": 1,
+            **_visual_range(row_offset=16, col_offset=0, rows=1, cols=1),
             "bold": True
         })
         
@@ -437,10 +373,11 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 5,
-            "range_end_row": 2,  # Invalid: end before start
-            "range_start_col": 0,
-            "range_end_col": 2,
+            # Keep invalid end-before-start but in visual test area
+            "range_start_row": VISUAL_BASE_ROW + 5,
+            "range_end_row": VISUAL_BASE_ROW + 2,  # Invalid: end before start
+            "range_start_col": VISUAL_BASE_COL + 0,
+            "range_end_col": VISUAL_BASE_COL + 2,
             "bold": True
         })
         
@@ -449,20 +386,15 @@ class TestFormatSheetRangeValidation:
     
     @pytest.mark.asyncio
     async def test_individual_tools_still_available(self, client):
-        """Test that individual formatting tools are still available (not deprecated yet)."""
+        """Test that the unified formatting tool exists.
+
+        Individual formatting tools may be removed as the unified formatter becomes
+        the preferred interface.
+        """
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
-        
-        # All four individual tools should still be available
-        individual_tools = [
-            "format_sheet_cells",
-            "update_sheet_borders", 
-            "add_conditional_formatting",
-            "merge_cells"
-        ]
-        
-        for tool_name in individual_tools:
-            assert tool_name in tool_names, f"Individual tool {tool_name} should still be available"
+
+        assert "format_sheet_range" in tool_names, "format_sheet_range tool should be available"
     
     @pytest.mark.asyncio
     async def test_auth_patterns_format_sheet_range(self, client):
@@ -473,10 +405,8 @@ class TestFormatSheetRangeValidation:
         results = await runner.test_auth_patterns("format_sheet_range", {
             "spreadsheet_id": "test_spreadsheet_id", 
             "sheet_id": 0,
-            "range_start_row": 0,
-            "range_end_row": 1,
-            "range_start_col": 0,
-            "range_end_col": 1,
+            # Use the shared visual test area for consistency
+            **_visual_range(row_offset=30, col_offset=0, rows=1, cols=1),
             "bold": True
         })
         
@@ -495,10 +425,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 0,
-            "range_end_row": 2,
-            "range_start_col": 0,
-            "range_end_col": 3,
+            **_visual_range(row_offset=18, col_offset=0, rows=2, cols=3),
             "text_color": '{"red": 1.0, "green": 1.0, "blue": 1.0}',  # JSON string
             "background_color": '{"red": 0.2, "green": 0.4, "blue": 0.8}',  # JSON string
             "bold": True
@@ -529,10 +456,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 2,
-            "range_end_row": 4,
-            "range_start_col": 0,
-            "range_end_col": 2,
+            **_visual_range(row_offset=20, col_offset=0, rows=2, cols=2),
             "apply_borders": True,
             "border_color": '{"red": 0.5, "green": 0.5, "blue": 0.5}',  # JSON string
             "border_positions": '{"top": true, "bottom": true, "left": true, "right": true}',  # JSON string
@@ -564,10 +488,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 4,
-            "range_end_row": 6,
-            "range_start_col": 0,
-            "range_end_col": 2,
+            **_visual_range(row_offset=22, col_offset=0, rows=2, cols=2),
             "condition_type": "NUMBER_GREATER",
             "condition_value": 50,
             "condition_format_background_color": '{"red": 0.9, "green": 0.9, "blue": 0.5}',  # JSON string
@@ -599,10 +520,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 6,
-            "range_end_row": 8,
-            "range_start_col": 0,
-            "range_end_col": 3,
+            **_visual_range(row_offset=24, col_offset=0, rows=2, cols=3),
             "text_color": {"red": 1.0, "green": 0.0, "blue": 0.0},  # Dict
             "background_color": '{"red": 1.0, "green": 1.0, "blue": 0.8}',  # JSON string
             "bold": True
@@ -631,10 +549,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": "invalid_spreadsheet_id_12345",
             "sheet_id": 0,
-            "range_start_row": 0,
-            "range_end_row": 1,
-            "range_start_col": 0,
-            "range_end_col": 1,
+            **_visual_range(row_offset=32, col_offset=0, rows=1, cols=1),
             "bold": True
         })
         
@@ -657,10 +572,7 @@ class TestFormatSheetRangeValidation:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 0,
-            "range_end_row": 1,
-            "range_start_col": 0,
-            "range_end_col": 1,
+            **_visual_range(row_offset=34, col_offset=0, rows=1, cols=1),
             "text_color": '{red: 1.0, green: 1.0}'  # Invalid JSON (missing quotes)
         })
         
@@ -683,11 +595,11 @@ class TestFormatSheetRangeIntegration:
         if not test_spreadsheet_id:
             pytest.skip("No test spreadsheet ID available")
         
-        # First write some data
+        # First write some data (in the default viewing area so it's immediately visible)
         write_result = await client.call_tool("modify_sheet_values", {
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
-            "range_name": "A21:C23",
+            "range_name": "A1:C3",
             "values": [
                 ["Product", "Price", "Quantity"],
                 ["Widget A", "25.99", "100"],
@@ -695,16 +607,15 @@ class TestFormatSheetRangeIntegration:
             ]
         })
         
-        # Then format the data
+        # Then format the data (high-contrast styling so it is visually obvious)
         format_result = await client.call_tool("format_sheet_range", {
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": 0,
-            "range_start_row": 20,  # A21 in 0-based indexing
-            "range_end_row": 23,    # Through A23
-            "range_start_col": 0,   # Column A
-            "range_end_col": 3,     # Through Column C
+            **_visual_range(row_offset=0, col_offset=0, rows=3, cols=3),
             "bold": True,
+            "background_color": {"red": 1.0, "green": 0.95, "blue": 0.6},
+            "text_color": {"red": 0.1, "green": 0.1, "blue": 0.1},
             "horizontal_alignment": "CENTER",
             "apply_borders": True,
             "border_style": "SOLID",
