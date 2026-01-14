@@ -10,7 +10,13 @@ from typing import Optional, Dict, Any, List, Union
 from pathlib import Path
 from pydantic import BaseModel, Field
 
-from fastmcp.server.auth import BearerAuthProvider
+"""FastMCP Google OAuth authentication setup.
+
+NOTE: FastMCP v2.14 removed `BearerAuthProvider` (deprecated in v2.11).
+Use `JWTVerifier` for JWT bearer verification instead.
+"""
+
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.auth.providers.google import GoogleProvider
 from config.settings import settings
 from auth.compatibility_shim import CompatibilityShim
@@ -20,7 +26,7 @@ from config.enhanced_logging import setup_logger
 logger = setup_logger()
 
 # Global auth provider
-_auth_provider: Optional[Union[BearerAuthProvider, GoogleProvider]] = None
+_auth_provider: Optional[Union[JWTVerifier, GoogleProvider]] = None
 
 
 class GoogleProviderSettings(BaseModel):
@@ -159,10 +165,10 @@ def create_modern_google_provider(
 def setup_google_oauth_auth(
     enable_modern_provider: bool = True,
     scope_group: str = "base"
-) -> Union[BearerAuthProvider, GoogleProvider]:
+) -> Union[JWTVerifier, GoogleProvider]:
     """Setup Google OAuth authentication for MCP.
-    
-    Tries to use modern GoogleProvider first, falls back to legacy BearerAuthProvider.
+
+    Tries to use modern GoogleProvider first, falls back to JWTVerifier.
     This enables dynamic client registration with MCP Inspector.
     
     Args:
@@ -170,7 +176,7 @@ def setup_google_oauth_auth(
         scope_group: ScopeRegistry group for modern provider scopes
     
     Returns:
-        Configured GoogleProvider or BearerAuthProvider instance
+        Configured GoogleProvider or JWTVerifier instance
     """
     global _auth_provider
     
@@ -188,22 +194,19 @@ def setup_google_oauth_auth(
             _auth_provider = modern_provider
             return _auth_provider
     
-    # Fallback to legacy BearerAuthProvider
-    logger.info("🔄 Using legacy BearerAuthProvider for Google OAuth")
-    
-    # Configure the auth provider with Google's real OAuth endpoints
-    _auth_provider = BearerAuthProvider(
-        # Use Google's JWKS endpoint for token validation
+    # Fallback to JWTVerifier (FastMCP v2.14+)
+    logger.info("🔄 Using JWTVerifier fallback for Google OAuth")
+
+    # Configure JWT verification using Google's JWKS endpoint.
+    # This will validate JWT bearer tokens (e.g., Google ID tokens), not opaque access tokens.
+    _auth_provider = JWTVerifier(
         jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
-        # Use Google's real issuer
         issuer="https://accounts.google.com",
-        # Our server audience
-        audience=None,  # Google OAuth tokens don't always have specific audience
-        required_scopes=["openid", "email"]  # Basic Google OAuth scopes
+        audience=None,
     )
     
-    logger.info("✅ Google OAuth Bearer Token authentication configured")
-    logger.info("🔑 Using Google's JWKS endpoint for token validation")
+    logger.info("✅ Google OAuth JWT verification configured")
+    logger.info("🔑 Using Google's JWKS endpoint for JWT validation")
     logger.info("🌐 OAuth issuer: https://accounts.google.com")
     
     return _auth_provider
