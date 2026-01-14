@@ -1,0 +1,17 @@
+# MCP Server Email Allowlist
+# One email per line, lines starting with # are ignored
+#
+# This file controls who can authenticate to your MCP server
+# when exposed via Tailscale Funnel or other public URLs.
+#
+# Security Model:
+# - Users MUST authenticate with Google OAuth
+# - AND their email must be in this list OR have existing credentials
+#
+# Configuration:
+# Set MCP_EMAIL_ALLOWLIST_FILE=/path/to/.email_allowlist in your .env file
+
+# Example entries:
+# youremail@example.com
+# teammate@company.com
+# contractor@external.com

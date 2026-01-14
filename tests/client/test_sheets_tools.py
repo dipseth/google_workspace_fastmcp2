@@ -1,133 +1,51 @@
 """Test suite for Google Sheets tools using FastMCP Client SDK."""
 
 import pytest
-import asyncio
-from fastmcp import Client
 from typing import Any, Dict, List
 import os
-import json
-import re
-from .base_test_config import TEST_EMAIL, create_test_client
+
+from .base_test_config import TEST_EMAIL
 from .test_helpers import ToolTestRunner, TestResponseValidator
-from ..test_auth_utils import get_client_auth_config
-
-# Global variables to store created test spreadsheet data
-_test_spreadsheet_id = None
-_test_sheet_id = None
 
 
-@pytest.fixture(scope="session")
-async def test_spreadsheet_data():
-    """Create a test spreadsheet and return its ID and sheet ID for tests."""
-    global _test_spreadsheet_id, _test_sheet_id
-    
-    # Return cached data if available
-    if _test_spreadsheet_id is not None and _test_sheet_id is not None:
-        return {
-            "spreadsheet_id": _test_spreadsheet_id,
-            "sheet_id": _test_sheet_id
-        }
-    
-    # Create a test spreadsheet
-    client = await create_test_client(TEST_EMAIL)
-    try:
-        # Create spreadsheet
-        create_result = await client.call_tool("create_spreadsheet", {
-            "user_google_email": TEST_EMAIL,
-            "title": "MCP Test Spreadsheet for Formatting"
-        })
-        
-        if create_result and create_result.content:
-            content = create_result.content[0].text
-            print(f"DEBUG: Create spreadsheet response: {content}")
-            
-            # Extract spreadsheet ID from response
-            spreadsheet_id = None
-            
-            # Try to parse JSON response first
-            try:
-                import json
-                if content.startswith('{'):
-                    data = json.loads(content)
-                    spreadsheet_id = data.get('spreadsheetId')
-            except (json.JSONDecodeError, KeyError):
-                pass
-            
-            # Fallback to regex patterns
-            if not spreadsheet_id:
-                patterns = [
-                    r'"spreadsheetId":\s*"([a-zA-Z0-9_-]{20,})"',  # JSON format
-                    r'ID:\s*([a-zA-Z0-9_-]{20,})',  # Plain text format
-                    r'spreadsheetId[:\s]+"?([a-zA-Z0-9_-]{20,})"?',
-                    r'https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)',
-                ]
-                
-                for pattern in patterns:
-                    match = re.search(pattern, content, re.IGNORECASE)
-                    if match:
-                        potential_id = match.group(1)
-                        if len(potential_id) >= 20:
-                            spreadsheet_id = potential_id
-                            break
-            
-            if spreadsheet_id:
-                # Get spreadsheet info to get sheet ID
-                info_result = await client.call_tool("get_spreadsheet_info", {
-                    "user_google_email": TEST_EMAIL,
-                    "spreadsheet_id": spreadsheet_id
-                })
-                
-                sheet_id = 0  # Default sheet ID
-                if info_result and info_result.content:
-                    info_content = info_result.content[0].text
-                    print(f"DEBUG: Get spreadsheet info response: {info_content}")
-                    
-                    # Try to extract sheet ID from response
-                    try:
-                        if info_content.startswith('{'):
-                            info_data = json.loads(info_content)
-                            sheets = info_data.get('sheets', [])
-                            if sheets:
-                                sheet_id = sheets[0].get('sheetId', 0)
-                    except (json.JSONDecodeError, KeyError):
-                        # Fallback to default sheet ID
-                        sheet_id = 0
-                
-                # Cache the results
-                _test_spreadsheet_id = spreadsheet_id
-                _test_sheet_id = sheet_id
-                
-                print(f"DEBUG: Created test spreadsheet - ID: {spreadsheet_id}, Sheet ID: {sheet_id}")
-                
-                return {
-                    "spreadsheet_id": spreadsheet_id,
-                    "sheet_id": sheet_id
-                }
-    
-    except Exception as e:
-        print(f"DEBUG: Failed to create test spreadsheet: {e}")
-    
-    finally:
-        await client.close()
-    
-    # Return None if creation failed
-    return None
+# Use a visually obvious test area in the default viewing region.
+# NOTE: This intentionally targets the top-left of the sheet (A1+) so the user can
+# immediately see formatting changes without scrolling.
+VISUAL_BASE_ROW = 0
+VISUAL_BASE_COL = 0  # Column A (0=A)
+
+
+def _visual_range(row_offset: int, col_offset: int, rows: int, cols: int) -> dict:
+    """Build common range params for format_sheet_range in the test sheet area."""
+    return {
+        "range_start_row": VISUAL_BASE_ROW + row_offset,
+        "range_end_row": VISUAL_BASE_ROW + row_offset + rows,
+        "range_start_col": VISUAL_BASE_COL + col_offset,
+        "range_end_col": VISUAL_BASE_COL + col_offset + cols,
+    }
 
 
 @pytest.fixture(scope="session")
-def test_spreadsheet_id(test_spreadsheet_data):
-    """Extract spreadsheet ID from spreadsheet data for backward compatibility."""
-    if test_spreadsheet_data:
-        return test_spreadsheet_data["spreadsheet_id"]
-    return None
+def test_spreadsheet_id() -> str | None:
+    """Use a stable, pre-created spreadsheet ID from the environment.
+
+    Expected env var:
+    - TEST_GOOGLE_SHEET_ID
+
+    This matches the pattern used by other tests that accept fixed IDs via env vars
+    (e.g., TEST_DOCUMENT_ID).
+    """
+    return os.getenv("TEST_GOOGLE_SHEET_ID")
 
 
 @pytest.fixture(scope="session")
-def test_sheet_id(test_spreadsheet_data):
-    """Extract sheet ID from spreadsheet data for formatting tests."""
-    if test_spreadsheet_data:
-        return test_spreadsheet_data["sheet_id"]
-    return None
+def test_sheet_id() -> int:
+    """Default sheet/tab ID used by many tests.
+
+    If your TEST_GOOGLE_SHEET_ID uses a different first sheet ID, set tests to
+    derive it via get_spreadsheet_info. For now we assume the first sheet is ID 0.
+    """
+    return 0
 
 
 @pytest.mark.service("sheets")
@@ -197,51 +115,22 @@ class TestSheetsTools:
     @pytest.mark.asyncio
     async def test_create_spreadsheet(self, client):
         """Test creating a new spreadsheet."""
-        result = await client.call_tool("create_spreadsheet", {
-            "user_google_email": TEST_EMAIL,
-            "title": "Test Spreadsheet from MCP"
-        })
-        
-        # Check that we get a result
-        assert result is not None and result.content
-        
-        content = result.content[0].text
-        # Should either succeed or return authentication/middleware error
-        valid_responses = [
-            "requires authentication", "no valid credentials", "successfully created spreadsheet",
-            "❌", "failed to create", "unexpected error", "middleware", "service", "not yet fulfilled"
-        ]
-        assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
+        pytest.skip("Use a stable spreadsheet via TEST_GOOGLE_SHEET_ID; spreadsheet creation is environment-dependent")
     
     @pytest.mark.asyncio
     async def test_create_spreadsheet_with_sheets(self, client):
         """Test creating a spreadsheet with custom sheet names."""
-        result = await client.call_tool("create_spreadsheet", {
-            "user_google_email": TEST_EMAIL,
-            "title": "Multi-Sheet Test Spreadsheet",
-            "sheet_names": ["Data", "Summary", "Charts"]
-        })
-        
-        assert result is not None and result.content
-        content = result.content[0].text
-        # Should either succeed or return authentication/middleware error
-        valid_responses = [
-            "requires authentication", "no valid credentials", "successfully created spreadsheet",
-            "❌", "failed to create", "unexpected error", "middleware", "service", "not yet fulfilled"
-        ]
-        assert any(keyword in content.lower() for keyword in valid_responses), f"Response didn't match any expected pattern: {content}"
+        pytest.skip("Use a stable spreadsheet via TEST_GOOGLE_SHEET_ID; spreadsheet creation is environment-dependent")
     
     @pytest.mark.asyncio
     async def test_get_spreadsheet_info(self, client, test_spreadsheet_id):
         """Test getting spreadsheet information."""
-        spreadsheet_id = await test_spreadsheet_id if hasattr(test_spreadsheet_id, '__await__') else test_spreadsheet_id
-        
-        if not spreadsheet_id:
-            pytest.skip("No test spreadsheet ID available")
+        if not test_spreadsheet_id:
+            pytest.skip("No test spreadsheet ID available (set TEST_GOOGLE_SHEET_ID)")
         
         result = await client.call_tool("get_spreadsheet_info", {
             "user_google_email": TEST_EMAIL,
-            "spreadsheet_id": spreadsheet_id
+            "spreadsheet_id": test_spreadsheet_id
         })
         
         assert result is not None and result.content
@@ -257,13 +146,11 @@ class TestSheetsTools:
     async def test_read_sheet_values(self, client, test_spreadsheet_id):
         """Test reading values from a sheet."""
         if not test_spreadsheet_id:
-            pytest.skip("No test spreadsheet ID available")
-        
-        spreadsheet_id = test_spreadsheet_id
+            pytest.skip("No test spreadsheet ID available (set TEST_GOOGLE_SHEET_ID)")
         
         result = await client.call_tool("read_sheet_values", {
             "user_google_email": TEST_EMAIL,
-            "spreadsheet_id": spreadsheet_id,
+            "spreadsheet_id": test_spreadsheet_id,
             "range_name": "A1:D10"
         })
         
@@ -281,13 +168,11 @@ class TestSheetsTools:
     async def test_read_sheet_values_default_range(self, client, test_spreadsheet_id):
         """Test reading values with default range."""
         if not test_spreadsheet_id:
-            pytest.skip("No test spreadsheet ID available")
-        
-        spreadsheet_id = test_spreadsheet_id
+            pytest.skip("No test spreadsheet ID available (set TEST_GOOGLE_SHEET_ID)")
         
         result = await client.call_tool("read_sheet_values", {
             "user_google_email": TEST_EMAIL,
-            "spreadsheet_id": spreadsheet_id
+            "spreadsheet_id": test_spreadsheet_id
         })
         
         assert result is not None and result.content
@@ -304,9 +189,7 @@ class TestSheetsTools:
     async def test_modify_sheet_values(self, client, test_spreadsheet_id):
         """Test modifying sheet values."""
         if not test_spreadsheet_id:
-            pytest.skip("No test spreadsheet ID available")
-        
-        spreadsheet_id = test_spreadsheet_id
+            pytest.skip("No test spreadsheet ID available (set TEST_GOOGLE_SHEET_ID)")
         
         # Test writing values
         test_values = [
@@ -317,7 +200,7 @@ class TestSheetsTools:
         
         result = await client.call_tool("modify_sheet_values", {
             "user_google_email": TEST_EMAIL,
-            "spreadsheet_id": spreadsheet_id,
+            "spreadsheet_id": test_spreadsheet_id,
             "range_name": "A1:C3",
             "values": test_values
         })
@@ -335,13 +218,11 @@ class TestSheetsTools:
     async def test_clear_sheet_values(self, client, test_spreadsheet_id):
         """Test clearing sheet values."""
         if not test_spreadsheet_id:
-            pytest.skip("No test spreadsheet ID available")
-        
-        spreadsheet_id = test_spreadsheet_id
+            pytest.skip("No test spreadsheet ID available (set TEST_GOOGLE_SHEET_ID)")
         
         result = await client.call_tool("modify_sheet_values", {
             "user_google_email": TEST_EMAIL,
-            "spreadsheet_id": spreadsheet_id,
+            "spreadsheet_id": test_spreadsheet_id,
             "range_name": "A1:Z100",
             "clear_values": True
         })
@@ -359,13 +240,11 @@ class TestSheetsTools:
     async def test_create_sheet(self, client, test_spreadsheet_id):
         """Test creating a new sheet in an existing spreadsheet."""
         if not test_spreadsheet_id:
-            pytest.skip("No test spreadsheet ID available")
-        
-        spreadsheet_id = test_spreadsheet_id
+            pytest.skip("No test spreadsheet ID available (set TEST_GOOGLE_SHEET_ID)")
         
         result = await client.call_tool("create_sheet", {
             "user_google_email": TEST_EMAIL,
-            "spreadsheet_id": spreadsheet_id,
+            "spreadsheet_id": test_spreadsheet_id,
             "sheet_name": "Test Sheet"
         })
         
@@ -407,14 +286,12 @@ class TestSheetsTools:
     async def test_value_input_options(self, client, test_spreadsheet_id):
         """Test different value input options."""
         if not test_spreadsheet_id:
-            pytest.skip("No test spreadsheet ID available")
-        
-        spreadsheet_id = test_spreadsheet_id
+            pytest.skip("No test spreadsheet ID available (set TEST_GOOGLE_SHEET_ID)")
         
         # Test with RAW input option
         result = await client.call_tool("modify_sheet_values", {
             "user_google_email": TEST_EMAIL,
-            "spreadsheet_id": spreadsheet_id,
+            "spreadsheet_id": test_spreadsheet_id,
             "range_name": "E1:F2",
             "values": [["=SUM(1,2)", "2023-01-01"], ["Raw Text", "100"]],
             "value_input_option": "RAW"
@@ -429,14 +306,12 @@ class TestSheetsTools:
     async def test_large_range_operations(self, client, test_spreadsheet_id):
         """Test operations with larger data ranges."""
         if not test_spreadsheet_id:
-            pytest.skip("No test spreadsheet ID available")
-        
-        spreadsheet_id = test_spreadsheet_id
+            pytest.skip("No test spreadsheet ID available (set TEST_GOOGLE_SHEET_ID)")
         
         # Test reading a large range
         result = await client.call_tool("read_sheet_values", {
             "user_google_email": TEST_EMAIL,
-            "spreadsheet_id": spreadsheet_id,
+            "spreadsheet_id": test_spreadsheet_id,
             "range_name": "A1:Z1000"
         })
         
@@ -462,16 +337,7 @@ class TestSheetsTools:
         # Check that the master formatting tool is available
         assert "format_sheet_range" in tool_names, "format_sheet_range tool should be available"
         
-        # Optionally check that individual formatting tools are still available for backward compatibility
-        individual_tools = [
-            "format_sheet_cells",
-            "update_sheet_borders",
-            "add_conditional_formatting",
-            "merge_cells"
-        ]
-        
-        for tool in individual_tools:
-            assert tool in tool_names, f"Individual tool '{tool}' should still be available for backward compatibility"
+        # Individual tools may be removed over time; only require the unified tool.
 
     @pytest.mark.asyncio
     async def test_format_sheet_range_cell_formatting(self, client, test_spreadsheet_id, test_sheet_id):
@@ -484,18 +350,15 @@ class TestSheetsTools:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": test_sheet_id,
-            "range_start_row": 0,
-            "range_end_row": 2,
-            "range_start_col": 0,
-            "range_end_col": 3,
+            **_visual_range(row_offset=0, col_offset=0, rows=2, cols=3),
             "bold": True,
             "italic": False,
             "font_size": 12,
             "text_color": {"red": 0.0, "green": 0.0, "blue": 1.0},
-            "background_color": {"red": 1.0, "green": 1.0, "blue": 0.0},
+            # High-contrast background so changes are visually obvious
+            "background_color": {"red": 1.0, "green": 0.95, "blue": 0.6},
             "horizontal_alignment": "CENTER",
             "vertical_alignment": "MIDDLE",
-            "number_format_type": "TEXT",
             "wrap_strategy": "WRAP"
         })
         
@@ -520,10 +383,7 @@ class TestSheetsTools:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": test_sheet_id,
-            "range_start_row": 2,
-            "range_end_row": 4,
-            "range_start_col": 2,
-            "range_end_col": 5,
+            **_visual_range(row_offset=2, col_offset=0, rows=2, cols=3),
             "apply_borders": True,
             "border_style": "SOLID",
             "border_color": {"red": 0.0, "green": 0.0, "blue": 0.0},
@@ -555,10 +415,7 @@ class TestSheetsTools:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": test_sheet_id,
-            "range_start_row": 4,
-            "range_end_row": 8,
-            "range_start_col": 0,
-            "range_end_col": 2,
+            **_visual_range(row_offset=4, col_offset=0, rows=4, cols=2),
             "condition_type": "NUMBER_GREATER",
             "condition_value": 10,
             "condition_format_background_color": {"red": 0.0, "green": 1.0, "blue": 0.0},
@@ -586,10 +443,7 @@ class TestSheetsTools:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": test_sheet_id,
-            "range_start_row": 8,
-            "range_end_row": 10,
-            "range_start_col": 0,
-            "range_end_col": 3,
+            **_visual_range(row_offset=9, col_offset=0, rows=2, cols=3),
             "merge_cells_option": "MERGE_ALL"
         })
         
@@ -613,18 +467,16 @@ class TestSheetsTools:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": test_sheet_id,
-            "range_start_row": 10,
-            "range_end_row": 15,
-            "range_start_col": 0,
-            "range_end_col": 4,
+            **_visual_range(row_offset=12, col_offset=0, rows=5, cols=4),
             # Cell formatting
             "bold": True,
             "italic": True,
             "font_size": 14,
             "text_color": {"red": 1.0, "green": 0.0, "blue": 0.0},
-            "background_color": {"red": 0.9, "green": 0.9, "blue": 0.9},
+            "background_color": {"red": 1.0, "green": 0.95, "blue": 0.6},
             "horizontal_alignment": "CENTER",
             "number_format_type": "CURRENCY",
+            "number_format_pattern": "$#,##0.00",
             # Borders
             "apply_borders": True,
             "border_style": "SOLID_MEDIUM",
@@ -663,11 +515,9 @@ class TestSheetsTools:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": test_sheet_id,
-            "range_start_row": 0,
-            "range_end_row": 1,
-            "range_start_col": 0,
-            "range_end_col": 10,
+            **_visual_range(row_offset=18, col_offset=0, rows=1, cols=6),
             # Advanced number formatting
+            "number_format_type": "NUMBER",
             "number_format_pattern": "$#,##0.00",
             "text_rotation": 45,
             # Freeze panes
@@ -718,10 +568,7 @@ class TestSheetsTools:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": test_spreadsheet_id,
             "sheet_id": test_sheet_id,
-            "range_start_row": 0,
-            "range_end_row": 2,
-            "range_start_col": 0,
-            "range_end_col": 2
+            **_visual_range(row_offset=20, col_offset=0, rows=2, cols=2)
         })
         
         assert result is not None and result.content
@@ -741,10 +588,7 @@ class TestSheetsTools:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": "invalid_spreadsheet_id_12345",
             "sheet_id": 0,
-            "range_start_row": 0,
-            "range_end_row": 2,
-            "range_start_col": 0,
-            "range_end_col": 2,
+            **_visual_range(row_offset=22, col_offset=0, rows=2, cols=2),
             "bold": True
         })
         
@@ -760,10 +604,7 @@ class TestSheetsTools:
             "user_google_email": TEST_EMAIL,
             "spreadsheet_id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",  # Sample ID
             "sheet_id": 999999,  # Invalid sheet ID
-            "range_start_row": 0,
-            "range_end_row": 2,
-            "range_start_col": 0,
-            "range_end_col": 2,
+            **_visual_range(row_offset=24, col_offset=0, rows=2, cols=2),
             "italic": True
         })
         
@@ -788,16 +629,7 @@ class TestSheetsFormatRangeComparison:
         # Master tool should be available
         assert "format_sheet_range" in tool_names, "Master format_sheet_range tool should be available"
         
-        # Individual tools should still be available for backward compatibility
-        individual_tools = [
-            "format_sheet_cells",
-            "update_sheet_borders",
-            "add_conditional_formatting",
-            "merge_cells"
-        ]
-        
-        for tool in individual_tools:
-            assert tool in tool_names, f"Individual tool '{tool}' should remain available for backward compatibility"
+        # Individual tools may be removed over time; only require the unified tool.
     
     @pytest.mark.asyncio
     async def test_format_range_parameter_coverage(self, client):

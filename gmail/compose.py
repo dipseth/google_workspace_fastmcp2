@@ -13,25 +13,46 @@ import json
 import asyncio
 import html
 from datetime import datetime, UTC
-from typing_extensions import Optional, Literal, Any, List, Dict, Union,Annotated
+from typing_extensions import Optional, Literal, Any, List, Dict, Union, Annotated
 from pydantic import Field
 from dataclasses import dataclass
 
 from fastmcp import FastMCP, Context
 from googleapiclient.errors import HttpError
+from googleapiclient.discovery import build
 
+from auth.context import get_auth_middleware
 from .service import _get_gmail_service_with_fallback
-from .utils import _create_mime_message, _prepare_reply_subject, _quote_original_message, _html_to_plain_text, _extract_headers, _extract_message_body, extract_email_addresses, _prepare_forward_subject, _extract_html_body, _format_forward_content, _generate_gmail_web_url, count_recipients
+from .utils import (
+    _create_mime_message,
+    _prepare_reply_subject,
+    _quote_original_message,
+    _html_to_plain_text,
+    _extract_headers,
+    _extract_message_body,
+    extract_email_addresses,
+    _prepare_forward_subject,
+    _extract_html_body,
+    _format_forward_content,
+    _generate_gmail_web_url,
+    count_recipients,
+)
 from .gmail_types import (
-    SendGmailMessageResponse, DraftGmailMessageResponse, ReplyGmailMessageResponse,
-    DraftGmailReplyResponse, ForwardGmailMessageResponse, DraftGmailForwardResponse,
-    GmailRecipients, GmailRecipientsOptional
+    SendGmailMessageResponse,
+    DraftGmailMessageResponse,
+    ReplyGmailMessageResponse,
+    DraftGmailReplyResponse,
+    ForwardGmailMessageResponse,
+    DraftGmailForwardResponse,
+    GmailRecipients,
+    GmailRecipientsOptional,
 )
 from config.settings import settings
 from tools.common_types import UserGoogleEmail
 
 
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
 
 
@@ -41,103 +62,432 @@ class EmailAction:
 
 
 def _resolve_recipient_aliases(
-    recipient: Union[str, List[str], None],
-    user_google_email: str
+    recipient: Union[str, List[str], None], user_google_email: str
 ) -> Union[str, List[str], None]:
     """
     Resolve 'me'/'myself' aliases in recipient fields to actual user email.
-    
+
     Args:
         recipient: Recipient(s) that may contain 'me'/'myself' aliases
         user_google_email: Actual user email to substitute for aliases
-    
+
     Returns:
         Resolved recipient(s) with aliases replaced by actual email
     """
     if not recipient:
         return recipient
-    
+
     if isinstance(recipient, str):
         # Handle single string or comma-separated list
-        if ',' in recipient:
-            emails = [email.strip() for email in recipient.split(',')]
-            resolved = [user_google_email if email.lower() in ['me', 'myself'] else email for email in emails]
-            return ', '.join(resolved)
+        if "," in recipient:
+            emails = [email.strip() for email in recipient.split(",")]
+            resolved = [
+                user_google_email if email.lower() in ["me", "myself"] else email
+                for email in emails
+            ]
+            return ", ".join(resolved)
         else:
             # Single recipient
-            if recipient.strip().lower() in ['me', 'myself']:
+            if recipient.strip().lower() in ["me", "myself"]:
                 return user_google_email
             return recipient
-    
+
     elif isinstance(recipient, list):
         # List of recipients
-        return [user_google_email if email.strip().lower() in ['me', 'myself'] else email for email in recipient]
-    
+        return [
+            user_google_email if email.strip().lower() in ["me", "myself"] else email
+            for email in recipient
+        ]
+
     return recipient
+
+
+async def _resolve_group_recipients(
+    recipients: Union[str, List[str], None], user_google_email: UserGoogleEmail
+) -> Union[str, List[str], None]:
+    """
+    Resolve group: and groupId: recipient specs to actual email addresses.
+
+    This enables sending to groups by specifying:
+      - "group:Team Name" → resolves to all member emails
+      - "groupId:contactGroups/123" → resolves to all member emails
+
+    Args:
+        recipients: May contain group specs mixed with regular emails
+        user_google_email: For People API access
+
+    Returns:
+        Recipients with group specs expanded to actual emails
+    """
+    if not recipients or not user_google_email:
+        return recipients
+
+    # Import People tools for group resolution
+    try:
+        from people.people_tools import get_people_contact_group_members
+    except Exception as exc:
+        logger.warning(f"Failed to import People tools for group resolution: {exc}")
+        return recipients
+
+    # Convert to list for processing
+    if isinstance(recipients, str):
+        recipient_list = [r.strip() for r in recipients.split(",")]
+    elif isinstance(recipients, list):
+        recipient_list = recipients
+    else:
+        return recipients
+
+    resolved_emails: List[str] = []
+
+    for recipient in recipient_list:
+        recipient = recipient.strip()
+        if not recipient:
+            continue
+
+        lower = recipient.lower()
+
+        # Check if this is a group spec
+        if lower.startswith("group:"):
+            # Extract group name
+            group_name = recipient[len("group:") :].strip()
+            logger.info(
+                f"Resolving group spec 'group:{group_name}' to member emails..."
+            )
+
+            # Call People API to get group members
+            result = await get_people_contact_group_members(
+                group_name, user_google_email
+            )
+
+            if result.get("error"):
+                logger.warning(
+                    f"Failed to resolve group '{group_name}': {result['error']}"
+                )
+                # Keep the original spec if resolution fails
+                resolved_emails.append(recipient)
+            elif result.get("emails"):
+                member_emails = result["emails"]
+                logger.info(
+                    f"Resolved 'group:{group_name}' to {len(member_emails)} member(s)"
+                )
+                resolved_emails.extend(member_emails)
+            else:
+                logger.warning(f"Group '{group_name}' has no members")
+
+        elif lower.startswith("groupid:"):
+            # Extract resource name
+            resource_name = recipient[len("groupId:") :].strip()
+            logger.warning(
+                f"groupId: resolution not yet implemented for '{resource_name}'"
+            )
+            # Keep the original spec
+            resolved_emails.append(recipient)
+        else:
+            # Regular email address - keep as is
+            resolved_emails.append(recipient)
+
+    # Return in same format as input
+    if isinstance(recipients, str):
+        return ", ".join(resolved_emails)
+    else:
+        return resolved_emails
 
 
 async def _resolve_recipients_and_check_allow_list(
     to: Union[str, List[str]],
     cc: Optional[Union[str, List[str]]],
     bcc: Optional[Union[str, List[str]]],
-    user_google_email: str,
-    allow_list: List[str]
+    user_google_email: UserGoogleEmail,
+    allow_list: List[str],
 ) -> List[str]:
     """
     Resolve 'me'/'myself' aliases and check recipients against allow list.
-    
+
+    The allow list now supports:
+      - Explicit email addresses (existing behavior)
+      - Group specs based on People API contact groups:
+        * "group:Team A"           → contact group by display name
+        * "groupId:contactGroups/ID" → contact group by resourceName
+
+    Recipients are considered allowed if:
+      - Their email is explicitly in the allow list, OR
+      - They are a member of any allowed contact group (best-effort via People API), OR
+      - They are a group spec that matches an allow list group spec (case-insensitive).
+
     Returns:
-        List of recipients that are NOT on the allow list
+        List of recipients that are NOT on the allow list (after group checks).
     """
+    from .allowlist import (
+        split_allow_list_tokens,
+    )  # Local import to avoid circular imports
+
+    # Split allow list into explicit email entries and group specs
+    email_entries, group_specs = split_allow_list_tokens(allow_list)
+
+    # Normalize group specs for case-insensitive matching
+    normalized_group_specs = [spec.lower() for spec in group_specs]
+
     # Collect all recipient emails for the message
-    all_recipients = []
+    all_recipients: List[str] = []
 
     # Process 'to' recipients
     if isinstance(to, str):
-        all_recipients.extend([email.strip() for email in to.split(',')])
+        all_recipients.extend([email.strip() for email in to.split(",")])
     elif isinstance(to, list):
         all_recipients.extend(to)
 
     # Process 'cc' recipients
     if cc:
         if isinstance(cc, str):
-            all_recipients.extend([email.strip() for email in cc.split(',')])
+            all_recipients.extend([email.strip() for email in cc.split(",")])
         elif isinstance(cc, list):
             all_recipients.extend(cc)
 
     # Process 'bcc' recipients
     if bcc:
         if isinstance(bcc, str):
-            all_recipients.extend([email.strip() for email in bcc.split(',')])
+            all_recipients.extend([email.strip() for email in bcc.split(",")])
         elif isinstance(bcc, list):
             all_recipients.extend(bcc)
 
     # Resolve 'me'/'myself' aliases to actual user email before elicitation check
-    # This prevents elicitation when user sends emails to themselves
-    resolved_recipients = []
+    # ALSO check if any recipient is a group spec that's in the allow list
+    resolved_recipients: List[str] = []
+    group_specs_found_in_recipients: List[str] = []
+
     for email in all_recipients:
-        if email.strip().lower() in ['me', 'myself']:
+        email_lower = email.strip().lower()
+
+        # Check if this is a 'me'/'myself' alias
+        if email_lower in ["me", "myself"]:
             # Resolve to actual user email address
             if user_google_email:
                 resolved_recipients.append(user_google_email.strip().lower())
             # If user_google_email not available yet, skip elicitation for 'me'/'myself'
             # The middleware will resolve it properly later
+        # Check if this recipient is itself a group spec that's in the allow list
+        elif email_lower.startswith("group:") or email_lower.startswith("groupid:"):
+            if email_lower in normalized_group_specs:
+                # This group spec is in the allow list - mark as allowed
+                logger.info(
+                    f"Recipient '{email}' is a group spec in allow list - treating as allowed"
+                )
+                group_specs_found_in_recipients.append(email_lower)
+                # Don't add to resolved_recipients - it's already allowed
+            else:
+                # Group spec not in allow list - treat as regular recipient
+                resolved_recipients.append(email_lower)
         else:
-            resolved_recipients.append(email.strip().lower())
+            resolved_recipients.append(email_lower)
 
     # Normalize resolved recipient emails (lowercase, strip whitespace)
     all_recipients = [email for email in resolved_recipients if email]
 
-    # Normalize allow list emails
-    normalized_allow_list = [email.lower() for email in allow_list]
+    # Normalize allow list explicit email entries
+    normalized_allow_emails = [email.lower() for email in email_entries]
 
-    # Check if any recipient is NOT on the allow list
+    # Initial pass: recipients not covered by explicit email entries
     recipients_not_allowed = [
-        email for email in all_recipients
-        if email not in normalized_allow_list
+        email for email in all_recipients if email not in normalized_allow_emails
     ]
-    
+
+    # If there are group specs configured, try to allow some recipients via People API group membership
+    if group_specs and recipients_not_allowed and user_google_email:
+        group_allowed = await _filter_recipients_allowed_by_groups(
+            recipients_not_allowed, group_specs, user_google_email
+        )
+        # Keep only those still not allowed after group checks
+        recipients_not_allowed = [
+            email for email in recipients_not_allowed if email not in group_allowed
+        ]
+
     return recipients_not_allowed
+
+
+async def _get_people_service_for_allow_list(user_email: UserGoogleEmail):
+    """
+    Create a People API service instance for allow list group resolution.
+
+    This uses the same AuthMiddleware-backed credential loading approach as the
+    profile enrichment middleware, but is scoped specifically for allow list checks.
+
+    Returns:
+        People API service instance or None on failure.
+    """
+    try:
+        if not user_email:
+            logger.warning("No user email provided for People API (allow list groups)")
+            return None
+
+        auth_middleware = get_auth_middleware()
+        if not auth_middleware:
+            logger.warning(
+                "No AuthMiddleware available for People API (allow list groups)"
+            )
+            return None
+
+        credentials = auth_middleware.load_credentials(user_email)
+        if not credentials:
+            logger.warning(
+                f"No credentials found for People API (allow list groups) for user {user_email}"
+            )
+            return None
+
+        people_service = await asyncio.to_thread(
+            build, "people", "v1", credentials=credentials
+        )
+        return people_service
+    except Exception as e:
+        logger.error(
+            f"Failed to create People API service for allow list groups: {e}",
+            exc_info=True,
+        )
+        return None
+
+
+async def _resolve_allowed_group_ids(
+    group_specs: List[str], people_service
+) -> List[str]:
+    """
+    Resolve configured group specs into concrete contact group resourceNames.
+
+    Supports:
+      - "group:Team A" → resolved via contactGroups.list() name matching
+      - "groupId:contactGroups/123" → used as-is
+
+    Returns:
+        List of contact group resourceNames to treat as trusted groups.
+    """
+    allowed_ids: List[str] = []
+    try:
+        # Fetch user's contact groups once for name → resourceName mapping
+        def _list_groups():
+            return people_service.contactGroups().list(pageSize=200).execute()
+
+        result = await asyncio.to_thread(_list_groups)
+        groups = result.get("contactGroups", []) or []
+        name_to_id = {
+            g.get("name", ""): g.get("resourceName")
+            for g in groups
+            if g.get("name") and g.get("resourceName")
+        }
+
+        for spec in group_specs:
+            value = spec.strip()
+            lower = value.lower()
+            if lower.startswith("groupid:"):
+                gid = value[len("groupId:") :].strip()
+                if gid:
+                    allowed_ids.append(gid)
+            elif lower.startswith("group:"):
+                group_name = value[len("group:") :].strip()
+                gid = name_to_id.get(group_name)
+                if gid:
+                    allowed_ids.append(gid)
+                else:
+                    logger.warning(
+                        f"[allow_list_groups] No contact group found with name '{group_name}'"
+                    )
+            else:
+                logger.warning(
+                    f"[allow_list_groups] Unknown group spec format: {value}"
+                )
+
+    except Exception as e:
+        logger.error(
+            f"Failed to resolve allow list group specs via People API: {e}",
+            exc_info=True,
+        )
+
+    return allowed_ids
+
+
+async def _get_contact_group_ids_for_email(email: str, people_service) -> List[str]:
+    """
+    Fetch contact group resourceNames for a given email using People API.
+
+    This uses people.searchContacts with readMask including memberships.
+    Returns:
+        List of contact group resourceNames the person belongs to.
+    """
+    group_ids: List[str] = []
+    try:
+
+        def _search():
+            # searchContacts returns results containing person objects
+            return (
+                people_service.people()
+                .searchContacts(query=email, readMask="emailAddresses,memberships")
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_search)
+        # Handle both "results" (searchContacts) and possible "connections"/"people" structures
+        containers = (
+            result.get("results")
+            or result.get("connections")
+            or result.get("people")
+            or []
+        )
+
+        for item in containers:
+            person = item.get("person", item)
+            for membership in person.get("memberships", []):
+                cgm = membership.get("contactGroupMembership")
+                if cgm:
+                    gid = cgm.get("contactGroupResourceName")
+                    if gid:
+                        group_ids.append(gid)
+
+    except Exception as e:
+        logger.error(
+            f"Failed to fetch contact group memberships for {email}: {e}", exc_info=True
+        )
+
+    return group_ids
+
+
+async def _filter_recipients_allowed_by_groups(
+    recipients: List[str], group_specs: List[str], user_google_email: UserGoogleEmail
+) -> List[str]:
+    """
+    Determine which recipients should be considered allowed based on group specs.
+
+    Uses People API to:
+      1) Resolve configured group specs → contact group resourceNames
+      2) For each recipient, fetch memberships and see if they belong to any allowed group
+
+    Returns:
+        List of recipient emails that are allowed via contact group membership.
+    """
+    allowed_recipients: List[str] = []
+
+    people_service = await _get_people_service_for_allow_list(user_google_email)
+    if not people_service:
+        return allowed_recipients
+
+    allowed_group_ids = await _resolve_allowed_group_ids(group_specs, people_service)
+    if not allowed_group_ids:
+        return allowed_recipients
+
+    allowed_group_ids_set = set(allowed_group_ids)
+
+    # De-duplicate recipients for efficiency
+    unique_recipients = sorted(set(recipients))
+    for email in unique_recipients:
+        group_ids = await _get_contact_group_ids_for_email(email, people_service)
+        if not group_ids:
+            continue
+
+        if allowed_group_ids_set.intersection(group_ids):
+            allowed_recipients.append(email)
+
+    if allowed_recipients:
+        logger.info(
+            f"[allow_list_groups] Marked {len(allowed_recipients)} recipient(s) as allowed via contact group membership"
+        )
+
+    return allowed_recipients
 
 
 async def _handle_elicitation_fallback(
@@ -145,32 +495,36 @@ async def _handle_elicitation_fallback(
     to: Union[str, List[str]],
     subject: str,
     body: str,
-    user_google_email: str,
+    user_google_email: UserGoogleEmail,
     content_type: str,
     html_body: Optional[str],
     cc: Optional[Union[str, List[str]]],
     bcc: Optional[Union[str, List[str]]],
-    recipients_not_allowed: List[str]
+    recipients_not_allowed: List[str],
 ) -> Optional[SendGmailMessageResponse]:
     """
     Handle elicitation fallback when client doesn't support elicitation.
-    
+
     Args:
         fallback_mode: "block", "allow", or "draft"
         Other args: Same as send_gmail_message
         recipients_not_allowed: List of recipients not on allow list
-        
+
     Returns:
         Optional[SendGmailMessageResponse]: Result based on fallback mode, or None to continue sending
     """
     if fallback_mode == "allow":
         # Proceed with sending (allow untrusted recipients)
-        logger.info("Fallback mode 'allow' - proceeding with send despite untrusted recipients")
+        logger.info(
+            "Fallback mode 'allow' - proceeding with send despite untrusted recipients"
+        )
         return None  # Return None to continue with normal send flow
-        
+
     elif fallback_mode == "draft":
         # Save as draft instead of sending
-        logger.info("Fallback mode 'draft' - saving as draft due to untrusted recipients")
+        logger.info(
+            "Fallback mode 'draft' - saving as draft due to untrusted recipients"
+        )
         draft_result = await draft_gmail_message(
             subject=subject,
             body=body,
@@ -179,7 +533,7 @@ async def _handle_elicitation_fallback(
             content_type=content_type,
             html_body=html_body,
             cc=cc,
-            bcc=bcc
+            bcc=bcc,
         )
         return SendGmailMessageResponse(
             success=True,
@@ -197,14 +551,14 @@ async def _handle_elicitation_fallback(
    • OR add recipients to allow list for auto-sending""",
             messageId=None,
             threadId=None,
-            draftId=draft_result['draft_id'],
-            recipientCount=draft_result['recipient_count'],
+            draftId=draft_result["draft_id"],
+            recipientCount=draft_result["recipient_count"],
             contentType=content_type,
             templateApplied=False,
             error=None,
             elicitationRequired=False,
             elicitationNotSupported=True,
-            action="saved_draft"
+            action="saved_draft",
         )
     else:  # fallback_mode == "block" (default)
         # Block the send and inform user
@@ -235,7 +589,7 @@ async def _handle_elicitation_fallback(
             error="Recipients not on allow list and elicitation not supported",
             elicitationRequired=True,
             elicitationNotSupported=True,
-            recipientsNotAllowed=recipients_not_allowed
+            recipientsNotAllowed=recipients_not_allowed,
         )
 
 
@@ -243,12 +597,12 @@ async def send_gmail_message(
     ctx: Context,
     subject: str,
     body: str,
-    to: GmailRecipients = 'myself',
+    to: GmailRecipients = "myself",
     user_google_email: UserGoogleEmail = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
     cc: GmailRecipientsOptional = None,
-    bcc: GmailRecipientsOptional = None
+    bcc: GmailRecipientsOptional = None,
 ) -> SendGmailMessageResponse:
     """
     Sends an email using the user's Gmail account with support for HTML formatting and multiple recipients.
@@ -297,7 +651,7 @@ async def send_gmail_message(
         send_gmail_message(ctx, "user@example.com", "Subject", "Body content")
     """
     # Parameter validation and helpful error messages
-    if content_type == "html" and html_body and not body.strip().startswith('<'):
+    if content_type == "html" and html_body and not body.strip().startswith("<"):
         error_msg = (
             "❌ **Parameter Usage Error for content_type='html'**\n\n"
             "When using content_type='html':\n"
@@ -316,7 +670,7 @@ async def send_gmail_message(
             recipientCount=0,
             contentType=content_type,
             templateApplied=False,
-            error="Parameter validation error: incorrect content_type usage"
+            error="Parameter validation error: incorrect content_type usage",
         )
 
     if content_type == "mixed" and not html_body:
@@ -334,88 +688,89 @@ async def send_gmail_message(
             recipientCount=0,
             contentType=content_type,
             templateApplied=False,
-            error="Parameter validation error: missing html_body for mixed content"
+            error="Parameter validation error: missing html_body for mixed content",
         )
 
     # Format recipients for logging using shared utility function
     to_count = count_recipients(to)
     cc_count = count_recipients(cc) if cc else 0
     bcc_count = count_recipients(bcc) if bcc else 0
-    
+
     to_str = to if isinstance(to, str) else f"{to_count} recipients"
-    cc_str = f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
-    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}" if bcc else ""
+    cc_str = (
+        f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
+    )
+    bcc_str = (
+        f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}"
+        if bcc
+        else ""
+    )
 
-    logger.info(f"[send_gmail_message] Sending to: {to_str}{cc_str}{bcc_str}, from: {user_google_email}, content_type: {content_type}")
+    logger.info(
+        f"[send_gmail_message] Sending to: {to_str}{cc_str}{bcc_str}, from: {user_google_email}, content_type: {content_type}"
+    )
 
-    # Check allow list and trigger elicitation if needed
+    # STEP 1: Resolve any group: or groupId: recipient specs to actual email addresses
+    # This must happen BEFORE allow list checking so we check the actual recipients
+    resolved_to = await _resolve_group_recipients(to, user_google_email)
+    resolved_cc = await _resolve_group_recipients(cc, user_google_email)
+    resolved_bcc = await _resolve_group_recipients(bcc, user_google_email)
+
+    logger.debug(
+        f"[send_gmail_message] After group resolution - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}"
+    )
+
+    # STEP 2: Check allow list and trigger elicitation if needed
     allow_list = settings.get_gmail_allow_list()
+    recipients_not_allowed: List[str] = []
 
     if allow_list:
-        # Collect all recipient emails for the message
-        all_recipients = []
-
-        # Process 'to' recipients
-        if isinstance(to, str):
-            all_recipients.extend([email.strip() for email in to.split(',')])
-        elif isinstance(to, list):
-            all_recipients.extend(to)
-
-        # Process 'cc' recipients
-        if cc:
-            if isinstance(cc, str):
-                all_recipients.extend([email.strip() for email in cc.split(',')])
-            elif isinstance(cc, list):
-                all_recipients.extend(cc)
-
-        # Process 'bcc' recipients
-        if bcc:
-            if isinstance(bcc, str):
-                all_recipients.extend([email.strip() for email in bcc.split(',')])
-            elif isinstance(bcc, list):
-                all_recipients.extend(bcc)
-
-        # Resolve 'me'/'myself' aliases to actual user email before elicitation check
-        # This prevents elicitation when user sends emails to themselves
-        resolved_recipients = []
-        for email in all_recipients:
-            if email.strip().lower() in ['me', 'myself']:
-                # Resolve to actual user email address
-                if user_google_email:
-                    resolved_recipients.append(user_google_email.strip().lower())
-                # If user_google_email not available yet, skip elicitation for 'me'/'myself'
-                # The middleware will resolve it properly later
-            else:
-                resolved_recipients.append(email.strip().lower())
-
-        # Normalize resolved recipient emails (lowercase, strip whitespace)
-        all_recipients = [email for email in resolved_recipients if email]
-
-        # Normalize allow list emails
-        normalized_allow_list = [email.lower() for email in allow_list]
-
-        # Check if any recipient is NOT on the allow list
-        recipients_not_allowed = [
-            email for email in all_recipients
-            if email not in normalized_allow_list
-        ]
+        # Use consolidated helper to resolve aliases and perform email + group checks
+        # Now using resolved recipients (groups expanded to emails)
+        recipients_not_allowed = await _resolve_recipients_and_check_allow_list(
+            resolved_to, resolved_cc, resolved_bcc, user_google_email, allow_list
+        )
 
         if recipients_not_allowed:
             # Check if elicitation is enabled in settings
             if not settings.gmail_enable_elicitation:
-                logger.info(f"Elicitation disabled in settings - applying fallback: {settings.gmail_elicitation_fallback}")
-                return await _handle_elicitation_fallback(
-                    settings.gmail_elicitation_fallback, to, subject, body, user_google_email,
-                    content_type, html_body, cc, bcc, recipients_not_allowed
+                logger.info(
+                    f"Elicitation disabled in settings - applying fallback: {settings.gmail_elicitation_fallback}"
                 )
+                fallback_result = await _handle_elicitation_fallback(
+                    settings.gmail_elicitation_fallback,
+                    resolved_to,
+                    subject,
+                    body,
+                    user_google_email,
+                    content_type,
+                    html_body,
+                    resolved_cc,
+                    resolved_bcc,
+                    recipients_not_allowed,
+                )
+                if fallback_result is not None:
+                    return fallback_result
 
             # Log elicitation trigger
-            logger.info(f"Elicitation triggered for {len(recipients_not_allowed)} recipient(s) not on allow list")
+            logger.info(
+                f"Elicitation triggered for {len(recipients_not_allowed)} recipient(s) not on allow list"
+            )
 
             # Prepare elicitation message with better formatting
-            to_display = to if isinstance(to, str) else ', '.join(to)
-            cc_display = f"\n📋 **CC:** {cc if isinstance(cc, str) else ', '.join(cc)}" if cc else ""
-            bcc_display = f"\n📋 **BCC:** {bcc if isinstance(bcc, str) else ', '.join(bcc)}" if bcc else ""
+            to_display = (
+                resolved_to if isinstance(resolved_to, str) else ", ".join(resolved_to)
+            )
+            cc_display = (
+                f"\n📋 **CC:** {resolved_cc if isinstance(resolved_cc, str) else ', '.join(resolved_cc)}"
+                if resolved_cc
+                else ""
+            )
+            bcc_display = (
+                f"\n📋 **BCC:** {resolved_bcc if isinstance(resolved_bcc, str) else ', '.join(resolved_bcc)}"
+                if resolved_bcc
+                else ""
+            )
 
             # Truncate body for preview if too long
             body_preview = body[:300] + "... [truncated]" if len(body) > 300 else body
@@ -452,11 +807,8 @@ async def send_gmail_message(
                 #         response_type=EmailAction
                 #     )
                 response = await asyncio.wait_for(
-                    ctx.elicit(
-                        message=elicitation_message,
-                        response_type=EmailAction
-                    ),
-                    timeout=300.0
+                    ctx.elicit(message=elicitation_message, response_type=EmailAction),
+                    timeout=300.0,
                 )
             except asyncio.TimeoutError:
                 logger.info("Elicitation timed out after 300 seconds")
@@ -470,45 +822,61 @@ async def send_gmail_message(
                     templateApplied=False,
                     error="Elicitation timeout",
                     elicitationRequired=True,
-                    recipientsNotAllowed=recipients_not_allowed
+                    recipientsNotAllowed=recipients_not_allowed,
                 )
             except Exception as elicit_error:
                 # Enhanced client support detection - broader patterns to catch more unsupported clients
                 error_msg = str(elicit_error).lower()
                 error_type = type(elicit_error).__name__
-                
+
                 # Check for indicators that elicitation is not supported by the client
                 # Using broader patterns to catch various client implementations
                 is_unsupported_client = (
                     # Method/feature not found errors
-                    "method not found" in error_msg or
-                    "unknown method" in error_msg or
-                    "unsupported method" in error_msg or
-                    "not found" in error_msg or  # Broader pattern
-                    "not supported" in error_msg or  # Broader pattern
-                    "unsupported" in error_msg or  # Broader pattern
+                    "method not found" in error_msg
+                    or "unknown method" in error_msg
+                    or "unsupported method" in error_msg
+                    or "not found" in error_msg  # Broader pattern
+                    or "not supported" in error_msg  # Broader pattern
+                    or "unsupported" in error_msg  # Broader pattern
+                    or
                     # FastMCP/MCP-specific indicators
-                    "elicit not supported" in error_msg or
-                    "elicitation not supported" in error_msg or
-                    "elicitation not available" in error_msg or
+                    "elicit not supported" in error_msg
+                    or "elicitation not supported" in error_msg
+                    or "elicitation not available" in error_msg
+                    or
                     # Exception types that commonly indicate missing functionality
-                    error_type in ["AttributeError", "NotImplementedError", "TypeError"] or
+                    error_type in ["AttributeError", "NotImplementedError", "TypeError"]
+                    or
                     # Common client error patterns
-                    "elicit" in error_msg and ("error" in error_msg or "fail" in error_msg)
+                    "elicit" in error_msg
+                    and ("error" in error_msg or "fail" in error_msg)
                 )
-                
+
                 if is_unsupported_client:
-                    logger.warning(f"Client doesn't support elicitation (error: {error_type}: {error_msg}) - applying fallback: {settings.gmail_elicitation_fallback}")
+                    logger.warning(
+                        f"Client doesn't support elicitation (error: {error_type}: {error_msg}) - applying fallback: {settings.gmail_elicitation_fallback}"
+                    )
                     fallback_result = await _handle_elicitation_fallback(
-                        settings.gmail_elicitation_fallback, to, subject, body, user_google_email,
-                        content_type, html_body, cc, bcc, recipients_not_allowed
+                        settings.gmail_elicitation_fallback,
+                        resolved_to,
+                        subject,
+                        body,
+                        user_google_email,
+                        content_type,
+                        html_body,
+                        resolved_cc,
+                        resolved_bcc,
+                        recipients_not_allowed,
                     )
                     if fallback_result is not None:
                         return fallback_result
                     # If fallback_result is None (allow mode), continue with normal sending
                 else:
                     # Very specific errors that indicate client should support elicitation
-                    logger.error(f"Elicitation failed for supporting client: {error_type}: {elicit_error}")
+                    logger.error(
+                        f"Elicitation failed for supporting client: {error_type}: {elicit_error}"
+                    )
                     return SendGmailMessageResponse(
                         success=False,
                         message=f"❌ Email confirmation failed: {elicit_error}\n\n🔧 **Client appears to support elicitation but encountered an error**",
@@ -519,7 +887,7 @@ async def send_gmail_message(
                         templateApplied=False,
                         error=f"Elicitation error: {elicit_error}",
                         elicitationRequired=True,
-                        recipientsNotAllowed=recipients_not_allowed
+                        recipientsNotAllowed=recipients_not_allowed,
                     )
 
             # Handle standard elicitation response structure
@@ -541,12 +909,12 @@ async def send_gmail_message(
                     templateApplied=False,
                     error=f"User {response.action}d",
                     elicitationRequired=True,
-                    recipientsNotAllowed=recipients_not_allowed
+                    recipientsNotAllowed=recipients_not_allowed,
                 )
             elif response.action == "accept":
                 # Get the user's choice from the data field
                 user_choice = response.data.action
-                
+
                 if user_choice == "cancel":
                     logger.info("User chose to cancel email operation")
                     return SendGmailMessageResponse(
@@ -565,20 +933,20 @@ async def send_gmail_message(
                         templateApplied=False,
                         error="User cancelled",
                         elicitationRequired=True,
-                        recipientsNotAllowed=recipients_not_allowed
+                        recipientsNotAllowed=recipients_not_allowed,
                     )
                 elif user_choice == "save_draft":
                     logger.info("User chose to save email as draft")
-                    # Create draft instead of sending
+                    # Create draft instead of sending (use resolved recipients)
                     draft_result = await draft_gmail_message(
                         user_google_email=user_google_email,
                         subject=subject,
                         body=body,
-                        to=to,
+                        to=resolved_to,
                         content_type=content_type,
                         html_body=html_body,
-                        cc=cc,
-                        bcc=bcc
+                        cc=resolved_cc,
+                        bcc=resolved_bcc,
                     )
                     # Return as send response with draft info
                     return SendGmailMessageResponse(
@@ -593,14 +961,14 @@ async def send_gmail_message(
 🔧 **Next step:** Review draft in Gmail and send manually""",
                         messageId=None,
                         threadId=None,
-                        draftId=draft_result['draft_id'],  # Include draft ID
-                        recipientCount=draft_result['recipient_count'],
+                        draftId=draft_result["draft_id"],  # Include draft ID
+                        recipientCount=draft_result["recipient_count"],
                         contentType=content_type,
                         templateApplied=False,
                         error=None,
                         elicitationRequired=True,
                         recipientsNotAllowed=recipients_not_allowed,
-                        action="saved_draft"
+                        action="saved_draft",
                     )
                 elif user_choice == "send":
                     # Continue with sending
@@ -618,7 +986,7 @@ async def send_gmail_message(
                         templateApplied=False,
                         error=f"Unexpected choice: {user_choice}",
                         elicitationRequired=True,
-                        recipientsNotAllowed=recipients_not_allowed
+                        recipientsNotAllowed=recipients_not_allowed,
                     )
             else:
                 # Unexpected elicitation action
@@ -633,25 +1001,33 @@ async def send_gmail_message(
                     templateApplied=False,
                     error=f"Unexpected elicitation response: {response.action}",
                     elicitationRequired=True,
-                    recipientsNotAllowed=recipients_not_allowed
+                    recipientsNotAllowed=recipients_not_allowed,
                 )
         else:
             # All recipients are on allow list
-            logger.info(f"All {len(all_recipients)} recipient(s) are on allow list - sending without elicitation")
+            total_recipients = count_recipients(resolved_to, resolved_cc, resolved_bcc)
+            logger.info(
+                f"All {total_recipients} recipient(s) are on allow list - sending without elicitation"
+            )
     else:
-        # No allow list configured
+        # No allow list configured - still need to resolve groups
         logger.debug("No Gmail allow list configured - sending without elicitation")
+        resolved_to = await _resolve_group_recipients(to, user_google_email)
+        resolved_cc = await _resolve_group_recipients(cc, user_google_email)
+        resolved_bcc = await _resolve_group_recipients(bcc, user_google_email)
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
-        # CRITICAL FIX: Resolve 'me'/'myself' aliases BEFORE creating MIME message
+        # STEP 3: Resolve 'me'/'myself' aliases in the already-group-resolved recipients
         # The Gmail API expects valid email addresses, not keywords
-        resolved_to = _resolve_recipient_aliases(to, user_google_email)
-        resolved_cc = _resolve_recipient_aliases(cc, user_google_email)
-        resolved_bcc = _resolve_recipient_aliases(bcc, user_google_email)
-        
-        logger.debug(f"Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}")
+        final_to = _resolve_recipient_aliases(resolved_to, user_google_email)
+        final_cc = _resolve_recipient_aliases(resolved_cc, user_google_email)
+        final_bcc = _resolve_recipient_aliases(resolved_bcc, user_google_email)
+
+        logger.debug(
+            f"Final recipients after alias resolution - to: {final_to}, cc: {final_cc}, bcc: {final_bcc}"
+        )
 
         # Check for email templates for recipients
         template_applied = False
@@ -659,27 +1035,29 @@ async def send_gmail_message(
         final_body = body
         final_html_body = html_body
         final_content_type = content_type
-        
+
         # Get primary recipient for template lookup
         primary_recipient = None
-        if isinstance(resolved_to, str):
+        if isinstance(final_to, str):
             # Handle comma-separated string
-            recipients = [email.strip() for email in resolved_to.split(',') if email.strip()]
+            recipients = [
+                email.strip() for email in final_to.split(",") if email.strip()
+            ]
             if recipients:
                 primary_recipient = recipients[0]
-        elif isinstance(resolved_to, list) and resolved_to:
-            primary_recipient = resolved_to[0]
-        
+        elif isinstance(final_to, list) and final_to:
+            primary_recipient = final_to[0]
+
         # Create properly formatted MIME message using helper function
         raw_message = _create_mime_message(
-            to=resolved_to,
+            to=final_to,
             subject=subject,
             body=final_body,
             content_type=final_content_type,
             html_body=final_html_body,
             from_email=user_google_email,
-            cc=resolved_cc,
-            bcc=resolved_bcc
+            cc=final_cc,
+            bcc=final_bcc,
         )
 
         send_body = {"raw": raw_message}
@@ -691,7 +1069,7 @@ async def send_gmail_message(
         message_id = sent_message.get("id")
 
         # Count total recipients for confirmation using shared utility function
-        total_recipients = count_recipients(to, cc, bcc)
+        total_recipients = count_recipients(final_to, final_cc, final_bcc)
 
         # Get thread ID from the sent message
         thread_id = sent_message.get("threadId")
@@ -707,7 +1085,7 @@ async def send_gmail_message(
             templateName=template.name if template_applied and template else None,
             error=None,
             elicitationRequired=bool(recipients_not_allowed) if allow_list else False,
-            recipientsNotAllowed=recipients_not_allowed if allow_list else []
+            recipientsNotAllowed=recipients_not_allowed if allow_list else [],
         )
 
     except HttpError as e:
@@ -720,7 +1098,7 @@ async def send_gmail_message(
             recipientCount=0,
             contentType=content_type,
             templateApplied=False,
-            error=str(e)
+            error=str(e),
         )
 
     except Exception as e:
@@ -733,7 +1111,7 @@ async def send_gmail_message(
             recipientCount=0,
             contentType=content_type,
             templateApplied=False,
-            error=str(e)
+            error=str(e),
         )
 
 
@@ -745,7 +1123,7 @@ async def draft_gmail_message(
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
     cc: GmailRecipientsOptional = None,
-    bcc: GmailRecipientsOptional = None
+    bcc: GmailRecipientsOptional = None,
 ) -> DraftGmailMessageResponse:
     """
     Creates a draft email in the user's Gmail account with support for HTML formatting and multiple recipients.
@@ -784,7 +1162,7 @@ async def draft_gmail_message(
         draft_gmail_message("Subject", "Body content")
     """
     # Parameter validation and helpful error messages (same as send_gmail_message)
-    if content_type == "html" and html_body and not body.strip().startswith('<'):
+    if content_type == "html" and html_body and not body.strip().startswith("<"):
         error_msg = (
             "❌ **Parameter Usage Error for content_type='html'**\n\n"
             "When using content_type='html':\n"
@@ -803,7 +1181,7 @@ async def draft_gmail_message(
             has_recipients=bool(to),
             recipient_count=0,
             userEmail=user_google_email or "",
-            error="Parameter validation error: incorrect content_type usage"
+            error="Parameter validation error: incorrect content_type usage",
         )
 
     if content_type == "mixed" and not html_body:
@@ -820,19 +1198,31 @@ async def draft_gmail_message(
             has_recipients=bool(to),
             recipient_count=0,
             userEmail=user_google_email or "",
-            error="Parameter validation error: missing html_body for mixed content"
+            error="Parameter validation error: missing html_body for mixed content",
         )
 
     # Format recipients for logging using shared utility function
     to_count = count_recipients(to) if to else 0
     cc_count = count_recipients(cc) if cc else 0
     bcc_count = count_recipients(bcc) if bcc else 0
-    
-    to_str = "no recipients" if not to else (to if isinstance(to, str) else f"{to_count} recipients")
-    cc_str = f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
-    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}" if bcc else ""
 
-    logger.info(f"[draft_gmail_message] Email: '{user_google_email}', Subject: '{subject}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}")
+    to_str = (
+        "no recipients"
+        if not to
+        else (to if isinstance(to, str) else f"{to_count} recipients")
+    )
+    cc_str = (
+        f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
+    )
+    bcc_str = (
+        f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}"
+        if bcc
+        else ""
+    )
+
+    logger.info(
+        f"[draft_gmail_message] Email: '{user_google_email}', Subject: '{subject}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}"
+    )
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
@@ -841,8 +1231,10 @@ async def draft_gmail_message(
         resolved_to = _resolve_recipient_aliases(to, user_google_email) if to else ""
         resolved_cc = _resolve_recipient_aliases(cc, user_google_email)
         resolved_bcc = _resolve_recipient_aliases(bcc, user_google_email)
-        
-        logger.debug(f"[draft] Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}")
+
+        logger.debug(
+            f"[draft] Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}"
+        )
 
         # Create properly formatted MIME message using helper function
         raw_message = _create_mime_message(
@@ -853,7 +1245,7 @@ async def draft_gmail_message(
             html_body=html_body,
             from_email=user_google_email,
             cc=resolved_cc,
-            bcc=resolved_bcc
+            bcc=resolved_bcc,
         )
 
         # Create a draft instead of sending
@@ -880,7 +1272,7 @@ async def draft_gmail_message(
             has_recipients=bool(to),
             recipient_count=total_recipients,
             userEmail=user_google_email or "",
-            error=None
+            error=None,
         )
 
     except Exception as e:
@@ -893,7 +1285,7 @@ async def draft_gmail_message(
             has_recipients=bool(to),
             recipient_count=0,
             userEmail=user_google_email or "",
-            error=str(e)
+            error=str(e),
         )
 
 
@@ -906,7 +1298,7 @@ async def reply_to_gmail_message(
     cc: GmailRecipientsOptional = None,
     bcc: GmailRecipientsOptional = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
-    html_body: Optional[str] = None
+    html_body: Optional[str] = None,
 ) -> ReplyGmailMessageResponse:
     """
     Sends a reply to a specific Gmail message with support for HTML formatting and flexible recipient options.
@@ -949,14 +1341,19 @@ async def reply_to_gmail_message(
         reply_to_gmail_message("msg_123", "<p>Thanks <b>everyone</b>!</p>",
                               content_type="html", reply_mode="reply_all")
     """
-    logger.info(f"[reply_to_gmail_message] Email: '{user_google_email}', Replying to Message ID: '{message_id}', reply_mode: {reply_mode}, content_type: {content_type}")
+    logger.info(
+        f"[reply_to_gmail_message] Email: '{user_google_email}', Replying to Message ID: '{message_id}', reply_mode: {reply_mode}, content_type: {content_type}"
+    )
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
         # Fetch the original message to get headers and body for quoting
         original_message = await asyncio.to_thread(
-            gmail_service.users().messages().get(userId="me", id=message_id, format="full").execute
+            gmail_service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute
         )
         payload = original_message.get("payload", {})
         headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
@@ -972,13 +1369,13 @@ async def reply_to_gmail_message(
             final_to = original_from
             final_cc = None
             final_bcc = None
-            
+
         elif reply_mode == "reply_all":
             # Extract all original recipients
             from_emails = extract_email_addresses(original_from)
             to_emails = extract_email_addresses(original_to)
             cc_emails = extract_email_addresses(original_cc)
-            
+
             # Remove current user's email from the lists (case-insensitive)
             if user_google_email:
                 user_email_lower = user_google_email.lower()
@@ -986,7 +1383,7 @@ async def reply_to_gmail_message(
                 cc_emails = [e for e in cc_emails if e.lower() != user_email_lower]
                 # Also remove from from_emails in case user is replying to their own message
                 from_emails = [e for e in from_emails if e.lower() != user_email_lower]
-            
+
             # Combine recipients appropriately
             # Original sender goes to 'To' field along with original To recipients
             # Original CC recipients stay in 'CC' field
@@ -995,7 +1392,7 @@ async def reply_to_gmail_message(
                 all_to_recipients.extend(from_emails)
             if to_emails:
                 all_to_recipients.extend(to_emails)
-            
+
             # Remove duplicates while preserving order
             seen = set()
             final_to = []
@@ -1003,22 +1400,24 @@ async def reply_to_gmail_message(
                 if email.lower() not in seen:
                     seen.add(email.lower())
                     final_to.append(email)
-            
+
             # If no recipients left (e.g., replying to own message), use original from
             if not final_to:
                 final_to = original_from
-            
+
             final_cc = cc_emails if cc_emails else None
             final_bcc = None
-            
+
         elif reply_mode == "custom":
             # Use provided recipients
             if not to:
-                raise ValueError("When using reply_mode='custom', you must provide 'to' recipients")
+                raise ValueError(
+                    "When using reply_mode='custom', you must provide 'to' recipients"
+                )
             final_to = to
             final_cc = cc
             final_bcc = bcc
-            
+
         else:
             raise ValueError(f"Invalid reply_mode: {reply_mode}")
 
@@ -1050,7 +1449,7 @@ async def reply_to_gmail_message(
             html_body=html_full_body if content_type == "mixed" else None,
             from_email=user_google_email,
             reply_to_message_id=headers.get("Message-ID", ""),
-            thread_id=original_message.get("threadId")
+            thread_id=original_message.get("threadId"),
         )
 
         send_body = {"raw": raw_message, "threadId": original_message.get("threadId")}
@@ -1061,7 +1460,7 @@ async def reply_to_gmail_message(
         )
         sent_message_id = sent_message.get("id")
         thread_id = sent_message.get("threadId")
-        
+
         # Format recipients for response
         def format_recipient_string(recipients):
             if not recipients:
@@ -1071,9 +1470,9 @@ async def reply_to_gmail_message(
             elif isinstance(recipients, list):
                 return ", ".join(recipients)
             return ""
-        
+
         replied_to_str = format_recipient_string(final_to)
-        
+
         return ReplyGmailMessageResponse(
             success=True,
             reply_message_id=sent_message_id,
@@ -1083,11 +1482,23 @@ async def reply_to_gmail_message(
             subject=reply_subject,
             content_type=content_type,
             reply_mode=reply_mode,
-            to_recipients=final_to if isinstance(final_to, list) else [final_to] if final_to else [],
-            cc_recipients=final_cc if isinstance(final_cc, list) else [final_cc] if final_cc else [],
-            bcc_recipients=final_bcc if isinstance(final_bcc, list) else [final_bcc] if final_bcc else [],
+            to_recipients=(
+                final_to
+                if isinstance(final_to, list)
+                else [final_to] if final_to else []
+            ),
+            cc_recipients=(
+                final_cc
+                if isinstance(final_cc, list)
+                else [final_cc] if final_cc else []
+            ),
+            bcc_recipients=(
+                final_bcc
+                if isinstance(final_bcc, list)
+                else [final_bcc] if final_bcc else []
+            ),
             userEmail=user_google_email or "",
-            error=None
+            error=None,
         )
 
     except Exception as e:
@@ -1105,7 +1516,7 @@ async def reply_to_gmail_message(
             cc_recipients=[],
             bcc_recipients=[],
             userEmail=user_google_email or "",
-            error=str(e)
+            error=str(e),
         )
 
 
@@ -1118,7 +1529,7 @@ async def draft_gmail_reply(
     cc: GmailRecipientsOptional = None,
     bcc: GmailRecipientsOptional = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
-    html_body: Optional[str] = None
+    html_body: Optional[str] = None,
 ) -> DraftGmailReplyResponse:
     """
     Creates a draft reply to a specific Gmail message with support for HTML formatting and flexible recipient options.
@@ -1161,14 +1572,19 @@ async def draft_gmail_reply(
         draft_gmail_reply("msg_123", "<p>Thanks <b>everyone</b>!</p>",
                          content_type="html", reply_mode="reply_all")
     """
-    logger.info(f"[draft_gmail_reply] Email: '{user_google_email}', Drafting reply to Message ID: '{message_id}', reply_mode: {reply_mode}, content_type: {content_type}")
+    logger.info(
+        f"[draft_gmail_reply] Email: '{user_google_email}', Drafting reply to Message ID: '{message_id}', reply_mode: {reply_mode}, content_type: {content_type}"
+    )
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
         # Fetch the original message to get headers and body for quoting
         original_message = await asyncio.to_thread(
-            gmail_service.users().messages().get(userId="me", id=message_id, format="full").execute
+            gmail_service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute
         )
         payload = original_message.get("payload", {})
         headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
@@ -1184,13 +1600,13 @@ async def draft_gmail_reply(
             final_to = original_from
             final_cc = None
             final_bcc = None
-            
+
         elif reply_mode == "reply_all":
             # Extract all original recipients
             from_emails = extract_email_addresses(original_from)
             to_emails = extract_email_addresses(original_to)
             cc_emails = extract_email_addresses(original_cc)
-            
+
             # Remove current user's email from the lists (case-insensitive)
             if user_google_email:
                 user_email_lower = user_google_email.lower()
@@ -1198,7 +1614,7 @@ async def draft_gmail_reply(
                 cc_emails = [e for e in cc_emails if e.lower() != user_email_lower]
                 # Also remove from from_emails in case user is replying to their own message
                 from_emails = [e for e in from_emails if e.lower() != user_email_lower]
-            
+
             # Combine recipients appropriately
             # Original sender goes to 'To' field along with original To recipients
             # Original CC recipients stay in 'CC' field
@@ -1207,7 +1623,7 @@ async def draft_gmail_reply(
                 all_to_recipients.extend(from_emails)
             if to_emails:
                 all_to_recipients.extend(to_emails)
-            
+
             # Remove duplicates while preserving order
             seen = set()
             final_to = []
@@ -1215,22 +1631,24 @@ async def draft_gmail_reply(
                 if email.lower() not in seen:
                     seen.add(email.lower())
                     final_to.append(email)
-            
+
             # If no recipients left (e.g., replying to own message), use original from
             if not final_to:
                 final_to = original_from
-            
+
             final_cc = cc_emails if cc_emails else None
             final_bcc = None
-            
+
         elif reply_mode == "custom":
             # Use provided recipients
             if not to:
-                raise ValueError("When using reply_mode='custom', you must provide 'to' recipients")
+                raise ValueError(
+                    "When using reply_mode='custom', you must provide 'to' recipients"
+                )
             final_to = to
             final_cc = cc
             final_bcc = bcc
-            
+
         else:
             raise ValueError(f"Invalid reply_mode: {reply_mode}")
 
@@ -1262,10 +1680,15 @@ async def draft_gmail_reply(
             html_body=html_full_body if content_type == "mixed" else None,
             from_email=user_google_email,
             reply_to_message_id=headers.get("Message-ID", ""),
-            thread_id=original_message.get("threadId")
+            thread_id=original_message.get("threadId"),
         )
 
-        draft_body = {"message": {"raw": raw_message, "threadId": original_message.get("threadId")}}
+        draft_body = {
+            "message": {
+                "raw": raw_message,
+                "threadId": original_message.get("threadId"),
+            }
+        }
 
         # Create the draft reply
         created_draft = await asyncio.to_thread(
@@ -1274,7 +1697,7 @@ async def draft_gmail_reply(
         draft_id = created_draft.get("id")
         message_id_from_draft = created_draft.get("message", {}).get("id")
         thread_id = created_draft.get("message", {}).get("threadId")
-        
+
         # Format recipients for response
         def format_recipient_string(recipients):
             if not recipients:
@@ -1284,9 +1707,9 @@ async def draft_gmail_reply(
             elif isinstance(recipients, list):
                 return ", ".join(recipients)
             return ""
-        
+
         replied_to_str = format_recipient_string(final_to)
-        
+
         return DraftGmailReplyResponse(
             success=True,
             draft_id=draft_id,
@@ -1296,11 +1719,23 @@ async def draft_gmail_reply(
             subject=reply_subject,
             content_type=content_type,
             reply_mode=reply_mode,
-            to_recipients=final_to if isinstance(final_to, list) else [final_to] if final_to else [],
-            cc_recipients=final_cc if isinstance(final_cc, list) else [final_cc] if final_cc else [],
-            bcc_recipients=final_bcc if isinstance(final_bcc, list) else [final_bcc] if final_bcc else [],
+            to_recipients=(
+                final_to
+                if isinstance(final_to, list)
+                else [final_to] if final_to else []
+            ),
+            cc_recipients=(
+                final_cc
+                if isinstance(final_cc, list)
+                else [final_cc] if final_cc else []
+            ),
+            bcc_recipients=(
+                final_bcc
+                if isinstance(final_bcc, list)
+                else [final_bcc] if final_bcc else []
+            ),
             userEmail=user_google_email or "",
-            error=None
+            error=None,
         )
 
     except Exception as e:
@@ -1318,20 +1753,20 @@ async def draft_gmail_reply(
             cc_recipients=[],
             bcc_recipients=[],
             userEmail=user_google_email or "",
-            error=str(e)
+            error=str(e),
         )
 
 
 async def forward_gmail_message(
     ctx: Context,
     message_id: str,
-    to: GmailRecipients = 'myself',
+    to: GmailRecipients = "myself",
     user_google_email: UserGoogleEmail = None,
     body: Optional[str] = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
     cc: GmailRecipientsOptional = None,
-    bcc: GmailRecipientsOptional = None
+    bcc: GmailRecipientsOptional = None,
 ) -> ForwardGmailMessageResponse:
     """
     Forward a Gmail message to specified recipients with HTML formatting preservation and elicitation support.
@@ -1378,60 +1813,120 @@ async def forward_gmail_message(
     to_count = count_recipients(to)
     cc_count = count_recipients(cc) if cc else 0
     bcc_count = count_recipients(bcc) if bcc else 0
-    
+
     to_str = to if isinstance(to, str) else f"{to_count} recipients"
-    cc_str = f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
-    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}" if bcc else ""
+    cc_str = (
+        f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
+    )
+    bcc_str = (
+        f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}"
+        if bcc
+        else ""
+    )
 
-    logger.info(f"[forward_gmail_message] Email: '{user_google_email}', Forwarding Message ID: '{message_id}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}")
+    logger.info(
+        f"[forward_gmail_message] Email: '{user_google_email}', Forwarding Message ID: '{message_id}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}"
+    )
 
-    # Check allow list and trigger elicitation if needed (same pattern as send_gmail_message)
+    # STEP 1: Resolve any group: or groupId: recipient specs to actual email addresses
+    resolved_to = await _resolve_group_recipients(to, user_google_email)
+    resolved_cc = await _resolve_group_recipients(cc, user_google_email)
+    resolved_bcc = await _resolve_group_recipients(bcc, user_google_email)
+
+    logger.debug(
+        f"[forward_gmail_message] After group resolution - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}"
+    )
+
+    # STEP 2: Check allow list and trigger elicitation if needed (same pattern as send_gmail_message)
     allow_list = settings.get_gmail_allow_list()
 
     if allow_list:
         # Use consolidated function to resolve recipients and check allow list
         recipients_not_allowed = await _resolve_recipients_and_check_allow_list(
-            to, cc, bcc, user_google_email, allow_list
+            resolved_to, resolved_cc, resolved_bcc, user_google_email, allow_list
         )
 
         if recipients_not_allowed:
             # Check if elicitation is enabled in settings
             if not settings.gmail_enable_elicitation:
-                logger.info(f"Elicitation disabled in settings - applying fallback: {settings.gmail_elicitation_fallback}")
+                logger.info(
+                    f"Elicitation disabled in settings - applying fallback: {settings.gmail_elicitation_fallback}"
+                )
                 fallback_result = await _handle_elicitation_fallback(
-                    settings.gmail_elicitation_fallback, to, f"Fwd: Original Message",
-                    body or "Forwarded message", user_google_email,
-                    content_type, html_body, cc, bcc, recipients_not_allowed
+                    settings.gmail_elicitation_fallback,
+                    resolved_to,
+                    f"Fwd: Original Message",
+                    body or "Forwarded message",
+                    user_google_email,
+                    content_type,
+                    html_body,
+                    resolved_cc,
+                    resolved_bcc,
+                    recipients_not_allowed,
                 )
                 if fallback_result is not None:
                     # Convert SendGmailMessageResponse to ForwardGmailMessageResponse
                     return ForwardGmailMessageResponse(
-                        success=fallback_result['success'],
-                        forward_message_id=fallback_result.get('messageId'),
+                        success=fallback_result["success"],
+                        forward_message_id=fallback_result.get("messageId"),
                         original_message_id=message_id,
-                        forwarded_to=to if isinstance(to, str) else ', '.join(to),
+                        forwarded_to=(
+                            resolved_to
+                            if isinstance(resolved_to, str)
+                            else ", ".join(resolved_to)
+                        ),
                         subject=f"Fwd: Original Message",
                         content_type=content_type,
-                        to_recipients=to if isinstance(to, list) else [to] if to else [],
-                        cc_recipients=cc if isinstance(cc, list) else [cc] if cc else [],
-                        bcc_recipients=bcc if isinstance(bcc, list) else [bcc] if bcc else [],
+                        to_recipients=(
+                            resolved_to
+                            if isinstance(resolved_to, list)
+                            else [resolved_to] if resolved_to else []
+                        ),
+                        cc_recipients=(
+                            resolved_cc
+                            if isinstance(resolved_cc, list)
+                            else [resolved_cc] if resolved_cc else []
+                        ),
+                        bcc_recipients=(
+                            resolved_bcc
+                            if isinstance(resolved_bcc, list)
+                            else [resolved_bcc] if resolved_bcc else []
+                        ),
                         html_preserved=False,
                         userEmail=user_google_email or "",
-                        error=fallback_result.get('error'),
-                        elicitationRequired=fallback_result.get('elicitationRequired', False),
-                        elicitationNotSupported=fallback_result.get('elicitationNotSupported', False),
-                        recipientsNotAllowed=fallback_result.get('recipientsNotAllowed', []),
-                        action=fallback_result.get('action', 'blocked'),
-                        draftId=fallback_result.get('draftId')
+                        error=fallback_result.get("error"),
+                        elicitationRequired=fallback_result.get(
+                            "elicitationRequired", False
+                        ),
+                        elicitationNotSupported=fallback_result.get(
+                            "elicitationNotSupported", False
+                        ),
+                        recipientsNotAllowed=fallback_result.get(
+                            "recipientsNotAllowed", []
+                        ),
+                        action=fallback_result.get("action", "blocked"),
+                        draftId=fallback_result.get("draftId"),
                     )
 
             # Log elicitation trigger
-            logger.info(f"Elicitation triggered for {len(recipients_not_allowed)} recipient(s) not on allow list")
+            logger.info(
+                f"Elicitation triggered for {len(recipients_not_allowed)} recipient(s) not on allow list"
+            )
 
             # Prepare elicitation message
-            to_display = to if isinstance(to, str) else ', '.join(to)
-            cc_display = f"\n📋 **CC:** {cc if isinstance(cc, str) else ', '.join(cc)}" if cc else ""
-            bcc_display = f"\n📋 **BCC:** {bcc if isinstance(bcc, str) else ', '.join(bcc)}" if bcc else ""
+            to_display = (
+                resolved_to if isinstance(resolved_to, str) else ", ".join(resolved_to)
+            )
+            cc_display = (
+                f"\n📋 **CC:** {resolved_cc if isinstance(resolved_cc, str) else ', '.join(resolved_cc)}"
+                if resolved_cc
+                else ""
+            )
+            bcc_display = (
+                f"\n📋 **BCC:** {resolved_bcc if isinstance(resolved_bcc, str) else ', '.join(resolved_bcc)}"
+                if resolved_bcc
+                else ""
+            )
 
             # Preview of additional message if provided
             body_preview = ""
@@ -1462,11 +1957,8 @@ async def forward_gmail_message(
             # Trigger elicitation with graceful fallback for unsupported clients
             try:
                 response = await asyncio.wait_for(
-                    ctx.elicit(
-                        message=elicitation_message,
-                        response_type=EmailAction
-                    ),
-                    timeout=300.0
+                    ctx.elicit(message=elicitation_message, response_type=EmailAction),
+                    timeout=300.0,
                 )
             except asyncio.TimeoutError:
                 logger.info("Elicitation timed out after 300 seconds")
@@ -1484,65 +1976,102 @@ async def forward_gmail_message(
                     userEmail=user_google_email or "",
                     error="Forward operation timed out - no response received within 300 seconds",
                     elicitationRequired=True,
-                    recipientsNotAllowed=recipients_not_allowed
+                    recipientsNotAllowed=recipients_not_allowed,
                 )
             except Exception as elicit_error:
                 # Enhanced client support detection - broader patterns to catch more unsupported clients
                 error_msg = str(elicit_error).lower()
                 error_type = type(elicit_error).__name__
-                
+
                 # Check for indicators that elicitation is not supported by the client
                 # Using broader patterns to catch various client implementations
                 is_unsupported_client = (
                     # Method/feature not found errors
-                    "method not found" in error_msg or
-                    "unknown method" in error_msg or
-                    "unsupported method" in error_msg or
-                    "not found" in error_msg or  # Broader pattern
-                    "not supported" in error_msg or  # Broader pattern
-                    "unsupported" in error_msg or  # Broader pattern
+                    "method not found" in error_msg
+                    or "unknown method" in error_msg
+                    or "unsupported method" in error_msg
+                    or "not found" in error_msg  # Broader pattern
+                    or "not supported" in error_msg  # Broader pattern
+                    or "unsupported" in error_msg  # Broader pattern
+                    or
                     # FastMCP/MCP-specific indicators
-                    "elicit not supported" in error_msg or
-                    "elicitation not supported" in error_msg or
-                    "elicitation not available" in error_msg or
+                    "elicit not supported" in error_msg
+                    or "elicitation not supported" in error_msg
+                    or "elicitation not available" in error_msg
+                    or
                     # Exception types that commonly indicate missing functionality
-                    error_type in ["AttributeError", "NotImplementedError", "TypeError"] or
+                    error_type in ["AttributeError", "NotImplementedError", "TypeError"]
+                    or
                     # Common client error patterns
-                    "elicit" in error_msg and ("error" in error_msg or "fail" in error_msg)
+                    "elicit" in error_msg
+                    and ("error" in error_msg or "fail" in error_msg)
                 )
-                
+
                 if is_unsupported_client:
-                    logger.warning(f"Client doesn't support elicitation (error: {error_type}: {error_msg}) - applying fallback: {settings.gmail_elicitation_fallback}")
+                    logger.warning(
+                        f"Client doesn't support elicitation (error: {error_type}: {error_msg}) - applying fallback: {settings.gmail_elicitation_fallback}"
+                    )
                     fallback_result = await _handle_elicitation_fallback(
-                        settings.gmail_elicitation_fallback, to, f"Fwd: Original Message",
-                        body or "Forwarded message", user_google_email,
-                        content_type, html_body, cc, bcc, recipients_not_allowed
+                        settings.gmail_elicitation_fallback,
+                        resolved_to,
+                        f"Fwd: Original Message",
+                        body or "Forwarded message",
+                        user_google_email,
+                        content_type,
+                        html_body,
+                        resolved_cc,
+                        resolved_bcc,
+                        recipients_not_allowed,
                     )
                     if fallback_result is not None:
                         # Convert SendGmailMessageResponse to ForwardGmailMessageResponse
                         return ForwardGmailMessageResponse(
-                            success=fallback_result['success'],
-                            forward_message_id=fallback_result.get('messageId'),
+                            success=fallback_result["success"],
+                            forward_message_id=fallback_result.get("messageId"),
                             original_message_id=message_id,
-                            forwarded_to=to if isinstance(to, str) else ', '.join(to),
+                            forwarded_to=(
+                                resolved_to
+                                if isinstance(resolved_to, str)
+                                else ", ".join(resolved_to)
+                            ),
                             subject=f"Fwd: Original Message",
                             content_type=content_type,
-                            to_recipients=to if isinstance(to, list) else [to] if to else [],
-                            cc_recipients=cc if isinstance(cc, list) else [cc] if cc else [],
-                            bcc_recipients=bcc if isinstance(bcc, list) else [bcc] if bcc else [],
+                            to_recipients=(
+                                resolved_to
+                                if isinstance(resolved_to, list)
+                                else [resolved_to] if resolved_to else []
+                            ),
+                            cc_recipients=(
+                                resolved_cc
+                                if isinstance(resolved_cc, list)
+                                else [resolved_cc] if resolved_cc else []
+                            ),
+                            bcc_recipients=(
+                                resolved_bcc
+                                if isinstance(resolved_bcc, list)
+                                else [resolved_bcc] if resolved_bcc else []
+                            ),
                             html_preserved=False,
                             userEmail=user_google_email or "",
-                            error=fallback_result.get('error'),
-                            elicitationRequired=fallback_result.get('elicitationRequired', False),
-                            elicitationNotSupported=fallback_result.get('elicitationNotSupported', False),
-                            recipientsNotAllowed=fallback_result.get('recipientsNotAllowed', []),
-                            action=fallback_result.get('action', 'blocked'),
-                            draftId=fallback_result.get('draftId')
+                            error=fallback_result.get("error"),
+                            elicitationRequired=fallback_result.get(
+                                "elicitationRequired", False
+                            ),
+                            elicitationNotSupported=fallback_result.get(
+                                "elicitationNotSupported", False
+                            ),
+                            recipientsNotAllowed=fallback_result.get(
+                                "recipientsNotAllowed", []
+                            ),
+                            action=fallback_result.get("action", "blocked"),
+                            draftId=fallback_result.get("draftId"),
                         )
                     # If fallback_result is None (allow mode), continue with normal forwarding
                 else:
                     # Very specific errors that indicate client should support elicitation
-                    logger.error(f"Forward elicitation failed for supporting client: {error_type}: {elicit_error}")
+                    logger.error(
+                        f"Forward elicitation failed for supporting client: {error_type}: {elicit_error}"
+                    )
                     return ForwardGmailMessageResponse(
                         success=False,
                         forward_message_id="",
@@ -1557,7 +2086,7 @@ async def forward_gmail_message(
                         userEmail=user_google_email or "",
                         error=f"Forward confirmation failed: {elicit_error}\n\n🔧 **Client appears to support elicitation but encountered an error**",
                         elicitationRequired=True,
-                        recipientsNotAllowed=recipients_not_allowed
+                        recipientsNotAllowed=recipients_not_allowed,
                     )
 
             # Handle elicitation responses
@@ -1577,12 +2106,12 @@ async def forward_gmail_message(
                     userEmail=user_google_email or "",
                     error=f"User {response.action}d",
                     elicitationRequired=True,
-                    recipientsNotAllowed=recipients_not_allowed
+                    recipientsNotAllowed=recipients_not_allowed,
                 )
             elif response.action == "accept":
                 # Get the user's choice from the data field
                 user_choice = response.data.action
-                
+
                 if user_choice == "cancel":
                     logger.info("User chose to cancel forward operation")
                     return ForwardGmailMessageResponse(
@@ -1599,39 +2128,43 @@ async def forward_gmail_message(
                         userEmail=user_google_email or "",
                         error="User cancelled",
                         elicitationRequired=True,
-                        recipientsNotAllowed=recipients_not_allowed
+                        recipientsNotAllowed=recipients_not_allowed,
                     )
                 elif user_choice == "save_draft":
                     logger.info("User chose to save forward as draft")
-                    # Create draft instead of sending
+                    # Create draft instead of sending (use resolved recipients)
                     draft_result = await draft_gmail_forward(
                         message_id=message_id,
-                        to=to,
+                        to=resolved_to,
                         user_google_email=user_google_email,
                         body=body,
                         content_type=content_type,
                         html_body=html_body,
-                        cc=cc,
-                        bcc=bcc
+                        cc=resolved_cc,
+                        bcc=resolved_bcc,
                     )
                     # Return as forward response with draft info
                     return ForwardGmailMessageResponse(
                         success=True,
                         forward_message_id="",
                         original_message_id=message_id,
-                        forwarded_to=to if isinstance(to, str) else ', '.join(to),
-                        subject=draft_result.get('subject', ''),
+                        forwarded_to=(
+                            resolved_to
+                            if isinstance(resolved_to, str)
+                            else ", ".join(resolved_to)
+                        ),
+                        subject=draft_result.get("subject", ""),
                         content_type=content_type,
-                        to_recipients=draft_result.get('to_recipients', []),
-                        cc_recipients=draft_result.get('cc_recipients', []),
-                        bcc_recipients=draft_result.get('bcc_recipients', []),
-                        html_preserved=draft_result.get('html_preserved', False),
+                        to_recipients=draft_result.get("to_recipients", []),
+                        cc_recipients=draft_result.get("cc_recipients", []),
+                        bcc_recipients=draft_result.get("bcc_recipients", []),
+                        html_preserved=draft_result.get("html_preserved", False),
                         userEmail=user_google_email or "",
                         error=None,
                         elicitationRequired=True,
                         recipientsNotAllowed=recipients_not_allowed,
                         action="saved_draft",
-                        draftId=draft_result.get('draft_id')
+                        draftId=draft_result.get("draft_id"),
                     )
                 elif user_choice == "send":
                     # Continue with forwarding
@@ -1653,7 +2186,7 @@ async def forward_gmail_message(
                         userEmail=user_google_email or "",
                         error=f"Unexpected choice: {user_choice}",
                         elicitationRequired=True,
-                        recipientsNotAllowed=recipients_not_allowed
+                        recipientsNotAllowed=recipients_not_allowed,
                     )
             else:
                 # Unexpected elicitation action
@@ -1672,29 +2205,39 @@ async def forward_gmail_message(
                     userEmail=user_google_email or "",
                     error=f"Unexpected elicitation response: {response.action}",
                     elicitationRequired=True,
-                    recipientsNotAllowed=recipients_not_allowed
+                    recipientsNotAllowed=recipients_not_allowed,
                 )
         else:
             # All recipients are on allow list - get count safely
-            total_recipients = count_recipients(to, cc, bcc)
-            logger.info(f"All {total_recipients} recipient(s) are on allow list - forwarding without elicitation")
+            total_recipients = count_recipients(resolved_to, resolved_cc, resolved_bcc)
+            logger.info(
+                f"All {total_recipients} recipient(s) are on allow list - forwarding without elicitation"
+            )
     else:
-        # No allow list configured
+        # No allow list configured - still need to resolve groups
         logger.debug("No Gmail allow list configured - forwarding without elicitation")
+        resolved_to = await _resolve_group_recipients(to, user_google_email)
+        resolved_cc = await _resolve_group_recipients(cc, user_google_email)
+        resolved_bcc = await _resolve_group_recipients(bcc, user_google_email)
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
-        # CRITICAL FIX: Resolve 'me'/'myself' aliases BEFORE processing
-        resolved_to = _resolve_recipient_aliases(to, user_google_email)
-        resolved_cc = _resolve_recipient_aliases(cc, user_google_email)
-        resolved_bcc = _resolve_recipient_aliases(bcc, user_google_email)
-        
-        logger.debug(f"[forward] Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}")
+        # STEP 3: Resolve 'me'/'myself' aliases in the already-group-resolved recipients
+        final_to = _resolve_recipient_aliases(resolved_to, user_google_email)
+        final_cc = _resolve_recipient_aliases(resolved_cc, user_google_email)
+        final_bcc = _resolve_recipient_aliases(resolved_bcc, user_google_email)
+
+        logger.debug(
+            f"[forward] Final recipients after alias resolution - to: {final_to}, cc: {final_cc}, bcc: {final_bcc}"
+        )
 
         # Fetch the original message to get headers and body for forwarding
         original_message = await asyncio.to_thread(
-            gmail_service.users().messages().get(userId="me", id=message_id, format="full").execute
+            gmail_service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute
         )
         payload = original_message.get("payload", {})
         headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
@@ -1703,10 +2246,10 @@ async def forward_gmail_message(
         # Extract both plain text and HTML content from original message
         original_plain_body = _extract_message_body(payload)
         original_html_body = _extract_html_body(payload)
-        
+
         # Determine if we have HTML content to preserve
         has_html = bool(original_html_body)
-        html_preserved = has_html and content_type in ['html', 'mixed']
+        html_preserved = has_html and content_type in ["html", "mixed"]
 
         # Prepare forward subject
         forward_subject = _prepare_forward_subject(original_subject)
@@ -1714,17 +2257,21 @@ async def forward_gmail_message(
         # Format the forwarded content based on content_type
         if content_type == "plain":
             # Plain text only - use plain text version of original
-            forwarded_content = _format_forward_content(original_plain_body, headers, is_html=False)
+            forwarded_content = _format_forward_content(
+                original_plain_body, headers, is_html=False
+            )
             if body:
                 full_body = f"{body}{forwarded_content}"
             else:
                 full_body = forwarded_content
             final_html_body = None
-            
+
         elif content_type == "html":
             # HTML only - use HTML version if available, fallback to plain text
             content_to_forward = original_html_body if has_html else original_plain_body
-            forwarded_content = _format_forward_content(content_to_forward, headers, is_html=has_html)
+            forwarded_content = _format_forward_content(
+                content_to_forward, headers, is_html=has_html
+            )
             if body:
                 if has_html:
                     full_body = f"{body}{forwarded_content}"
@@ -1733,43 +2280,49 @@ async def forward_gmail_message(
             else:
                 full_body = forwarded_content
             final_html_body = None
-            
+
         elif content_type == "mixed":
             # Mixed content - prepare both plain and HTML versions
             # Plain text version
-            plain_forwarded = _format_forward_content(original_plain_body, headers, is_html=False)
+            plain_forwarded = _format_forward_content(
+                original_plain_body, headers, is_html=False
+            )
             if body:
                 full_plain_body = f"{body}{plain_forwarded}"
             else:
                 full_plain_body = plain_forwarded
-            
+
             # HTML version
             if has_html:
-                html_forwarded = _format_forward_content(original_html_body, headers, is_html=True)
+                html_forwarded = _format_forward_content(
+                    original_html_body, headers, is_html=True
+                )
                 if html_body:
                     final_html_body = f"{html_body}{html_forwarded}"
                 else:
                     final_html_body = html_forwarded
             else:
                 # No HTML content in original, convert plain text to HTML
-                html_forwarded = _format_forward_content(original_plain_body, headers, is_html=True)
+                html_forwarded = _format_forward_content(
+                    original_plain_body, headers, is_html=True
+                )
                 if html_body:
                     final_html_body = f"{html_body}{html_forwarded}"
                 else:
                     final_html_body = html_forwarded
-            
+
             full_body = full_plain_body
 
         # Create properly formatted MIME message using helper function
         raw_message = _create_mime_message(
-            to=resolved_to,
-            cc=resolved_cc,
-            bcc=resolved_bcc,
+            to=final_to,
+            cc=final_cc,
+            bcc=final_bcc,
             subject=forward_subject,
             body=full_body,
             content_type=content_type,
             html_body=final_html_body,
-            from_email=user_google_email
+            from_email=user_google_email,
         )
 
         send_body = {"raw": raw_message}
@@ -1779,7 +2332,7 @@ async def forward_gmail_message(
             gmail_service.users().messages().send(userId="me", body=send_body).execute
         )
         sent_message_id = sent_message.get("id")
-        
+
         # Format recipients for response
         def format_recipient_string(recipients):
             if not recipients:
@@ -1789,9 +2342,9 @@ async def forward_gmail_message(
             elif isinstance(recipients, list):
                 return ", ".join(recipients)
             return ""
-        
-        forwarded_to_str = format_recipient_string(resolved_to)
-        
+
+        forwarded_to_str = format_recipient_string(final_to)
+
         return ForwardGmailMessageResponse(
             success=True,
             forward_message_id=sent_message_id,
@@ -1799,14 +2352,26 @@ async def forward_gmail_message(
             forwarded_to=forwarded_to_str,
             subject=forward_subject,
             content_type=content_type,
-            to_recipients=resolved_to if isinstance(resolved_to, list) else [resolved_to] if resolved_to else [],
-            cc_recipients=resolved_cc if isinstance(resolved_cc, list) else [resolved_cc] if resolved_cc else [],
-            bcc_recipients=resolved_bcc if isinstance(resolved_bcc, list) else [resolved_bcc] if resolved_bcc else [],
+            to_recipients=(
+                final_to
+                if isinstance(final_to, list)
+                else [final_to] if final_to else []
+            ),
+            cc_recipients=(
+                final_cc
+                if isinstance(final_cc, list)
+                else [final_cc] if final_cc else []
+            ),
+            bcc_recipients=(
+                final_bcc
+                if isinstance(final_bcc, list)
+                else [final_bcc] if final_bcc else []
+            ),
             html_preserved=html_preserved,
             userEmail=user_google_email or "",
             error=None,
             elicitationRequired=bool(recipients_not_allowed) if allow_list else False,
-            recipientsNotAllowed=recipients_not_allowed if allow_list else []
+            recipientsNotAllowed=recipients_not_allowed if allow_list else [],
         )
 
     except Exception as e:
@@ -1823,19 +2388,19 @@ async def forward_gmail_message(
             bcc_recipients=[],
             html_preserved=False,
             userEmail=user_google_email or "",
-            error=str(e)
+            error=str(e),
         )
 
 
 async def draft_gmail_forward(
     message_id: str,
-    to: GmailRecipients = 'myself',
+    to: GmailRecipients = "myself",
     user_google_email: UserGoogleEmail = None,
     body: Optional[str] = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
     cc: GmailRecipientsOptional = None,
-    bcc: GmailRecipientsOptional = None
+    bcc: GmailRecipientsOptional = None,
 ) -> DraftGmailForwardResponse:
     """
     Create a draft forward of a Gmail message with HTML formatting preservation.
@@ -1877,12 +2442,20 @@ async def draft_gmail_forward(
     to_count = count_recipients(to)
     cc_count = count_recipients(cc) if cc else 0
     bcc_count = count_recipients(bcc) if bcc else 0
-    
-    to_str = to if isinstance(to, str) else f"{to_count} recipients"
-    cc_str = f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
-    bcc_str = f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}" if bcc else ""
 
-    logger.info(f"[draft_gmail_forward] Email: '{user_google_email}', Drafting forward of Message ID: '{message_id}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}")
+    to_str = to if isinstance(to, str) else f"{to_count} recipients"
+    cc_str = (
+        f", CC: {cc if isinstance(cc, str) else f'{cc_count} recipients'}" if cc else ""
+    )
+    bcc_str = (
+        f", BCC: {bcc if isinstance(bcc, str) else f'{bcc_count} recipients'}"
+        if bcc
+        else ""
+    )
+
+    logger.info(
+        f"[draft_gmail_forward] Email: '{user_google_email}', Drafting forward of Message ID: '{message_id}', To: {to_str}{cc_str}{bcc_str}, content_type: {content_type}"
+    )
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
@@ -1891,12 +2464,17 @@ async def draft_gmail_forward(
         resolved_to = _resolve_recipient_aliases(to, user_google_email)
         resolved_cc = _resolve_recipient_aliases(cc, user_google_email)
         resolved_bcc = _resolve_recipient_aliases(bcc, user_google_email)
-        
-        logger.debug(f"[draft_forward] Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}")
+
+        logger.debug(
+            f"[draft_forward] Resolved recipients - to: {resolved_to}, cc: {resolved_cc}, bcc: {resolved_bcc}"
+        )
 
         # Fetch the original message to get headers and body for forwarding
         original_message = await asyncio.to_thread(
-            gmail_service.users().messages().get(userId="me", id=message_id, format="full").execute
+            gmail_service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute
         )
         payload = original_message.get("payload", {})
         headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
@@ -1905,10 +2483,10 @@ async def draft_gmail_forward(
         # Extract both plain text and HTML content from original message
         original_plain_body = _extract_message_body(payload)
         original_html_body = _extract_html_body(payload)
-        
+
         # Determine if we have HTML content to preserve
         has_html = bool(original_html_body)
-        html_preserved = has_html and content_type in ['html', 'mixed']
+        html_preserved = has_html and content_type in ["html", "mixed"]
 
         # Prepare forward subject
         forward_subject = _prepare_forward_subject(original_subject)
@@ -1916,47 +2494,57 @@ async def draft_gmail_forward(
         # Format the forwarded content based on content_type
         if content_type == "plain":
             # Plain text only - use plain text version of original
-            forwarded_content = _format_forward_content(original_plain_body, headers, is_html=False)
+            forwarded_content = _format_forward_content(
+                original_plain_body, headers, is_html=False
+            )
             if body:
                 full_body = f"{body}{forwarded_content}"
             else:
                 full_body = forwarded_content
             final_html_body = None
-            
+
         elif content_type == "html":
             # HTML only - use HTML version if available, fallback to plain text
             content_to_forward = original_html_body if has_html else original_plain_body
-            forwarded_content = _format_forward_content(content_to_forward, headers, is_html=has_html)
+            forwarded_content = _format_forward_content(
+                content_to_forward, headers, is_html=has_html
+            )
             if body:
                 full_body = f"{body}{forwarded_content}"
             else:
                 full_body = forwarded_content
             final_html_body = None
-            
+
         elif content_type == "mixed":
             # Mixed content - prepare both plain and HTML versions
             # Plain text version
-            plain_forwarded = _format_forward_content(original_plain_body, headers, is_html=False)
+            plain_forwarded = _format_forward_content(
+                original_plain_body, headers, is_html=False
+            )
             if body:
                 full_plain_body = f"{body}{plain_forwarded}"
             else:
                 full_plain_body = plain_forwarded
-            
+
             # HTML version
             if has_html:
-                html_forwarded = _format_forward_content(original_html_body, headers, is_html=True)
+                html_forwarded = _format_forward_content(
+                    original_html_body, headers, is_html=True
+                )
                 if html_body:
                     final_html_body = f"{html_body}{html_forwarded}"
                 else:
                     final_html_body = html_forwarded
             else:
                 # No HTML content in original, convert plain text to HTML
-                html_forwarded = _format_forward_content(original_plain_body, headers, is_html=True)
+                html_forwarded = _format_forward_content(
+                    original_plain_body, headers, is_html=True
+                )
                 if html_body:
                     final_html_body = f"{html_body}{html_forwarded}"
                 else:
                     final_html_body = html_forwarded
-            
+
             full_body = full_plain_body
 
         # Create properly formatted MIME message using helper function
@@ -1968,7 +2556,7 @@ async def draft_gmail_forward(
             body=full_body,
             content_type=content_type,
             html_body=final_html_body,
-            from_email=user_google_email
+            from_email=user_google_email,
         )
 
         draft_body = {"message": {"raw": raw_message}}
@@ -1978,7 +2566,7 @@ async def draft_gmail_forward(
             gmail_service.users().drafts().create(userId="me", body=draft_body).execute
         )
         draft_id = created_draft.get("id")
-        
+
         # Format recipients for response
         def format_recipient_string(recipients):
             if not recipients:
@@ -1988,9 +2576,9 @@ async def draft_gmail_forward(
             elif isinstance(recipients, list):
                 return ", ".join(recipients)
             return ""
-        
+
         forwarded_to_str = format_recipient_string(resolved_to)
-        
+
         return DraftGmailForwardResponse(
             success=True,
             draft_id=draft_id,
@@ -1998,12 +2586,24 @@ async def draft_gmail_forward(
             forwarded_to=forwarded_to_str,
             subject=forward_subject,
             content_type=content_type,
-            to_recipients=resolved_to if isinstance(resolved_to, list) else [resolved_to] if resolved_to else [],
-            cc_recipients=resolved_cc if isinstance(resolved_cc, list) else [resolved_cc] if resolved_cc else [],
-            bcc_recipients=resolved_bcc if isinstance(resolved_bcc, list) else [resolved_bcc] if resolved_bcc else [],
+            to_recipients=(
+                resolved_to
+                if isinstance(resolved_to, list)
+                else [resolved_to] if resolved_to else []
+            ),
+            cc_recipients=(
+                resolved_cc
+                if isinstance(resolved_cc, list)
+                else [resolved_cc] if resolved_cc else []
+            ),
+            bcc_recipients=(
+                resolved_bcc
+                if isinstance(resolved_bcc, list)
+                else [resolved_bcc] if resolved_bcc else []
+            ),
             html_preserved=html_preserved,
             userEmail=user_google_email or "",
-            error=None
+            error=None,
         )
 
     except Exception as e:
@@ -2020,10 +2620,8 @@ async def draft_gmail_forward(
             bcc_recipients=[],
             html_preserved=False,
             userEmail=user_google_email or "",
-            error=str(e)
+            error=str(e),
         )
-
-
 
 
 def setup_compose_tools(mcp: FastMCP) -> None:
@@ -2038,34 +2636,49 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,  # Sends emails, modifies state
             "destructiveHint": False,  # Creates new content, doesn't destroy
             "idempotentHint": False,  # Multiple sends create multiple emails
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def send_gmail_message_tool(
         ctx: Context,
         subject: Annotated[str, Field(description="Email subject line")],
-        body: Annotated[str, Field(description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)")],
+        body: Annotated[
+            str,
+            Field(
+                description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)"
+            ),
+        ],
         user_google_email: UserGoogleEmail = None,
-        to: GmailRecipients = 'myself',
-        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)")] = "mixed",
-        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. Ignored for 'plain' and 'html' types")] = None,
+        to: GmailRecipients = "myself",
+        content_type: Annotated[
+            Literal["plain", "html", "mixed"],
+            Field(
+                description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)"
+            ),
+        ] = "mixed",
+        html_body: Annotated[
+            Optional[str],
+            Field(
+                description="HTML content when content_type='mixed'. Ignored for 'plain' and 'html' types"
+            ),
+        ] = None,
         cc: GmailRecipientsOptional = None,
-        bcc: GmailRecipientsOptional = None
+        bcc: GmailRecipientsOptional = None,
     ) -> SendGmailMessageResponse:
         """
         Send Gmail message with structured output and elicitation support.
-        
+
         Returns both:
         - Traditional content: Human-readable confirmation message (automatic via FastMCP)
         - Structured content: Machine-readable JSON with detailed send results
-        
+
         Features:
         - HTML and plain text support with automatic conversion
         - Multiple recipients (to, cc, bcc)
         - Email template auto-application based on recipients
         - Elicitation for recipients not on allow list
         - Auto-injection of user context via middleware
-        
+
         Args:
             ctx: FastMCP context for user interactions and elicitation
             subject: Email subject line
@@ -2076,11 +2689,13 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             html_body: HTML content for mixed-type emails
             cc: CC recipients (optional)
             bcc: BCC recipients (optional)
-            
+
         Returns:
         SendGmailMessageResponse: Structured response with send status and details
         """
-        return await send_gmail_message(ctx, subject, body, to, user_google_email, content_type, html_body, cc, bcc)
+        return await send_gmail_message(
+            ctx, subject, body, to, user_google_email, content_type, html_body, cc, bcc
+        )
 
     @mcp.tool(
         name="draft_gmail_message",
@@ -2091,32 +2706,47 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def draft_gmail_message_tool(
         subject: Annotated[str, Field(description="Email subject line for the draft")],
-        body: Annotated[str, Field(description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)")],
+        body: Annotated[
+            str,
+            Field(
+                description="Email body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body)"
+            ),
+        ],
         user_google_email: UserGoogleEmail = None,
         to: GmailRecipientsOptional = None,
-        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)")] = "mixed",
-        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. Ignored for 'plain' and 'html' types")] = None,
+        content_type: Annotated[
+            Literal["plain", "html", "mixed"],
+            Field(
+                description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)"
+            ),
+        ] = "mixed",
+        html_body: Annotated[
+            Optional[str],
+            Field(
+                description="HTML content when content_type='mixed'. Ignored for 'plain' and 'html' types"
+            ),
+        ] = None,
         cc: GmailRecipientsOptional = None,
-        bcc: GmailRecipientsOptional = None
+        bcc: GmailRecipientsOptional = None,
     ) -> DraftGmailMessageResponse:
         """
         Create Gmail draft with structured output.
-        
+
         Returns both:
         - Traditional content: Human-readable confirmation message (automatic via FastMCP)
         - Structured content: Machine-readable JSON with draft creation details
-        
+
         Features:
         - HTML and plain text support with automatic conversion
         - Multiple recipients (to, cc, bcc) or recipient-less drafts
         - Auto-injection of user context via middleware
         - Flexible content type handling
-        
+
         Args:
             subject: Email subject line
             body: Email body content (usage varies by content_type)
@@ -2126,11 +2756,13 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             html_body: HTML content for mixed-type emails
             cc: CC recipients (optional)
             bcc: BCC recipients (optional)
-            
+
         Returns:
         DraftGmailMessageResponse: Structured response with draft creation details
         """
-        return await draft_gmail_message(subject, body, user_google_email, to, content_type, html_body, cc, bcc)
+        return await draft_gmail_message(
+            subject, body, user_google_email, to, content_type, html_body, cc, bcc
+        )
 
     @mcp.tool(
         name="reply_to_gmail_message",
@@ -2141,27 +2773,52 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def reply_to_gmail_message_tool(
-        message_id: Annotated[str, Field(description="The ID of the original Gmail message to reply to. This maintains proper email threading")],
-        body: Annotated[str, Field(description="Reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted")],
+        message_id: Annotated[
+            str,
+            Field(
+                description="The ID of the original Gmail message to reply to. This maintains proper email threading"
+            ),
+        ],
+        body: Annotated[
+            str,
+            Field(
+                description="Reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted"
+            ),
+        ],
         user_google_email: UserGoogleEmail = None,
-        reply_mode: Annotated[Literal["sender_only", "reply_all", "custom"], Field(description="Who receives the reply: 'sender_only' = only original sender (default), 'reply_all' = all original recipients, 'custom' = use provided to/cc/bcc parameters")] = "sender_only",
+        reply_mode: Annotated[
+            Literal["sender_only", "reply_all", "custom"],
+            Field(
+                description="Who receives the reply: 'sender_only' = only original sender (default), 'reply_all' = all original recipients, 'custom' = use provided to/cc/bcc parameters"
+            ),
+        ] = "sender_only",
         to: GmailRecipientsOptional = None,
         cc: GmailRecipientsOptional = None,
         bcc: GmailRecipientsOptional = None,
-        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)")] = "mixed",
-        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types")] = None
+        content_type: Annotated[
+            Literal["plain", "html", "mixed"],
+            Field(
+                description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)"
+            ),
+        ] = "mixed",
+        html_body: Annotated[
+            Optional[str],
+            Field(
+                description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types"
+            ),
+        ] = None,
     ) -> ReplyGmailMessageResponse:
         """
         Reply to Gmail message with structured output and proper threading.
-        
+
         Returns both:
         - Traditional content: Human-readable confirmation message (automatic via FastMCP)
         - Structured content: Machine-readable JSON with reply details and threading info
-        
+
         Features:
         - Automatic email threading (maintains conversation)
         - Original message quoting in reply
@@ -2169,7 +2826,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         - Flexible recipient options: sender only, reply all, or custom
         - Auto-extraction of reply-to address and subject
         - Auto-injection of user context via middleware
-        
+
         Args:
             message_id: ID of the original message to reply to
             body: Reply body content (original message auto-quoted)
@@ -2180,42 +2837,86 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             bcc: Custom BCC recipients (when reply_mode='custom')
             content_type: How to handle body/html_body content
             html_body: HTML content for mixed-type replies
-            
+
         Returns:
         ReplyGmailMessageResponse: Structured response with reply status and threading info
         """
-        return await reply_to_gmail_message(message_id, body, user_google_email, reply_mode, to, cc, bcc, content_type, html_body)
+        return await reply_to_gmail_message(
+            message_id,
+            body,
+            user_google_email,
+            reply_mode,
+            to,
+            cc,
+            bcc,
+            content_type,
+            html_body,
+        )
 
     @mcp.tool(
         name="draft_gmail_reply",
         description="Create a draft reply to a specific Gmail message with proper threading and HTML support",
-        tags={"gmail", "draft", "reply", "thread", "email", "html", "conversation", "save"},
+        tags={
+            "gmail",
+            "draft",
+            "reply",
+            "thread",
+            "email",
+            "html",
+            "conversation",
+            "save",
+        },
         annotations={
             "title": "Draft Gmail Reply",
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def draft_gmail_reply_tool(
-        message_id: Annotated[str, Field(description="The ID of the original Gmail message to draft a reply for. This maintains proper email threading in the draft")],
-        body: Annotated[str, Field(description="Draft reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted")],
+        message_id: Annotated[
+            str,
+            Field(
+                description="The ID of the original Gmail message to draft a reply for. This maintains proper email threading in the draft"
+            ),
+        ],
+        body: Annotated[
+            str,
+            Field(
+                description="Draft reply body content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content (plain auto-generated), 'mixed' = plain text (HTML in html_body). Original message will be automatically quoted"
+            ),
+        ],
         user_google_email: UserGoogleEmail = None,
-        reply_mode: Annotated[Literal["sender_only", "reply_all", "custom"], Field(description="Who receives the reply: 'sender_only' = only original sender (default), 'reply_all' = all original recipients, 'custom' = use provided to/cc/bcc parameters")] = "sender_only",
+        reply_mode: Annotated[
+            Literal["sender_only", "reply_all", "custom"],
+            Field(
+                description="Who receives the reply: 'sender_only' = only original sender (default), 'reply_all' = all original recipients, 'custom' = use provided to/cc/bcc parameters"
+            ),
+        ] = "sender_only",
         to: GmailRecipientsOptional = None,
         cc: GmailRecipientsOptional = None,
         bcc: GmailRecipientsOptional = None,
-        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)")] = "mixed",
-        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types")] = None
+        content_type: Annotated[
+            Literal["plain", "html", "mixed"],
+            Field(
+                description="Content type: 'plain' (text only with quoted original), 'html' (HTML in body param with quoted original), 'mixed' (text in body, HTML in html_body, both with quoted original)"
+            ),
+        ] = "mixed",
+        html_body: Annotated[
+            Optional[str],
+            Field(
+                description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types"
+            ),
+        ] = None,
     ) -> DraftGmailReplyResponse:
         """
         Create Gmail draft reply with structured output and proper threading.
-        
+
         Returns both:
         - Traditional content: Human-readable confirmation message (automatic via FastMCP)
         - Structured content: Machine-readable JSON with draft creation and threading info
-        
+
         Features:
         - Automatic email threading (maintains conversation in draft)
         - Original message quoting in draft
@@ -2223,7 +2924,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         - Flexible recipient options: sender only, reply all, or custom
         - Auto-extraction of reply-to address and subject
         - Auto-injection of user context via middleware
-        
+
         Args:
             message_id: ID of the original message to draft reply for
             body: Draft reply body content (original message auto-quoted)
@@ -2234,11 +2935,21 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             bcc: Custom BCC recipients (when reply_mode='custom')
             content_type: How to handle body/html_body content
             html_body: HTML content for mixed-type draft replies
-            
+
         Returns:
         DraftGmailReplyResponse: Structured response with draft creation and threading info
         """
-        return await draft_gmail_reply(message_id, body, user_google_email, reply_mode, to, cc, bcc, content_type, html_body)
+        return await draft_gmail_reply(
+            message_id,
+            body,
+            user_google_email,
+            reply_mode,
+            to,
+            cc,
+            bcc,
+            content_type,
+            html_body,
+        )
 
     @mcp.tool(
         name="forward_gmail_message",
@@ -2249,27 +2960,47 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,  # Sends emails, modifies state
             "destructiveHint": False,  # Creates new content, doesn't destroy
             "idempotentHint": False,  # Multiple forwards create multiple emails
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def forward_gmail_message_tool(
         ctx: Context,
-        message_id: Annotated[str, Field(description="The ID of the Gmail message to forward. This will include the original message content and headers")],
-        to: GmailRecipients = 'myself',
+        message_id: Annotated[
+            str,
+            Field(
+                description="The ID of the Gmail message to forward. This will include the original message content and headers"
+            ),
+        ],
+        to: GmailRecipients = "myself",
         user_google_email: UserGoogleEmail = None,
-        body: Annotated[Optional[str], Field(description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)")] = None,
-        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)")] = "mixed",
-        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. This will be added before the forwarded HTML content. Ignored for 'plain' and 'html' types")] = None,
+        body: Annotated[
+            Optional[str],
+            Field(
+                description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)"
+            ),
+        ] = None,
+        content_type: Annotated[
+            Literal["plain", "html", "mixed"],
+            Field(
+                description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)"
+            ),
+        ] = "mixed",
+        html_body: Annotated[
+            Optional[str],
+            Field(
+                description="HTML content when content_type='mixed'. This will be added before the forwarded HTML content. Ignored for 'plain' and 'html' types"
+            ),
+        ] = None,
         cc: GmailRecipientsOptional = None,
-        bcc: GmailRecipientsOptional = None
+        bcc: GmailRecipientsOptional = None,
     ) -> ForwardGmailMessageResponse:
         """
         Forward Gmail message with structured output, HTML preservation, and elicitation support.
-        
+
         Returns both:
         - Traditional content: Human-readable confirmation message (automatic via FastMCP)
         - Structured content: Machine-readable JSON with forward details and HTML preservation status
-        
+
         Features:
         - HTML formatting preservation (maintains original email styling)
         - Elicitation for recipients not on allow list
@@ -2277,13 +3008,13 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         - Original message headers included (From, Date, Subject, To, Cc)
         - Auto-injection of user context via middleware
         - Proper Gmail forward formatting with "---------- Forwarded message ---------" separator
-        
+
         HTML Preservation Strategy:
         - Uses 'mixed' content type by default for maximum compatibility
         - Preserves original HTML structure and inline styles
         - Includes both plain text and HTML versions for email client compatibility
         - Maintains formatting even when forwarded through Gmail
-        
+
         Args:
             ctx: FastMCP context for user interactions and elicitation
             message_id: ID of the Gmail message to forward
@@ -2294,11 +3025,21 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             html_body: HTML content for mixed-type forwards
             cc: CC recipients (optional)
             bcc: BCC recipients (optional)
-            
+
         Returns:
         ForwardGmailMessageResponse: Structured response with forward status and HTML preservation info
         """
-        return await forward_gmail_message(ctx, message_id, to, user_google_email, body, content_type, html_body, cc, bcc)
+        return await forward_gmail_message(
+            ctx,
+            message_id,
+            to,
+            user_google_email,
+            body,
+            content_type,
+            html_body,
+            cc,
+            bcc,
+        )
 
     @mcp.tool(
         name="draft_gmail_forward",
@@ -2309,26 +3050,46 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def draft_gmail_forward_tool(
-        message_id: Annotated[str, Field(description="The ID of the Gmail message to create a forward draft for. This will include the original message content and headers")],
-        to: GmailRecipients = 'myself',
+        message_id: Annotated[
+            str,
+            Field(
+                description="The ID of the Gmail message to create a forward draft for. This will include the original message content and headers"
+            ),
+        ],
+        to: GmailRecipients = "myself",
         user_google_email: UserGoogleEmail = None,
-        body: Annotated[Optional[str], Field(description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)")] = None,
-        content_type: Annotated[Literal["plain", "html", "mixed"], Field(description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)")] = "mixed",
-        html_body: Annotated[Optional[str], Field(description="HTML content when content_type='mixed'. This will be added before the forwarded HTML content. Ignored for 'plain' and 'html' types")] = None,
+        body: Annotated[
+            Optional[str],
+            Field(
+                description="Optional additional message body to add before the forwarded content. Usage depends on content_type: 'plain' = plain text only, 'html' = HTML content, 'mixed' = plain text (HTML in html_body)"
+            ),
+        ] = None,
+        content_type: Annotated[
+            Literal["plain", "html", "mixed"],
+            Field(
+                description="Content type: 'plain' (converts original HTML to text), 'html' (preserves HTML formatting), 'mixed' (both plain and HTML versions - recommended)"
+            ),
+        ] = "mixed",
+        html_body: Annotated[
+            Optional[str],
+            Field(
+                description="HTML content when content_type='mixed'. This will be added before the forwarded HTML content. Ignored for 'plain' and 'html' types"
+            ),
+        ] = None,
         cc: GmailRecipientsOptional = None,
-        bcc: GmailRecipientsOptional = None
+        bcc: GmailRecipientsOptional = None,
     ) -> DraftGmailForwardResponse:
         """
         Create Gmail forward draft with structured output and HTML preservation.
-        
+
         Returns both:
         - Traditional content: Human-readable confirmation message (automatic via FastMCP)
         - Structured content: Machine-readable JSON with draft creation and HTML preservation info
-        
+
         Features:
         - HTML formatting preservation (maintains original email styling)
         - Multiple recipients (to, cc, bcc)
@@ -2336,13 +3097,13 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         - Auto-injection of user context via middleware
         - Proper Gmail forward formatting with "---------- Forwarded message ---------" separator
         - Draft saved to Gmail drafts folder for later review/sending
-        
+
         HTML Preservation Strategy:
         - Uses 'mixed' content type by default for maximum compatibility
         - Preserves original HTML structure and inline styles
         - Includes both plain text and HTML versions for email client compatibility
         - Maintains formatting even when forwarded through Gmail
-        
+
         Args:
             message_id: ID of the Gmail message to draft forward for
             to: Recipient email address(es)
@@ -2352,8 +3113,10 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             html_body: HTML content for mixed-type draft forwards
             cc: CC recipients (optional)
             bcc: BCC recipients (optional)
-            
+
         Returns:
         DraftGmailForwardResponse: Structured response with draft creation and HTML preservation info
         """
-        return await draft_gmail_forward(message_id, to, user_google_email, body, content_type, html_body, cc, bcc)
+        return await draft_gmail_forward(
+            message_id, to, user_google_email, body, content_type, html_body, cc, bcc
+        )

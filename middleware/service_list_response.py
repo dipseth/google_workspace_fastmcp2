@@ -7,7 +7,7 @@ in TagBasedResourceMiddleware.
 
 from typing import Any, Optional, Dict
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ServiceListResponse(BaseModel):
@@ -54,11 +54,9 @@ class ServiceListResponse(BaseModel):
         description="ISO timestamp of when the response was generated"
     )
 
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda v: v.isoformat()}
+    )
         
     @classmethod
     def from_middleware_data(

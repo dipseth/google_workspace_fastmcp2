@@ -24,6 +24,9 @@ from .config import QdrantConfig
 from config.enhanced_logging import setup_logger
 logger = setup_logger()
 
+# Global singleton instance for shared Qdrant client usage
+_global_client_manager = None  # type: Optional["QdrantClientManager"]
+
 
 class QdrantClientManager:
     """
@@ -317,22 +320,28 @@ class QdrantClientManager:
                 logger.info(f"🚀 Optimization Profile: {profile_name}")
                 logger.info(f"📊 Profile Description: {description}")
                 
-                # Create keyword indexes for filterable fields
+                # Create keyword indexes for filterable fields using KeywordIndexParams
                 filterable_fields = [
-                    "tool_name",      # Tool name filtering
-                    "user_email",     # User email filtering
-                    "user_id",        # User ID filtering
-                    "session_id",     # Session filtering
-                    "payload_type"    # Payload type filtering
+                    # Core indexed fields
+                    "tool_name", "user_email", "user_id", "session_id", "payload_type", "label",
+                    # Additional fields for comprehensive search support
+                    "timestamp", "execution_time_ms", "compressed",
+                    # Common search aliases
+                    "user", "service", "tool", "email", "type"
                 ]
                 
                 for field in filterable_fields:
                     try:
+                        # Use KeywordIndexParams for more robust index creation
+                        keyword_index = qdrant_models['KeywordIndexParams'](
+                            type=qdrant_models['KeywordIndexType'].KEYWORD,
+                            on_disk=False  # Keep frequently accessed fields in memory
+                        )
                         await asyncio.to_thread(
                             self.client.create_payload_index,
                             collection_name=self.config.collection_name,
                             field_name=field,
-                            field_schema=qdrant_models['PayloadSchemaType'].KEYWORD
+                            field_schema=keyword_index
                         )
                         logger.info(f"✅ Created keyword index for field: {field}")
                     except Exception as e:
@@ -352,10 +361,10 @@ class QdrantClientManager:
                     if hasattr(collection_info, 'payload_schema') and collection_info.payload_schema:
                         existing_indexes = set(collection_info.payload_schema.keys())
                     
-                    # Create missing indexes - comprehensive list
+                    # Create missing indexes - comprehensive list with KeywordIndexParams
                     filterable_fields = [
                         # Core indexed fields
-                        "tool_name", "user_email", "user_id", "session_id", "payload_type",
+                        "tool_name", "user_email", "user_id", "session_id", "payload_type", "label",
                         # Additional fields for comprehensive search support
                         "timestamp", "execution_time_ms", "compressed",
                         # Common search aliases
@@ -364,11 +373,16 @@ class QdrantClientManager:
                     for field in filterable_fields:
                         if field not in existing_indexes:
                             try:
+                                # Use KeywordIndexParams for more robust index creation
+                                keyword_index = qdrant_models['KeywordIndexParams'](
+                                    type=qdrant_models['KeywordIndexType'].KEYWORD,
+                                    on_disk=False  # Keep frequently accessed fields in memory
+                                )
                                 await asyncio.to_thread(
                                     self.client.create_payload_index,
                                     collection_name=self.config.collection_name,
                                     field_name=field,
-                                    field_schema=qdrant_models['PayloadSchemaType'].KEYWORD
+                                    field_schema=keyword_index
                                 )
                                 logger.info(f"✅ Created missing keyword index for field: {field}")
                             except Exception as e:
@@ -741,6 +755,13 @@ class QdrantClientManager:
                     ),
                     "description": "Session identifier index"
                 },
+                "label": {
+                    "schema": qdrant_models['KeywordIndexParams'](
+                        type=qdrant_models['KeywordIndexType'].KEYWORD,
+                        on_disk=False    # Generic label/tag field for filters like label:sent
+                    ),
+                    "description": "Generic label/tag index"
+                },
                 
                 # Boolean index for compression flag
                 "compressed": {
@@ -901,3 +922,35 @@ class QdrantClientManager:
             "embedding_dim": self.embedding_dim,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+
+def get_or_create_client_manager(
+    config: Optional[QdrantConfig] = None,
+    qdrant_api_key: Optional[str] = None,
+    qdrant_url: Optional[str] = None,
+    auto_discovery: bool = True,
+) -> "QdrantClientManager":
+    """
+    Get a singleton QdrantClientManager instance.
+
+    The first caller may optionally provide config/credentials; subsequent callers
+    will receive the same instance regardless of arguments. This ensures a single
+    shared Qdrant client is used across middleware, tools, and resources.
+    """
+    global _global_client_manager
+
+    if _global_client_manager is not None:
+        return _global_client_manager
+
+    # Default to centralized settings-based config if none provided
+    if config is None:
+        from .config import load_config_from_settings
+        config = load_config_from_settings()
+
+    _global_client_manager = QdrantClientManager(
+        config=config,
+        qdrant_api_key=qdrant_api_key,
+        qdrant_url=qdrant_url,
+        auto_discovery=auto_discovery,
+    )
+    return _global_client_manager

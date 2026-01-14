@@ -205,9 +205,35 @@ class TestQdrantResources:
     @pytest.mark.asyncio
     async def test_read_qdrant_specific_point(self, client):
         """Test reading a specific point from Qdrant collection."""
-        # Use the point ID mentioned in the user's issue
         collection_name = "mcp_tool_responses"
-        point_id = "88fc2b49-0e61-4617-a9cb-02812375394a"
+        
+        # Discover a real point_id from recent responses instead of hardcoding
+        recent_uri = f"qdrant://collection/{collection_name}/responses/recent"
+        try:
+            recent_content = await client.read_resource(recent_uri)
+        except Exception as e:
+            pytest.skip(f"Unable to read recent responses for dynamic point_id: {e}")
+        
+        assert isinstance(recent_content, list)
+        assert len(recent_content) > 0
+        
+        recent_first = recent_content[0]
+        recent_text = recent_first.text if hasattr(recent_first, "text") else str(recent_first)
+        
+        try:
+            recent_data = json.loads(recent_text)
+        except json.JSONDecodeError:
+            pytest.skip("Recent responses resource did not return JSON")
+        
+        responses = recent_data.get("responses") or []
+        if not responses:
+            pytest.skip("No recent responses in Qdrant to test specific point access")
+        
+        first_response = responses[0]
+        point_id = first_response.get("id") or first_response.get("point_id")
+        if not point_id:
+            pytest.skip("Recent response did not contain an id/point_id field")
+        
         uri = f"qdrant://collection/{collection_name}/{point_id}"
         
         try:
@@ -381,8 +407,13 @@ class TestQdrantTools:
             })
             
             # Should return a result
-            assert len(result) > 0
-            content = result[0].text
+            assert result is not None
+            if hasattr(result, "content") and result.content:
+                content = result.content[0].text
+            else:
+                content = str(result)
+            
+            print("Qdrant search tool raw response:", content[:500])
             
             # Parse the result
             if "{" in content and "}" in content:
@@ -408,8 +439,13 @@ class TestQdrantTools:
             })
             
             # Should return a result
-            assert len(result) > 0
-            content = result[0].text
+            assert result is not None
+            if hasattr(result, "content") and result.content:
+                content = result.content[0].text
+            else:
+                content = str(result)
+            
+            print("Qdrant analytics tool raw response:", content[:500])
             
             # Check for analytics data
             if "total_responses" in content or "tools" in content:
@@ -423,7 +459,33 @@ class TestQdrantTools:
     @pytest.mark.asyncio
     async def test_fetch_tool(self, client):
         """Test fetching a specific point."""
-        point_id = "88fc2b49-0e61-4617-a9cb-02812375394a"
+        collection_name = "mcp_tool_responses"
+        recent_uri = f"qdrant://collection/{collection_name}/responses/recent"
+        
+        try:
+            recent_content = await client.read_resource(recent_uri)
+        except Exception as e:
+            pytest.skip(f"Unable to read recent responses for fetch tool test: {e}")
+        
+        assert isinstance(recent_content, list)
+        assert len(recent_content) > 0
+        
+        recent_first = recent_content[0]
+        recent_text = recent_first.text if hasattr(recent_first, "text") else str(recent_first)
+        
+        try:
+            recent_data = json.loads(recent_text)
+        except json.JSONDecodeError:
+            pytest.skip("Recent responses resource did not return JSON")
+        
+        responses = recent_data.get("responses") or []
+        if not responses:
+            pytest.skip("No recent responses in Qdrant to test fetch tool")
+        
+        first_response = responses[0]
+        point_id = first_response.get("id") or first_response.get("point_id")
+        if not point_id:
+            pytest.skip("Recent response did not contain an id/point_id field")
         
         try:
             # Call the fetch tool
@@ -432,8 +494,13 @@ class TestQdrantTools:
             })
             
             # Should return a result
-            assert len(result) > 0
-            content = result[0].text
+            assert result is not None
+            if hasattr(result, "content") and result.content:
+                content = result.content[0].text
+            else:
+                content = str(result)
+            
+            print("Qdrant fetch tool raw response:", content[:500])
             
             # Check the content
             if "error" in content.lower() and "not found" in content.lower():

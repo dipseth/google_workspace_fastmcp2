@@ -120,6 +120,13 @@ class TagBasedResourceMiddleware(Middleware):
                         "list_tool": "list_gmail_labels",
                         "get_tool": None,
                         "id_field": "label_id"
+                    },
+                    "messages": {
+                        "display_name": "Gmail Messages",
+                        "description": "Email messages and conversations",
+                        "list_tool": "search_gmail_messages",
+                        "get_tool": "get_gmail_message_content",
+                        "id_field": "message_id"
                     }
                 }
             elif service_name == "drive":
@@ -207,6 +214,16 @@ class TagBasedResourceMiddleware(Middleware):
                         "list_tool": "list_photos_albums",
                         "get_tool": "list_album_photos",
                         "id_field": "album_id"
+                    }
+                }
+            elif service_name == "people":
+                service_config["list_types"] = {
+                    "labels": {
+                        "display_name": "Contact Labels",
+                        "description": "Google People contact groups / labels",
+                        "list_tool": "list_people_contact_labels",
+                        "get_tool": "get_people_contact_group_members",  # ✅ Label-to-emails resolution
+                        "id_field": "label"  # Changed from resourceName to match the tool parameter
                     }
                 }
             elif service_name == "tasks":
@@ -946,6 +963,15 @@ class TagBasedResourceMiddleware(Middleware):
         """
         if not hasattr(context, 'fastmcp_context') or not context.fastmcp_context:
             raise RuntimeError("FastMCP context not available for tool calling")
+
+        # Special handling for search_gmail_messages: inject default query if not provided
+        if tool_name == "search_gmail_messages" and "query" not in parameters:
+            from datetime import datetime, timedelta
+            # Default to recent messages from last 7 days
+            seven_days_ago = datetime.now() - timedelta(days=7)
+            default_query = f"after:{seven_days_ago.strftime('%Y/%m/%d')}"
+            parameters["query"] = default_query
+            logger.debug(f"🔧 Injecting default query for Gmail messages: {default_query}")
 
         if self.enable_debug_logging:
             logger.debug(f"🔧 Calling tool {tool_name} with parameters: {parameters}")

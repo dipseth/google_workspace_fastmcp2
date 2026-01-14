@@ -157,7 +157,14 @@ class QdrantSearchManager:
         )
         return search_response.points  # Extract points from response
 
-    async def search(self, query: str, limit: int = None, score_threshold: float = None) -> List[Dict]:
+    async def search(
+        self,
+        query: str,
+        limit: int = None,
+        score_threshold: float = None,
+        positive_point_ids: Optional[List[str]] = None,
+        negative_point_ids: Optional[List[str]] = None,
+    ) -> List[Dict]:
         """
         Advanced search with query parsing support.
         
@@ -183,148 +190,207 @@ class QdrantSearchManager:
             raise RuntimeError("Qdrant client or embedding model not available")
         
         try:
-            # Parse the query to extract filters and semantic components
-            parsed_query = parse_search_query(query)
-            logger.debug(f"🔍 Parsed query: {parsed_query}")
-            
-            search_results = []
-            
-            # Handle direct ID lookup
-            if parsed_query["query_type"] == "id_lookup":
-                target_id = parsed_query["id"]
-                logger.debug(f"🎯 Looking up point by ID: {target_id}")
+            # Short-circuit: recommendation-style search using positive/negative examples
+            if positive_point_ids or negative_point_ids:
+                logger.debug(
+                    f"🧲 Recommendation search with examples: "
+                    f"positive={positive_point_ids}, negative={negative_point_ids}"
+                )
                 
-                try:
-                    # Handle both string and UUID formats - always use string for Qdrant
-                    try:
-                        # Try to parse as UUID first to validate, but keep as string
-                        uuid.UUID(target_id)
-                        search_id = target_id  # Keep as string
-                    except ValueError:
-                        # If not a valid UUID, use as string anyway
-                        search_id = target_id
-                    
-                    points = await asyncio.to_thread(
-                        self.client_manager.client.retrieve,
-                        collection_name=self.config.collection_name,
-                        ids=[search_id],
-                        with_payload=True
-                    )
-                    
-                    if points:
-                        point = points[0]
-                        search_results = [{
-                            'id': str(point.id),
-                            'score': 1.0,  # Perfect match for direct lookup
-                            'payload': point.payload
-                        }]
-                    logger.debug(f"📍 ID lookup found {len(search_results)} results")
-                        
-                except Exception as e:
-                    logger.error(f"❌ ID lookup failed: {e}")
-                    raise
-            
-            # Handle filtered search (with or without semantic component)
+                search_results = await self._execute_recommend_search(
+                    positive_ids=positive_point_ids or [],
+                    negative_ids=negative_point_ids or [],
+                    limit=limit,
+                    score_threshold=score_threshold,
+                )
             else:
-                qdrant_filter = None
+                # Parse the query to extract filters and semantic components
+                parsed_query = parse_search_query(query)
+                logger.debug(f"🔍 Parsed query: {parsed_query}")
                 
-                # Build Qdrant filter from parsed filters
-                if parsed_query["filters"]:
-                    try:
-                        # Import Qdrant models for filtering
-                        _, qdrant_models = get_qdrant_imports()
-                        Filter = qdrant_models['models'].Filter
-                        FieldCondition = qdrant_models['models'].FieldCondition
-                        MatchValue = qdrant_models['models'].MatchValue
+                search_results = []
+                
+                # When not using example-based recommendation, fall back to query parsing path
+                if not (positive_point_ids or negative_point_ids):
+                    # Handle direct ID lookup
+                    if parsed_query["query_type"] == "id_lookup":
+                        target_id = parsed_query["id"]
+                        logger.debug(f"🎯 Looking up point by ID: {target_id}")
                         
-                        conditions = []
-                        for filter_key, filter_value in parsed_query["filters"].items():
-                            logger.debug(f"🏷️  Adding filter: {filter_key}={filter_value}")
-                            conditions.append(
-                                FieldCondition(
-                                    key=filter_key,
-                                    match=MatchValue(value=filter_value)
-                                )
+                        try:
+                            # Handle both string and UUID formats - always use string for Qdrant
+                            try:
+                                # Try to parse as UUID first to validate, but keep as string
+                                uuid.UUID(target_id)
+                                search_id = target_id  # Keep as string
+                            except ValueError:
+                                # If not a valid UUID, use as string anyway
+                                search_id = target_id
+                            
+                            points = await asyncio.to_thread(
+                                self.client_manager.client.retrieve,
+                                collection_name=self.config.collection_name,
+                                ids=[search_id],
+                                with_payload=True
                             )
-                        
-                        if conditions:
-                            qdrant_filter = Filter(must=conditions)
-                            logger.debug(f"🔧 Built filter with {len(conditions)} conditions")
+                            
+                            if points:
+                                point = points[0]
+                                search_results = [{
+                                    'id': str(point.id),
+                                    'score': 1.0,  # Perfect match for direct lookup
+                                    'payload': point.payload
+                                }]
+                            logger.debug(f"📍 ID lookup found {len(search_results)} results")
+                                
+                        except Exception as e:
+                            logger.error(f"❌ ID lookup failed: {e}")
+                            raise
                     
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to build filter, falling back to simple search: {e}")
+                    # Handle filtered search (with or without semantic component)
+                    else:
                         qdrant_filter = None
-                
-                # Perform semantic search if there's a semantic query
-                if parsed_query["semantic_query"]:
-                    logger.debug(f"🧠 Performing semantic search: '{parsed_query['semantic_query']}'")
-                    
-                    # Generate embedding for the semantic query using FastEmbed
-                    embedding_list = await asyncio.to_thread(
-                        lambda q: list(self.client_manager.embedder.embed([q])),
-                        parsed_query["semantic_query"]
-                    )
-                    query_embedding = embedding_list[0] if embedding_list else None
-                    
-                    if query_embedding is None:
-                        logger.error(f"Failed to generate embedding for semantic query: {parsed_query['semantic_query']}")
-                        return []
-                    
-                    # Use helper method for consistent query_points usage
-                    search_results = await self._execute_semantic_search(
-                        query_embedding=query_embedding,
-                        qdrant_filter=qdrant_filter,
-                        limit=limit,
-                        score_threshold=score_threshold
-                    )
-                    
-                    logger.debug(f"🎯 Semantic search found {len(search_results)} results")
-                
-                # If no semantic query, just filter and return results
-                elif parsed_query["filters"]:
-                    logger.debug("📋 Performing filter-only search")
-                    
-                    # Scroll with filter to get filtered results
-                    scroll_result = await asyncio.to_thread(
-                        self.client_manager.client.scroll,
-                        collection_name=self.config.collection_name,
-                        scroll_filter=qdrant_filter,
-                        limit=limit or self.config.default_search_limit,
-                        with_payload=True
-                    )
-                    
-                    # Convert scroll results to search result format
-                    search_results = [{
-                        'id': str(point.id),
-                        'score': 1.0,  # Equal relevance for filter-only results
-                        'payload': point.payload
-                    } for point in scroll_result[0]]  # scroll returns (points, next_page_offset)
-                    
-                    logger.debug(f"📋 Filter search found {len(search_results)} results")
-                
-                # Default behavior for plain semantic search
-                else:
-                    logger.debug(f"🧠 Pure semantic search: '{query}'")
-                    
-                    # Generate embedding for the entire query using FastEmbed
-                    embedding_list = await asyncio.to_thread(
-                        lambda q: list(self.client_manager.embedder.embed([q])),
-                        query
-                    )
-                    query_embedding = embedding_list[0] if embedding_list else None
-                    
-                    if query_embedding is None:
-                        logger.error(f"Failed to generate embedding for query: {query}")
-                        return []
-                    
-                    # Use helper method for consistent query_points usage
-                    search_results = await self._execute_semantic_search(
-                        query_embedding=query_embedding,
-                        limit=limit,
-                        score_threshold=score_threshold
-                    )
-                    
-                    logger.debug(f"🧠 Pure semantic search found {len(search_results)} results")
+                        
+                        # Build Qdrant filter from parsed filters
+                        if parsed_query["filters"]:
+                            try:
+                                # Import Qdrant models for filtering
+                                _, qdrant_models = get_qdrant_imports()
+                                Filter = qdrant_models['models'].Filter
+                                FieldCondition = qdrant_models['models'].FieldCondition
+                                MatchValue = qdrant_models['models'].MatchValue
+                                
+                                conditions = []
+                                for filter_key, filter_value in parsed_query["filters"].items():
+                                    logger.debug(f"🏷️  Adding filter: {filter_key}={filter_value}")
+                                    conditions.append(
+                                        FieldCondition(
+                                            key=filter_key,
+                                            match=MatchValue(value=filter_value)
+                                        )
+                                    )
+                                
+                                if conditions:
+                                    qdrant_filter = Filter(must=conditions)
+                                    logger.debug(f"🔧 Built filter with {len(conditions)} conditions")
+                            
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to build filter, falling back to simple search: {e}")
+                                qdrant_filter = None
+                        
+                        # Perform semantic search if there's a semantic query
+                        if parsed_query["semantic_query"]:
+                            logger.debug(f"🧠 Performing semantic search: '{parsed_query['semantic_query']}'")
+                            
+                            # Generate embedding for the semantic query using FastEmbed
+                            embedding_list = await asyncio.to_thread(
+                                lambda q: list(self.client_manager.embedder.embed([q])),
+                                parsed_query["semantic_query"]
+                            )
+                            query_embedding = embedding_list[0] if embedding_list else None
+                            
+                            if query_embedding is None:
+                                logger.error(f"Failed to generate embedding for semantic query: {parsed_query['semantic_query']}")
+                                return []
+                            
+                            # Use helper method for consistent query_points usage with fallback for missing indexes
+                            try:
+                                search_results = await self._execute_semantic_search(
+                                    query_embedding=query_embedding,
+                                    qdrant_filter=qdrant_filter,
+                                    limit=limit,
+                                    score_threshold=score_threshold
+                                )
+                                
+                                logger.debug(f"🎯 Semantic search found {len(search_results)} results")
+                                
+                            except Exception as e:
+                                error_msg = str(e)
+                                # Check for missing index error specifically for label field
+                                if "Index required but not found" in error_msg and '"label"' in error_msg:
+                                    logger.warning(
+                                        f"⚠️ Missing label index detected, falling back to unfiltered search. "
+                                        f"Original error: {error_msg}"
+                                    )
+                                    
+                                    # Retry with full query embedding and no filters
+                                    try:
+                                        # Embed the full original query to preserve filter terms in semantic search
+                                        fallback_embedding_list = await asyncio.to_thread(
+                                            lambda q: list(self.client_manager.embedder.embed([q])),
+                                            query
+                                        )
+                                        fallback_embedding = fallback_embedding_list[0] if fallback_embedding_list else None
+                                        
+                                        if fallback_embedding is None:
+                                            logger.error("Failed to generate fallback embedding, returning empty results")
+                                            return []
+                                        
+                                        # Retry without filters
+                                        search_results = await self._execute_semantic_search(
+                                            query_embedding=fallback_embedding,
+                                            qdrant_filter=None,
+                                            limit=limit,
+                                            score_threshold=score_threshold
+                                        )
+                                        
+                                        logger.warning(
+                                            f"✅ Fallback search completed with {len(search_results)} results "
+                                            f"(filters dropped due to missing label index)"
+                                        )
+                                        
+                                    except Exception as fallback_error:
+                                        logger.error(f"❌ Fallback search also failed: {fallback_error}")
+                                        return []
+                                else:
+                                    # Re-raise other exceptions
+                                    raise
+                        
+                        # If no semantic query, just filter and return results
+                        elif parsed_query["filters"]:
+                            logger.debug("📋 Performing filter-only search")
+                            
+                            # Scroll with filter to get filtered results
+                            scroll_result = await asyncio.to_thread(
+                                self.client_manager.client.scroll,
+                                collection_name=self.config.collection_name,
+                                scroll_filter=qdrant_filter,
+                                limit=limit or self.config.default_search_limit,
+                                with_payload=True
+                            )
+                            
+                            # Convert scroll results to search result format
+                            search_results = [{
+                                'id': str(point.id),
+                                'score': 1.0,  # Equal relevance for filter-only results
+                                'payload': point.payload
+                            } for point in scroll_result[0]]  # scroll returns (points, next_page_offset)
+                            
+                            logger.debug(f"📋 Filter search found {len(search_results)} results")
+                        
+                        # Default behavior for plain semantic search
+                        else:
+                            logger.debug(f"🧠 Pure semantic search: '{query}'")
+                            
+                            # Generate embedding for the entire query using FastEmbed
+                            embedding_list = await asyncio.to_thread(
+                                lambda q: list(self.client_manager.embedder.embed([q])),
+                                query
+                            )
+                            query_embedding = embedding_list[0] if embedding_list else None
+                            
+                            if query_embedding is None:
+                                logger.error(f"Failed to generate embedding for query: {query}")
+                                return []
+                            
+                            # Use helper method for consistent query_points usage
+                            search_results = await self._execute_semantic_search(
+                                query_embedding=query_embedding,
+                                limit=limit,
+                                score_threshold=score_threshold
+                            )
+                            
+                            logger.debug(f"🧠 Pure semantic search found {len(search_results)} results")
             
             # Process and format results
             results = []
@@ -667,6 +733,52 @@ class QdrantSearchManager:
             logger.error(f"❌ Failed to get analytics: {e}")
             return {"error": str(e)}
 
+    async def _execute_recommend_search(
+        self,
+        positive_ids: List[str],
+        negative_ids: List[str],
+        limit: Optional[int] = None,
+        score_threshold: Optional[float] = None,
+    ):
+        """
+        Execute recommendation-style search using positive/negative example point IDs.
+        
+        This uses Qdrant's RecommendQuery API as described in docs/qdrant_explore_data.md.
+        Only stored vectors are used (no new embeddings are computed).
+        """
+        # Ensure client is initialized
+        if not self.client_manager.is_initialized:
+            await self.client_manager.initialize()
+        
+        if not self.client_manager.is_available:
+            raise RuntimeError("Qdrant client not available")
+        
+        # Import Qdrant models
+        _, qdrant_models = get_qdrant_imports()
+        models = qdrant_models["models"]
+        
+        # Build recommend input from example IDs
+        recommend_input = models.RecommendInput(
+            positive=positive_ids,
+            negative=negative_ids or None,
+            # Default strategy aligns with docs: average_vector
+            strategy=models.RecommendStrategy.AVERAGE_VECTOR,
+        )
+        
+        recommend_query = models.RecommendQuery(recommend=recommend_input)
+        
+        # Execute query_points with recommendation query
+        search_response = await asyncio.to_thread(
+            self.client_manager.client.query_points,
+            collection_name=self.config.collection_name,
+            query=recommend_query,
+            limit=limit or self.config.default_search_limit,
+            score_threshold=score_threshold or self.config.score_threshold,
+            with_payload=True,
+        )
+        
+        return search_response.points
+    
     async def get_response_by_id(self, response_id: str) -> Optional[Dict]:
         """
         Get a specific response by its ID.
@@ -754,6 +866,28 @@ class QdrantSearchManager:
             logger.error(f"❌ Failed to get response by ID: {e}")
             return {"error": str(e)}
 
+    async def get_responses_by_ids(self, response_ids: List[str]) -> Dict[str, Dict]:
+        """
+        Batch retrieve multiple responses by their IDs.
+
+        Args:
+            response_ids: List of Qdrant point IDs
+
+        Returns:
+            Dict mapping point_id -&gt; response data (same shape as get_response_by_id)
+        """
+        results: Dict[str, Dict] = {}
+        if not response_ids:
+            return results
+
+        for rid in response_ids:
+            try:
+                data = await self.get_response_by_id(rid)
+                if data is not None:
+                    results[rid] = data
+            except Exception as e:
+                logger.error(f"❌ Failed to get response for ID {rid}: {e}")
+        return results
     async def unified_search_core(self, query: str, limit: int = 10) -> Dict:
         """
         Core unified search function with intelligent query routing.

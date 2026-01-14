@@ -251,19 +251,24 @@ def load_config_from_settings() -> QdrantConfig:
     """Load configuration from centralized settings (preferred method)."""
     try:
         from config.settings import settings
-        
+         
         config = QdrantConfig()
-        
+         
         # Use centralized settings for cache retention
         config.cache_retention_days = settings.mcp_tool_responses_collection_cache_days
-        
+         
         # Use centralized Qdrant settings
         if settings.qdrant_host:
             config.host = settings.qdrant_host
-        
+         
         if settings.qdrant_port:
             config.ports = [settings.qdrant_port] + [p for p in config.ports if p != settings.qdrant_port]
-        
+
+        # Primary collection from centralized settings (TOOL_COLLECTION)
+        # This allows a single env var to define the main tool-response collection
+        if getattr(settings, "tool_collection", None):
+            config.collection_name = settings.tool_collection
+         
         # Additional overrides from environment variables if present
         import os
         if os.getenv("QDRANT_COLLECTION"):

@@ -74,6 +74,42 @@ def _parse_json_list(value: Any, field_name: str) -> Optional[List[Any]]:
     raise ValueError(f"Invalid type for {field_name}: expected string (JSON) or list, got {type(value).__name__}")
 
 
+def _parse_json_dict(value: Any, field_name: str) -> Optional[dict]:
+    """
+    Helper function to parse JSON strings or return dicts as-is.
+    Used for handling MCP client inputs that send JSON strings instead of Python dicts.
+    
+    Args:
+        value: The value to parse (could be string, dict, or None)
+        field_name: Name of the field for error messages
+        
+    Returns:
+        Dict if successful, None if value is None
+        
+    Raises:
+        ValueError: If parsing fails or type is invalid
+    """
+    if value is None:
+        return None
+        
+    # If it's already a dict, return it
+    if isinstance(value, dict):
+        return value
+    
+    # If it's a string, try to parse as JSON
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+            else:
+                raise ValueError(f"Invalid JSON structure for {field_name}: expected dict, got {type(parsed).__name__}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in {field_name}: {e}. Expected valid JSON string or Python dict.")
+    
+    raise ValueError(f"Invalid type for {field_name}: expected string (JSON) or dict, got {type(value).__name__}")
+
+
 async def _get_sheets_service_with_fallback(user_google_email: str):
     """
     Get Sheets service with fallback pattern.
@@ -362,7 +398,29 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
     async def read_sheet_values(
         spreadsheet_id: str,
         user_google_email: UserGoogleEmailSheets = None,
-        range_name: str = "A1:Z1000"
+        range_name: str = "A1:Z1000",
+        value_render_option: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description=(
+                    "How values should be rendered. One of: "
+                    "FORMATTED_VALUE (default), UNFORMATTED_VALUE, FORMULA. "
+                    "If omitted, the Google Sheets API default is used."
+                ),
+            ),
+        ] = None,
+        date_time_render_option: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description=(
+                    "How dates, times, and durations should be rendered. One of: "
+                    "SERIAL_NUMBER, FORMATTED_STRING. "
+                    "If omitted, the Google Sheets API default is used."
+                ),
+            ),
+        ] = None,
     ) -> SheetValuesResponse:
         """
         Reads values from a specific range in a Google Sheet.
@@ -375,16 +433,26 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         Returns:
             SheetValuesResponse: Structured response with the values from the specified range.
         """
-        logger.info(f"[read_sheet_values] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Range: {range_name}")
+        logger.info(
+            f"[read_sheet_values] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, "
+            f"Range: {range_name}, value_render_option: {value_render_option}, date_time_render_option: {date_time_render_option}"
+        )
 
         try:
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
 
+            # Optional rendering parameters (mirrors Google Sheets API Values.get)
+            request_kwargs: dict = {
+                "spreadsheetId": spreadsheet_id,
+                "range": range_name,
+            }
+            if value_render_option:
+                request_kwargs["valueRenderOption"] = value_render_option
+            if date_time_render_option:
+                request_kwargs["dateTimeRenderOption"] = date_time_render_option
+
             result = await asyncio.to_thread(
-                sheets_service.spreadsheets()
-                .values()
-                .get(spreadsheetId=spreadsheet_id, range=range_name)
-                .execute
+                sheets_service.spreadsheets().values().get(**request_kwargs).execute
             )
 
             values = result.get("values", [])
@@ -629,11 +697,12 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         """
         logger.info(f"[create_spreadsheet] Invoked. Email: '{user_google_email}', Title: {title}")
 
+        parsed_sheet_names: Optional[List[str]] = None
+
         try:
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
 
             # Parse sheet_names parameter to handle JSON strings from MCP clients
-            parsed_sheet_names = None
             if sheet_names is not None:
                 try:
                     parsed_sheet_names = _parse_json_list(sheet_names, "sheet_names")
@@ -695,7 +764,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 spreadsheetId="",
                 spreadsheetUrl="",
                 title=title,
-                sheets=parsed_sheet_names,
+                sheets=parsed_sheet_names or (sheet_names if isinstance(sheet_names, list) else None),
                 success=False,
                 message="",
                 error=error_msg
@@ -707,7 +776,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 spreadsheetId="",
                 spreadsheetUrl="",
                 title=title,
-                sheets=parsed_sheet_names,
+                sheets=parsed_sheet_names or (sheet_names if isinstance(sheet_names, list) else None),
                 success=False,
                 message="",
                 error=error_msg
@@ -819,13 +888,13 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         range_start_col: int,
         range_end_col: int,
         # Cell formatting options (replaces format_sheet_cells)
-        cell_format: Optional[dict] = None,
+        cell_format: Optional[Union[str, dict]] = None,
         # Individual cell format parameters for convenience
         bold: Optional[bool] = None,
         italic: Optional[bool] = None,
         font_size: Optional[int] = None,
-        text_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
-        background_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
+        text_color: Optional[Union[str, dict]] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0} or JSON string
+        background_color: Optional[Union[str, dict]] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0} or JSON string
         horizontal_alignment: Optional[str] = None,  # "LEFT", "CENTER", "RIGHT"
         vertical_alignment: Optional[str] = None,  # "TOP", "MIDDLE", "BOTTOM"
         number_format_type: Optional[str] = None,  # "TEXT", "NUMBER", "PERCENT", "CURRENCY", "DATE", "TIME", "DATE_TIME", "SCIENTIFIC"
@@ -835,8 +904,8 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         # Border options (replaces update_sheet_borders)
         apply_borders: bool = False,
         border_style: Optional[str] = None,  # "SOLID", "DASHED", "DOTTED", "SOLID_MEDIUM", "SOLID_THICK", "DOUBLE"
-        border_color: Optional[dict] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0}
-        border_positions: Optional[dict] = None,  # {"top": True, "bottom": True, "left": True, "right": True, "inner_horizontal": False, "inner_vertical": False}
+        border_color: Optional[Union[str, dict]] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0} or JSON string
+        border_positions: Optional[Union[str, dict]] = None,  # {"top": True, "bottom": True, "left": True, "right": True, "inner_horizontal": False, "inner_vertical": False} or JSON string
         # Individual border position parameters for convenience
         top_border: Optional[bool] = None,
         bottom_border: Optional[bool] = None,
@@ -851,8 +920,8 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         # Simple conditional formatting parameters for convenience
         condition_type: Optional[str] = None,  # "NUMBER_GREATER", "NUMBER_LESS", "NUMBER_EQ", "TEXT_CONTAINS", "TEXT_EQ", "BLANK", "NOT_BLANK", "CUSTOM_FORMULA"
         condition_value: Optional[Union[str, float]] = None,  # Value for comparison or formula
-        condition_format_background_color: Optional[dict] = None,  # Background color when condition is met
-        condition_format_text_color: Optional[dict] = None,  # Text color when condition is met
+        condition_format_background_color: Optional[Union[str, dict]] = None,  # Background color when condition is met or JSON string
+        condition_format_text_color: Optional[Union[str, dict]] = None,  # Text color when condition is met or JSON string
         condition_format_bold: Optional[bool] = None,  # Make text bold when condition is met
         condition_format_italic: Optional[bool] = None,  # Make text italic when condition is met
         # Column width
@@ -908,14 +977,35 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
 
             requests = []
             formatting_details = {}
+            
+            # Parse JSON string parameters to dicts
+            try:
+                parsed_cell_format = _parse_json_dict(cell_format, "cell_format") if cell_format else None
+                parsed_text_color = _parse_json_dict(text_color, "text_color") if text_color else None
+                parsed_background_color = _parse_json_dict(background_color, "background_color") if background_color else None
+                parsed_border_color = _parse_json_dict(border_color, "border_color") if border_color else None
+                parsed_border_positions = _parse_json_dict(border_positions, "border_positions") if border_positions else None
+                parsed_condition_bg_color = _parse_json_dict(condition_format_background_color, "condition_format_background_color") if condition_format_background_color else None
+                parsed_condition_text_color = _parse_json_dict(condition_format_text_color, "condition_format_text_color") if condition_format_text_color else None
+            except ValueError as e:
+                return FormatRangeResponse(
+                    spreadsheetId=spreadsheet_id,
+                    sheetId=sheet_id,
+                    range="",
+                    requestsApplied=0,
+                    formattingDetails={},
+                    success=False,
+                    message="",
+                    error=str(e)
+                )
 
             # 1. Cell formatting (combining cell_format dict with convenience parameters)
             final_cell_format = {}
             fields = []
             
             # Start with cell_format dict if provided
-            if cell_format:
-                final_cell_format.update(cell_format)
+            if parsed_cell_format:
+                final_cell_format.update(parsed_cell_format)
             
             # Override with convenience parameters (they take precedence)
             text_format_updates = {}
@@ -928,8 +1018,8 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             if font_size is not None:
                 text_format_updates["fontSize"] = font_size
                 fields.append("userEnteredFormat.textFormat.fontSize")
-            if text_color is not None:
-                text_format_updates["foregroundColor"] = text_color
+            if parsed_text_color is not None:
+                text_format_updates["foregroundColor"] = parsed_text_color
                 fields.append("userEnteredFormat.textFormat.foregroundColor")
             
             # Merge text format updates
@@ -939,8 +1029,8 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 final_cell_format["textFormat"].update(text_format_updates)
             
             # Other convenience parameters
-            if background_color is not None:
-                final_cell_format["backgroundColor"] = background_color
+            if parsed_background_color is not None:
+                final_cell_format["backgroundColor"] = parsed_background_color
                 fields.append("userEnteredFormat.backgroundColor")
             if horizontal_alignment is not None:
                 final_cell_format["horizontalAlignment"] = horizontal_alignment
@@ -1008,12 +1098,12 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             # 2. Borders (combining border_positions dict with convenience parameters)
             if apply_borders:
                 final_border_style = border_style or "SOLID"
-                final_border_color = border_color or {"red": 0.0, "green": 0.0, "blue": 0.0}
+                final_border_color = parsed_border_color or {"red": 0.0, "green": 0.0, "blue": 0.0}
                 
                 # Determine border positions
                 final_border_positions = {}
-                if border_positions:
-                    final_border_positions = border_positions.copy()
+                if parsed_border_positions:
+                    final_border_positions = parsed_border_positions.copy()
                 
                 # Override with convenience parameters
                 if top_border is not None:
@@ -1138,13 +1228,13 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 if condition:
                     # Build format for condition
                     format_dict = {}
-                    if condition_format_background_color:
-                        format_dict["backgroundColor"] = condition_format_background_color
-                    if (condition_format_text_color or condition_format_bold is not None
+                    if parsed_condition_bg_color:
+                        format_dict["backgroundColor"] = parsed_condition_bg_color
+                    if (parsed_condition_text_color or condition_format_bold is not None
                         or condition_format_italic is not None):
                         text_format = {}
-                        if condition_format_text_color:
-                            text_format["foregroundColor"] = condition_format_text_color
+                        if parsed_condition_text_color:
+                            text_format["foregroundColor"] = parsed_condition_text_color
                         if condition_format_bold is not None:
                             text_format["bold"] = condition_format_bold
                         if condition_format_italic is not None:

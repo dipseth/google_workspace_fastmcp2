@@ -301,7 +301,7 @@ async def get_doc_content(
         # Get file metadata from Drive
         file_metadata = await asyncio.to_thread(
             drive_service.files()
-            .get(fileId=document_id, fields="id, name, mimeType, webViewLink")
+            .get(fileId=document_id, fields="id, name, mimeType, webViewLink", supportsAllDrives=True)
             .execute
         )
         mime_type = file_metadata.get("mimeType", "")
@@ -316,25 +316,21 @@ async def get_doc_content(
 
         # Process based on mimeType
         if mime_type == "application/vnd.google-apps.document":
-            logger.info(f"[get_doc_content] Processing as native Google Doc.")
-            doc_data = await asyncio.to_thread(
-                docs_service.documents().get(documentId=document_id).execute
+            logger.info(f"[get_doc_content] Processing as native Google Doc - using Drive API export for better compatibility.")
+            # Use Drive API export instead of Docs API for better permission handling
+            # This matches the approach in get_drive_file_content and respects Drive-level permissions
+            request_obj = drive_service.files().export_media(
+                fileId=document_id, mimeType="text/plain"
             )
-            body_elements = doc_data.get("body", {}).get("content", [])
-
-            processed_text_lines: List[str] = []
-            for element in body_elements:
-                if "paragraph" in element:
-                    paragraph = element.get("paragraph", {})
-                    para_elements = paragraph.get("elements", [])
-                    current_line_text = ""
-                    for pe in para_elements:
-                        text_run = pe.get("textRun", {})
-                        if text_run and "content" in text_run:
-                            current_line_text += text_run["content"]
-                    if current_line_text.strip():
-                        processed_text_lines.append(current_line_text)
-            body_text = "".join(processed_text_lines)
+            
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request_obj)
+            done = False
+            while not done:
+                status, done = await asyncio.get_event_loop().run_in_executor(None, downloader.next_chunk)
+            
+            file_content_bytes = fh.getvalue()
+            body_text = file_content_bytes.decode("utf-8", errors="replace")
         else:
             logger.info(
                 f"[get_doc_content] Processing as Drive file (e.g., .docx, other). MimeType: {mime_type}"

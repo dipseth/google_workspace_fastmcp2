@@ -27,7 +27,7 @@ from auth.context import get_session_context
 
 # Import qdrant_core modules
 from middleware.qdrant_core.config import QdrantConfig
-from middleware.qdrant_core.client import QdrantClientManager
+from middleware.qdrant_core.client import QdrantClientManager, get_or_create_client_manager
 from middleware.qdrant_core.storage import QdrantStorageManager
 from middleware.qdrant_core.search import QdrantSearchManager
 from middleware.qdrant_core.resource_handler import QdrantResourceHandler
@@ -128,12 +128,12 @@ class QdrantUnifiedMiddleware(Middleware):
         if compression_threshold:
             self.config.compression_threshold = compression_threshold
         
-        # Initialize managers
-        self.client_manager = QdrantClientManager(
+        # Initialize managers using a shared singleton client manager
+        self.client_manager = get_or_create_client_manager(
             config=self.config,
             qdrant_api_key=qdrant_api_key,
             qdrant_url=qdrant_url,
-            auto_discovery=auto_discovery
+            auto_discovery=auto_discovery,
         )
         
         self.storage_manager = QdrantStorageManager(self.client_manager)

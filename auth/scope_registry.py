@@ -338,7 +338,7 @@ class ScopeRegistry:
         "drive_basic": [
             "base.userinfo_email",
             "base.openid",
-            "drive.file",
+            "drive.full",  # Full Drive access for MCP - required to access shared/organizational files
             "drive.readonly",
         ],
         "drive_full": ["base.userinfo_email", "base.openid", "drive.full"],
@@ -421,6 +421,14 @@ class ScopeRegistry:
             "base.userinfo_profile",
             "base.openid",
             "people.readonly",
+            "people.contacts",  # Write access needed for contact group management
+        ],
+        "people_full": [
+            "base.userinfo_email",
+            "base.userinfo_profile",
+            "base.openid",
+            "people.contacts",
+            "people.directory_readonly",
         ],
         # Multi-service combinations
         "office_suite": [
@@ -485,6 +493,8 @@ class ScopeRegistry:
             "tasks.readonly",
             "tasks.full",
             "people.readonly",
+            "people.contacts",
+            "people.directory_readonly",
         ],
     }
 

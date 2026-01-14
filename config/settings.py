@@ -52,7 +52,14 @@ class Settings(BaseSettings):
     qdrant_host: Optional[str] = None  # Will be set from qdrant_url
     qdrant_port: Optional[int] = None  # Will be set from qdrant_url
     qdrant_api_key: Optional[str] = None  # Will be set from qdrant_key
-    
+
+    # Primary Qdrant collection for MCP tool responses / analytics
+    tool_collection: str = Field(
+        default="mcp_tool_responses",
+        description="Primary Qdrant collection for MCP tool responses and analytics",
+        json_schema_extra={"env": "TOOL_COLLECTION"},
+    )
+     
     # Logging
     log_level: str = "INFO"
     
@@ -82,15 +89,15 @@ class Settings(BaseSettings):
     # Security Configuration
     auth_security_level: str = Field(
         default="standard",
-        env="AUTH_SECURITY_LEVEL",
-        description="Authentication security level: 'standard', 'high', or 'custom'"
+        description="Authentication security level: 'standard', 'high', or 'custom'",
+        json_schema_extra={"env": "AUTH_SECURITY_LEVEL"},
     )
     
     # Template Configuration
     jinja_template_strict_mode: bool = Field(
         default=True,
-        env="JINJA_TEMPLATE_STRICT_MODE",
-        description="When enabled, template processing errors will cause tool execution to fail instead of just logging the error"
+        description="When enabled, template processing errors will cause tool execution to fail instead of just logging the error",
+        json_schema_extra={"env": "JINJA_TEMPLATE_STRICT_MODE"},
     )
     
     # FastMCP 2.12.0 GoogleProvider Configuration

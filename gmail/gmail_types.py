@@ -52,9 +52,19 @@ class AllowedEmailInfo(TypedDict):
     masked_email: str  # Privacy-masked version of the email
 
 
+class AllowedGroupInfo(TypedDict):
+    """Structure for a single allowed group entry based on People API contact groups."""
+    raw: str  # Raw token from GMAIL_ALLOW_LIST (e.g., "group:Team A" or "groupId:contactGroups/123")
+    type: NotRequired[str]  # "name" or "id"
+    group_name: NotRequired[str]  # Human-friendly group name when available
+    group_id: NotRequired[str]  # Contact group resourceName when available (e.g., "contactGroups/123")
+
+
 class GmailAllowListResponse(TypedDict):
     """Response structure for view_gmail_allow_list tool."""
     allowed_emails: List[AllowedEmailInfo]
+    # Optional list of group-based allow list entries (People API contact groups)
+    allowed_groups: NotRequired[List[AllowedGroupInfo]]
     count: int
     userEmail: str
     is_configured: bool
@@ -102,6 +112,9 @@ class GmailLabelsResponse(TypedDict):
     total_count: int
     system_labels: List[GmailLabelInfo]
     user_labels: List[GmailLabelInfo]
+    system_count: int  # Number of system labels
+    user_count: int  # Number of user-created labels
+    id_to_name: Dict[str, str]  # Convenience map from label ID to label name
     error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
@@ -150,6 +163,8 @@ class GmailMessageInfo(TypedDict):
     subject: NotRequired[Optional[str]]
     sender: NotRequired[Optional[str]]
     date: NotRequired[Optional[str]]
+    labels: NotRequired[List[str]]  # Gmail label IDs applied to this message
+    label_names: NotRequired[List[str]]  # Human-readable label names corresponding to labels
     web_url: str
 
 
@@ -244,6 +259,8 @@ class ModifyGmailMessageLabelsResponse(TypedDict):
     message_id: str
     labels_added: List[str]
     labels_removed: List[str]
+    labels_added_names: NotRequired[List[str]]  # Human-readable names for added labels
+    labels_removed_names: NotRequired[List[str]]  # Human-readable names for removed labels
     userEmail: str
     error: NotRequired[Optional[str]]
 

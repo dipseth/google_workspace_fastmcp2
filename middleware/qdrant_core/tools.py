@@ -85,8 +85,8 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
     
     @mcp.tool(
         name="search",
-        description="Search through Qdrant vector database using natural language queries, filters, or point IDs. Supports semantic search, service-specific filtering, analytics queries, and direct point lookup. Returns structured search results with relevance scores and metadata.",
-        tags={"qdrant", "search", "vector", "semantic", "database", "analytics"},
+        description="Search through Qdrant vector database using natural language queries, filters, or point IDs. Supports semantic search, service-specific filtering, analytics queries, recommendation-style example search, and direct point lookup. Returns structured search results with relevance scores and metadata.",
+        tags={"qdrant", "search", "vector", "semantic", "database", "analytics", "recommend"},
         annotations={
             "title": "Qdrant Vector Search Tool",
             "readOnlyHint": True,
@@ -99,6 +99,8 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
         query: str,
         limit: int = 10,
         score_threshold: float = 0.3,
+        positive_point_ids: Optional[List[str]] = None,
+        negative_point_ids: Optional[List[str]] = None,
         user_google_email: UserGoogleEmail = None
     ) -> QdrantToolSearchResponse:
         """
@@ -111,15 +113,18 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
         - Point Lookup: "id:12345" or "point:abc-def-123"
         - Filtered Search: "user_email:test@gmail.com document creation"
         - Index Search: "tool_name:search_gmail_messages" or "service:gmail"
+        - Example-based recommend: positive/negative point ID lists (see docs/qdrant_explore_data.md)
         
         Args:
             query: Search query string (supports natural language and filters)
             limit: Maximum number of results to return (1-100)
             score_threshold: Minimum similarity score (0.0-1.0)
+            positive_point_ids: Optional list of point IDs to use as positive examples
+            negative_point_ids: Optional list of point IDs to use as negative examples
             user_google_email: User's Google email for access control
             
         Returns:
-            QdrantSearchResponse: Structured search results with metadata
+            QdrantToolSearchResponse: Structured search results with metadata
         """
         start_time = time.time()
         
@@ -135,64 +140,88 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
                     query_type="error",
                     total_results=0,
                     collection_name=_client_manager.config.collection_name,
-                    error="Qdrant client not available - database may not be running"
+                    error="Qdrant client not available - database may not be running",
                 )
             
-            # Parse query using enhanced parser
-            parsed_query = parse_unified_query(query)
-            query_type = parsed_query["capability"]
+            raw_results: List[Dict[str, Any]] = []
             
-            logger.info(f"🔍 Qdrant search: query='{query}', type={query_type}, confidence={parsed_query['confidence']:.2f}")
+            # 1) Example-based recommendation mode (bypasses text query)
+            if positive_point_ids or negative_point_ids:
+                query_type = "recommend"
+                logger.info(
+                    f"🧲 Qdrant recommend search: "
+                    f"positive={positive_point_ids}, negative={negative_point_ids}"
+                )
+                raw_results = await _search_manager.search(
+                    query="",
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    positive_point_ids=positive_point_ids,
+                    negative_point_ids=negative_point_ids,
+                )
             
-            # Execute search based on query type
-            raw_results = []
-            
-            if query_type == "overview":
-                # Get analytics/overview data
-                try:
-                    analytics = await _search_manager.get_analytics()
-                    if analytics and "groups" in analytics:
-                        # Convert analytics to search result format
-                        for group_name, group_data in list(analytics["groups"].items())[:limit]:
-                            raw_results.append({
-                                "id": f"analytics_{group_name}",
-                                "tool_name": f"analytics_{group_name}",
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                "user_email": "system",
-                                "score": 1.0,
-                                "response_data": {
-                                    "summary": f"{group_name}: {group_data.get('count', 0)} responses",
-                                    "analytics": group_data
-                                }
-                            })
-                except Exception as e:
-                    logger.error(f"❌ Overview analytics failed: {e}")
-                    
-            elif query_type == "service_history":
-                # Build filtered query for service history
-                search_query = ""
-                if parsed_query.get("service_name"):
-                    search_query += f"tool_name:{parsed_query['service_name']}"
-                if parsed_query.get("time_range"):
-                    search_query += f" {parsed_query['time_range']}"
-                if parsed_query.get("semantic_query"):
-                    search_query += f" {parsed_query['semantic_query']}"
-                
-                search_query = search_query.strip() or query
-                raw_results = await _search_manager.search(search_query, limit=limit, score_threshold=score_threshold)
-                
+            # 2) Query-based modes (overview / service_history / general)
             else:
-                # General search - use existing search functionality with index support
-                raw_results = await _search_manager.search(query, limit=limit, score_threshold=score_threshold)
+                parsed_query = parse_unified_query(query)
+                query_type = parsed_query["capability"]
+                
+                logger.info(
+                    f"🔍 Qdrant search: query='{query}', "
+                    f"type={query_type}, confidence={parsed_query['confidence']:.2f}"
+                )
+                
+                if query_type == "overview":
+                    # Get analytics/overview data and adapt to search result format
+                    try:
+                        analytics = await _search_manager.get_analytics()
+                        if analytics and "groups" in analytics:
+                            for group_name, group_data in list(analytics["groups"].items())[:limit]:
+                                raw_results.append(
+                                    {
+                                        "id": f"analytics_{group_name}",
+                                        "score": 1.0,
+                                        "tool_name": f"analytics_{group_name}",
+                                        "timestamp": analytics.get("generated_at"),
+                                        "user_email": "system",
+                                    }
+                                )
+                    except Exception as e:
+                        logger.error(f"❌ Overview analytics failed: {e}")
+                
+                elif query_type == "service_history":
+                    # Build filtered query for service history
+                    search_query = ""
+                    if parsed_query.get("service_name"):
+                        search_query += f"tool_name:{parsed_query['service_name']}"
+                    if parsed_query.get("time_range"):
+                        search_query += f" {parsed_query['time_range']}"
+                    if parsed_query.get("semantic_query"):
+                        search_query += f" {parsed_query['semantic_query']}"
+                    
+                    search_query = search_query.strip() or query
+                    raw_results = await _search_manager.search(
+                        search_query,
+                        limit=limit,
+                        score_threshold=score_threshold,
+                    )
+                
+                else:
+                    # General search - use existing search functionality
+                    raw_results = await _search_manager.search(
+                        query,
+                        limit=limit,
+                        score_threshold=score_threshold,
+                    )
             
-            # Format results with service metadata
-            formatted_results = []
+            # 3) Format results with service metadata
+            formatted_results: List[QdrantSearchResultItem] = []
             for result in raw_results:
+                # search_manager.search returns dicts with normalized keys
                 result_id = str(result.get("id", "unknown"))
-                tool_name = result.get("tool_name", "unknown_tool")
-                timestamp = result.get("timestamp", "unknown")
-                user_email = result.get("user_email", "unknown")
-                score = result.get("score", 0.0)
+                tool_name = result.get("tool_name") or "unknown_tool"
+                timestamp = result.get("timestamp") or "unknown"
+                user_email = result.get("user_email") or "unknown"
+                score = float(result.get("score", 0.0))
                 
                 # Determine service from tool name
                 service_name = extract_service_from_tool(tool_name)
@@ -201,23 +230,24 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
                 try:
                     from auth.scope_registry import ScopeRegistry
                     service_meta = ScopeRegistry.SERVICE_METADATA.get(service_name, {})
-                    service_icon = getattr(service_meta, 'icon', '🔧') if service_meta else '🔧'
-                    service_display = getattr(service_meta, 'name', service_name.title()) if service_meta else service_name.title()
+                    service_icon = getattr(service_meta, "icon", "🔧") if service_meta else "🔧"
+                    service_display = getattr(service_meta, "name", service_name.title()) if service_meta else service_name.title()
                 except ImportError:
-                    service_icon = '🔧'
+                    service_icon = "🔧"
                     service_display = service_name.title()
                 
-                # Create formatted result
-                formatted_results.append(QdrantSearchResultItem(
-                    id=result_id,
-                    title=f"{service_icon} {service_display} - {tool_name}",
-                    url=f"qdrant://{_client_manager.config.collection_name}?{result_id}",
-                    score=score,
-                    tool_name=tool_name,
-                    service=service_name,
-                    timestamp=timestamp,
-                    user_email=user_email
-                ))
+                formatted_results.append(
+                    QdrantSearchResultItem(
+                        id=result_id,
+                        title=f"{service_icon} {service_display} - {tool_name}",
+                        url=f"qdrant://{_client_manager.config.collection_name}?{result_id}",
+                        score=score,
+                        tool_name=tool_name,
+                        service=service_name,
+                        timestamp=timestamp,
+                        user_email=user_email,
+                    )
+                )
             
             processing_time = (time.time() - start_time) * 1000
             
@@ -227,9 +257,9 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
                 query_type=query_type,
                 total_results=len(formatted_results),
                 processing_time_ms=processing_time,
-                collection_name=_client_manager.config.collection_name
+                collection_name=_client_manager.config.collection_name,
             )
-            
+        
         except Exception as e:
             logger.error(f"❌ Qdrant search failed: {e}")
             processing_time = (time.time() - start_time) * 1000
@@ -241,12 +271,12 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
                 total_results=0,
                 processing_time_ms=processing_time,
                 collection_name=_client_manager.config.collection_name,
-                error=str(e)
+                error=str(e),
             )
 
     @mcp.tool(
         name="fetch",
-        description="Retrieve complete document content from Qdrant by point ID. Returns full document with structured metadata, service context, and formatted content. Use point IDs from search results or direct Qdrant point identifiers.",
+        description="Retrieve complete document content from Qdrant by point ID. Supports single document fetch or batch fetch with optional client-side ordering by payload key.",
         tags={"qdrant", "fetch", "document", "vector", "database", "retrieval"},
         annotations={
             "title": "Qdrant Document Fetch Tool",
@@ -258,15 +288,23 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
     )
     async def fetch(
         point_id: str,
+        point_ids: Optional[List[str]] = None,
+        order_by: Optional[str] = None,
+        order_direction: str = "asc",
         user_google_email: UserGoogleEmail = None
     ) -> QdrantFetchResponse:
         """
-        Fetch complete document from Qdrant vector database by point ID.
+        Fetch complete document from Qdrant vector database by point ID, or
+        optionally fetch a batch of documents and aggregate them into a single
+        textual response.
         
         Args:
-            point_id: Unique Qdrant point identifier (UUID or string ID)
+            point_id: Primary point identifier (UUID or string ID)
+            point_ids: Optional additional point IDs to fetch in batch
+            order_by: Optional payload key to sort batch results by (client-side)
+            order_direction: "asc" (default) or "desc" for batch ordering
             user_google_email: User's Google email for access control
-            
+        
         Returns:
             QdrantFetchResponse: Complete document with metadata and content
         """
@@ -291,22 +329,162 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
                         arguments_count=0,
                         payload_type="error",
                         collection_name=_client_manager.config.collection_name,
-                        point_id=point_id
+                        point_id=point_id,
                     ),
                     found=False,
                     collection_name=_client_manager.config.collection_name,
-                    error="no_client"
+                    error="no_client",
                 )
             
-            # Get the response by ID using search manager
-            response_data = await _search_manager.get_response_by_id(point_id)
+            # Build list of IDs to fetch
+            ids_to_fetch: List[str] = []
+            if point_id:
+                ids_to_fetch.append(str(point_id))
+            if point_ids:
+                ids_to_fetch.extend([str(pid) for pid in point_ids if pid])
             
-            if not response_data:
+            # De-duplicate while preserving order
+            seen: set = set()
+            ids_to_fetch = [i for i in ids_to_fetch if not (i in seen or seen.add(i))]
+            
+            if not ids_to_fetch:
                 return QdrantFetchResponse(
-                    id=point_id,
-                    title="❌ Document Not Found",
-                    text=f"No document found with point ID: {point_id}",
-                    url=f"qdrant://{_client_manager.config.collection_name}?{point_id}",
+                    id=point_id or "",
+                    title="❌ No Point IDs Provided",
+                    text="No point_ids or point_id were provided to fetch.",
+                    url=f"qdrant://{_client_manager.config.collection_name}",
+                    metadata=QdrantDocumentMetadata(
+                        tool_name="error",
+                        service="system",
+                        service_display_name="System",
+                        user_email="unknown",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        response_type="error",
+                        arguments_count=0,
+                        payload_type="error",
+                        collection_name=_client_manager.config.collection_name,
+                        point_id=point_id or "",
+                    ),
+                    found=False,
+                    collection_name=_client_manager.config.collection_name,
+                    error="no_ids",
+                )
+            
+            # Single-ID fast path (backwards compatible behavior)
+            if len(ids_to_fetch) == 1:
+                single_id = ids_to_fetch[0]
+                
+                response_data = await _search_manager.get_response_by_id(single_id)
+                
+                if not response_data:
+                    return QdrantFetchResponse(
+                        id=single_id,
+                        title="❌ Document Not Found",
+                        text=f"No document found with point ID: {single_id}",
+                        url=f"qdrant://{_client_manager.config.collection_name}?{single_id}",
+                        metadata=QdrantDocumentMetadata(
+                            tool_name="not_found",
+                            service="system",
+                            service_display_name="System",
+                            user_email="unknown",
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            response_type="error",
+                            arguments_count=0,
+                            payload_type="not_found",
+                            collection_name=_client_manager.config.collection_name,
+                            point_id=single_id,
+                        ),
+                        found=False,
+                        collection_name=_client_manager.config.collection_name,
+                        error="not_found",
+                    )
+                
+                # Extract information from response data
+                tool_name = response_data.get("tool_name", "unknown_tool")
+                timestamp = response_data.get("timestamp", "unknown")
+                user_email = response_data.get("user_email", "unknown")
+                arguments = response_data.get("arguments", {})
+                response = response_data.get("response", {})
+                payload_type = response_data.get("payload_type", "unknown")
+                
+                # Determine service and get metadata using qdrant_core function
+                service_name = extract_service_from_tool(tool_name)
+                try:
+                    from auth.scope_registry import ScopeRegistry
+                    
+                    service_meta = ScopeRegistry.SERVICE_METADATA.get(service_name, {})
+                    service_icon = getattr(service_meta, "icon", "🔧") if service_meta else "🔧"
+                    service_display_name = getattr(service_meta, "name", service_name.title()) if service_meta else service_name.title()
+                except ImportError:
+                    service_icon = "🔧"
+                    service_display_name = service_name.title()
+                
+                # Format title
+                title = f"{service_icon} {service_display_name} - {tool_name} ({timestamp})"
+                
+                # Format comprehensive text content
+                text_sections = [
+                    "=== QDRANT DOCUMENT ===",
+                    f"Point ID: {single_id}",
+                    f"Collection: {_client_manager.config.collection_name}",
+                    f"Tool: {tool_name}",
+                    f"Service: {service_display_name} ({service_name})",
+                    f"User: {user_email}",
+                    f"Timestamp: {timestamp}",
+                    f"Type: {payload_type}",
+                    "",
+                    "=== TOOL ARGUMENTS ===",
+                    json.dumps(arguments, indent=2) if arguments else "No arguments",
+                    "",
+                    "=== TOOL RESPONSE ===",
+                    json.dumps(response, indent=2)
+                    if isinstance(response, (dict, list))
+                    else str(response),
+                    "",
+                    "=== METADATA ===",
+                    f"Arguments Count: {len(arguments) if isinstance(arguments, dict) else 0}",
+                    f"Response Type: {type(response).__name__}",
+                    f"Payload Type: {payload_type}",
+                ]
+                
+                full_text = "\n".join(text_sections)
+                
+                # Create URL using specified format
+                url = f"qdrant://{_client_manager.config.collection_name}?{single_id}"
+                
+                # Build structured metadata
+                metadata = QdrantDocumentMetadata(
+                    tool_name=tool_name,
+                    service=service_name,
+                    service_display_name=service_display_name,
+                    user_email=user_email,
+                    timestamp=timestamp,
+                    response_type=type(response).__name__,
+                    arguments_count=len(arguments) if isinstance(arguments, dict) else 0,
+                    payload_type=payload_type,
+                    collection_name=_client_manager.config.collection_name,
+                    point_id=single_id,
+                )
+                
+                return QdrantFetchResponse(
+                    id=single_id,
+                    title=title,
+                    text=full_text,
+                    url=url,
+                    metadata=metadata,
+                    found=True,
+                    collection_name=_client_manager.config.collection_name,
+                )
+            
+            # Batch path: fetch multiple IDs and aggregate
+            responses_by_id = await _search_manager.get_responses_by_ids(ids_to_fetch)
+            
+            if not responses_by_id:
+                return QdrantFetchResponse(
+                    id=ids_to_fetch[0],
+                    title="❌ Documents Not Found",
+                    text=f"No documents found for point IDs: {', '.join(ids_to_fetch)}",
+                    url=f"qdrant://{_client_manager.config.collection_name}",
                     metadata=QdrantDocumentMetadata(
                         tool_name="not_found",
                         service="system",
@@ -317,87 +495,137 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
                         arguments_count=0,
                         payload_type="not_found",
                         collection_name=_client_manager.config.collection_name,
-                        point_id=point_id
+                        point_id=ids_to_fetch[0],
                     ),
                     found=False,
                     collection_name=_client_manager.config.collection_name,
-                    error="not_found"
+                    error="not_found",
                 )
             
-            # Extract information from response data
-            tool_name = response_data.get("tool_name", "unknown_tool")
-            timestamp = response_data.get("timestamp", "unknown")
-            user_email = response_data.get("user_email", "unknown")
-            arguments = response_data.get("arguments", {})
-            response = response_data.get("response", {})
-            payload_type = response_data.get("payload_type", "unknown")
+            # Apply client-side ordering by payload key if requested
+            ordered_ids = list(responses_by_id.keys())
+            if order_by:
+                def sort_key(pid: str):
+                    data = responses_by_id.get(pid) or {}
+                    val = data.get(order_by)
+                    # Sort None values last
+                    return (1, "") if val is None else (0, str(val))
+                
+                reverse = order_direction.lower() == "desc"
+                ordered_ids.sort(key=sort_key, reverse=reverse)
+            else:
+                # Preserve original order (ids_to_fetch intersect found IDs)
+                ordered_ids = [i for i in ids_to_fetch if i in responses_by_id]
             
-            # Determine service and get metadata using qdrant_core function
-            service_name = extract_service_from_tool(tool_name)
-            try:
-                from auth.scope_registry import ScopeRegistry
-                service_meta = ScopeRegistry.SERVICE_METADATA.get(service_name, {})
-                service_icon = getattr(service_meta, 'icon', '🔧') if service_meta else '🔧'
-                service_display_name = getattr(service_meta, 'name', service_name.title()) if service_meta else service_name.title()
-            except ImportError:
-                service_icon = '🔧'
-                service_display_name = service_name.title()
+            # Build aggregated text for all documents
+            aggregated_sections: List[str] = []
+            first_meta = None
             
-            # Format title
-            title = f"{service_icon} {service_display_name} - {tool_name} ({timestamp})"
+            for idx, pid in enumerate(ordered_ids):
+                response_data = responses_by_id[pid]
+                
+                tool_name = response_data.get("tool_name", "unknown_tool")
+                timestamp = response_data.get("timestamp", "unknown")
+                user_email = response_data.get("user_email", "unknown")
+                arguments = response_data.get("arguments", {})
+                response = response_data.get("response", {})
+                payload_type = response_data.get("payload_type", "unknown")
+                
+                service_name = extract_service_from_tool(tool_name)
+                try:
+                    from auth.scope_registry import ScopeRegistry
+                    
+                    service_meta = ScopeRegistry.SERVICE_METADATA.get(service_name, {})
+                    service_icon = getattr(service_meta, "icon", "🔧") if service_meta else "🔧"
+                    service_display_name = getattr(service_meta, "name", service_name.title()) if service_meta else service_name.title()
+                except ImportError:
+                    service_icon = "🔧"
+                    service_display_name = service_name.title()
+                
+                if idx == 0:
+                    first_meta = {
+                        "tool_name": tool_name,
+                        "service_name": service_name,
+                        "service_display_name": service_display_name,
+                        "user_email": user_email,
+                        "timestamp": timestamp,
+                        "payload_type": payload_type,
+                        "response_type": type(response).__name__,
+                    }
+                
+                aggregated_sections.extend(
+                    [
+                        "=== QDRANT DOCUMENT ===",
+                        f"Point ID: {pid}",
+                        f"Collection: {_client_manager.config.collection_name}",
+                        f"Tool: {tool_name}",
+                        f"Service: {service_display_name} ({service_name})",
+                        f"User: {user_email}",
+                        f"Timestamp: {timestamp}",
+                        f"Type: {payload_type}",
+                        "",
+                        "=== TOOL ARGUMENTS ===",
+                        json.dumps(arguments, indent=2) if arguments else "No arguments",
+                        "",
+                        "=== TOOL RESPONSE ===",
+                        json.dumps(response, indent=2)
+                        if isinstance(response, (dict, list))
+                        else str(response),
+                        "",
+                        "=== METADATA ===",
+                        f"Arguments Count: {len(arguments) if isinstance(arguments, dict) else 0}",
+                        f"Response Type: {type(response).__name__}",
+                        f"Payload Type: {payload_type}",
+                        "",
+                    ]
+                )
             
-            # Format comprehensive text content
-            text_sections = [
-                "=== QDRANT DOCUMENT ===",
-                f"Point ID: {point_id}",
-                f"Collection: {_client_manager.config.collection_name}",
-                f"Tool: {tool_name}",
-                f"Service: {service_display_name} ({service_name})",
-                f"User: {user_email}",
-                f"Timestamp: {timestamp}",
-                f"Type: {payload_type}",
-                "",
-                "=== TOOL ARGUMENTS ===",
-                json.dumps(arguments, indent=2) if arguments else "No arguments",
-                "",
-                "=== TOOL RESPONSE ===",
-                json.dumps(response, indent=2) if isinstance(response, (dict, list)) else str(response),
-                "",
-                "=== METADATA ===",
-                f"Arguments Count: {len(arguments) if isinstance(arguments, dict) else 0}",
-                f"Response Type: {type(response).__name__}",
-                f"Payload Type: {payload_type}"
-            ]
+            aggregated_text = "\n".join(aggregated_sections)
             
-            full_text = "\n".join(text_sections)
+            # Use first document's metadata as the primary metadata for the batch
+            if first_meta is None:
+                first_meta = {
+                    "tool_name": "unknown_tool",
+                    "service_name": "unknown",
+                    "service_display_name": "Unknown",
+                    "user_email": "unknown",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "payload_type": "unknown",
+                    "response_type": "dict",
+                }
             
-            # Create URL using specified format
-            url = f"qdrant://{_client_manager.config.collection_name}?{point_id}"
+            # Build title indicating batch
+            title = (
+                f"{first_meta['tool_name']} batch fetch "
+                f"({len(ordered_ids)} documents, first at {first_meta['timestamp']})"
+            )
             
-            # Build structured metadata
+            # URL cannot encode all IDs, so point to collection-level URI
+            url = f"qdrant://{_client_manager.config.collection_name}"
+            
             metadata = QdrantDocumentMetadata(
-                tool_name=tool_name,
-                service=service_name,
-                service_display_name=service_display_name,
-                user_email=user_email,
-                timestamp=timestamp,
-                response_type=type(response).__name__,
-                arguments_count=len(arguments) if isinstance(arguments, dict) else 0,
-                payload_type=payload_type,
+                tool_name=first_meta["tool_name"],
+                service=first_meta["service_name"],
+                service_display_name=first_meta["service_display_name"],
+                user_email=first_meta["user_email"],
+                timestamp=first_meta["timestamp"],
+                response_type=first_meta["response_type"],
+                arguments_count=0,  # ambiguous in batch context
+                payload_type=first_meta["payload_type"],
                 collection_name=_client_manager.config.collection_name,
-                point_id=point_id
+                point_id=ordered_ids[0],
             )
             
             return QdrantFetchResponse(
-                id=point_id,
+                id=ordered_ids[0],
                 title=title,
-                text=full_text,
+                text=aggregated_text,
                 url=url,
                 metadata=metadata,
                 found=True,
-                collection_name=_client_manager.config.collection_name
+                collection_name=_client_manager.config.collection_name,
             )
-            
+        
         except Exception as e:
             logger.error(f"❌ Qdrant fetch failed for {point_id}: {e}")
             
@@ -416,11 +644,11 @@ def setup_enhanced_qdrant_tools(mcp, middleware=None, client_manager=None, searc
                     arguments_count=0,
                     payload_type="error",
                     collection_name=_client_manager.config.collection_name,
-                    point_id=point_id
+                    point_id=point_id,
                 ),
                 found=False,
                 collection_name=_client_manager.config.collection_name,
-                error=str(e)
+                error=str(e),
             )
 
     # Keep existing legacy tools for backward compatibility

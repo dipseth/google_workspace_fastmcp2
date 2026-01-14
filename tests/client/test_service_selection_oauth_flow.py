@@ -64,7 +64,7 @@ class TestServiceSelectionOAuthFlow:
         try:
             # Call a protected tool - this SHOULD trigger OAuth
             result = await client.call_tool("start_google_auth", {
-                "user_google_email": TEST_EMAIL,
+                "user_google_email": TEST_EMAIL , 
                 "service_name": "Test Service Selection"
             })
             
