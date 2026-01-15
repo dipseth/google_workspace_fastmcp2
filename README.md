@@ -1,6 +1,6 @@
-# 🚀 RiversUnlimited Google Workspace Platform
+# 🚀 GoogleUnlimited Google Workspace Platform
 
-**RiversUnlimited** is a comprehensive MCP framework that provides seamless Google Workspace integration through an advanced middleware architecture. It enables AI assistants and MCP clients to interact with Gmail, Google Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos services using a unified, secure API.
+**GoogleUnlimited** is a comprehensive MCP framework that provides seamless Google Workspace integration through an advanced middleware architecture. It enables AI assistants and MCP clients to interact with Gmail, Google Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos services using a unified, secure API.
 
 ## 📋 Table of Contents
 
@@ -14,9 +14,9 @@
 
 ## ⚡ Quick Installation Instructions
 
-### What is RiversUnlimited?
+### What is GoogleUnlimited?
 
-RiversUnlimited provides AI assistants with access to Google Workspace services through the Model Context Protocol (MCP). It supports **72+ tools** across **9 Google services**, enabling seamless integration between AI workflows and Google Workspace applications with revolutionary performance improvements.
+GoogleUnlimited provides AI assistants with access to Google Workspace services through the Model Context Protocol (MCP). It supports **90+ tools** across **9 Google services**, enabling seamless integration between AI workflows and Google Workspace applications with revolutionary performance improvements.
 
 ```mermaid
 graph TB
@@ -24,7 +24,7 @@ graph TB
         A[Claude/GPT/Other]
     end
     
-    subgraph "🌉 RiversUnlimited MCP Framework"
+    subgraph "🌉 GoogleUnlimited MCP Framework"
         B[MCP Protocol]
         C[Unified Middleware]
         D[OAuth 2.1 + PKCE]
@@ -94,7 +94,7 @@ graph TB
 
 ## 🔗 Client Connections
 
-RiversUnlimited supports multiple connection methods. Here are the two most popular ways to get started:
+GoogleUnlimited supports multiple connection methods. Here are the two most popular ways to get started:
 
 ### 🎯 Quick Setup Options
 
@@ -147,22 +147,22 @@ For detailed setup instructions, troubleshooting, and configurations for all sup
 
 ## 🎯 Service Capabilities
 
-RiversUnlimited supports **9 Google Workspace services** with **71+ specialized tools**:
+GoogleUnlimited supports **9 Google Workspace services** with **90+ specialized tools**:
 
 | Service | Icon | Tools | Key Features | Documentation |
 |---------|------|-------|--------------|---------------|
-| **Gmail** | 📧 | 11 | Send, reply, labels, filters, search | [`api-reference/gmail/`](documentation/api-reference/gmail/) |
-| **Drive** | 📁 | 7 | Upload, download, sharing, Office docs | [`api-reference/drive/`](documentation/api-reference/drive/) |
+| **Gmail** | 📧 | 14 | Send, reply, labels, filters, search, allowlist | [`api-reference/gmail/`](documentation/api-reference/gmail/) |
+| **Drive** | 📁 | 9 | Upload, download, sharing, Office docs, file management | [`api-reference/drive/`](documentation/api-reference/drive/) |
 | **Docs** | 📄 | 4 | Create, edit, format, batch operations | [`api-reference/docs/`](documentation/api-reference/docs/) |
-| **Sheets** | 📊 | 6 | Read, write, formulas, formatting | [`api-reference/sheets/`](documentation/api-reference/sheets/) |
+| **Sheets** | 📊 | 7 | Read, write, formulas, formatting | [`api-reference/sheets/`](documentation/api-reference/sheets/) |
 | **Slides** | 🎯 | 5 | Presentations, templates, export | [`api-reference/slides/`](documentation/api-reference/slides/) |
-| **Calendar** | 📅 | 6 | Events, scheduling, attendees, timezones | [`api-reference/calendar/`](documentation/api-reference/calendar/) |
+| **Calendar** | 📅 | 9 | Events, scheduling, attendees, timezones | [`api-reference/calendar/`](documentation/api-reference/calendar/) |
 | **Forms** | 📝 | 8 | Creation, responses, validation, publishing | [`api-reference/forms/`](documentation/api-reference/forms/) |
-| **Chat** | 💬 | 12 | Messaging, cards, spaces, webhooks | [`api-reference/chat/`](documentation/api-reference/chat/) |
-| **Photos** | 📷 | 12 | Albums, upload, search, metadata | [`api-reference/photos/`](documentation/api-reference/photos/) |
+| **Chat** | 💬 | 24 | Messaging, cards, spaces, webhooks, unified cards | [`api-reference/chat/`](documentation/api-reference/chat/) |
+| **Photos** | 📷 | 12 | Albums, upload, search, metadata, smart search | [`api-reference/photos/`](documentation/api-reference/photos/) |
 
 > 📚 **API Documentation Resources:**
-> - 🔗 **[Complete API Reference](documentation/api-reference/)** - Comprehensive documentation for all 71+ tools across 9 services
+> - 🔗 **[Complete API Reference](documentation/api-reference/)** - Comprehensive documentation for all 90+ tools across 9 services
 > - 📧 **[Gmail API Guide](documentation/api-reference/gmail/)** - Email management, labels, filters, and search operations
 > - 📁 **[Drive API Guide](documentation/api-reference/drive/)** - File operations, sharing, and Office document handling
 > - 📊 **[Sheets API Guide](documentation/api-reference/sheets/)** - Spreadsheet data manipulation and formatting
@@ -170,7 +170,7 @@ RiversUnlimited supports **9 Google Workspace services** with **71+ specialized 
 
 ## 🧠 Middleware Architecture
 
-RiversUnlimited uses a middleware architecture that provides seamless service integration, intelligent resource management, and powerful templating capabilities.
+GoogleUnlimited uses a middleware architecture that provides seamless service integration, intelligent resource management, and powerful templating capabilities.
 
 ```mermaid
 graph TD
@@ -213,7 +213,7 @@ graph TD
 
 ## 🎨 Template System
 
-RiversUnlimited features powerful **Jinja2 template macros** that transform raw Google Workspace data into visually stunning, AI-optimized formats.
+GoogleUnlimited features powerful **Jinja2 template macros** that transform raw Google Workspace data into visually stunning, AI-optimized formats.
 
 ### 🎯 Available Template Macros
 
@@ -331,7 +331,7 @@ await send_gmail_message(
 # Generate and send a professional report
 await create_doc(
     title="Q4 Performance Report",
-    content="{{ generate_report_doc( report_title='Quarterly Results', company_name='RiversUnlimited' ) }}"
+    content="{{ generate_report_doc( report_title='Quarterly Results', company_name='GoogleUnlimited' ) }}"
 )
 ```
 
@@ -344,7 +344,7 @@ await create_doc(
 
 ## 🗂️ Resource Discovery
 
-RiversUnlimited provides a powerful **MCP resource system** that enables lightning-fast data access without API calls through intelligent URI patterns.
+GoogleUnlimited provides a powerful **MCP resource system** that enables lightning-fast data access without API calls through intelligent URI patterns.
 
 ```mermaid
 graph LR
@@ -418,7 +418,7 @@ events = await access_resource("recent://calendar")
 
 ## 🧪 Testing Framework
 
-RiversUnlimited includes comprehensive testing with **client tests** that validate MCP usage exactly as an LLM would experience it, plus additional testing suites.
+GoogleUnlimited includes comprehensive testing with **client tests** that validate MCP usage exactly as an LLM would experience it, plus additional testing suites. **559 tests passing with 100% pass rate**.
 
 ### 🎯 Client Testing Focus
 
@@ -428,21 +428,21 @@ flowchart LR
     A --> C[📁 Drive Tests]
     A --> D[📊 Sheets Tests]
     A --> E[📅 Calendar Tests]
-    
+
     B --> F[✅ Real Resource Integration]
     C --> F
     D --> F
     E --> F
-    
+
     F --> G[🔄 Authentication Patterns]
     F --> H[📊 Service Validation]
-    
+
     style A fill:#e1f5fe
     style F fill:#e8f5e8
     style G fill:#f3e5f5
 ```
 
-The **client tests** are the most important component - they provide deterministic testing of MCP operations using real resource integration and standardized patterns across all **71+ tools** and **9 Google services**. These tests validate both explicit email authentication and middleware injection patterns.
+The **client tests** are the most important component - they provide deterministic testing of MCP operations using real resource integration and standardized patterns across all **90+ tools** and **9 Google services**. These tests validate both explicit email authentication and middleware injection patterns.
 
 ### 🚀 Quick Test Commands
 
@@ -457,6 +457,30 @@ uv run pytest tests/client/ -k "gmail" -v
 uv run pytest tests/client/ -m "auth_required" -v
 ```
 
+### 🔬 Real Resource ID Integration
+
+The testing framework fetches **real IDs** from service resources for realistic testing:
+
+```python
+# Available fixtures for real resource testing
+real_gmail_message_id      # From service://gmail/messages
+real_drive_document_id     # From service://drive/items
+real_calendar_event_id     # From service://calendar/events
+real_photos_album_id       # From service://photos/albums
+real_forms_form_id         # From service://forms/forms
+real_chat_space_id         # From service://chat/spaces
+```
+
+### 🔄 CI/CD Pipeline
+
+Automated testing and publishing via GitHub Actions:
+
+- **CI Workflow**: Runs on every PR and push to main
+  - Python 3.11 & 3.12 matrix testing
+  - Linting with `ruff` and formatting with `black`
+  - Full test suite execution
+- **TestPyPI Publishing**: Automated package publishing for testing
+
 > 📚 **Testing Resources:**
 > - 📋 **[Client Testing Framework Guide](tests/client/TESTING_FRAMEWORK.md)** - Complete client testing documentation and patterns
 > - 🧪 **[Client Tests Directory](tests/client/)** - Real resource integration tests for deterministic MCP validation
@@ -465,7 +489,7 @@ uv run pytest tests/client/ -m "auth_required" -v
 
 ## 🔒 Security & Authentication
 
-RiversUnlimited implements **enterprise-grade security** with OAuth 2.1 + PKCE, advanced session management, and comprehensive audit capabilities.
+GoogleUnlimited implements **enterprise-grade security** with OAuth 2.1 + PKCE, advanced session management, and comprehensive audit capabilities.
 
 ```mermaid
 flowchart TD
