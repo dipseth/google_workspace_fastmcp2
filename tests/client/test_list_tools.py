@@ -110,48 +110,46 @@ class TestGmailListTools(BaseListToolsTest):
     
     @pytest.mark.asyncio
     async def test_view_gmail_allow_list(self, client):
-        """Test viewing Gmail allow list."""
-        result = await client.call_tool("view_gmail_allow_list", {
-            "user_google_email": TEST_EMAIL
-        })
-        
+        """Test viewing Gmail allow list.
+
+        The allow list management tools were consolidated into
+        [`manage_gmail_allow_list()`](gmail/allowlist.py:1) with `action="view"`.
+        """
+        result = await client.call_tool(
+            "manage_gmail_allow_list",
+            {
+                "action": "view",
+                "user_google_email": TEST_EMAIL,
+            },
+        )
+
         assert result is not None
         content = result.content[0].text if result.content else str(result)
-        
+
         # Verify structured response
-        self.verify_structured_response(content, "Gmail", "view_gmail_allow_list")
-        
+        self.verify_structured_response(content, "Gmail", "manage_gmail_allow_list")
+
         # Check for valid responses
         valid_responses = [
-            "allow", "list", "allowed", "senders", "domains",
-            "requires authentication", "failed", "error",
-            "count", "items", "data"
+            "allow",
+            "list",
+            "allowed",
+            "senders",
+            "domains",
+            "requires authentication",
+            "failed",
+            "error",
+            "count",
+            "items",
+            "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), \
+        assert any(keyword in content.lower() for keyword in valid_responses), (
             f"Gmail allow list response didn't match expected pattern: {content}"
+        )
     
-    @pytest.mark.asyncio
-    async def test_list_email_templates(self, client):
-        """Test listing email templates."""
-        result = await client.call_tool("list_email_templates", {
-            "user_google_email": TEST_EMAIL
-        })
-        
-        assert result is not None
-        content = result.content[0].text if result.content else str(result)
-        
-        # Verify structured response
-        self.verify_structured_response(content, "Gmail", "list_email_templates")
-        
-        # Check for valid responses
-        valid_responses = [
-            "template", "email", "no templates",
-            "requires authentication", "failed", "error",
-            "count", "items", "data"
-        ]
-        assert any(keyword in content.lower() for keyword in valid_responses), \
-            f"Email templates response didn't match expected pattern: {content}"
-    
+    # NOTE: test_list_email_templates has been removed as the list_email_templates
+    # tool is no longer part of the supported tool surface.
+
     @pytest.mark.asyncio
     async def test_list_gmail_labels(self, client):
         """Test listing Gmail labels."""
@@ -310,8 +308,14 @@ class TestChatListTools(BaseListToolsTest):
             f"Chat spaces response didn't match expected pattern: {content}"
     
     @pytest.mark.asyncio
+    @pytest.mark.slow
     async def test_list_messages(self, client):
-        """Test listing Chat messages."""
+        """Test listing Chat messages.
+
+        NOTE: This test is marked slow because it makes multiple API calls
+        (list_spaces then list_messages) that can timeout. The test may fail
+        with a 30s timeout error if the Chat API is slow to respond.
+        """
         # First, try to get a real space ID from list_spaces
         space_id = None
         try:
@@ -361,68 +365,13 @@ class TestChatListTools(BaseListToolsTest):
         assert any(keyword in content.lower() for keyword in valid_responses), \
             f"Chat messages response didn't match expected pattern: {content}"
     
-    @pytest.mark.asyncio
-    async def test_list_available_card_types(self, client):
-        """Test listing available card types."""
-        # This tool doesn't take user_google_email parameter
-        result = await client.call_tool("list_available_card_types", {})
-        
-        assert result is not None
-        content = result.content[0].text if result.content else str(result)
-        
-        # Verify structured response
-        self.verify_structured_response(content, "Chat", "list_available_card_types")
-        
-        # Check for valid responses
-        valid_responses = [
-            "card", "types", "template", "available",
-            "requires authentication", "failed", "error",
-            "count", "items", "data"
-        ]
-        assert any(keyword in content.lower() for keyword in valid_responses), \
-            f"Card types response didn't match expected pattern: {content}"
-    
-    @pytest.mark.asyncio
-    async def test_list_available_card_components(self, client):
-        """Test listing card components."""
-        # Fixed: correct tool name is list_available_card_components
-        result = await client.call_tool("list_available_card_components", {})
-        
-        assert result is not None
-        content = result.content[0].text if result.content else str(result)
-        
-        # Verify structured response
-        self.verify_structured_response(content, "Chat", "list_card_components")
-        
-        # Check for valid responses
-        valid_responses = [
-            "component", "card", "widget", "element",
-            "requires authentication", "failed", "error",
-            "count", "items", "data"
-        ]
-        assert any(keyword in content.lower() for keyword in valid_responses), \
-            f"Card components response didn't match expected pattern: {content}"
-    
-    @pytest.mark.asyncio
-    async def test_list_card_templates(self, client):
-        """Test listing card templates."""
-        # This tool doesn't take user_google_email parameter
-        result = await client.call_tool("list_card_templates", {})
-        
-        assert result is not None
-        content = result.content[0].text if result.content else str(result)
-        
-        # Verify structured response
-        self.verify_structured_response(content, "Chat", "list_card_templates")
-        
-        # Check for valid responses
-        valid_responses = [
-            "template", "card", "templates", "examples",
-            "requires authentication", "failed", "error",
-            "count", "items", "data"
-        ]
-        assert any(keyword in content.lower() for keyword in valid_responses), \
-            f"Card templates response didn't match expected pattern: {content}"
+    # NOTE: The following Chat App Dev tools have been removed from the server:
+    # - list_available_card_types
+    # - list_available_card_components
+    # - list_card_templates
+    # These were experimental Chat App Development features that are no longer
+    # part of the supported tool surface. The tests have been removed as part
+    # of the test cleanup effort.
 
 
 @pytest.mark.service("docs")
@@ -541,13 +490,15 @@ class TestListToolsAvailability:
         """Test that all expected list tools are available."""
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
-        
-        # All expected list tools
+
+        # All expected list tools (core service tools)
+        # NOTE: Chat App Dev tools (list_available_card_types, list_available_card_components,
+        # list_card_templates) have been removed from the supported surface area.
+        # Gmail allow list is now managed via manage_gmail_allow_list tool.
+        # Email templates tool has been removed.
         expected_list_tools = [
             # Gmail
             "list_gmail_filters",
-            "view_gmail_allow_list",
-            "list_email_templates",
             "list_gmail_labels",
             # Drive
             "list_drive_items",
@@ -559,9 +510,6 @@ class TestListToolsAvailability:
             # Chat
             "list_spaces",
             "list_messages",
-            "list_available_card_types",
-            "list_available_card_components",
-            "list_card_templates",
             # Docs
             "list_docs_in_folder",
             # Sheets
@@ -570,22 +518,22 @@ class TestListToolsAvailability:
             "list_photos_albums",
             "list_album_photos"
         ]
-        
+
         missing_tools = []
         for tool in expected_list_tools:
             if tool not in tool_names:
                 missing_tools.append(tool)
-        
+
         assert len(missing_tools) == 0, f"Missing list tools: {missing_tools}"
-        
+
         # Print summary
         print(f"\n✅ All {len(expected_list_tools)} list tools are available in the server")
         print("\nGoogle Service List Tools Summary:")
-        print(f"  Gmail: 4 tools")
+        print(f"  Gmail: 2 tools")
         print(f"  Drive: 1 tool")
         print(f"  Forms: 1 tool")
         print(f"  Calendar: 2 tools")
-        print(f"  Chat: 5 tools")
+        print(f"  Chat: 2 tools")
         print(f"  Docs: 1 tool")
         print(f"  Sheets: 1 tool")
         print(f"  Photos: 2 tools")
@@ -619,16 +567,18 @@ class TestStructuredResponseValidation:
     @pytest.mark.asyncio
     async def test_successful_response_structure(self, client):
         """Test that successful responses have proper structure."""
-        # Test with a simple list tool
-        result = await client.call_tool("list_available_card_types", {})
-        
+        # Test with a simple list tool (list_calendars is available to all users)
+        result = await client.call_tool("list_calendars", {
+            "user_google_email": TEST_EMAIL
+        })
+
         assert result is not None
         content = result.content[0].text if result.content else str(result)
-        
+
         # Should NOT raise ValueError about structured_content
         assert "ValueError: structured_content must be a dict or None" not in content, \
             "Bug detected: Responses are not being returned as structured format"
-        
+
         # Should have structured response indicators
         content_lower = content.lower()
         has_structure = any([
@@ -636,9 +586,11 @@ class TestStructuredResponseValidation:
             "items" in content_lower,
             "data" in content_lower,
             "error" in content_lower,
-            "user" in content_lower
+            "user" in content_lower,
+            "calendar" in content_lower,
+            "authentication" in content_lower
         ])
-        
+
         assert has_structure, f"Response lacks structured format indicators: {content[:500]}..."
 
 

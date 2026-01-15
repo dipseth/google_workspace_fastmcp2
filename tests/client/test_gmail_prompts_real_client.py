@@ -125,7 +125,13 @@ class TestGmailPrompts:
         
         # Verify expected content patterns
         assert "Quick Email Demo" in content
-        assert "Simple" in content or "Zero-Config" in content.replace("-", "")
+
+        # The prompt copy has evolved; accept either "Simple" wording or "Zero-Configuration"
+        # variants.
+        normalized = content.lower().replace("-", " ")
+        assert "simple" in normalized or "zero configuration" in normalized, (
+            "Prompt should communicate that it's a simple/zero-config demo."
+        )
         
         # Should include resource templating examples
         assert "{{" in content and "}}" in content  # Template expressions

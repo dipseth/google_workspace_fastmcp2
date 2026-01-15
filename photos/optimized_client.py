@@ -251,32 +251,34 @@ class OptimizedPhotosClient:
     ) -> Dict[str, Any]:
         """Search media items with optimized pagination and caching."""
         logger.info(f"Searching media items (album_id: {album_id}, max: {max_items})")
-        
+
         all_items = []
         page_token = None
-        
+
+        # IMPORTANT: Photos API requires consistent pageSize across paginated requests
+        # Using min(100, max_items) for ALL requests in this pagination session
+        page_size = min(100, max_items)  # API max is 100
+
         while len(all_items) < max_items:
-            page_size = min(100, max_items - len(all_items))  # API max is 100
-            
             search_body = {"pageSize": page_size}
-            
+
             if album_id:
                 search_body["albumId"] = album_id
             if filters:
                 search_body["filters"] = filters
             if page_token:
                 search_body["pageToken"] = page_token
-            
+
             request = self.photos_service.mediaItems().search(body=search_body)
             response = await self._make_request(request.execute)
-            
+
             media_items = response.get('mediaItems', [])
             all_items.extend(media_items)
-            
+
             page_token = response.get('nextPageToken')
             if not page_token:
                 break
-        
+
         logger.info(f"Retrieved {len(all_items)} media items")
         return {"mediaItems": all_items[:max_items]}
     

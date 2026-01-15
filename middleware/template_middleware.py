@@ -44,6 +44,10 @@ from config.enhanced_logging import setup_logger
 logger = setup_logger()
 
 
+# Backwards-compat exports used by older tests/tools
+JINJA2_AVAILABLE = True
+
+
 class EnhancedTemplateMiddleware(Middleware):
     """
     Enhanced template parameter substitution middleware with modular architecture.

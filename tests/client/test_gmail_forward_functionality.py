@@ -253,42 +253,52 @@ class TestGmailForwardFunctionality:
 
     @pytest.mark.asyncio
     async def test_forward_parameter_validation(self, client):
-        """Test forward tools handle parameter validation properly."""
-        # Test missing required 'to' parameter
+        """Test forward tools handle parameter validation properly.
+
+        Note: [`forward_gmail_message_tool()`](gmail/compose.py:2966) defines `to` with a default
+        ("myself"), so it is *not* a required parameter at the schema/validation layer.
+
+        This test instead validates that truly-required parameters (like `message_id`) are
+        enforced.
+        """
+        # Test missing required 'message_id' parameter
         incomplete_params = {
             "user_google_email": TEST_EMAIL,
-            "message_id": "test_123",
-            "body": "Test message"
-            # Missing 'to' parameter
+            "to": "myself",
+            "body": "Test message",
+            # Missing 'message_id'
         }
-        
+
         print(f"\n{'='*60}")
-        print(f"🚫 PARAMETER VALIDATION TEST")
+        print("🚫 PARAMETER VALIDATION TEST")
         print(f"{'='*60}")
-        print("Testing missing 'to' parameter...")
+        print("Testing missing 'message_id' parameter...")
         print(json.dumps(incomplete_params, indent=2))
         print(f"{'='*60}\n")
-        
+
         # Test parameter validation - should throw an exception
         try:
-            result = await client.call_tool("forward_gmail_message", incomplete_params)
-            # If we get here, validation didn't work as expected
-            pytest.fail("Should have thrown parameter validation error for missing 'to' parameter")
+            await client.call_tool("forward_gmail_message", incomplete_params)
+            pytest.fail("Should have thrown parameter validation error for missing 'message_id' parameter")
         except Exception as e:
             # Expected - should get validation error
             error_msg = str(e)
-            print(f"\n=== PARAMETER VALIDATION RESPONSE ===")
+            print("\n=== PARAMETER VALIDATION RESPONSE ===")
             print(f"Exception: '{error_msg}'")
-            print(f"=== END PARAMETER VALIDATION ===\n")
-            
+            print("=== END PARAMETER VALIDATION ===\n")
+
             # Should show parameter validation error
             validation_keywords = [
-                "required", "missing", "parameter", "to", "recipient",
-                "validation", "error"
+                "required",
+                "missing",
+                "parameter",
+                "message_id",
+                "validation",
+                "error",
             ]
             has_validation_error = any(keyword in error_msg.lower() for keyword in validation_keywords)
             assert has_validation_error, f"Should show parameter validation error. Got: {error_msg}"
-            
+
             print("✅ SUCCESS: Parameter validation working correctly")
             logger.info(f"Parameter validation test result: {error_msg}")
 

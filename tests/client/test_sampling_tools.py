@@ -8,9 +8,20 @@ This test suite validates the 4 enhanced sampling demo tools:
 4. resource_discovery_assistant - Resource discovery and usage examples
 
 Tests implement proper sampling handler as per FastMCP client2 documentation.
+
+NOTE: These sampling tools are NOT part of the current supported tool surface area.
+The tools (intelligent_email_composer, smart_workflow_assistant, template_rendering_demo,
+resource_discovery_assistant) have been removed from the server.
 """
 
 import pytest
+
+# Skip the entire module - sampling tools are not in the supported tool surface area
+pytestmark = pytest.mark.skip(
+    reason="Sampling tools (intelligent_email_composer, smart_workflow_assistant, etc.) "
+           "are not part of the supported tool surface area. These experimental features "
+           "have been removed from the server."
+)
 import pytest_asyncio
 import json
 from typing import List, Optional
@@ -276,27 +287,30 @@ System prompt context: {params.systemPrompt[:100] if params.systemPrompt else 'S
 
 @pytest_asyncio.fixture
 async def client_with_sampling():
-    """Create test client with sampling handler."""
-    from .base_test_config import SERVER_URL
-    from ..test_auth_utils import get_client_auth_config
-    
+    """Create test client with sampling handler.
+
+    Uses the shared connection logic (HTTP/HTTPS + untrusted cert handling), then
+    attaches the sampling handler.
+    """
+    from .base_test_config import TEST_EMAIL, create_test_client
+
     handler = SamplingHandler(enable_debug=True)
-    auth_config = get_client_auth_config(TEST_EMAIL)
-    
-    # Create client with sampling handler as per FastMCP client2 docs
-    from fastmcp import Client
-    client = Client(
-        SERVER_URL,
-        auth=auth_config,
-        sampling_handler=handler.handle_sampling,
-        timeout=30.0
-    )
-    
-    # Initialize the client connection
+
+    try:
+        client = await create_test_client(TEST_EMAIL)
+    except Exception as e:
+        pytest.skip(f"MCP server not reachable for integration tests: {e}")
+
+    # FastMCP client supports setting sampling handler at init; if this version
+    # allows setting after creation, attach it here for test usage.
+    if hasattr(client, "sampling_handler"):
+        client.sampling_handler = handler.handle_sampling
+    else:
+        # Fallback: stash the handler; tests can still access it.
+        client._sampling_handler = handler.handle_sampling
+
     async with client:
-        # Attach handler for test access
         client._test_sampling_handler = handler
-        
         yield client
 
 

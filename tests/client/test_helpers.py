@@ -108,16 +108,46 @@ class ToolTestRunner:
                 }
         return None
     
+    async def test_tool_basic(self, tool_name: str, params: Dict[str, Any] = None) -> Dict:
+        """Test tool with provided parameters (without auto-adding user_google_email).
+
+        Use this for tools that don't require user_google_email or when you want
+        to provide your own parameters directly.
+        """
+        if params is None:
+            params = {}
+
+        try:
+            result = await self.client.call_tool(tool_name, params)
+            content = result.content[0].text if result.content else ""
+
+            return {
+                "success": True,
+                "content": content,
+                "response_length": len(content),
+                "is_auth_related": TestResponseValidator.is_valid_auth_response(content),
+                "is_success": TestResponseValidator.is_success_response(content)
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "content": str(e),
+                "error": str(e),
+                "response_length": 0,
+                "is_auth_related": False,
+                "is_success": False
+            }
+
     async def test_tool_with_explicit_email(self, tool_name: str, params: Dict[str, Any] = None) -> Dict:
         """Test tool with explicit user_google_email parameter."""
         if params is None:
             params = {}
-        
+
         params["user_google_email"] = self.test_email
-        
+
         result = await self.client.call_tool(tool_name, params)
         content = result.content[0].text if result.content else ""
-        
+
         return {
             "success": result is not None,
             "content": content,

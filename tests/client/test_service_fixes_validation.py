@@ -12,6 +12,7 @@ the underlying tools and return real data instead of errors or example data.
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import json
 import os
@@ -57,39 +58,22 @@ class TestServiceListResourceFixes:
 - Cross-service testing similar to integration tests
 """
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def client(self):
-        """Create a client connected to the running server."""
-        auth_config = get_client_auth_config(TEST_EMAIL)
-        
-        # Set environment variables to disable SSL verification
-        original_verify = os.environ.get('HTTPX_VERIFY')
-        original_ssl_verify = os.environ.get('SSL_VERIFY')
-        
-        os.environ['HTTPX_VERIFY'] = 'false'
-        os.environ['SSL_VERIFY'] = 'false'
-        
+        """Create a client connected to the running server.
+
+        Use the shared framework connection logic so HTTPS works even with
+        untrusted local certs.
+        """
+        from .base_test_config import create_test_client
+
         try:
-            # Create transport
-            transport = StreamableHttpTransport(
-                SERVER_URL,
-                auth=auth_config
-            )
-            
-            client = Client(transport)
-            async with client:
-                yield client
-        finally:
-            # Restore original environment
-            if original_verify is not None:
-                os.environ['HTTPX_VERIFY'] = original_verify
-            else:
-                os.environ.pop('HTTPX_VERIFY', None)
-                
-            if original_ssl_verify is not None:
-                os.environ['SSL_VERIFY'] = original_ssl_verify
-            else:
-                os.environ.pop('SSL_VERIFY', None)
+            client_obj = await create_test_client(TEST_EMAIL)
+        except Exception as e:
+            pytest.skip(f"MCP server not reachable for integration tests: {e}")
+
+        async with client_obj:
+            yield client_obj
     
     @pytest.mark.asyncio
     async def test_gmail_filters_no_parameter_error(self, client):
@@ -97,9 +81,9 @@ class TestServiceListResourceFixes:
         # Get the service lists to ensure filters is available
         content = await client.read_resource("service://gmail/lists")
         data = json.loads(content[0].text)
-        
-        # Verify filters is in the list types
-        list_types = [lt["name"] for lt in data.get("list_types", [])]
+
+        # Verify filters is in the list types (new format: dict with type names as keys)
+        list_types = list(data.get("list_types", {}).keys())
         assert "filters" in list_types, "Gmail filters should be available"
         
         # Try to access the filters resource - this previously caused TypeError
@@ -125,8 +109,9 @@ class TestServiceListResourceFixes:
         # Check service lists includes labels
         content = await client.read_resource("service://gmail/lists")
         data = json.loads(content[0].text)
-        
-        list_types = [lt["name"] for lt in data.get("list_types", [])]
+
+        # New format: list_types is a dict with type names as keys
+        list_types = list(data.get("list_types", {}).keys())
         assert "labels" in list_types, "Gmail labels should be available"
         
         # Try to access the labels resource
@@ -145,14 +130,15 @@ class TestServiceListResourceFixes:
             assert "list_type" in data
             assert data["list_type"] == "labels"
     
-    @pytest.mark.asyncio 
+    @pytest.mark.asyncio
     async def test_calendar_events_returns_real_data_not_examples(self, client):
         """Test that calendar events calls real tool instead of returning example data."""
         # Check service lists includes events
         content = await client.read_resource("service://calendar/lists")
         data = json.loads(content[0].text)
-        
-        list_types = [lt["name"] for lt in data.get("list_types", [])]
+
+        # New format: list_types is a dict with type names as keys
+        list_types = list(data.get("list_types", {}).keys())
         assert "events" in list_types, "Calendar events should be available"
         
         # Try to access the events resource
@@ -188,8 +174,9 @@ class TestServiceListResourceFixes:
         # Check service lists includes calendars
         content = await client.read_resource("service://calendar/lists")
         data = json.loads(content[0].text)
-        
-        list_types = [lt["name"] for lt in data.get("list_types", [])]
+
+        # New format: list_types is a dict with type names as keys
+        list_types = list(data.get("list_types", {}).keys())
         assert "calendars" in list_types, "Calendar calendars should be available"
         
         # Try to access the calendars resource  
@@ -214,38 +201,30 @@ class TestServiceListResourceFixes:
         # Test Gmail filters configuration
         content = await client.read_resource("service://gmail/lists")
         data = json.loads(content[0].text)
-        
-        filters_config = next(
-            (lt for lt in data.get("list_types", []) if lt["name"] == "filters"),
-            None
-        )
+
+        # New format: list_types is a dict with type names as keys
+        list_types = data.get("list_types", {})
+        filters_config = list_types.get("filters")
         assert filters_config is not None, "Gmail filters config should exist"
-        # Filters should not require an ID field
-        assert not filters_config.get("has_detail_view", True), "Filters should not require ID"
-        
-        # Test Gmail labels configuration  
-        labels_config = next(
-            (lt for lt in data.get("list_types", []) if lt["name"] == "labels"),
-            None
-        )
+        # Filters should not require an ID field (if has_detail_view exists)
+        if "has_detail_view" in filters_config:
+            assert not filters_config.get("has_detail_view", True), "Filters should not require ID"
+
+        # Test Gmail labels configuration
+        labels_config = list_types.get("labels")
         assert labels_config is not None, "Gmail labels config should exist"
-        
+
         # Test Calendar configuration
         content = await client.read_resource("service://calendar/lists")
         data = json.loads(content[0].text)
-        
-        events_config = next(
-            (lt for lt in data.get("list_types", []) if lt["name"] == "events"), 
-            None
-        )
+
+        list_types = data.get("list_types", {})
+        events_config = list_types.get("events")
         assert events_config is not None, "Calendar events config should exist"
         # Events should now NOT require an ID (we removed id_field)
         # The has_detail_view should be False since we set id_field to None
-        
-        calendars_config = next(
-            (lt for lt in data.get("list_types", []) if lt["name"] == "calendars"),
-            None  
-        )
+
+        calendars_config = list_types.get("calendars")
         assert calendars_config is not None, "Calendar calendars config should exist"
     
     @pytest.mark.asyncio

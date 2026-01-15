@@ -1,4 +1,28 @@
-"""Test suite for ModuleWrapper tools using FastMCP Client SDK."""
+"""Test suite for ModuleWrapper tools using FastMCP Client SDK.
+
+⚠️ NOTE: This entire test module is SKIPPED because the ModuleWrapper and
+UnifiedCard tools are NOT part of the supported tool surface area.
+
+The following tools tested here have been removed from the server:
+- wrap_module
+- search_module
+- get_module_component
+- list_module_components
+- list_wrapped_modules
+- list_available_card_components
+- get_card_component_info
+- list_card_templates
+- get_card_template
+- save_card_template
+- delete_card_template
+- create_card_framework_wrapper
+
+These were experimental features for Python module introspection that are no
+longer maintained. The tests are skipped rather than deleted to preserve the
+test structure in case these features are re-added in the future.
+
+See: tests/client/TESTING_FRAMEWORK.md for the supported tool surface area.
+"""
 
 """Test module wrapper functionality for Python module introspection.
 
@@ -22,9 +46,15 @@
 - Semantic indexing might overlap with Qdrant integration tests
 - Documentation extraction might be similar to other metadata extraction
 - Dynamic loading patterns might overlap with other dynamic functionality
-"""  
+"""
 
 import pytest
+
+# Skip the entire module - ModuleWrapper and UnifiedCard tools are not in the supported tool surface
+pytestmark = pytest.mark.skip(
+    reason="ModuleWrapper and UnifiedCard tools are not part of the supported tool surface area. "
+           "These experimental features have been removed from the server."
+)
 import asyncio
 from typing import Any, Dict, List
 import os

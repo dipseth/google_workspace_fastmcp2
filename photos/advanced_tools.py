@@ -49,10 +49,18 @@ async def _get_optimized_photos_client(user_google_email: str) -> OptimizedPhoto
         photos_service = get_injected_service(service_key)
         if not photos_service:
             raise RuntimeError("Service not available")
-    except Exception:
+    except Exception as e:
         # Fallback to direct service creation
+        logger.debug(f"Middleware service injection failed, trying direct service: {e}")
         photos_service = await get_service("photos", user_google_email)
-    
+
+    # Validate that we have a valid service
+    if photos_service is None:
+        raise RuntimeError(
+            f"Failed to get Photos service for {user_google_email}. "
+            "Ensure the user is authenticated with Photos API scopes."
+        )
+
     # Create optimized client with upload-friendly rate limits
     rate_config = RateLimitConfig(
         requests_per_second=6,  # More conservative for uploads
@@ -100,7 +108,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
         include_photos: bool = True,
         include_videos: bool = False,
         max_results: int = 50
-    ) -> str:
+    ) -> PhotosSmartSearchResponse:
         """
         Advanced photo search with smart filtering and caching.
 

@@ -3,34 +3,64 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "riversunlimited-google-workspace"
+name = "google-workspace-unlimited"
 version = "1.0.0"
 description = "Comprehensive MCP server for Google Workspace integration - 72+ tools across Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos with OAuth 2.1 + PKCE authentication"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 authors = [
-    { name = "RiversUnlimited", email = "contact@riversunlimited.com" }
+    { name = "Seth Rivers", email = "sethrivers@gmail.com" }
 ]
 maintainers = [
-    { name = "RiversUnlimited", email = "contact@riversunlimited.com" }
+    { name = "Seth Rivers", email = "sethrivers@gmail.com" }
 ]
 keywords = [
+    # MCP
     "mcp",
     "model-context-protocol",
+    "fastmcp",
+    "tool-calling",
+    "ai-tools",
+    "ai-assistant",
+    "llm",
+
+    # Google Workspace (core)
+    "google",
     "google-workspace",
+    "google-api",
+    "oauth2",
+    "oauth",
+    "pkce",
+
+    # Primary services
     "gmail",
     "google-drive",
-    "google-docs",
-    "google-sheets",
+    "drive",
     "google-calendar",
+    "calendar",
+    "google-docs",
+    "docs",
+    "google-sheets",
+    "sheets",
+    "google-slides",
+    "slides",
     "google-chat",
-    "fastmcp",
-    "ai-assistant",
-    "oauth2",
-    "llm",
-    "claude",
-    "anthropic"
+    "chat",
+    "google-forms",
+    "forms",
+    "google-photos",
+    "photos",
+    "people-api",
+    "contacts",
+
+    # Infra / features
+    "qdrant",
+    "vector-database",
+    "embeddings",
+    "semantic-search",
+    "jinja2",
+    "templates"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -40,7 +70,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Communications :: Email",
     "Topic :: Office/Business",
@@ -69,7 +98,6 @@ dependencies = [
     
     # Vector Database & Embeddings
     "qdrant-client>=1.7.0",
-    "sentence-transformers>=2.2.0",
     "fastembed>=0.7.2",
     "numpy>=1.24.0",
     
@@ -118,8 +146,20 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --ignore=tests/content_mapping"
 asyncio_mode = "auto"
+
+markers = [
+    "auth_required: mark test as requiring authentication",
+    "service(name): mark test as belonging to a specific Google service",
+    "integration: mark test as integration test requiring server",
+    "slow: slow tests",
+    "core: core tests",
+    "order(n): ordering hint",
+    "middleware: middleware tests",
+    "analytics: analytics tests",
+    "security: security tests",
+]
 
 [tool.ruff]
 target-version = "py311"

@@ -2255,10 +2255,11 @@ async def test_debug_single_card():
     print(f"🔍 SINGLE CARD DEBUG SESSION - MAXIMUM VERBOSITY")
     print(f"{'='*80}")
     
-    # Create client
-    auth_config = get_client_auth_config(TEST_EMAIL)
-    client = Client(SERVER_URL, auth=auth_config)
-    
+    # Create client (use shared framework connection logic to handle untrusted local certs)
+    from .base_test_config import create_test_client
+
+    client = await create_test_client(TEST_EMAIL)
+
     async with client:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
         

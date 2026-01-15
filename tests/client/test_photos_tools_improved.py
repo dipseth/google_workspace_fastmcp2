@@ -460,32 +460,53 @@ class TestPhotosTools:
             })
 
             content = print_tool_result("photos_smart_search", result)
-            
-            # Store found media items for later tests
-            if "media_items" in content or "id" in content:
-                # Extract media item IDs using regex
-                import re
-                media_ids = re.findall(r'"id":\s*"([^"]+)"', content)
+
+            # Parse the JSON response - tool returns structured PhotosSmartSearchResponse
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                # If not valid JSON, treat as string response
+                data = {"text_response": content}
+
+            # Check for error in structured response
+            if "error" in data and data["error"]:
+                error_msg = data["error"].lower()
+                if "scope" in error_msg or "unauthorized" in error_msg or "permission" in error_msg:
+                    pytest.skip(f"Skipping due to scope/permission issue: {data['error']}")
+                else:
+                    # Some errors are acceptable (e.g., no results found)
+                    print(f"⚠️ Tool returned error: {data['error']}")
+
+            # Store found media items for later tests from structured response
+            if "media_items" in data and data["media_items"]:
+                media_ids = [item.get("id") for item in data["media_items"] if item.get("id")]
                 if media_ids:
-                    TestPhotosTools.found_media_item_ids = media_ids[:5]  # Store up to 5 IDs
+                    TestPhotosTools.found_media_item_ids = media_ids[:5]
                     print(f"✅ Stored {len(TestPhotosTools.found_media_item_ids)} media item IDs for batch test")
 
-            # Check for success indicators
-            success_indicators = [
-                "smart search", "results", "found", "photos", "videos",
-                "performance", "cache", "search time", "successfully", "completed"
-            ]
-            error_indicators = [
-                "error", "failed", "unauthorized", "permission", "scope"
-            ]
+            # Validate structured response fields (PhotosSmartSearchResponse)
+            expected_fields = ["media_items", "total_found", "search_time_seconds", "user_email"]
+            has_structured_response = any(field in data for field in expected_fields)
 
-            is_success = any(indicator in content.lower() for indicator in success_indicators)
-            is_error = any(indicator in content.lower() for indicator in error_indicators)
+            if has_structured_response:
+                # Validate the structured response
+                print(f"📊 Search Results:")
+                print(f"   - Total found: {data.get('total_found', 'N/A')}")
+                print(f"   - Search time: {data.get('search_time_seconds', 'N/A')}s")
+                print(f"   - User email: {data.get('user_email', 'N/A')}")
+                print(f"   - Filters applied: {data.get('filters_applied', 'N/A')}")
+                if data.get('text_summary'):
+                    print(f"   - Summary: {data['text_summary']}")
 
-            if is_error and ("scope" in content.lower() or "unauthorized" in content.lower()):
-                pytest.skip(f"Skipping due to scope/permission issue: {content}")
+                # Assert basic structure is valid
+                assert "media_items" in data or "error" in data, "Response should have media_items or error"
+                if "media_items" in data:
+                    assert isinstance(data["media_items"], list), "media_items should be a list"
             else:
-                assert is_success or is_error, f"Unexpected response format: {content}"
+                # Fallback to string-based validation for non-structured responses
+                success_indicators = ["smart search", "results", "found", "photos"]
+                is_success = any(indicator in content.lower() for indicator in success_indicators)
+                assert is_success, f"Unexpected response format: {content}"
 
         except Exception as e:
             if "permission" in str(e).lower() or "scope" in str(e).lower():
@@ -509,14 +530,21 @@ class TestPhotosTools:
                     "user_google_email": PHOTO_TEST_EMAIL,
                     "max_results": 3
                 })
-                
-                search_content = print_tool_result("photos_smart_search", search_result)
-                
-                # Extract media item IDs
-                import re
-                media_ids = re.findall(r'"id":\s*"([^"]+)"', search_content)
-                test_ids = media_ids[:3] if media_ids else None
-            
+
+                search_content = print_tool_result("photos_smart_search (for IDs)", search_result)
+
+                # Parse the JSON response to get media item IDs
+                try:
+                    search_data = json.loads(search_content)
+                    if "media_items" in search_data and search_data["media_items"]:
+                        test_ids = [item.get("id") for item in search_data["media_items"] if item.get("id")][:3]
+                    else:
+                        test_ids = None
+                except json.JSONDecodeError:
+                    # Fallback to regex extraction
+                    media_ids = re.findall(r'"id":\s*"([^"]+)"', search_content)
+                    test_ids = media_ids[:3] if media_ids else None
+
             if test_ids:
                 result = await client.call_tool("photos_batch_details", {
                     "user_google_email": PHOTO_TEST_EMAIL,
@@ -527,22 +555,43 @@ class TestPhotosTools:
                     "Media IDs": test_ids
                 })
 
-                # Check for success indicators
-                success_indicators = [
-                    "bulk", "details", "media items", "batch", "processed",
-                    "successfully", "metadata", "retrieved"
-                ]
-                error_indicators = [
-                    "error", "failed", "unauthorized", "permission", "scope"
-                ]
+                # Parse the JSON response - tool returns structured PhotosBatchDetailsResponse
+                try:
+                    data = json.loads(content)
+                except json.JSONDecodeError:
+                    data = {"text_response": content}
 
-                is_success = any(indicator in content.lower() for indicator in success_indicators)
-                is_error = any(indicator in content.lower() for indicator in error_indicators)
+                # Check for error in structured response
+                if "error" in data and data["error"]:
+                    error_msg = data["error"].lower()
+                    if "scope" in error_msg or "unauthorized" in error_msg or "permission" in error_msg:
+                        pytest.skip(f"Skipping due to scope/permission issue: {data['error']}")
+                    else:
+                        print(f"⚠️ Tool returned error: {data['error']}")
 
-                if is_error and ("scope" in content.lower() or "unauthorized" in content.lower()):
-                    pytest.skip(f"Skipping due to scope/permission issue: {content}")
+                # Validate structured response fields (PhotosBatchDetailsResponse)
+                expected_fields = ["successful_items", "failed_items", "total_requested", "successful_count"]
+                has_structured_response = any(field in data for field in expected_fields)
+
+                if has_structured_response:
+                    # Validate the structured response
+                    print(f"📊 Batch Details Results:")
+                    print(f"   - Total requested: {data.get('total_requested', 'N/A')}")
+                    print(f"   - Successful count: {data.get('successful_count', 'N/A')}")
+                    print(f"   - Failed count: {data.get('failed_count', 'N/A')}")
+                    print(f"   - Processing time: {data.get('processing_time_seconds', 'N/A')}s")
+                    if data.get('text_summary'):
+                        print(f"   - Summary: {data['text_summary']}")
+
+                    # Assert basic structure is valid
+                    assert "successful_items" in data or "error" in data, "Response should have successful_items or error"
+                    if "successful_items" in data:
+                        assert isinstance(data["successful_items"], list), "successful_items should be a list"
                 else:
-                    assert is_success or is_error, f"Unexpected response format: {content}"
+                    # Fallback to string-based validation
+                    success_indicators = ["bulk", "details", "batch", "processed", "retrieved"]
+                    is_success = any(indicator in content.lower() for indicator in success_indicators)
+                    assert is_success or "error" in content.lower(), f"Unexpected response format: {content}"
             else:
                 pytest.skip("No media item IDs found to test photos_batch_details")
 

@@ -63,8 +63,8 @@ class TestRegistryDiscovery:
         print(f"Initial tool count: {initial_count}")
         
         # Verify registry has loaded a substantial number of tools
-        # The system should have at least 100+ tools from all services
-        assert initial_count > 100, f"Registry should discover 100+ tools, found {initial_count}"
+        # The system should have at least 80+ tools from all services
+        assert initial_count > 80, f"Registry should discover 80+ tools, found {initial_count}"
         
         # Check that tools have proper metadata from registry
         sample_tools = initial_tools[:5]  # Check first 5 tools

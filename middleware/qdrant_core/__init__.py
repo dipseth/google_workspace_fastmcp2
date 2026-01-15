@@ -29,13 +29,13 @@ from .query_parser import (
 from .lazy_imports import (
     get_numpy,
     get_qdrant_imports,
-    get_sentence_transformer,
+    get_fastembed,
     reset_imports,
     get_import_status,
     # Legacy aliases
     _get_numpy,
     _get_qdrant_imports,
-    _get_sentence_transformer,
+    _get_fastembed,
 )
 
 from .config import (
@@ -84,7 +84,7 @@ __all__ = [
     # Lazy import functions
     "get_numpy",
     "get_qdrant_imports",
-    "get_sentence_transformer",
+    "get_fastembed",
     "reset_imports",
     "get_import_status",
     
@@ -117,7 +117,7 @@ __all__ = [
     "_extract_service_from_tool",
     "_get_numpy",
     "_get_qdrant_imports",
-    "_get_sentence_transformer",
+    "_get_fastembed",
 ]
 
 

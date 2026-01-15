@@ -1,7 +1,21 @@
+"""
+Test Google Service Configuration resources.
+
+NOTE: The google://services/* resource pattern has been removed from the server.
+These resources (google://services/gmail/config, google://services/drive/config, etc.)
+are no longer part of the supported resource surface area.
+"""
+
 import pytest
 import asyncio
 from jsonschema import ValidationError
 from datetime import datetime
+
+# Skip the entire module - google://services/* resources are not in the supported surface area
+pytestmark = pytest.mark.skip(
+    reason="google://services/* resources are not part of the supported resource surface area. "
+           "These configuration resources have been removed from the server."
+)
 
 # Import the validation function from service_resources
 import sys

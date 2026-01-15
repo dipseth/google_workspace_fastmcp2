@@ -67,8 +67,9 @@ def detect_server_protocol():
 DETECTED_PROTOCOL = detect_server_protocol()
 PROTOCOL = os.getenv("MCP_PROTOCOL", DETECTED_PROTOCOL)
 
-# FastMCP servers use the /mcp/ endpoint
-SERVER_URL = os.getenv("MCP_SERVER_URL", f"{PROTOCOL}://{SERVER_HOST}:{SERVER_PORT}/mcp/")
+# FastMCP servers typically live at `/mcp` (no trailing slash). Using `/mcp/` can
+# trigger a 307 redirect which breaks StreamableHTTP in some client stacks.
+SERVER_URL = os.getenv("MCP_SERVER_URL", f"{PROTOCOL}://{SERVER_HOST}:{SERVER_PORT}/mcp")
 
 # Test email address from environment variable
 TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_example@gmail.com")
@@ -100,7 +101,7 @@ async def create_test_client(test_email: str = TEST_EMAIL):
     
     for protocol in protocols_to_try:
         try:
-            test_url = f"{protocol}://{SERVER_HOST}:{SERVER_PORT}/mcp/"
+            test_url = f"{protocol}://{SERVER_HOST}:{SERVER_PORT}/mcp"
             print(f"   🔌 Attempting connection to {test_url}")
             
             # Configure client based on protocol
@@ -152,8 +153,8 @@ async def create_test_client(test_email: str = TEST_EMAIL):
 ❌ Failed to connect to server on both HTTP and HTTPS
 
 Attempted URLs:
-- http://{SERVER_HOST}:{SERVER_PORT}/mcp/
-- https://{SERVER_HOST}:{SERVER_PORT}/mcp/
+- http://{SERVER_HOST}:{SERVER_PORT}/mcp
+- https://{SERVER_HOST}:{SERVER_PORT}/mcp
 
 Last error: {last_error}
 
@@ -259,16 +260,17 @@ class TestImprovedAuthPattern:
         print(f"   Response length: {len(content)} characters")
         print(f"   Response preview: {content[:200]}...")
         
-        # Check that we get a valid response (auth error or actual labels)
+        # Check that we get a valid response (auth error OR actual label payload)
         valid_responses = [
             "authentication" in content.lower(),
-            "credentials" in content.lower(), 
+            "credentials" in content.lower(),
             "not authenticated" in content.lower(),
             "please check your gmail permissions" in content.lower(),
-            "labels found" in content.lower(),
+            # Real successful payload from this server is JSON starting with {"labels": ...}
+            "\"labels\"" in content.lower(),
             "gmail labels" in content.lower(),
             "system labels" in content.lower(),
-            "user-created labels" in content.lower()
+            "user-created labels" in content.lower(),
         ]
         
         assert any(valid_responses), f"Should get valid response. Content: {content[:300]}"
@@ -289,19 +291,19 @@ class TestImprovedAuthPattern:
             print(f"   Response length: {len(content)} characters") 
             print(f"   Response preview: {content[:200]}...")
             
-            # Check that we get a valid response (auth error or actual labels)
+            # Check that we get a valid response (auth error OR actual label payload)
             valid_responses = [
                 "authentication" in content.lower(),
                 "credentials" in content.lower(),
-                "not authenticated" in content.lower(), 
+                "not authenticated" in content.lower(),
                 "please check your gmail permissions" in content.lower(),
-                "labels found" in content.lower(),
+                "\"labels\"" in content.lower(),
                 "gmail labels" in content.lower(),
                 "system labels" in content.lower(),
                 "user-created labels" in content.lower(),
                 # Middleware might inject default or context-based email
                 "middleware" in content.lower(),
-                "auto-injection" in content.lower()
+                "auto-injection" in content.lower(),
             ]
             
             assert any(valid_responses), f"Should get valid response via middleware. Content: {content[:300]}"
@@ -341,10 +343,10 @@ class TestImprovedAuthPattern:
         auth_indicators = [
             "authentication error" in content_explicit.lower(),
             "credentials" in content_explicit.lower(),
-            "labels found" in content_explicit.lower(),
+            "\"labels\"" in content_explicit.lower(),
             "system labels" in content_explicit.lower(),
             "user-created labels" in content_explicit.lower(),
-            "gmail labels" in content_explicit.lower()
+            "gmail labels" in content_explicit.lower(),
         ]
         
         assert any(auth_indicators), "Should get authentication-related response"

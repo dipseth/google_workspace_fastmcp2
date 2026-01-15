@@ -23,6 +23,18 @@ import pytest
 import pytest_asyncio
 import asyncio
 import os
+
+# Ensure pytest process uses the same trusted cert bundle as the running HTTPS server.
+# This mirrors the VS Code MCP client config that connects to https://localhost:8002/mcp.
+os.environ.setdefault(
+    "SSL_CERT_FILE",
+    os.path.abspath("localhost+2.pem"),
+)
+os.environ.setdefault(
+    "REQUESTS_CA_BUNDLE",
+    os.path.abspath("localhost+2.pem"),
+)
+
 from .base_test_config import create_test_client, print_test_configuration
 from .resource_helpers import (
     get_real_gmail_message_id, get_real_gmail_filter_id,
@@ -30,6 +42,10 @@ from .resource_helpers import (
     get_real_calendar_event_id, get_real_photos_album_id,
     get_real_forms_form_id, get_real_chat_space_id
 )
+
+# NOTE:
+# Pytest 8+ no longer supports defining `pytest_plugins` in non-top-level conftest.
+# Keep this file fixture-only.
 
 
 def pytest_configure(config):
@@ -57,25 +73,21 @@ def print_global_test_config():
 @pytest_asyncio.fixture
 async def client():
     """Create a client connected to the running server with protocol auto-detection.
-    
-    This is the standard client fixture that all tests should use.
+
+    IMPORTANT:
+    - Always use the shared connection logic in [`tests/client/base_test_config.create_test_client()`](tests/client/base_test_config.py:90)
+      so tests don't depend on a valid local TLS/CA chain.
+    - If the server is not running, skip the suite (this is an integration-style test harness).
     """
-    from .base_test_config import TEST_EMAIL, SERVER_URL
-    from ..test_auth_utils import get_client_auth_config
-    from fastmcp import Client
-    
-    # Create client directly in fixture to avoid double context management
-    auth_config = get_client_auth_config(TEST_EMAIL)
-    client_obj = Client(SERVER_URL, auth=auth_config)
-    
-    # Start the client connection
-    await client_obj.__aenter__()
-    
+    from .base_test_config import TEST_EMAIL, create_test_client
+
     try:
+        client_obj = await create_test_client(TEST_EMAIL)
+    except Exception as e:
+        pytest.skip(f"MCP server not reachable for integration tests: {e}")
+
+    async with client_obj:
         yield client_obj
-    finally:
-        # Ensure client is properly closed
-        await client_obj.__aexit__(None, None, None)
 
 
 @pytest.fixture
@@ -140,9 +152,9 @@ async def real_chat_space_id(client):
     real_id = await get_real_chat_space_id(client)
     return real_id or "fake_space_id_fallback"
 
+# NOTE: Pytest 8+ disallows pytest_plugins in non-top-level conftest.
+# pytest-asyncio is already installed and auto-loaded via entry points.
 
-# Configure asyncio mode for all tests
-pytest_plugins = ["pytest_asyncio"]
 
 
 def pytest_collection_modifyitems(config, items):
