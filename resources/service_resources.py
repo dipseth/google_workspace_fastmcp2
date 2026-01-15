@@ -1,50 +1,56 @@
-import logging
 import json
 from datetime import datetime
 from pathlib import Path
-from typing_extensions import Any, Dict, List, Optional, Set, Annotated
 
-from fastmcp import FastMCP, Context
-from jsonschema import validate, ValidationError
+from fastmcp import Context, FastMCP
+from jsonschema import ValidationError, validate
 from pydantic import Field
+from typing_extensions import Annotated, Any, Dict, Optional
+
+from auth.scope_registry import ScopeRegistry
+from config.enhanced_logging import setup_logger
+
+# Import validation utilities
+from resources.service_list_resources import get_supported_services
 
 # Import our custom types for consistent parameter definitions
 from tools.common_types import ServiceTypeAnnotated
 
-# Import validation utilities
-from resources.service_list_resources import get_supported_services
-from auth.scope_registry import ScopeRegistry
-
-from config.enhanced_logging import setup_logger
 logger = setup_logger()
+
 
 def setup_service_resources(main_mcp: FastMCP):
     """Register service resources with the main FastMCP server using FastMCP 2.10.6+ API."""
     logger.info("🔧 Setting up Google service resources...")
-    
+
     # Register resources directly with main MCP instance using FastMCP 2.10.6+ approach
     # This avoids the Context creation issues from using a separate local instance
     logger.info("✅ Service resources setup completed (FastMCP 2.10.6+ compatible)")
 
+
 # Load the JSON schema for Google Service Configuration
-_SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "google_service_config_schema.json"
+_SCHEMA_PATH = (
+    Path(__file__).parent.parent / "schemas" / "google_service_config_schema.json"
+)
 _SERVICE_CONFIG_SCHEMA: Optional[Dict[str, Any]] = None
+
 
 def _load_schema():
     """Loads the JSON schema from file."""
     global _SERVICE_CONFIG_SCHEMA
     if _SERVICE_CONFIG_SCHEMA is None:
         try:
-            with open(_SCHEMA_PATH, 'r') as f:
+            with open(_SCHEMA_PATH, "r") as f:
                 _SERVICE_CONFIG_SCHEMA = json.load(f)
             logger.info(f"Successfully loaded schema from {_SCHEMA_PATH}")
         except FileNotFoundError:
             logger.error(f"Schema file not found at {_SCHEMA_PATH}")
-            _SERVICE_CONFIG_SCHEMA = {} # Set to empty to avoid repeated attempts
+            _SERVICE_CONFIG_SCHEMA = {}  # Set to empty to avoid repeated attempts
         except json.JSONDecodeError as e:
             logger.error(f"Error decoding JSON schema from {_SCHEMA_PATH}: {e}")
             _SERVICE_CONFIG_SCHEMA = {}
     return _SERVICE_CONFIG_SCHEMA
+
 
 def validate_service_config(config_data: Dict[str, Any]):
     """
@@ -60,18 +66,27 @@ def validate_service_config(config_data: Dict[str, Any]):
     if not schema:
         logger.warning("Schema not loaded, skipping validation.")
         return
-    
+
     try:
         validate(instance=config_data, schema=schema)
         logger.debug("Service configuration validated successfully.")
     except ValidationError as e:
-        logger.error(f"Service configuration validation failed: {e.message} at {e.path}")
+        logger.error(
+            f"Service configuration validation failed: {e.message} at {e.path}"
+        )
         raise
+
 
 async def get_service_config(
     ctx: Context,
     service_type: ServiceTypeAnnotated,
-    api_version: Annotated[Optional[str], Field(description="Optional specific API version (e.g., 'v1', 'v3')", pattern=r"^v\d+$")] = None
+    api_version: Annotated[
+        Optional[str],
+        Field(
+            description="Optional specific API version (e.g., 'v1', 'v3')",
+            pattern=r"^v\d+$",
+        ),
+    ] = None,
 ) -> Dict[str, Any]:
     """
     Retrieves the configuration for a specified Google service.
@@ -87,14 +102,16 @@ async def get_service_config(
     """
     # Normalize service type to lowercase
     service_lower = service_type.lower()
-    
+
     # Validate service is supported
     if service_lower not in get_supported_services():
-        raise ValueError(f"Service '{service_type}' not supported. Available: {get_supported_services()}")
-    
+        raise ValueError(
+            f"Service '{service_type}' not supported. Available: {get_supported_services()}"
+        )
+
     # Get endpoint information dynamically
     endpoint = _get_service_endpoint(service_lower, api_version)
-    
+
     # Get scopes from the scope registry
     try:
         basic_scopes = ScopeRegistry.get_service_scopes(service_lower, "basic")
@@ -105,36 +122,35 @@ async def get_service_config(
         basic_scopes = []
         full_scopes = []
         readonly_scopes = []
-    
+
     # Example structure for a service configuration
     config_data = {
         "service": service_lower,
         "configuration": {
             "api_name": service_lower,
-            "api_version": api_version if api_version else _get_default_api_version(service_lower),
+            "api_version": (
+                api_version if api_version else _get_default_api_version(service_lower)
+            ),
             "base_url": endpoint,
             "discovery_url": f"{endpoint}$discovery/rest?version={api_version if api_version else _get_default_api_version(service_lower)}",
             "scopes": {
                 "read": readonly_scopes,
                 "basic": basic_scopes,
-                "full": full_scopes
+                "full": full_scopes,
             },
             "features": {
                 "batch_requests": True,
                 "watch_notifications": False,
-                "delegation": False
+                "delegation": False,
             },
-            "limits": {
-                "requests_per_minute": 1000,
-                "requests_per_day": 100000
-            }
+            "limits": {"requests_per_minute": 1000, "requests_per_day": 100000},
         },
         "metadata": {
             "last_updated": datetime.now().isoformat(),
             "documentation_url": f"https://developers.google.com/{service_lower}/api",
             "authentication_required": True,
-            "tags": ["google", "service", "config", "metadata", "api", service_lower]
-        }
+            "tags": ["google", "service", "config", "metadata", "api", service_lower],
+        },
     }
 
     # Add service-specific details
@@ -154,21 +170,26 @@ async def get_service_config(
     try:
         validate_service_config(config_data)
     except ValidationError as e:
-        logger.error(f"Generated service config for {service_lower} failed validation: {e.message}")
+        logger.error(
+            f"Generated service config for {service_lower} failed validation: {e.message}"
+        )
         # Depending on severity, you might raise the error or return a partial/error response
-        raise ValueError(f"Invalid service configuration generated for {service_lower}: {e.message}")
+        raise ValueError(
+            f"Invalid service configuration generated for {service_lower}: {e.message}"
+        )
 
     return config_data
+
 
 # Helper functions for dynamic service configuration
 def _get_service_endpoint(service: str, api_version: Optional[str] = None) -> str:
     """
     Get the API endpoint for a service dynamically.
-    
+
     Args:
         service: Service name (lowercase)
         api_version: Optional API version
-        
+
     Returns:
         Base API endpoint URL
     """
@@ -187,9 +208,9 @@ def _get_service_endpoint(service: str, api_version: Optional[str] = None) -> st
         "admin": f"https://admin.googleapis.com/admin/directory/{api_version or 'v1'}/",
         "tasks": f"https://tasks.googleapis.com/tasks/{api_version or 'v1'}/",
         "youtube": f"https://www.googleapis.com/youtube/{api_version or 'v3'}/",
-        "script": f"https://script.googleapis.com/{api_version or 'v1'}/"
+        "script": f"https://script.googleapis.com/{api_version or 'v1'}/",
     }
-    
+
     # Return specific pattern or generate default
     if service in endpoint_patterns:
         return endpoint_patterns[service]
@@ -197,13 +218,14 @@ def _get_service_endpoint(service: str, api_version: Optional[str] = None) -> st
         # Default pattern for unknown services
         return f"https://www.googleapis.com/{service}/{api_version or 'v1'}/"
 
+
 def _get_default_api_version(service: str) -> str:
     """
     Get the default API version for a service.
-    
+
     Args:
         service: Service name (lowercase)
-        
+
     Returns:
         Default API version string
     """
@@ -221,71 +243,79 @@ def _get_default_api_version(service: str) -> str:
         "admin": "v1",
         "tasks": "v1",
         "youtube": "v3",
-        "script": "v1"
+        "script": "v1",
     }
-    
+
     return default_versions.get(service, "v1")
 
+
 # Additional resource templates for scopes and versions
+
 
 async def get_service_scopes_by_group(
     ctx: Context,
     service_type: ServiceTypeAnnotated,
-    scope_group: Annotated[str, Field(description="Scope group name (e.g., 'basic', 'full', 'readonly')")]
+    scope_group: Annotated[
+        str, Field(description="Scope group name (e.g., 'basic', 'full', 'readonly')")
+    ],
 ) -> Dict[str, Any]:
     """
     Retrieves OAuth scopes for a specified Google service and scope group.
-    
+
     Args:
         ctx: The FastMCP context.
         service_type: The type of Google service (validated).
         scope_group: The scope group (e.g., 'basic', 'full', 'readonly').
-        
+
     Returns:
         Dictionary with scope information.
     """
     # Normalize service type
     service_lower = service_type.lower()
-    
+
     # Validate service is supported
     if service_lower not in get_supported_services():
-        raise ValueError(f"Service '{service_type}' not supported. Available: {get_supported_services()}")
-    
+        raise ValueError(
+            f"Service '{service_type}' not supported. Available: {get_supported_services()}"
+        )
+
     # Get scopes from the scope registry
     try:
         scopes = ScopeRegistry.get_service_scopes(service_lower, scope_group)
     except ValueError as e:
         logger.warning(f"Could not get scopes for {service_lower}/{scope_group}: {e}")
         scopes = []
-    
+
     return {
         "service_type": service_lower,
         "scope_group": scope_group,
         "scopes": scopes,
-        "description": f"Scopes for {service_lower} {scope_group} access."
+        "description": f"Scopes for {service_lower} {scope_group} access.",
     }
 
+
 async def get_service_versions(
-    ctx: Context,
-    service_type: ServiceTypeAnnotated
+    ctx: Context, service_type: ServiceTypeAnnotated
 ) -> Dict[str, Any]:
     """
     Retrieves available API versions for a specified Google service.
-    
+
     Args:
         ctx: The FastMCP context.
         service_type: The type of Google service (validated).
-        
+
     Returns:
         Dictionary with version information.
     """
     # Normalize service type
     service_lower = service_type.lower()
-    
+
     # Validate service is supported
     if service_lower not in get_supported_services():
-        raise ValueError(f"Service '{service_type}' not supported. Available: {get_supported_services()}")
-    
+        raise ValueError(
+            f"Service '{service_type}' not supported. Available: {get_supported_services()}"
+        )
+
     # Known API versions for each service
     versions = {
         "gmail": ["v1"],
@@ -301,123 +331,127 @@ async def get_service_versions(
         "admin": ["v1"],
         "tasks": ["v1"],
         "youtube": ["v3"],
-        "script": ["v1"]
+        "script": ["v1"],
     }
-    
+
     return {
         "service_type": service_lower,
         "available_versions": versions.get(service_lower, ["v1"]),
         "default_version": _get_default_api_version(service_lower),
-        "description": f"Available API versions for {service_lower}."
+        "description": f"Available API versions for {service_lower}.",
     }
 
+
 async def get_service_quota(
-    ctx: Context,
-    service_type: ServiceTypeAnnotated
+    ctx: Context, service_type: ServiceTypeAnnotated
 ) -> Dict[str, Any]:
     """
     Retrieves quota information for a specified Google service.
-    
+
     Args:
         ctx: The FastMCP context.
         service_type: The type of Google service (validated).
-        
+
     Returns:
         Dictionary with quota information.
     """
     # Normalize service type
     service_lower = service_type.lower()
-    
+
     # Validate service is supported
     if service_lower not in get_supported_services():
-        raise ValueError(f"Service '{service_type}' not supported. Available: {get_supported_services()}")
-    
+        raise ValueError(
+            f"Service '{service_type}' not supported. Available: {get_supported_services()}"
+        )
+
     # Quota information (these are typical values, actual quotas may vary by project)
     quota_info = {
         "gmail": {
             "requests_per_minute": 1000,
             "requests_per_day": 1000000,
             "concurrent_requests": 100,
-            "quota_units": "per-user"
+            "quota_units": "per-user",
         },
         "drive": {
             "requests_per_minute": 10000,
             "requests_per_day": 10000000,
             "concurrent_requests": 500,
-            "quota_units": "per-project"
+            "quota_units": "per-project",
         },
         "calendar": {
             "requests_per_minute": 2000,
             "requests_per_day": 1000000,
             "concurrent_requests": 200,
-            "quota_units": "per-user"
+            "quota_units": "per-user",
         },
         "sheets": {
             "requests_per_minute": 300,
             "requests_per_100_seconds": 500,
             "concurrent_requests": 100,
-            "quota_units": "per-project"
+            "quota_units": "per-project",
         },
         "docs": {
             "requests_per_minute": 300,
             "requests_per_100_seconds": 500,
             "concurrent_requests": 100,
-            "quota_units": "per-project"
+            "quota_units": "per-project",
         },
         "photos": {
             "requests_per_minute": 1000,
             "requests_per_day": 50000,
             "concurrent_requests": 50,
-            "quota_units": "per-user"
-        }
+            "quota_units": "per-user",
+        },
     }
-    
+
     # Default quota for services not explicitly listed
     default_quota = {
         "requests_per_minute": 500,
         "requests_per_day": 100000,
         "concurrent_requests": 50,
-        "quota_units": "per-project"
+        "quota_units": "per-project",
     }
-    
+
     return {
         "service_type": service_lower,
         "quota_limits": quota_info.get(service_lower, default_quota),
         "description": f"Quota limits for {service_lower} API.",
-        "note": "Actual quotas may vary based on your Google Cloud project settings."
+        "note": "Actual quotas may vary based on your Google Cloud project settings.",
     }
 
+
 async def get_service_endpoints(
-    ctx: Context,
-    service_type: ServiceTypeAnnotated
+    ctx: Context, service_type: ServiceTypeAnnotated
 ) -> Dict[str, Any]:
     """
     Retrieves API endpoints for a specified Google service.
-    
+
     This function dynamically generates endpoints based on the service type
     and integrates with the scope registry for comprehensive service information.
-    
+
     Args:
         ctx: The FastMCP context.
         service_type: The type of Google service (validated).
-        
+
     Returns:
         Dictionary with endpoint information.
     """
     # Normalize service type
     service_lower = service_type.lower()
-    
+
     # Validate service is supported
     if service_lower not in get_supported_services():
-        raise ValueError(f"Service '{service_type}' not supported. Available: {get_supported_services()}")
-    
+        raise ValueError(
+            f"Service '{service_type}' not supported. Available: {get_supported_services()}"
+        )
+
     # Get the base endpoint
     base_endpoint = _get_service_endpoint(service_lower)
     default_version = _get_default_api_version(service_lower)
-    
+
     # Check if service exists in scope registry for additional info
     has_scope_info = service_lower in ScopeRegistry.GOOGLE_API_SCOPES
-    
+
     return {
         "service_type": service_lower,
         "base_endpoint": base_endpoint,
@@ -427,5 +461,5 @@ async def get_service_endpoints(
         "token_endpoint": "https://oauth2.googleapis.com/token",
         "has_scope_registry": has_scope_info,
         "description": f"API endpoints for {service_lower} service.",
-        "documentation": f"https://developers.google.com/{service_lower}/api"
+        "documentation": f"https://developers.google.com/{service_lower}/api",
     }

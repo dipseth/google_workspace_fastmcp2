@@ -5,11 +5,11 @@ This module provides backward compatibility for legacy scope usage patterns
 while automatically redirecting to the new centralized scope registry.
 """
 
-import logging
-from typing_extensions import Dict, List, Any, Optional, Union
-from .scope_registry import ScopeRegistry, ServiceScopeManager
+from typing_extensions import Any, Dict, List, Optional
 
 from config.enhanced_logging import setup_logger
+
+from .scope_registry import ScopeRegistry
 
 logger = setup_logger()
 
@@ -570,7 +570,7 @@ class MigrationHelper:
         total_files = len(analyses)
         files_with_legacy = sum(1 for a in analyses if a["legacy_patterns_found"])
 
-        report += f"## Summary\n"
+        report += "## Summary\n"
         report += f"- Total files analyzed: {total_files}\n"
         report += f"- Files with legacy patterns: {files_with_legacy}\n"
         report += f"- Migration completion: {((total_files - files_with_legacy) / total_files * 100):.1f}%\n\n"
@@ -578,12 +578,12 @@ class MigrationHelper:
         for analysis in analyses:
             if analysis["legacy_patterns_found"]:
                 report += f"## {analysis['file_path']}\n"
-                report += f"**Legacy patterns found:**\n"
+                report += "**Legacy patterns found:**\n"
                 for pattern in analysis["legacy_patterns_found"]:
                     report += f"- {pattern['pattern']}: {pattern['description']}\n"
 
                 if analysis["recommended_migration"]:
-                    report += f"\n**Recommended migration steps:**\n"
+                    report += "\n**Recommended migration steps:**\n"
                     for rec in analysis["recommended_migration"]:
                         report += f"- {rec}\n"
 

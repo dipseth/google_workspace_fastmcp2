@@ -6,14 +6,15 @@ regex_replace, append) to Google Docs using the Docs API batch update mechanism.
 """
 
 import logging
-import asyncio
-from typing import Dict, List, Any, Tuple
-from docs.docs_types import EditConfig, RegexReplace
+from typing import Any, Dict, List, Tuple
+
+from docs.docs_types import EditConfig
+
 from .line_parser import (
-    parse_document_lines,
+    extract_document_text,
     find_line_position,
     get_document_end_index,
-    extract_document_text,
+    parse_document_lines,
 )
 from .regex_operations import apply_regex_replacements, validate_regex_operations
 
@@ -131,13 +132,11 @@ async def apply_edit_config(
 
         # Extract document text using comprehensive extraction utility
         current_text = extract_document_text(doc_data)
-        
+
         logger.info(
             f"[apply_edit_config] Extracted {len(current_text)} characters from document"
         )
-        logger.info(
-            f"[apply_edit_config] First 200 chars: {repr(current_text[:200])}"
-        )
+        logger.info(f"[apply_edit_config] First 200 chars: {repr(current_text[:200])}")
 
         # Validate that we extracted some text
         if not current_text or len(current_text) <= 1:

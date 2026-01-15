@@ -5,11 +5,12 @@ These TypedDict classes define the structure of data returned by Gmail tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional, Dict, Any, NotRequired, Union
+from typing_extensions import Dict, List, NotRequired, Optional, TypedDict, Union
 
 
 class FilterCriteria(TypedDict):
     """Structure for Gmail filter criteria."""
+
     from_address: Optional[str]
     to_address: Optional[str]
     subject: Optional[str]
@@ -22,6 +23,7 @@ class FilterCriteria(TypedDict):
 
 class FilterAction(TypedDict):
     """Structure for Gmail filter actions."""
+
     addLabelIds: Optional[List[str]]
     removeLabelIds: Optional[List[str]]
     forward: Optional[str]
@@ -33,6 +35,7 @@ class FilterAction(TypedDict):
 
 class FilterInfo(TypedDict):
     """Structure for a single Gmail filter entry."""
+
     id: str
     criteria: FilterCriteria
     action: FilterAction
@@ -40,6 +43,7 @@ class FilterInfo(TypedDict):
 
 class GmailFiltersResponse(TypedDict):
     """Response structure for list_gmail_filters tool."""
+
     filters: List[FilterInfo]
     count: int
     userEmail: str
@@ -48,20 +52,25 @@ class GmailFiltersResponse(TypedDict):
 
 class AllowedEmailInfo(TypedDict):
     """Structure for a single allowed email entry."""
+
     email: str
     masked_email: str  # Privacy-masked version of the email
 
 
 class AllowedGroupInfo(TypedDict):
     """Structure for a single allowed group entry based on People API contact groups."""
+
     raw: str  # Raw token from GMAIL_ALLOW_LIST (e.g., "group:Team A" or "groupId:contactGroups/123")
     type: NotRequired[str]  # "name" or "id"
     group_name: NotRequired[str]  # Human-friendly group name when available
-    group_id: NotRequired[str]  # Contact group resourceName when available (e.g., "contactGroups/123")
+    group_id: NotRequired[
+        str
+    ]  # Contact group resourceName when available (e.g., "contactGroups/123")
 
 
 class GmailAllowListResponse(TypedDict):
     """Response structure for view_gmail_allow_list tool."""
+
     allowed_emails: List[AllowedEmailInfo]
     # Optional list of group-based allow list entries (People API contact groups)
     allowed_groups: NotRequired[List[AllowedGroupInfo]]
@@ -74,6 +83,7 @@ class GmailAllowListResponse(TypedDict):
 
 class EmailTemplateInfo(TypedDict):
     """Structure for a single email template entry."""
+
     id: str
     name: str
     description: str
@@ -85,6 +95,7 @@ class EmailTemplateInfo(TypedDict):
 
 class EmailTemplatesResponse(TypedDict):
     """Response structure for list_email_templates tool."""
+
     templates: List[EmailTemplateInfo]
     count: int
     userEmail: str
@@ -94,6 +105,7 @@ class EmailTemplatesResponse(TypedDict):
 
 class GmailLabelInfo(TypedDict):
     """Structure for a single Gmail label entry."""
+
     id: str
     name: str
     type: str  # "system" or "user"
@@ -108,6 +120,7 @@ class GmailLabelInfo(TypedDict):
 
 class GmailLabelsResponse(TypedDict):
     """Response structure for list_gmail_labels tool."""
+
     labels: List[GmailLabelInfo]
     total_count: int
     system_labels: List[GmailLabelInfo]
@@ -120,6 +133,7 @@ class GmailLabelsResponse(TypedDict):
 
 class RetroactiveResults(TypedDict):
     """Structure for retroactive filter application results."""
+
     total_found: int
     processed_count: int
     error_count: int
@@ -129,6 +143,7 @@ class RetroactiveResults(TypedDict):
 
 class CreateGmailFilterResponse(TypedDict):
     """Response structure for create_gmail_filter tool."""
+
     success: bool
     filter_id: NotRequired[Optional[str]]
     criteria_summary: NotRequired[Optional[str]]
@@ -139,6 +154,7 @@ class CreateGmailFilterResponse(TypedDict):
 
 class GetGmailFilterResponse(TypedDict):
     """Response structure for get_gmail_filter tool."""
+
     success: bool
     filter_info: NotRequired[Optional[FilterInfo]]
     filter_id: str
@@ -148,6 +164,7 @@ class GetGmailFilterResponse(TypedDict):
 
 class DeleteGmailFilterResponse(TypedDict):
     """Response structure for delete_gmail_filter tool."""
+
     success: bool
     filter_id: str
     criteria_summary: NotRequired[Optional[str]]
@@ -157,6 +174,7 @@ class DeleteGmailFilterResponse(TypedDict):
 
 class GmailMessageInfo(TypedDict):
     """Structure for a single Gmail message entry."""
+
     id: str
     thread_id: str
     snippet: NotRequired[Optional[str]]
@@ -164,12 +182,15 @@ class GmailMessageInfo(TypedDict):
     sender: NotRequired[Optional[str]]
     date: NotRequired[Optional[str]]
     labels: NotRequired[List[str]]  # Gmail label IDs applied to this message
-    label_names: NotRequired[List[str]]  # Human-readable label names corresponding to labels
+    label_names: NotRequired[
+        List[str]
+    ]  # Human-readable label names corresponding to labels
     web_url: str
 
 
 class SearchGmailMessagesResponse(TypedDict):
     """Response structure for search_gmail_messages tool."""
+
     success: bool
     messages: List[GmailMessageInfo]
     total_found: int
@@ -181,6 +202,7 @@ class SearchGmailMessagesResponse(TypedDict):
 
 class GmailMessageContent(TypedDict):
     """Structure for Gmail message content."""
+
     id: str
     subject: str
     sender: str
@@ -191,6 +213,7 @@ class GmailMessageContent(TypedDict):
 
 class GetGmailMessageContentResponse(TypedDict):
     """Response structure for get_gmail_message_content tool."""
+
     success: bool
     message_content: NotRequired[Optional[GmailMessageContent]]
     userEmail: str
@@ -199,6 +222,7 @@ class GetGmailMessageContentResponse(TypedDict):
 
 class BatchMessageResult(TypedDict):
     """Structure for individual message in batch result."""
+
     id: str
     success: bool
     subject: NotRequired[Optional[str]]
@@ -211,6 +235,7 @@ class BatchMessageResult(TypedDict):
 
 class GetGmailMessagesBatchResponse(TypedDict):
     """Response structure for get_gmail_messages_content_batch tool."""
+
     success: bool
     messages: List[BatchMessageResult]
     total_requested: int
@@ -223,6 +248,7 @@ class GetGmailMessagesBatchResponse(TypedDict):
 
 class ThreadMessageInfo(TypedDict):
     """Structure for a message within a thread."""
+
     message_number: int
     id: str
     subject: str
@@ -233,6 +259,7 @@ class ThreadMessageInfo(TypedDict):
 
 class GetGmailThreadContentResponse(TypedDict):
     """Response structure for get_gmail_thread_content tool."""
+
     success: bool
     thread_id: str
     thread_subject: str
@@ -244,6 +271,7 @@ class GetGmailThreadContentResponse(TypedDict):
 
 class ManageGmailLabelResponse(TypedDict):
     """Response structure for manage_gmail_label tool."""
+
     success: bool
     action: str
     labels_processed: int
@@ -255,20 +283,26 @@ class ManageGmailLabelResponse(TypedDict):
 
 class ModifyGmailMessageLabelsResponse(TypedDict):
     """Response structure for modify_gmail_message_labels tool."""
+
     success: bool
     message_id: str
     labels_added: List[str]
     labels_removed: List[str]
     labels_added_names: NotRequired[List[str]]  # Human-readable names for added labels
-    labels_removed_names: NotRequired[List[str]]  # Human-readable names for removed labels
+    labels_removed_names: NotRequired[
+        List[str]
+    ]  # Human-readable names for removed labels
     userEmail: str
     error: NotRequired[Optional[str]]
 
 
 class SendGmailMessageResponse(TypedDict):
     """Response structure for send_gmail_message tool."""
+
     success: bool
-    message_id: NotRequired[Optional[str]]  # Optional when saved as draft instead of sent
+    message_id: NotRequired[
+        Optional[str]
+    ]  # Optional when saved as draft instead of sent
     to_recipients: NotRequired[List[str]]  # Optional when blocked or draft
     cc_recipients: NotRequired[List[str]]
     bcc_recipients: NotRequired[List[str]]
@@ -293,6 +327,7 @@ class SendGmailMessageResponse(TypedDict):
 
 class DraftGmailMessageResponse(TypedDict):
     """Response structure for draft_gmail_message tool."""
+
     success: bool
     draft_id: NotRequired[Optional[str]]  # Optional when there's an error
     subject: str
@@ -305,11 +340,14 @@ class DraftGmailMessageResponse(TypedDict):
 
 class ReplyGmailMessageResponse(TypedDict):
     """Response structure for reply_to_gmail_message tool."""
+
     success: bool
     reply_message_id: NotRequired[Optional[str]]  # Optional when there's an error
     original_message_id: str
     thread_id: NotRequired[Optional[str]]  # Optional when there's an error
-    replied_to: NotRequired[Optional[str]]  # Recipients who received the reply (comma-separated)
+    replied_to: NotRequired[
+        Optional[str]
+    ]  # Recipients who received the reply (comma-separated)
     subject: NotRequired[Optional[str]]  # Optional when there's an error
     content_type: str
     reply_mode: NotRequired[str]  # "sender_only", "reply_all", or "custom"
@@ -322,11 +360,14 @@ class ReplyGmailMessageResponse(TypedDict):
 
 class DraftGmailReplyResponse(TypedDict):
     """Response structure for draft_gmail_reply tool."""
+
     success: bool
     draft_id: NotRequired[Optional[str]]  # Optional when there's an error
     original_message_id: str
     thread_id: NotRequired[Optional[str]]  # Optional when there's an error
-    replied_to: NotRequired[Optional[str]]  # Recipients who would receive the reply (comma-separated)
+    replied_to: NotRequired[
+        Optional[str]
+    ]  # Recipients who would receive the reply (comma-separated)
     subject: NotRequired[Optional[str]]  # Optional when there's an error
     content_type: str
     reply_mode: NotRequired[str]  # "sender_only", "reply_all", or "custom"
@@ -339,10 +380,13 @@ class DraftGmailReplyResponse(TypedDict):
 
 class ForwardGmailMessageResponse(TypedDict):
     """Response structure for forward_gmail_message tool."""
+
     success: bool
     forward_message_id: NotRequired[Optional[str]]  # Optional when there's an error
     original_message_id: str
-    forwarded_to: NotRequired[Optional[str]]  # Recipients who received the forward (comma-separated)
+    forwarded_to: NotRequired[
+        Optional[str]
+    ]  # Recipients who received the forward (comma-separated)
     subject: NotRequired[Optional[str]]  # Optional when there's an error
     content_type: str
     to_recipients: NotRequired[List[str]]  # List of To recipients
@@ -361,10 +405,13 @@ class ForwardGmailMessageResponse(TypedDict):
 
 class DraftGmailForwardResponse(TypedDict):
     """Response structure for draft_gmail_forward tool."""
+
     success: bool
     draft_id: NotRequired[Optional[str]]  # Optional when there's an error
     original_message_id: str
-    forwarded_to: NotRequired[Optional[str]]  # Recipients who would receive the forward (comma-separated)
+    forwarded_to: NotRequired[
+        Optional[str]
+    ]  # Recipients who would receive the forward (comma-separated)
     subject: NotRequired[Optional[str]]  # Optional when there's an error
     content_type: str
     to_recipients: NotRequired[List[str]]  # List of To recipients
@@ -399,6 +446,7 @@ Supports same formats as GmailRecipients but can also be None.
 
 class GmailMessageData(TypedDict):
     """Structure for unified Gmail message data."""
+
     message_id: str
     thread_id: str
     subject: str
@@ -417,6 +465,7 @@ class GmailMessageData(TypedDict):
 
 class GmailMessageContentResponse(TypedDict):
     """Response structure for unified get_gmail_message_content tool."""
+
     success: bool
     messages: List[GmailMessageData]
     total_count: int

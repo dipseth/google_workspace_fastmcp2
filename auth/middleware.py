@@ -1,22 +1,19 @@
 """Authentication middleware for session management and service injection."""
 
-import logging
-
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-import json
 import base64
+import json
 import secrets
-import os
-from datetime import datetime, timedelta, UTC
-from pathlib import Path
-from typing_extensions import Any, Optional, Dict
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
-from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.dependencies import get_context
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 from google.oauth2.credentials import Credentials
+from typing_extensions import Any, Dict, Optional
 
 # Try to import GoogleProvider - it might not be available
 try:
@@ -27,23 +24,18 @@ except ImportError:
     GoogleProvider = None
     GOOGLE_PROVIDER_AVAILABLE = False
 
+from config.enhanced_logging import setup_logger
+from config.settings import settings
+
 from .context import (
-    set_session_context,
-    clear_session_context,
-    clear_all_context,
-    cleanup_expired_sessions,
-    get_session_context,
-    set_user_email_context,
-    get_user_email_context,
     _get_pending_service_requests,
     _set_injected_service,
     _set_service_error,
+    cleanup_expired_sessions,
+    set_user_email_context,
 )
-from .service_manager import get_google_service, GoogleServiceError
-from config.settings import settings
 from .dual_auth_bridge import get_dual_auth_bridge
-
-from config.enhanced_logging import setup_logger
+from .service_manager import GoogleServiceError, get_google_service
 
 logger = setup_logger()
 
@@ -145,8 +137,9 @@ class AuthMiddleware(Middleware):
         PHASE 1 FIX: Session management independent of FastMCP context.
         Reuses existing sessions from thread-safe session store.
         """
-        from .context import list_sessions
         import uuid
+
+        from .context import list_sessions
 
         # Check if we already have a session for this request
         with self._session_lock:
@@ -180,7 +173,6 @@ class AuthMiddleware(Middleware):
         PHASE 1 FIX: Uses instance-level session tracking instead of FastMCP context.
         This avoids "Context is not available" errors during early request phases.
         """
-        from .context import store_session_data, get_session_data, list_sessions
 
         # PHASE 1 FIX: Get request ID and session without accessing FastMCP context
         request_id = self._get_request_id(context)
@@ -230,7 +222,7 @@ class AuthMiddleware(Middleware):
             context: MiddlewareContext containing tool call information
             call_next: Function to continue the middleware chain
         """
-        from .context import store_session_data, get_session_data
+        from .context import get_session_data, store_session_data
 
         tool_name = getattr(context.message, "name", "unknown")
         logger.debug(f"Processing tool call: {tool_name}")
@@ -388,7 +380,7 @@ class AuthMiddleware(Middleware):
             context: MiddlewareContext containing resource access information
             call_next: Function to continue the middleware chain
         """
-        from .context import store_session_data, get_session_data
+        from .context import get_session_data, store_session_data
 
         resource_uri = getattr(context, "uri", "unknown")
         logger.debug(f"Processing resource access: {resource_uri}")
@@ -1079,7 +1071,7 @@ class AuthMiddleware(Middleware):
             if not hasattr(context, "message") or not hasattr(
                 context.message, "arguments"
             ):
-                logger.debug(f"No arguments to inject for context")
+                logger.debug("No arguments to inject for context")
                 return
 
             args = context.message.arguments
@@ -1121,7 +1113,7 @@ class AuthMiddleware(Middleware):
                     logger.debug(f"✅ Auto-injected user_google_email={final_email}")
                 else:
                     logger.debug(
-                        f"⚠️ No email to inject - leaving parameter unset (tool will fail clearly)"
+                        "⚠️ No email to inject - leaving parameter unset (tool will fail clearly)"
                     )
             else:
                 logger.debug(f"user_google_email already set: {current_value}")
@@ -1153,7 +1145,7 @@ class AuthMiddleware(Middleware):
     def _set_service_selection_needed(self, needed: bool):
         """Set flag indicating service selection is needed."""
         try:
-            from .context import store_session_data, get_session_context
+            from .context import get_session_context, store_session_data
 
             session_id = get_session_context()
             if session_id:
@@ -1249,9 +1241,9 @@ class AuthMiddleware(Middleware):
             User email address if found in OAuth authentication file, None otherwise
         """
         try:
-            from pathlib import Path
             import json
             from datetime import datetime, timedelta
+            from pathlib import Path
 
             oauth_data_path = (
                 Path(settings.credentials_dir) / ".oauth_authentication.json"
@@ -1325,6 +1317,7 @@ def setup_oauth_coordination(mcp, google_auth_provider):
         async def oauth_authorization_server_mcp(request):
             """Minimal MCP-specific OAuth authorization server endpoint."""
             from starlette.responses import JSONResponse, Response
+
             from config.settings import settings
 
             if request.method == "OPTIONS":

@@ -5,16 +5,15 @@ import logging
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-from typing_extensions import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from typing_extensions import Any, Dict, List, Optional, Union
 
-from .google_auth import get_valid_credentials, GoogleAuthError, needs_refresh
-from .context import get_session_context, store_session_data, get_session_data
+from .context import get_session_context, get_session_data, store_session_data
+from .google_auth import get_valid_credentials, needs_refresh
 
 # Import compatibility shim for OAuth scope management
 try:
@@ -382,8 +381,8 @@ async def get_google_service(
     try:
         # Special handling for Photos Library API which uses a custom discovery URL
         if service_name == "photoslibrary":
-            from googleapiclient.discovery import build_from_document
             import requests
+            from googleapiclient.discovery import build_from_document
 
             # Photos Library API uses a custom discovery document
             discovery_url = f"https://photoslibrary.googleapis.com/$discovery/rest?version={service_version}"

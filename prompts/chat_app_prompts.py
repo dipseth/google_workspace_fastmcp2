@@ -16,20 +16,19 @@ Author: Enhanced FastMCP Implementation
 Version: 2.0
 """
 
-from typing_extensions import Optional, Union
-from pydantic import Field
-from fastmcp import FastMCP, Context
+from fastmcp import Context, FastMCP
 from fastmcp.prompts.prompt import Message, PromptMessage, TextContent
-
+from pydantic import Field
 
 # ============================================================================
 # SETUP FUNCTION FOR FASTMCP REGISTRATION
 # ============================================================================
 
+
 def setup_chat_app_prompts(mcp: FastMCP):
     """
     Register all Google Chat app prompts with the FastMCP server.
-    
+
     Args:
         mcp: The FastMCP server instance
     """
@@ -37,51 +36,57 @@ def setup_chat_app_prompts(mcp: FastMCP):
     @mcp.prompt(
         name="google_chat_complex_card_advanced",
         description="Generate sophisticated interactive card creation guidance with advanced FastMCP capabilities",
-        tags={"google_chat", "cards", "interactive", "advanced"}
+        tags={"google_chat", "cards", "interactive", "advanced"},
     )
     def google_chat_complex_card_advanced(
         context: Context,
-        card_type: str = Field(default="approval_workflow", description="Type of sophisticated card to create"),
+        card_type: str = Field(
+            default="approval_workflow",
+            description="Type of sophisticated card to create",
+        ),
         integration_services: str = Field(
             default="drive,calendar",
-            description="Comma-separated list of Google services to integrate with the card"
+            description="Comma-separated list of Google services to integrate with the card",
         ),
         complexity_level: float = Field(
             default=0.75,
             ge=0.0,
             le=1.0,
-            description="Complexity level from 0.0 (basic) to 1.0 (highly advanced)"
+            description="Complexity level from 0.0 (basic) to 1.0 (highly advanced)",
         ),
         use_interactive_elements: bool = Field(
             default=True,
-            description="Include interactive elements like buttons, forms, and widgets"
+            description="Include interactive elements like buttons, forms, and widgets",
         ),
         styling_theme: str = Field(
-            default="professional",
-            description="Styling theme for the card"
+            default="professional", description="Styling theme for the card"
         ),
         custom_actions: str = Field(
             default="approve,reject,comment",
-            description="Comma-separated list of custom action buttons to include"
-        )
+            description="Comma-separated list of custom action buttons to include",
+        ),
     ) -> PromptMessage:
         """
         Generate comprehensive guidance for creating sophisticated interactive Google Chat cards
         with advanced capabilities and real-world integration examples.
         """
-        
+
         # Access context information
         request_id = context.request_id
-        
+
         # Parse comma-separated strings
-        services_list = [s.strip() for s in integration_services.split(',')]
-        actions_list = [a.strip() for a in custom_actions.split(',')]
-        
+        services_list = [s.strip() for s in integration_services.split(",")]
+        actions_list = [a.strip() for a in custom_actions.split(",")]
+
         services_text = ", ".join(services_list)
         actions_text = ", ".join(actions_list)
-        
-        complexity_description = "basic" if complexity_level < 0.3 else "intermediate" if complexity_level < 0.7 else "advanced"
-        
+
+        complexity_description = (
+            "basic"
+            if complexity_level < 0.3
+            else "intermediate" if complexity_level < 0.7 else "advanced"
+        )
+
         card_guidance = f"""
 # Advanced Google Chat Card Creation Guide
 
@@ -156,47 +161,55 @@ def create_{card_type}_card():
 
 This {complexity_description} implementation showcases FastMCP's advanced parameter handling capabilities.
 """
-        
-        return PromptMessage(
-            content=TextContent(text=card_guidance),
-            role="assistant"
-        )
+
+        return PromptMessage(content=TextContent(text=card_guidance), role="assistant")
 
     @mcp.prompt(
         name="google_chat_app_setup_guide",
         description="Comprehensive Google Chat app setup guide with deployment options and advanced configuration",
-        tags={"google_chat", "setup", "deployment", "configuration"}
+        tags={"google_chat", "setup", "deployment", "configuration"},
     )
     def google_chat_app_setup_guide(
         context: Context,
-        deployment_target: str = Field(default="cloud_run", description="Target deployment platform"),
-        authentication_type: str = Field(default="service_account", description="Authentication method to use"),
+        deployment_target: str = Field(
+            default="cloud_run", description="Target deployment platform"
+        ),
+        authentication_type: str = Field(
+            default="service_account", description="Authentication method to use"
+        ),
         required_services: str = Field(
             default="chat,drive",
-            description="Comma-separated list of Google Workspace services to enable"
+            description="Comma-separated list of Google Workspace services to enable",
         ),
-        enable_monitoring: bool = Field(default=True, description="Enable comprehensive monitoring and logging"),
-        environment: str = Field(default="development", description="Target deployment environment"),
+        enable_monitoring: bool = Field(
+            default=True, description="Enable comprehensive monitoring and logging"
+        ),
+        environment: str = Field(
+            default="development", description="Target deployment environment"
+        ),
         custom_scopes: str = Field(
             default="https://www.googleapis.com/auth/chat.bot",
-            description="Comma-separated list of custom OAuth scopes required"
+            description="Comma-separated list of custom OAuth scopes required",
         ),
         app_name: str = Field(default="ChatBot", description="Application name"),
-        app_version: str = Field(default="1.0.0", description="Application version")
+        app_version: str = Field(default="1.0.0", description="Application version"),
     ) -> list[Message]:
         """
         Generate comprehensive setup guide for Google Chat applications with platform-specific
         deployment instructions and advanced configuration options.
         """
-        
+
         request_id = context.request_id
-        services_list = ", ".join(required_services.split(','))
-        scopes_list = "\n".join([f"- {scope.strip()}" for scope in custom_scopes.split(',')])
-        
+        services_list = ", ".join(required_services.split(","))
+        scopes_list = "\n".join(
+            [f"- {scope.strip()}" for scope in custom_scopes.split(",")]
+        )
+
         setup_messages = [
             Message(
                 role="assistant",
-                content=TextContent(text=f"""
+                content=TextContent(
+                    text=f"""
 # Google Chat App Setup Guide
 *Request ID: {request_id}*
 
@@ -219,11 +232,13 @@ This {complexity_description} implementation showcases FastMCP's advanced parame
 {scopes_list}
 
 ## Authentication Setup ({authentication_type.replace('_', ' ').title()})
-""")
+"""
+                ),
             ),
             Message(
                 role="assistant",
-                content=TextContent(text=f"""
+                content=TextContent(
+                    text=f"""
 ## Step-by-Step Setup
 
 ### 1. Enable Google Chat API
@@ -242,11 +257,13 @@ gcloud iam service-accounts keys create service-account-key.json \\
 ```
 
 ### 3. Deploy to {deployment_target.replace('_', ' ').title()}
-""")
+"""
+                ),
             ),
             Message(
                 role="assistant",
-                content=TextContent(text=f"""
+                content=TextContent(
+                    text=f"""
 ## Platform-Specific Deployment
 
 ### {deployment_target.replace('_', ' ').title()} Configuration
@@ -276,58 +293,72 @@ automatic_scaling:
 - [ ] Monitoring and logging enabled
 
 This setup guide demonstrates FastMCP's sophisticated parameter handling and multi-message responses.
-""")
-            )
+"""
+                ),
+            ),
         ]
-        
+
         return setup_messages
 
     @mcp.prompt(
         name="google_chat_service_integration",
         description="Advanced Google Workspace service integration patterns with workflow automation",
-        tags={"google_chat", "integration", "workflow", "automation"}
+        tags={"google_chat", "integration", "workflow", "automation"},
     )
     def google_chat_service_integration(
-          context: Context,
-        primary_service: str = Field(default="drive", description="Primary Google service to integrate"),
+        context: Context,
+        primary_service: str = Field(
+            default="drive", description="Primary Google service to integrate"
+        ),
         secondary_services: str = Field(
             default="calendar,gmail",
-            description="Comma-separated list of additional services for workflow integration"
+            description="Comma-separated list of additional services for workflow integration",
         ),
-        workflow_type: str = Field(default="collaborative", description="Type of workflow to implement"),
+        workflow_type: str = Field(
+            default="collaborative", description="Type of workflow to implement"
+        ),
         automation_level: float = Field(
             default=0.6,
             ge=0.0,
             le=1.0,
-            description="Automation level from 0.0 (manual) to 1.0 (fully automated)"
+            description="Automation level from 0.0 (manual) to 1.0 (fully automated)",
         ),
-        enable_notifications: bool = Field(default=True, description="Enable automated notifications"),
-        sync_frequency: str = Field(default="realtime", description="Synchronization frequency"),
-        data_format: str = Field(default="json", description="Data format for integration"),
+        enable_notifications: bool = Field(
+            default=True, description="Enable automated notifications"
+        ),
+        sync_frequency: str = Field(
+            default="realtime", description="Synchronization frequency"
+        ),
+        data_format: str = Field(
+            default="json", description="Data format for integration"
+        ),
         trigger_events: str = Field(
             default="file_created,calendar_updated",
-            description="Comma-separated list of events that trigger workflow actions"
+            description="Comma-separated list of events that trigger workflow actions",
         ),
-      
     ) -> PromptMessage:
         """
         Generate advanced integration patterns for Google Workspace services with
         automated workflow capabilities and real-time synchronization.
         """
-        
+
         request_id = context.request_id
-        secondary_list = ", ".join(secondary_services.split(','))
-        triggers_list = ", ".join(trigger_events.split(','))
-        automation_desc = "manual" if automation_level < 0.3 else "semi-automated" if automation_level < 0.7 else "fully automated"
-        
+        secondary_list = ", ".join(secondary_services.split(","))
+        triggers_list = ", ".join(trigger_events.split(","))
+        automation_desc = (
+            "manual"
+            if automation_level < 0.3
+            else "semi-automated" if automation_level < 0.7 else "fully automated"
+        )
+
         # Create integration settings from available parameters
         integration_settings = {
-            'sync_frequency': sync_frequency,
-            'data_format': data_format,
-            'enable_notifications': enable_notifications,
-            'automation_level': automation_level
+            "sync_frequency": sync_frequency,
+            "data_format": data_format,
+            "enable_notifications": enable_notifications,
+            "automation_level": automation_level,
         }
-        
+
         integration_guide = f"""
 # Advanced Google Workspace Service Integration
 *Request ID: {request_id}*
@@ -421,56 +452,70 @@ async def handle_workflow_event(event_type, event_data):
 
 This integration pattern showcases FastMCP's advanced typing system and complex parameter handling capabilities.
 """
-        
+
         return PromptMessage(
-            content=TextContent(text=integration_guide),
-            role="assistant"
+            content=TextContent(text=integration_guide), role="assistant"
         )
 
     @mcp.prompt(
         name="google_chat_deployment_guide",
         description="Production deployment guide with monitoring, scaling, and security best practices",
-        tags={"google_chat", "deployment", "production", "monitoring", "security"}
+        tags={"google_chat", "deployment", "production", "monitoring", "security"},
     )
     def google_chat_deployment_guide(
         context: Context,
-        deployment_target: str = Field(default="cloud_run", description="Target deployment platform"),
-        environment: str = Field(default="production", description="Deployment environment"),
-        monitoring_level: str = Field(default="comprehensive", description="Level of monitoring to implement"),
-        enable_auto_scaling: bool = Field(default=True, description="Enable automatic scaling based on load"),
+        deployment_target: str = Field(
+            default="cloud_run", description="Target deployment platform"
+        ),
+        environment: str = Field(
+            default="production", description="Deployment environment"
+        ),
+        monitoring_level: str = Field(
+            default="comprehensive", description="Level of monitoring to implement"
+        ),
+        enable_auto_scaling: bool = Field(
+            default=True, description="Enable automatic scaling based on load"
+        ),
         security_features: str = Field(
             default="oauth,encryption,audit_logging",
-            description="Comma-separated list of security features to enable"
+            description="Comma-separated list of security features to enable",
         ),
-        max_instances: str = Field(default="50", description="Maximum number of instances"),
-        memory: str = Field(default="2Gi", description="Memory allocation per instance"),
+        max_instances: str = Field(
+            default="50", description="Maximum number of instances"
+        ),
+        memory: str = Field(
+            default="2Gi", description="Memory allocation per instance"
+        ),
         cpu: str = Field(default="1000m", description="CPU allocation per instance"),
         backup_strategy: str = Field(
             default="automated,cross_region",
-            description="Comma-separated list of backup and disaster recovery strategies"
+            description="Comma-separated list of backup and disaster recovery strategies",
         ),
-        compliance_requirements: bool = Field(default=True, description="Enable compliance features (GDPR, SOC2, etc.)")
+        compliance_requirements: bool = Field(
+            default=True, description="Enable compliance features (GDPR, SOC2, etc.)"
+        ),
     ) -> list[Message]:
         """
         Generate comprehensive production deployment guide with enterprise-grade
         monitoring, security, and scaling configurations.
         """
-        
+
         request_id = context.request_id
-        security_list = ", ".join(security_features.split(','))
-        backup_list = ", ".join(backup_strategy.split(','))
-        
+        security_list = ", ".join(security_features.split(","))
+        backup_list = ", ".join(backup_strategy.split(","))
+
         # Create performance settings from available parameters
         performance_settings = {
-            'max_instances': max_instances,
-            'memory': memory,
-            'cpu': cpu
+            "max_instances": max_instances,
+            "memory": memory,
+            "cpu": cpu,
         }
-        
+
         deployment_messages = [
             Message(
                 role="assistant",
-                content=TextContent(text=f"""
+                content=TextContent(
+                    text=f"""
 # Production Deployment Guide
 *Request ID: {request_id}*
 
@@ -491,11 +536,13 @@ This integration pattern showcases FastMCP's advanced typing system and complex 
 
 ## Compliance
 {'Enabled (GDPR, SOC2, HIPAA compatible)' if compliance_requirements else 'Basic compliance only'}
-""")
+"""
+                ),
             ),
             Message(
                 role="assistant",
-                content=TextContent(text=f"""
+                content=TextContent(
+                    text=f"""
 ## Infrastructure as Code
 
 ### {deployment_target.replace('_', ' ').title()} Configuration
@@ -565,11 +612,13 @@ spec:
         type: Utilization
         averageUtilization: 80
 ```
-""")
+"""
+                ),
             ),
             Message(
                 role="assistant",
-                content=TextContent(text=f"""
+                content=TextContent(
+                    text=f"""
 ## Monitoring and Observability
 
 ### {monitoring_level.title()} Monitoring Setup
@@ -638,55 +687,72 @@ data:
 - [ ] Documentation updated
 
 This deployment guide demonstrates FastMCP's ability to handle complex enterprise configurations with sophisticated parameter validation.
-""")
-            )
+"""
+                ),
+            ),
         ]
-        
+
         return deployment_messages
 
     @mcp.prompt(
         name="google_chat_examples_showcase",
         description="Showcase of advanced Google Chat examples with different use cases and implementation patterns",
-        tags={"google_chat", "examples", "showcase", "patterns", "use_cases"}
+        tags={"google_chat", "examples", "showcase", "patterns", "use_cases"},
     )
     def google_chat_examples_showcase(
         context: Context,
-        use_case_category: str = Field(default="business_workflow", description="Category of use case to showcase"),
-        example_category: str = Field(default="interactive_cards", description="Type of examples to generate"),
-        complexity_level: str = Field(default="advanced", description="Complexity level of examples"),
-        include_code_samples: bool = Field(default=True, description="Include complete code implementations"),
+        use_case_category: str = Field(
+            default="business_workflow", description="Category of use case to showcase"
+        ),
+        example_category: str = Field(
+            default="interactive_cards", description="Type of examples to generate"
+        ),
+        complexity_level: str = Field(
+            default="advanced", description="Complexity level of examples"
+        ),
+        include_code_samples: bool = Field(
+            default=True, description="Include complete code implementations"
+        ),
         integration_services: str = Field(
             default="drive,calendar,sheets",
-            description="Comma-separated list of services to integrate in examples"
+            description="Comma-separated list of services to integrate in examples",
         ),
         example_count: float = Field(
             default=3.0,
             ge=1.0,
             le=10.0,
-            description="Number of examples to generate (1.0 to 10.0)"
+            description="Number of examples to generate (1.0 to 10.0)",
         ),
         theme: str = Field(default="corporate", description="UI theme for examples"),
         branding: str = Field(default="enabled", description="Branding options"),
         target_audience: str = Field(
             default="developers,business_users",
-            description="Comma-separated list of target audience for examples"
-        )
+            description="Comma-separated list of target audience for examples",
+        ),
     ) -> PromptMessage:
         """
         Generate comprehensive showcase of Google Chat examples with different use cases,
         implementation patterns, and complexity levels for various audiences.
         """
-        
+
         request_id = context.request_id
         # Handle string parameters - split if comma-separated, otherwise use as-is
-        services_list = [s.strip() for s in integration_services.split(',')] if isinstance(integration_services, str) else integration_services
+        services_list = (
+            [s.strip() for s in integration_services.split(",")]
+            if isinstance(integration_services, str)
+            else integration_services
+        )
         services_text = ", ".join(services_list)
-        
-        audience_list = [s.strip() for s in target_audience.split(',')] if isinstance(target_audience, str) else target_audience
+
+        audience_list = (
+            [s.strip() for s in target_audience.split(",")]
+            if isinstance(target_audience, str)
+            else target_audience
+        )
         audience_text = ", ".join(audience_list)
-        
+
         example_count_int = int(example_count)
-        
+
         examples_content = f"""
 # Google Chat Examples Showcase
 *Request ID: {request_id}*
@@ -990,8 +1056,7 @@ def create_form_card(form_config):
 
 This showcase demonstrates FastMCP's sophisticated parameter handling with complex types, constraints, and validation rules.
 """
-        
+
         return PromptMessage(
-            content=TextContent(text=examples_content),
-            role="assistant"
+            content=TextContent(text=examples_content), role="assistant"
         )

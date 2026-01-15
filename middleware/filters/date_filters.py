@@ -9,20 +9,20 @@ from datetime import datetime
 from typing import Any
 
 
-def format_date_filter(date_input: Any, format_str: str = '%Y-%m-%d %H:%M') -> str:
+def format_date_filter(date_input: Any, format_str: str = "%Y-%m-%d %H:%M") -> str:
     """
     Format a date string or datetime object.
-    
+
     Handles both datetime objects and ISO format date strings, converting
     them to the specified format string.
-    
+
     Args:
         date_input: Date to format (datetime object or ISO string)
         format_str: Python strftime format string (default: '%Y-%m-%d %H:%M')
-        
+
     Returns:
         Formatted date string, or original input if formatting fails
-        
+
     Usage in templates:
         {{ timestamp | format_date }}
         {{ created_at | format_date('%B %d, %Y') }}
@@ -35,7 +35,7 @@ def format_date_filter(date_input: Any, format_str: str = '%Y-%m-%d %H:%M') -> s
         elif isinstance(date_input, str):
             # Try to parse ISO format first
             try:
-                dt = datetime.fromisoformat(date_input.replace('Z', '+00:00'))
+                dt = datetime.fromisoformat(date_input.replace("Z", "+00:00"))
                 return dt.strftime(format_str)
             except ValueError:
                 return date_input
@@ -44,20 +44,20 @@ def format_date_filter(date_input: Any, format_str: str = '%Y-%m-%d %H:%M') -> s
         return str(date_input)
 
 
-def strftime_filter(date_input: Any, format_str: str = '%Y-%m-%d %H:%M:%S') -> str:
+def strftime_filter(date_input: Any, format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
     """
     Format a date using strftime (Jinja2 filter).
-    
+
     Similar to format_date_filter but with a different default format and
     support for callable date inputs (like the now() function).
-    
+
     Args:
         date_input: Date to format (datetime, string, or callable)
         format_str: Python strftime format string (default: '%Y-%m-%d %H:%M:%S')
-        
+
     Returns:
         Formatted date string, or original input if formatting fails
-        
+
     Usage in templates:
         {{ now() | strftime }}
         {{ timestamp | strftime('%A, %B %d, %Y') }}
@@ -70,7 +70,7 @@ def strftime_filter(date_input: Any, format_str: str = '%Y-%m-%d %H:%M:%S') -> s
         elif isinstance(date_input, str):
             # Try to parse ISO format first
             try:
-                dt = datetime.fromisoformat(date_input.replace('Z', '+00:00'))
+                dt = datetime.fromisoformat(date_input.replace("Z", "+00:00"))
                 return dt.strftime(format_str)
             except ValueError:
                 return date_input

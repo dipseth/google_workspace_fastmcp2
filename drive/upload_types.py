@@ -5,11 +5,12 @@ These TypedDict classes define the structure of data returned by Drive upload to
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional
+from typing_extensions import List, Optional, TypedDict
 
 
 class FileUploadInfo(TypedDict):
     """Structure for uploaded file information."""
+
     fileId: str
     fileName: str
     filePath: str
@@ -22,6 +23,7 @@ class FileUploadInfo(TypedDict):
 
 class FolderUploadSummary(TypedDict):
     """Summary statistics for folder upload operation."""
+
     totalFiles: int
     successfulUploads: int
     failedUploads: int
@@ -31,6 +33,7 @@ class FolderUploadSummary(TypedDict):
 
 class UploadFileResponse(TypedDict, total=False):
     """Response structure for upload_file_to_drive and upload_file_to_drive_unified tools."""
+
     success: bool
     userEmail: str
     fileInfo: Optional[FileUploadInfo]  # For single file upload
@@ -43,24 +46,43 @@ class UploadFileResponse(TypedDict, total=False):
 
 class OAuthInstruction(TypedDict):
     """Structure for OAuth instruction step."""
+
     step: int
     instruction: str
 
 
 class OAuthScope(TypedDict):
     """Structure for OAuth scope information."""
+
     service: List[str]  # Changed from str to List[str] to match actual usage
     description: str
 
 
 class StartAuthResponse(TypedDict, total=False):
     """Response structure for start_google_auth tool."""
+
     status: str  # "success" or "error"
     message: str
     authUrl: Optional[str]
     clickableLink: Optional[str]
     userEmail: str
-    serviceName: Optional[List[str]] = ['base', 'drive', 'gmail', 'calendar', 'docs', 'sheets', 'chat', 'forms', 'slides', 'photos', 'admin', 'cloud', 'tasks', 'youtube', 'script']
+    serviceName: Optional[List[str]] = [
+        "base",
+        "drive",
+        "gmail",
+        "calendar",
+        "docs",
+        "sheets",
+        "chat",
+        "forms",
+        "slides",
+        "photos",
+        "admin",
+        "cloud",
+        "tasks",
+        "youtube",
+        "script",
+    ]
     instructions: Optional[List[str]]
     scopesIncluded: Optional[List[str]]
     note: Optional[str]
@@ -69,6 +91,7 @@ class StartAuthResponse(TypedDict, total=False):
 
 class CheckAuthResponse(TypedDict, total=False):
     """Response structure for check_drive_auth tool."""
+
     authenticated: bool
     userEmail: str
     message: str

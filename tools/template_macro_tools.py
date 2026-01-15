@@ -15,35 +15,38 @@ Key Features:
 - Consistent types with template resource system
 """
 
-import logging
-from typing import Optional, Dict, Any
-from pathlib import Path
+from typing import Annotated, Any, Dict, Optional
 
-from fastmcp import FastMCP, Context
+from fastmcp import Context, FastMCP
 from fastmcp.server.dependencies import get_context
-from pydantic import Field
-from typing import Annotated
-from tools.common_types import UserGoogleEmail
+from pydantic import BaseModel, Field
+
 from config.enhanced_logging import setup_logger
 from resources.template_resources import MacroInfo
-from pydantic import BaseModel
-from datetime import datetime
+from tools.common_types import UserGoogleEmail
 
 logger = setup_logger()
 
 
 class MacroCreationResponse(BaseModel):
     """Response for macro creation operations."""
+
     success: bool = Field(description="Whether the macro was created successfully")
-    macro: Optional[MacroInfo] = Field(description="Created macro information if successful", default=None)
-    errors: list[str] = Field(description="List of error messages if creation failed", default_factory=list)
-    usage_info: Optional[Dict[str, Any]] = Field(description="Usage information for the created macro", default=None)
+    macro: Optional[MacroInfo] = Field(
+        description="Created macro information if successful", default=None
+    )
+    errors: list[str] = Field(
+        description="List of error messages if creation failed", default_factory=list
+    )
+    usage_info: Optional[Dict[str, Any]] = Field(
+        description="Usage information for the created macro", default=None
+    )
 
 
 def get_template_middleware_from_context():
     """
     Extract the EnhancedTemplateMiddleware instance from FastMCP context.
-    
+
     Returns:
         EnhancedTemplateMiddleware instance or None if not found
     """
@@ -58,36 +61,51 @@ def get_template_middleware_from_context():
 
 async def create_template_macro(
     ctx: Context,
-    macro_name: Annotated[str, Field(
-        description="Name of the macro to create (must be a valid Python identifier)",
-        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
-        min_length=1,
-        max_length=100
-    )],
-    macro_content: Annotated[str, Field(
-        description="Complete Jinja2 macro definition including {% macro %} and {% endmacro %} tags",
-        min_length=10,
-        max_length=50000
-    )],
-    description: Annotated[str, Field(
-        description="Optional description of the macro's purpose and functionality",
-        max_length=1000
-    )] = "",
-    usage_example: Annotated[str, Field(
-        description="Optional usage example showing how to call the macro",
-        max_length=500
-    )] = "",
-    persist_to_file: Annotated[bool, Field(
-        description="Whether to save the macro to a .j2 file for permanent availability"
-    )] = False
+    macro_name: Annotated[
+        str,
+        Field(
+            description="Name of the macro to create (must be a valid Python identifier)",
+            pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+            min_length=1,
+            max_length=100,
+        ),
+    ],
+    macro_content: Annotated[
+        str,
+        Field(
+            description="Complete Jinja2 macro definition including {% macro %} and {% endmacro %} tags",
+            min_length=10,
+            max_length=50000,
+        ),
+    ],
+    description: Annotated[
+        str,
+        Field(
+            description="Optional description of the macro's purpose and functionality",
+            max_length=1000,
+        ),
+    ] = "",
+    usage_example: Annotated[
+        str,
+        Field(
+            description="Optional usage example showing how to call the macro",
+            max_length=500,
+        ),
+    ] = "",
+    persist_to_file: Annotated[
+        bool,
+        Field(
+            description="Whether to save the macro to a .j2 file for permanent availability"
+        ),
+    ] = False,
 ) -> MacroCreationResponse:
     """
     Create and register a new Jinja2 template macro dynamically.
-    
+
     This tool allows LLMs to create custom template macros that are immediately available
     for use in any tool parameter that supports Jinja2 templating. The macro is registered
     in the existing template system and can optionally be persisted to disk.
-    
+
     Args:
         ctx: FastMCP Context for accessing middleware
         macro_name: Name of the macro (must be valid Python identifier)
@@ -95,10 +113,10 @@ async def create_template_macro(
         description: Optional description of macro purpose
         usage_example: Optional example showing how to use the macro
         persist_to_file: Whether to save macro to templates/dynamic/ directory
-        
+
     Returns:
         MacroCreationResponse with creation status, macro info, and any errors
-        
+
     Example:
         create_template_macro(
             macro_name="render_task_list",
@@ -122,84 +140,82 @@ async def create_template_macro(
     """
     try:
         await ctx.info(f"Creating template macro '{macro_name}'...")
-        
+
         # Get the template middleware from context
         template_middleware = get_template_middleware_from_context()
         if not template_middleware:
             error_msg = "Template middleware not available - cannot create macros"
             await ctx.error(error_msg)
-            return {
-                "success": False,
-                "macro_name": macro_name,
-                "errors": [error_msg]
-            }
-        
+            return {"success": False, "macro_name": macro_name, "errors": [error_msg]}
+
         # Access the macro manager
         macro_manager = template_middleware.macro_manager
-        
+
         await ctx.info(f"Validating macro syntax for '{macro_name}'...")
-        
+
         # Create the macro using the extended MacroManager
         result = macro_manager.add_dynamic_macro(
             macro_name=macro_name,
             macro_content=macro_content,
             description=description,
             usage_example=usage_example,
-            persist_to_file=persist_to_file
+            persist_to_file=persist_to_file,
         )
-        
+
         if result["success"]:
             success_msg = f"✅ Macro '{macro_name}' created successfully!"
             await ctx.info(success_msg)
-            
+
             if persist_to_file:
-                await ctx.info(f"💾 Macro persisted to templates/dynamic/{macro_name}.j2")
-            
-            await ctx.info(f"🔍 Macro immediately available via: template://macros/{macro_name}")
-            
+                await ctx.info(
+                    f"💾 Macro persisted to templates/dynamic/{macro_name}.j2"
+                )
+
+            await ctx.info(
+                f"🔍 Macro immediately available via: template://macros/{macro_name}"
+            )
+
             # Add usage information to result
             result["usage_info"] = {
                 "immediate_availability": f"template://macros/{macro_name}",
-                "template_usage": result.get("macro_info", {}).get("usage_example", f"{{{{ {macro_name}() }}}}"),
-                "persisted": persist_to_file
+                "template_usage": result.get("macro_info", {}).get(
+                    "usage_example", f"{{{{ {macro_name}() }}}}"
+                ),
+                "persisted": persist_to_file,
             }
-            
-            logger.info(f"🎉 Successfully created macro '{macro_name}' via FastMCP tool")
-            
+
+            logger.info(
+                f"🎉 Successfully created macro '{macro_name}' via FastMCP tool"
+            )
+
         else:
             error_msg = f"❌ Failed to create macro '{macro_name}': {'; '.join(result.get('errors', []))}"
             await ctx.warning(error_msg)
             logger.warning(f"⚠️ Macro creation failed: {macro_name}")
-        
+
         return result
-        
+
     except Exception as e:
         error_msg = f"Unexpected error creating macro '{macro_name}': {str(e)}"
         await ctx.error(error_msg)
         logger.error(f"❌ Template macro creation error: {e}", exc_info=True)
-        
-        return {
-            "success": False,
-            "macro_name": macro_name,
-            "errors": [error_msg]
-        }
 
-
+        return {"success": False, "macro_name": macro_name, "errors": [error_msg]}
 
 
 def setup_template_macro_tools(mcp: FastMCP) -> None:
     """
     Register template macro management tools with the FastMCP server.
-    
+
     This function registers the template macro tools:
     1. create_template_macro: Create new Jinja2 macros dynamically
     2. list_template_macros: List all available macros with metadata
     3. remove_template_macro: Remove dynamically created macros
-    
+
     Args:
         mcp: FastMCP server instance to register tools with
     """
-    
+
     @mcp.tool(
         name="create_template_macro",
         description="Create and register a new Jinja2 template macro dynamically",
@@ -209,52 +225,74 @@ def setup_template_macro_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def create_template_macro_tool(
         ctx: Context,
-        macro_name: Annotated[str, Field(
-            description="Name of the macro to create (must be a valid Python identifier)",
-            pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
-            min_length=1,
-            max_length=100,
-            examples=["render_task_list", "format_user_info", "create_status_badge"]
-        )],
-        macro_content: Annotated[str, Field(
-            description="Complete Jinja2 macro definition including {% macro %} and {% endmacro %} tags",
-            min_length=10,
-            max_length=50000,
-            examples=[
-                "{% macro greeting(name) %}Hello {{ name }}!{% endmacro %}",
-                "{% macro task_card(task) %}<div class='task'>{{ task.name }}</div>{% endmacro %}"
-            ]
-        )],
-        description: Annotated[str, Field(
-            description="Optional description of the macro's purpose and functionality",
-            max_length=1000,
-            examples=["Creates a greeting message", "Renders a task card with styling"]
-        )] = "",
-        usage_example: Annotated[str, Field(
-            description="Optional usage example showing how to call the macro in templates",
-            max_length=500,
-            examples=[
-                "{{ greeting('John') }}",
-                "{{ task_card(service://asana/tasks/123) }}"
-            ]
-        )] = "",
-        persist_to_file: Annotated[bool, Field(
-            description="Whether to save the macro to a .j2 file for permanent availability across server restarts"
-        )] = False,
-        user_google_email: UserGoogleEmail = None
+        macro_name: Annotated[
+            str,
+            Field(
+                description="Name of the macro to create (must be a valid Python identifier)",
+                pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+                min_length=1,
+                max_length=100,
+                examples=[
+                    "render_task_list",
+                    "format_user_info",
+                    "create_status_badge",
+                ],
+            ),
+        ],
+        macro_content: Annotated[
+            str,
+            Field(
+                description="Complete Jinja2 macro definition including {% macro %} and {% endmacro %} tags",
+                min_length=10,
+                max_length=50000,
+                examples=[
+                    "{% macro greeting(name) %}Hello {{ name }}!{% endmacro %}",
+                    "{% macro task_card(task) %}<div class='task'>{{ task.name }}</div>{% endmacro %}",
+                ],
+            ),
+        ],
+        description: Annotated[
+            str,
+            Field(
+                description="Optional description of the macro's purpose and functionality",
+                max_length=1000,
+                examples=[
+                    "Creates a greeting message",
+                    "Renders a task card with styling",
+                ],
+            ),
+        ] = "",
+        usage_example: Annotated[
+            str,
+            Field(
+                description="Optional usage example showing how to call the macro in templates",
+                max_length=500,
+                examples=[
+                    "{{ greeting('John') }}",
+                    "{{ task_card(service://asana/tasks/123) }}",
+                ],
+            ),
+        ] = "",
+        persist_to_file: Annotated[
+            bool,
+            Field(
+                description="Whether to save the macro to a .j2 file for permanent availability across server restarts"
+            ),
+        ] = False,
+        user_google_email: UserGoogleEmail = None,
     ) -> MacroCreationResponse:
         """
         Create and register a new Jinja2 template macro dynamically.
-        
+
         This tool allows you to create custom template macros that become immediately
         available for use in any tool parameter that supports Jinja2 templating.
         Created macros are discoverable via template://macros resources.
-        
+
         Args:
             ctx: FastMCP Context (automatically injected)
             macro_name: Name of the macro (must be valid Python identifier)
@@ -263,12 +301,12 @@ def setup_template_macro_tools(mcp: FastMCP) -> None:
             usage_example: Optional example showing how to use the macro
             persist_to_file: Whether to save macro to templates/dynamic/ directory
             user_google_email: The user's Google email address (auto-injected by middleware)
-            
+
         Returns:
             MacroCreationResponse with creation status, macro info, and any errors
         """
         return await create_template_macro(
             ctx, macro_name, macro_content, description, usage_example, persist_to_file
         )
-    
+
     logger.info("✅ Template macro creation tool registered: create_template_macro")

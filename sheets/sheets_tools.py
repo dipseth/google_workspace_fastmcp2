@@ -4,37 +4,34 @@ Google Sheets MCP Tools
 This module provides MCP tools for interacting with Google Sheets API using the universal service architecture.
 """
 
-import logging
 import asyncio
 import json
-from typing_extensions import List, Optional, Any, Union, Annotated
-from pydantic import Field
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
+from pydantic import Field
+from typing_extensions import Annotated, Any, List, Optional, Union
+
+from auth.service_helpers import get_injected_service, get_service, request_service
+
+# Configure module logger
+from config.enhanced_logging import setup_logger
 
 # Import our custom type for consistent parameter definition
 from tools.common_types import UserGoogleEmailSheets
 
-from auth.service_helpers import request_service, get_injected_service, get_service
 from .sheets_types import (
-    SpreadsheetListResponse,
-    SpreadsheetInfo,
-    SpreadsheetDetailsResponse,
-    SheetInfo,
-    SheetValuesResponse,
-    SheetModifyResponse,
-    CreateSpreadsheetResponse,
     CreateSheetResponse,
-    FormatCellsResponse,
-    UpdateBordersResponse,
-    ConditionalFormattingResponse,
-    MergeCellsResponse,
-    FormatRangeResponse
+    CreateSpreadsheetResponse,
+    FormatRangeResponse,
+    SheetInfo,
+    SheetModifyResponse,
+    SheetValuesResponse,
+    SpreadsheetDetailsResponse,
+    SpreadsheetInfo,
+    SpreadsheetListResponse,
 )
 
-# Configure module logger
-from config.enhanced_logging import setup_logger
 logger = setup_logger()
 
 
@@ -42,24 +39,24 @@ def _parse_json_list(value: Any, field_name: str) -> Optional[List[Any]]:
     """
     Helper function to parse JSON strings or return lists as-is.
     Used for handling MCP client inputs that send JSON strings instead of Python lists.
-    
+
     Args:
         value: The value to parse (could be string, list, or None)
         field_name: Name of the field for error messages
-        
+
     Returns:
         List if successful, None if value is None
-        
+
     Raises:
         ValueError: If parsing fails or type is invalid
     """
     if value is None:
         return None
-        
+
     # If it's already a list, validate and return it
     if isinstance(value, list):
         return value
-    
+
     # If it's a string, try to parse as JSON
     if isinstance(value, str):
         try:
@@ -67,35 +64,41 @@ def _parse_json_list(value: Any, field_name: str) -> Optional[List[Any]]:
             if isinstance(parsed, list):
                 return parsed
             else:
-                raise ValueError(f"Invalid JSON structure for {field_name}: expected list, got {type(parsed).__name__}")
+                raise ValueError(
+                    f"Invalid JSON structure for {field_name}: expected list, got {type(parsed).__name__}"
+                )
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in {field_name}: {e}. Expected valid JSON string or Python list.")
-    
-    raise ValueError(f"Invalid type for {field_name}: expected string (JSON) or list, got {type(value).__name__}")
+            raise ValueError(
+                f"Invalid JSON in {field_name}: {e}. Expected valid JSON string or Python list."
+            )
+
+    raise ValueError(
+        f"Invalid type for {field_name}: expected string (JSON) or list, got {type(value).__name__}"
+    )
 
 
 def _parse_json_dict(value: Any, field_name: str) -> Optional[dict]:
     """
     Helper function to parse JSON strings or return dicts as-is.
     Used for handling MCP client inputs that send JSON strings instead of Python dicts.
-    
+
     Args:
         value: The value to parse (could be string, dict, or None)
         field_name: Name of the field for error messages
-        
+
     Returns:
         Dict if successful, None if value is None
-        
+
     Raises:
         ValueError: If parsing fails or type is invalid
     """
     if value is None:
         return None
-        
+
     # If it's already a dict, return it
     if isinstance(value, dict):
         return value
-    
+
     # If it's a string, try to parse as JSON
     if isinstance(value, str):
         try:
@@ -103,20 +106,26 @@ def _parse_json_dict(value: Any, field_name: str) -> Optional[dict]:
             if isinstance(parsed, dict):
                 return parsed
             else:
-                raise ValueError(f"Invalid JSON structure for {field_name}: expected dict, got {type(parsed).__name__}")
+                raise ValueError(
+                    f"Invalid JSON structure for {field_name}: expected dict, got {type(parsed).__name__}"
+                )
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in {field_name}: {e}. Expected valid JSON string or Python dict.")
-    
-    raise ValueError(f"Invalid type for {field_name}: expected string (JSON) or dict, got {type(value).__name__}")
+            raise ValueError(
+                f"Invalid JSON in {field_name}: {e}. Expected valid JSON string or Python dict."
+            )
+
+    raise ValueError(
+        f"Invalid type for {field_name}: expected string (JSON) or dict, got {type(value).__name__}"
+    )
 
 
 async def _get_sheets_service_with_fallback(user_google_email: str):
     """
     Get Sheets service with fallback pattern.
-    
+
     Args:
         user_google_email: User's Google email address
-        
+
     Returns:
         Google Sheets service instance
     """
@@ -129,44 +138,44 @@ async def _get_sheets_service_with_fallback(user_google_email: str):
             return service
     except Exception as e:
         logger.warning(f"Middleware service injection failed: {e}")
-    
+
     # Fallback to direct service creation
     logger.info("Falling back to direct Sheets service creation")
-    from auth.service_manager import get_google_service
     from auth.compatibility_shim import CompatibilityShim
-    
+    from auth.service_manager import get_google_service
+
     # Get sheets scopes using compatibility shim
     try:
         shim = CompatibilityShim()
         sheets_scopes = [
             shim.get_legacy_scope_groups()["sheets_write"],
-            shim.get_legacy_scope_groups()["sheets_read"]
+            shim.get_legacy_scope_groups()["sheets_read"],
         ]
     except Exception as e:
         logger.warning(f"Failed to get sheets scopes from compatibility shim: {e}")
         # Fallback to hardcoded scopes
         sheets_scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/spreadsheets.readonly"
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
         ]
-    
+
     return await get_google_service(
         user_email=user_google_email,
         service_type="sheets",
         version="v4",
-        scopes=sheets_scopes
+        scopes=sheets_scopes,
     )
 
 
 def setup_sheets_tools(mcp: FastMCP) -> None:
     """
     Setup and register all Google Sheets tools with the MCP server.
-    
+
     Args:
         mcp: The FastMCP server instance to register tools with
     """
     logger.info("Setting up Google Sheets tools")
-    
+
     @mcp.tool(
         name="list_spreadsheets",
         description="List spreadsheets from Google Drive that the user has access to",
@@ -176,12 +185,11 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def list_spreadsheets(
-        user_google_email: UserGoogleEmailSheets = None,
-        max_results: int = 25
+        user_google_email: UserGoogleEmailSheets = None, max_results: int = 25
     ) -> SpreadsheetListResponse:
         """
         Lists spreadsheets from Google Drive that the user has access to.
@@ -193,60 +201,77 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         Returns:
             SpreadsheetListResponse: Structured list of spreadsheets with metadata.
         """
-        logger.info(f"[list_spreadsheets] Invoked. Email: '{user_google_email}', max_results: {max_results}")
-        
+        logger.info(
+            f"[list_spreadsheets] Invoked. Email: '{user_google_email}', max_results: {max_results}"
+        )
+
         # Validate max_results parameter
         if max_results < 1:
             max_results = 1
-            logger.warning(f"max_results was less than 1, setting to 1")
+            logger.warning("max_results was less than 1, setting to 1")
         elif max_results > 1000:
             max_results = 1000
-            logger.warning(f"max_results was greater than 1000, setting to 1000")
+            logger.warning("max_results was greater than 1000, setting to 1000")
 
         try:
             # Get Drive service (spreadsheets are stored in Drive)
             drive_service_key = request_service("drive")
-            
+
             try:
                 # Try to get the injected service from middleware
                 drive_service = get_injected_service(drive_service_key)
-                logger.info(f"Successfully retrieved injected Drive service for {user_google_email}")
-                
+                logger.info(
+                    f"Successfully retrieved injected Drive service for {user_google_email}"
+                )
+
             except RuntimeError as e:
-                if "not yet fulfilled" in str(e).lower() or "service injection" in str(e).lower():
+                if (
+                    "not yet fulfilled" in str(e).lower()
+                    or "service injection" in str(e).lower()
+                ):
                     # Middleware injection failed, fall back to direct service creation
-                    logger.warning(f"Middleware injection unavailable, falling back to direct service creation for {user_google_email}")
-                    
+                    logger.warning(
+                        f"Middleware injection unavailable, falling back to direct service creation for {user_google_email}"
+                    )
+
                     try:
                         # Use the same helper function pattern as Gmail
                         drive_service = await get_service("drive", user_google_email)
-                        logger.info(f"Successfully created Drive service directly for {user_google_email}")
-                        
+                        logger.info(
+                            f"Successfully created Drive service directly for {user_google_email}"
+                        )
+
                     except Exception as direct_error:
-                        logger.error(f"Direct Drive service creation failed for {user_google_email}: {direct_error}")
+                        logger.error(
+                            f"Direct Drive service creation failed for {user_google_email}: {direct_error}"
+                        )
                         return SpreadsheetListResponse(
                             items=[],
                             count=0,
                             userEmail=user_google_email,
-                            error=f"Failed to create Google Drive service. Please check your credentials and permissions."
+                            error="Failed to create Google Drive service. Please check your credentials and permissions.",
                         )
                 else:
                     # Different type of RuntimeError, log and fail
-                    logger.error(f"Drive service injection error for {user_google_email}: {e}")
+                    logger.error(
+                        f"Drive service injection error for {user_google_email}: {e}"
+                    )
                     return SpreadsheetListResponse(
                         items=[],
                         count=0,
                         userEmail=user_google_email,
-                        error=f"Drive service injection error: {e}"
+                        error=f"Drive service injection error: {e}",
                     )
-                    
+
             except Exception as e:
-                logger.error(f"Unexpected error getting Drive service for {user_google_email}: {e}")
+                logger.error(
+                    f"Unexpected error getting Drive service for {user_google_email}: {e}"
+                )
                 return SpreadsheetListResponse(
                     items=[],
                     count=0,
                     userEmail=user_google_email,
-                    error=f"Unexpected error getting Drive service: {e}"
+                    error=f"Unexpected error getting Drive service: {e}",
                 )
 
             files_response = await asyncio.to_thread(
@@ -261,7 +286,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             )
 
             files = files_response.get("files", [])
-            
+
             # Convert to structured format
             spreadsheets: List[SpreadsheetInfo] = []
             for file in files:
@@ -270,35 +295,31 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     "name": file.get("name", "Unknown"),
                     "modifiedTime": file.get("modifiedTime"),
                     "webViewLink": file.get("webViewLink"),
-                    "mimeType": "application/vnd.google-apps.spreadsheet"
+                    "mimeType": "application/vnd.google-apps.spreadsheet",
                 }
                 spreadsheets.append(spreadsheet_info)
 
-            logger.info(f"Successfully listed {len(spreadsheets)} spreadsheets for {user_google_email}.")
-            
+            logger.info(
+                f"Successfully listed {len(spreadsheets)} spreadsheets for {user_google_email}."
+            )
+
             return SpreadsheetListResponse(
                 items=spreadsheets,  # Changed from 'spreadsheets' to 'items' to match TypedDict
                 count=len(spreadsheets),
-                userEmail=user_google_email
+                userEmail=user_google_email,
             )
-        
+
         except HttpError as e:
             error_msg = f"Failed to list spreadsheets: {e}"
             logger.error(f"❌ {error_msg}")
             return SpreadsheetListResponse(
-                items=[],
-                count=0,
-                userEmail=user_google_email,
-                error=error_msg
+                items=[], count=0, userEmail=user_google_email, error=error_msg
             )
         except Exception as e:
             error_msg = f"Unexpected error listing spreadsheets: {str(e)}"
             logger.error(f"❌ {error_msg}")
             return SpreadsheetListResponse(
-                items=[],
-                count=0,
-                userEmail=user_google_email,
-                error=error_msg
+                items=[], count=0, userEmail=user_google_email, error=error_msg
             )
 
     @mcp.tool(
@@ -310,12 +331,11 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def get_spreadsheet_info(
-        spreadsheet_id: str,
-        user_google_email: UserGoogleEmailSheets = None
+        spreadsheet_id: str, user_google_email: UserGoogleEmailSheets = None
     ) -> SpreadsheetDetailsResponse:
         """
         Gets information about a specific spreadsheet including its sheets.
@@ -327,7 +347,9 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         Returns:
             SpreadsheetDetailsResponse: Structured spreadsheet information including title and sheets list.
         """
-        logger.info(f"[get_spreadsheet_info] Invoked. Email: '{user_google_email}', Spreadsheet ID: {spreadsheet_id}")
+        logger.info(
+            f"[get_spreadsheet_info] Invoked. Email: '{user_google_email}', Spreadsheet ID: {spreadsheet_id}"
+        )
 
         try:
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
@@ -347,21 +369,27 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     "sheetId": sheet_props.get("sheetId", 0),
                     "title": sheet_props.get("title", "Unknown"),
                     "index": sheet_props.get("index", 0),
-                    "rowCount": sheet_props.get("gridProperties", {}).get("rowCount", 0),
-                    "columnCount": sheet_props.get("gridProperties", {}).get("columnCount", 0)
+                    "rowCount": sheet_props.get("gridProperties", {}).get(
+                        "rowCount", 0
+                    ),
+                    "columnCount": sheet_props.get("gridProperties", {}).get(
+                        "columnCount", 0
+                    ),
                 }
                 sheets_info.append(sheet_info)
 
-            logger.info(f"Successfully retrieved info for spreadsheet {spreadsheet_id} for {user_google_email}.")
-            
+            logger.info(
+                f"Successfully retrieved info for spreadsheet {spreadsheet_id} for {user_google_email}."
+            )
+
             return SpreadsheetDetailsResponse(
                 spreadsheetId=spreadsheet_id,
                 title=title,
                 sheets=sheets_info,
                 sheetCount=len(sheets),
-                spreadsheetUrl=spreadsheet_url
+                spreadsheetUrl=spreadsheet_url,
             )
-        
+
         except HttpError as e:
             error_msg = f"Failed to get spreadsheet info: {e}"
             logger.error(f"❌ {error_msg}")
@@ -370,7 +398,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 title="",
                 sheets=[],
                 sheetCount=0,
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error getting spreadsheet info: {str(e)}"
@@ -380,7 +408,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 title="",
                 sheets=[],
                 sheetCount=0,
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -392,8 +420,8 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def read_sheet_values(
         spreadsheet_id: str,
@@ -456,21 +484,23 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             )
 
             values = result.get("values", [])
-            
+
             # Calculate row and column counts
             row_count = len(values)
             column_count = max(len(row) for row in values) if values else 0
-            
-            logger.info(f"Successfully read {row_count} rows from range '{range_name}' for {user_google_email}.")
-            
+
+            logger.info(
+                f"Successfully read {row_count} rows from range '{range_name}' for {user_google_email}."
+            )
+
             return SheetValuesResponse(
                 spreadsheetId=spreadsheet_id,
                 range=range_name,
                 values=values,
                 rowCount=row_count,
-                columnCount=column_count
+                columnCount=column_count,
             )
-        
+
         except HttpError as e:
             error_msg = f"Failed to read sheet values: {e}"
             logger.error(f"❌ {error_msg}")
@@ -480,7 +510,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 values=[],
                 rowCount=0,
                 columnCount=0,
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error reading sheet values: {str(e)}"
@@ -491,7 +521,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 values=[],
                 rowCount=0,
                 columnCount=0,
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -503,8 +533,8 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": True,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def modify_sheet_values(
         spreadsheet_id: str,
@@ -513,24 +543,24 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             Optional[Union[str, List[List[str]]]],
             Field(
                 default=None,
-                description="2D array of values to write/update. Can be Python list [[\"cell1\", \"cell2\"], [\"cell3\", \"cell4\"]] or JSON string '[[\"cell1\", \"cell2\"], [\"cell3\", \"cell4\"]]'. Required unless clear_values=True."
-            )
+                description='2D array of values to write/update. Can be Python list [["cell1", "cell2"], ["cell3", "cell4"]] or JSON string \'[["cell1", "cell2"], ["cell3", "cell4"]]\'. Required unless clear_values=True.',
+            ),
         ] = None,
         value_input_option: Annotated[
             str,
             Field(
                 default="USER_ENTERED",
-                description="How to interpret input values: 'RAW' (values not parsed) or 'USER_ENTERED' (values parsed as if typed by user)"
-            )
+                description="How to interpret input values: 'RAW' (values not parsed) or 'USER_ENTERED' (values parsed as if typed by user)",
+            ),
         ] = "USER_ENTERED",
         clear_values: Annotated[
             bool,
             Field(
                 default=False,
-                description="If True, clears the range instead of writing values. When True, 'values' parameter is ignored."
-            )
+                description="If True, clears the range instead of writing values. When True, 'values' parameter is ignored.",
+            ),
         ] = False,
-        user_google_email: UserGoogleEmailSheets = None
+        user_google_email: UserGoogleEmailSheets = None,
     ) -> SheetModifyResponse:
         """
         Modifies values in a specific range of a Google Sheet - can write, update, or clear values.
@@ -547,7 +577,9 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             SheetModifyResponse: Structured response with details of the modification operation.
         """
         operation = "clear" if clear_values else "write"
-        logger.info(f"[modify_sheet_values] Invoked. Operation: {operation}, Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Range: {range_name}")
+        logger.info(
+            f"[modify_sheet_values] Invoked. Operation: {operation}, Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Range: {range_name}"
+        )
 
         try:
             # Parse values parameter to handle JSON strings from MCP clients
@@ -556,14 +588,18 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 try:
                     parsed_values = _parse_json_list(values, "values")
                     # Validate that it's a 2D array of strings
-                    if parsed_values and not all(isinstance(row, list) and all(isinstance(cell, str) for cell in row) for row in parsed_values):
+                    if parsed_values and not all(
+                        isinstance(row, list)
+                        and all(isinstance(cell, str) for cell in row)
+                        for row in parsed_values
+                    ):
                         return SheetModifyResponse(
                             spreadsheetId=spreadsheet_id,
                             range=range_name,
                             operation="error",
                             success=False,
                             message="",
-                            error="Values must be a 2D array of strings (List[List[str]])."
+                            error="Values must be a 2D array of strings (List[List[str]]).",
                         )
                 except ValueError as e:
                     return SheetModifyResponse(
@@ -572,7 +608,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                         operation="error",
                         success=False,
                         message="",
-                        error=str(e)
+                        error=str(e),
                     )
 
             if not clear_values and not parsed_values:
@@ -582,7 +618,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     operation="error",
                     success=False,
                     message="",
-                    error="Either 'values' must be provided or 'clear_values' must be True."
+                    error="Either 'values' must be provided or 'clear_values' must be True.",
                 )
 
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
@@ -596,15 +632,17 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 )
 
                 cleared_range = result.get("clearedRange", range_name)
-                logger.info(f"Successfully cleared range '{cleared_range}' for {user_google_email}.")
-                
+                logger.info(
+                    f"Successfully cleared range '{cleared_range}' for {user_google_email}."
+                )
+
                 return SheetModifyResponse(
                     spreadsheetId=spreadsheet_id,
                     range=range_name,
                     operation="clear",
                     clearedRange=cleared_range,
                     success=True,
-                    message=f"Successfully cleared range '{cleared_range}' in spreadsheet {spreadsheet_id}."
+                    message=f"Successfully cleared range '{cleared_range}' in spreadsheet {spreadsheet_id}.",
                 )
             else:
                 body = {"values": parsed_values}
@@ -625,8 +663,10 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 updated_rows = result.get("updatedRows", 0)
                 updated_columns = result.get("updatedColumns", 0)
 
-                logger.info(f"Successfully updated {updated_cells} cells for {user_google_email}.")
-                
+                logger.info(
+                    f"Successfully updated {updated_cells} cells for {user_google_email}."
+                )
+
                 return SheetModifyResponse(
                     spreadsheetId=spreadsheet_id,
                     range=range_name,
@@ -635,9 +675,9 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     updatedRows=updated_rows,
                     updatedColumns=updated_columns,
                     success=True,
-                    message=f"Successfully updated range '{range_name}' in spreadsheet {spreadsheet_id}. Updated: {updated_cells} cells, {updated_rows} rows, {updated_columns} columns."
+                    message=f"Successfully updated range '{range_name}' in spreadsheet {spreadsheet_id}. Updated: {updated_cells} cells, {updated_rows} rows, {updated_columns} columns.",
                 )
-        
+
         except HttpError as e:
             error_msg = f"Failed to modify sheet values: {e}"
             logger.error(f"❌ {error_msg}")
@@ -647,7 +687,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 operation="clear" if clear_values else "update",
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error modifying sheet values: {str(e)}"
@@ -658,7 +698,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 operation="clear" if clear_values else "update",
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -670,8 +710,8 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def create_spreadsheet(
         title: str,
@@ -680,9 +720,9 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             Optional[Union[str, List[str]]],
             Field(
                 default=None,
-                description="List of sheet names to create. Can be Python list [\"Sheet1\", \"Sheet2\"] or JSON string '[\"Sheet1\", \"Sheet2\"]'. If not provided, creates one sheet with default name."
-            )
-        ] = None
+                description='List of sheet names to create. Can be Python list ["Sheet1", "Sheet2"] or JSON string \'["Sheet1", "Sheet2"]\'. If not provided, creates one sheet with default name.',
+            ),
+        ] = None,
     ) -> CreateSpreadsheetResponse:
         """
         Creates a new Google Spreadsheet.
@@ -695,7 +735,9 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         Returns:
             CreateSpreadsheetResponse: Structured response with information about the newly created spreadsheet.
         """
-        logger.info(f"[create_spreadsheet] Invoked. Email: '{user_google_email}', Title: {title}")
+        logger.info(
+            f"[create_spreadsheet] Invoked. Email: '{user_google_email}', Title: {title}"
+        )
 
         parsed_sheet_names: Optional[List[str]] = None
 
@@ -707,7 +749,9 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 try:
                     parsed_sheet_names = _parse_json_list(sheet_names, "sheet_names")
                     # Validate that all items are strings
-                    if parsed_sheet_names and not all(isinstance(name, str) for name in parsed_sheet_names):
+                    if parsed_sheet_names and not all(
+                        isinstance(name, str) for name in parsed_sheet_names
+                    ):
                         return CreateSpreadsheetResponse(
                             spreadsheetId="",
                             spreadsheetUrl="",
@@ -715,7 +759,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                             sheets=sheet_names,
                             success=False,
                             message="",
-                            error="All sheet names must be strings."
+                            error="All sheet names must be strings.",
                         )
                 except ValueError as e:
                     return CreateSpreadsheetResponse(
@@ -725,18 +769,15 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                         sheets=sheet_names,
                         success=False,
                         message="",
-                        error=str(e)
+                        error=str(e),
                     )
 
-            spreadsheet_body = {
-                "properties": {
-                    "title": title
-                }
-            }
+            spreadsheet_body = {"properties": {"title": title}}
 
             if parsed_sheet_names:
                 spreadsheet_body["sheets"] = [
-                    {"properties": {"title": sheet_name}} for sheet_name in parsed_sheet_names
+                    {"properties": {"title": sheet_name}}
+                    for sheet_name in parsed_sheet_names
                 ]
 
             spreadsheet = await asyncio.to_thread(
@@ -746,17 +787,19 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             spreadsheet_id = spreadsheet.get("spreadsheetId")
             spreadsheet_url = spreadsheet.get("spreadsheetUrl")
 
-            logger.info(f"Successfully created spreadsheet for {user_google_email}. ID: {spreadsheet_id}")
-            
+            logger.info(
+                f"Successfully created spreadsheet for {user_google_email}. ID: {spreadsheet_id}"
+            )
+
             return CreateSpreadsheetResponse(
                 spreadsheetId=spreadsheet_id,
                 spreadsheetUrl=spreadsheet_url,
                 title=title,
                 sheets=parsed_sheet_names,
                 success=True,
-                message=f"Successfully created spreadsheet '{title}' for {user_google_email}. ID: {spreadsheet_id}"
+                message=f"Successfully created spreadsheet '{title}' for {user_google_email}. ID: {spreadsheet_id}",
             )
-        
+
         except HttpError as e:
             error_msg = f"Failed to create spreadsheet: {e}"
             logger.error(f"❌ {error_msg}")
@@ -764,10 +807,11 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 spreadsheetId="",
                 spreadsheetUrl="",
                 title=title,
-                sheets=parsed_sheet_names or (sheet_names if isinstance(sheet_names, list) else None),
+                sheets=parsed_sheet_names
+                or (sheet_names if isinstance(sheet_names, list) else None),
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error creating spreadsheet: {str(e)}"
@@ -776,10 +820,11 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 spreadsheetId="",
                 spreadsheetUrl="",
                 title=title,
-                sheets=parsed_sheet_names or (sheet_names if isinstance(sheet_names, list) else None),
+                sheets=parsed_sheet_names
+                or (sheet_names if isinstance(sheet_names, list) else None),
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -791,13 +836,13 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def create_sheet(
         spreadsheet_id: str,
         sheet_name: str,
-        user_google_email: UserGoogleEmailSheets = None
+        user_google_email: UserGoogleEmailSheets = None,
     ) -> CreateSheetResponse:
         """
         Creates a new sheet within an existing spreadsheet.
@@ -810,21 +855,15 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         Returns:
             CreateSheetResponse: Structured response with confirmation of the sheet creation.
         """
-        logger.info(f"[create_sheet] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Sheet: {sheet_name}")
+        logger.info(
+            f"[create_sheet] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Sheet: {sheet_name}"
+        )
 
         try:
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
 
             request_body = {
-                "requests": [
-                    {
-                        "addSheet": {
-                            "properties": {
-                                "title": sheet_name
-                            }
-                        }
-                    }
-                ]
+                "requests": [{"addSheet": {"properties": {"title": sheet_name}}}]
             }
 
             response = await asyncio.to_thread(
@@ -835,16 +874,18 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
 
             sheet_id = response["replies"][0]["addSheet"]["properties"]["sheetId"]
 
-            logger.info(f"Successfully created sheet for {user_google_email}. Sheet ID: {sheet_id}")
-            
+            logger.info(
+                f"Successfully created sheet for {user_google_email}. Sheet ID: {sheet_id}"
+            )
+
             return CreateSheetResponse(
                 spreadsheetId=spreadsheet_id,
                 sheetId=sheet_id,
                 sheetName=sheet_name,
                 success=True,
-                message=f"Successfully created sheet '{sheet_name}' (ID: {sheet_id}) in spreadsheet {spreadsheet_id}."
+                message=f"Successfully created sheet '{sheet_name}' (ID: {sheet_id}) in spreadsheet {spreadsheet_id}.",
             )
-        
+
         except HttpError as e:
             error_msg = f"Failed to create sheet: {e}"
             logger.error(f"❌ {error_msg}")
@@ -854,7 +895,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 sheetName=sheet_name,
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error creating sheet: {str(e)}"
@@ -865,7 +906,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 sheetName=sheet_name,
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -877,8 +918,8 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def format_sheet_range(
         spreadsheet_id: str,
@@ -893,19 +934,31 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         bold: Optional[bool] = None,
         italic: Optional[bool] = None,
         font_size: Optional[int] = None,
-        text_color: Optional[Union[str, dict]] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0} or JSON string
-        background_color: Optional[Union[str, dict]] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0} or JSON string
+        text_color: Optional[
+            Union[str, dict]
+        ] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0} or JSON string
+        background_color: Optional[
+            Union[str, dict]
+        ] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0} or JSON string
         horizontal_alignment: Optional[str] = None,  # "LEFT", "CENTER", "RIGHT"
         vertical_alignment: Optional[str] = None,  # "TOP", "MIDDLE", "BOTTOM"
-        number_format_type: Optional[str] = None,  # "TEXT", "NUMBER", "PERCENT", "CURRENCY", "DATE", "TIME", "DATE_TIME", "SCIENTIFIC"
+        number_format_type: Optional[
+            str
+        ] = None,  # "TEXT", "NUMBER", "PERCENT", "CURRENCY", "DATE", "TIME", "DATE_TIME", "SCIENTIFIC"
         number_format_pattern: Optional[str] = None,  # Custom pattern like "$#,##0.00"
         wrap_strategy: Optional[str] = None,  # "WRAP", "CLIP"
         text_rotation: Optional[int] = None,  # Angle in degrees (-90 to 90)
         # Border options (replaces update_sheet_borders)
         apply_borders: bool = False,
-        border_style: Optional[str] = None,  # "SOLID", "DASHED", "DOTTED", "SOLID_MEDIUM", "SOLID_THICK", "DOUBLE"
-        border_color: Optional[Union[str, dict]] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0} or JSON string
-        border_positions: Optional[Union[str, dict]] = None,  # {"top": True, "bottom": True, "left": True, "right": True, "inner_horizontal": False, "inner_vertical": False} or JSON string
+        border_style: Optional[
+            str
+        ] = None,  # "SOLID", "DASHED", "DOTTED", "SOLID_MEDIUM", "SOLID_THICK", "DOUBLE"
+        border_color: Optional[
+            Union[str, dict]
+        ] = None,  # {"red": 0.0-1.0, "green": 0.0-1.0, "blue": 0.0-1.0} or JSON string
+        border_positions: Optional[
+            Union[str, dict]
+        ] = None,  # {"top": True, "bottom": True, "left": True, "right": True, "inner_horizontal": False, "inner_vertical": False} or JSON string
         # Individual border position parameters for convenience
         top_border: Optional[bool] = None,
         bottom_border: Optional[bool] = None,
@@ -914,16 +967,30 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         inner_horizontal_border: Optional[bool] = None,
         inner_vertical_border: Optional[bool] = None,
         # Merge options (replaces merge_cells)
-        merge_cells_option: Optional[str] = None,  # "MERGE_ALL", "MERGE_ROWS", "MERGE_COLUMNS", "UNMERGE"
+        merge_cells_option: Optional[
+            str
+        ] = None,  # "MERGE_ALL", "MERGE_ROWS", "MERGE_COLUMNS", "UNMERGE"
         # Conditional formatting options (replaces add_conditional_formatting)
         conditional_rules: Optional[List[dict]] = None,
         # Simple conditional formatting parameters for convenience
-        condition_type: Optional[str] = None,  # "NUMBER_GREATER", "NUMBER_LESS", "NUMBER_EQ", "TEXT_CONTAINS", "TEXT_EQ", "BLANK", "NOT_BLANK", "CUSTOM_FORMULA"
-        condition_value: Optional[Union[str, float]] = None,  # Value for comparison or formula
-        condition_format_background_color: Optional[Union[str, dict]] = None,  # Background color when condition is met or JSON string
-        condition_format_text_color: Optional[Union[str, dict]] = None,  # Text color when condition is met or JSON string
-        condition_format_bold: Optional[bool] = None,  # Make text bold when condition is met
-        condition_format_italic: Optional[bool] = None,  # Make text italic when condition is met
+        condition_type: Optional[
+            str
+        ] = None,  # "NUMBER_GREATER", "NUMBER_LESS", "NUMBER_EQ", "TEXT_CONTAINS", "TEXT_EQ", "BLANK", "NOT_BLANK", "CUSTOM_FORMULA"
+        condition_value: Optional[
+            Union[str, float]
+        ] = None,  # Value for comparison or formula
+        condition_format_background_color: Optional[
+            Union[str, dict]
+        ] = None,  # Background color when condition is met or JSON string
+        condition_format_text_color: Optional[
+            Union[str, dict]
+        ] = None,  # Text color when condition is met or JSON string
+        condition_format_bold: Optional[
+            bool
+        ] = None,  # Make text bold when condition is met
+        condition_format_italic: Optional[
+            bool
+        ] = None,  # Make text italic when condition is met
         # Column width
         column_width: Optional[int] = None,
         # Row height
@@ -931,7 +998,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         # Freeze rows/columns
         freeze_rows: Optional[int] = None,
         freeze_columns: Optional[int] = None,
-        user_google_email: UserGoogleEmailSheets = None
+        user_google_email: UserGoogleEmailSheets = None,
     ) -> FormatRangeResponse:
         """
         Apply comprehensive formatting to a range in Google Sheets.
@@ -970,23 +1037,56 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         Returns:
             FormatRangeResponse with details of all applied formatting
         """
-        logger.info(f"[format_sheet_range] Applying comprehensive formatting to spreadsheet {spreadsheet_id}, sheet {sheet_id}")
+        logger.info(
+            f"[format_sheet_range] Applying comprehensive formatting to spreadsheet {spreadsheet_id}, sheet {sheet_id}"
+        )
 
         try:
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
 
             requests = []
             formatting_details = {}
-            
+
             # Parse JSON string parameters to dicts
             try:
-                parsed_cell_format = _parse_json_dict(cell_format, "cell_format") if cell_format else None
-                parsed_text_color = _parse_json_dict(text_color, "text_color") if text_color else None
-                parsed_background_color = _parse_json_dict(background_color, "background_color") if background_color else None
-                parsed_border_color = _parse_json_dict(border_color, "border_color") if border_color else None
-                parsed_border_positions = _parse_json_dict(border_positions, "border_positions") if border_positions else None
-                parsed_condition_bg_color = _parse_json_dict(condition_format_background_color, "condition_format_background_color") if condition_format_background_color else None
-                parsed_condition_text_color = _parse_json_dict(condition_format_text_color, "condition_format_text_color") if condition_format_text_color else None
+                parsed_cell_format = (
+                    _parse_json_dict(cell_format, "cell_format")
+                    if cell_format
+                    else None
+                )
+                parsed_text_color = (
+                    _parse_json_dict(text_color, "text_color") if text_color else None
+                )
+                parsed_background_color = (
+                    _parse_json_dict(background_color, "background_color")
+                    if background_color
+                    else None
+                )
+                parsed_border_color = (
+                    _parse_json_dict(border_color, "border_color")
+                    if border_color
+                    else None
+                )
+                parsed_border_positions = (
+                    _parse_json_dict(border_positions, "border_positions")
+                    if border_positions
+                    else None
+                )
+                parsed_condition_bg_color = (
+                    _parse_json_dict(
+                        condition_format_background_color,
+                        "condition_format_background_color",
+                    )
+                    if condition_format_background_color
+                    else None
+                )
+                parsed_condition_text_color = (
+                    _parse_json_dict(
+                        condition_format_text_color, "condition_format_text_color"
+                    )
+                    if condition_format_text_color
+                    else None
+                )
             except ValueError as e:
                 return FormatRangeResponse(
                     spreadsheetId=spreadsheet_id,
@@ -996,17 +1096,17 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     formattingDetails={},
                     success=False,
                     message="",
-                    error=str(e)
+                    error=str(e),
                 )
 
             # 1. Cell formatting (combining cell_format dict with convenience parameters)
             final_cell_format = {}
             fields = []
-            
+
             # Start with cell_format dict if provided
             if parsed_cell_format:
                 final_cell_format.update(parsed_cell_format)
-            
+
             # Override with convenience parameters (they take precedence)
             text_format_updates = {}
             if bold is not None:
@@ -1021,13 +1121,13 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             if parsed_text_color is not None:
                 text_format_updates["foregroundColor"] = parsed_text_color
                 fields.append("userEnteredFormat.textFormat.foregroundColor")
-            
+
             # Merge text format updates
             if text_format_updates:
                 if "textFormat" not in final_cell_format:
                     final_cell_format["textFormat"] = {}
                 final_cell_format["textFormat"].update(text_format_updates)
-            
+
             # Other convenience parameters
             if parsed_background_color is not None:
                 final_cell_format["backgroundColor"] = parsed_background_color
@@ -1048,7 +1148,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             if number_format_type and number_format_pattern:
                 number_format = {
                     "type": number_format_type,
-                    "pattern": number_format_pattern
+                    "pattern": number_format_pattern,
                 }
                 fields.append("userEnteredFormat.numberFormat.type")
                 fields.append("userEnteredFormat.numberFormat.pattern")
@@ -1063,48 +1163,60 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     formattingDetails={},
                     success=False,
                     message="",
-                    error="Both number_format_type and number_format_pattern must be provided together, or neither."
+                    error="Both number_format_type and number_format_pattern must be provided together, or neither.",
                 )
-            
+
             # Create cell format request if we have any formatting
             if final_cell_format and fields:
                 cell_format_request = {}
-                
+
                 # Build text format
                 if "textFormat" in final_cell_format:
                     cell_format_request["textFormat"] = final_cell_format["textFormat"]
-                
+
                 # Other properties
-                for prop in ["backgroundColor", "horizontalAlignment", "verticalAlignment",
-                           "numberFormat", "wrapStrategy", "textRotation"]:
+                for prop in [
+                    "backgroundColor",
+                    "horizontalAlignment",
+                    "verticalAlignment",
+                    "numberFormat",
+                    "wrapStrategy",
+                    "textRotation",
+                ]:
                     if prop in final_cell_format:
                         cell_format_request[prop] = final_cell_format[prop]
-                
-                requests.append({
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": range_start_row,
-                            "endRowIndex": range_end_row,
-                            "startColumnIndex": range_start_col,
-                            "endColumnIndex": range_end_col
-                        },
-                        "cell": {"userEnteredFormat": cell_format_request},
-                        "fields": ",".join(fields)
+
+                requests.append(
+                    {
+                        "repeatCell": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": range_start_row,
+                                "endRowIndex": range_end_row,
+                                "startColumnIndex": range_start_col,
+                                "endColumnIndex": range_end_col,
+                            },
+                            "cell": {"userEnteredFormat": cell_format_request},
+                            "fields": ",".join(fields),
+                        }
                     }
-                })
+                )
                 formatting_details["cellFormat"] = final_cell_format
 
             # 2. Borders (combining border_positions dict with convenience parameters)
             if apply_borders:
                 final_border_style = border_style or "SOLID"
-                final_border_color = parsed_border_color or {"red": 0.0, "green": 0.0, "blue": 0.0}
-                
+                final_border_color = parsed_border_color or {
+                    "red": 0.0,
+                    "green": 0.0,
+                    "blue": 0.0,
+                }
+
                 # Determine border positions
                 final_border_positions = {}
                 if parsed_border_positions:
                     final_border_positions = parsed_border_positions.copy()
-                
+
                 # Override with convenience parameters
                 if top_border is not None:
                     final_border_positions["top"] = top_border
@@ -1118,13 +1230,18 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     final_border_positions["innerHorizontal"] = inner_horizontal_border
                 if inner_vertical_border is not None:
                     final_border_positions["innerVertical"] = inner_vertical_border
-                
+
                 # Default to all borders if none specified
                 if not final_border_positions:
-                    final_border_positions = {"top": True, "bottom": True, "left": True, "right": True}
-                
+                    final_border_positions = {
+                        "top": True,
+                        "bottom": True,
+                        "left": True,
+                        "right": True,
+                    }
+
                 border = {"style": final_border_style, "color": final_border_color}
-                
+
                 border_request = {
                     "updateBorders": {
                         "range": {
@@ -1132,75 +1249,81 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                             "startRowIndex": range_start_row,
                             "endRowIndex": range_end_row,
                             "startColumnIndex": range_start_col,
-                            "endColumnIndex": range_end_col
+                            "endColumnIndex": range_end_col,
                         }
                     }
                 }
-                
+
                 for position, apply in final_border_positions.items():
                     if apply:
                         border_request["updateBorders"][position] = border
-                
+
                 requests.append(border_request)
                 formatting_details["borders"] = {
                     "style": final_border_style,
                     "color": final_border_color,
-                    "positions": final_border_positions
+                    "positions": final_border_positions,
                 }
 
             # 3. Merge cells
             if merge_cells_option:
-                requests.append({
-                    "mergeCells": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": range_start_row,
-                            "endRowIndex": range_end_row,
-                            "startColumnIndex": range_start_col,
-                            "endColumnIndex": range_end_col
-                        },
-                        "mergeType": merge_cells_option
+                requests.append(
+                    {
+                        "mergeCells": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": range_start_row,
+                                "endRowIndex": range_end_row,
+                                "startColumnIndex": range_start_col,
+                                "endColumnIndex": range_end_col,
+                            },
+                            "mergeType": merge_cells_option,
+                        }
                     }
-                })
+                )
                 formatting_details["merge"] = merge_cells_option
 
             # 4. Column width
             if column_width is not None:
-                requests.append({
-                    "updateDimensionProperties": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "dimension": "COLUMNS",
-                            "startIndex": range_start_col,
-                            "endIndex": range_end_col
-                        },
-                        "properties": {"pixelSize": column_width},
-                        "fields": "pixelSize"
+                requests.append(
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "dimension": "COLUMNS",
+                                "startIndex": range_start_col,
+                                "endIndex": range_end_col,
+                            },
+                            "properties": {"pixelSize": column_width},
+                            "fields": "pixelSize",
+                        }
                     }
-                })
+                )
                 formatting_details["columnWidth"] = column_width
 
             # 5. Row height
             if row_height is not None:
-                requests.append({
-                    "updateDimensionProperties": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "dimension": "ROWS",
-                            "startIndex": range_start_row,
-                            "endIndex": range_end_row
-                        },
-                        "properties": {"pixelSize": row_height},
-                        "fields": "pixelSize"
+                requests.append(
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "dimension": "ROWS",
+                                "startIndex": range_start_row,
+                                "endIndex": range_end_row,
+                            },
+                            "properties": {"pixelSize": row_height},
+                            "fields": "pixelSize",
+                        }
                     }
-                })
+                )
                 formatting_details["rowHeight"] = row_height
 
             # 6. Conditional formatting (combining conditional_rules with convenience parameters)
             final_conditional_rules = []
             if conditional_rules:
                 final_conditional_rules.extend(conditional_rules)
-            
+
             # Add simple conditional rule from convenience parameters
             if condition_type:
                 condition = {}
@@ -1208,30 +1331,33 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     if condition_value is not None:
                         condition = {
                             "type": condition_type,
-                            "values": [{"userEnteredValue": str(condition_value)}]
+                            "values": [{"userEnteredValue": str(condition_value)}],
                         }
                 elif condition_type in ["TEXT_CONTAINS", "TEXT_EQ"]:
                     if condition_value is not None:
                         condition = {
                             "type": condition_type,
-                            "values": [{"userEnteredValue": str(condition_value)}]
+                            "values": [{"userEnteredValue": str(condition_value)}],
                         }
                 elif condition_type == "CUSTOM_FORMULA":
                     if condition_value is not None:
                         condition = {
                             "type": "CUSTOM_FORMULA",
-                            "values": [{"userEnteredValue": str(condition_value)}]
+                            "values": [{"userEnteredValue": str(condition_value)}],
                         }
                 elif condition_type in ["BLANK", "NOT_BLANK"]:
                     condition = {"type": condition_type}
-                
+
                 if condition:
                     # Build format for condition
                     format_dict = {}
                     if parsed_condition_bg_color:
                         format_dict["backgroundColor"] = parsed_condition_bg_color
-                    if (parsed_condition_text_color or condition_format_bold is not None
-                        or condition_format_italic is not None):
+                    if (
+                        parsed_condition_text_color
+                        or condition_format_bold is not None
+                        or condition_format_italic is not None
+                    ):
                         text_format = {}
                         if parsed_condition_text_color:
                             text_format["foregroundColor"] = parsed_condition_text_color
@@ -1240,33 +1366,36 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                         if condition_format_italic is not None:
                             text_format["italic"] = condition_format_italic
                         format_dict["textFormat"] = text_format
-                    
+
                     rule = {
-                        "ranges": [{
-                            "sheetId": sheet_id,
-                            "startRowIndex": range_start_row,
-                            "endRowIndex": range_end_row,
-                            "startColumnIndex": range_start_col,
-                            "endColumnIndex": range_end_col
-                        }],
-                        "booleanRule": {
-                            "condition": condition,
-                            "format": format_dict
-                        }
+                        "ranges": [
+                            {
+                                "sheetId": sheet_id,
+                                "startRowIndex": range_start_row,
+                                "endRowIndex": range_end_row,
+                                "startColumnIndex": range_start_col,
+                                "endColumnIndex": range_end_col,
+                            }
+                        ],
+                        "booleanRule": {"condition": condition, "format": format_dict},
                     }
                     final_conditional_rules.append(rule)
-            
+
             # Add conditional formatting rules
             for rule in final_conditional_rules:
-                requests.append({
-                    "addConditionalFormatRule": {
-                        "rule": rule,
-                        "index": 0  # Add at the beginning (highest priority)
+                requests.append(
+                    {
+                        "addConditionalFormatRule": {
+                            "rule": rule,
+                            "index": 0,  # Add at the beginning (highest priority)
+                        }
                     }
-                })
-            
+                )
+
             if final_conditional_rules:
-                formatting_details["conditionalFormatting"] = len(final_conditional_rules)
+                formatting_details["conditionalFormatting"] = len(
+                    final_conditional_rules
+                )
 
             # 7. Freeze rows/columns
             if freeze_rows is not None or freeze_columns is not None:
@@ -1275,17 +1404,24 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     grid_properties["frozenRowCount"] = freeze_rows
                 if freeze_columns is not None:
                     grid_properties["frozenColumnCount"] = freeze_columns
-                
-                requests.append({
-                    "updateSheetProperties": {
-                        "properties": {
-                            "sheetId": sheet_id,
-                            "gridProperties": grid_properties
-                        },
-                        "fields": ",".join([f"gridProperties.{k}" for k in grid_properties.keys()])
+
+                requests.append(
+                    {
+                        "updateSheetProperties": {
+                            "properties": {
+                                "sheetId": sheet_id,
+                                "gridProperties": grid_properties,
+                            },
+                            "fields": ",".join(
+                                [f"gridProperties.{k}" for k in grid_properties.keys()]
+                            ),
+                        }
                     }
-                })
-                formatting_details["freeze"] = {"rows": freeze_rows, "columns": freeze_columns}
+                )
+                formatting_details["freeze"] = {
+                    "rows": freeze_rows,
+                    "columns": freeze_columns,
+                }
 
             # Execute all requests
             if requests:
@@ -1295,10 +1431,12 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     .batchUpdate(spreadsheetId=spreadsheet_id, body=body)
                     .execute
                 )
-                
+
                 range_str = f"R{range_start_row+1}C{range_start_col+1}:R{range_end_row}C{range_end_col}"
-                
-                logger.info(f"Successfully applied {len(requests)} formatting operations to range {range_str}")
+
+                logger.info(
+                    f"Successfully applied {len(requests)} formatting operations to range {range_str}"
+                )
                 return FormatRangeResponse(
                     spreadsheetId=spreadsheet_id,
                     sheetId=sheet_id,
@@ -1306,7 +1444,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     requestsApplied=len(requests),
                     formattingDetails=formatting_details,
                     success=True,
-                    message=f"Successfully applied {len(requests)} formatting operations to range {range_str}"
+                    message=f"Successfully applied {len(requests)} formatting operations to range {range_str}",
                 )
             else:
                 return FormatRangeResponse(
@@ -1316,9 +1454,9 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     requestsApplied=0,
                     formattingDetails={},
                     success=False,
-                    message="No formatting options provided"
+                    message="No formatting options provided",
                 )
-        
+
         except HttpError as e:
             error_msg = f"Failed to apply comprehensive formatting: {e}"
             logger.error(f"❌ {error_msg}")
@@ -1330,7 +1468,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 formattingDetails={},
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error applying comprehensive formatting: {str(e)}"
@@ -1343,7 +1481,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 formattingDetails={},
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
 
     logger.info("✅ Google Sheets tools setup complete")

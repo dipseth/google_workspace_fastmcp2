@@ -5,11 +5,12 @@ These TypedDict classes define the structure of data returned by Forms tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional, Dict, Any, NotRequired
+from typing_extensions import List, NotRequired, Optional, TypedDict
 
 
 class FormResponseAnswer(TypedDict):
     """Structure for a single answer in a form response."""
+
     questionId: str
     questionTitle: str
     answer: str  # Formatted answer text
@@ -17,6 +18,7 @@ class FormResponseAnswer(TypedDict):
 
 class FormResponseInfo(TypedDict):
     """Structure for a single form response entry."""
+
     responseId: str
     submittedTime: str
     respondentEmail: Optional[str]  # May be Anonymous
@@ -25,6 +27,7 @@ class FormResponseInfo(TypedDict):
 
 class FormResponsesListResponse(TypedDict):
     """Response structure for list_form_responses tool."""
+
     responses: List[FormResponseInfo]
     count: int
     formId: str
@@ -37,6 +40,7 @@ class FormResponsesListResponse(TypedDict):
 
 class FormCreationResult(TypedDict):
     """Response structure for create_form tool."""
+
     success: bool
     message: str
     formId: Optional[str]
@@ -48,6 +52,7 @@ class FormCreationResult(TypedDict):
 
 class FormUpdateResult(TypedDict):
     """Response structure for form update operations."""
+
     success: bool
     message: str
     formId: str
@@ -59,6 +64,7 @@ class FormUpdateResult(TypedDict):
 
 class FormQuestion(TypedDict):
     """Structure for a form question."""
+
     itemId: str
     title: str
     type: str
@@ -68,6 +74,7 @@ class FormQuestion(TypedDict):
 
 class FormDetails(TypedDict):
     """Response structure for get_form tool."""
+
     success: bool
     formId: str
     title: str
@@ -82,6 +89,7 @@ class FormDetails(TypedDict):
 
 class FormPublishResult(TypedDict):
     """Response structure for form publishing operations."""
+
     success: bool
     message: str
     formId: str
@@ -97,6 +105,7 @@ class FormPublishResult(TypedDict):
 
 class FormResponseDetails(TypedDict):
     """Response structure for get_form_response tool."""
+
     success: bool
     responseId: str
     formId: str

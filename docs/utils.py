@@ -1,9 +1,9 @@
 """Utility functions for Google Docs tools."""
 
 import io
-import logging
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
+
 from typing_extensions import List, Optional
 
 from config.enhanced_logging import setup_logger

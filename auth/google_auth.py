@@ -5,30 +5,30 @@ import logging
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-import secrets
 import json
 import os
-from typing_extensions import Optional, Tuple, Any, Dict, List, Literal
-from pathlib import Path
-from datetime import datetime, UTC, timedelta
-from enum import Enum
+import secrets
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from enum import Enum
+from pathlib import Path
+
+from typing_extensions import Any, Dict, List, Literal, Optional, Tuple
 
 # Allow insecure transport for local development
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
-from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-
-from config.settings import settings
-from .context import store_session_data, get_session_data, get_session_context
-from .pkce_utils import generate_pkce_pair, pkce_manager
 
 from config.enhanced_logging import setup_logger
+from config.settings import settings
+
+from .context import get_session_context, get_session_data, store_session_data
+from .pkce_utils import pkce_manager
 
 logger = setup_logger()
 
@@ -686,8 +686,8 @@ def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentia
             )
         elif "invalid_client" in error_str.lower():
             raise GoogleAuthError(
-                f"OAuth client configuration is invalid. "
-                f"Please check your GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET settings."
+                "OAuth client configuration is invalid. "
+                "Please check your GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET settings."
             )
         else:
             raise GoogleAuthError(f"Failed to refresh credentials: {e}")
@@ -826,11 +826,11 @@ async def initiate_oauth_flow(
                 final_client_secret = default_config.get("client_secret", "")
                 if final_client_secret:
                     logger.info(
-                        f"🔑 INITIATE: Using default client_secret as fallback for custom client_id"
+                        "🔑 INITIATE: Using default client_secret as fallback for custom client_id"
                     )
                 else:
                     logger.warning(
-                        f"🔑 INITIATE: No client_secret available - this may cause 'client_secret is missing' error"
+                        "🔑 INITIATE: No client_secret available - this may cause 'client_secret is missing' error"
                     )
             except Exception as e:
                 logger.warning(f"🔑 INITIATE: Could not get default client_secret: {e}")
@@ -858,7 +858,7 @@ async def initiate_oauth_flow(
     else:
         # Use default configuration for system credentials
         oauth_config = settings.get_oauth_client_config()
-        logger.info(f"🔑 INITIATE: Using default OAuth configuration")
+        logger.info("🔑 INITIATE: Using default OAuth configuration")
 
     # Verify no problematic scopes are included
     problematic_patterns = [
@@ -1053,7 +1053,7 @@ async def handle_oauth_callback(
         )
 
         # Extract email from authorization response as fallback
-        from urllib.parse import urlparse, parse_qs
+        from urllib.parse import parse_qs, urlparse
 
         try:
             parsed_url = urlparse(authorization_response)
@@ -1087,7 +1087,7 @@ async def handle_oauth_callback(
     custom_client_secret = state_info.get("custom_client_secret")
 
     # DIAGNOSTIC: Log custom credentials retrieval
-    logger.info(f"🔍 CUSTOM_CREDS_DEBUG: Retrieved from state:")
+    logger.info("🔍 CUSTOM_CREDS_DEBUG: Retrieved from state:")
     logger.info(
         f"   custom_client_id: {custom_client_id[:10] + '...' if custom_client_id else 'None'}"
     )
@@ -1118,7 +1118,7 @@ async def handle_oauth_callback(
             if fallback_client_secret and not custom_client_secret:
                 custom_client_secret = fallback_client_secret
                 logger.info(
-                    f"🔗 UNIFIED_SESSION_FALLBACK: Retrieved custom_client_secret"
+                    "🔗 UNIFIED_SESSION_FALLBACK: Retrieved custom_client_secret"
                 )
 
             if fallback_auth_method and not auth_method:
@@ -1154,7 +1154,7 @@ async def handle_oauth_callback(
                     if fallback_client_secret and not custom_client_secret:
                         custom_client_secret = fallback_client_secret
                         logger.info(
-                            f"🔗 CONTEXT_FALLBACK: Retrieved custom_client_secret from session"
+                            "🔗 CONTEXT_FALLBACK: Retrieved custom_client_secret from session"
                         )
 
                     if fallback_auth_method and not auth_method:
@@ -1191,10 +1191,10 @@ async def handle_oauth_callback(
             if code_verifier:
                 # True PKCE flow - should work without client_secret for public clients
                 logger.info(
-                    f"🔑 CALLBACK: PKCE flow without client_secret (public client)"
+                    "🔑 CALLBACK: PKCE flow without client_secret (public client)"
                 )
                 logger.info(
-                    f"🔑 CALLBACK: If this fails, your Google OAuth client type may need to be 'Public application'"
+                    "🔑 CALLBACK: If this fails, your Google OAuth client type may need to be 'Public application'"
                 )
                 # Don't set final_client_secret - leave it None for public client behavior
             else:
@@ -1204,11 +1204,11 @@ async def handle_oauth_callback(
                     final_client_secret = default_config.get("client_secret", "")
                     if final_client_secret:
                         logger.info(
-                            f"🔑 CALLBACK: Using default client_secret for non-PKCE flow"
+                            "🔑 CALLBACK: Using default client_secret for non-PKCE flow"
                         )
                     else:
                         logger.error(
-                            f"🔑 CALLBACK: Non-PKCE flow requires client_secret but none available"
+                            "🔑 CALLBACK: Non-PKCE flow requires client_secret but none available"
                         )
                 except Exception as e:
                     logger.error(
@@ -1229,7 +1229,7 @@ async def handle_oauth_callback(
             logger.info(
                 f"🔑 CALLBACK: Created public client config for PKCE: {custom_client_id[:10]}..."
             )
-            logger.info(f"🔑 CALLBACK: PKCE mode - no client_secret (public client)")
+            logger.info("🔑 CALLBACK: PKCE mode - no client_secret (public client)")
         else:
             # Confidential client or non-PKCE flow
             oauth_config = {
@@ -1252,7 +1252,7 @@ async def handle_oauth_callback(
     else:
         # Use default configuration for system credentials
         oauth_config = settings.get_oauth_client_config()
-        logger.info(f"🔑 CALLBACK: Using default OAuth configuration")
+        logger.info("🔑 CALLBACK: Using default OAuth configuration")
 
     # Use centralized scope registry as single source of truth (same as initiate_oauth_flow)
     from .scope_registry import ScopeRegistry
@@ -1260,7 +1260,7 @@ async def handle_oauth_callback(
     oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
 
     # DIAGNOSTIC LOG: OAuth client_secret debugging - callback phase
-    logger.info(f"🔍 CALLBACK_DEBUG: Creating OAuth flow for token exchange")
+    logger.info("🔍 CALLBACK_DEBUG: Creating OAuth flow for token exchange")
     logger.info(f"🔍 CALLBACK_DEBUG: - oauth_config keys: {list(oauth_config.keys())}")
     logger.info(
         f"🔍 CALLBACK_DEBUG: - client_id: {oauth_config.get('client_id', 'MISSING')[:20]}..."
@@ -1284,7 +1284,7 @@ async def handle_oauth_callback(
     flow.redirect_uri = settings.dynamic_oauth_redirect_uri
 
     # DIAGNOSTIC LOG: Verify flow has client credentials
-    logger.info(f"🔍 CALLBACK_DEBUG: Flow configuration after creation:")
+    logger.info("🔍 CALLBACK_DEBUG: Flow configuration after creation:")
     logger.info(f"🔍 CALLBACK_DEBUG: - flow.client_config: {flow.client_config}")
     logger.info(
         f"🔍 CALLBACK_DEBUG: - flow.client_type: {getattr(flow, 'client_type', 'NOT_SET')}"
@@ -1294,7 +1294,7 @@ async def handle_oauth_callback(
     # Exchange authorization code for credentials
     try:
         # DIAGNOSTIC LOG: OAuth scope inconsistency debugging - callback phase
-        logger.info(f"OAUTH_SCOPE_DEBUG: Processing OAuth callback")
+        logger.info("OAUTH_SCOPE_DEBUG: Processing OAuth callback")
         logger.info(
             f"OAUTH_SCOPE_DEBUG: Authorization response: {authorization_response}"
         )
@@ -1311,7 +1311,7 @@ async def handle_oauth_callback(
             token_kwargs = {}
             if code_verifier:
                 token_kwargs["code_verifier"] = code_verifier
-                logger.info(f"🔐 Added PKCE code verifier to token exchange")
+                logger.info("🔐 Added PKCE code verifier to token exchange")
 
             flow.fetch_token(
                 authorization_response=authorization_response, **token_kwargs
@@ -1325,7 +1325,7 @@ async def handle_oauth_callback(
                 os.environ.pop("OAUTHLIB_RELAX_TOKEN_SCOPE", None)
 
         # DIAGNOSTIC LOG: Check final granted scopes vs requested
-        logger.info(f"OAUTH_SCOPE_DEBUG: OAuth callback successful")
+        logger.info("OAUTH_SCOPE_DEBUG: OAuth callback successful")
         logger.info(
             f"OAUTH_SCOPE_DEBUG: Granted scopes: {getattr(credentials, 'scopes', 'Not available')}"
         )
@@ -1379,9 +1379,9 @@ async def handle_oauth_callback(
 
         # Check if this is the specific scope mismatch error
         if "Scope has changed" in str(e):
-            logger.error(f"OAUTH_SCOPE_DEBUG: SCOPE MISMATCH DETECTED!")
+            logger.error("OAUTH_SCOPE_DEBUG: SCOPE MISMATCH DETECTED!")
             logger.error(
-                f"OAUTH_SCOPE_DEBUG: This is the OAuth scope inconsistency error we're debugging"
+                "OAUTH_SCOPE_DEBUG: This is the OAuth scope inconsistency error we're debugging"
             )
 
         logger.error(f"OAuth callback failed: {e}")

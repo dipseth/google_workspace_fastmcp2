@@ -22,29 +22,28 @@ trust list used by Gmail send/forward tools today and, over time,
 by Chat tools as well.
 """
 
-import logging
-import re
 import asyncio
-from typing_extensions import Optional, Union, List, Annotated
-from pydantic import Field
+import re
 
 from fastmcp import FastMCP
+from googleapiclient.discovery import build
+from pydantic import Field
+from typing_extensions import Annotated, List, Optional, Union
+
+from auth.context import get_auth_middleware
+from config.enhanced_logging import setup_logger
+from config.settings import settings
 
 # Import our custom type for consistent parameter definition
 from tools.common_types import UserGoogleEmail
+
 from .gmail_types import (
-    GmailAllowListResponse,
     AllowedEmailInfo,
-    GmailRecipientsOptional,
     AllowedGroupInfo,
+    GmailAllowListResponse,
+    GmailRecipientsOptional,
 )
-
-from config.settings import settings
 from .utils import _parse_email_addresses
-from auth.context import get_auth_middleware
-from googleapiclient.discovery import build
-
-from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

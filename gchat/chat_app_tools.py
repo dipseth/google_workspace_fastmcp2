@@ -4,20 +4,19 @@ Google Chat App Development Tools
 This module provides comprehensive tools for creating, configuring, and managing Google Chat apps.
 Uses service account authentication for app-level operations.
 """
-import logging
+
 import json
 import os
-from typing_extensions import Optional, Dict, Any, List
 from datetime import datetime
 
 from fastmcp import FastMCP
-from googleapiclient.discovery import build
 from google.oauth2 import service_account
-from googleapiclient.errors import HttpError
-
-from config.settings import Settings
+from googleapiclient.discovery import build
+from typing_extensions import List, Optional
 
 from config.enhanced_logging import setup_logger
+from config.settings import Settings
+
 logger = setup_logger()
 
 # Load settings
@@ -26,33 +25,36 @@ settings = Settings()
 # Import compatibility shim for consolidated scope management
 from auth.compatibility_shim import CompatibilityShim
 
+
 def _get_chat_app_scopes():
     """Get Google Chat API scopes for app development using compatibility shim."""
     try:
         shim = CompatibilityShim()
         return shim.get_legacy_chat_app_scopes()
-    except Exception as e:
+    except Exception:
         # Fallback to hardcoded scopes if shim fails
         return [
-            'https://www.googleapis.com/auth/chat.bot',
-            'https://www.googleapis.com/auth/chat.messages',
-            'https://www.googleapis.com/auth/chat.spaces',
-            'https://www.googleapis.com/auth/chat.apps',
-            'https://www.googleapis.com/auth/cloud-platform'
+            "https://www.googleapis.com/auth/chat.bot",
+            "https://www.googleapis.com/auth/chat.messages",
+            "https://www.googleapis.com/auth/chat.spaces",
+            "https://www.googleapis.com/auth/chat.apps",
+            "https://www.googleapis.com/auth/cloud-platform",
         ]
+
 
 # Google Chat API scopes for app development
 CHAT_APP_SCOPES = _get_chat_app_scopes()
 
+
 class GoogleChatAppManager:
     """Manager for Google Chat app operations using service account."""
-    
+
     def __init__(self):
         self.service_account_file = settings.chat_service_account_file
         self.credentials = None
         self.chat_service = None
         self.project_id = None
-        
+
     async def initialize(self):
         """Initialize service account credentials and Chat service."""
         try:
@@ -61,33 +63,38 @@ class GoogleChatAppManager:
                     "Service account file not configured. Please set CHAT_SERVICE_ACCOUNT_FILE "
                     "environment variable to the path of your Google Cloud service account JSON file."
                 )
-            
+
             if not os.path.exists(self.service_account_file):
-                raise FileNotFoundError(f"Service account file not found: {self.service_account_file}")
-            
+                raise FileNotFoundError(
+                    f"Service account file not found: {self.service_account_file}"
+                )
+
             # Load service account credentials
             self.credentials = service_account.Credentials.from_service_account_file(
-                self.service_account_file,
-                scopes=CHAT_APP_SCOPES
+                self.service_account_file, scopes=CHAT_APP_SCOPES
             )
-            
+
             # Get project ID from service account file
-            with open(self.service_account_file, 'r') as f:
+            with open(self.service_account_file, "r") as f:
                 sa_info = json.load(f)
-                self.project_id = sa_info.get('project_id')
-            
+                self.project_id = sa_info.get("project_id")
+
             # Build Chat service
-            self.chat_service = build('chat', 'v1', credentials=self.credentials)
-            
-            logger.info(f"✅ Google Chat App Manager initialized for project: {self.project_id}")
+            self.chat_service = build("chat", "v1", credentials=self.credentials)
+
+            logger.info(
+                f"✅ Google Chat App Manager initialized for project: {self.project_id}"
+            )
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to initialize Chat App Manager: {e}")
             return False
 
+
 # Lazy initialization - create manager instance when needed
 chat_app_manager = None
+
 
 def get_chat_app_manager():
     """Get or create the chat app manager instance."""
@@ -96,10 +103,11 @@ def get_chat_app_manager():
         chat_app_manager = GoogleChatAppManager()
     return chat_app_manager
 
+
 def setup_chat_app_tools(mcp: FastMCP) -> None:
     """
     Setup and register all Google Chat app development tools.
-    
+
     Args:
         mcp: The FastMCP server instance to register tools with
     """
@@ -115,7 +123,7 @@ def setup_chat_app_tools(mcp: FastMCP) -> None:
         try:
             manager = get_chat_app_manager()
             success = await manager.initialize()
-            
+
             if success:
                 return f"""✅ Google Chat App Manager initialized successfully!
 
@@ -133,7 +141,7 @@ def setup_chat_app_tools(mcp: FastMCP) -> None:
 Use other chat app tools to start building your Google Chat app!"""
             else:
                 return "❌ Failed to initialize Google Chat App Manager. Check service account file and permissions."
-                
+
         except Exception as e:
             error_msg = f"❌ Error initializing Chat App Manager: {str(e)}"
             logger.error(error_msg)
@@ -150,14 +158,14 @@ Use other chat app tools to start building your Google Chat app!"""
         bot_endpoint: str,
         avatar_url: Optional[str] = None,
         scopes: Optional[List[str]] = None,
-        publishing_state: str = "DRAFT"
+        publishing_state: str = "DRAFT",
     ) -> str:
         """Create a Google Chat app manifest with the specified configuration."""
         try:
             manager = get_chat_app_manager()
             if not await manager.initialize():
                 return "❌ Chat App Manager not initialized. Run 'initialize_chat_app_manager' first."
-            
+
             # Default manifest structure
             manifest = {
                 "name": app_name,
@@ -168,18 +176,18 @@ Use other chat app tools to start building your Google Chat app!"""
                 "useAppsScriptAuth": False,
                 "enabledDomains": [],
                 "publishingState": publishing_state,
-                "permissions": {
-                    "scopes": scopes or ["SPACE", "DM"]
-                }
+                "permissions": {"scopes": scopes or ["SPACE", "DM"]},
             }
-            
+
             manifest_json = json.dumps(manifest, indent=2)
-            
+
             # Save manifest to file
-            manifest_file = f"chat_app_manifest_{app_name.lower().replace(' ', '_')}.json"
-            with open(manifest_file, 'w') as f:
+            manifest_file = (
+                f"chat_app_manifest_{app_name.lower().replace(' ', '_')}.json"
+            )
+            with open(manifest_file, "w") as f:
                 f.write(manifest_json)
-            
+
             return f"""✅ Google Chat App Manifest Created Successfully!
 
 **App Configuration:**
@@ -196,7 +204,7 @@ Use other chat app tools to start building your Google Chat app!"""
 2. Create webhook handler templates
 3. Deploy your app endpoint
 4. Publish the app in Google Cloud Console"""
-            
+
         except Exception as e:
             error_msg = f"❌ Error creating app manifest: {str(e)}"
             logger.error(error_msg)
@@ -208,25 +216,23 @@ Use other chat app tools to start building your Google Chat app!"""
         tags={"chat", "app", "webhook", "template"},
     )
     async def generate_webhook_template(
-        app_name: str,
-        use_card_framework: bool = True,
-        port: int = 8080
+        app_name: str, use_card_framework: bool = True, port: int = 8080
     ) -> str:
         """Generate webhook handler template that integrates with existing card framework."""
         try:
             from .app_templates.webhook_templates import WebhookTemplateGenerator
-            
+
             generator = WebhookTemplateGenerator()
             if use_card_framework:
                 template_code = generator.generate_basic_webhook(app_name, port)
             else:
                 template_code = generator.generate_basic_webhook(app_name, port)
-            
+
             # Save template to file
             template_file = f"webhook_{app_name.lower().replace(' ', '_')}.py"
-            with open(template_file, 'w') as f:
+            with open(template_file, "w") as f:
                 f.write(template_code)
-            
+
             return f"""✅ Webhook Template Generated!
 
 **Template Features:**
@@ -246,7 +252,7 @@ Use other chat app tools to start building your Google Chat app!"""
 • Uses existing card framework when available
 • Graceful fallback to REST API format
 • Leverages GoogleChatCardManager for rich interactions"""
-            
+
         except ImportError:
             # Fallback if template generator not available
             basic_template = f'''"""
@@ -328,11 +334,11 @@ def handle_card_interaction(event):
 if __name__ == '__main__':
     uvicorn.run(app, host='0.0.0.0', port={port}, log_level="info")
 '''
-            
+
             template_file = f"webhook_{app_name.lower().replace(' ', '_')}.py"
-            with open(template_file, 'w') as f:
+            with open(template_file, "w") as f:
                 f.write(basic_template)
-            
+
             return f"""✅ Basic Webhook Template Generated!
 
 **File Created:** {template_file}
@@ -342,7 +348,7 @@ if __name__ == '__main__':
 • Rich card templates
 • Advanced webhook patterns
 • Deployment configurations"""
-        
+
         except Exception as e:
             error_msg = f"❌ Error generating webhook template: {str(e)}"
             logger.error(error_msg)
@@ -396,6 +402,5 @@ if __name__ == '__main__':
 4. Deploy to hosting platform
 5. Test and iterate
 6. Publish in Google Cloud Console"""
-
 
     logger.info("✅ Google Chat App Development tools setup complete")

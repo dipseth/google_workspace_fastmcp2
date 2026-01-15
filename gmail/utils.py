@@ -11,53 +11,230 @@ This module contains shared utility functions used across Gmail tools including:
 - MIME message creation
 """
 
-import logging
 import base64
-from typing_extensions import Optional, List, Dict, Literal, Any, Union
-from pathlib import Path
-
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.utils import make_msgid
-import re
 import html
+import re
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import make_msgid
+
+from typing_extensions import Dict, List, Literal, Optional, Union
 
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
 
 
 # Gmail API supported colors (from official documentation)
 GMAIL_LABEL_COLORS = {
     "text_colors": [
-        "#000000", "#434343", "#666666", "#999999", "#cccccc", "#efefef", "#f3f3f3", "#ffffff",
-        "#fb4c2f", "#ffad47", "#fad165", "#16a766", "#43d692", "#4a86e8", "#a479e2", "#f691b3",
-        "#f6c5be", "#ffe6c7", "#fef1d1", "#b9e4d0", "#c6f3de", "#c9daf8", "#e4d7f5", "#fcdee8",
-        "#efa093", "#ffd6a2", "#fce8b3", "#89d3b2", "#a0eac9", "#a4c2f4", "#d0bcf1", "#fbc8d9",
-        "#e66550", "#ffbc6b", "#fcda83", "#44b984", "#68dfa9", "#6d9eeb", "#b694e8", "#f7a7c0",
-        "#cc3a21", "#eaa041", "#f2c960", "#149e60", "#3dc789", "#3c78d8", "#8e63ce", "#e07798",
-        "#ac2b16", "#cf8933", "#d5ae49", "#0b804b", "#2a9c68", "#285bac", "#653e9b", "#b65775",
-        "#822111", "#a46a21", "#aa8831", "#076239", "#1a764d", "#1c4587", "#41236d", "#83334c",
-        "#464646", "#e7e7e7", "#0d3472", "#b6cff5", "#0d3b44", "#98d7e4", "#3d188e", "#e3d7ff",
-        "#711a36", "#fbd3e0", "#8a1c0a", "#f2b2a8", "#7a2e0b", "#ffc8af", "#7a4706", "#ffdeb5",
-        "#594c05", "#fbe983", "#684e07", "#fdedc1", "#0b4f30", "#b3efd3", "#04502e", "#a2dcc1",
-        "#c2c2c2", "#4986e7", "#2da2bb", "#b99aff", "#994a64", "#f691b2", "#ff7537", "#ffad46",
-        "#662e37", "#ebdbde", "#cca6ac", "#094228", "#42d692", "#16a765"
+        "#000000",
+        "#434343",
+        "#666666",
+        "#999999",
+        "#cccccc",
+        "#efefef",
+        "#f3f3f3",
+        "#ffffff",
+        "#fb4c2f",
+        "#ffad47",
+        "#fad165",
+        "#16a766",
+        "#43d692",
+        "#4a86e8",
+        "#a479e2",
+        "#f691b3",
+        "#f6c5be",
+        "#ffe6c7",
+        "#fef1d1",
+        "#b9e4d0",
+        "#c6f3de",
+        "#c9daf8",
+        "#e4d7f5",
+        "#fcdee8",
+        "#efa093",
+        "#ffd6a2",
+        "#fce8b3",
+        "#89d3b2",
+        "#a0eac9",
+        "#a4c2f4",
+        "#d0bcf1",
+        "#fbc8d9",
+        "#e66550",
+        "#ffbc6b",
+        "#fcda83",
+        "#44b984",
+        "#68dfa9",
+        "#6d9eeb",
+        "#b694e8",
+        "#f7a7c0",
+        "#cc3a21",
+        "#eaa041",
+        "#f2c960",
+        "#149e60",
+        "#3dc789",
+        "#3c78d8",
+        "#8e63ce",
+        "#e07798",
+        "#ac2b16",
+        "#cf8933",
+        "#d5ae49",
+        "#0b804b",
+        "#2a9c68",
+        "#285bac",
+        "#653e9b",
+        "#b65775",
+        "#822111",
+        "#a46a21",
+        "#aa8831",
+        "#076239",
+        "#1a764d",
+        "#1c4587",
+        "#41236d",
+        "#83334c",
+        "#464646",
+        "#e7e7e7",
+        "#0d3472",
+        "#b6cff5",
+        "#0d3b44",
+        "#98d7e4",
+        "#3d188e",
+        "#e3d7ff",
+        "#711a36",
+        "#fbd3e0",
+        "#8a1c0a",
+        "#f2b2a8",
+        "#7a2e0b",
+        "#ffc8af",
+        "#7a4706",
+        "#ffdeb5",
+        "#594c05",
+        "#fbe983",
+        "#684e07",
+        "#fdedc1",
+        "#0b4f30",
+        "#b3efd3",
+        "#04502e",
+        "#a2dcc1",
+        "#c2c2c2",
+        "#4986e7",
+        "#2da2bb",
+        "#b99aff",
+        "#994a64",
+        "#f691b2",
+        "#ff7537",
+        "#ffad46",
+        "#662e37",
+        "#ebdbde",
+        "#cca6ac",
+        "#094228",
+        "#42d692",
+        "#16a765",
     ],
     "background_colors": [
-        "#000000", "#434343", "#666666", "#999999", "#cccccc", "#efefef", "#f3f3f3", "#ffffff",
-        "#fb4c2f", "#ffad47", "#fad165", "#16a766", "#43d692", "#4a86e8", "#a479e2", "#f691b3",
-        "#f6c5be", "#ffe6c7", "#fef1d1", "#b9e4d0", "#c6f3de", "#c9daf8", "#e4d7f5", "#fcdee8",
-        "#efa093", "#ffd6a2", "#fce8b3", "#89d3b2", "#a0eac9", "#a4c2f4", "#d0bcf1", "#fbc8d9",
-        "#e66550", "#ffbc6b", "#fcda83", "#44b984", "#68dfa9", "#6d9eeb", "#b694e8", "#f7a7c0",
-        "#cc3a21", "#eaa041", "#f2c960", "#149e60", "#3dc789", "#3c78d8", "#8e63ce", "#e07798",
-        "#ac2b16", "#cf8933", "#d5ae49", "#0b804b", "#2a9c68", "#285bac", "#653e9b", "#b65775",
-        "#822111", "#a46a21", "#aa8831", "#076239", "#1a764d", "#1c4587", "#41236d", "#83334c",
-        "#464646", "#e7e7e7", "#0d3472", "#b6cff5", "#0d3b44", "#98d7e4", "#3d188e", "#e3d7ff",
-        "#711a36", "#fbd3e0", "#8a1c0a", "#f2b2a8", "#7a2e0b", "#ffc8af", "#7a4706", "#ffdeb5",
-        "#594c05", "#fbe983", "#684e07", "#fdedc1", "#0b4f30", "#b3efd3", "#04502e", "#a2dcc1",
-        "#c2c2c2", "#4986e7", "#2da2bb", "#b99aff", "#994a64", "#f691b2", "#ff7537", "#ffad46",
-        "#662e37", "#ebdbde", "#cca6ac", "#094228", "#42d692", "#16a765"
-    ]
+        "#000000",
+        "#434343",
+        "#666666",
+        "#999999",
+        "#cccccc",
+        "#efefef",
+        "#f3f3f3",
+        "#ffffff",
+        "#fb4c2f",
+        "#ffad47",
+        "#fad165",
+        "#16a766",
+        "#43d692",
+        "#4a86e8",
+        "#a479e2",
+        "#f691b3",
+        "#f6c5be",
+        "#ffe6c7",
+        "#fef1d1",
+        "#b9e4d0",
+        "#c6f3de",
+        "#c9daf8",
+        "#e4d7f5",
+        "#fcdee8",
+        "#efa093",
+        "#ffd6a2",
+        "#fce8b3",
+        "#89d3b2",
+        "#a0eac9",
+        "#a4c2f4",
+        "#d0bcf1",
+        "#fbc8d9",
+        "#e66550",
+        "#ffbc6b",
+        "#fcda83",
+        "#44b984",
+        "#68dfa9",
+        "#6d9eeb",
+        "#b694e8",
+        "#f7a7c0",
+        "#cc3a21",
+        "#eaa041",
+        "#f2c960",
+        "#149e60",
+        "#3dc789",
+        "#3c78d8",
+        "#8e63ce",
+        "#e07798",
+        "#ac2b16",
+        "#cf8933",
+        "#d5ae49",
+        "#0b804b",
+        "#2a9c68",
+        "#285bac",
+        "#653e9b",
+        "#b65775",
+        "#822111",
+        "#a46a21",
+        "#aa8831",
+        "#076239",
+        "#1a764d",
+        "#1c4587",
+        "#41236d",
+        "#83334c",
+        "#464646",
+        "#e7e7e7",
+        "#0d3472",
+        "#b6cff5",
+        "#0d3b44",
+        "#98d7e4",
+        "#3d188e",
+        "#e3d7ff",
+        "#711a36",
+        "#fbd3e0",
+        "#8a1c0a",
+        "#f2b2a8",
+        "#7a2e0b",
+        "#ffc8af",
+        "#7a4706",
+        "#ffdeb5",
+        "#594c05",
+        "#fbe983",
+        "#684e07",
+        "#fdedc1",
+        "#0b4f30",
+        "#b3efd3",
+        "#04502e",
+        "#a2dcc1",
+        "#c2c2c2",
+        "#4986e7",
+        "#2da2bb",
+        "#b99aff",
+        "#994a64",
+        "#f691b2",
+        "#ff7537",
+        "#ffad46",
+        "#662e37",
+        "#ebdbde",
+        "#cca6ac",
+        "#094228",
+        "#42d692",
+        "#16a765",
+    ],
 }
 
 
@@ -184,21 +361,25 @@ def _format_gmail_results_plain(messages: list, query: str) -> str:
         message_url = _generate_gmail_web_url(msg["id"])
         thread_url = _generate_gmail_web_url(msg["threadId"])
 
-        lines.extend([
-            f"  {i}. Message ID: {msg['id']}",
-            f"     Web Link: {message_url}",
-            f"     Thread ID: {msg['threadId']}",
-            f"     Thread Link: {thread_url}",
-            ""
-        ])
+        lines.extend(
+            [
+                f"  {i}. Message ID: {msg['id']}",
+                f"     Web Link: {message_url}",
+                f"     Thread ID: {msg['threadId']}",
+                f"     Thread Link: {thread_url}",
+                "",
+            ]
+        )
 
-    lines.extend([
-        "💡 USAGE:",
-        "  • Pass the Message IDs **as a list** to get_gmail_messages_content_batch()",
-        "    e.g. get_gmail_messages_content_batch(message_ids=[...])",
-        "  • Pass the Thread IDs to get_gmail_thread_content() (single) _or_",
-        "    get_gmail_threads_content_batch() (coming soon)"
-    ])
+    lines.extend(
+        [
+            "💡 USAGE:",
+            "  • Pass the Message IDs **as a list** to get_gmail_messages_content_batch()",
+            "    e.g. get_gmail_messages_content_batch(message_ids=[...])",
+            "  • Pass the Thread IDs to get_gmail_thread_content() (single) _or_",
+            "    get_gmail_threads_content_batch() (coming soon)",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -292,42 +473,48 @@ def _extract_html_body(payload):
     return html_body
 
 
-def _format_forward_content(original_body: str, original_headers: dict, is_html: bool = False) -> str:
+def _format_forward_content(
+    original_body: str, original_headers: dict, is_html: bool = False
+) -> str:
     """
     Format original message content for forwarding with proper headers.
-    
+
     Args:
         original_body (str): The original message body (plain text or HTML)
         original_headers (dict): Dictionary of original message headers
         is_html (bool): Whether the content is HTML or plain text
-        
+
     Returns:
         str: Formatted forward content with headers
     """
     if not original_body:
         return ""
-    
+
     # Extract key headers
     from_header = original_headers.get("From", "(unknown sender)")
     to_header = original_headers.get("To", "")
     cc_header = original_headers.get("Cc", "")
     date_header = original_headers.get("Date", "")
     subject_header = original_headers.get("Subject", "(no subject)")
-    
+
     if is_html:
         # HTML format with proper styling
         separator = "---------- Forwarded message ---------"
         header_lines = []
-        
+
         header_lines.append(f"<strong>From:</strong> {html.escape(from_header)}<br>")
         if date_header:
-            header_lines.append(f"<strong>Date:</strong> {html.escape(date_header)}<br>")
-        header_lines.append(f"<strong>Subject:</strong> {html.escape(subject_header)}<br>")
+            header_lines.append(
+                f"<strong>Date:</strong> {html.escape(date_header)}<br>"
+            )
+        header_lines.append(
+            f"<strong>Subject:</strong> {html.escape(subject_header)}<br>"
+        )
         if to_header:
             header_lines.append(f"<strong>To:</strong> {html.escape(to_header)}<br>")
         if cc_header:
             header_lines.append(f"<strong>Cc:</strong> {html.escape(cc_header)}<br>")
-        
+
         formatted_content = (
             f"<br><br>{html.escape(separator)}<br>"
             + "".join(header_lines)
@@ -337,7 +524,7 @@ def _format_forward_content(original_body: str, original_headers: dict, is_html:
         # Plain text format
         separator = "---------- Forwarded message ---------"
         header_lines = []
-        
+
         header_lines.append(f"From: {from_header}")
         if date_header:
             header_lines.append(f"Date: {date_header}")
@@ -346,28 +533,26 @@ def _format_forward_content(original_body: str, original_headers: dict, is_html:
             header_lines.append(f"To: {to_header}")
         if cc_header:
             header_lines.append(f"Cc: {cc_header}")
-        
+
         formatted_content = (
-            f"\n\n{separator}\n"
-            + "\n".join(header_lines)
-            + f"\n\n{original_body}"
+            f"\n\n{separator}\n" + "\n".join(header_lines) + f"\n\n{original_body}"
         )
-    
+
     return formatted_content
 
 
 def _parse_email_addresses(email_input: Union[str, List[str]]) -> List[str]:
     """
     Parse email addresses from various input formats.
-    
+
     Supports:
     - Single email string: "user@example.com"
     - List of emails: ["user1@example.com", "user2@example.com"]
     - Comma-separated string: "user1@example.com,user2@example.com"
-    
+
     Args:
         email_input: Email address(es) in various formats
-        
+
     Returns:
         List of email addresses, normalized and stripped
     """
@@ -375,7 +560,7 @@ def _parse_email_addresses(email_input: Union[str, List[str]]) -> List[str]:
         return [email.strip() for email in email_input if email.strip()]
     elif isinstance(email_input, str):
         # Handle comma-separated string
-        return [email.strip() for email in email_input.split(',') if email.strip()]
+        return [email.strip() for email in email_input.split(",") if email.strip()]
     else:
         return []
 
@@ -383,19 +568,19 @@ def _parse_email_addresses(email_input: Union[str, List[str]]) -> List[str]:
 def count_recipients(*recipient_fields: Optional[Union[str, List[str]]]) -> int:
     """
     Count total recipients across multiple recipient fields (to, cc, bcc).
-    
+
     Handles all recipient formats consistently:
     - Single email string: "user@example.com" → 1 recipient
     - List of emails: ["user1@example.com", "user2@example.com"] → 2 recipients
     - Comma-separated string: "user1@example.com,user2@example.com" → 2 recipients
     - None/empty → 0 recipients
-    
+
     Args:
         *recipient_fields: Variable number of recipient fields (to, cc, bcc, etc.)
-        
+
     Returns:
         Total count of unique recipients across all fields
-        
+
     Example:
         count_recipients(to, cc, bcc)
         count_recipients("user1@example.com,user2@example.com", ["user3@example.com"])
@@ -411,33 +596,33 @@ def count_recipients(*recipient_fields: Optional[Union[str, List[str]]]) -> int:
 def extract_email_addresses(header_value: str) -> List[str]:
     """
     Extract email addresses from an email header value.
-    
+
     Handles formats like:
     - "John Doe <john@example.com>"
     - "john@example.com"
     - "John Doe <john@example.com>, Jane Smith <jane@example.com>"
     - "john@example.com, jane@example.com"
-    
+
     Args:
         header_value: The raw header value string from Gmail API
-        
+
     Returns:
         List of extracted email addresses (lowercase, unique)
     """
     if not header_value:
         return []
-    
+
     # Regular expression to match email addresses
     # This pattern matches email addresses either standalone or within angle brackets
     # Using a more precise pattern that handles both cases correctly
-    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-    
+    email_pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+
     # Find all email addresses in the header
     matches = re.findall(email_pattern, header_value)
-    
+
     # Remove duplicates and return lowercase
     unique_emails = list(set(email.strip().lower() for email in matches))
-    
+
     return unique_emails
 
 
@@ -462,20 +647,24 @@ def _html_to_plain_text(html_content: str) -> str:
 
     # Remove HTML tags with regex (simple approach)
     # This handles basic HTML to text conversion
-    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)  # <br> to newline
-    text = re.sub(r'<p[^>]*>', '\n', text, flags=re.IGNORECASE)   # <p> to newline
-    text = re.sub(r'</p>', '\n', text, flags=re.IGNORECASE)      # </p> to newline
-    text = re.sub(r'<div[^>]*>', '\n', text, flags=re.IGNORECASE)  # <div> to newline
-    text = re.sub(r'</div>', '\n', text, flags=re.IGNORECASE)    # </div> to newline
-    text = re.sub(r'<h[1-6][^>]*>', '\n', text, flags=re.IGNORECASE)  # Headers to newline
-    text = re.sub(r'</h[1-6]>', '\n', text, flags=re.IGNORECASE)     # Header close to newline
-    text = re.sub(r'<li[^>]*>', '\n• ', text, flags=re.IGNORECASE)   # List items
-    text = re.sub(r'</li>', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'<[^>]+>', '', text)  # Remove all remaining HTML tags
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)  # <br> to newline
+    text = re.sub(r"<p[^>]*>", "\n", text, flags=re.IGNORECASE)  # <p> to newline
+    text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)  # </p> to newline
+    text = re.sub(r"<div[^>]*>", "\n", text, flags=re.IGNORECASE)  # <div> to newline
+    text = re.sub(r"</div>", "\n", text, flags=re.IGNORECASE)  # </div> to newline
+    text = re.sub(
+        r"<h[1-6][^>]*>", "\n", text, flags=re.IGNORECASE
+    )  # Headers to newline
+    text = re.sub(
+        r"</h[1-6]>", "\n", text, flags=re.IGNORECASE
+    )  # Header close to newline
+    text = re.sub(r"<li[^>]*>", "\n• ", text, flags=re.IGNORECASE)  # List items
+    text = re.sub(r"</li>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)  # Remove all remaining HTML tags
 
     # Clean up multiple newlines and whitespace
-    text = re.sub(r'\n\s*\n', '\n\n', text)  # Multiple newlines to double newline
-    text = re.sub(r'^\s+|\s+$', '', text, flags=re.MULTILINE)  # Trim lines
+    text = re.sub(r"\n\s*\n", "\n\n", text)  # Multiple newlines to double newline
+    text = re.sub(r"^\s+|\s+$", "", text, flags=re.MULTILINE)  # Trim lines
     text = text.strip()
 
     return text
@@ -491,7 +680,7 @@ def _create_mime_message(
     cc: Optional[Union[str, List[str]]] = None,
     bcc: Optional[Union[str, List[str]]] = None,
     reply_to_message_id: Optional[str] = None,
-    thread_id: Optional[str] = None
+    thread_id: Optional[str] = None,
 ) -> str:
     """
     Create a properly formatted MIME message for Gmail API with support for multiple recipients.
@@ -516,6 +705,7 @@ def _create_mime_message(
     Returns:
         Base64url encoded message string ready for Gmail API
     """
+
     # Helper function to format recipient list
     def format_recipients(recipients: Optional[Union[str, List[str]]]) -> Optional[str]:
         if not recipients:

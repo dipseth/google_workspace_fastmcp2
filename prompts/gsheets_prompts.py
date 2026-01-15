@@ -7,7 +7,7 @@ spreadsheet IDs, sheet names, cell ranges, and URL construction for seamless int
 
 Key Features:
 - Advanced: Smart contextual spreadsheet cards using real Sheets data and ranges
-- Medium: Professional data dashboard cards with live Sheets integration  
+- Medium: Professional data dashboard cards with live Sheets integration
 - Simple: Instant demo cards for quick Sheets testing and demonstrations
 
 Resource Integration:
@@ -17,20 +17,21 @@ Resource Integration:
 - Uses {{user://current/profile}} for user context and permissions
 """
 
-import logging
-from typing_extensions import Optional
 from datetime import datetime, timezone
+
+from fastmcp import Context, FastMCP
+from fastmcp.prompts.prompt import PromptMessage, TextContent
 from pydantic import Field
-from fastmcp import FastMCP, Context
-from fastmcp.prompts.prompt import Message, PromptMessage, TextContent
 
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
+
 
 def setup_gsheets_prompts(mcp: FastMCP):
     """
     Register Google Sheets prompts: Advanced, Medium, Simple.
-    
+
     Args:
         mcp: The FastMCP server instance
     """
@@ -46,40 +47,48 @@ def setup_gsheets_prompts(mcp: FastMCP):
             "uses_resources": True,
             "resource_dependencies": [
                 "service://sheets/spreadsheets",
-                "sheets://spreadsheets/list", 
+                "sheets://spreadsheets/list",
                 "sheets://data/active",
-                "user://current/profile"
-            ]
-        }
+                "user://current/profile",
+            ],
+        },
     )
     def smart_contextual_sheets_card(
         context: Context,
         card_title: str = Field(
             default="Smart Sheets Dashboard",
-            description="Title for the contextual Sheets card"
+            description="Title for the contextual Sheets card",
         ),
         target_spreadsheet: str = Field(
             default="financial_data",
-            description="Description of the target spreadsheet (e.g., 'sales_report', 'budget_2024', 'project_tracker')"
+            description="Description of the target spreadsheet (e.g., 'sales_report', 'budget_2024', 'project_tracker')",
         ),
         data_focus: str = Field(
             default="summary analysis",
-            description="Focus of the data presentation (e.g., 'trends', 'performance', 'comparison', 'forecast')"
-        )
+            description="Focus of the data presentation (e.g., 'trends', 'performance', 'comparison', 'forecast')",
+        ),
     ) -> PromptMessage:
         """
         ADVANCED: Generate intelligent Google Sheets cards that adapt to real spreadsheet configurations.
         Uses real-time Sheets data for contextual, data-driven communication.
         """
-        
+
         request_id = context.request_id
         current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        
+
         # Resolve Field values
-        card_title_str = str(card_title) if hasattr(card_title, 'default') else card_title
-        target_spreadsheet_str = str(target_spreadsheet) if hasattr(target_spreadsheet, 'default') else target_spreadsheet
-        data_focus_str = str(data_focus) if hasattr(data_focus, 'default') else data_focus
-        
+        card_title_str = (
+            str(card_title) if hasattr(card_title, "default") else card_title
+        )
+        target_spreadsheet_str = (
+            str(target_spreadsheet)
+            if hasattr(target_spreadsheet, "default")
+            else target_spreadsheet
+        )
+        data_focus_str = (
+            str(data_focus) if hasattr(data_focus, "default") else data_focus
+        )
+
         advanced_content = f"""
 # 📊 Smart Contextual Google Sheets Card (Advanced)
 *Request ID: {request_id} | Generated: {current_time}*
@@ -371,10 +380,9 @@ Last Update: {{summary_metrics['range']}}
 
 This advanced prompt showcases FastMCP2's sophisticated Sheets resource integration capabilities with real spreadsheet data!
 """
-        
+
         return PromptMessage(
-            content=TextContent(type="text", text=advanced_content),
-            role="assistant"
+            content=TextContent(type="text", text=advanced_content), role="assistant"
         )
 
     # ========== MEDIUM PROMPT ==========
@@ -382,39 +390,45 @@ This advanced prompt showcases FastMCP2's sophisticated Sheets resource integrat
         name="professional_sheets_dashboard",
         description="Medium: Create beautiful Sheets dashboard cards with live spreadsheet integration",
         tags={"gsheets", "sheets", "medium", "dashboard", "professional", "data"},
-        meta={
-            "version": "3.0",
-            "author": "FastMCP2-StreamlinedSheets"
-        }
+        meta={"version": "3.0", "author": "FastMCP2-StreamlinedSheets"},
     )
     def professional_sheets_dashboard(
         context: Context,
         dashboard_title: str = Field(
-            default="Data Dashboard",
-            description="Title for the Sheets dashboard card"
+            default="Data Dashboard", description="Title for the Sheets dashboard card"
         ),
         data_source: str = Field(
             default="Monthly Report",
-            description="Name or description of the data source spreadsheet"
+            description="Name or description of the data source spreadsheet",
         ),
         dashboard_theme: str = Field(
             default="performance analytics",
-            description="Theme of the dashboard (e.g., 'financial summary', 'sales metrics', 'project status')"
-        )
+            description="Theme of the dashboard (e.g., 'financial summary', 'sales metrics', 'project status')",
+        ),
     ) -> PromptMessage:
         """
         MEDIUM: Generate professional Sheets dashboard cards with modern design and live spreadsheet data.
         Perfect balance of functionality, visual appeal, and Sheets integration.
         """
-        
+
         request_id = context.request_id
         current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        
+
         # Resolve Field values
-        dashboard_title_str = str(dashboard_title) if hasattr(dashboard_title, 'default') else dashboard_title
-        data_source_str = str(data_source) if hasattr(data_source, 'default') else data_source
-        dashboard_theme_str = str(dashboard_theme) if hasattr(dashboard_theme, 'default') else dashboard_theme
-        
+        dashboard_title_str = (
+            str(dashboard_title)
+            if hasattr(dashboard_title, "default")
+            else dashboard_title
+        )
+        data_source_str = (
+            str(data_source) if hasattr(data_source, "default") else data_source
+        )
+        dashboard_theme_str = (
+            str(dashboard_theme)
+            if hasattr(dashboard_theme, "default")
+            else dashboard_theme
+        )
+
         medium_content = f"""
 # 📊 Professional Sheets Dashboard (Medium)
 *Request ID: {request_id} | Generated: {current_time}*
@@ -623,10 +637,9 @@ data_view = f"{{sheet_base_url}}/edit#gid={{{{sheets://spreadsheets/list}}}}['pr
 
 This medium-complexity prompt delivers professional Sheets dashboards with smart spreadsheet integration!
 """
-        
+
         return PromptMessage(
-            content=TextContent(type="text", text=medium_content),
-            role="assistant"
+            content=TextContent(type="text", text=medium_content), role="assistant"
         )
 
     # ========== SIMPLE PROMPT ==========
@@ -634,20 +647,17 @@ This medium-complexity prompt delivers professional Sheets dashboards with smart
         name="quick_sheets_card_demo",
         description="Simple: Zero-config instant Sheets card demo - ready to send immediately",
         tags={"gsheets", "sheets", "simple", "demo", "instant", "data"},
-        meta={
-            "version": "3.0",
-            "author": "FastMCP2-StreamlinedSheets"
-        }
+        meta={"version": "3.0", "author": "FastMCP2-StreamlinedSheets"},
     )
     def quick_sheets_card_demo(context: Context) -> PromptMessage:
         """
         SIMPLE: Zero-configuration Sheets card demo. Perfect for instant testing and demonstrations.
         No parameters needed - works immediately out of the box with sample spreadsheet data.
         """
-        
+
         request_id = context.request_id
         current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        
+
         simple_content = f"""
 # ⚡ Quick Sheets Card Demo (Simple)
 *Request ID: {request_id} | Generated: {current_time}*
@@ -860,16 +870,20 @@ card_text = f'''
 
 This simple prompt proves that FastMCP2 can create professional Sheets cards with zero complexity!
 """
-        
+
         return PromptMessage(
-            content=TextContent(type="text", text=simple_content),
-            role="assistant"
+            content=TextContent(type="text", text=simple_content), role="assistant"
         )
 
     logger.info("✅ Google Sheets prompts registered successfully")
-    logger.info("   • smart_contextual_sheets_card: Advanced with real-time Sheets data")
-    logger.info("   • professional_sheets_dashboard: Medium complexity professional data dashboard")
+    logger.info(
+        "   • smart_contextual_sheets_card: Advanced with real-time Sheets data"
+    )
+    logger.info(
+        "   • professional_sheets_dashboard: Medium complexity professional data dashboard"
+    )
     logger.info("   • quick_sheets_card_demo: Simple zero-config instant demo")
 
+
 # Export the setup function
-__all__ = ['setup_gsheets_prompts']
+__all__ = ["setup_gsheets_prompts"]

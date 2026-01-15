@@ -5,9 +5,8 @@ This script demonstrates how to migrate from the basic template middleware
 to the enhanced Jinja2 template middleware.
 """
 
-from pathlib import Path
-import shutil
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -15,44 +14,44 @@ logger = logging.getLogger(__name__)
 def migrate_to_jinja2_middleware():
     """
     Migrate existing FastMCP2 project to use Jinja2 template middleware.
-    
+
     This function:
     1. Creates template directory structure
     2. Updates server.py to use Jinja2 middleware
     3. Provides example template files
     4. Shows before/after comparison
     """
-    
+
     print("🚀 Starting migration to Jinja2 Template Middleware...")
-    
+
     # Step 1: Create template directory structure
     create_template_directories()
-    
+
     # Step 2: Create example template files
     create_example_templates()
-    
+
     # Step 3: Update requirements.txt
     update_requirements()
-    
+
     # Step 4: Show server.py integration example
     show_server_integration()
-    
+
     print("✅ Migration complete! See the examples above for integration steps.")
 
 
 def create_template_directories():
     """Create the recommended template directory structure."""
-    
+
     directories = [
         "templates",
         "templates/prompts",
-        "templates/tools", 
+        "templates/tools",
         "templates/gmail",
         "templates/gchat",
         "templates/gsheets",
-        "templates/base"
+        "templates/base",
     ]
-    
+
     for directory in directories:
         path = Path(directory)
         path.mkdir(parents=True, exist_ok=True)
@@ -61,7 +60,7 @@ def create_template_directories():
 
 def create_example_templates():
     """Create example Jinja2 template files."""
-    
+
     # Base template for inheritance
     base_template = """<!DOCTYPE html>
 <html>
@@ -92,7 +91,7 @@ def create_example_templates():
     </div>
 </body>
 </html>"""
-    
+
     # Gmail template example
     gmail_template = """{% extends "base/layout.html" %}
 
@@ -158,7 +157,7 @@ Generated at: {{ utc_now().isoformat() }}
 </div>
 {% endif %}
 {% endblock %}"""
-    
+
     # Simple parameter template
     simple_template = """# Quick Email: {{ tool_name }}
 
@@ -170,14 +169,14 @@ Generated at: {{ utc_now().isoformat() }}
 {% endif %}
 
 This is a simple template that resolves {{resource://user/current/email}} automatically."""
-    
+
     # Write template files
     templates = {
         "templates/base/layout.html": base_template,
         "templates/gmail/quick_demo.html": gmail_template,
-        "templates/prompts/simple_email.txt": simple_template
+        "templates/prompts/simple_email.txt": simple_template,
     }
-    
+
     for filepath, content in templates.items():
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -187,19 +186,19 @@ This is a simple template that resolves {{resource://user/current/email}} automa
 
 def update_requirements():
     """Show how to update requirements.txt for Jinja2."""
-    
+
     requirements_addition = """
 # Add this to your requirements.txt:
 jinja2>=3.1.0
 """
-    
-    print(f"📋 Requirements.txt update needed:")
+
+    print("📋 Requirements.txt update needed:")
     print(requirements_addition)
 
 
 def show_server_integration():
     """Show how to integrate Jinja2 middleware in server.py"""
-    
+
     integration_example = '''
 # In your server.py file:
 
@@ -242,7 +241,7 @@ async def main():
     
     # Your prompts can now use Jinja2 templates!
 '''
-    
+
     print("🔧 Server.py Integration Example:")
     print(integration_example)
 

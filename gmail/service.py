@@ -8,15 +8,12 @@ This module handles Gmail API service creation with fallback support:
 - Service caching and session management
 """
 
-import logging
-import asyncio
+from fastmcp import FastMCP
 from typing_extensions import Any
 
-from fastmcp import FastMCP
-
-from auth.service_helpers import request_service, get_injected_service, get_service
-
+from auth.service_helpers import get_injected_service, get_service, request_service
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
 
 
@@ -39,18 +36,27 @@ async def _get_gmail_service_with_fallback(user_google_email: str) -> Any:
     try:
         # Try to get the injected service from middleware
         gmail_service = get_injected_service(service_key)
-        logger.info(f"Successfully retrieved injected Gmail service for {user_google_email}")
+        logger.info(
+            f"Successfully retrieved injected Gmail service for {user_google_email}"
+        )
         return gmail_service
 
     except RuntimeError as e:
-        if "not yet fulfilled" in str(e).lower() or "service injection" in str(e).lower():
+        if (
+            "not yet fulfilled" in str(e).lower()
+            or "service injection" in str(e).lower()
+        ):
             # Middleware injection failed, fall back to direct service creation
-            logger.warning(f"Middleware injection unavailable, falling back to direct service creation for {user_google_email}")
+            logger.warning(
+                f"Middleware injection unavailable, falling back to direct service creation for {user_google_email}"
+            )
 
             try:
                 # Use the helper function that handles smart defaults
                 gmail_service = await get_service("gmail", user_google_email)
-                logger.info(f"Successfully created Gmail service directly for {user_google_email}")
+                logger.info(
+                    f"Successfully created Gmail service directly for {user_google_email}"
+                )
                 return gmail_service
 
             except Exception as direct_error:
@@ -58,7 +64,10 @@ async def _get_gmail_service_with_fallback(user_google_email: str) -> Any:
                 logger.error(f"Direct service creation also failed: {direct_error}")
 
                 # Check for specific credential errors
-                if "credentials do not contain the necessary fields" in error_str.lower():
+                if (
+                    "credentials do not contain the necessary fields"
+                    in error_str.lower()
+                ):
                     raise RuntimeError(
                         f"❌ **Invalid or Corrupted Credentials**\n\n"
                         f"Your stored credentials for {user_google_email} are missing required OAuth fields.\n"
@@ -115,7 +124,7 @@ def setup_gmail_tools(mcp: FastMCP) -> None:
 
     # Import all Gmail tool modules and call their setup functions
     try:
-        from . import messages, compose, labels, filters, allowlist
+        from . import allowlist, compose, filters, labels, messages
 
         # Call each module's setup function to register their tools
         messages.setup_message_tools(mcp)
@@ -127,11 +136,21 @@ def setup_gmail_tools(mcp: FastMCP) -> None:
         # Log successful setup
         logger.info("✅ Gmail tools setup completed successfully")
         logger.info("Available Gmail tools:")
-        logger.info("  📧 Message tools: search_gmail_messages, get_gmail_message_content, get_gmail_messages_content_batch, get_gmail_thread_content")
-        logger.info("  ✍️  Compose tools: send_gmail_message, draft_gmail_message, reply_to_gmail_message, draft_gmail_reply")
-        logger.info("  🏷️  Label tools: list_gmail_labels, manage_gmail_label, modify_gmail_message_labels")
-        logger.info("  🔍 Filter tools: list_gmail_filters, create_gmail_filter, get_gmail_filter, delete_gmail_filter")
-        logger.info("  ✅ Allow list tools: add_to_gmail_allow_list, remove_from_gmail_allow_list, view_gmail_allow_list")
+        logger.info(
+            "  📧 Message tools: search_gmail_messages, get_gmail_message_content, get_gmail_messages_content_batch, get_gmail_thread_content"
+        )
+        logger.info(
+            "  ✍️  Compose tools: send_gmail_message, draft_gmail_message, reply_to_gmail_message, draft_gmail_reply"
+        )
+        logger.info(
+            "  🏷️  Label tools: list_gmail_labels, manage_gmail_label, modify_gmail_message_labels"
+        )
+        logger.info(
+            "  🔍 Filter tools: list_gmail_filters, create_gmail_filter, get_gmail_filter, delete_gmail_filter"
+        )
+        logger.info(
+            "  ✅ Allow list tools: add_to_gmail_allow_list, remove_from_gmail_allow_list, view_gmail_allow_list"
+        )
 
     except ImportError as e:
         logger.error(f"❌ Failed to import Gmail tool modules: {e}")

@@ -27,26 +27,22 @@ Dependencies:
 - auth.service_helpers: Service injection utilities
 """
 
-import logging
 import asyncio
 import io
 import re
 from typing import List, Optional, Union, cast
-from pathlib import Path
-from googleapiclient.http import MediaIoBaseUpload
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
-from auth.service_helpers import request_service, get_injected_service, get_service
-from auth.context import get_user_email_context
-from tools.common_types import UserGoogleEmail
-from .utils import extract_office_xml_text
-from .docs_types import DocsListResponse, DocInfo, CreateDocResponse, EditConfig
-from .editing import apply_edit_config
-
+from auth.service_helpers import get_injected_service, get_service, request_service
 from config.enhanced_logging import setup_logger
+from tools.common_types import UserGoogleEmail
+
+from .docs_types import CreateDocResponse, DocInfo, DocsListResponse, EditConfig
+from .editing import apply_edit_config
+from .utils import extract_office_xml_text
 
 logger = setup_logger()
 
@@ -301,7 +297,11 @@ async def get_doc_content(
         # Get file metadata from Drive
         file_metadata = await asyncio.to_thread(
             drive_service.files()
-            .get(fileId=document_id, fields="id, name, mimeType, webViewLink", supportsAllDrives=True)
+            .get(
+                fileId=document_id,
+                fields="id, name, mimeType, webViewLink",
+                supportsAllDrives=True,
+            )
             .execute
         )
         mime_type = file_metadata.get("mimeType", "")
@@ -316,19 +316,23 @@ async def get_doc_content(
 
         # Process based on mimeType
         if mime_type == "application/vnd.google-apps.document":
-            logger.info(f"[get_doc_content] Processing as native Google Doc - using Drive API export for better compatibility.")
+            logger.info(
+                "[get_doc_content] Processing as native Google Doc - using Drive API export for better compatibility."
+            )
             # Use Drive API export instead of Docs API for better permission handling
             # This matches the approach in get_drive_file_content and respects Drive-level permissions
             request_obj = drive_service.files().export_media(
                 fileId=document_id, mimeType="text/plain"
             )
-            
+
             fh = io.BytesIO()
             downloader = MediaIoBaseDownload(fh, request_obj)
             done = False
             while not done:
-                status, done = await asyncio.get_event_loop().run_in_executor(None, downloader.next_chunk)
-            
+                status, done = await asyncio.get_event_loop().run_in_executor(
+                    None, downloader.next_chunk
+                )
+
             file_content_bytes = fh.getvalue()
             body_text = file_content_bytes.decode("utf-8", errors="replace")
         else:
@@ -823,7 +827,7 @@ async def create_doc(
         # Get Docs service
         try:
             docs_service = get_injected_service(docs_key)
-            logger.info(f"[create_doc] Using injected Docs service for editing")
+            logger.info("[create_doc] Using injected Docs service for editing")
         except RuntimeError as e:
             logger.warning(f"[create_doc] Docs middleware injection failed: {e}")
             if (
@@ -831,14 +835,14 @@ async def create_doc(
                 or "service injection" in str(e).lower()
             ):
                 docs_service = await get_service("docs", user_google_email)
-                logger.info(f"[create_doc] Using direct Docs service for editing")
+                logger.info("[create_doc] Using direct Docs service for editing")
             else:
                 raise
 
         # Get Drive service
         try:
             drive_service = get_injected_service(drive_key)
-            logger.info(f"[create_doc] Using injected Drive service for editing")
+            logger.info("[create_doc] Using injected Drive service for editing")
         except RuntimeError as e:
             logger.warning(f"[create_doc] Drive middleware injection failed: {e}")
             if (
@@ -846,7 +850,7 @@ async def create_doc(
                 or "service injection" in str(e).lower()
             ):
                 drive_service = await get_service("drive", user_google_email)
-                logger.info(f"[create_doc] Using direct Drive service for editing")
+                logger.info("[create_doc] Using direct Drive service for editing")
             else:
                 raise
 
@@ -1018,7 +1022,7 @@ async def create_doc(
 
         try:
             docs_service = get_injected_service(docs_key)
-            logger.info(f"[create_doc] Using injected Docs service for empty doc")
+            logger.info("[create_doc] Using injected Docs service for empty doc")
         except RuntimeError as e:
             logger.warning(f"[create_doc] Docs middleware injection failed: {e}")
             if (
@@ -1026,7 +1030,7 @@ async def create_doc(
                 or "service injection" in str(e).lower()
             ):
                 docs_service = await get_service("docs", user_google_email)
-                logger.info(f"[create_doc] Using direct Docs service for empty doc")
+                logger.info("[create_doc] Using direct Docs service for empty doc")
             else:
                 raise
 
@@ -1079,7 +1083,7 @@ async def create_doc(
 
     try:
         drive_service = get_injected_service(drive_key)
-        logger.info(f"[create_doc] Using injected Drive service for content conversion")
+        logger.info("[create_doc] Using injected Drive service for content conversion")
     except RuntimeError as e:
         logger.warning(f"[create_doc] Drive middleware injection failed: {e}")
         if (
@@ -1090,7 +1094,7 @@ async def create_doc(
             try:
                 drive_service = await get_service("drive", user_google_email)
                 logger.info(
-                    f"[create_doc] Using direct Drive service for content conversion"
+                    "[create_doc] Using direct Drive service for content conversion"
                 )
             except Exception as direct_error:
                 error_str = str(direct_error)

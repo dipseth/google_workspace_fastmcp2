@@ -5,11 +5,12 @@ These TypedDict classes define structured responses for file operations like
 moving, copying, renaming, and deleting files.
 """
 
-from typing_extensions import TypedDict, List, Optional, NotRequired
+from typing_extensions import List, NotRequired, Optional, TypedDict
 
 
 class MoveFileResult(TypedDict):
     """Structure for individual file move result."""
+
     fileId: str
     fileName: str
     webViewLink: str
@@ -21,6 +22,7 @@ class MoveFileResult(TypedDict):
 
 class MoveDriveFilesResponse(TypedDict):
     """Response structure for move_drive_files tool."""
+
     success: bool
     totalFiles: int
     successfulMoves: int
@@ -35,6 +37,7 @@ class MoveDriveFilesResponse(TypedDict):
 
 class CopyFileResult(TypedDict):
     """Structure for individual file copy result."""
+
     originalFileId: str
     originalFileName: str
     copiedFileId: Optional[str]
@@ -46,6 +49,7 @@ class CopyFileResult(TypedDict):
 
 class CopyDriveFilesResponse(TypedDict):
     """Response structure for copy_drive_files tool."""
+
     success: bool
     totalFiles: int
     successfulCopies: int
@@ -59,6 +63,7 @@ class CopyDriveFilesResponse(TypedDict):
 
 class RenameFileResponse(TypedDict):
     """Response structure for rename_drive_file tool."""
+
     success: bool
     fileId: str
     oldName: str
@@ -71,6 +76,7 @@ class RenameFileResponse(TypedDict):
 
 class DeleteFileResult(TypedDict):
     """Structure for individual file delete result."""
+
     fileId: str
     fileName: str
     status: str  # 'trashed', 'permanently_deleted', 'failed', 'already_trashed'
@@ -79,6 +85,7 @@ class DeleteFileResult(TypedDict):
 
 class DeleteDriveFilesResponse(TypedDict):
     """Response structure for delete_drive_files tool."""
+
     success: bool
     totalFiles: int
     successfulDeletes: int

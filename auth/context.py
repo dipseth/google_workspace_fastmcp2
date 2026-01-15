@@ -1,14 +1,12 @@
 """Session context management for multi-user OAuth authentication using FastMCP Context."""
 
-import logging
-from typing_extensions import Optional, Dict, Any, Union, List
-from datetime import datetime, timedelta
-import threading
 import json
+import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastmcp import Context
 from fastmcp.server.dependencies import get_context
+from typing_extensions import Any, Dict, List, Optional, Union
 
 from config.enhanced_logging import setup_logger
 
@@ -344,7 +342,6 @@ def get_google_service_simple(
 
     # For now, fall back to direct service creation
     # In the future, this could be enhanced to work with middleware pre-injection
-    from .service_manager import get_google_service
     import asyncio
 
     # Check if we're in an async context

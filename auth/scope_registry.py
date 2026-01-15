@@ -10,8 +10,9 @@ import logging
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-from typing_extensions import Dict, List, Optional, Set, Union, Any
 from dataclasses import dataclass
+
+from typing_extensions import Any, Dict, List, Optional
 
 from config.enhanced_logging import setup_logger
 
@@ -673,7 +674,7 @@ class ScopeRegistry:
             Combined list of scopes from oauth_comprehensive group
         """
         logger.info(
-            f"SCOPE_REGISTRY: Getting OAuth scopes - using oauth_comprehensive as single source of truth"
+            "SCOPE_REGISTRY: Getting OAuth scopes - using oauth_comprehensive as single source of truth"
         )
 
         # Use our cleaned-up oauth_comprehensive group as the single source of truth

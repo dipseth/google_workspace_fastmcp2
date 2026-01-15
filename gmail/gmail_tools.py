@@ -39,30 +39,29 @@ Tool Modules:
 - gmail.service: Gmail service authentication and setup coordination
 """
 
-import logging
-
 from fastmcp import FastMCP
 
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
 
 
 def setup_gmail_tools(mcp: FastMCP) -> None:
     """
     Register Gmail tools with the FastMCP server using middleware-based service injection with fallback.
-    
+
     This function delegates to the modular Gmail tools setup that imports all specialized
     tool modules. Each module auto-registers its tools when imported.
-    
+
     Args:
         mcp: FastMCP server instance to register tools with
-        
+
     Returns:
         None: Tools are registered as side effects through module imports
     """
     # Delegate to the modular setup function
     from .service import setup_gmail_tools as _setup_modular_gmail_tools
-    
+
     logger.info("Setting up Gmail tools (delegating to modular structure)...")
     _setup_modular_gmail_tools(mcp)
     logger.info("✅ Gmail tools setup completed via modular delegation")

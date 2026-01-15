@@ -10,29 +10,26 @@ This module provides a unified file management tool that handles:
 All operations use the unified OAuth architecture with middleware injection.
 """
 
-import logging
 import asyncio
-from typing_extensions import List, Optional, Annotated, Any, Union, Literal
-from pathlib import Path
-from pydantic import Field
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
+from pydantic import Field
+from typing_extensions import Annotated, Any, List, Literal, Optional, Union
 
 from auth.service_helpers import get_service
-from auth.context import get_user_email_context
+from config.enhanced_logging import setup_logger
+from tools.common_types import UserGoogleEmail
+
 from .file_management_types import (
-    MoveDriveFilesResponse,
-    MoveFileResult,
     CopyDriveFilesResponse,
     CopyFileResult,
-    RenameFileResponse,
     DeleteDriveFilesResponse,
     DeleteFileResult,
+    MoveDriveFilesResponse,
+    MoveFileResult,
+    RenameFileResponse,
 )
-from tools.common_types import UserGoogleEmail, UserGoogleEmailDrive
-
-from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
@@ -50,7 +47,7 @@ async def _get_drive_service_with_fallback(user_google_email: str) -> Any:
     Raises:
         RuntimeError: If service creation fails
     """
-    from auth.service_helpers import request_service, get_injected_service
+    from auth.service_helpers import get_injected_service, request_service
 
     # First, try middleware injection
     service_key = request_service("drive")

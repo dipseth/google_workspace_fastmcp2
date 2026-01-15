@@ -12,19 +12,18 @@ Key Features:
 - Authentication status and session management
 """
 
-import logging
-import os
 import json
+import os
 from pathlib import Path
-from typing_extensions import Optional, Literal, Annotated, Any, Dict, Union, List
 
 from fastmcp import FastMCP
 from pydantic import Field
-from config.settings import settings
-from auth.middleware import CredentialStorageMode
-from tools.common_types import UserGoogleEmail
+from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
 
+from auth.middleware import CredentialStorageMode
 from config.enhanced_logging import setup_logger
+from config.settings import settings
+from tools.common_types import UserGoogleEmail
 
 logger = setup_logger()
 
@@ -311,7 +310,7 @@ async def manage_credentials(
 
         elif action == "delete":
             # Delete credentials (this would need to be implemented in AuthMiddleware)
-            return f"⚠️ Credential deletion not yet implemented. Please manually delete credential files if needed."
+            return "⚠️ Credential deletion not yet implemented. Please manually delete credential files if needed."
 
         else:
             return f"❌ Invalid action '{action}'. Valid actions: status, migrate, summary, delete"
@@ -498,7 +497,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
     ) -> str:
         """
         Manage FastMCP tool availability using FastMCP 2.8.0 enable/disable support.
-        
+
         Actions:
             - 'list':
                 List all registered tools and their enabled/disabled state.
@@ -513,7 +512,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
             - 'enable_all':
                 Enable all tools in the registry (optionally excluding internal tools
                 whose names start with '_', depending on include_internal).
-        
+
         Args:
             action:
                 One of: 'list', 'disable', 'enable', 'disable_all_except', 'enable_all'.
@@ -530,7 +529,13 @@ def setup_server_tools(mcp: FastMCP) -> None:
             Human-readable status string describing the result.
         """
         action_normalized = action.lower().strip()
-        valid_actions = {"list", "disable", "enable", "disable_all_except", "enable_all"}
+        valid_actions = {
+            "list",
+            "disable",
+            "enable",
+            "disable_all_except",
+            "enable_all",
+        }
 
         if action_normalized not in valid_actions:
             return "❌ Invalid action. Valid actions are: " "list, disable, enable"
@@ -615,26 +620,29 @@ def setup_server_tools(mcp: FastMCP) -> None:
             return deduped
 
         target_names = _normalize_tool_names(tool_names)
-        
+
         # For some actions, we require at least one concrete tool name
-        if action_normalized in {"disable", "enable", "disable_all_except"} and not target_names:
+        if (
+            action_normalized in {"disable", "enable", "disable_all_except"}
+            and not target_names
+        ):
             return "❌ 'tool_names' parameter is required for disable/enable/disable_all_except actions"
-        
+
         results = []
-        
+
         if action_normalized == "disable":
             for name in target_names:
                 target = registry.get(name)
                 if not target:
                     results.append(f"❌ Tool '{name}' not found in registry")
                     continue
-        
+
                 if name in protected_tools:
                     results.append(
                         f"🛡️ Tool '{name}' is protected and cannot be disabled"
                     )
                     continue
-        
+
                 # Call FastMCP 2.8.0 tool disable API if available
                 try:
                     if hasattr(target, "disable") and callable(target.disable):
@@ -651,38 +659,38 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 except Exception as e:
                     logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
                     results.append(f"❌ Failed to disable tool '{name}': {e}")
-        
+
             header = "🧰 **Tool disable results**"
             return "\n".join([header, ""] + results)
-        
+
         if action_normalized == "disable_all_except":
             # Keep list is explicit target_names plus always-protected infra tools
             keep_set = set(target_names) | protected_tools
             disabled = []
             skipped = []
             errors = []
-        
+
             for name, target in registry.items():
                 # Optionally skip internal/system tools
                 if not include_internal and name.startswith("_"):
                     skipped.append(name)
                     continue
-        
+
                 if name in keep_set:
                     skipped.append(name)
                     continue
-        
+
                 if not hasattr(target, "disable") or not callable(target.disable):
                     skipped.append(name)
                     continue
-        
+
                 try:
                     target.disable()
                     disabled.append(name)
                 except Exception as e:
                     logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
                     errors.append(f"{name}: {e}")
-        
+
             header_lines = [
                 "🧰 **Tool disable_all_except results**",
                 "",
@@ -699,9 +707,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
             if errors:
                 detail_lines.append("⚠️ Errors:")
                 detail_lines.extend(f"  - {e}" for e in errors)
-        
+
             return "\n".join(header_lines + detail_lines)
-        
+
         if action_normalized == "enable":
             for name in target_names:
                 target = registry.get(name)
@@ -822,11 +830,11 @@ def setup_server_tools(mcp: FastMCP) -> None:
     ) -> str:
         """
         Manage tools based on Qdrant usage analytics with intelligent filtering.
-        
+
         This tool leverages Qdrant's historical tool response data to identify
         and manage tools based on actual usage patterns. Supports service-based
         filtering and usage thresholds.
-        
+
         Args:
             action: Operation to perform - 'preview', 'disable', or 'enable'
             service_filter: Optional service name filter (gmail, chat, drive, etc.)
@@ -834,17 +842,17 @@ def setup_server_tools(mcp: FastMCP) -> None:
             min_usage_count: Minimum historical usage count threshold
             min_score: Minimum semantic search relevance score (optional)
             user_google_email: User's email for access control
-            
+
         Returns:
             Human-readable summary of matched tools and actions taken
         """
         try:
             # Import Qdrant components
-            from middleware.qdrant_core.search import QdrantSearchManager
             from middleware.qdrant_core.client import get_or_create_client_manager
-            from middleware.qdrant_core.query_parser import extract_service_from_tool
             from middleware.qdrant_core.config import load_config_from_settings
-             
+            from middleware.qdrant_core.query_parser import extract_service_from_tool
+            from middleware.qdrant_core.search import QdrantSearchManager
+
             # Initialize or reuse a shared Qdrant client manager using the same URL/API key
             config = load_config_from_settings()
             client_manager = get_or_create_client_manager(
@@ -854,69 +862,75 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 auto_discovery=True,
             )
             search_manager = QdrantSearchManager(client_manager)
-            
+
             # Ensure Qdrant is initialized
             if not client_manager.is_initialized:
                 await client_manager.initialize()
-            
+
             if not client_manager.is_available:
                 return "❌ Qdrant not available - cannot analyze tool usage data. Ensure Qdrant is running."
-            
+
             # Get analytics grouped by tool_name
-            logger.info(f"📊 Fetching Qdrant analytics for tool management...")
+            logger.info("📊 Fetching Qdrant analytics for tool management...")
             analytics = await search_manager.get_analytics(group_by="tool_name")
-            
+
             if "error" in analytics:
                 return f"❌ Failed to get analytics: {analytics['error']}"
-            
+
             if not analytics.get("groups"):
                 return "⚠️ No tool usage data found in Qdrant. Analytics database may be empty."
-            
+
             # Filter and rank tools based on criteria
             matched_tools = []
-            
+
             for tool_name, tool_data in analytics["groups"].items():
                 usage_count = tool_data.get("count", 0)
-                
+
                 # Skip if below usage threshold
                 if usage_count < min_usage_count:
                     continue
-                
+
                 # Apply service filter if specified
                 if service_filter:
                     tool_service = extract_service_from_tool(tool_name)
                     if tool_service.lower() != service_filter.lower():
                         continue
-                
-                matched_tools.append({
-                    "tool_name": tool_name,
-                    "usage_count": usage_count,
-                    "service": extract_service_from_tool(tool_name),
-                    "unique_users": tool_data.get("unique_users", 0),
-                    "error_rate": tool_data.get("error_rate", 0.0),
-                    "recent_activity": tool_data.get("recent_activity", {}),
-                    "sample_point_ids": tool_data.get("point_ids", [])[:3],  # First 3 point IDs
-                })
-            
+
+                matched_tools.append(
+                    {
+                        "tool_name": tool_name,
+                        "usage_count": usage_count,
+                        "service": extract_service_from_tool(tool_name),
+                        "unique_users": tool_data.get("unique_users", 0),
+                        "error_rate": tool_data.get("error_rate", 0.0),
+                        "recent_activity": tool_data.get("recent_activity", {}),
+                        "sample_point_ids": tool_data.get("point_ids", [])[
+                            :3
+                        ],  # First 3 point IDs
+                    }
+                )
+
             # Sort by usage count (descending) and limit
             matched_tools.sort(key=lambda x: x["usage_count"], reverse=True)
             matched_tools = matched_tools[:limit]
-            
+
             if not matched_tools:
-                filter_desc = f" matching service '{service_filter}'" if service_filter else ""
+                filter_desc = (
+                    f" matching service '{service_filter}'" if service_filter else ""
+                )
                 return f"ℹ️ No tools found{filter_desc} with usage count >= {min_usage_count}"
-            
+
             # Get current tool registry
             registry = _get_tool_registry(mcp)
             if not registry:
                 return "❌ Unable to access FastMCP tool registry"
-            
+
             # Build results based on action
             if action == "preview":
                 lines = [
                     "🔍 **Analytics-Based Tool Management Preview**",
                     "",
-                    f"**Filters Applied:**",
+                    "**Filters Applied:**",
                     f"  - Service: {service_filter or 'All services'}",
                     f"  - Min Usage Count: {min_usage_count}",
                     f"  - Limit: Top {limit} tools",
@@ -926,47 +940,55 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     "Rank | Tool Name | Service | Usage Count | Users | Error Rate | In Registry",
                     "---- | --------- | ------- | ----------- | ----- | ---------- | -----------",
                 ]
-                
+
                 for idx, tool_info in enumerate(matched_tools, 1):
                     tool_name = tool_info["tool_name"]
                     in_registry = "✅" if tool_name in registry else "❌"
-                    
+
                     lines.append(
                         f"{idx} | {tool_name} | {tool_info['service']} | "
                         f"{tool_info['usage_count']} | {tool_info['unique_users']} | "
                         f"{tool_info['error_rate']:.1%} | {in_registry}"
                     )
-                
-                lines.extend([
-                    "",
-                    "**Sample Point IDs for Investigation:**",
-                ])
-                
+
+                lines.extend(
+                    [
+                        "",
+                        "**Sample Point IDs for Investigation:**",
+                    ]
+                )
+
                 for tool_info in matched_tools[:5]:  # Show point IDs for top 5
                     if tool_info["sample_point_ids"]:
-                        lines.append(f"  - {tool_info['tool_name']}: {', '.join(tool_info['sample_point_ids'])}")
-                
-                lines.extend([
-                    "",
-                    "💡 **Next Steps:**",
-                    f"  - Use action='disable' to disable these {len(matched_tools)} tools",
-                    f"  - Use action='enable' to re-enable previously disabled tools",
-                    "  - Adjust filters to refine tool selection",
-                ])
-                
+                        lines.append(
+                            f"  - {tool_info['tool_name']}: {', '.join(tool_info['sample_point_ids'])}"
+                        )
+
+                lines.extend(
+                    [
+                        "",
+                        "💡 **Next Steps:**",
+                        f"  - Use action='disable' to disable these {len(matched_tools)} tools",
+                        "  - Use action='enable' to re-enable previously disabled tools",
+                        "  - Adjust filters to refine tool selection",
+                    ]
+                )
+
                 return "\n".join(lines)
-            
+
             elif action in ["disable", "enable"]:
                 # Extract tool names to manage
                 target_names = [t["tool_name"] for t in matched_tools]
-                
+
                 # Filter out tools not in registry
                 available_targets = [name for name in target_names if name in registry]
-                missing_targets = [name for name in target_names if name not in registry]
-                
+                missing_targets = [
+                    name for name in target_names if name not in registry
+                ]
+
                 if not available_targets:
-                    return f"❌ None of the matched tools are currently registered in FastMCP"
-                
+                    return "❌ None of the matched tools are currently registered in FastMCP"
+
                 # Check for protected tools
                 protected_tools = {
                     "manage_tools",
@@ -975,16 +997,22 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     "start_google_auth",
                     "check_drive_auth",
                 }
-                
-                protected_in_targets = [name for name in available_targets if name in protected_tools]
-                safe_targets = [name for name in available_targets if name not in protected_tools]
-                
+
+                protected_in_targets = [
+                    name for name in available_targets if name in protected_tools
+                ]
+                safe_targets = [
+                    name for name in available_targets if name not in protected_tools
+                ]
+
                 results = []
-                
+
                 # Report protected tools
                 if protected_in_targets and action == "disable":
-                    results.append(f"🛡️ Skipped {len(protected_in_targets)} protected tool(s): {', '.join(protected_in_targets)}")
-                
+                    results.append(
+                        f"🛡️ Skipped {len(protected_in_targets)} protected tool(s): {', '.join(protected_in_targets)}"
+                    )
+
                 # Execute action on safe targets
                 if action == "disable":
                     for name in safe_targets:
@@ -993,15 +1021,26 @@ def setup_server_tools(mcp: FastMCP) -> None:
                             if hasattr(target, "disable") and callable(target.disable):
                                 target.disable()
                                 # Find usage info for this tool
-                                tool_info = next((t for t in matched_tools if t["tool_name"] == name), {})
+                                tool_info = next(
+                                    (
+                                        t
+                                        for t in matched_tools
+                                        if t["tool_name"] == name
+                                    ),
+                                    {},
+                                )
                                 usage = tool_info.get("usage_count", "?")
                                 results.append(f"⭕ Disabled '{name}' (usage: {usage})")
                             else:
-                                results.append(f"❌ '{name}' doesn't support disable() in this FastMCP version")
+                                results.append(
+                                    f"❌ '{name}' doesn't support disable() in this FastMCP version"
+                                )
                         except Exception as e:
-                            logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
+                            logger.error(
+                                f"Error disabling tool {name}: {e}", exc_info=True
+                            )
                             results.append(f"❌ Failed to disable '{name}': {e}")
-                
+
                 elif action == "enable":
                     for name in safe_targets:
                         target = registry[name]
@@ -1009,24 +1048,37 @@ def setup_server_tools(mcp: FastMCP) -> None:
                             if hasattr(target, "enable") and callable(target.enable):
                                 target.enable()
                                 # Find usage info for this tool
-                                tool_info = next((t for t in matched_tools if t["tool_name"] == name), {})
+                                tool_info = next(
+                                    (
+                                        t
+                                        for t in matched_tools
+                                        if t["tool_name"] == name
+                                    ),
+                                    {},
+                                )
                                 usage = tool_info.get("usage_count", "?")
                                 results.append(f"✅ Enabled '{name}' (usage: {usage})")
                             else:
-                                results.append(f"❌ '{name}' doesn't support enable() in this FastMCP version")
+                                results.append(
+                                    f"❌ '{name}' doesn't support enable() in this FastMCP version"
+                                )
                         except Exception as e:
-                            logger.error(f"Error enabling tool {name}: {e}", exc_info=True)
+                            logger.error(
+                                f"Error enabling tool {name}: {e}", exc_info=True
+                            )
                             results.append(f"❌ Failed to enable '{name}': {e}")
-                
+
                 # Report missing tools
                 if missing_targets:
-                    results.append(f"ℹ️ {len(missing_targets)} tool(s) not in registry: {', '.join(missing_targets[:5])}")
-                
+                    results.append(
+                        f"ℹ️ {len(missing_targets)} tool(s) not in registry: {', '.join(missing_targets[:5])}"
+                    )
+
                 # Build summary
                 header_lines = [
                     f"🧰 **Analytics-Based Tool {action.title()} Results**",
                     "",
-                    f"**Query Filters:**",
+                    "**Query Filters:**",
                     f"  - Service: {service_filter or 'All'}",
                     f"  - Min Usage: {min_usage_count}",
                     f"  - Top N: {limit}",
@@ -1036,14 +1088,16 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     f"**Protected:** {len(protected_in_targets)} tools skipped",
                     "",
                 ]
-                
+
                 return "\n".join(header_lines + results)
-            
+
             else:
                 return f"❌ Invalid action '{action}'. Valid actions: preview, disable, enable"
-            
+
         except Exception as e:
-            logger.error(f"❌ Analytics-based tool management failed: {e}", exc_info=True)
+            logger.error(
+                f"❌ Analytics-based tool management failed: {e}", exc_info=True
+            )
             return f"❌ Tool management by analytics failed: {e}"
 
     logger.info(

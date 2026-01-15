@@ -8,6 +8,7 @@ to document text content before updating via the Docs API.
 import logging
 import re
 from typing import List, Tuple
+
 from docs.docs_types import RegexReplace
 
 logger = logging.getLogger(__name__)

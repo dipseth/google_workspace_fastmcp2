@@ -3,7 +3,7 @@
 import pytest
 
 from .base_test_config import TEST_EMAIL
-from .test_helpers import ToolTestRunner, TestResponseValidator, print_test_result
+from .test_helpers import ToolTestRunner, print_test_result
 
 
 @pytest.mark.service("people")

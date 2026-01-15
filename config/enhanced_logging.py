@@ -4,16 +4,13 @@ Provides rich colored logging with file path tracking, line numbers,
 and automatically truncated long messages.
 """
 
-import logging
-from rich.logging import RichHandler
 import datetime
+import logging
 import os
 import sys
-from pathlib import Path
-import inspect
 import time
-import re
 from functools import wraps
+from pathlib import Path
 
 # ======== Color Configuration ========
 COLORS = {
@@ -49,16 +46,17 @@ def get_log_directory():
     log_path = os.getenv("LOG_PATH")
     if log_path:
         return Path(log_path)
-    
+
     # Try user's home directory
     try:
         home_logs = Path.home() / "logs" / "fastmcp"
         return home_logs
     except:
         pass
-    
+
     # Fall back to system temp directory
     import tempfile
+
     temp_logs = Path(tempfile.gettempdir()) / "fastmcp_logs"
     return temp_logs
 
@@ -140,11 +138,11 @@ def setup_logger(level=None):
         logging.Logger: The root logger instance
     """
     global _root_logger_initialized
-    
+
     # Avoid re-initializing if already done
     if _root_logger_initialized:
         return logging.getLogger()
-    
+
     # Determine log level
     if level is None:
         log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -155,7 +153,7 @@ def setup_logger(level=None):
 
     # Get log directory (with fallback for restricted environments)
     log_dir = get_log_directory()
-    
+
     # Create log directory structure with error handling
     try:
         today = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -165,15 +163,18 @@ def setup_logger(level=None):
         # Create timestamped log file
         timestamp = datetime.datetime.now().strftime("%H-%M-%S")
         log_file = daily_log_dir / f"app_log_{timestamp}.log"
-        
+
         # Test if we can write to the directory
         test_file = daily_log_dir / "test_write.tmp"
         test_file.touch()
         test_file.unlink()
-        
+
     except (OSError, PermissionError) as e:
         # If we can't create files, fall back to console-only logging
-        print(f"Warning: Cannot create log files ({e}). Using console logging only.", file=sys.stderr)
+        print(
+            f"Warning: Cannot create log files ({e}). Using console logging only.",
+            file=sys.stderr,
+        )
         log_file = None
 
     # Define log format with colors
@@ -205,7 +206,10 @@ def setup_logger(level=None):
             file_handler.setFormatter(file_formatter)
             root_logger.addHandler(file_handler)
         except (OSError, PermissionError):
-            print("Warning: Cannot create file handler. Using console logging only.", file=sys.stderr)
+            print(
+                "Warning: Cannot create file handler. Using console logging only.",
+                file=sys.stderr,
+            )
 
     # Configure console handler with colors
     console_handler = logging.StreamHandler()
@@ -235,7 +239,7 @@ def get_logger(name=None):
     # Ensure root logger is set up
     if not _root_logger_initialized:
         setup_logger()
-    
+
     return logging.getLogger(name)
 
 

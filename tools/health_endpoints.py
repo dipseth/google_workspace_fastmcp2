@@ -6,27 +6,31 @@ following Kubernetes best practices with liveness and readiness probes.
 
 import logging
 from typing import Any
+
 from fastmcp import FastMCP
+
 from config.settings import settings
 from tools.server_tools import health_check as check_server_health
 
 logger = logging.getLogger(__name__)
 
 
-def setup_health_endpoints(mcp: FastMCP, google_auth_provider=None, credential_storage_mode=None):
+def setup_health_endpoints(
+    mcp: FastMCP, google_auth_provider=None, credential_storage_mode=None
+):
     """
     Setup health check endpoints for container orchestration.
-    
+
     Provides two endpoints following Kubernetes best practices:
     - /health: Comprehensive liveness probe with detailed status
     - /ready: Simple readiness probe for traffic routing
-    
+
     Args:
         mcp: FastMCP application instance
         google_auth_provider: Optional Google auth provider for health checks
         credential_storage_mode: Current credential storage mode
     """
-    
+
     @mcp.custom_route("/health", methods=["GET"])
     async def health_endpoint(request: Any):
         """
@@ -34,25 +38,25 @@ def setup_health_endpoints(mcp: FastMCP, google_auth_provider=None, credential_s
         Returns detailed server health status including OAuth flows and credentials.
         """
         from starlette.responses import JSONResponse
-        
+
         logger.info("Health check endpoint called")
-        
+
         try:
             # Use the comprehensive health check from server_tools
             health_status = await check_server_health(
                 google_auth_provider=google_auth_provider,
                 credential_storage_mode=credential_storage_mode,
-                user_google_email=None
+                user_google_email=None,
             )
-            
+
             return JSONResponse(
                 status_code=200,
                 content={
                     "status": "healthy",
                     "service": settings.server_name,
                     "version": "1.0.0",
-                    "details": health_status
-                }
+                    "details": health_status,
+                },
             )
         except Exception as e:
             logger.error(f"Health check failed: {e}")
@@ -61,8 +65,8 @@ def setup_health_endpoints(mcp: FastMCP, google_auth_provider=None, credential_s
                 content={
                     "status": "unhealthy",
                     "service": settings.server_name,
-                    "error": str(e)
-                }
+                    "error": str(e),
+                },
             )
 
     @mcp.custom_route("/ready", methods=["GET"])
@@ -72,26 +76,19 @@ def setup_health_endpoints(mcp: FastMCP, google_auth_provider=None, credential_s
         This is a lightweight check for container orchestration.
         """
         from starlette.responses import JSONResponse
-        
+
         try:
             # Basic readiness check - is the server running?
             return JSONResponse(
                 status_code=200,
-                content={
-                    "status": "ready",
-                    "service": settings.server_name
-                }
+                content={"status": "ready", "service": settings.server_name},
             )
         except Exception as e:
             logger.error(f"Readiness check failed: {e}")
             return JSONResponse(
-                status_code=503,
-                content={
-                    "status": "not_ready",
-                    "error": str(e)
-                }
+                status_code=503, content={"status": "not_ready", "error": str(e)}
             )
-    
+
     logger.info("✅ Health check endpoints registered:")
     logger.info("   • /health - Comprehensive health status (for liveness probe)")
     logger.info("   • /ready - Readiness check (for readiness probe)")

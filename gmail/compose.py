@@ -8,50 +8,43 @@ This module provides tools for:
 - Creating draft replies
 """
 
-import logging
-import json
 import asyncio
 import html
-from datetime import datetime, UTC
-from typing_extensions import Optional, Literal, Any, List, Dict, Union, Annotated
-from pydantic import Field
 from dataclasses import dataclass
 
-from fastmcp import FastMCP, Context
-from googleapiclient.errors import HttpError
+from fastmcp import Context, FastMCP
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from pydantic import Field
+from typing_extensions import Annotated, List, Literal, Optional, Union
 
 from auth.context import get_auth_middleware
-from .service import _get_gmail_service_with_fallback
-from .utils import (
-    _create_mime_message,
-    _prepare_reply_subject,
-    _quote_original_message,
-    _html_to_plain_text,
-    _extract_headers,
-    _extract_message_body,
-    extract_email_addresses,
-    _prepare_forward_subject,
-    _extract_html_body,
-    _format_forward_content,
-    _generate_gmail_web_url,
-    count_recipients,
-)
-from .gmail_types import (
-    SendGmailMessageResponse,
-    DraftGmailMessageResponse,
-    ReplyGmailMessageResponse,
-    DraftGmailReplyResponse,
-    ForwardGmailMessageResponse,
-    DraftGmailForwardResponse,
-    GmailRecipients,
-    GmailRecipientsOptional,
-)
+from config.enhanced_logging import setup_logger
 from config.settings import settings
 from tools.common_types import UserGoogleEmail
 
-
-from config.enhanced_logging import setup_logger
+from .gmail_types import (
+    DraftGmailForwardResponse,
+    DraftGmailMessageResponse,
+    DraftGmailReplyResponse,
+    ForwardGmailMessageResponse,
+    GmailRecipients,
+    GmailRecipientsOptional,
+    ReplyGmailMessageResponse,
+    SendGmailMessageResponse,
+)
+from .service import _get_gmail_service_with_fallback
+from .utils import (
+    _create_mime_message,
+    _extract_html_body,
+    _extract_message_body,
+    _format_forward_content,
+    _prepare_forward_subject,
+    _prepare_reply_subject,
+    _quote_original_message,
+    count_recipients,
+    extract_email_addresses,
+)
 
 logger = setup_logger()
 
@@ -1855,7 +1848,7 @@ async def forward_gmail_message(
                 fallback_result = await _handle_elicitation_fallback(
                     settings.gmail_elicitation_fallback,
                     resolved_to,
-                    f"Fwd: Original Message",
+                    "Fwd: Original Message",
                     body or "Forwarded message",
                     user_google_email,
                     content_type,
@@ -1875,7 +1868,7 @@ async def forward_gmail_message(
                             if isinstance(resolved_to, str)
                             else ", ".join(resolved_to)
                         ),
-                        subject=f"Fwd: Original Message",
+                        subject="Fwd: Original Message",
                         content_type=content_type,
                         to_recipients=(
                             resolved_to
@@ -2014,7 +2007,7 @@ async def forward_gmail_message(
                     fallback_result = await _handle_elicitation_fallback(
                         settings.gmail_elicitation_fallback,
                         resolved_to,
-                        f"Fwd: Original Message",
+                        "Fwd: Original Message",
                         body or "Forwarded message",
                         user_google_email,
                         content_type,
@@ -2034,7 +2027,7 @@ async def forward_gmail_message(
                                 if isinstance(resolved_to, str)
                                 else ", ".join(resolved_to)
                             ),
-                            subject=f"Fwd: Original Message",
+                            subject="Fwd: Original Message",
                             content_type=content_type,
                             to_recipients=(
                                 resolved_to

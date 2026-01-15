@@ -33,46 +33,35 @@ Dependencies:
 - fastmcp: FastMCP server framework
 """
 
-import logging
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 import time
 from pathlib import Path
-from typing_extensions import Optional, Any, List, Annotated, Union, Literal
+
 from fastmcp import FastMCP
-from pydantic import BaseModel, Field
+from pydantic import Field
+from typing_extensions import Annotated, Any, List, Literal, Optional, Union
 
-
-# Import our custom type for consistent parameter definition
-from tools.common_types import UserGoogleEmailDrive, GoogleServiceNames
-from config.settings import settings
-
-# Import service types for proper typing
-from auth.service_types import (
-    GoogleServiceDisplayName,
-    AuthenticationMethod,
-    GoogleServiceName,
-)
-
-from auth.google_auth import initiate_oauth_flow, GoogleAuthError
+from auth.google_auth import GoogleAuthError, initiate_oauth_flow
 from auth.service_helpers import (
     get_service,
-    request_service,
-    get_injected_service,
-    get_drive_service,
-    list_supported_services,
-    get_service_defaults,
 )
-from .utils import upload_file_to_drive_api, format_upload_result, DriveUploadError
+
+# Import service types for proper typing
+from config.settings import settings
+
+# Import our custom type for consistent parameter definition
+from tools.common_types import UserGoogleEmailDrive
+
 from .upload_types import (
-    UploadFileResponse,
+    CheckAuthResponse,
     FileUploadInfo,
     FolderUploadSummary,
     StartAuthResponse,
-    CheckAuthResponse,
+    UploadFileResponse,
 )
-from .auth_models import GoogleAuthConfig
+from .utils import DriveUploadError, upload_file_to_drive_api
 
 
 def setup_drive_tools(mcp: FastMCP) -> None:
@@ -178,7 +167,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             StartAuthResponse: Structured response with auth URL, instructions, and metadata
         """
         # DEBUG: Log all received parameters
-        logger.info(f"🔧 TOOL DEBUG: start_google_auth called with parameters:")
+        logger.info("🔧 TOOL DEBUG: start_google_auth called with parameters:")
         logger.info(
             f"🔧 TOOL DEBUG:   user_google_email = {user_google_email} (type: {type(user_google_email)})"
         )
@@ -192,7 +181,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         # Try to get user email from context if not provided
         if not user_google_email:
             logger.info(
-                f"🔧 TOOL DEBUG: user_google_email is None/empty, checking context"
+                "🔧 TOOL DEBUG: user_google_email is None/empty, checking context"
             )
             from auth.context import get_user_email_context
 
@@ -207,7 +196,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     f"🔧 TOOL DEBUG: Using email from context: {user_google_email}"
                 )
             else:
-                logger.info(f"🔧 TOOL DEBUG: No email found in context either")
+                logger.info("🔧 TOOL DEBUG: No email found in context either")
 
         logger.info(
             f"Starting OAuth flow for {user_google_email} (auto_open_browser={auto_open_browser})"
@@ -216,7 +205,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         # Validate that user_google_email is provided
         if not user_google_email:
             logger.error(
-                f"🔧 TOOL DEBUG: ❌ Still no user_google_email after context check"
+                "🔧 TOOL DEBUG: ❌ Still no user_google_email after context check"
             )
             return StartAuthResponse(
                 status="error",
@@ -277,7 +266,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
                     browser_opened = webbrowser.open(auth_url)
                     logger.info(
-                        f"✅ Browser opened automatically for OAuth authentication"
+                        "✅ Browser opened automatically for OAuth authentication"
                     )
                 except Exception as e:
                     browser_error = str(e)
@@ -588,7 +577,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             return UploadFileResponse(
                 success=False, userEmail=user_google_email, message="", error=error_msg
             )
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             error_msg = f"Path not found: {path}"
             logger.error(f"❌ {error_msg}")
             return UploadFileResponse(

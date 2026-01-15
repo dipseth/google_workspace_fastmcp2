@@ -5,12 +5,14 @@ This module defines structured response types for Drive search operations
 to provide consistent, typed responses across the FastMCP2 platform.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import Dict, List, Optional
+
 from typing_extensions import TypedDict
 
 
 class DriveFileInfo(TypedDict):
     """Information about a single Drive file or folder."""
+
     id: str
     name: str
     mimeType: str
@@ -29,6 +31,7 @@ class DriveFileInfo(TypedDict):
 
 class DriveSearchResponse(TypedDict):
     """Structured response for Drive search operations."""
+
     query: str
     queryType: str  # "structured" or "free-text"
     processedQuery: str  # The actual query sent to API
@@ -45,6 +48,7 @@ class DriveSearchResponse(TypedDict):
 
 class DriveSearchError(TypedDict):
     """Error response for Drive search operations."""
+
     query: str
     error: str
     errorType: str  # "AUTH_ERROR", "API_ERROR", "INVALID_QUERY", etc.

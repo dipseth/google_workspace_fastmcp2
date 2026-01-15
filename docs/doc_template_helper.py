@@ -3,10 +3,12 @@ Helper module for creating dynamic Google Docs using Jinja2 templates.
 This integrates with the middleware template system for seamless document generation.
 """
 
-from typing import Dict, Any, Optional, Union
-from jinja2 import Template, Environment, FileSystemLoader, ChoiceLoader
 import asyncio
 from pathlib import Path
+from typing import Any, Dict, Optional, Union
+
+from jinja2 import ChoiceLoader, Environment, FileSystemLoader
+
 from docs.docs_tools import create_doc
 from docs.docs_types import CreateDocResponse
 from tools.common_types import UserGoogleEmail

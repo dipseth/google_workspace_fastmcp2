@@ -30,16 +30,10 @@ the ModuleWrapper adapter.
 - Format conversion might overlap with general data transformation tests
 """
 
-import pytest
-import asyncio
-import json
-from typing import Any, Dict, List
 import os
-from datetime import datetime
-from dotenv import load_dotenv
-from ..test_auth_utils import get_client_auth_config
 
-from fastmcp import Client
+import pytest
+from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
@@ -55,31 +49,36 @@ TEST_EMAIL = os.getenv("TEST_CHAT_WEBHOOK_EMAIL", "srivers@groupon.com")
 # Test space ID for Google Chat - extract from your configured webhook space or use full format
 TEST_SPACE_ID = f"spaces/{os.getenv('TEST_CHAT_WEBHOOK_SPACE', 'AAAAWvjq2HE')}"
 # Test webhook URL for Google Chat - using your configured variable
-TEST_WEBHOOK_URL = os.getenv("TEST_CHAT_WEBHOOK", "https://chat.googleapis.com/v1/spaces/AAAAWvjq2HE/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=mfrR_lwMjDtMA6qVGp0C0Hlu8jFvaYEpFrfIaKJJroQ")
+TEST_WEBHOOK_URL = os.getenv(
+    "TEST_CHAT_WEBHOOK",
+    "https://chat.googleapis.com/v1/spaces/AAAAWvjq2HE/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=mfrR_lwMjDtMA6qVGp0C0Hlu8jFvaYEpFrfIaKJJroQ",
+)
 
 
 class TestUnifiedCardTool:
     """Test the Unified Card Tool using the FastMCP Client."""
-    
+
     # Use standardized client fixture from conftest.py
-    
+
     @pytest.mark.asyncio
     async def test_send_dynamic_card_tool_available(self, client):
         """Test that the send_dynamic_card tool is available."""
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
-        
+
         # Check for the main tool we're testing
-        assert "send_dynamic_card" in tool_names, f"Tool 'send_dynamic_card' not found in available tools"
-        print(f"✅ send_dynamic_card tool is available")
-    
+        assert (
+            "send_dynamic_card" in tool_names
+        ), "Tool 'send_dynamic_card' not found in available tools"
+        print("✅ send_dynamic_card tool is available")
+
     @pytest.mark.asyncio
     async def test_send_dynamic_card_simple(self, client):
         """Test sending a simple dynamic card."""
         # Skip if no webhook URL is available
         if not TEST_WEBHOOK_URL:
             pytest.skip("No webhook URL available for testing send_dynamic_card")
-        
+
         try:
             # Call the tool with a simple card description
             result = await client.call_tool(
@@ -91,32 +90,34 @@ class TestUnifiedCardTool:
                     "card_params": {
                         "title": "Simple Test Card",
                         "text": "This is a simple test card sent by the unified card tool",
-                        "subtitle": "Simple Test"
+                        "subtitle": "Simple Test",
                     },
-                    "webhook_url": TEST_WEBHOOK_URL
-                }
+                    "webhook_url": TEST_WEBHOOK_URL,
+                },
             )
-            
+
             # Simple optimistic approach
             assert len(result.content) > 0
             content = result.content[0].text
-            
+
             # Check result
-            assert "successfully" in content.lower() or "sent" in content.lower(), f"Failed to send card: {content}"
+            assert (
+                "successfully" in content.lower() or "sent" in content.lower()
+            ), f"Failed to send card: {content}"
             print(f"Simple card sending result: {content}")
         except Exception as e:
             # Handle server errors gracefully
             print(f"Error during test_send_dynamic_card_simple: {str(e)}")
             # Don't fail the test if there's a server-side error
             pytest.skip(f"Server error occurred: {str(e)}")
-    
+
     @pytest.mark.asyncio
     async def test_send_dynamic_card_with_image(self, client):
         """Test sending a dynamic card with an image."""
         # Skip if no webhook URL is available
         if not TEST_WEBHOOK_URL:
             pytest.skip("No webhook URL available for testing send_dynamic_card")
-        
+
         try:
             # Call the tool with a card description that includes an image
             result = await client.call_tool(
@@ -129,32 +130,34 @@ class TestUnifiedCardTool:
                         "title": "Image Test Card",
                         "text": "This card includes an image",
                         "subtitle": "Image Test",
-                        "image_url": "https://picsum.photos/200/300"
+                        "image_url": "https://picsum.photos/200/300",
                     },
-                    "webhook_url": TEST_WEBHOOK_URL
-                }
+                    "webhook_url": TEST_WEBHOOK_URL,
+                },
             )
-            
+
             # Simple optimistic approach
             assert len(result.content) > 0
             content = result.content[0].text
-            
+
             # Check result
-            assert "successfully" in content.lower() or "sent" in content.lower(), f"Failed to send card with image: {content}"
+            assert (
+                "successfully" in content.lower() or "sent" in content.lower()
+            ), f"Failed to send card with image: {content}"
             print(f"Card with image sending result: {content}")
         except Exception as e:
             # Handle server errors gracefully
             print(f"Error during test_send_dynamic_card_with_image: {str(e)}")
             # Don't fail the test if there's a server-side error
             pytest.skip(f"Server error occurred: {str(e)}")
-    
+
     @pytest.mark.asyncio
     async def test_send_dynamic_card_interactive(self, client):
         """Test sending an interactive dynamic card with buttons."""
         # Skip if no webhook URL is available
         if not TEST_WEBHOOK_URL:
             pytest.skip("No webhook URL available for testing send_dynamic_card")
-        
+
         try:
             # Call the tool with an interactive card description
             result = await client.call_tool(
@@ -167,40 +170,36 @@ class TestUnifiedCardTool:
                         "title": "Interactive Test Card",
                         "text": "This card has interactive buttons",
                         "buttons": [
-                            {
-                                "text": "Visit Google",
-                                "url": "https://www.google.com"
-                            },
-                            {
-                                "text": "Visit GitHub",
-                                "url": "https://www.github.com"
-                            }
-                        ]
+                            {"text": "Visit Google", "url": "https://www.google.com"},
+                            {"text": "Visit GitHub", "url": "https://www.github.com"},
+                        ],
                     },
-                    "webhook_url": TEST_WEBHOOK_URL
-                }
+                    "webhook_url": TEST_WEBHOOK_URL,
+                },
             )
-            
+
             # Simple optimistic approach
             assert len(result.content) > 0
             content = result.content[0].text
-            
+
             # Check result
-            assert "successfully" in content.lower() or "sent" in content.lower(), f"Failed to send interactive card: {content}"
+            assert (
+                "successfully" in content.lower() or "sent" in content.lower()
+            ), f"Failed to send interactive card: {content}"
             print(f"Interactive card sending result: {content}")
         except Exception as e:
             # Handle server errors gracefully
             print(f"Error during test_send_dynamic_card_interactive: {str(e)}")
             # Don't fail the test if there's a server-side error
             pytest.skip(f"Server error occurred: {str(e)}")
-    
+
     @pytest.mark.asyncio
     async def test_send_dynamic_card_with_natural_language(self, client):
         """Test sending a dynamic card using complex natural language description."""
         # Skip if no webhook URL is available
         if not TEST_WEBHOOK_URL:
             pytest.skip("No webhook URL available for testing send_dynamic_card")
-        
+
         try:
             # Call the tool with a complex natural language description
             result = await client.call_tool(
@@ -217,34 +216,38 @@ class TestUnifiedCardTool:
                         "buttons": [
                             {
                                 "text": "Learn More",
-                                "url": "https://cloud.google.com/chat"
+                                "url": "https://cloud.google.com/chat",
                             }
-                        ]
+                        ],
                     },
-                    "webhook_url": TEST_WEBHOOK_URL
-                }
+                    "webhook_url": TEST_WEBHOOK_URL,
+                },
             )
-            
+
             # Simple optimistic approach
             assert len(result.content) > 0
             content = result.content[0].text
-            
+
             # Check result
-            assert "successfully" in content.lower() or "sent" in content.lower(), f"Failed to send card with natural language: {content}"
+            assert (
+                "successfully" in content.lower() or "sent" in content.lower()
+            ), f"Failed to send card with natural language: {content}"
             print(f"Natural language card sending result: {content}")
         except Exception as e:
             # Handle server errors gracefully
-            print(f"Error during test_send_dynamic_card_with_natural_language: {str(e)}")
+            print(
+                f"Error during test_send_dynamic_card_with_natural_language: {str(e)}"
+            )
             # Don't fail the test if there's a server-side error
             pytest.skip(f"Server error occurred: {str(e)}")
-    
+
     @pytest.mark.asyncio
     async def test_send_dynamic_card_fallback(self, client):
         """Test the fallback behavior when card description doesn't match any component."""
         # Skip if no webhook URL is available
         if not TEST_WEBHOOK_URL:
             pytest.skip("No webhook URL available for testing send_dynamic_card")
-        
+
         try:
             # Call the tool with an unusual description that might not match any component
             result = await client.call_tool(
@@ -255,16 +258,16 @@ class TestUnifiedCardTool:
                     "card_description": "something completely unusual that doesn't match any card type",
                     "card_params": {
                         "title": "Fallback Test",
-                        "text": "Testing fallback behavior"
+                        "text": "Testing fallback behavior",
                     },
-                    "webhook_url": TEST_WEBHOOK_URL
-                }
+                    "webhook_url": TEST_WEBHOOK_URL,
+                },
             )
-            
+
             # Simple optimistic approach
             assert len(result.content) > 0
             content = result.content[0].text
-            
+
             # We should either get a fallback to a simple card or an error message
             # Either way, the test should not fail with an exception
             print(f"Fallback test result: {content}")

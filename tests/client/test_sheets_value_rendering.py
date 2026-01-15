@@ -8,10 +8,12 @@ The test is written to be robust in environments where OAuth is not configured:
 
 import json
 import os
+
 import pytest
 
 from .base_test_config import TEST_EMAIL
 from .test_helpers import ToolTestRunner
+
 
 @pytest.fixture(scope="session")
 def test_spreadsheet_id() -> str | None:
@@ -29,7 +31,9 @@ def test_spreadsheet_id() -> str | None:
 @pytest.mark.service("sheets")
 class TestSheetsValueRendering:
     @pytest.mark.asyncio
-    async def test_read_sheet_values_value_render_options_auth_patterns(self, client, test_spreadsheet_id):
+    async def test_read_sheet_values_value_render_options_auth_patterns(
+        self, client, test_spreadsheet_id
+    ):
         """Test read_sheet_values accepts value_render_option/date_time_render_option under both auth patterns."""
         if not test_spreadsheet_id:
             pytest.skip("No test spreadsheet ID available (set TEST_GOOGLE_SHEET_ID)")

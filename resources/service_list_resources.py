@@ -51,15 +51,20 @@ Examples:
 - service://gmail/filters/123 → Specific filter details
 """
 
-import logging
-from typing import Dict, Any, List
-from fastmcp import FastMCP, Context
+from typing import List
+
+from fastmcp import Context, FastMCP
 from pydantic import Field
 from typing_extensions import Annotated
-from middleware.service_list_response import ServiceListResponse, ServiceListsResponse, ServiceItemDetailsResponse
-from auth.context import get_user_email_context
 
+from auth.context import get_user_email_context
 from config.enhanced_logging import setup_logger
+from middleware.service_list_response import (
+    ServiceItemDetailsResponse,
+    ServiceListResponse,
+    ServiceListsResponse,
+)
+
 logger = setup_logger()
 
 
@@ -70,8 +75,15 @@ def get_supported_services() -> List[str]:
     This list matches what's configured in TagBasedResourceMiddleware.
     """
     return [
-        "gmail", "drive", "calendar", "docs", "sheets",
-        "chat", "forms", "slides", "photos"
+        "gmail",
+        "drive",
+        "calendar",
+        "docs",
+        "sheets",
+        "chat",
+        "forms",
+        "slides",
+        "photos",
     ]
 
 
@@ -90,7 +102,7 @@ def generate_service_documentation() -> str:
         "chat": "💬",
         "forms": "📝",
         "slides": "🎯",
-        "photos": "📷"
+        "photos": "📷",
     }
 
     for service in services:
@@ -111,7 +123,9 @@ def register_service_resources(mcp: FastMCP) -> None:
     Args:
         mcp: FastMCP instance to register resources with
     """
-    logger.info("Registering simplified service list resources (handled by TagBasedResourceMiddleware)...")
+    logger.info(
+        "Registering simplified service list resources (handled by TagBasedResourceMiddleware)..."
+    )
 
     supported_services = get_supported_services()
     service_list_str = ", ".join(supported_services)
@@ -143,24 +157,24 @@ Returns comprehensive metadata including:
 This resource is handled by TagBasedResourceMiddleware.""",
         mime_type="application/json",
         tags={"service", "lists", "discovery", "dynamic", "enhanced"},
-        annotations={
-            "readOnlyHint": True,
-            "idempotentHint": True
-        },
+        annotations={"readOnlyHint": True, "idempotentHint": True},
         meta={
             "version": "2.0",
             "category": "discovery",
             "enhanced": True,
             "includes_metadata": True,
-            "accepted_services": supported_services
-        }
+            "accepted_services": supported_services,
+        },
     )
     async def handle_service_lists(
-        service: Annotated[str, Field(
-            description=f"The Google service name. Supported: {service_list_str}",
-            examples=["gmail", "drive", "calendar"]
-        )],
-        ctx: Context
+        service: Annotated[
+            str,
+            Field(
+                description=f"The Google service name. Supported: {service_list_str}",
+                examples=["gmail", "drive", "calendar"],
+            ),
+        ],
+        ctx: Context,
     ) -> ServiceListsResponse:
         """
         Handler for service list types that retrieves cached results from middleware.
@@ -177,19 +191,23 @@ This resource is handled by TagBasedResourceMiddleware.""",
 
         if cached_result is None:
             # Fallback - middleware didn't cache result (shouldn't happen in normal operation)
-            logger.warning(f"No cached ServiceListsResponse found for {service} - middleware may not have processed this request")
+            logger.warning(
+                f"No cached ServiceListsResponse found for {service} - middleware may not have processed this request"
+            )
             return ServiceListsResponse.from_middleware_data(
                 service=service,
                 service_metadata={
                     "display_name": f"{service.title()} Service",
                     "icon": "🔧",
-                    "description": f"{service} service (fallback response)"
+                    "description": f"{service} service (fallback response)",
                 },
-                list_types={}
+                list_types={},
             )
 
         # Return the cached ServiceListsResponse
-        logger.info(f"📦 Retrieved cached ServiceListsResponse for {service} from FastMCP context state")
+        logger.info(
+            f"📦 Retrieved cached ServiceListsResponse for {service} from FastMCP context state"
+        )
         return cached_result
 
     @mcp.resource(
@@ -235,25 +253,31 @@ This resource is handled by TagBasedResourceMiddleware.""",
         tags={"service", "lists", "items", "dynamic", "enhanced"},
         annotations={
             "readOnlyHint": True,
-            "idempotentHint": False  # May change as new items are added
+            "idempotentHint": False,  # May change as new items are added
         },
         meta={
             "version": "2.0",
             "category": "data",
             "requires_auth": True,
-            "accepted_services": supported_services
-        }
+            "accepted_services": supported_services,
+        },
     )
     async def handle_service_list_items(
-        service: Annotated[str, Field(
-            description=f"The Google service name. Supported: {service_list_str}",
-            examples=["gmail", "drive", "calendar"]
-        )],
-        list_type: Annotated[str, Field(
-            description="Type of list to retrieve (e.g., 'filters', 'labels', 'albums')",
-            examples=["filters", "labels", "events", "albums", "items", "spaces"]
-        )],
-        ctx: Context
+        service: Annotated[
+            str,
+            Field(
+                description=f"The Google service name. Supported: {service_list_str}",
+                examples=["gmail", "drive", "calendar"],
+            ),
+        ],
+        list_type: Annotated[
+            str,
+            Field(
+                description="Type of list to retrieve (e.g., 'filters', 'labels', 'albums')",
+                examples=["filters", "labels", "events", "albums", "items", "spaces"],
+            ),
+        ],
+        ctx: Context,
     ) -> ServiceListResponse:
         """
         Handler for service list items that retrieves cached results from middleware.
@@ -271,21 +295,25 @@ This resource is handled by TagBasedResourceMiddleware.""",
 
         if cached_result is None:
             # Fallback - middleware didn't cache result (shouldn't happen in normal operation)
-            logger.warning(f"No cached result found for {service}/{list_type} - middleware may not have processed this request")
+            logger.warning(
+                f"No cached result found for {service}/{list_type} - middleware may not have processed this request"
+            )
             return ServiceListResponse.from_middleware_data(
                 result={
                     "message": "No cached result found - middleware may not have processed this request",
                     "middleware_status": "CACHE_MISS",
-                    "timestamp": "2025-09-07T13:42:00Z"
+                    "timestamp": "2025-09-07T13:42:00Z",
                 },
                 service=service,
                 list_type=list_type,
                 tool_called="CACHE_FALLBACK",
-                user_email=user_email or "unknown@example.com"
+                user_email=user_email or "unknown@example.com",
             )
 
         # Return the cached ServiceListResponse
-        logger.info(f"📦 Retrieved cached result for {service}/{list_type} from FastMCP context state")
+        logger.info(
+            f"📦 Retrieved cached result for {service}/{list_type} from FastMCP context state"
+        )
         return cached_result
 
     @mcp.resource(
@@ -333,29 +361,52 @@ This resource is handled by TagBasedResourceMiddleware.""",
         tags={"service", "lists", "detail", "dynamic", "enhanced"},
         annotations={
             "readOnlyHint": True,
-            "idempotentHint": False  # Item details may change
+            "idempotentHint": False,  # Item details may change
         },
         meta={
             "version": "2.0",
             "category": "detail",
             "requires_auth": True,
-            "accepted_services": supported_services
-        }
+            "accepted_services": supported_services,
+        },
     )
     async def handle_service_item_details(
-        service: Annotated[str, Field(
-            description=f"The Google service name. Supported: {service_list_str}",
-            examples=["gmail", "drive", "calendar"]
-        )],
-        list_type: Annotated[str, Field(
-            description="Type of list containing the item",
-            examples=["filters", "labels", "events", "albums", "items", "form_responses"]
-        )],
-        item_id: Annotated[str, Field(
-            description="Unique identifier for the specific item",
-            examples=["filter_123", "INBOX", "event_abc", "album_xyz", "root", "form_123"]
-        )],
-        ctx: Context
+        service: Annotated[
+            str,
+            Field(
+                description=f"The Google service name. Supported: {service_list_str}",
+                examples=["gmail", "drive", "calendar"],
+            ),
+        ],
+        list_type: Annotated[
+            str,
+            Field(
+                description="Type of list containing the item",
+                examples=[
+                    "filters",
+                    "labels",
+                    "events",
+                    "albums",
+                    "items",
+                    "form_responses",
+                ],
+            ),
+        ],
+        item_id: Annotated[
+            str,
+            Field(
+                description="Unique identifier for the specific item",
+                examples=[
+                    "filter_123",
+                    "INBOX",
+                    "event_abc",
+                    "album_xyz",
+                    "root",
+                    "form_123",
+                ],
+            ),
+        ],
+        ctx: Context,
     ) -> ServiceItemDetailsResponse:
         """
         Handler for service item details that retrieves cached results from middleware.
@@ -373,7 +424,9 @@ This resource is handled by TagBasedResourceMiddleware.""",
 
         if cached_result is None:
             # Fallback - middleware didn't cache result (shouldn't happen in normal operation)
-            logger.warning(f"No cached ServiceItemDetailsResponse found for {service}/{list_type}/{item_id} - middleware may not have processed this request")
+            logger.warning(
+                f"No cached ServiceItemDetailsResponse found for {service}/{list_type}/{item_id} - middleware may not have processed this request"
+            )
             return ServiceItemDetailsResponse.from_middleware_data(
                 service=service,
                 list_type=list_type,
@@ -383,16 +436,22 @@ This resource is handled by TagBasedResourceMiddleware.""",
                 parameters={},
                 result={
                     "message": "No cached result found - middleware may not have processed this request",
-                    "middleware_status": "CACHE_MISS"
-                }
+                    "middleware_status": "CACHE_MISS",
+                },
             )
 
         # Return the cached ServiceItemDetailsResponse
-        logger.info(f"📦 Retrieved cached ServiceItemDetailsResponse for {service}/{list_type}/{item_id} from FastMCP context state")
+        logger.info(
+            f"📦 Retrieved cached ServiceItemDetailsResponse for {service}/{list_type}/{item_id} from FastMCP context state"
+        )
         return cached_result
 
-    logger.info("✅ Registered 3 enhanced service resources (all handled by TagBasedResourceMiddleware)")
-    logger.info("   1. service://{service}/lists - Get available list types with metadata")
+    logger.info(
+        "✅ Registered 3 enhanced service resources (all handled by TagBasedResourceMiddleware)"
+    )
+    logger.info(
+        "   1. service://{service}/lists - Get available list types with metadata"
+    )
     logger.info("   2. service://{service}/{list_type} - Get all items with pagination")
     logger.info("   3. service://{service}/{list_type}/{item_id} - Get item details")
     logger.info("")

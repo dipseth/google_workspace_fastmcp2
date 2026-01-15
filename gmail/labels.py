@@ -9,31 +9,27 @@ This module provides tools for:
 - Modifying message labels
 """
 
-import logging
 import asyncio
 import json
 import re
-from typing_extensions import Optional, Literal, Any, List, Dict, Union, Annotated
-from pydantic import Field
 from functools import lru_cache
-
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
-from googleapiclient.http import BatchHttpRequest
+from pydantic import Field
+from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from .service import _get_gmail_service_with_fallback
-from .utils import _validate_gmail_color, _format_label_color_info, GMAIL_LABEL_COLORS
+from config.enhanced_logging import setup_logger
+from tools.common_types import UserGoogleEmail
+
 from .gmail_types import (
     GmailLabelInfo,
     GmailLabelsResponse,
     ManageGmailLabelResponse,
     ModifyGmailMessageLabelsResponse,
 )
-from tools.common_types import UserGoogleEmail
-
-
-from config.enhanced_logging import setup_logger
+from .service import _get_gmail_service_with_fallback
+from .utils import GMAIL_LABEL_COLORS, _format_label_color_info, _validate_gmail_color
 
 logger = setup_logger()
 
@@ -1130,7 +1126,7 @@ async def _process_single_label(
         else:
             raise ValueError(f"Unsupported action: {action}")
 
-    except Exception as e:
+    except Exception:
         raise  # Re-raise to be handled by caller
 
 
@@ -1221,7 +1217,7 @@ async def modify_gmail_message_labels(
                         raise ValueError(
                             f"Invalid JSON structure for label_ids: expected string or list, got {type(parsed).__name__}"
                         )
-                except json.JSONDecodeError as e:
+                except json.JSONDecodeError:
                     # Not valid JSON, treat as single label ID
                     return [label_ids]
 

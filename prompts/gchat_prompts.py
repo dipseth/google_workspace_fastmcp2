@@ -7,7 +7,7 @@ space IDs, webhook URLs, member lists, and room configurations.
 
 Key Features:
 - Advanced: Smart contextual cards using real Chat spaces and member data
-- Medium: Professional dashboard cards with live Chat room integration  
+- Medium: Professional dashboard cards with live Chat room integration
 - Simple: Instant demo cards for quick testing and demonstrations
 
 Resource Integration:
@@ -17,20 +17,21 @@ Resource Integration:
 - Uses {{user://current/profile}} for user context
 """
 
-import logging
-from typing_extensions import Optional
 from datetime import datetime, timezone
+
+from fastmcp import Context, FastMCP
+from fastmcp.prompts.prompt import PromptMessage, TextContent
 from pydantic import Field
-from fastmcp import FastMCP, Context
-from fastmcp.prompts.prompt import Message, PromptMessage, TextContent
 
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
+
 
 def setup_gchat_prompts(mcp: FastMCP):
     """
     Register Google Chat prompts: Advanced, Medium, Simple.
-    
+
     Args:
         mcp: The FastMCP server instance
     """
@@ -46,40 +47,46 @@ def setup_gchat_prompts(mcp: FastMCP):
             "uses_resources": True,
             "resource_dependencies": [
                 "service://chat/spaces",
-                "chat://spaces/list", 
+                "chat://spaces/list",
                 "chat://webhooks/active",
-                "user://current/profile"
-            ]
-        }
+                "user://current/profile",
+            ],
+        },
     )
     def smart_contextual_chat_card(
         context: Context,
         card_title: str = Field(
             default="Smart Chat Dashboard",
-            description="Title for the contextual Chat card"
+            description="Title for the contextual Chat card",
         ),
         target_space: str = Field(
             default="team workspace",
-            description="Description of the target Chat space (e.g., 'engineering team', 'project updates')"
+            description="Description of the target Chat space (e.g., 'engineering team', 'project updates')",
         ),
         card_purpose: str = Field(
             default="status update",
-            description="Purpose of the card (e.g., 'dashboard', 'report', 'notification', 'announcement')"
-        )
+            description="Purpose of the card (e.g., 'dashboard', 'report', 'notification', 'announcement')",
+        ),
     ) -> PromptMessage:
         """
         ADVANCED: Generate intelligent Google Chat cards that adapt to real space configurations.
         Uses real-time Chat space data for contextual, professional communication.
         """
-        
+
         request_id = context.request_id
         current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        
+
         # Resolve Field values
-        card_title_str = str(card_title) if hasattr(card_title, 'default') else card_title
-        target_space_str = str(target_space) if hasattr(target_space, 'default') else target_space
-        card_purpose_str = str(card_purpose) if hasattr(card_purpose, 'default') else card_purpose
-        
+        card_title_str = (
+            str(card_title) if hasattr(card_title, "default") else card_title
+        )
+        target_space_str = (
+            str(target_space) if hasattr(target_space, "default") else target_space
+        )
+        card_purpose_str = (
+            str(card_purpose) if hasattr(card_purpose, "default") else card_purpose
+        )
+
         advanced_content = f"""
 # 🤖 Smart Contextual Google Chat Card (Advanced)
 *Request ID: {request_id} | Generated: {current_time}*
@@ -332,10 +339,9 @@ if spaces_resource.get('spaces'):
 
 This advanced prompt showcases FastMCP2's sophisticated resource integration capabilities with real Google Chat data!
 """
-        
+
         return PromptMessage(
-            content=TextContent(type="text", text=advanced_content),
-            role="assistant"
+            content=TextContent(type="text", text=advanced_content), role="assistant"
         )
 
     # ========== MEDIUM PROMPT ==========
@@ -343,39 +349,42 @@ This advanced prompt showcases FastMCP2's sophisticated resource integration cap
         name="professional_chat_dashboard",
         description="Medium: Create beautiful Chat dashboard cards with live space integration",
         tags={"gchat", "chat", "medium", "dashboard", "professional"},
-        meta={
-            "version": "3.0",
-            "author": "FastMCP2-StreamlinedChat"
-        }
+        meta={"version": "3.0", "author": "FastMCP2-StreamlinedChat"},
     )
     def professional_chat_dashboard(
         context: Context,
         dashboard_title: str = Field(
-            default="Team Dashboard",
-            description="Title for the Chat dashboard card"
+            default="Team Dashboard", description="Title for the Chat dashboard card"
         ),
         team_name: str = Field(
-            default="Development Team",
-            description="Name of the team or group"
+            default="Development Team", description="Name of the team or group"
         ),
         dashboard_theme: str = Field(
             default="status overview",
-            description="Theme of the dashboard (e.g., 'weekly report', 'project status', 'team metrics')"
-        )
+            description="Theme of the dashboard (e.g., 'weekly report', 'project status', 'team metrics')",
+        ),
     ) -> PromptMessage:
         """
         MEDIUM: Generate professional Chat dashboard cards with modern design and live space data.
         Perfect balance of functionality, visual appeal, and Chat integration.
         """
-        
+
         request_id = context.request_id
         current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        
+
         # Resolve Field values
-        dashboard_title_str = str(dashboard_title) if hasattr(dashboard_title, 'default') else dashboard_title
-        team_name_str = str(team_name) if hasattr(team_name, 'default') else team_name
-        dashboard_theme_str = str(dashboard_theme) if hasattr(dashboard_theme, 'default') else dashboard_theme
-        
+        dashboard_title_str = (
+            str(dashboard_title)
+            if hasattr(dashboard_title, "default")
+            else dashboard_title
+        )
+        team_name_str = str(team_name) if hasattr(team_name, "default") else team_name
+        dashboard_theme_str = (
+            str(dashboard_theme)
+            if hasattr(dashboard_theme, "default")
+            else dashboard_theme
+        )
+
         medium_content = f"""
 # 📊 Professional Chat Dashboard (Medium)
 *Request ID: {request_id} | Generated: {current_time}*
@@ -527,10 +536,9 @@ print(f"✅ Professional Chat dashboard sent: {{result}}")
 
 This medium-complexity prompt delivers professional Chat dashboards with smart space integration!
 """
-        
+
         return PromptMessage(
-            content=TextContent(type="text", text=medium_content),
-            role="assistant"
+            content=TextContent(type="text", text=medium_content), role="assistant"
         )
 
     # ========== SIMPLE PROMPT ==========
@@ -538,20 +546,17 @@ This medium-complexity prompt delivers professional Chat dashboards with smart s
         name="quick_chat_card_demo",
         description="Simple: Zero-config instant Chat card demo - ready to send immediately",
         tags={"gchat", "chat", "simple", "demo", "instant", "cards"},
-        meta={
-            "version": "3.0",
-            "author": "FastMCP2-StreamlinedChat"
-        }
+        meta={"version": "3.0", "author": "FastMCP2-StreamlinedChat"},
     )
     def quick_chat_card_demo(context: Context) -> PromptMessage:
         """
         SIMPLE: Zero-configuration Chat card demo. Perfect for instant testing and demonstrations.
         No parameters needed - works immediately out of the box with sample space data.
         """
-        
+
         request_id = context.request_id
         current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        
+
         simple_content = f"""
 # ⚡ Quick Chat Card Demo (Simple)
 *Request ID: {request_id} | Generated: {current_time}*
@@ -700,16 +705,20 @@ result = await send_dynamic_card(
 
 This simple prompt proves that FastMCP2 can create professional Chat cards with zero complexity!
 """
-        
+
         return PromptMessage(
-            content=TextContent(type="text", text=simple_content),
-            role="assistant"
+            content=TextContent(type="text", text=simple_content), role="assistant"
         )
 
     logger.info("✅ Google Chat prompts registered successfully")
-    logger.info("   • smart_contextual_chat_card: Advanced with real-time Chat space data")
-    logger.info("   • professional_chat_dashboard: Medium complexity professional dashboard")
+    logger.info(
+        "   • smart_contextual_chat_card: Advanced with real-time Chat space data"
+    )
+    logger.info(
+        "   • professional_chat_dashboard: Medium complexity professional dashboard"
+    )
     logger.info("   • quick_chat_card_demo: Simple zero-config instant demo")
 
+
 # Export the setup function
-__all__ = ['setup_gchat_prompts']
+__all__ = ["setup_gchat_prompts"]

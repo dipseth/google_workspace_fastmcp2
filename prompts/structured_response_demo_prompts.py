@@ -2,7 +2,7 @@
 Structured Response Demo Prompts for FastMCP2
 
 This module provides dynamic MCP prompts that showcase tools and their structured responses.
-It randomly selects tools from the server and demonstrates both original string responses 
+It randomly selects tools from the server and demonstrates both original string responses
 and their structured counterparts using the structured response middleware.
 
 Features:
@@ -15,166 +15,163 @@ Features:
 """
 
 import json
-import logging
 import random
-from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
-from pathlib import Path
+from typing import Any, Dict, Optional
 
 try:
-    from jinja2 import Environment, DictLoader, Template
+    from jinja2 import DictLoader, Environment, Template
+
     JINJA2_AVAILABLE = True
 except ImportError:
     JINJA2_AVAILABLE = False
     print("⚠️ Jinja2 not available, falling back to simple templates")
 
-from fastmcp import FastMCP, Context
-from fastmcp.prompts.prompt import Message, PromptMessage, TextContent, PromptResult
+from fastmcp import Context, FastMCP
+from fastmcp.prompts.prompt import PromptMessage, TextContent
 
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
 
 
 class StructuredResponseDemoPrompts:
     """Demo prompts showcasing structured response capabilities with tool examples."""
-    
+
     def __init__(self):
         """Initialize with Jinja2 template environment and tool mappings."""
         self.jinja_env = None
         self.structured_tools_map = self._get_structured_tools_mapping()
-        
+
         if JINJA2_AVAILABLE:
             # Built-in templates for structured response demos
             templates = {
-                'tool_showcase.txt': self._get_tool_showcase_template(),
-                'comparison_demo.txt': self._get_comparison_demo_template(),
-                'interactive_demo.txt': self._get_interactive_demo_template(),
-                'structured_benefits.txt': self._get_benefits_template()
+                "tool_showcase.txt": self._get_tool_showcase_template(),
+                "comparison_demo.txt": self._get_comparison_demo_template(),
+                "interactive_demo.txt": self._get_interactive_demo_template(),
+                "structured_benefits.txt": self._get_benefits_template(),
             }
-            
+
             loader = DictLoader(templates)
             self.jinja_env = Environment(
-                loader=loader,
-                autoescape=False,
-                trim_blocks=True,
-                lstrip_blocks=True
+                loader=loader, autoescape=False, trim_blocks=True, lstrip_blocks=True
             )
-            
+
             logger.info("✅ Structured Response Demo prompts initialized with Jinja2")
-    
+
     def _get_structured_tools_mapping(self) -> Dict[str, Dict[str, Any]]:
         """Get mapping of structured tools with example data and descriptions."""
         return {
-            'send_gmail_message': {
-                'category': 'Gmail',
-                'description': 'Send an email via Gmail',
-                'example_params': {
-                    'user_google_email': '{{user://current/email}}',
-                    'to': 'demo@example.com',
-                    'subject': 'FastMCP2 Demo Email',
-                    'body': 'This is a test email from FastMCP2!'
+            "send_gmail_message": {
+                "category": "Gmail",
+                "description": "Send an email via Gmail",
+                "example_params": {
+                    "user_google_email": "{{user://current/email}}",
+                    "to": "demo@example.com",
+                    "subject": "FastMCP2 Demo Email",
+                    "body": "This is a test email from FastMCP2!",
                 },
-                'original_response_example': 'Message sent successfully! Message ID: msg_abc123xyz',
-                'structured_response_example': {
-                    'success': True,
-                    'userEmail': 'user@example.com',
-                    'messageId': 'msg_abc123xyz',
-                    'message': 'Email sent successfully',
-                    'error': None
-                }
+                "original_response_example": "Message sent successfully! Message ID: msg_abc123xyz",
+                "structured_response_example": {
+                    "success": True,
+                    "userEmail": "user@example.com",
+                    "messageId": "msg_abc123xyz",
+                    "message": "Email sent successfully",
+                    "error": None,
+                },
             },
-            'upload_file_to_drive': {
-                'category': 'Drive',
-                'description': 'Upload a file to Google Drive',
-                'example_params': {
-                    'user_google_email': '{{user://current/email}}',
-                    'filepath': '/path/to/document.pdf',
-                    'filename': 'Important Document.pdf',
-                    'folder_id': 'root'
+            "upload_file_to_drive": {
+                "category": "Drive",
+                "description": "Upload a file to Google Drive",
+                "example_params": {
+                    "user_google_email": "{{user://current/email}}",
+                    "filepath": "/path/to/document.pdf",
+                    "filename": "Important Document.pdf",
+                    "folder_id": "root",
                 },
-                'original_response_example': 'File uploaded successfully to Google Drive! File ID: 1abc123xyz_def456',
-                'structured_response_example': {
-                    'success': True,
-                    'userEmail': 'user@example.com',
-                    'fileId': '1abc123xyz_def456',
-                    'fileName': 'Important Document.pdf',
-                    'message': 'File uploaded successfully to Google Drive',
-                    'error': None
-                }
+                "original_response_example": "File uploaded successfully to Google Drive! File ID: 1abc123xyz_def456",
+                "structured_response_example": {
+                    "success": True,
+                    "userEmail": "user@example.com",
+                    "fileId": "1abc123xyz_def456",
+                    "fileName": "Important Document.pdf",
+                    "message": "File uploaded successfully to Google Drive",
+                    "error": None,
+                },
             },
-            'create_event': {
-                'category': 'Calendar',
-                'description': 'Create a Google Calendar event',
-                'example_params': {
-                    'user_google_email': '{{user://current/email}}',
-                    'summary': 'Team Meeting',
-                    'start_time': '2025-09-04T14:00:00Z',
-                    'end_time': '2025-09-04T15:00:00Z',
-                    'description': 'Weekly team sync meeting'
+            "create_event": {
+                "category": "Calendar",
+                "description": "Create a Google Calendar event",
+                "example_params": {
+                    "user_google_email": "{{user://current/email}}",
+                    "summary": "Team Meeting",
+                    "start_time": "2025-09-04T14:00:00Z",
+                    "end_time": "2025-09-04T15:00:00Z",
+                    "description": "Weekly team sync meeting",
                 },
-                'original_response_example': 'Event created successfully! Event ID: evt_789xyz123',
-                'structured_response_example': {
-                    'success': True,
-                    'userEmail': 'user@example.com',
-                    'eventId': 'evt_789xyz123',
-                    'calendarId': 'primary',
-                    'message': 'Event created successfully',
-                    'error': None
-                }
+                "original_response_example": "Event created successfully! Event ID: evt_789xyz123",
+                "structured_response_example": {
+                    "success": True,
+                    "userEmail": "user@example.com",
+                    "eventId": "evt_789xyz123",
+                    "calendarId": "primary",
+                    "message": "Event created successfully",
+                    "error": None,
+                },
             },
-            'create_form': {
-                'category': 'Forms',
-                'description': 'Create a Google Form',
-                'example_params': {
-                    'user_google_email': '{{user://current/email}}',
-                    'title': 'Customer Feedback Survey',
-                    'description': 'Please share your thoughts about our service'
+            "create_form": {
+                "category": "Forms",
+                "description": "Create a Google Form",
+                "example_params": {
+                    "user_google_email": "{{user://current/email}}",
+                    "title": "Customer Feedback Survey",
+                    "description": "Please share your thoughts about our service",
                 },
-                'original_response_example': 'Form created successfully! Form ID: form_survey_456',
-                'structured_response_example': {
-                    'success': True,
-                    'userEmail': 'user@example.com',
-                    'formId': 'form_survey_456',
-                    'message': 'Form created successfully',
-                    'error': None
-                }
+                "original_response_example": "Form created successfully! Form ID: form_survey_456",
+                "structured_response_example": {
+                    "success": True,
+                    "userEmail": "user@example.com",
+                    "formId": "form_survey_456",
+                    "message": "Form created successfully",
+                    "error": None,
+                },
             },
-            'create_presentation': {
-                'category': 'Slides',
-                'description': 'Create a Google Slides presentation',
-                'example_params': {
-                    'user_google_email': '{{user://current/email}}',
-                    'title': 'Q4 Business Review'
+            "create_presentation": {
+                "category": "Slides",
+                "description": "Create a Google Slides presentation",
+                "example_params": {
+                    "user_google_email": "{{user://current/email}}",
+                    "title": "Q4 Business Review",
                 },
-                'original_response_example': 'Presentation created! ID: pres_q4_review_789',
-                'structured_response_example': {
-                    'success': True,
-                    'userEmail': 'user@example.com',
-                    'presentationId': 'pres_q4_review_789',
-                    'message': 'Presentation created successfully',
-                    'error': None
-                }
+                "original_response_example": "Presentation created! ID: pres_q4_review_789",
+                "structured_response_example": {
+                    "success": True,
+                    "userEmail": "user@example.com",
+                    "presentationId": "pres_q4_review_789",
+                    "message": "Presentation created successfully",
+                    "error": None,
+                },
             },
-            'send_dynamic_card': {
-                'category': 'Chat',
-                'description': 'Send a dynamic card to Google Chat',
-                'example_params': {
-                    'user_google_email': '{{user://current/email}}',
-                    'space_id': 'spaces/AAAAxxxx',
-                    'card_description': 'Create a status update card with action buttons'
+            "send_dynamic_card": {
+                "category": "Chat",
+                "description": "Send a dynamic card to Google Chat",
+                "example_params": {
+                    "user_google_email": "{{user://current/email}}",
+                    "space_id": "spaces/AAAAxxxx",
+                    "card_description": "Create a status update card with action buttons",
                 },
-                'original_response_example': 'Card sent successfully to Google Chat space!',
-                'structured_response_example': {
-                    'success': True,
-                    'userEmail': 'user@example.com',
-                    'messageId': 'msg_card_123',
-                    'spaceId': 'spaces/AAAAxxxx',
-                    'message': 'Dynamic card sent successfully',
-                    'error': None
-                }
-            }
+                "original_response_example": "Card sent successfully to Google Chat space!",
+                "structured_response_example": {
+                    "success": True,
+                    "userEmail": "user@example.com",
+                    "messageId": "msg_card_123",
+                    "spaceId": "spaces/AAAAxxxx",
+                    "message": "Dynamic card sent successfully",
+                    "error": None,
+                },
+            },
         }
-    
+
     def _get_tool_showcase_template(self) -> str:
         """Template for showcasing a random tool with structured responses."""
         return """# 🛠️ FastMCP2 Tool Showcase: {{ tool_name }}
@@ -441,7 +438,9 @@ Chain structured tools together using their consistent response format for compl
 ---
 *FastMCP2 Structured Response System • Making MCP tools more powerful and developer-friendly! 🎉*"""
 
-    async def tool_showcase(self, context: Context, tool_name: Optional[str] = None) -> PromptMessage:
+    async def tool_showcase(
+        self, context: Context, tool_name: Optional[str] = None
+    ) -> PromptMessage:
         """
         Showcase a specific tool (or random if not specified) with structured responses.
         """
@@ -454,73 +453,80 @@ Chain structured tools together using their consistent response format for compl
                 # Random selection
                 selected_tool = random.choice(list(self.structured_tools_map.keys()))
                 tool_info = self.structured_tools_map[selected_tool]
-            
+
             # Prepare template context
             template_context = {
-                'request_id': context.request_id,
-                'current_time': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-                'tool_name': selected_tool,
-                'tool_info': tool_info,
-                'tool_params': tool_info['example_params'],
-                'original_response': tool_info['original_response_example'],
-                'structured_response': tool_info['structured_response_example']
+                "request_id": context.request_id,
+                "current_time": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                ),
+                "tool_name": selected_tool,
+                "tool_info": tool_info,
+                "tool_params": tool_info["example_params"],
+                "original_response": tool_info["original_response_example"],
+                "structured_response": tool_info["structured_response_example"],
             }
-            
+
             # Render with Jinja2
             if JINJA2_AVAILABLE and self.jinja_env:
-                template = self.jinja_env.get_template('tool_showcase.txt')
+                template = self.jinja_env.get_template("tool_showcase.txt")
                 content = template.render(**template_context)
                 logger.info(f"✅ Rendered tool showcase for: {selected_tool}")
             else:
                 content = self._render_fallback_showcase(template_context)
-            
+
             return PromptMessage(
-                role="user",
-                content=TextContent(type="text", text=content)
+                role="user", content=TextContent(type="text", text=content)
             )
-            
+
         except Exception as e:
             logger.error(f"Error in tool showcase prompt: {e}")
             return self._create_error_prompt(str(e))
-    
-    async def comparison_demo(self, context: Context, num_tools: int = 3) -> PromptMessage:
+
+    async def comparison_demo(
+        self, context: Context, num_tools: int = 3
+    ) -> PromptMessage:
         """
         Show side-by-side comparison of multiple tools and their response formats.
         """
         try:
             # Select random tools for comparison
             available_tools = list(self.structured_tools_map.keys())
-            selected_tools = random.sample(available_tools, min(num_tools, len(available_tools)))
-            
+            selected_tools = random.sample(
+                available_tools, min(num_tools, len(available_tools))
+            )
+
             tools_comparison = {
-                tool: self.structured_tools_map[tool] 
-                for tool in selected_tools
+                tool: self.structured_tools_map[tool] for tool in selected_tools
             }
-            
+
             # Prepare template context
             template_context = {
-                'request_id': context.request_id,
-                'current_time': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-                'tools_comparison': tools_comparison
+                "request_id": context.request_id,
+                "current_time": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                ),
+                "tools_comparison": tools_comparison,
             }
-            
+
             # Render with Jinja2
             if JINJA2_AVAILABLE and self.jinja_env:
-                template = self.jinja_env.get_template('comparison_demo.txt')
+                template = self.jinja_env.get_template("comparison_demo.txt")
                 content = template.render(**template_context)
-                logger.info(f"✅ Rendered comparison demo for {len(selected_tools)} tools")
+                logger.info(
+                    f"✅ Rendered comparison demo for {len(selected_tools)} tools"
+                )
             else:
                 content = self._render_fallback_comparison(template_context)
-            
+
             return PromptMessage(
-                role="user",
-                content=TextContent(type="text", text=content)
+                role="user", content=TextContent(type="text", text=content)
             )
-            
+
         except Exception as e:
             logger.error(f"Error in comparison demo prompt: {e}")
             return self._create_error_prompt(str(e))
-    
+
     async def interactive_demo(self, context: Context) -> PromptMessage:
         """
         Create an interactive challenge with a randomly selected tool.
@@ -529,49 +535,52 @@ Chain structured tools together using their consistent response format for compl
             # Select random tool for the challenge
             selected_tool_name = random.choice(list(self.structured_tools_map.keys()))
             tool_info = self.structured_tools_map[selected_tool_name]
-            
+
             # Organize tools by category for the reference section
             structured_categories = {}
             for tool_name, info in self.structured_tools_map.items():
-                category = info['category']
+                category = info["category"]
                 if category not in structured_categories:
                     structured_categories[category] = []
                 structured_categories[category].append(tool_name)
-            
+
             # Prepare featured tool info
             featured_tool = {
-                'name': selected_tool_name,
-                'category': tool_info['category'],
-                'description': tool_info['description'],
-                'example_params': tool_info['example_params'],
-                'structured_response_example': tool_info['structured_response_example']
+                "name": selected_tool_name,
+                "category": tool_info["category"],
+                "description": tool_info["description"],
+                "example_params": tool_info["example_params"],
+                "structured_response_example": tool_info["structured_response_example"],
             }
-            
+
             # Prepare template context
             template_context = {
-                'request_id': context.request_id,
-                'current_time': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-                'featured_tool': featured_tool,
-                'structured_categories': structured_categories
+                "request_id": context.request_id,
+                "current_time": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                ),
+                "featured_tool": featured_tool,
+                "structured_categories": structured_categories,
             }
-            
+
             # Render with Jinja2
             if JINJA2_AVAILABLE and self.jinja_env:
-                template = self.jinja_env.get_template('interactive_demo.txt')
+                template = self.jinja_env.get_template("interactive_demo.txt")
                 content = template.render(**template_context)
-                logger.info(f"✅ Rendered interactive demo featuring: {selected_tool_name}")
+                logger.info(
+                    f"✅ Rendered interactive demo featuring: {selected_tool_name}"
+                )
             else:
                 content = self._render_fallback_interactive(template_context)
-            
+
             return PromptMessage(
-                role="user",
-                content=TextContent(type="text", text=content)
+                role="user", content=TextContent(type="text", text=content)
             )
-            
+
         except Exception as e:
             logger.error(f"Error in interactive demo prompt: {e}")
             return self._create_error_prompt(str(e))
-    
+
     async def benefits_overview(self, context: Context) -> PromptMessage:
         """
         Comprehensive overview of structured response benefits and implementation.
@@ -581,61 +590,90 @@ Chain structured tools together using their consistent response format for compl
             total_structured = len(self.structured_tools_map)
             categories = {}
             for tool_info in self.structured_tools_map.values():
-                category = tool_info['category']
+                category = tool_info["category"]
                 categories[category] = categories.get(category, 0) + 1
-            
+
             coverage_stats = {
-                'total_tools': 150,  # Approximate total tools in server
-                'structured_tools': total_structured,
-                'coverage_percentage': round((total_structured / 150) * 100, 1),
-                'categories': categories
+                "total_tools": 150,  # Approximate total tools in server
+                "structured_tools": total_structured,
+                "coverage_percentage": round((total_structured / 150) * 100, 1),
+                "categories": categories,
             }
-            
+
             # Response schema descriptions
             response_schemas = {
-                'GmailOperationResponse': {
-                    'description': 'For Gmail operations (send, draft, search, etc.)',
-                    'fields': ['success', 'userEmail', 'messageId', 'labelId', 'message', 'error']
+                "GmailOperationResponse": {
+                    "description": "For Gmail operations (send, draft, search, etc.)",
+                    "fields": [
+                        "success",
+                        "userEmail",
+                        "messageId",
+                        "labelId",
+                        "message",
+                        "error",
+                    ],
                 },
-                'DriveOperationResponse': {
-                    'description': 'For Google Drive file operations',
-                    'fields': ['success', 'userEmail', 'fileId', 'fileName', 'message', 'error']
+                "DriveOperationResponse": {
+                    "description": "For Google Drive file operations",
+                    "fields": [
+                        "success",
+                        "userEmail",
+                        "fileId",
+                        "fileName",
+                        "message",
+                        "error",
+                    ],
                 },
-                'CalendarOperationResponse': {
-                    'description': 'For Google Calendar event operations',
-                    'fields': ['success', 'userEmail', 'eventId', 'calendarId', 'message', 'error']
+                "CalendarOperationResponse": {
+                    "description": "For Google Calendar event operations",
+                    "fields": [
+                        "success",
+                        "userEmail",
+                        "eventId",
+                        "calendarId",
+                        "message",
+                        "error",
+                    ],
                 },
-                'FormOperationResponse': {
-                    'description': 'For Google Forms operations',
-                    'fields': ['success', 'userEmail', 'formId', 'responseId', 'message', 'error']
-                }
+                "FormOperationResponse": {
+                    "description": "For Google Forms operations",
+                    "fields": [
+                        "success",
+                        "userEmail",
+                        "formId",
+                        "responseId",
+                        "message",
+                        "error",
+                    ],
+                },
             }
-            
+
             # Prepare template context
             template_context = {
-                'request_id': context.request_id,
-                'current_time': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-                'coverage_stats': coverage_stats,
-                'response_schemas': response_schemas
+                "request_id": context.request_id,
+                "current_time": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                ),
+                "coverage_stats": coverage_stats,
+                "response_schemas": response_schemas,
             }
-            
+
             # Render with Jinja2
             if JINJA2_AVAILABLE and self.jinja_env:
-                template = self.jinja_env.get_template('structured_benefits.txt')
+                template = self.jinja_env.get_template("structured_benefits.txt")
                 content = template.render(**template_context)
                 logger.info("✅ Rendered benefits overview")
             else:
                 content = self._render_fallback_benefits(template_context)
-            
+
             return PromptMessage(
-                role="user",
-                content=TextContent(type="text", text=content)
+                role="user", content=TextContent(type="text", text=content)
             )
-            
+
         except Exception as e:
             logger.error(f"Error in benefits overview prompt: {e}")
             return self._create_error_prompt(str(e))
-    
+
     def _render_fallback_showcase(self, context: Dict) -> str:
         """Fallback rendering for tool showcase."""
         return f"""# 🛠️ Tool Showcase: {context['tool_name']}
@@ -651,23 +689,25 @@ Chain structured tools together using their consistent response format for compl
 {json.dumps(context['structured_response'], indent=2)}
 
 *Fallback template - install Jinja2 for better formatting*"""
-    
+
     def _render_fallback_comparison(self, context: Dict) -> str:
         """Fallback rendering for comparison demo."""
-        tools = context['tools_comparison']
-        content = f"# 🔄 Response Comparison Demo\n*Request ID: {context['request_id']}*\n\n"
-        
+        tools = context["tools_comparison"]
+        content = (
+            f"# 🔄 Response Comparison Demo\n*Request ID: {context['request_id']}*\n\n"
+        )
+
         for i, (tool_name, tool_info) in enumerate(tools.items(), 1):
             content += f"## {i}. {tool_info['category']} → {tool_name}\n"
             content += f"{tool_info['description']}\n\n"
             content += f"**Original:** {tool_info['original_response_example']}\n"
             content += f"**Structured:** {json.dumps(tool_info['structured_response_example'], indent=2)}\n\n"
-        
+
         return content
-    
+
     def _render_fallback_interactive(self, context: Dict) -> str:
         """Fallback rendering for interactive demo."""
-        tool = context['featured_tool']
+        tool = context["featured_tool"]
         return f"""# 🎮 Interactive Demo
 *Request ID: {context['request_id']}*
 
@@ -685,10 +725,10 @@ Chain structured tools together using their consistent response format for compl
 ```
 
 *Fallback template - install Jinja2 for full interactive experience*"""
-    
+
     def _render_fallback_benefits(self, context: Dict) -> str:
         """Fallback rendering for benefits overview."""
-        stats = context['coverage_stats']
+        stats = context["coverage_stats"]
         return f"""# ✨ Structured Response Benefits
 *Request ID: {context['request_id']}*
 
@@ -701,12 +741,14 @@ Chain structured tools together using their consistent response format for compl
 - Integration-ready responses
 
 *Fallback template - install Jinja2 for detailed overview*"""
-    
+
     def _create_error_prompt(self, error: str) -> PromptMessage:
         """Create error prompt."""
         return PromptMessage(
             role="user",
-            content=TextContent(type="text", text=f"""# ⚠️ Structured Response Demo Error
+            content=TextContent(
+                type="text",
+                text=f"""# ⚠️ Structured Response Demo Error
 *Error: {error}*
 
 The structured response demonstration encountered an issue. Please try again or check the logs for more details.
@@ -715,7 +757,8 @@ The structured response demonstration encountered an issue. Please try again or 
 - Tool Showcase: Random tool demonstration
 - Comparison Demo: Side-by-side format comparison
 - Interactive Demo: Challenge-based exploration
-- Benefits Overview: Comprehensive system explanation""")
+- Benefits Overview: Comprehensive system explanation""",
+            ),
         )
 
 
@@ -735,12 +778,12 @@ def get_structured_demo_prompts() -> StructuredResponseDemoPrompts:
 def setup_structured_response_demo_prompts(mcp: FastMCP):
     """
     Setup structured response demonstration prompts.
-    
+
     This function registers interactive prompts that showcase the structured
     response middleware capabilities with real tool examples and comparisons.
     """
     demo_prompts = get_structured_demo_prompts()
-    
+
     @mcp.prompt(
         name="structured_tool_showcase",
         description="Showcase a specific tool with structured response example (random if tool not specified)",
@@ -749,13 +792,15 @@ def setup_structured_response_demo_prompts(mcp: FastMCP):
             "version": "1.0",
             "author": "FastMCP2-StructuredResponse",
             "category": "demonstration",
-            "interactive": True
-        }
+            "interactive": True,
+        },
     )
-    async def structured_tool_showcase(context: Context, tool_name: Optional[str] = None) -> PromptMessage:
+    async def structured_tool_showcase(
+        context: Context, tool_name: Optional[str] = None
+    ) -> PromptMessage:
         """Demo a specific tool with structured response comparison."""
         return await demo_prompts.tool_showcase(context, tool_name)
-    
+
     @mcp.prompt(
         name="structured_response_comparison",
         description="Compare multiple tools showing original vs structured response formats",
@@ -763,13 +808,15 @@ def setup_structured_response_demo_prompts(mcp: FastMCP):
         meta={
             "version": "1.0",
             "author": "FastMCP2-StructuredResponse",
-            "category": "demonstration"
-        }
+            "category": "demonstration",
+        },
     )
-    async def structured_response_comparison(context: Context, num_tools: int = 3) -> PromptMessage:
+    async def structured_response_comparison(
+        context: Context, num_tools: int = 3
+    ) -> PromptMessage:
         """Side-by-side comparison of original vs structured responses."""
         return await demo_prompts.comparison_demo(context, num_tools)
-    
+
     @mcp.prompt(
         name="structured_interactive_demo",
         description="Interactive challenge featuring a random tool with structured responses",
@@ -779,13 +826,13 @@ def setup_structured_response_demo_prompts(mcp: FastMCP):
             "author": "FastMCP2-StructuredResponse",
             "category": "demonstration",
             "interactive": True,
-            "gamified": True
-        }
+            "gamified": True,
+        },
     )
     async def structured_interactive_demo(context: Context) -> PromptMessage:
         """Interactive challenge with random tool and difficulty levels."""
         return await demo_prompts.interactive_demo(context)
-    
+
     @mcp.prompt(
         name="structured_response_benefits",
         description="Comprehensive overview of structured response system benefits and implementation",
@@ -794,21 +841,21 @@ def setup_structured_response_demo_prompts(mcp: FastMCP):
             "version": "1.0",
             "author": "FastMCP2-StructuredResponse",
             "category": "documentation",
-            "comprehensive": True
-        }
+            "comprehensive": True,
+        },
     )
     async def structured_response_benefits(context: Context) -> PromptMessage:
         """Complete guide to structured response system benefits."""
         return await demo_prompts.benefits_overview(context)
-    
+
     logger.info("✅ Structured Response Demo prompts registered successfully")
     logger.info("   • structured_tool_showcase: Random/specific tool demonstration")
-    logger.info("   • structured_response_comparison: Before/after format comparison")  
+    logger.info("   • structured_response_comparison: Before/after format comparison")
     logger.info("   • structured_interactive_demo: Gamified challenge experience")
     logger.info("   • structured_response_benefits: Comprehensive system overview")
-    
+
     return demo_prompts
 
 
 # Export for server.py
-__all__ = ['setup_structured_response_demo_prompts', 'get_structured_demo_prompts']
+__all__ = ["setup_structured_response_demo_prompts", "get_structured_demo_prompts"]

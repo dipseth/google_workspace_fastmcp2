@@ -6,7 +6,6 @@ to avoid import errors and delays during server startup. Dependencies
 are loaded only when first needed.
 """
 
-import logging
 from typing import Dict
 
 from config.enhanced_logging import setup_logger

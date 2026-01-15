@@ -4,11 +4,12 @@ Google Photos MCP Types
 This module defines all data structures and types used in Google Photos MCP tools.
 """
 
-from typing_extensions import List, Optional, Dict, Any, TypedDict, NotRequired
+from typing_extensions import Any, Dict, List, NotRequired, Optional, TypedDict
 
 
 class AlbumInfo(TypedDict):
     """Structure for a single photo album."""
+
     id: str
     title: str
     productUrl: NotRequired[Optional[str]]
@@ -19,6 +20,7 @@ class AlbumInfo(TypedDict):
 
 class PhotoInfo(TypedDict):
     """Structure for a single photo/media item."""
+
     id: str
     filename: str
     mimeType: str
@@ -38,15 +40,17 @@ class PhotoInfo(TypedDict):
 
 class AlbumListResponse(TypedDict):
     """Response structure for list_photos_albums tool."""
+
     albums: List[AlbumInfo]
     count: int
     excludeNonAppCreated: bool
     userEmail: str
-    error: NotRequired[Optional[str]]   # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class PhotoListResponse(TypedDict):
     """Response structure for photo list operations."""
+
     photos: List[PhotoInfo]
     count: int
     albumId: NotRequired[Optional[str]]
@@ -56,6 +60,7 @@ class PhotoListResponse(TypedDict):
 
 class PhotoUploadResponse(TypedDict):
     """Response structure for photo upload operations."""
+
     successful: List[Dict[str, Any]]
     failed: List[Dict[str, Any]]
     total_count: int
@@ -71,6 +76,7 @@ class PhotoUploadResponse(TypedDict):
 
 class PhotosSmartSearchResponse(TypedDict):
     """Response structure for smart photo search operations."""
+
     media_items: List[PhotoInfo]
     total_found: int
     search_time_seconds: float
@@ -83,6 +89,7 @@ class PhotosSmartSearchResponse(TypedDict):
 
 class PhotosBatchDetailsResponse(TypedDict):
     """Response structure for batch photo details operations."""
+
     successful_items: List[PhotoInfo]
     failed_items: List[Dict[str, str]]  # {"id": str, "error": str}
     total_requested: int
@@ -97,6 +104,7 @@ class PhotosBatchDetailsResponse(TypedDict):
 
 class PhotosPerformanceStatsResponse(TypedDict):
     """Response structure for photos performance statistics."""
+
     cache_size: int
     max_cache_size: int
     cache_utilization_percent: float
@@ -111,6 +119,7 @@ class PhotosPerformanceStatsResponse(TypedDict):
 
 class PhotosAlbumSyncResponse(TypedDict):
     """Response structure for optimized album sync operations."""
+
     album_id: str
     total_items: int
     photos_count: int
@@ -127,6 +136,7 @@ class PhotosAlbumSyncResponse(TypedDict):
 
 class PhotosFolderUploadResponse(TypedDict):
     """Response structure for folder photo upload operations."""
+
     successful: List[Dict[str, Any]]
     failed: List[Dict[str, Any]]
     total_found: int

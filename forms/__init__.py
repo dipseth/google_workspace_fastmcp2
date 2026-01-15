@@ -2,15 +2,15 @@
 
 from .forms_tools import setup_forms_tools
 from .forms_types import (
-    FormResponseAnswer,
-    FormResponseInfo,
-    FormResponsesListResponse,
     FormCreationResult,
-    FormUpdateResult,
-    FormQuestion,
     FormDetails,
     FormPublishResult,
-    FormResponseDetails
+    FormQuestion,
+    FormResponseAnswer,
+    FormResponseDetails,
+    FormResponseInfo,
+    FormResponsesListResponse,
+    FormUpdateResult,
 )
 
 __all__ = [
@@ -23,5 +23,5 @@ __all__ = [
     "FormQuestion",
     "FormDetails",
     "FormPublishResult",
-    "FormResponseDetails"
+    "FormResponseDetails",
 ]

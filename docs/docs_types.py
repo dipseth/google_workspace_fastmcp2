@@ -5,8 +5,8 @@ These TypedDict classes define the structure of data returned by Docs tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional, NotRequired, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import List, Literal, NotRequired, Optional, TypedDict
 
 
 class RegexReplace(BaseModel):

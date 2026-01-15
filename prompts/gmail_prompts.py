@@ -7,50 +7,47 @@ for automatic resource resolution.
 
 Features:
 - Clean Jinja2 templates (no f-string CSS parsing errors!)
-- Template Parameter Middleware integration 
+- Template Parameter Middleware integration
 - Automatic {{resource://uri}} resolution
 - Professional email templates
 - Proper error handling and fallbacks
 """
 
-import json
-import logging
-from typing_extensions import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from jinja2 import Environment, FileSystemLoader, Template, DictLoader, ChoiceLoader
+    from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader, Template
+
     JINJA2_AVAILABLE = True
 except ImportError:
     JINJA2_AVAILABLE = False
     print("⚠️ Jinja2 not available, falling back to simple templates")
 
-from fastmcp import FastMCP, Context
-from fastmcp.prompts.prompt import Message, PromptMessage, TextContent
+from fastmcp import Context, FastMCP
+from fastmcp.prompts.prompt import PromptMessage, TextContent
 
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
-
-
 
 
 class GmailPrompts:
     """Gmail prompts with professional Jinja2 templates and Template Parameter Middleware integration."""
-    
+
     def __init__(self):
         """Initialize with Jinja2 template environment."""
         self.jinja_env = None
-        
+
         if JINJA2_AVAILABLE:
             # Setup template directories (corrected paths)
             template_dirs = [
                 "prompts/templates/gmail",  # Primary location after move
                 "prompts/templates",
-                "templates/gmail",           # Fallback locations
-                "templates"
+                "templates/gmail",  # Fallback locations
+                "templates",
             ]
-            
+
             # Find existing directories
             loaders = []
             for template_dir in template_dirs:
@@ -58,26 +55,28 @@ class GmailPrompts:
                 if path.exists():
                     loaders.append(FileSystemLoader(str(path)))
                     logger.info(f"📁 Found Gmail template directory: {path}")
-            
+
             if loaders:
                 loader = ChoiceLoader(loaders)
                 logger.info(f"✅ Using {len(loaders)} template directories")
             else:
                 # Use built-in templates as fallback
-                loader = DictLoader({
-                    'quick_demo_simple.txt': self._get_builtin_simple_template()
-                })
-                logger.info("📄 Using built-in Gmail template (no template directories found)")
-            
+                loader = DictLoader(
+                    {"quick_demo_simple.txt": self._get_builtin_simple_template()}
+                )
+                logger.info(
+                    "📄 Using built-in Gmail template (no template directories found)"
+                )
+
             self.jinja_env = Environment(
                 loader=loader,
                 autoescape=False,  # We're generating text/markdown
                 trim_blocks=True,
-                lstrip_blocks=True
+                lstrip_blocks=True,
             )
-            
+
             logger.info("✅ Clean Gmail prompts initialized with Jinja2")
-    
+
     def _get_builtin_simple_template(self) -> str:
         """Get the built-in simple template."""
         return """# ⚡ Quick Email Demo (Simple) - With Real Gmail Resources
@@ -138,40 +137,41 @@ Run: `start_google_auth('your.email@gmail.com')`
 
 ---
 *Generated with Jinja2 templates • No CSS errors!*"""
-    
+
     async def quick_email_demo(self, context: Context) -> PromptMessage:
         """
         Gmail Quick Email Demo that returns template content with {{resource://uri}} variables.
-        
+
         The Template Parameter Middleware will automatically resolve these variables
         in the on_get_prompt hook after this function returns.
         """
         try:
             # Get template content with resource variables that middleware will resolve
             template_content = self._get_template_content_with_resources()
-            
+
             # Basic template context for non-resource variables only
             basic_context = {
-                'request_id': context.request_id,
-                'current_time': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-                'current_date': datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                "request_id": context.request_id,
+                "current_time": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                ),
+                "current_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             }
-            
+
             # Do ONLY basic string replacement for non-resource variables
             # Let Template Parameter Middleware handle {{resource://uri}} and Jinja2 syntax
             content = template_content
             for key, value in basic_context.items():
                 content = content.replace(f"{{{{ {key} }}}}", str(value))
-            
+
             return PromptMessage(
-                role="user",
-                content=TextContent(type="text", text=content)
+                role="user", content=TextContent(type="text", text=content)
             )
-            
+
         except Exception as e:
             logger.error(f"Error in Gmail prompt: {e}")
             return self._create_error_prompt(str(e))
-    
+
     def _get_template_content_with_resources(self) -> str:
         """Get template content with resource variables that middleware will resolve."""
         return """# ⚡ Quick Email Demo - Template Middleware Resource Resolution
@@ -230,12 +230,14 @@ FastMCP2 Team
 
 ---
 *Template Parameter Middleware • Live Gmail data in prompts!*"""
-    
+
     def _create_error_prompt(self, error: str) -> PromptMessage:
         """Create error prompt."""
         return PromptMessage(
             role="user",
-            content=TextContent(type="text", text=f"""# ⚡ Gmail Demo (Error)
+            content=TextContent(
+                type="text",
+                text=f"""# ⚡ Gmail Demo (Error)
 *Error: {error}*
 
 ## 📧 Basic Demo
@@ -250,7 +252,8 @@ FastMCP2 Team
     <body>Hello! This is a basic email demo.</body>
   </params>
 </mcp_tool_call>
-```""")
+```""",
+            ),
         )
 
 
@@ -270,13 +273,13 @@ def get_gmail_prompts() -> GmailPrompts:
 def setup_gmail_prompts(mcp: FastMCP):
     """
     Setup Gmail prompts with Jinja2 templates and Template Parameter Middleware integration.
-    
+
     This function registers the clean Gmail prompts that work with both:
     1. Jinja2 templates for presentation
     2. Template Parameter Middleware for {{resource://uri}} resolution
     """
     gmail_prompts = get_gmail_prompts()
-    
+
     @mcp.prompt(
         name="quick_email_demo",
         description="Simple: Zero-config Gmail demo with Jinja2 templates and resource integration",
@@ -286,20 +289,24 @@ def setup_gmail_prompts(mcp: FastMCP):
             "author": "FastMCP2-Jinja2",
             "uses_jinja2": True,
             "uses_template_middleware": True,
-            "resource_dependencies": ["service://gmail/labels", "user://current/email"]
-        }
+            "resource_dependencies": ["service://gmail/labels", "user://current/email"],
+        },
     )
     async def quick_email_demo_prompt(context: Context) -> PromptMessage:
         """Gmail Quick Email Demo - Clean Jinja2 version with Template Parameter Middleware support."""
         return await gmail_prompts.quick_email_demo(context)
-    
+
     logger.info("✅ Gmail prompts with Jinja2 templates registered successfully")
-    logger.info("   • quick_email_demo: Simple zero-config demo with resource integration")
-    logger.info("   • Template Parameter Middleware: {{resource://uri}} expressions supported")
+    logger.info(
+        "   • quick_email_demo: Simple zero-config demo with resource integration"
+    )
+    logger.info(
+        "   • Template Parameter Middleware: {{resource://uri}} expressions supported"
+    )
     logger.info("   • Jinja2 Templates: Professional presentation layer")
-    
+
     return gmail_prompts
 
 
 # Export for server.py
-__all__ = ['setup_gmail_prompts', 'get_gmail_prompts']
+__all__ = ["setup_gmail_prompts", "get_gmail_prompts"]

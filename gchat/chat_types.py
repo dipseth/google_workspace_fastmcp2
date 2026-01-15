@@ -5,11 +5,12 @@ These TypedDict classes define the structure of data returned by Chat tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional,NotRequired
+from typing_extensions import List, NotRequired, Optional, TypedDict
 
 
 class SpaceInfo(TypedDict):
     """Structure for a single Chat space entry."""
+
     id: str
     displayName: str
     spaceType: str  # 'SPACE', 'DIRECT_MESSAGE', etc.
@@ -20,6 +21,7 @@ class SpaceInfo(TypedDict):
 
 class MessageInfo(TypedDict):
     """Structure for a single Chat message."""
+
     id: str
     text: str
     senderName: str
@@ -32,26 +34,29 @@ class MessageInfo(TypedDict):
 
 class SpaceListResponse(TypedDict):
     """Response structure for list_spaces tool."""
+
     spaces: List[SpaceInfo]
     count: int
     spaceType: str  # Filter type used: 'all', 'room', 'dm'
     userEmail: str
-    error: NotRequired[Optional[str]]   # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class MessageListResponse(TypedDict):
     """Response structure for list_messages tool."""
+
     messages: List[MessageInfo]
     count: int
     spaceId: str
     spaceName: str
     orderBy: str
     userEmail: str
-    error: NotRequired[Optional[str]]   # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class CardTypeInfo(TypedDict):
     """Structure for a single card type entry."""
+
     type: str
     description: str
     supported_features: List[str]
@@ -59,14 +64,16 @@ class CardTypeInfo(TypedDict):
 
 class CardTypesResponse(TypedDict):
     """Response structure for list_available_card_types tool."""
+
     card_types: List[CardTypeInfo]
     count: int
     framework_status: str
-    error: NotRequired[Optional[str]]   # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class CardComponentInfo(TypedDict):
     """Structure for a single card component entry."""
+
     name: str
     path: str
     type: str
@@ -76,14 +83,16 @@ class CardComponentInfo(TypedDict):
 
 class CardComponentsResponse(TypedDict):
     """Response structure for list_available_card_components tool."""
+
     components: List[CardComponentInfo]
     count: int
     query: str
-    error: NotRequired[Optional[str]]   # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class CardTemplateInfo(TypedDict):
     """Structure for a single card template entry."""
+
     template_id: str
     name: str
     description: str
@@ -93,15 +102,17 @@ class CardTemplateInfo(TypedDict):
 
 class CardTemplatesResponse(TypedDict):
     """Response structure for list_card_templates tool."""
+
     templates: List[CardTemplateInfo]
     count: int
     query: str
     # error: NotRequired[Optional[str]]
-    error: NotRequired[Optional[str]] 
+    error: NotRequired[Optional[str]]
 
 
 class JWTSpaceInfo(TypedDict):
     """Structure for a single JWT-authenticated Chat space entry."""
+
     name: str
     displayName: str
     type: str
@@ -113,16 +124,18 @@ class JWTSpaceInfo(TypedDict):
 
 class JWTSpacesResponse(TypedDict):
     """Response structure for list_spaces_jwt tool."""
+
     spaces: List[JWTSpaceInfo]
     count: int
     userEmail: str
     authMethod: str  # 'JWT Bearer Token', 'resource_context', etc.
     filterApplied: str  # 'all', 'room', 'dm'
-    error: NotRequired[Optional[str]]   # Optional error message for error responses
+    error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
 class SendMessageResponse(TypedDict):
     """Response structure for send_message tool."""
+
     success: bool
     messageId: Optional[str]
     spaceId: str
@@ -136,6 +149,7 @@ class SendMessageResponse(TypedDict):
 
 class SearchMessageResult(TypedDict):
     """Structure for individual search message result."""
+
     messageId: str
     text: str
     senderName: str
@@ -146,6 +160,7 @@ class SearchMessageResult(TypedDict):
 
 class SearchMessagesResponse(TypedDict):
     """Response structure for search_messages tool."""
+
     success: bool
     query: str
     results: List[SearchMessageResult]
@@ -159,6 +174,7 @@ class SearchMessagesResponse(TypedDict):
 
 class SendCardMessageResponse(TypedDict):
     """Response structure for send_card_message tool."""
+
     success: bool
     messageId: Optional[str]
     spaceId: str
@@ -175,6 +191,7 @@ class SendCardMessageResponse(TypedDict):
 
 class SendSimpleCardResponse(TypedDict):
     """Response structure for send_simple_card tool."""
+
     success: bool
     messageId: Optional[str]
     spaceId: str
@@ -188,6 +205,7 @@ class SendSimpleCardResponse(TypedDict):
 
 class SendInteractiveCardResponse(TypedDict):
     """Response structure for send_interactive_card tool."""
+
     success: bool
     messageId: Optional[str]
     spaceId: str
@@ -202,6 +220,7 @@ class SendInteractiveCardResponse(TypedDict):
 
 class SendFormCardResponse(TypedDict):
     """Response structure for send_form_card tool."""
+
     success: bool
     messageId: Optional[str]
     spaceId: str
@@ -216,6 +235,7 @@ class SendFormCardResponse(TypedDict):
 
 class SendRichCardResponse(TypedDict):
     """Response structure for send_rich_card tool."""
+
     success: bool
     messageId: Optional[str]
     spaceId: str

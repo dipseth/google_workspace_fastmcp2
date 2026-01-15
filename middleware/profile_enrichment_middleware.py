@@ -7,16 +7,15 @@ by calling Google People API when user IDs are detected in responses.
 Works across all services: Chat, Gmail, Drive, Calendar, etc.
 """
 
-import logging
 import asyncio
-from typing_extensions import Any, Dict, Optional, List, Set
-from fastmcp.server.middleware import Middleware, MiddlewareContext
-from googleapiclient.errors import HttpError
-from googleapiclient.discovery import build
 
-from config.enhanced_logging import setup_logger
-from auth.service_helpers import get_service
+from fastmcp.server.middleware import Middleware, MiddlewareContext
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from typing_extensions import Any, Dict, List, Optional, Set
+
 from auth.context import get_auth_middleware
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
@@ -39,7 +38,7 @@ class ProfileEnrichmentMiddleware(Middleware):
         enable_caching: bool = True,
         cache_ttl_seconds: int = 300,
         qdrant_middleware=None,
-        enable_qdrant_cache: bool = False
+        enable_qdrant_cache: bool = False,
     ):
         """
         Initialize Profile Enrichment Middleware.
@@ -52,13 +51,17 @@ class ProfileEnrichmentMiddleware(Middleware):
         """
         self._enable_caching = enable_caching
         self._cache_ttl = cache_ttl_seconds
-        self._profile_cache: Dict[str, Dict[str, Any]] = {}  # In-memory cache (fast tier)
+        self._profile_cache: Dict[str, Dict[str, Any]] = (
+            {}
+        )  # In-memory cache (fast tier)
         self._cache_timestamps: Dict[str, float] = {}
-        
+
         # Optional Qdrant integration for persistent caching
         self._qdrant_middleware = qdrant_middleware
-        self._enable_qdrant_cache = enable_qdrant_cache and qdrant_middleware is not None
-        
+        self._enable_qdrant_cache = (
+            enable_qdrant_cache and qdrant_middleware is not None
+        )
+
         # Analytics tracking
         self._stats = {
             "total_lookups": 0,
@@ -67,16 +70,20 @@ class ProfileEnrichmentMiddleware(Middleware):
             "api_calls": 0,
             "api_errors": 0,
             "qdrant_cache_hits": 0,
-            "qdrant_cache_misses": 0
+            "qdrant_cache_misses": 0,
         }
 
         logger.info("👤 Profile Enrichment Middleware initialized")
-        logger.info(f"  In-memory caching: {'enabled' if enable_caching else 'disabled'}")
+        logger.info(
+            f"  In-memory caching: {'enabled' if enable_caching else 'disabled'}"
+        )
         if enable_caching:
             logger.info(f"  Cache TTL: {cache_ttl_seconds}s")
-        logger.info(f"  Qdrant persistent cache: {'enabled' if self._enable_qdrant_cache else 'disabled'}")
+        logger.info(
+            f"  Qdrant persistent cache: {'enabled' if self._enable_qdrant_cache else 'disabled'}"
+        )
         if self._enable_qdrant_cache:
-            logger.info(f"  Two-tier caching: In-memory (fast) → Qdrant (persistent)")
+            logger.info("  Two-tier caching: In-memory (fast) → Qdrant (persistent)")
 
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         """
@@ -113,12 +120,16 @@ class ProfileEnrichmentMiddleware(Middleware):
 
         # Enrich the result
         try:
-            logger.info(f"👤 Starting enrichment for {tool_name} with user {user_email}")
+            logger.info(
+                f"👤 Starting enrichment for {tool_name} with user {user_email}"
+            )
             enriched_result = await self._enrich_response(result, user_email, tool_name)
             logger.info(f"👤 Enrichment completed successfully for {tool_name}")
             return enriched_result
         except Exception as e:
-            logger.error(f"👤 Failed to enrich response for {tool_name}: {e}", exc_info=True)
+            logger.error(
+                f"👤 Failed to enrich response for {tool_name}: {e}", exc_info=True
+            )
             return result
 
     def _should_enrich_tool(self, tool_name: str) -> bool:
@@ -156,36 +167,40 @@ class ProfileEnrichmentMiddleware(Middleware):
             Enriched response with full names and emails
         """
         logger.debug(f"👤 _enrich_response called with result type: {type(result)}")
-        
+
         # Handle ToolResult objects (FastMCP standard response)
-        if hasattr(result, 'structured_content') and result.structured_content:
-            logger.info(f"👤 Extracting structured_content from ToolResult")
+        if hasattr(result, "structured_content") and result.structured_content:
+            logger.info("👤 Extracting structured_content from ToolResult")
             structured_data = result.structured_content
             logger.debug(f"👤 Structured content type: {type(structured_data)}")
-            
+
             if isinstance(structured_data, dict):
                 # Enrich the structured content
                 enriched_data = await self._enrich_dict_response(
                     structured_data, user_email, tool_name
                 )
-                
+
                 # Update BOTH structured_content AND content
                 result.structured_content = enriched_data
-                
+
                 # Regenerate the content field so client sees enriched data
                 import json
+
                 from mcp.types import TextContent
+
                 enriched_json = json.dumps(enriched_data, indent=2, default=str)
                 result.content = [TextContent(type="text", text=enriched_json)]
-                
-                logger.info(f"👤 Updated ToolResult with enriched data in BOTH structured_content and content")
+
+                logger.info(
+                    "👤 Updated ToolResult with enriched data in BOTH structured_content and content"
+                )
                 return result
-        
+
         # Handle plain dict responses
         if isinstance(result, dict):
-            logger.debug(f"👤 Handling plain dict response")
+            logger.debug("👤 Handling plain dict response")
             return await self._enrich_dict_response(result, user_email, tool_name)
-        
+
         # Handle other dict-like objects
         elif hasattr(result, "__dict__"):
             logger.debug(f"👤 Handling dict-like object: {type(result)}")
@@ -195,7 +210,7 @@ class ProfileEnrichmentMiddleware(Middleware):
             )
             # Return as same type
             return type(result)(**enriched) if hasattr(result, "__init__") else enriched
-        
+
         logger.debug(f"👤 No enrichable content found in result type: {type(result)}")
         return result
 
@@ -205,8 +220,10 @@ class ProfileEnrichmentMiddleware(Middleware):
         """Enrich dictionary response with People API data."""
         logger.info(f"👤 _enrich_dict_response called for {tool_name}")
         logger.info(f"👤 Response type: {type(response)}")
-        logger.info(f"👤 Response keys: {response.keys() if isinstance(response, dict) else 'NOT A DICT'}")
-        
+        logger.info(
+            f"👤 Response keys: {response.keys() if isinstance(response, dict) else 'NOT A DICT'}"
+        )
+
         # Log first 500 chars of response for debugging
         response_str = str(response)[:500]
         logger.info(f"👤 Response preview: {response_str}")
@@ -214,11 +231,15 @@ class ProfileEnrichmentMiddleware(Middleware):
         # Chat-specific enrichment
         if tool_name in ["list_messages", "search_messages"]:
             messages = response.get("messages", [])
-            logger.info(f"👤 Extracted messages array - type: {type(messages)}, length: {len(messages)}")
-            
+            logger.info(
+                f"👤 Extracted messages array - type: {type(messages)}, length: {len(messages)}"
+            )
+
             if messages:
                 logger.info(f"👤 Found {len(messages)} messages to enrich")
-                logger.info(f"👤 First message sample: {messages[0] if messages else 'NONE'}")
+                logger.info(
+                    f"👤 First message sample: {messages[0] if messages else 'NONE'}"
+                )
                 await self._enrich_chat_messages(messages, user_email)
             else:
                 logger.warning(f"👤 No messages found in response for {tool_name}")
@@ -290,7 +311,7 @@ class ProfileEnrichmentMiddleware(Middleware):
         """
         try:
             logger.info(f"👤 Attempting to create People API service for {user_email}")
-            
+
             # Get AuthMiddleware to load credentials
             auth_middleware = get_auth_middleware()
             if not auth_middleware:
@@ -298,15 +319,17 @@ class ProfileEnrichmentMiddleware(Middleware):
                 return None
 
             logger.debug("👤 AuthMiddleware found, loading credentials")
-            
+
             # Load credentials using middleware's storage system
             credentials = auth_middleware.load_credentials(user_email)
             if not credentials:
                 logger.warning(f"👤 No credentials found for {user_email}")
                 return None
 
-            logger.info(f"👤 Credentials loaded for {user_email}, building People API service")
-            
+            logger.info(
+                f"👤 Credentials loaded for {user_email}, building People API service"
+            )
+
             # Build People service directly
             people_service = await asyncio.to_thread(
                 build, "people", "v1", credentials=credentials
@@ -396,23 +419,27 @@ class ProfileEnrichmentMiddleware(Middleware):
                 .get(resourceName=resource_name, personFields="names,emailAddresses")
                 .execute
             )
-            
+
             logger.info(f"👤 People API response for {user_id}: {person}")
 
             # Extract display name
             names = person.get("names", [])
             display_name = names[0].get("displayName") if names else None
-            
-            logger.info(f"👤 Extracted name: {display_name} from {len(names)} name entries")
+
+            logger.info(
+                f"👤 Extracted name: {display_name} from {len(names)} name entries"
+            )
 
             # Extract email
             emails = person.get("emailAddresses", [])
             email = emails[0].get("value") if emails else None
-            
+
             logger.info(f"👤 Extracted email: {email} from {len(emails)} email entries")
 
             if display_name or email:
-                logger.info(f"✅ People API SUCCESS: {user_id} → {display_name} ({email})")
+                logger.info(
+                    f"✅ People API SUCCESS: {user_id} → {display_name} ({email})"
+                )
                 return {
                     "displayName": display_name or f"User {user_id}",
                     "email": email,
@@ -453,12 +480,13 @@ class ProfileEnrichmentMiddleware(Middleware):
             for user_id, timestamp in self._cache_timestamps.items()
             if (current_time - timestamp) < self._cache_ttl
         )
-        
+
         # Calculate hit rate
         total_lookups = self._stats["total_lookups"]
         cache_hit_rate = (
             (self._stats["cache_hits"] / total_lookups * 100)
-            if total_lookups > 0 else 0.0
+            if total_lookups > 0
+            else 0.0
         )
 
         stats = {
@@ -482,11 +510,11 @@ class ProfileEnrichmentMiddleware(Middleware):
                 "available": self._qdrant_middleware is not None,
                 "cache_hits": self._stats["qdrant_cache_hits"],
                 "cache_misses": self._stats["qdrant_cache_misses"],
-            }
+            },
         }
-        
+
         return stats
-    
+
     def get_enrichment_analytics(self) -> Dict[str, Any]:
         """Get detailed analytics about profile enrichment operations."""
         return {
@@ -496,13 +524,13 @@ class ProfileEnrichmentMiddleware(Middleware):
                 "list_messages",
                 "search_messages",
                 "search_gmail_messages",
-                "get_gmail_message_content"
+                "get_gmail_message_content",
             ],
             "features": {
                 "in_memory_cache": self._enable_caching,
                 "qdrant_persistent_cache": self._enable_qdrant_cache,
                 "two_tier_caching": self._enable_caching and self._enable_qdrant_cache,
                 "people_api_integration": True,
-                "analytics_tracking": True
-            }
+                "analytics_tracking": True,
+            },
         }

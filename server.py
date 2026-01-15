@@ -3,7 +3,6 @@
 A focused MCP server for uploading files to Google Drive with OAuth authentication.
 """
 
-import argparse
 import os
 from pathlib import Path
 
@@ -14,57 +13,51 @@ logger = setup_logger()
 
 # Now import the rest of the modules
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.google import (
-    GoogleProvider,
-)  # FastMCP 2.12.0 GoogleProvider
-from config.settings import settings
-from auth.middleware import AuthMiddleware, CredentialStorageMode
+
+from auth.fastmcp_oauth_endpoints import setup_oauth_endpoints_fastmcp
 
 # MCPAuthMiddleware removed - deprecated due to architectural mismatch (see auth/mcp_auth_middleware.py)
-from auth.google_oauth_auth import setup_google_oauth_auth, get_google_oauth_metadata
-from auth.jwt_auth import setup_jwt_auth, create_test_tokens  # Keep for fallback
-from auth.fastmcp_oauth_endpoints import setup_oauth_endpoints_fastmcp
-from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
+from auth.jwt_auth import setup_jwt_auth  # Keep for fallback
+from auth.middleware import CredentialStorageMode
+from config.settings import settings
+from docs.docs_tools import setup_docs_tools
 from drive.drive_tools import setup_drive_comprehensive_tools
 from drive.file_management_tools import setup_file_management_tools
-from gmail.gmail_tools import setup_gmail_tools
-from docs.docs_tools import setup_docs_tools
+from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
 from forms.forms_tools import setup_forms_tools
-from slides.slides_tools import setup_slides_tools
 from gcalendar.calendar_tools import setup_calendar_tools
 from gchat.chat_tools import setup_chat_tools
-from gchat.chat_app_tools import setup_chat_app_tools
-from prompts.chat_app_prompts import setup_chat_app_prompts
-from prompts.gmail_prompts import setup_gmail_prompts
-from prompts.structured_response_demo_prompts import (
-    setup_structured_response_demo_prompts,
-)
 from gchat.unified_card_tool import setup_unified_card_tool
-from adapters.module_wrapper_mcp import setup_module_wrapper_middleware
-from sheets.sheets_tools import setup_sheets_tools
-from photos.photos_tools import setup_photos_tools
-from photos.advanced_tools import setup_advanced_photos_tools
+from gmail.gmail_tools import setup_gmail_tools
 from middleware.qdrant_middleware import (
     QdrantUnifiedMiddleware,
     setup_enhanced_qdrant_tools,
     setup_qdrant_resources,
 )
+from middleware.sampling_middleware import (
+    EnhancementLevel,
+    setup_enhanced_sampling_demo_tools,
+    setup_enhanced_sampling_middleware,
+)
+from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
 
 # from middleware.template_middleware import setup_template_middleware
 from middleware.template_middleware import (
     setup_enhanced_template_middleware as setup_template_middleware,
 )
-from middleware.sampling_middleware import (
-    setup_enhanced_sampling_middleware,
-    EnhancementLevel,
-    setup_enhanced_sampling_demo_tools,
+from photos.advanced_tools import setup_advanced_photos_tools
+from photos.photos_tools import setup_photos_tools
+from prompts.gmail_prompts import setup_gmail_prompts
+from prompts.structured_response_demo_prompts import (
+    setup_structured_response_demo_prompts,
 )
-from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
-from resources.user_resources import setup_user_resources
-from resources.tool_output_resources import setup_tool_output_resources
 from resources.service_list_resources import setup_service_list_resources
 from resources.service_recent_resources import setup_service_recent_resources
 from resources.template_resources import register_template_resources
+from resources.tool_output_resources import setup_tool_output_resources
+from resources.user_resources import setup_user_resources
+from sheets.sheets_tools import setup_sheets_tools
+from slides.slides_tools import setup_slides_tools
 from tools.server_tools import setup_server_tools
 from tools.template_macro_tools import setup_template_macro_tools
 
@@ -236,13 +229,15 @@ logger.info("👤 Setting up Profile Enrichment Middleware for People API integr
 from middleware.profile_enrichment_middleware import ProfileEnrichmentMiddleware
 
 # Enable Qdrant caching if middleware is available
-enable_qdrant_profile_cache = qdrant_middleware is not None and qdrant_middleware.client_manager.is_available
+enable_qdrant_profile_cache = (
+    qdrant_middleware is not None and qdrant_middleware.client_manager.is_available
+)
 
 profile_middleware = ProfileEnrichmentMiddleware(
     enable_caching=True,
     cache_ttl_seconds=300,
     qdrant_middleware=qdrant_middleware if enable_qdrant_profile_cache else None,
-    enable_qdrant_cache=enable_qdrant_profile_cache
+    enable_qdrant_cache=enable_qdrant_profile_cache,
 )
 mcp.add_middleware(profile_middleware)
 
@@ -465,7 +460,7 @@ def main():
     if settings.enable_https and not settings.is_cloud_deployment:
         try:
             settings.validate_ssl_config()
-            logger.info(f"✅ SSL configuration validated")
+            logger.info("✅ SSL configuration validated")
             logger.info(f"SSL Certificate: {settings.ssl_cert_file}")
             logger.info(f"SSL Private Key: {settings.ssl_key_file}")
             if settings.ssl_ca_file:
@@ -498,7 +493,7 @@ def main():
                 )
                 run_args["uvicorn_config"] = ssl_config
                 logger.info("🔒 Starting server with HTTPS/SSL support")
-                logger.info(f"Transport: http (with SSL)")
+                logger.info("Transport: http (with SSL)")
                 logger.info(f"SSL Certificate: {ssl_config['ssl_certfile']}")
                 logger.info(f"SSL Private Key: {ssl_config['ssl_keyfile']}")
             else:

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import time
+
 import pytest
 
 from .base_test_config import TEST_EMAIL
@@ -38,7 +39,9 @@ def allow_writes() -> bool:
 @pytest.mark.auth_required
 class TestSheetsRealEdits:
     @pytest.mark.asyncio
-    async def test_modify_then_read_roundtrip(self, client, test_spreadsheet_id, allow_writes):
+    async def test_modify_then_read_roundtrip(
+        self, client, test_spreadsheet_id, allow_writes
+    ):
         """Write values to a real sheet and read them back (round-trip verification)."""
         if not test_spreadsheet_id:
             pytest.skip("Set TEST_GOOGLE_SHEET_ID to run real-edit Sheets tests")
@@ -71,7 +74,9 @@ class TestSheetsRealEdits:
         write_text = write_result.content[0].text.lower()
         # If the server isn't authenticated, this cannot be a real-edit test.
         if "no valid credentials" in write_text or "authenticate first" in write_text:
-            pytest.skip(f"Sheets write auth not configured: {write_result.content[0].text}")
+            pytest.skip(
+                f"Sheets write auth not configured: {write_result.content[0].text}"
+            )
 
         # Read back and verify.
         read_result = await client.call_tool(
@@ -87,6 +92,10 @@ class TestSheetsRealEdits:
 
         content = read_result.content[0].text.lower()
         if "no valid credentials" in content or "authenticate first" in content:
-            pytest.skip(f"Sheets read auth not configured: {read_result.content[0].text}")
+            pytest.skip(
+                f"Sheets read auth not configured: {read_result.content[0].text}"
+            )
         # The server may return structured or text; the marker should appear in the payload.
-        assert marker.lower() in content, f"Expected marker '{marker}' to be present in readback: {content}"
+        assert (
+            marker.lower() in content
+        ), f"Expected marker '{marker}' to be present in readback: {content}"

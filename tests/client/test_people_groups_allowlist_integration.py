@@ -1,11 +1,11 @@
 """Integration tests for People contact groups and Gmail allow list group specs."""
 
 import json
+
 import pytest
 
 from .base_test_config import TEST_EMAIL
-from .test_helpers import ToolTestRunner, TestResponseValidator, print_test_result
-
+from .test_helpers import TestResponseValidator, ToolTestRunner, print_test_result
 
 LABEL_NAME = "MCP People Group Allow List Test"
 GROUP_SPEC = f"group:{LABEL_NAME}"

@@ -12,17 +12,17 @@ from typing import Any
 def json_pretty_filter(data: Any, indent: int = 2) -> str:
     """
     Pretty print JSON data.
-    
+
     Converts Python data structures to formatted JSON strings with configurable
     indentation. Handles serialization of complex objects gracefully.
-    
+
     Args:
         data: Data to serialize to JSON
         indent: Number of spaces for indentation (default: 2)
-        
+
     Returns:
         Pretty-formatted JSON string, or string representation if serialization fails
-        
+
     Usage in templates:
         {{ response_data | json_pretty }}
         {{ config | json_pretty(4) }}

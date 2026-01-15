@@ -1,16 +1,16 @@
 """Test authentication utilities for getting JWT tokens."""
 
-import os
 import json
+import os
 from typing import Optional
 
 
 def get_test_token(user_email: str = "test@example.com") -> Optional[str]:
     """Get a test JWT token for the specified user.
-    
+
     Args:
         user_email: Email address to get token for
-        
+
     Returns:
         JWT token string if available, None otherwise
     """
@@ -24,7 +24,9 @@ def get_test_token(user_email: str = "test@example.com") -> Optional[str]:
                     test_tokens = json.load(f)
                 return test_tokens.get(user_email)
             else:
-                print(f"Warning: Test tokens file {test_tokens_file} not found. Make sure server is running.")
+                print(
+                    f"Warning: Test tokens file {test_tokens_file} not found. Make sure server is running."
+                )
                 return None
         return None
     except Exception as e:
@@ -34,10 +36,10 @@ def get_test_token(user_email: str = "test@example.com") -> Optional[str]:
 
 def get_client_auth_config(user_email: str = "test@example.com") -> Optional[str]:
     """Get authentication configuration for FastMCP client.
-    
+
     Args:
         user_email: Email address to get token for
-        
+
     Returns:
         JWT token for Bearer auth if JWT enabled, None otherwise
     """

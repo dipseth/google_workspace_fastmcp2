@@ -5,11 +5,12 @@ These TypedDict classes define the structure of data returned by Drive tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import TypedDict, List, Optional, NotRequired
+from typing_extensions import List, NotRequired, Optional, TypedDict
 
 
 class DriveItemInfo(TypedDict):
     """Structure for a single Drive item (file or folder) entry."""
+
     id: str
     name: str
     mimeType: str
@@ -22,6 +23,7 @@ class DriveItemInfo(TypedDict):
 
 class DriveItemsResponse(TypedDict):
     """Response structure for list_drive_items tool."""
+
     items: List[DriveItemInfo]
     count: int
     folderId: str
@@ -33,6 +35,7 @@ class DriveItemsResponse(TypedDict):
 
 class CreateDriveFileResponse(TypedDict):
     """Response structure for create_drive_file tool."""
+
     success: bool
     fileId: Optional[str]
     fileName: Optional[str]
@@ -46,6 +49,7 @@ class CreateDriveFileResponse(TypedDict):
 
 class ShareFileResult(TypedDict):
     """Structure for individual file sharing result."""
+
     fileId: str
     fileName: str
     webViewLink: str
@@ -56,6 +60,7 @@ class ShareFileResult(TypedDict):
 
 class ShareDriveFilesResponse(TypedDict):
     """Response structure for share_drive_files tool."""
+
     success: bool
     totalFiles: int
     totalRecipients: int
@@ -72,6 +77,7 @@ class ShareDriveFilesResponse(TypedDict):
 
 class PublicFileResult(TypedDict):
     """Structure for individual file public sharing result."""
+
     fileId: str
     fileName: str
     webViewLink: str
@@ -81,6 +87,7 @@ class PublicFileResult(TypedDict):
 
 class MakeDriveFilesPublicResponse(TypedDict):
     """Response structure for make_drive_files_public tool."""
+
     success: bool
     totalFiles: int
     successfulOperations: int

@@ -42,14 +42,15 @@ class TestGmailAllowListTools:
         middleware = auth_results["middleware_injection"]
 
         print_test_result("manage_gmail_allow_list explicit email (view)", explicit)
-        print_test_result("manage_gmail_allow_list middleware injection (view)", middleware)
+        print_test_result(
+            "manage_gmail_allow_list middleware injection (view)", middleware
+        )
 
         # Both patterns should either succeed or produce auth-related responses,
         # or indicate that user_google_email must be supplied at the client level.
         explicit_valid = explicit["success"] or explicit["is_auth_related"]
-        middleware_valid = (
-            middleware.get("success", False)
-            or middleware.get("param_required_at_client", False)
+        middleware_valid = middleware.get("success", False) or middleware.get(
+            "param_required_at_client", False
         )
 
         assert explicit_valid, "Explicit auth pattern should work or give auth error"

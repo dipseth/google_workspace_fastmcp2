@@ -5,37 +5,35 @@ This module provides MCP tools for interacting with Google Slides API.
 Migrated from decorator-based pattern to FastMCP2 architecture.
 """
 
-import logging
 import asyncio
 import os
 import re
 from datetime import datetime
-from typing_extensions import List, Optional, Dict, Any, Union
-from googleapiclient.errors import HttpError
-from fastmcp import FastMCP
-import aiohttp
+
 import aiofiles
+import aiohttp
+from fastmcp import FastMCP
+from googleapiclient.errors import HttpError
+from typing_extensions import Any, Dict, List, Optional
+
+from auth.service_helpers import get_service
+from config.enhanced_logging import setup_logger
 
 # Import our custom type for consistent parameter definition
 from tools.common_types import UserGoogleEmailSlides
 
-from auth.service_helpers import get_service, request_service
-from auth.context import get_injected_service
 from .slides_types import (
-    CreatePresentationResponse,
-    PresentationInfoResponse,
     AddSlideResponse,
-    UpdateSlideContentResponse,
-    ExportPresentationResponse,
-    GetPresentationFileResponse,
-    ExportAndDownloadPresentationResponse,
-    SlideInfo,
-    PageSize,
     BatchUpdateReply,
-    FileDownloadInfo
+    CreatePresentationResponse,
+    ExportAndDownloadPresentationResponse,
+    FileDownloadInfo,
+    PageSize,
+    PresentationInfoResponse,
+    SlideInfo,
+    UpdateSlideContentResponse,
 )
 
-from config.enhanced_logging import setup_logger
 logger = setup_logger()
 
 
@@ -44,18 +42,10 @@ logger = setup_logger()
 # ============================================================================
 
 # Valid thumbnail sizes
-VALID_THUMBNAIL_SIZES = {
-    "LARGE",
-    "MEDIUM", 
-    "SMALL"
-}
+VALID_THUMBNAIL_SIZES = {"LARGE", "MEDIUM", "SMALL"}
 
 # Valid page types
-VALID_PAGE_TYPES = {
-    "SLIDE",
-    "MASTER",
-    "LAYOUT"
-}
+VALID_PAGE_TYPES = {"SLIDE", "MASTER", "LAYOUT"}
 
 # Valid shape types for validation
 VALID_SHAPE_TYPES = {
@@ -161,7 +151,7 @@ VALID_SHAPE_TYPES = {
     "WAVE",
     "WEDGE_ELLIPSE_CALLOUT",
     "WEDGE_RECTANGLE_CALLOUT",
-    "WEDGE_ROUND_RECTANGLE_CALLOUT"
+    "WEDGE_ROUND_RECTANGLE_CALLOUT",
 }
 
 
@@ -169,20 +159,21 @@ VALID_SHAPE_TYPES = {
 # HELPER FUNCTIONS
 # ============================================================================
 
+
 def format_slide_details(slide: Dict[str, Any], index: int) -> str:
     """
     Format a single slide's details for display.
-    
+
     Args:
         slide: Slide dict from Slides API
         index: 1-based index of the slide
-        
+
     Returns:
         Formatted string describing the slide
     """
     slide_id = slide.get("objectId", "Unknown")
     page_elements = slide.get("pageElements", [])
-    
+
     # Count different types of elements
     element_counts = {}
     for element in page_elements:
@@ -196,29 +187,29 @@ def format_slide_details(slide: Dict[str, Any], index: int) -> str:
             element_counts["images"] = element_counts.get("images", 0) + 1
         else:
             element_counts["other"] = element_counts.get("other", 0) + 1
-    
+
     # Build element summary
     element_summary = []
     for elem_type, count in element_counts.items():
         element_summary.append(f"{count} {elem_type}")
-    
+
     element_text = ", ".join(element_summary) if element_summary else "no elements"
-    
+
     return f"  Slide {index}: ID {slide_id}, {len(page_elements)} total elements ({element_text})"
 
 
 def format_page_element_details(element: Dict[str, Any]) -> str:
     """
     Format a page element's details for display.
-    
+
     Args:
         element: Page element dict from Slides API
-        
+
     Returns:
         Formatted string describing the element
     """
     element_id = element.get("objectId", "Unknown")
-    
+
     if "shape" in element:
         shape = element["shape"]
         shape_type = shape.get("shapeType", "Unknown")
@@ -227,29 +218,29 @@ def format_page_element_details(element: Dict[str, Any]) -> str:
         has_text = bool(text_content.get("textElements", []))
         text_info = " (with text)" if has_text else ""
         return f"  Shape: ID {element_id}, Type: {shape_type}{text_info}"
-    
+
     elif "table" in element:
         table = element["table"]
         rows = table.get("rows", 0)
         cols = table.get("columns", 0)
         return f"  Table: ID {element_id}, Size: {rows}x{cols}"
-    
+
     elif "line" in element:
         line_type = element["line"].get("lineType", "Unknown")
         return f"  Line: ID {element_id}, Type: {line_type}"
-    
+
     elif "image" in element:
         return f"  Image: ID {element_id}"
-    
+
     elif "video" in element:
         return f"  Video: ID {element_id}"
-    
+
     elif "wordArt" in element:
         return f"  WordArt: ID {element_id}"
-    
+
     elif "sheetsChart" in element:
         return f"  Sheets Chart: ID {element_id}"
-    
+
     else:
         return f"  Element: ID {element_id}, Type: Unknown"
 
@@ -257,84 +248,88 @@ def format_page_element_details(element: Dict[str, Any]) -> str:
 def validate_thumbnail_size(size: str) -> bool:
     """
     Validate thumbnail size parameter.
-    
+
     Args:
         size: Thumbnail size to validate
-        
+
     Returns:
         bool: True if valid, False otherwise
     """
     return size in VALID_THUMBNAIL_SIZES
 
 
-def build_create_slide_request(title: Optional[str] = None, 
-                             layout_id: Optional[str] = None,
-                             index: Optional[int] = None) -> Dict[str, Any]:
+def build_create_slide_request(
+    title: Optional[str] = None,
+    layout_id: Optional[str] = None,
+    index: Optional[int] = None,
+) -> Dict[str, Any]:
     """
     Build a create slide request for batch update.
-    
+
     Args:
         title: Optional title for the slide
         layout_id: Optional layout ID to use
         index: Optional index to insert the slide at
-        
+
     Returns:
         Create slide request dict
     """
     request = {"createSlide": {}}
-    
+
     if index is not None:
         request["createSlide"]["insertionIndex"] = index
-    
+
     if layout_id:
-        request["createSlide"]["slideLayoutReference"] = {
-            "layoutId": layout_id
-        }
-    
+        request["createSlide"]["slideLayoutReference"] = {"layoutId": layout_id}
+
     # Note: Title is typically set after creation
     return request
 
 
-def build_create_shape_request(slide_id: str,
-                             shape_type: str = "TEXT_BOX",
-                             element_properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def build_create_shape_request(
+    slide_id: str,
+    shape_type: str = "TEXT_BOX",
+    element_properties: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Build a create shape request for batch update.
-    
+
     Args:
         slide_id: ID of the slide to add shape to
         shape_type: Type of shape to create
         element_properties: Optional element properties
-        
+
     Returns:
         Create shape request dict
     """
     request = {
         "createShape": {
             "shapeType": shape_type,
-            "elementProperties": element_properties or {
+            "elementProperties": element_properties
+            or {
                 "pageObjectId": slide_id,
                 "size": {
                     "width": {"magnitude": 300, "unit": "PT"},
-                    "height": {"magnitude": 100, "unit": "PT"}
+                    "height": {"magnitude": 100, "unit": "PT"},
                 },
                 "transform": {
                     "scaleX": 1,
                     "scaleY": 1,
                     "translateX": 100,
                     "translateY": 100,
-                    "unit": "PT"
-                }
-            }
+                    "unit": "PT",
+                },
+            },
         }
     }
-    
+
     return request
 
 
 # ============================================================================
-# SERVICE HELPER FUNCTIONS  
+# SERVICE HELPER FUNCTIONS
 # ============================================================================
+
 
 async def _get_slides_service_with_fallback(user_google_email: str):
     """Get Slides service with fallback to direct creation."""
@@ -354,12 +349,12 @@ async def _get_slides_service_with_fallback(user_google_email: str):
 def setup_slides_tools(mcp: FastMCP) -> None:
     """
     Setup and register all Google Slides tools with the MCP server.
-    
+
     Args:
         mcp: The FastMCP server instance to register tools with
     """
     logger.info("Setting up Google Slides tools")
-    
+
     @mcp.tool(
         name="create_presentation",
         description="Create a new Google Slides presentation",
@@ -369,12 +364,12 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def create_presentation(
         user_google_email: UserGoogleEmailSlides = None,
-        title: str = "Untitled Presentation"
+        title: str = "Untitled Presentation",
     ) -> CreatePresentationResponse:
         """
         Create a new Google Slides presentation.
@@ -386,36 +381,38 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         Returns:
             CreatePresentationResponse: Structured response with details about the created presentation.
         """
-        logger.info(f"[create_presentation] Invoked. Email: '{user_google_email}', Title: '{title}'")
+        logger.info(
+            f"[create_presentation] Invoked. Email: '{user_google_email}', Title: '{title}'"
+        )
 
         try:
             # Get the Slides service via middleware injection
             slides_service = await _get_slides_service_with_fallback(user_google_email)
-            
+
             # Build the presentation data
-            body = {
-                'title': title
-            }
-            
+            body = {"title": title}
+
             # Create the presentation via the API
             result = await asyncio.to_thread(
                 slides_service.presentations().create(body=body).execute
             )
-            
-            presentation_id = result.get('presentationId')
-            presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
-            
+
+            presentation_id = result.get("presentationId")
+            presentation_url = (
+                f"https://docs.google.com/presentation/d/{presentation_id}/edit"
+            )
+
             logger.info(f"Presentation created successfully for {user_google_email}")
-            
+
             return CreatePresentationResponse(
                 presentationId=presentation_id,
                 presentationUrl=presentation_url,
                 title=title,
-                slideCount=len(result.get('slides', [])),
+                slideCount=len(result.get("slides", [])),
                 success=True,
-                message=f"Presentation '{title}' created successfully for {user_google_email}"
+                message=f"Presentation '{title}' created successfully for {user_google_email}",
             )
-            
+
         except HttpError as e:
             error_msg = f"Failed to create presentation: {e}"
             logger.error(f"[create_presentation] HTTP error: {e}")
@@ -426,7 +423,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 slideCount=0,
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error creating presentation: {str(e)}"
@@ -438,7 +435,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 slideCount=0,
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -450,12 +447,11 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def get_presentation_info(
-        presentation_id: str,
-        user_google_email: UserGoogleEmailSlides = None
+        presentation_id: str, user_google_email: UserGoogleEmailSlides = None
     ) -> PresentationInfoResponse:
         """
         Get details about a Google Slides presentation.
@@ -467,33 +463,37 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         Returns:
             PresentationInfoResponse: Structured response with presentation details.
         """
-        logger.info(f"[get_presentation_info] Invoked. Email: '{user_google_email}', ID: '{presentation_id}'")
+        logger.info(
+            f"[get_presentation_info] Invoked. Email: '{user_google_email}', ID: '{presentation_id}'"
+        )
 
         try:
             slides_service = await _get_slides_service_with_fallback(user_google_email)
-            
+
             # Get the presentation
             result = await asyncio.to_thread(
-                slides_service.presentations().get(presentationId=presentation_id).execute
+                slides_service.presentations()
+                .get(presentationId=presentation_id)
+                .execute
             )
-            
-            title = result.get('title', 'Untitled')
-            slides = result.get('slides', [])
-            page_size_data = result.get('pageSize', {})
-            
+
+            title = result.get("title", "Untitled")
+            slides = result.get("slides", [])
+            page_size_data = result.get("pageSize", {})
+
             # Build page size info
             page_size: PageSize = {
-                "width": page_size_data.get('width', {}).get('magnitude', 0),
-                "height": page_size_data.get('height', {}).get('magnitude', 0),
-                "unit": page_size_data.get('width', {}).get('unit', 'PT')
+                "width": page_size_data.get("width", {}).get("magnitude", 0),
+                "height": page_size_data.get("height", {}).get("magnitude", 0),
+                "unit": page_size_data.get("width", {}).get("unit", "PT"),
             }
-            
+
             # Build slide info list
             slides_info: List[SlideInfo] = []
             for i, slide in enumerate(slides):
                 slide_id = slide.get("objectId", "Unknown")
                 page_elements = slide.get("pageElements", [])
-                
+
                 # Count different types of elements
                 element_counts = {}
                 for element in page_elements:
@@ -507,24 +507,24 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                         element_counts["images"] = element_counts.get("images", 0) + 1
                     else:
                         element_counts["other"] = element_counts.get("other", 0) + 1
-                
+
                 slide_info: SlideInfo = {
                     "objectId": slide_id,
                     "index": i,
                     "elementCount": len(page_elements),
-                    "elementTypes": element_counts
+                    "elementTypes": element_counts,
                 }
                 slides_info.append(slide_info)
-            
+
             return PresentationInfoResponse(
                 presentationId=presentation_id,
                 title=title,
                 presentationUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
                 slideCount=len(slides),
                 pageSize=page_size,
-                slides=slides_info
+                slides=slides_info,
             )
-            
+
         except HttpError as e:
             error_msg = f"Failed to get presentation: {e}"
             logger.error(f"[get_presentation_info] HTTP error: {e}")
@@ -535,7 +535,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 slideCount=0,
                 pageSize={"width": 0, "height": 0, "unit": ""},
                 slides=[],
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
@@ -547,7 +547,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 slideCount=0,
                 pageSize={"width": 0, "height": 0, "unit": ""},
                 slides=[],
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -559,14 +559,14 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def add_slide(
         presentation_id: str,
         layout_id: Optional[str] = None,
         index: Optional[int] = None,
-        user_google_email: UserGoogleEmailSlides = None
+        user_google_email: UserGoogleEmailSlides = None,
     ) -> AddSlideResponse:
         """
         Add a new slide to an existing presentation using batch update.
@@ -580,37 +580,35 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         Returns:
             AddSlideResponse: Structured response with details about the added slide.
         """
-        logger.info(f"[add_slide] Invoked. Email: '{user_google_email}', Presentation: '{presentation_id}'")
+        logger.info(
+            f"[add_slide] Invoked. Email: '{user_google_email}', Presentation: '{presentation_id}'"
+        )
 
         try:
             slides_service = await _get_slides_service_with_fallback(user_google_email)
-            
+
             # Build the create slide request
             create_slide_request = build_create_slide_request(
-                layout_id=layout_id,
-                index=index
+                layout_id=layout_id, index=index
             )
-            
+
             # Execute batch update
-            body = {
-                'requests': [create_slide_request]
-            }
-            
+            body = {"requests": [create_slide_request]}
+
             result = await asyncio.to_thread(
-                slides_service.presentations().batchUpdate(
-                    presentationId=presentation_id,
-                    body=body
-                ).execute
+                slides_service.presentations()
+                .batchUpdate(presentationId=presentation_id, body=body)
+                .execute
             )
-            
+
             # Extract the created slide ID
-            replies = result.get('replies', [])
+            replies = result.get("replies", [])
             slide_id = None
-            if replies and 'createSlide' in replies[0]:
-                slide_id = replies[0]['createSlide'].get('objectId', 'Unknown')
-            
+            if replies and "createSlide" in replies[0]:
+                slide_id = replies[0]["createSlide"].get("objectId", "Unknown")
+
             logger.info(f"Slide added successfully for {user_google_email}")
-            
+
             return AddSlideResponse(
                 presentationId=presentation_id,
                 slideId=slide_id or "",
@@ -618,9 +616,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 layoutId=layout_id,
                 presentationUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
                 success=True,
-                message=f"Successfully added slide to presentation {presentation_id}"
+                message=f"Successfully added slide to presentation {presentation_id}",
             )
-            
+
         except HttpError as e:
             error_msg = f"Failed to add slide: {e}"
             logger.error(f"[add_slide] HTTP error: {e}")
@@ -632,7 +630,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 presentationUrl="",
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
@@ -645,7 +643,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 presentationUrl="",
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -657,13 +655,13 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def update_slide_content(
         presentation_id: str,
         requests: List[Dict[str, Any]],
-        user_google_email: UserGoogleEmailSlides = None
+        user_google_email: UserGoogleEmailSlides = None,
     ) -> UpdateSlideContentResponse:
         """
         Apply batch updates to a Google Slides presentation.
@@ -682,60 +680,59 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         Returns:
             UpdateSlideContentResponse: Structured response with batch update operation results.
         """
-        logger.info(f"[update_slide_content] Invoked. Email: '{user_google_email}', ID: '{presentation_id}', Requests: {len(requests)}")
+        logger.info(
+            f"[update_slide_content] Invoked. Email: '{user_google_email}', ID: '{presentation_id}', Requests: {len(requests)}"
+        )
 
         try:
             slides_service = await _get_slides_service_with_fallback(user_google_email)
-            
-            body = {
-                'requests': requests
-            }
-            
+
+            body = {"requests": requests}
+
             result = await asyncio.to_thread(
-                slides_service.presentations().batchUpdate(
-                    presentationId=presentation_id,
-                    body=body
-                ).execute
+                slides_service.presentations()
+                .batchUpdate(presentationId=presentation_id, body=body)
+                .execute
             )
-            
-            replies = result.get('replies', [])
-            
+
+            replies = result.get("replies", [])
+
             # Build structured replies
             batch_replies: List[BatchUpdateReply] = []
             for i, reply in enumerate(replies):
                 object_id = None
                 operation_type = "unknown"
                 details = "Operation completed"
-                
-                if 'createSlide' in reply:
-                    object_id = reply['createSlide'].get('objectId')
+
+                if "createSlide" in reply:
+                    object_id = reply["createSlide"].get("objectId")
                     operation_type = "createSlide"
                     details = f"Created slide with ID {object_id}"
-                elif 'createShape' in reply:
-                    object_id = reply['createShape'].get('objectId')
+                elif "createShape" in reply:
+                    object_id = reply["createShape"].get("objectId")
                     operation_type = "createShape"
                     details = f"Created shape with ID {object_id}"
-                elif 'createTable' in reply:
-                    object_id = reply['createTable'].get('objectId')
+                elif "createTable" in reply:
+                    object_id = reply["createTable"].get("objectId")
                     operation_type = "createTable"
                     details = f"Created table with ID {object_id}"
-                elif 'createImage' in reply:
-                    object_id = reply['createImage'].get('objectId')
+                elif "createImage" in reply:
+                    object_id = reply["createImage"].get("objectId")
                     operation_type = "createImage"
                     details = f"Created image with ID {object_id}"
                 else:
                     # Try to determine operation type from keys
                     if reply:
                         operation_type = list(reply.keys())[0] if reply else "unknown"
-                
+
                 batch_reply: BatchUpdateReply = {
                     "requestIndex": i,
                     "operationType": operation_type,
                     "objectId": object_id,
-                    "details": details
+                    "details": details,
                 }
                 batch_replies.append(batch_reply)
-            
+
             return UpdateSlideContentResponse(
                 presentationId=presentation_id,
                 presentationUrl=f"https://docs.google.com/presentation/d/{presentation_id}/edit",
@@ -743,9 +740,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 replyCount=len(replies),
                 replies=batch_replies,
                 success=True,
-                message=f"Batch update completed successfully for {user_google_email}"
+                message=f"Batch update completed successfully for {user_google_email}",
             )
-            
+
         except HttpError as e:
             error_msg = f"Failed to update slide content: {e}"
             logger.error(f"[update_slide_content] HTTP error: {e}")
@@ -757,7 +754,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 replies=[],
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
@@ -770,7 +767,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 replies=[],
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
 
     @mcp.tool(
@@ -782,15 +779,15 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": False,
-            "openWorldHint": True
-        }
+            "openWorldHint": True,
+        },
     )
     async def export_and_download_presentation(
         presentation_id: str,
         export_format: str = "PDF",
         download_to_local: bool = False,
         download_directory: str = "./downloads/presentations",
-        user_google_email: UserGoogleEmailSlides = None
+        user_google_email: UserGoogleEmailSlides = None,
     ) -> ExportAndDownloadPresentationResponse:
         """
         Export a Google Slides presentation to various formats with optional local download.
@@ -809,7 +806,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
         Returns:
             ExportAndDownloadPresentationResponse: Structured response with export URL and optional file details.
         """
-        logger.info(f"[export_and_download_presentation] Email: '{user_google_email}', ID: '{presentation_id}', Format: '{export_format}', Download: {download_to_local}")
+        logger.info(
+            f"[export_and_download_presentation] Email: '{user_google_email}', ID: '{presentation_id}', Format: '{export_format}', Download: {download_to_local}"
+        )
 
         try:
             # Map format strings to export MIME types
@@ -820,9 +819,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 "TXT": "text/plain",
                 "PNG": "image/png",
                 "JPEG": "image/jpeg",
-                "SVG": "image/svg+xml"
+                "SVG": "image/svg+xml",
             }
-            
+
             export_format_upper = export_format.upper()
             if export_format_upper not in format_mapping:
                 return ExportAndDownloadPresentationResponse(
@@ -835,24 +834,26 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                     fileInfo=None,
                     success=False,
                     message="",
-                    error=f"Invalid export format. Supported formats: {', '.join(format_mapping.keys())}"
+                    error=f"Invalid export format. Supported formats: {', '.join(format_mapping.keys())}",
                 )
 
             # Get presentation title (needed for both modes)
             slides_service = await _get_slides_service_with_fallback(user_google_email)
             presentation_info = await asyncio.to_thread(
-                slides_service.presentations().get(presentationId=presentation_id).execute
+                slides_service.presentations()
+                .get(presentationId=presentation_id)
+                .execute
             )
-            presentation_title = presentation_info.get('title', 'Untitled_Presentation')
+            presentation_title = presentation_info.get("title", "Untitled_Presentation")
 
             # Generate export URL
             if export_format_upper in ["PNG", "JPEG", "SVG"]:
                 export_url = f"https://docs.google.com/presentation/d/{presentation_id}/export/{export_format_upper.lower()}"
             else:
                 export_url = f"https://docs.google.com/presentation/d/{presentation_id}/export/{export_format_upper.lower()}"
-            
+
             edit_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
-            
+
             # Set up warning for image formats
             warning = None
             if export_format_upper in ["PNG", "JPEG", "SVG"]:
@@ -860,7 +861,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
 
             # If download not requested, return just the URLs
             if not download_to_local:
-                logger.info(f"Export URL generated successfully for {user_google_email}")
+                logger.info(
+                    f"Export URL generated successfully for {user_google_email}"
+                )
                 return ExportAndDownloadPresentationResponse(
                     presentationId=presentation_id,
                     presentationTitle=presentation_title,
@@ -871,44 +874,43 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                     fileInfo=None,
                     success=True,
                     message=f"Export URL generated for presentation '{presentation_title}' in {export_format_upper} format",
-                    warning=warning
+                    warning=warning,
                 )
 
             # Download functionality
             try:
                 # Get Drive service for file export/download
                 drive_service = await get_service("drive", user_google_email)
-                
+
                 # Create download directory if it doesn't exist
                 os.makedirs(download_directory, exist_ok=True)
-                
+
                 # Sanitize filename for filesystem safety
-                safe_title = re.sub(r'[<>:"/\\|?*]', '_', presentation_title)
-                safe_title = re.sub(r'[^\w\s\-_.]', '_', safe_title)
-                safe_title = re.sub(r'\s+', '_', safe_title.strip())
-                
+                safe_title = re.sub(r'[<>:"/\\|?*]', "_", presentation_title)
+                safe_title = re.sub(r"[^\w\s\-_.]", "_", safe_title)
+                safe_title = re.sub(r"\s+", "_", safe_title.strip())
+
                 # Generate timestamp for unique filename
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                
+
                 # Build filename with proper extension
                 file_extension = export_format_upper.lower()
-                if file_extension == 'jpeg':
-                    file_extension = 'jpg'
+                if file_extension == "jpeg":
+                    file_extension = "jpg"
                 filename = f"{safe_title}_{timestamp}.{file_extension}"
                 local_file_path = os.path.join(download_directory, filename)
-                
+
                 # Download the file using Drive API export
                 download_start_time = datetime.now()
-                
+
                 # Use Drive API to export and get file content
                 if export_format_upper in ["PDF", "PPTX", "ODP", "TXT"]:
                     # Use Drive API export for document formats
                     mime_type = format_mapping[export_format_upper]
                     file_content = await asyncio.to_thread(
-                        drive_service.files().export(
-                            fileId=presentation_id,
-                            mimeType=mime_type
-                        ).execute
+                        drive_service.files()
+                        .export(fileId=presentation_id, mimeType=mime_type)
+                        .execute
                     )
                 else:
                     # For image formats, use direct download approach
@@ -916,31 +918,33 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                         # Get credentials for authorization
                         credentials = drive_service._http.credentials
                         credentials.refresh(drive_service._http.http.request)
-                        
-                        headers = {
-                            'Authorization': f'Bearer {credentials.token}'
-                        }
-                        
+
+                        headers = {"Authorization": f"Bearer {credentials.token}"}
+
                         async with session.get(export_url, headers=headers) as response:
                             if response.status == 200:
                                 file_content = await response.read()
                             else:
-                                raise Exception(f"Failed to download file: HTTP {response.status}")
-                
+                                raise Exception(
+                                    f"Failed to download file: HTTP {response.status}"
+                                )
+
                 # Save file to local storage
-                async with aiofiles.open(local_file_path, 'wb') as f:
+                async with aiofiles.open(local_file_path, "wb") as f:
                     if isinstance(file_content, str):
-                        await f.write(file_content.encode('utf-8'))
+                        await f.write(file_content.encode("utf-8"))
                     else:
                         await f.write(file_content)
-                
+
                 download_end_time = datetime.now()
-                download_duration = (download_end_time - download_start_time).total_seconds()
-                
+                download_duration = (
+                    download_end_time - download_start_time
+                ).total_seconds()
+
                 # Get file size
                 file_size = os.path.getsize(local_file_path)
                 file_size_mb = file_size / (1024 * 1024)
-                
+
                 # Build file info
                 file_info: FileDownloadInfo = {
                     "localPath": local_file_path,
@@ -948,11 +952,13 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                     "fileSize": file_size,
                     "fileSizeMB": file_size_mb,
                     "downloadDuration": download_duration,
-                    "timestamp": download_end_time.strftime('%Y-%m-%d %H:%M:%S')
+                    "timestamp": download_end_time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
-                
-                logger.info(f"[export_and_download_presentation] File downloaded successfully: {local_file_path}")
-                
+
+                logger.info(
+                    f"[export_and_download_presentation] File downloaded successfully: {local_file_path}"
+                )
+
                 return ExportAndDownloadPresentationResponse(
                     presentationId=presentation_id,
                     presentationTitle=presentation_title,
@@ -963,20 +969,22 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                     fileInfo=file_info,
                     success=True,
                     message=f"Presentation '{presentation_title}' exported and downloaded successfully in {export_format_upper} format",
-                    warning=warning
+                    warning=warning,
                 )
-                
+
             except Exception as download_error:
                 # Clean up partial file if it exists
-                if 'local_file_path' in locals() and os.path.exists(local_file_path):
+                if "local_file_path" in locals() and os.path.exists(local_file_path):
                     try:
                         os.remove(local_file_path)
                     except:
                         pass
-                
+
                 # Return with URL generation success but download failure
                 error_msg = f"Export URL generated successfully, but download failed: {str(download_error)}"
-                logger.error(f"[export_and_download_presentation] Download error: {download_error}")
+                logger.error(
+                    f"[export_and_download_presentation] Download error: {download_error}"
+                )
                 return ExportAndDownloadPresentationResponse(
                     presentationId=presentation_id,
                     presentationTitle=presentation_title,
@@ -988,9 +996,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                     success=True,  # URL generation succeeded
                     message=error_msg,
                     warning=warning,
-                    error=f"Download failed: {str(download_error)}"
+                    error=f"Download failed: {str(download_error)}",
                 )
-                
+
         except HttpError as e:
             error_msg = f"HTTP error accessing presentation: {e}"
             logger.error(f"[export_and_download_presentation] HTTP error: {e}")
@@ -1004,7 +1012,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 fileInfo=None,
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
@@ -1019,9 +1027,9 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 fileInfo=None,
                 success=False,
                 message="",
-                error=error_msg
+                error=error_msg,
             )
-    
+
     # Log successful setup
     tool_count = 5  # Updated total number of Slides tools (combined export tools)
     logger.info(f"Successfully registered {tool_count} Google Slides tools")

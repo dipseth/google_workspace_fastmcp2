@@ -8,7 +8,7 @@ Components:
 - utils: Exception classes and utility functions
 - cache_manager: TTL-based resource caching
 - resource_handler: Resource fetching and processing
-- jinja_environment: Jinja2 environment setup and configuration  
+- jinja_environment: Jinja2 environment setup and configuration
 - template_processor: Template detection and processing logic
 - macro_manager: Template macro discovery and management
 
@@ -25,19 +25,19 @@ Usage:
 """
 
 # Import all main classes for easy access
-from .utils import TemplateResolutionError, SilentUndefined
 from .cache_manager import CacheManager
-from .resource_handler import ResourceHandler
 from .jinja_environment import JinjaEnvironmentManager
-from .template_processor import TemplateProcessor
 from .macro_manager import MacroManager
+from .resource_handler import ResourceHandler
+from .template_processor import TemplateProcessor
+from .utils import SilentUndefined, TemplateResolutionError
 
 __all__ = [
-    'TemplateResolutionError',
-    'SilentUndefined',
-    'CacheManager',
-    'ResourceHandler',
-    'JinjaEnvironmentManager',
-    'TemplateProcessor',
-    'MacroManager'
+    "TemplateResolutionError",
+    "SilentUndefined",
+    "CacheManager",
+    "ResourceHandler",
+    "JinjaEnvironmentManager",
+    "TemplateProcessor",
+    "MacroManager",
 ]

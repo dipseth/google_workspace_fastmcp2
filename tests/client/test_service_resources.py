@@ -7,21 +7,20 @@ are no longer part of the supported resource surface area.
 """
 
 import pytest
-import asyncio
-from jsonschema import ValidationError
-from datetime import datetime
 
 # Skip the entire module - google://services/* resources are not in the supported surface area
 pytestmark = pytest.mark.skip(
     reason="google://services/* resources are not part of the supported resource surface area. "
-           "These configuration resources have been removed from the server."
+    "These configuration resources have been removed from the server."
 )
 
 # Import the validation function from service_resources
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from resources.service_resources import validate_service_config
+
 
 @pytest.mark.service("resources")
 class TestGoogleServiceResources:
@@ -31,7 +30,7 @@ class TestGoogleServiceResources:
     async def test_get_service_config_gmail(self, client):
         """Test retrieving Gmail service configuration."""
         result = await client.read_resource("google://services/gmail/config")
-        
+
         assert result is not None
         assert result.get("service") == "gmail"
         assert result["configuration"]["api_name"] == "gmail"
@@ -40,7 +39,7 @@ class TestGoogleServiceResources:
         assert "https://mail.google.com/" in result["configuration"]["scopes"]["full"]
         assert result["metadata"]["authentication_required"] is True
         assert "email" in result["metadata"]["tags"]
-        
+
         # Ensure it passes schema validation (handled internally by resource)
         # We can also explicitly validate the returned structure
         validate_service_config(result)
@@ -49,16 +48,19 @@ class TestGoogleServiceResources:
     async def test_get_service_config_drive(self, client):
         """Test retrieving Drive service configuration."""
         result = await client.read_resource("google://services/drive/config")
-        
+
         assert result is not None
         assert result.get("service") == "drive"
         assert result["configuration"]["api_name"] == "drive"
         assert result["configuration"]["api_version"] == "v3"
         assert "https://www.googleapis.com/drive" in result["configuration"]["base_url"]
-        assert "https://www.googleapis.com/auth/drive" in result["configuration"]["scopes"]["full"]
+        assert (
+            "https://www.googleapis.com/auth/drive"
+            in result["configuration"]["scopes"]["full"]
+        )
         assert result["metadata"]["authentication_required"] is True
         assert "storage" in result["metadata"]["tags"]
-        
+
         # Ensure it passes schema validation
         validate_service_config(result)
 
@@ -66,15 +68,20 @@ class TestGoogleServiceResources:
     async def test_get_service_config_invalid_service(self, client):
         """Test retrieving configuration for an invalid service type."""
         # The resource handler itself raises ValueError for unknown services
-        with pytest.raises(Exception) as excinfo: # Catch generic Exception as Client might wrap ValueError
+        with pytest.raises(
+            Exception
+        ) as excinfo:  # Catch generic Exception as Client might wrap ValueError
             await client.read_resource("google://services/non_existent_service/config")
-        assert "No configuration found for Google service type: non_existent_service" in str(excinfo.value)
+        assert (
+            "No configuration found for Google service type: non_existent_service"
+            in str(excinfo.value)
+        )
 
     @pytest.mark.asyncio
     async def test_get_service_scopes_by_group(self, client):
         """Test retrieving service scopes by group."""
         result = await client.read_resource("google://services/gmail/scopes/full")
-        
+
         assert result is not None
         assert result.get("service_type") == "gmail"
         assert result.get("scope_group") == "full"
@@ -84,7 +91,7 @@ class TestGoogleServiceResources:
     async def test_get_service_versions(self, client):
         """Test retrieving service API versions."""
         result = await client.read_resource("google://services/drive/versions")
-        
+
         assert result is not None
         assert result.get("service_type") == "drive"
         assert "v2" in result["available_versions"]
@@ -94,7 +101,7 @@ class TestGoogleServiceResources:
     async def test_get_service_quota(self, client):
         """Test retrieving service quota information."""
         result = await client.read_resource("google://services/gmail/quota")
-        
+
         assert result is not None
         assert result.get("service_type") == "gmail"
         assert result["quota_limits"]["requests_per_minute"] == 1000
@@ -103,7 +110,7 @@ class TestGoogleServiceResources:
     async def test_get_service_endpoints(self, client):
         """Test retrieving service API endpoints."""
         result = await client.read_resource("google://services/calendar/endpoints")
-        
+
         assert result is not None
         assert result.get("service_type") == "calendar"
         assert "https://www.googleapis.com/calendar/v3/" in result["base_endpoint"]

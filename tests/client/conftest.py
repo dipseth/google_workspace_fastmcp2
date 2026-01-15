@@ -19,10 +19,11 @@
 Note: This is the pytest framework configuration file.
 """
 
-import pytest
-import pytest_asyncio
 import asyncio
 import os
+
+import pytest
+import pytest_asyncio
 
 # Ensure pytest process uses the same trusted cert bundle as the running HTTPS server.
 # This mirrors the VS Code MCP client config that connects to https://localhost:8002/mcp.
@@ -37,10 +38,14 @@ os.environ.setdefault(
 
 from .base_test_config import create_test_client, print_test_configuration
 from .resource_helpers import (
-    get_real_gmail_message_id, get_real_gmail_filter_id,
-    get_real_drive_document_id, get_real_drive_folder_id,
-    get_real_calendar_event_id, get_real_photos_album_id,
-    get_real_forms_form_id, get_real_chat_space_id
+    get_real_calendar_event_id,
+    get_real_chat_space_id,
+    get_real_drive_document_id,
+    get_real_drive_folder_id,
+    get_real_forms_form_id,
+    get_real_gmail_filter_id,
+    get_real_gmail_message_id,
+    get_real_photos_album_id,
 )
 
 # NOTE:
@@ -51,16 +56,13 @@ from .resource_helpers import (
 def pytest_configure(config):
     """Configure pytest with custom markers and settings."""
     config.addinivalue_line(
-        "markers",
-        "auth_required: mark test as requiring authentication"
+        "markers", "auth_required: mark test as requiring authentication"
     )
     config.addinivalue_line(
-        "markers",
-        "service(name): mark test as belonging to a specific Google service"
+        "markers", "service(name): mark test as belonging to a specific Google service"
     )
     config.addinivalue_line(
-        "markers",
-        "integration: mark test as integration test requiring server"
+        "markers", "integration: mark test as integration test requiring server"
     )
 
 
@@ -93,10 +95,12 @@ async def client():
 @pytest.fixture
 async def custom_client():
     """Factory fixture for creating clients with custom email addresses."""
+
     async def _create_client(test_email: str):
         client = await create_test_client(test_email)
         async with client:
             yield client
+
     return _create_client
 
 
@@ -104,17 +108,20 @@ async def custom_client():
 # Real ID Fixtures from Resource System
 # =============================================================================
 
+
 @pytest_asyncio.fixture
 async def real_gmail_message_id(client):
     """Get a real Gmail message ID from resources."""
     real_id = await get_real_gmail_message_id(client)
     return real_id or "fake_message_id_fallback"
 
-@pytest_asyncio.fixture  
+
+@pytest_asyncio.fixture
 async def real_gmail_filter_id(client):
     """Get a real Gmail filter ID from resources."""
     real_id = await get_real_gmail_filter_id(client)
     return real_id or "fake_filter_id_fallback"
+
 
 @pytest_asyncio.fixture
 async def real_drive_document_id(client):
@@ -122,11 +129,13 @@ async def real_drive_document_id(client):
     real_id = await get_real_drive_document_id(client)
     return real_id or "fake_document_id_fallback"
 
+
 @pytest_asyncio.fixture
 async def real_drive_folder_id(client):
     """Get a real Drive folder ID from resources."""
     real_id = await get_real_drive_folder_id(client)
     return real_id or "fake_folder_id_fallback"
+
 
 @pytest_asyncio.fixture
 async def real_calendar_event_id(client):
@@ -134,11 +143,13 @@ async def real_calendar_event_id(client):
     real_id = await get_real_calendar_event_id(client)
     return real_id or "fake_event_id_fallback"
 
+
 @pytest_asyncio.fixture
 async def real_photos_album_id(client):
     """Get a real Photos album ID from resources."""
     real_id = await get_real_photos_album_id(client)
     return real_id or "fake_album_id_fallback"
+
 
 @pytest_asyncio.fixture
 async def real_forms_form_id(client):
@@ -146,15 +157,16 @@ async def real_forms_form_id(client):
     real_id = await get_real_forms_form_id(client)
     return real_id or "fake_form_id_fallback"
 
+
 @pytest_asyncio.fixture
 async def real_chat_space_id(client):
     """Get a real Chat space ID from resources."""
     real_id = await get_real_chat_space_id(client)
     return real_id or "fake_space_id_fallback"
 
+
 # NOTE: Pytest 8+ disallows pytest_plugins in non-top-level conftest.
 # pytest-asyncio is already installed and auto-loaded via entry points.
-
 
 
 def pytest_collection_modifyitems(config, items):

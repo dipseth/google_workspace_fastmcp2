@@ -6,15 +6,14 @@ Currently includes:
 """
 
 import asyncio
-from typing_extensions import List, Dict, Any, Optional, Union
 
 from fastmcp import FastMCP
-
-from tools.common_types import UserGoogleEmail
-from auth.context import get_auth_middleware
 from googleapiclient.discovery import build
+from typing_extensions import Any, Dict, List, Optional, Union
 
+from auth.context import get_auth_middleware
 from config.enhanced_logging import setup_logger
+from tools.common_types import UserGoogleEmail
 
 logger = setup_logger()
 

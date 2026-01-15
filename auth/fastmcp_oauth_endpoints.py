@@ -6,21 +6,22 @@ endpoints using FastMCP's native routing system.
 
 import json
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any, Dict, List
-from config.settings import settings
-from config.enhanced_logging import setup_logger
+
 from auth.context import (
-    set_user_email_context,
-    set_session_context,
     get_session_context,
+    set_session_context,
+    set_user_email_context,
 )
+from config.enhanced_logging import setup_logger
+from config.settings import settings
 
 # Initialize logger early
 logger = setup_logger()
 
 # Import OAuth proxy at module level to ensure singleton behavior
-from auth.oauth_proxy import oauth_proxy, handle_token_exchange, refresh_access_token
+from auth.oauth_proxy import handle_token_exchange, oauth_proxy, refresh_access_token
 
 # Import compatibility shim for OAuth scope management
 try:
@@ -115,11 +116,10 @@ async def _store_oauth_user_data_async(
             return
 
         # Get user email from Google userinfo API using the new tokens
+
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
-        import uuid
-        import json
-        from pathlib import Path
+
         from .dual_auth_bridge import get_dual_auth_bridge
         from .unified_session import UnifiedSession
 
@@ -205,7 +205,7 @@ async def _store_oauth_user_data_async(
                     extra_data=extra_data,
                 )
                 logger.info(
-                    f"✅ Updated .oauth_authentication.json with OAuth Proxy metadata"
+                    "✅ Updated .oauth_authentication.json with OAuth Proxy metadata"
                 )
             except Exception as save_error:
                 logger.error(
@@ -217,9 +217,9 @@ async def _store_oauth_user_data_async(
                 f"✅ Integrated OAuth Proxy authentication for user: {authenticated_email}"
             )
             logger.info(f"   Session ID: {session_state.session_id}")
-            logger.info(f"   Registered with DualAuthBridge as secondary account")
-            logger.info(f"   Created UnifiedSession with legacy credentials")
-            logger.info(f"   Saved persistent credentials for multi-client sharing")
+            logger.info("   Registered with DualAuthBridge as secondary account")
+            logger.info("   Created UnifiedSession with legacy credentials")
+            logger.info("   Saved persistent credentials for multi-client sharing")
 
             # Try to set context if available (won't work outside FastMCP request but worth trying)
             try:
@@ -232,7 +232,7 @@ async def _store_oauth_user_data_async(
             except RuntimeError:
                 # Expected when not in FastMCP request context
                 logger.info(
-                    f"📝 OAuth authentication integrated for later use (not in FastMCP context)"
+                    "📝 OAuth authentication integrated for later use (not in FastMCP context)"
                 )
         else:
             logger.warning(
@@ -760,8 +760,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
         maps temporary client_ids to real Google OAuth client_ids,
         and redirects to Google's authorization server.
         """
-        from starlette.responses import RedirectResponse, Response, JSONResponse
         from urllib.parse import urlencode
+
+        from starlette.responses import JSONResponse, RedirectResponse, Response
 
         # Handle CORS preflight
         if request.method == "OPTIONS":
@@ -816,7 +817,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 if not proxy_client:
                     logger.warning(f"⚠️ Proxy client not registered: {client_id}")
                     logger.info(
-                        f"🔧 AUTO-REGISTERING proxy client for Quick OAuth Flow compatibility"
+                        "🔧 AUTO-REGISTERING proxy client for Quick OAuth Flow compatibility"
                     )
 
                     # MCP Inspector's Quick OAuth Flow may skip /oauth/register
@@ -854,9 +855,10 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
                         # Register the proxy client with the EXACT client_id from the request
                         # This requires modifying oauth_proxy to accept custom temp_client_id
-                        from auth.oauth_proxy import ProxyClient
-                        from datetime import datetime, timezone
                         import secrets
+                        from datetime import datetime, timezone
+
+                        from auth.oauth_proxy import ProxyClient
 
                         proxy_client = ProxyClient(
                             temp_client_id=client_id,  # Use the exact client_id from request
@@ -950,7 +952,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         logger.info(
                             f"🔧 Replaced empty scope parameter using ScopeRegistry: {len(default_scopes)} scopes"
                         )
-                    except Exception as e:
+                    except Exception:
                         fallback_scopes = _get_oauth_endpoint_scopes()
                         google_auth_params["scope"] = " ".join(fallback_scopes)
                         logger.info(
@@ -983,7 +985,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 + urlencode(google_auth_params)
             )
 
-            logger.info(f"✅ Redirecting to Google OAuth authorization")
+            logger.info("✅ Redirecting to Google OAuth authorization")
 
             # Redirect to Google's authorization server
             return RedirectResponse(url=google_auth_url, status_code=302)
@@ -1007,8 +1009,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
         Implements OAuth 2.0 Dynamic Client Registration for MCP Inspector.
         """
-        from auth.dynamic_client_registration import handle_client_registration
         from starlette.responses import JSONResponse, Response
+
+        from auth.dynamic_client_registration import handle_client_registration
 
         # Handle CORS preflight
         if request.method == "OPTIONS":
@@ -1078,8 +1081,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
         This endpoint intercepts token exchange requests from MCP clients
         and uses the OAuth Proxy to map temporary credentials to real ones.
         """
-        from starlette.responses import JSONResponse, Response
         import urllib.parse
+
+        from starlette.responses import JSONResponse, Response
 
         # Handle CORS preflight
         if request.method == "OPTIONS":
@@ -1137,11 +1141,11 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         if not params.get("client_secret"):
                             params["client_secret"] = header_client_secret
                             logger.info(
-                                f"✅ Extracted client_secret from Authorization header"
+                                "✅ Extracted client_secret from Authorization header"
                             )
                     else:
                         logger.warning(
-                            f"⚠️ Invalid Basic auth format in Authorization header (no colon)"
+                            "⚠️ Invalid Basic auth format in Authorization header (no colon)"
                         )
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to parse Authorization header: {e}")
@@ -1157,7 +1161,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 code_verifier = params.get("code_verifier")  # PKCE parameter
 
                 # DIAGNOSTIC LOGGING for client_secret validation issue
-                logger.info(f"🔍 DIAGNOSTIC - Token exchange parameters:")
+                logger.info("🔍 DIAGNOSTIC - Token exchange parameters:")
                 logger.info(f"   client_id: {client_id}")
                 logger.info(
                     f"   client_secret provided: {'YES' if client_secret else 'NO'}"
@@ -1357,26 +1361,26 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             code = query_params.get("code")
             error = query_params.get("error")
 
-            logger.info(f"🔍 Query parameters extracted:")
+            logger.info("🔍 Query parameters extracted:")
             logger.info(f"   state: {state[:20] if state else 'MISSING'}...")
             logger.info(f"   code: {'PRESENT' if code else 'MISSING'}")
             logger.info(f"   error: {error or 'None'}")
 
             # SUCCESS: Process OAuth callback and save credentials
-            logger.info(f"✅ OAuth callback received - processing authorization code")
+            logger.info("✅ OAuth callback received - processing authorization code")
 
             try:
                 # Import OAuth handling and access control
+                from auth.access_control import validate_user_access
+                from auth.context import get_session_context, store_session_data
                 from auth.google_auth import handle_oauth_callback
                 from auth.pkce_utils import pkce_manager
-                from auth.context import get_session_context, store_session_data
-                from auth.access_control import validate_user_access
 
                 # Retrieve PKCE code verifier if available
                 code_verifier = None
                 try:
                     code_verifier = pkce_manager.get_code_verifier(state)
-                    logger.info(f"🔐 Retrieved PKCE code verifier for callback")
+                    logger.info("🔐 Retrieved PKCE code verifier for callback")
                 except KeyError:
                     logger.info(
                         f"ℹ️ No PKCE session found for state: {state} (non-PKCE flow)"
@@ -1649,7 +1653,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
         It extracts the authorization code and either displays it for debugging
         or exchanges it for tokens automatically.
         """
-        from starlette.responses import HTMLResponse, JSONResponse, Response
+        from starlette.responses import HTMLResponse, Response
 
         # Handle CORS preflight
         if request.method == "OPTIONS":
@@ -1834,9 +1838,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
         try:
             # Check for stored OAuth authentication data
-            from pathlib import Path
             import json
-            from datetime import datetime, timedelta
+            from datetime import datetime
+            from pathlib import Path
 
             oauth_data_path = (
                 Path(settings.credentials_dir) / ".oauth_authentication.json"
@@ -1950,8 +1954,8 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     @mcp.custom_route("/auth/services/select", methods=["GET", "OPTIONS"])
     async def show_service_selection(request: Any):
         """Show service selection page with PKCE support."""
+
         from starlette.responses import HTMLResponse, Response
-        from urllib.parse import parse_qs
 
         # Handle CORS preflight
         if request.method == "OPTIONS":
@@ -2005,7 +2009,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     @mcp.custom_route("/auth/services/selected", methods=["POST", "OPTIONS"])
     async def handle_service_selection(request: Any):
         """Handle service selection form submission with PKCE support."""
-        from starlette.responses import RedirectResponse, HTMLResponse, Response
+        from starlette.responses import HTMLResponse, RedirectResponse, Response
 
         # Handle CORS preflight
         if request.method == "OPTIONS":

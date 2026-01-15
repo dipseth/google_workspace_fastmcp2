@@ -6,36 +6,41 @@ This script demonstrates the new formatting capabilities added to sheets_tools.p
 
 import asyncio
 import logging
-from sheets.sheets_tools import setup_sheets_tools
+
 from fastmcp import FastMCP
 
+from sheets.sheets_tools import setup_sheets_tools
+
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
+
 
 async def test_formatting_tools():
     """
     Test the newly added formatting tools.
     Note: This requires a valid Google Sheets spreadsheet ID and authentication.
     """
-    
+
     # Initialize FastMCP server
     mcp = FastMCP(name="sheets_formatting_test")
-    
+
     # Setup sheets tools
     setup_sheets_tools(mcp)
-    
+
     logger.info("✅ Google Sheets formatting tools have been successfully set up!")
-    
+
     # List all available formatting tools
     formatting_tools = [
         "format_sheet_cells",
-        "update_sheet_borders", 
+        "update_sheet_borders",
         "add_conditional_formatting",
         "merge_cells",
-        "format_sheet_range"
+        "format_sheet_range",
     ]
-    
+
     logger.info("\n📊 New Formatting Tools Added:")
     for tool_name in formatting_tools:
         tool = mcp.tools.get(tool_name)
@@ -43,7 +48,7 @@ async def test_formatting_tools():
             logger.info(f"  ✓ {tool_name}: {tool.description}")
         else:
             logger.error(f"  ✗ {tool_name}: NOT FOUND")
-    
+
     # Display tool parameters for format_sheet_cells as an example
     format_cells_tool = mcp.tools.get("format_sheet_cells")
     if format_cells_tool:
@@ -63,16 +68,20 @@ async def test_formatting_tools():
         logger.info("    - background_color: RGB dict (0.0-1.0)")
         logger.info("    - horizontal_alignment: LEFT, CENTER, RIGHT")
         logger.info("    - vertical_alignment: TOP, MIDDLE, BOTTOM")
-        logger.info("    - number_format_type: TEXT, NUMBER, PERCENT, CURRENCY, DATE, etc.")
+        logger.info(
+            "    - number_format_type: TEXT, NUMBER, PERCENT, CURRENCY, DATE, etc."
+        )
         logger.info("    - number_format_pattern: Custom pattern like '$#,##0.00'")
         logger.info("    - wrap_strategy: WRAP, OVERFLOW, CLIP")
         logger.info("    - text_rotation: Angle in degrees (-90 to 90)")
-    
+
     # Display comprehensive formatting tool info
     format_range_tool = mcp.tools.get("format_sheet_range")
     if format_range_tool:
         logger.info("\n🎨 format_sheet_range - Comprehensive Formatting:")
-        logger.info("  This powerful tool can apply multiple formatting operations in a single API call:")
+        logger.info(
+            "  This powerful tool can apply multiple formatting operations in a single API call:"
+        )
         logger.info("    - Cell formatting (text, colors, alignment, number formats)")
         logger.info("    - Borders (style, positions)")
         logger.info("    - Cell merging")
@@ -80,7 +89,7 @@ async def test_formatting_tools():
         logger.info("    - Column width adjustments")
         logger.info("    - Row height adjustments")
         logger.info("    - Freeze rows/columns")
-    
+
     logger.info("\n✨ Summary:")
     logger.info(f"  Total formatting tools added: {len(formatting_tools)}")
     logger.info("  All tools support:")
@@ -88,8 +97,9 @@ async def test_formatting_tools():
     logger.info("    - Comprehensive error handling")
     logger.info("    - Structured response types")
     logger.info("    - Batch operations for efficiency")
-    
+
     return True
+
 
 def main():
     """Main entry point for testing."""
@@ -105,11 +115,14 @@ def main():
             logger.info("      range_start_row=0, range_end_row=5,")
             logger.info("      range_start_col=0, range_end_col=3,")
             logger.info("      bold=True,")
-            logger.info("      background_color={'red': 1.0, 'green': 1.0, 'blue': 0.0}")
+            logger.info(
+                "      background_color={'red': 1.0, 'green': 1.0, 'blue': 0.0}"
+            )
             logger.info("  )")
     except Exception as e:
         logger.error(f"❌ Test failed: {e}")
         return False
+
 
 if __name__ == "__main__":
     main()

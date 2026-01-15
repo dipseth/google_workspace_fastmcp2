@@ -3,26 +3,29 @@ Deployment Templates for Google Chat Apps
 
 Generates deployment configurations and scripts.
 """
-import logging
-from typing_extensions import Dict, Any, Optional
-from datetime import datetime
+
+from typing_extensions import Any, Dict
 
 from config.enhanced_logging import setup_logger
+
 logger = setup_logger()
+
 
 class DeploymentTemplateGenerator:
     """Generates deployment templates for Google Chat apps."""
-    
+
     def __init__(self):
         self.logger = logger
-    
-    def generate_cloud_run_config(self, app_name: str, project_id: str) -> Dict[str, Any]:
+
+    def generate_cloud_run_config(
+        self, app_name: str, project_id: str
+    ) -> Dict[str, Any]:
         """Generate Google Cloud Run deployment configuration."""
-        
-        safe_name = app_name.lower().replace(' ', '-').replace('_', '-')
-        
+
+        safe_name = app_name.lower().replace(" ", "-").replace("_", "-")
+
         return {
-            "dockerfile": f'''FROM python:3.11-slim
+            "dockerfile": f"""FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -34,8 +37,8 @@ COPY . .
 EXPOSE 8080
 
 CMD ["python", "webhook_{safe_name.replace('-', '_')}.py"]
-''',
-            "cloudbuild_yaml": f'''steps:
+""",
+            "cloudbuild_yaml": f"""steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'gcr.io/{project_id}/{safe_name}', '.']
   - name: 'gcr.io/cloud-builders/docker'
@@ -56,16 +59,16 @@ CMD ["python", "webhook_{safe_name.replace('-', '_')}.py"]
       - '8080'
 images:
   - 'gcr.io/{project_id}/{safe_name}'
-''',
-            "requirements_txt": '''fastapi==0.115.14
+""",
+            "requirements_txt": """fastapi==0.115.14
 uvicorn==0.32.1
 google-auth==2.23.3
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
 google-api-python-client==2.103.0
 requests==2.31.0
-''',
-            "deploy_script": f'''#!/bin/bash
+""",
+            "deploy_script": f"""#!/bin/bash
 # Google Cloud Run Deployment Script
 # Generated for: {app_name}
 
@@ -84,8 +87,8 @@ gcloud builds submit --config cloudbuild.yaml
 echo "✅ Deployment complete!"
 echo "🌐 Service URL: https://${{SERVICE_NAME}}-${{REGION}}-${{PROJECT_ID}}.a.run.app"
 echo "📋 Webhook URL: https://${{SERVICE_NAME}}-${{REGION}}-${{PROJECT_ID}}.a.run.app/webhook"
-''',
-            "app_yaml": f'''runtime: python39
+""",
+            "app_yaml": """runtime: python39
 
 env_variables:
   FASTAPI_ENV: production
@@ -102,16 +105,16 @@ handlers:
 - url: /.*
   script: auto
   secure: always
-'''
+""",
         }
-    
+
     def generate_app_engine_config(self, app_name: str) -> Dict[str, Any]:
         """Generate Google App Engine deployment configuration."""
-        
-        safe_name = app_name.lower().replace(' ', '_')
-        
+
+        safe_name = app_name.lower().replace(" ", "_")
+
         return {
-            "app_yaml": f'''runtime: python39
+            "app_yaml": """runtime: python39
 
 env_variables:
   FASTAPI_ENV: production
@@ -128,16 +131,16 @@ handlers:
 - url: /.*
   script: auto
   secure: always
-''',
-            "requirements_txt": '''fastapi==0.115.14
+""",
+            "requirements_txt": """fastapi==0.115.14
 uvicorn==0.32.1
 google-auth==2.23.3
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
 google-api-python-client==2.103.0
 requests==2.31.0
-''',
-            "deploy_script": f'''#!/bin/bash
+""",
+            "deploy_script": f"""#!/bin/bash
 # Google App Engine Deployment Script
 # Generated for: {app_name}
 
@@ -152,23 +155,23 @@ gcloud app deploy app.yaml --quiet
 echo "✅ Deployment complete!"
 echo "🌐 App URL: $(gcloud app describe --format='value(defaultHostname)')"
 echo "📋 Webhook URL: https://$(gcloud app describe --format='value(defaultHostname)')/webhook"
-''',
-            "main_py": f'''# App Engine requires main.py as entry point
+""",
+            "main_py": f"""# App Engine requires main.py as entry point
 from webhook_{safe_name} import app
 import uvicorn
 
 if __name__ == '__main__':
     uvicorn.run(app, host='0.0.0.0', port=8080)
-'''
+""",
         }
-    
+
     def generate_docker_config(self, app_name: str) -> Dict[str, Any]:
         """Generate Docker deployment configuration."""
-        
-        safe_name = app_name.lower().replace(' ', '_')
-        
+
+        safe_name = app_name.lower().replace(" ", "_")
+
         return {
-            "dockerfile": f'''FROM python:3.11-slim
+            "dockerfile": f"""FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
@@ -191,8 +194,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \\
 
 # Run the application
 CMD ["python", "webhook_{safe_name}.py"]
-''',
-            "docker_compose_yaml": f'''version: '3.8'
+""",
+            "docker_compose_yaml": f"""version: '3.8'
 
 services:
   {safe_name}:
@@ -208,16 +211,16 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-''',
-            "requirements_txt": '''fastapi==0.115.14
+""",
+            "requirements_txt": """fastapi==0.115.14
 uvicorn==0.32.1
 google-auth==2.23.3
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
 google-api-python-client==2.103.0
 requests==2.31.0
-''',
-            "deploy_script": f'''#!/bin/bash
+""",
+            "deploy_script": f"""#!/bin/bash
 # Docker Deployment Script
 # Generated for: {app_name}
 
@@ -241,16 +244,18 @@ echo "✅ Deployment complete!"
 echo "🌐 App URL: http://localhost:8080"
 echo "📋 Webhook URL: http://localhost:8080/webhook"
 echo "🔍 Container logs: docker logs {safe_name}"
-'''
+""",
         }
-    
-    def generate_kubernetes_config(self, app_name: str, project_id: str) -> Dict[str, Any]:
+
+    def generate_kubernetes_config(
+        self, app_name: str, project_id: str
+    ) -> Dict[str, Any]:
         """Generate Kubernetes deployment configuration."""
-        
-        safe_name = app_name.lower().replace(' ', '-').replace('_', '-')
-        
+
+        safe_name = app_name.lower().replace(" ", "-").replace("_", "-")
+
         return {
-            "deployment_yaml": f'''apiVersion: apps/v1
+            "deployment_yaml": f"""apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {safe_name}
@@ -306,8 +311,8 @@ spec:
       port: 80
       targetPort: 8080
   type: LoadBalancer
-''',
-            "ingress_yaml": f'''apiVersion: networking.k8s.io/v1
+""",
+            "ingress_yaml": f"""apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {safe_name}-ingress
@@ -334,8 +339,8 @@ metadata:
 spec:
   domains:
     - {safe_name}.example.com
-''',
-            "deploy_script": f'''#!/bin/bash
+""",
+            "deploy_script": f"""#!/bin/bash
 # Kubernetes Deployment Script
 # Generated for: {app_name}
 
@@ -360,30 +365,43 @@ kubectl rollout status deployment/{safe_name}
 echo "✅ Deployment complete!"
 echo "🌐 Service: kubectl get service {safe_name}-service"
 echo "🔍 Pods: kubectl get pods -l app={safe_name}"
-'''
+""",
         }
-    
+
     def list_deployment_options(self) -> Dict[str, Any]:
         """List all available deployment options."""
         return {
             "cloud_run": {
                 "description": "Google Cloud Run - Serverless, fully managed",
-                "benefits": ["Auto-scaling", "Pay-per-use", "HTTPS included", "Easy deployment"],
-                "best_for": "Most Chat apps, development, and production"
+                "benefits": [
+                    "Auto-scaling",
+                    "Pay-per-use",
+                    "HTTPS included",
+                    "Easy deployment",
+                ],
+                "best_for": "Most Chat apps, development, and production",
             },
             "app_engine": {
                 "description": "Google App Engine - Platform as a Service",
-                "benefits": ["Automatic scaling", "Built-in services", "Version management"],
-                "best_for": "Apps needing Google Cloud services integration"
+                "benefits": [
+                    "Automatic scaling",
+                    "Built-in services",
+                    "Version management",
+                ],
+                "best_for": "Apps needing Google Cloud services integration",
             },
             "docker": {
                 "description": "Docker containers - Portable deployment",
-                "benefits": ["Consistent environments", "Easy local development", "Portable"],
-                "best_for": "Local development, hybrid cloud, custom infrastructure"
+                "benefits": [
+                    "Consistent environments",
+                    "Easy local development",
+                    "Portable",
+                ],
+                "best_for": "Local development, hybrid cloud, custom infrastructure",
             },
             "kubernetes": {
                 "description": "Kubernetes - Container orchestration",
                 "benefits": ["High availability", "Advanced scaling", "Service mesh"],
-                "best_for": "Large-scale applications, microservices architecture"
-            }
+                "best_for": "Large-scale applications, microservices architecture",
+            },
         }

@@ -21,11 +21,12 @@ Note: This is a framework support file used by all client tests.
 """
 
 import os
-import ssl
+
 import httpx
+from dotenv import load_dotenv
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
-from dotenv import load_dotenv
+
 from ..test_auth_utils import get_client_auth_config
 
 # NOTE on TLS for local tests:
@@ -80,12 +81,12 @@ def detect_server_protocol():
     ssl_key = os.getenv("SSL_KEY_FILE") or os.getenv("SSL_KEYFILE")
     if ssl_cert and ssl_key:
         return "https"
-    
+
     # Check server port (common HTTPS ports)
     port = int(SERVER_PORT)
     if port in [443, 8443, 9443]:
         return "https"
-    
+
     # Default to HTTP for development
     return "http"
 
@@ -96,19 +97,23 @@ PROTOCOL = os.getenv("MCP_PROTOCOL", DETECTED_PROTOCOL)
 
 # FastMCP servers typically live at `/mcp` (no trailing slash).
 # Using `/mcp/` can trigger a 307 redirect which breaks StreamableHTTP in some client stacks.
-SERVER_URL = os.getenv("MCP_SERVER_URL", f"{PROTOCOL}://{SERVER_HOST}:{SERVER_PORT}/mcp")
+SERVER_URL = os.getenv(
+    "MCP_SERVER_URL", f"{PROTOCOL}://{SERVER_HOST}:{SERVER_PORT}/mcp"
+)
 
 
 def print_test_configuration():
     """Print the test configuration for debugging."""
-    print(f"\n🔧 Test Configuration:")
+    print("\n🔧 Test Configuration:")
     print(f"   SERVER_HOST: {SERVER_HOST}")
     print(f"   SERVER_PORT: {SERVER_PORT}")
     print(f"   DETECTED_PROTOCOL: {DETECTED_PROTOCOL}")
     print(f"   FINAL_PROTOCOL: {PROTOCOL}")
     print(f"   SERVER_URL: {SERVER_URL}")
     print(f"   TEST_EMAIL: {TEST_EMAIL}")
-    print(f"   GOOGLE_SLIDE_PRESENTATION_ID: {GOOGLE_SLIDE_PRESENTATION_ID or 'Not set'}")
+    print(
+        f"   GOOGLE_SLIDE_PRESENTATION_ID: {GOOGLE_SLIDE_PRESENTATION_ID or 'Not set'}"
+    )
     print(f"   SSL_CERT_FILE: {os.getenv('SSL_CERT_FILE', 'Not set')}")
     print(f"   SSL_KEY_FILE: {os.getenv('SSL_KEY_FILE', 'Not set')}")
 
@@ -163,7 +168,9 @@ async def create_test_client(test_email: str = TEST_EMAIL):
             verify_tls = os.getenv("MCP_TEST_TLS_VERIFY", "false").lower() == "true"
 
             if protocol == "https" and not verify_tls:
-                print("   🔒 Using HTTPS with TLS verification disabled for local testing")
+                print(
+                    "   🔒 Using HTTPS with TLS verification disabled for local testing"
+                )
 
             if protocol == "https":
                 transport = StreamableHttpTransport(
@@ -185,7 +192,7 @@ async def create_test_client(test_email: str = TEST_EMAIL):
             last_error = e
             print(f"   ❌ {protocol.upper()} connection failed: {e}")
             continue
-    
+
     # Both protocols failed, provide diagnostic information
     diagnostic_info = f"""
 ❌ Failed to connect to server on both HTTP and HTTPS

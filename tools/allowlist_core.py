@@ -12,13 +12,13 @@ This module is NOT an MCP tool itself. It provides reusable helpers for:
 import asyncio
 import re
 from dataclasses import dataclass
-from typing_extensions import List, Literal, Optional, Union
 
 from googleapiclient.discovery import build
+from typing_extensions import List, Literal
 
-from tools.common_types import UserGoogleEmail
 from auth.context import get_auth_middleware
 from config.enhanced_logging import setup_logger
+from tools.common_types import UserGoogleEmail
 
 logger = setup_logger()
 
@@ -26,7 +26,10 @@ logger = setup_logger()
 @dataclass
 class AllowListEntry:
     """Typed representation of a single trust-list token."""
-    kind: Literal["email", "people_group_name", "people_group_id", "chat_space", "unknown"]
+
+    kind: Literal[
+        "email", "people_group_name", "people_group_id", "chat_space", "unknown"
+    ]
     raw: str
     value: str  # normalized core value (email, group name/id, or space id)
 
@@ -119,12 +122,16 @@ async def _get_people_service_for_trust(user_email: UserGoogleEmail):
 
         auth_middleware = get_auth_middleware()
         if not auth_middleware:
-            logger.warning("No AuthMiddleware available for People API (trust list groups)")
+            logger.warning(
+                "No AuthMiddleware available for People API (trust list groups)"
+            )
             return None
 
         credentials = auth_middleware.load_credentials(user_email)
         if not credentials:
-            logger.warning(f"No credentials found for People API (trust list groups) for user {user_email}")
+            logger.warning(
+                f"No credentials found for People API (trust list groups) for user {user_email}"
+            )
             return None
 
         people_service = await asyncio.to_thread(
@@ -132,7 +139,10 @@ async def _get_people_service_for_trust(user_email: UserGoogleEmail):
         )
         return people_service
     except Exception as exc:
-        logger.error(f"Failed to create People API service for trust list groups: {exc}", exc_info=True)
+        logger.error(
+            f"Failed to create People API service for trust list groups: {exc}",
+            exc_info=True,
+        )
         return None
 
 
@@ -152,6 +162,7 @@ async def _resolve_allowed_group_ids(
         return allowed_ids
 
     try:
+
         def _list_groups():
             return people_service.contactGroups().list(pageSize=200).execute()
 
@@ -173,9 +184,14 @@ async def _resolve_allowed_group_ids(
                 if gid:
                     allowed_ids.append(gid)
                 else:
-                    logger.warning(f"[trust_list] No contact group found with name '{entry.value}'")
+                    logger.warning(
+                        f"[trust_list] No contact group found with name '{entry.value}'"
+                    )
     except Exception as exc:
-        logger.error(f"Failed to resolve trust list group specs via People API: {exc}", exc_info=True)
+        logger.error(
+            f"Failed to resolve trust list group specs via People API: {exc}",
+            exc_info=True,
+        )
 
     return allowed_ids
 
@@ -191,11 +207,16 @@ async def _get_contact_group_ids_for_email(email: str, people_service) -> List[s
         return group_ids
 
     try:
+
         def _search():
-            return people_service.people().searchContacts(
-                query=email,
-                readMask="emailAddresses,memberships",
-            ).execute()
+            return (
+                people_service.people()
+                .searchContacts(
+                    query=email,
+                    readMask="emailAddresses,memberships",
+                )
+                .execute()
+            )
 
         result = await asyncio.to_thread(_search)
         containers = (
@@ -216,7 +237,10 @@ async def _get_contact_group_ids_for_email(email: str, people_service) -> List[s
                     if gid:
                         group_ids.append(gid)
     except Exception as exc:
-        logger.error(f"Failed to fetch contact group memberships for {email}: {exc}", exc_info=True)
+        logger.error(
+            f"Failed to fetch contact group memberships for {email}: {exc}",
+            exc_info=True,
+        )
 
     return group_ids
 
@@ -237,8 +261,7 @@ async def filter_recipients_allowed_by_groups(
 
     # Extract only group-related entries
     group_entries = [
-        e for e in entries
-        if e.kind in ("people_group_name", "people_group_id")
+        e for e in entries if e.kind in ("people_group_name", "people_group_id")
     ]
     if not group_entries or not recipients:
         return allowed_recipients
@@ -291,21 +314,15 @@ async def resolve_untrusted_recipients(
 
     # Normalize recipients to lowercase, trimmed
     normalized_recipients = [
-        (email or "").strip().lower()
-        for email in recipients
-        if (email or "").strip()
+        (email or "").strip().lower() for email in recipients if (email or "").strip()
     ]
 
     # Explicit email entries
-    explicit_emails = {
-        e.value for e in entries
-        if e.kind == "email" and e.value
-    }
+    explicit_emails = {e.value for e in entries if e.kind == "email" and e.value}
 
     # Initial pass: recipients not covered by explicit email entries
     not_allowed = [
-        email for email in normalized_recipients
-        if email not in explicit_emails
+        email for email in normalized_recipients if email not in explicit_emails
     ]
 
     if not not_allowed:

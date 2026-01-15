@@ -37,38 +37,37 @@ For more details: https://developers.google.com/chat/format-messages
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
-import logging
 import asyncio
 import json
-from typing_extensions import Optional, Dict, Any, List, Union
-from googleapiclient.errors import HttpError
+
 from fastmcp import FastMCP
+from googleapiclient.errors import HttpError
+from typing_extensions import Any, Dict, List, Optional
+
+from auth.context import get_injected_service
+from auth.service_helpers import get_service, request_service
+from resources.user_resources import get_current_user_email_simple
 from tools.common_types import UserGoogleEmail
 
-from auth.service_helpers import get_service, request_service
-from auth.context import get_injected_service
-from tools.common_types import UserGoogleEmailChat
-from resources.user_resources import get_current_user_email_simple
 from .chat_types import (
-    SpaceListResponse,
-    MessageListResponse,
-    SpaceInfo,
     MessageInfo,
-    CardTypesResponse,
-    CardTypeInfo,
-    SendMessageResponse,
-    SearchMessagesResponse,
+    MessageListResponse,
     SearchMessageResult,
+    SearchMessagesResponse,
     SendCardMessageResponse,
-    SendSimpleCardResponse,
-    SendInteractiveCardResponse,
     SendFormCardResponse,
+    SendInteractiveCardResponse,
+    SendMessageResponse,
     SendRichCardResponse,
+    SendSimpleCardResponse,
+    SpaceInfo,
+    SpaceListResponse,
 )
 
 # Card Framework integration
 try:
     from card_framework.v2 import Message  # Import Message class
+
     from .chat_cards_optimized import GoogleChatCardManager
 
     CARDS_AVAILABLE = True
@@ -342,7 +341,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     count=0,
                     spaceType=space_type,
                     userEmail="unknown",
-                    error="Authentication error: Could not determine user email. Please provide user_google_email parameter or ensure proper authentication is set up."
+                    error="Authentication error: Could not determine user email. Please provide user_google_email parameter or ensure proper authentication is set up.",
                 )
 
             logger.info(
@@ -359,7 +358,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     count=0,
                     spaceType=space_type,
                     userEmail=user_email,
-                    error=error_msg
+                    error=error_msg,
                 )
 
             # Build filter based on space_type
@@ -1028,24 +1027,22 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                         # Convert to dictionary for JSON serialization
                         if hasattr(card_obj, "to_dict"):
                             card_dict = card_obj.to_dict()
-                            logger.debug(
-                                f"Converted card to dictionary using to_dict()"
-                            )
+                            logger.debug("Converted card to dictionary using to_dict()")
                         elif hasattr(card_obj, "__dict__"):
                             card_dict = card_obj.__dict__
-                            logger.debug(f"Converted card to dictionary using __dict__")
+                            logger.debug("Converted card to dictionary using __dict__")
                         else:
                             # Use the card manager to convert
                             card_dict = card_manager._convert_card_to_google_format(
                                 card_obj
                             )
                             logger.debug(
-                                f"Converted card using _convert_card_to_google_format"
+                                "Converted card using _convert_card_to_google_format"
                             )
 
                         # Replace card_obj with the dictionary
                         card_obj = card_dict
-                        logger.debug(f"Card object replaced with dictionary")
+                        logger.debug("Card object replaced with dictionary")
                     except Exception as e:
                         logger.error(f"Error creating rich card: {e}", exc_info=True)
                         # Fallback to simple card
@@ -1055,7 +1052,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                             text=f"Could not create rich card: {str(e)}",
                             image_url=image_url,
                         )
-                        logger.debug(f"Fell back to simple card due to error")
+                        logger.debug("Fell back to simple card due to error")
                 else:
                     raise ValueError(f"Unsupported card type: {card_type}")
 
@@ -1069,21 +1066,21 @@ def setup_chat_tools(mcp: FastMCP) -> None:
 
                 try:
                     message_obj.cards_v2.append(card_obj)
-                    logger.debug(f"[DEBUG] Successfully appended card to cards_v2")
+                    logger.debug("[DEBUG] Successfully appended card to cards_v2")
                 except Exception as append_error:
                     logger.error(f"[DEBUG] Error appending to cards_v2: {append_error}")
                     logger.debug(f"[DEBUG] cards_v2 dir: {dir(message_obj.cards_v2)}")
                     raise
 
                 # Render the message object to get the final payload
-                logger.debug(f"[DEBUG] About to render message object")
+                logger.debug("[DEBUG] About to render message object")
                 message_body = message_obj.render()
-                logger.debug(f"[DEBUG] Message rendered successfully")
+                logger.debug("[DEBUG] Message rendered successfully")
 
                 # Fix Card Framework v2 field name issue: cards_v_2 -> cardsV2
                 if "cards_v_2" in message_body:
                     message_body["cardsV2"] = message_body.pop("cards_v_2")
-                    logger.debug(f"[DEBUG] Converted cards_v_2 to cardsV2")
+                    logger.debug("[DEBUG] Converted cards_v_2 to cardsV2")
 
             except Exception as e:
                 logger.error(f"Error creating or rendering card: {e}", exc_info=True)
@@ -1102,17 +1099,17 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 # Ensure we're using a serializable dictionary, not a Card object
                 if isinstance(card_obj, dict):
                     card_dict = card_obj
-                    logger.debug(f"Card object is already a dictionary")
+                    logger.debug("Card object is already a dictionary")
                 elif hasattr(card_obj, "to_dict"):
                     card_dict = card_obj.to_dict()
-                    logger.debug(f"Converted card to dictionary using to_dict()")
+                    logger.debug("Converted card to dictionary using to_dict()")
                 elif hasattr(card_obj, "__dict__"):
                     card_dict = card_obj.__dict__
-                    logger.debug(f"Converted card to dictionary using __dict__")
+                    logger.debug("Converted card to dictionary using __dict__")
                 else:
                     # Convert to Google format if it's not already a dict
                     card_dict = card_manager._convert_card_to_google_format(card_obj)
-                    logger.debug(f"Converted card using _convert_card_to_google_format")
+                    logger.debug("Converted card using _convert_card_to_google_format")
 
                 rendered_message = {
                     "text": f"Card message: {title}",
@@ -1142,7 +1139,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                             webhook_url, thread_key
                         )
                         logger.info(
-                            f"🧵 THREADING FIX: Updated webhook URL with thread parameters"
+                            "🧵 THREADING FIX: Updated webhook URL with thread parameters"
                         )
 
                     response = requests.post(
@@ -1355,7 +1352,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                         webhook_url, thread_key
                     )
                     logger.info(
-                        f"🧵 THREADING FIX: Updated webhook URL with thread parameters"
+                        "🧵 THREADING FIX: Updated webhook URL with thread parameters"
                     )
 
                 # Send via webhook
@@ -1544,7 +1541,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                         webhook_url, thread_key
                     )
                     logger.info(
-                        f"🧵 THREADING FIX: Updated webhook URL with thread parameters"
+                        "🧵 THREADING FIX: Updated webhook URL with thread parameters"
                     )
 
                 # Send via webhook
@@ -1757,7 +1754,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                         webhook_url, thread_key
                     )
                     logger.info(
-                        f"🧵 THREADING FIX: Updated webhook URL with thread parameters"
+                        "🧵 THREADING FIX: Updated webhook URL with thread parameters"
                     )
 
                 # Send via webhook
@@ -1988,7 +1985,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             SendRichCardResponse: Structured response with sent message details
         """
         try:
-            logger.info(f"=== RICH CARD CREATION START ===")
+            logger.info("=== RICH CARD CREATION START ===")
             logger.info(f"User: {user_google_email}, Space: {space_id}, Title: {title}")
             logger.info(f"Image URL provided: {image_url}")
             logger.info(f"Webhook URL provided: {bool(webhook_url)}")
@@ -2029,7 +2026,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             try:
                 # Log section types for debugging
                 if sections:
-                    logger.debug(f"Section types before processing:")
+                    logger.debug("Section types before processing:")
                     for i, section in enumerate(sections):
                         section_type = type(section).__name__
                         logger.debug(f"  Section {i}: type={section_type}")
@@ -2099,7 +2096,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                         webhook_url, thread_key
                     )
                     logger.info(
-                        f"🧵 THREADING FIX: Updated webhook URL with thread parameters"
+                        "🧵 THREADING FIX: Updated webhook URL with thread parameters"
                     )
 
                 # Use webhook delivery (bypasses credential restrictions)
@@ -2114,7 +2111,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
 
                 logger.info(f"Webhook response status: {response.status_code}")
                 if response.status_code == 200:
-                    logger.info(f"=== RICH CARD WEBHOOK SUCCESS ===")
+                    logger.info("=== RICH CARD WEBHOOK SUCCESS ===")
                     return SendRichCardResponse(
                         success=True,
                         messageId=None,  # Webhook doesn't return message ID
@@ -2176,7 +2173,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
 
                 result = service.spaces().messages().create(**api_params).execute()
 
-                logger.info(f"=== RICH CARD API SUCCESS ===")
+                logger.info("=== RICH CARD API SUCCESS ===")
                 return SendRichCardResponse(
                     success=True,
                     messageId=result.get("name"),
@@ -2191,7 +2188,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 )
 
         except Exception as e:
-            logger.error(f"=== RICH CARD TEST FAILED ===")
+            logger.error("=== RICH CARD TEST FAILED ===")
             logger.error(f"Error sending rich card: {e}", exc_info=True)
             return SendRichCardResponse(
                 success=False,
