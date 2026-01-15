@@ -18,47 +18,7 @@
 
 GoogleUnlimited provides AI assistants with access to Google Workspace services through the Model Context Protocol (MCP). It supports **90+ tools** across **9 Google services**, enabling seamless integration between AI workflows and Google Workspace applications with revolutionary performance improvements.
 
-```mermaid
-graph TB
-    subgraph "🤖 AI Assistant"
-        A[Claude/GPT/Other]
-    end
-    
-    subgraph "🌉 GoogleUnlimited MCP Framework"
-        B[MCP Protocol]
-        C[Unified Middleware]
-        D[OAuth 2.1 + PKCE]
-    end
-    
-    subgraph "☁️ Google Workspace"
-        E[📧 Gmail]
-        F[📁 Drive]
-        G[📊 Sheets]
-        H[📄 Docs]
-        I[🎯 Slides]
-        J[📅 Calendar]
-        K[📝 Forms]
-        L[💬 Chat]
-        M[📷 Photos]
-    end
-    
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-    D --> F
-    D --> G
-    D --> H
-    D --> I
-    D --> J
-    D --> K
-    D --> L
-    D --> M
-    
-    style A fill:#e1f5fe
-    style C fill:#f3e5f5
-    style D fill:#e8f5e8
-```
+![Architecture Overview](mermaid-images/architecture-overview.png)
 
 ### 🛠️ Installation Steps
 
@@ -126,7 +86,7 @@ uv run python server.py --transport http --port 8002
 ```
 ```json
 {
-  "rivers_unlimited": {
+  "google-workspace": {
     "type": "streamable-http",
     "url": "https://localhost:8002/mcp",
     "disabled": false
@@ -172,24 +132,7 @@ GoogleUnlimited supports **9 Google Workspace services** with **90+ specialized 
 
 GoogleUnlimited uses a middleware architecture that provides seamless service integration, intelligent resource management, and powerful templating capabilities.
 
-```mermaid
-graph TD
-    A[🔄 MCP Request] --> B[🏷️ TagBasedResourceMiddleware]
-    B --> C[🧠 QdrantUnifiedMiddleware]
-    C --> D[🎨 TemplateMiddleware]
-    D --> E[⚡ Tool Execution]
-    E --> F[📊 Response Processing]
-    F --> G[✨ Formatted Output]
-    
-    B --> H[📋 Resource Discovery<br/>service://gmail/labels<br/>user://current/profile]
-    C --> I[🔍 Semantic Search<br/>Vector Embeddings<br/>Natural Language Queries]
-    D --> J[🎯 Template Rendering<br/>Gmail Chips<br/>Dashboard Cards]
-    
-    style B fill:#e3f2fd
-    style C fill:#f3e5f5
-    style D fill:#e8f5e8
-    style E fill:#fff3e0
-```
+![Middleware Architecture](mermaid-images/middleware-architecture.png)
 
 ### 🔧 Core Middleware Components
 
@@ -346,36 +289,7 @@ await create_doc(
 
 GoogleUnlimited provides a powerful **MCP resource system** that enables lightning-fast data access without API calls through intelligent URI patterns.
 
-```mermaid
-graph LR
-    subgraph "🔍 Resource Types"
-        A[👤 user://current/email]
-        B[🏷️ service://gmail/labels]
-        C[📅 recent://calendar]
-        D[🧠 qdrant://search/query]
-    end
-    
-    subgraph "🚀 Resource Engine"
-        E[TagBasedResourceMiddleware]
-        F[QdrantUnifiedMiddleware]
-        G[UserResourceManager]
-    end
-    
-    subgraph "📊 Data Sources"
-        H[Google APIs]
-        I[Vector Database]
-        J[Session Cache]
-    end
-    
-    A --> E --> J
-    B --> E --> H
-    C --> E --> H
-    D --> F --> I
-    
-    style E fill:#e1f5fe
-    style F fill:#f3e5f5
-    style G fill:#e8f5e8
-```
+![Resource Discovery](mermaid-images/resource-discovery.png)
 
 ### 🎯 Resource URI Patterns
 
@@ -422,25 +336,7 @@ GoogleUnlimited includes comprehensive testing with **client tests** that valida
 
 ### 🎯 Client Testing Focus
 
-```mermaid
-flowchart LR
-    A[🤖 LLM Client] --> B[📧 Gmail Tests]
-    A --> C[📁 Drive Tests]
-    A --> D[📊 Sheets Tests]
-    A --> E[📅 Calendar Tests]
-
-    B --> F[✅ Real Resource Integration]
-    C --> F
-    D --> F
-    E --> F
-
-    F --> G[🔄 Authentication Patterns]
-    F --> H[📊 Service Validation]
-
-    style A fill:#e1f5fe
-    style F fill:#e8f5e8
-    style G fill:#f3e5f5
-```
+![Testing Framework](mermaid-images/testing-framework.png)
 
 The **client tests** are the most important component - they provide deterministic testing of MCP operations using real resource integration and standardized patterns across all **90+ tools** and **9 Google services**. These tests validate both explicit email authentication and middleware injection patterns.
 
@@ -491,22 +387,7 @@ Automated testing and publishing via GitHub Actions:
 
 GoogleUnlimited implements **enterprise-grade security** with OAuth 2.1 + PKCE, advanced session management, and comprehensive audit capabilities.
 
-```mermaid
-flowchart TD
-    A[🔐 OAuth 2.1 + PKCE] --> B[🔑 Dynamic Client Registration]
-    B --> C[🏠 Session Management]
-    C --> D[🔐 Encrypted Storage]
-    D --> E[📝 Audit Logging]
-    
-    B --> F[🌐 MCP Inspector OAuth]
-    B --> G[🖥️ Direct Server OAuth]
-    B --> H[🔧 Development JWT]
-    B --> I[📁 File Credentials]
-    
-    style A fill:#e8f5e8
-    style C fill:#e1f5fe
-    style D fill:#f3e5f5
-```
+![Security Architecture](mermaid-images/security-architecture.png)
 
 ### 🛡️ Authentication Flows
 
