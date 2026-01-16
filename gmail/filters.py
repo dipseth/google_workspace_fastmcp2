@@ -12,7 +12,9 @@ This module provides tools for:
 import asyncio
 from typing import Annotated
 
-from fastmcp import Context, FastMCP
+from fastmcp import FastMCP
+from fastmcp.dependencies import Progress
+from fastmcp.server.tasks import TaskConfig
 from googleapiclient.errors import HttpError
 from pydantic import Field
 from typing_extensions import Any, List, Literal, Optional
@@ -45,7 +47,7 @@ async def apply_filter_to_existing_messages(
     batch_size: int = 100,
     max_messages: Optional[int] = None,
     rate_limit_delay: float = 0.1,
-    ctx: Optional[Context] = None,
+    progress: Optional[Progress] = None,
 ) -> str:
     """
     Enhanced retroactive filter application with pagination, batch processing, and comprehensive error handling.
@@ -96,8 +98,8 @@ async def apply_filter_to_existing_messages(
             )
 
             # Report progress for page fetching
-            if ctx:
-                await ctx.info(f"Fetching email page {page_count}...")
+            if progress:
+                await progress.set_message(f"Fetching email page {page_count}...")
 
             # Build list request with pagination
             search_params = {
@@ -126,12 +128,8 @@ async def apply_filter_to_existing_messages(
             )
 
             # Report progress on total messages found so far
-            if ctx:
-                await ctx.report_progress(
-                    progress=len(all_message_ids),
-                    total=len(all_message_ids)
-                    + (500 if next_page_token else 0),  # Estimate
-                )
+            if progress:
+                await progress.set_message(f"Found {len(all_message_ids)} messages so far...")
 
             # Check if we've reached the maximum message limit
             if max_messages and len(all_message_ids) >= max_messages:
@@ -170,12 +168,11 @@ async def apply_filter_to_existing_messages(
             )
 
             # Report batch processing progress
-            if ctx:
-                await ctx.report_progress(
-                    progress=batch_start, total=len(all_message_ids)
-                )
-                await ctx.info(
-                    f"Processing batch {batch_num} of {(len(all_message_ids) + batch_size - 1) // batch_size}: {len(batch_message_ids)} messages"
+            if progress:
+                total_batches = (len(all_message_ids) + batch_size - 1) // batch_size
+                await progress.set_total(total_batches)
+                await progress.set_message(
+                    f"Processing batch {batch_num} of {total_batches}: {len(batch_message_ids)} messages"
                 )
 
             # Try batch modify first (more efficient)
@@ -201,8 +198,9 @@ async def apply_filter_to_existing_messages(
                     )
 
                     # Report successful batch completion
-                    if ctx:
-                        await ctx.info(
+                    if progress:
+                        await progress.increment()
+                        await progress.set_message(
                             f"✅ Batch {batch_num} completed: {len(batch_message_ids)} messages processed"
                         )
 
@@ -252,10 +250,10 @@ async def apply_filter_to_existing_messages(
 
                         # Report individual message progress in fallback mode
                         if (
-                            ctx and idx % 10 == 0
+                            progress and idx % 10 == 0
                         ):  # Report every 10 messages to avoid spam
-                            await ctx.report_progress(
-                                progress=batch_start + idx, total=len(all_message_ids)
+                            await progress.set_message(
+                                f"Fallback mode: processed {batch_start + idx}/{len(all_message_ids)} messages"
                             )
 
                         # Rate limiting for individual calls
@@ -281,11 +279,8 @@ async def apply_filter_to_existing_messages(
         logger.error(f"[apply_filter_to_existing_messages] Unexpected error: {e}")
 
     # Report final completion
-    if ctx:
-        await ctx.report_progress(
-            progress=results["processed_count"], total=results["total_found"]
-        )
-        await ctx.info(
+    if progress:
+        await progress.set_message(
             f"✅ Retroactive filter application completed: {results['processed_count']}/{results['total_found']} messages processed, {results['error_count']} errors"
         )
 
@@ -478,7 +473,7 @@ async def create_gmail_filter(
         Optional[bool],
         Field(description="Whether to never mark matching messages as important"),
     ] = None,
-    ctx: Optional[Context] = None,
+    progress: Optional[Progress] = None,
 ) -> CreateGmailFilterResponse:
     """
     Creates a new Gmail filter/rule with specified criteria and actions.
@@ -695,7 +690,7 @@ async def create_gmail_filter(
                         batch_size=100,  # Default batch size
                         max_messages=10000,  # Safety limit, much higher than original 500
                         rate_limit_delay=0.05,  # Small delay for API rate limiting
-                        ctx=ctx,  # Pass context for progress reporting
+                        progress=progress,  # Pass Progress for background task tracking
                     )
 
                     # Add the retroactive results to the response
@@ -962,8 +957,9 @@ def setup_filter_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="create_gmail_filter",
-        description="Create a new Gmail filter/rule with criteria and actions, with optional retroactive application to existing emails",
+        description="Create a new Gmail filter/rule with criteria and actions, with optional retroactive application to existing emails. Supports background execution for large mailboxes.",
         tags={"gmail", "filters", "rules", "create", "automation"},
+        task=True,  # Enable background task execution for long-running retroactive filter application
         annotations={
             "title": "Create Gmail Filter",
             "readOnlyHint": False,
@@ -973,7 +969,7 @@ def setup_filter_tools(mcp: FastMCP) -> None:
         },
     )
     async def create_gmail_filter_tool(
-        ctx: Context,
+        progress: Progress = Progress(),  # FastMCP background task progress reporting
         user_google_email: UserGoogleEmail = None,
         # Criteria parameters
         from_address: Annotated[
@@ -1061,7 +1057,7 @@ def setup_filter_tools(mcp: FastMCP) -> None:
             mark_as_important,
             never_mark_as_spam,
             never_mark_as_important,
-            ctx,
+            progress,
         )
 
     @mcp.tool(

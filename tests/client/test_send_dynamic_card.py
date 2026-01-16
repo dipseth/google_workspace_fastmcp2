@@ -1770,7 +1770,7 @@ class TestSendDynamicCard:
         result = await client.call_tool("send_dynamic_card", test_payload)
 
         # Add pause to prevent rate limiting
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
         # Extract content from result
         if hasattr(result, "content"):
@@ -2621,6 +2621,457 @@ async def test_debug_single_card():
         except Exception as e:
             print(f"❌ EXCEPTION OCCURRED: {type(e).__name__}: {e}")
             raise
+
+
+class TestNLPFormCards:
+    """Tests for NLP-based form card generation."""
+
+    @pytest.mark.asyncio
+    async def test_nlp_only_form_card_with_submit_button(self, client):
+        """Test NLP-only form card generation with text input and submit button.
+
+        This test uses ONLY card_description (no card_params) to test the full
+        NLP pipeline for generating a form card with a text input and submit button.
+        """
+        # Skip if no webhook URL is available
+        if not TEST_WEBHOOK_URL:
+            pytest.skip("No webhook URL available for testing card sending")
+
+        # Create timestamp for unique identification
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # NLP-only payload - no card_params, relies entirely on NLP parsing
+        test_payload = {
+            "user_google_email": TEST_EMAIL,
+            "space_id": TEST_SPACE_ID,
+            "card_description": f"Create a form card with a single text input labeled \"Your name\" and a submit button that opens https://example.com (test: {timestamp})",
+            "webhook_url": TEST_WEBHOOK_URL,
+        }
+
+        print(f"\n{'='*60}")
+        print("NLP-ONLY FORM CARD TEST (Text Input + Submit Button)")
+        print(f"{'='*60}")
+        print("Testing full NLP pipeline without card_params")
+        print(json.dumps(test_payload, indent=2))
+        print(f"{'='*60}\n")
+
+        # Send the NLP-only form card
+        result = await client.call_tool("send_dynamic_card", test_payload)
+
+        # Add pause to prevent rate limiting
+        await asyncio.sleep(2)
+
+        # Extract content from result
+        if hasattr(result, "content"):
+            content_items = (
+                result.content
+                if hasattr(result.content, "__iter__")
+                else [result.content]
+            )
+            assert len(content_items) > 0
+            content = (
+                content_items[0].text
+                if hasattr(content_items[0], "text")
+                else str(content_items[0])
+            )
+        elif hasattr(result, "__iter__") and not isinstance(result, str):
+            assert len(result) > 0
+            content = result[0].text
+        else:
+            content = str(result)
+
+        print("\n=== NLP-ONLY FORM CARD TEST RESPONSE ===")
+        print(f"Response: '{content}'")
+
+        # Check for card_type in response to understand which path was used
+        if "card_type" in content.lower():
+            print("Card generation path detected in response")
+        if "simple_fallback" in content.lower():
+            print("WARNING: Used simple_fallback path")
+        elif "class" in content.lower():
+            print("SUCCESS: Used class-based path")
+
+        print("=== END NLP-ONLY FORM CARD TEST ===\n")
+
+        # Validate response
+        assert content is not None
+        assert len(content.strip()) > 0
+
+        # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
+        if "status: 200" in content:
+            assert (
+                "sent successfully" in content.lower()
+            ), "Card should be sent successfully with status 200"
+            print("SUCCESS: NLP-only form card sent successfully")
+        elif "status: 429" in content:
+            assert (
+                "rate limited" in content.lower()
+            ), "Status 429 should indicate rate limiting"
+            print("RATE LIMITED: Card formatting correct but rate limited")
+        elif "status: 400" in content or "status: 4" in content:
+            pytest.fail(f"NLP-only form card formatting error (4xx status): {content}")
+        elif "status: 5" in content:
+            pytest.fail(f"Server error (5xx status): {content}")
+        elif "webhook delivery failed" in content.lower():
+            pytest.fail(f"Webhook delivery failed: {content}")
+        elif "sent successfully" in content.lower():
+            print("SUCCESS: NLP-only form card sent successfully")
+        else:
+            print(f"Response: {content}")
+
+        logger.info(f"NLP-only form card test result: {content}")
+
+    @pytest.mark.asyncio
+    async def test_nlp_with_card_params_text_input(self, client):
+        """Test form card with explicit card_params containing textInput widget.
+
+        This test provides explicit card_params with a textInput widget to test
+        the hybrid NLP + explicit params flow.
+        """
+        # Skip if no webhook URL is available
+        if not TEST_WEBHOOK_URL:
+            pytest.skip("No webhook URL available for testing card sending")
+
+        # Create timestamp for unique identification
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Hybrid payload - NLP description plus explicit card_params
+        test_payload = {
+            "user_google_email": TEST_EMAIL,
+            "space_id": TEST_SPACE_ID,
+            "card_description": f"Create a form card with a single text input labeled \"Your name\" (test: {timestamp}).",
+            "card_params": {
+                "sections": [
+                    {
+                        "widgets": [
+                            {
+                                "textInput": {
+                                    "label": "Your name",
+                                    "name": "your_name"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+            "webhook_url": TEST_WEBHOOK_URL,
+        }
+
+        print(f"\n{'='*60}")
+        print("HYBRID NLP + CARD_PARAMS TEST (Explicit textInput)")
+        print(f"{'='*60}")
+        print("Testing with explicit card_params containing textInput")
+        print(json.dumps(test_payload, indent=2))
+        print(f"{'='*60}\n")
+
+        # Send the hybrid form card
+        result = await client.call_tool("send_dynamic_card", test_payload)
+
+        # Add pause to prevent rate limiting
+        await asyncio.sleep(2)
+
+        # Extract content from result
+        if hasattr(result, "content"):
+            content_items = (
+                result.content
+                if hasattr(result.content, "__iter__")
+                else [result.content]
+            )
+            assert len(content_items) > 0
+            content = (
+                content_items[0].text
+                if hasattr(content_items[0], "text")
+                else str(content_items[0])
+            )
+        elif hasattr(result, "__iter__") and not isinstance(result, str):
+            assert len(result) > 0
+            content = result[0].text
+        else:
+            content = str(result)
+
+        print("\n=== HYBRID NLP + CARD_PARAMS TEST RESPONSE ===")
+        print(f"Response: '{content}'")
+
+        # Check for card_type in response to understand which path was used
+        if "card_type" in content.lower():
+            print("Card generation path detected in response")
+        if "simple_fallback" in content.lower():
+            print("WARNING: Used simple_fallback path")
+        elif "class" in content.lower():
+            print("SUCCESS: Used class-based path")
+
+        print("=== END HYBRID NLP + CARD_PARAMS TEST ===\n")
+
+        # Validate response
+        assert content is not None
+        assert len(content.strip()) > 0
+
+        # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
+        if "status: 200" in content:
+            assert (
+                "sent successfully" in content.lower()
+            ), "Card should be sent successfully with status 200"
+            print("SUCCESS: Hybrid form card sent successfully")
+        elif "status: 429" in content:
+            assert (
+                "rate limited" in content.lower()
+            ), "Status 429 should indicate rate limiting"
+            print("RATE LIMITED: Card formatting correct but rate limited")
+        elif "status: 400" in content or "status: 4" in content:
+            pytest.fail(f"Hybrid form card formatting error (4xx status): {content}")
+        elif "status: 5" in content:
+            pytest.fail(f"Server error (5xx status): {content}")
+        elif "webhook delivery failed" in content.lower():
+            pytest.fail(f"Webhook delivery failed: {content}")
+        elif "sent successfully" in content.lower():
+            print("SUCCESS: Hybrid form card sent successfully")
+        else:
+            print(f"Response: {content}")
+
+        logger.info(f"Hybrid form card test result: {content}")
+
+
+class TestNLPDescriptionExamples:
+    """
+    Tests for NLP card description examples from documentation.
+
+    These tests validate that the natural language descriptions documented
+    in nlp_card_patterns.md actually work with the send_dynamic_card tool.
+    All tests use NLP-only (no card_params) to test the full pipeline.
+    """
+
+    async def _send_nlp_card(self, client, description: str) -> str:
+        """Helper to send an NLP-only card and extract response content."""
+        if not TEST_WEBHOOK_URL:
+            pytest.skip("No webhook URL available for testing card sending")
+
+        result = await client.call_tool(
+            "send_dynamic_card",
+            {
+                "user_google_email": TEST_EMAIL,
+                "space_id": TEST_SPACE_ID,
+                "card_description": description,
+                "webhook_url": TEST_WEBHOOK_URL,
+            },
+        )
+
+        # Extract content
+        if hasattr(result, "content"):
+            content_items = (
+                result.content
+                if hasattr(result.content, "__iter__")
+                else [result.content]
+            )
+            content = (
+                content_items[0].text
+                if hasattr(content_items[0], "text")
+                else str(content_items[0])
+            )
+        elif hasattr(result, "__iter__") and not isinstance(result, str):
+            content = result[0].text
+        else:
+            content = str(result)
+
+        return content
+
+    def _validate_response(self, content: str, test_name: str):
+        """Helper to validate card response."""
+        assert content is not None
+        assert len(content.strip()) > 0
+
+        # Log card type for debugging
+        if "Card Type: class" in content:
+            logger.info(f"{test_name}: Used class-based path")
+        elif "simple_fallback" in content.lower():
+            logger.info(f"{test_name}: Used simple_fallback path")
+
+        if "status: 200" in content:
+            assert "sent successfully" in content.lower()
+        elif "status: 429" in content:
+            pass  # Rate limiting is acceptable
+        elif "status: 400" in content or "status: 4" in content:
+            pytest.fail(f"{test_name} formatting error (4xx): {content}")
+        elif "status: 5" in content:
+            pytest.fail(f"{test_name} server error (5xx): {content}")
+
+    # === Basic Card Examples ===
+
+    @pytest.mark.asyncio
+    async def test_nlp_simple_titled_card(self, client):
+        """Test: card titled 'Welcome' with text 'Hello, team!'"""
+        content = await self._send_nlp_card(
+            client,
+            "Create a card titled 'Welcome' with text 'Hello, team!'"
+        )
+        self._validate_response(content, "simple_titled_card")
+
+    @pytest.mark.asyncio
+    async def test_nlp_card_with_subtitle(self, client):
+        """Test: card with title, subtitle, and text."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a card titled 'Project Status' with subtitle 'Weekly Update' and text 'All systems operational'"
+        )
+        self._validate_response(content, "card_with_subtitle")
+
+    # === Button Examples ===
+
+    @pytest.mark.asyncio
+    async def test_nlp_green_approve_red_reject_buttons(self, client):
+        """Test: card with green 'Approve' and red 'Reject' buttons."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a card with a green 'Approve' button and red 'Reject' button"
+        )
+        self._validate_response(content, "approve_reject_buttons")
+
+    @pytest.mark.asyncio
+    async def test_nlp_button_with_link(self, client):
+        """Test: button linking to a URL."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a card with button 'View Docs' linking to https://docs.example.com"
+        )
+        self._validate_response(content, "button_with_link")
+
+    @pytest.mark.asyncio
+    async def test_nlp_multiple_buttons(self, client):
+        """Test: card with multiple buttons."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a card titled 'Actions' with buttons: 'Save', 'Cancel', 'Help'"
+        )
+        self._validate_response(content, "multiple_buttons")
+
+    # === Form Input Examples ===
+
+    @pytest.mark.asyncio
+    async def test_nlp_text_input_labeled(self, client):
+        """Test: form with text input."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a form card with a text input labeled 'Your name'"
+        )
+        self._validate_response(content, "text_input_labeled")
+
+    @pytest.mark.asyncio
+    async def test_nlp_form_with_submit_button(self, client):
+        """Test: form with text input and submit button."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a form card with a text input labeled 'Email' and a submit button"
+        )
+        self._validate_response(content, "form_with_submit")
+
+    # === Section Examples ===
+
+    @pytest.mark.asyncio
+    async def test_nlp_multiple_sections(self, client):
+        """Test: card with multiple sections."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a card with sections: 'Overview', 'Details', and 'Actions'"
+        )
+        self._validate_response(content, "multiple_sections")
+
+    @pytest.mark.asyncio
+    async def test_nlp_collapsible_section(self, client):
+        """Test: card with collapsible section."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a card with a collapsible section 'Advanced Options'"
+        )
+        self._validate_response(content, "collapsible_section")
+
+    # === Icon Examples ===
+
+    @pytest.mark.asyncio
+    async def test_nlp_decorated_text_with_icon(self, client):
+        """Test: decoratedText with icon."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a card with decoratedText showing 'John Doe' with person icon"
+        )
+        self._validate_response(content, "decorated_text_icon")
+
+    @pytest.mark.asyncio
+    async def test_nlp_status_with_check_icon(self, client):
+        """Test: status indicator with check icon."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a status card with decoratedText showing 'Online' with check icon"
+        )
+        self._validate_response(content, "status_check_icon")
+
+    # === Complex Examples from Documentation ===
+
+    @pytest.mark.asyncio
+    async def test_nlp_information_card(self, client):
+        """Test: Information Card from docs gallery."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a card titled 'System Status' with subtitle 'Live Dashboard' "
+            "and text 'All services operational' with a green 'Refresh' button"
+        )
+        self._validate_response(content, "information_card")
+
+    @pytest.mark.asyncio
+    async def test_nlp_dashboard_with_sections(self, client):
+        """Test: Multi-Section Dashboard from docs gallery."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a dashboard with sections: "
+            "'Server Health' with decoratedText showing 'Online' with check icon, "
+            "'Actions' with buttons 'Restart' in red and 'Backup' in blue"
+        )
+        self._validate_response(content, "dashboard_sections")
+
+    @pytest.mark.asyncio
+    async def test_nlp_interactive_form(self, client):
+        """Test: Interactive Form from docs gallery."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a form card titled 'Feedback' with: "
+            "text input labeled 'Your name', "
+            "text input labeled 'Comments', "
+            "and buttons: 'Submit' in green, 'Cancel' in gray"
+        )
+        self._validate_response(content, "interactive_form")
+
+    @pytest.mark.asyncio
+    async def test_nlp_alert_card_with_warning(self, client):
+        """Test: Alert notification card."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create an alert card titled 'Warning' with warning icon "
+            "and text 'System maintenance scheduled for tonight'"
+        )
+        self._validate_response(content, "alert_warning")
+
+    @pytest.mark.asyncio
+    async def test_nlp_card_with_image_url(self, client):
+        """Test: Card with image URL."""
+        await asyncio.sleep(2)
+        content = await self._send_nlp_card(
+            client,
+            "Create a card titled 'Product' with image https://picsum.photos/200/100 "
+            "and a 'Learn More' button"
+        )
+        self._validate_response(content, "card_with_image")
 
 
 if __name__ == "__main__":

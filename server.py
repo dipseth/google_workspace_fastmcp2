@@ -115,6 +115,26 @@ logger.info("  No transaction ID conflicts")
 mcp = FastMCP(
     name=settings.server_name,
     version="1.0.0",
+    instructions="""Google Workspace MCP Server - Comprehensive access to Google services.
+
+## Authentication
+1. Call `start_google_auth` with your email to begin OAuth flow
+2. Complete authentication in browser
+3. Call `check_drive_auth` to verify credentials
+
+## Available Services
+- **Drive**: Upload, search, list, manage files
+- **Gmail**: Send, search, read emails
+- **Docs**: Create and edit documents
+- **Sheets**: Read and write spreadsheets
+- **Slides**: Create presentations
+- **Calendar**: Manage events
+- **Chat**: Send messages and cards
+- **Photos**: Access photo library
+- **Forms**: Create and manage forms
+
+## Tool Management
+Use `manage_tools` to list, enable, or disable tools at runtime.""",
     auth=None,  # No GoogleProvider - use legacy OAuth system
 )
 
@@ -263,6 +283,11 @@ logger.info(
 # Register drive upload tools
 setup_drive_tools(mcp)
 
+# Register server management tools (early for visibility in tool list)
+logger.info("🔧 Registering server management tools...")
+setup_server_tools(mcp)
+logger.info("✅ Server management tools registered")
+
 # Register comprehensive Drive tools (search, list, get content, create)
 setup_drive_comprehensive_tools(mcp)
 
@@ -373,11 +398,6 @@ setup_health_endpoints(
     credential_storage_mode=credential_storage_mode,
 )
 
-# Register server management tools
-logger.info("🔧 Registering server management tools...")
-setup_server_tools(mcp)
-logger.info("✅ Server management tools registered")
-
 # Register template macro management tools
 logger.info("🎨 Registering template macro management tools...")
 setup_template_macro_tools(mcp)
@@ -448,6 +468,29 @@ else:
 
 def main():
     """Main entry point for the server."""
+    import argparse
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="FastMCP Google Workspace Server")
+    parser.add_argument(
+        "--transport", "-t",
+        choices=["stdio", "http", "sse"],
+        default=None,
+        help="Transport mode: stdio (default), http, or sse"
+    )
+    parser.add_argument(
+        "--port", "-p",
+        type=int,
+        default=None,
+        help="Port for HTTP/SSE transport (default: from settings)"
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="Host for HTTP/SSE transport (default: from settings)"
+    )
+    args = parser.parse_args()
+
     logger.info(f"Starting {settings.server_name}")
     logger.info(f"Configuration: {settings.base_url}")
     logger.info(
@@ -475,44 +518,44 @@ def main():
     Path(settings.credentials_dir).mkdir(parents=True, exist_ok=True)
 
     try:
-        # Check for transport mode via environment variable
-        # Default to stdio for command-based usage (uvx), use http for network deployment
-        transport_mode = os.getenv("MCP_TRANSPORT", "stdio").lower()
+        # Check for transport mode: CLI args > environment variable > default (stdio)
+        transport_mode = args.transport or os.getenv("MCP_TRANSPORT", "stdio").lower()
         
         if transport_mode == "stdio":
             # Stdio transport for command-based MCP clients (uvx, npx, etc.)
             logger.info("📡 Starting server with STDIO transport (command-based)")
             mcp.run(transport="stdio")
         else:
-            # HTTP transport for network-based deployment
-            run_args = {"host": settings.server_host, "port": settings.server_port}
+            # HTTP/SSE transport for network-based deployment
+            # CLI args override settings
+            server_host = args.host or settings.server_host
+            server_port = args.port or settings.server_port
+            run_args = {"host": server_host, "port": server_port}
+            logger.info(f"🌐 Starting server on {server_host}:{server_port}")
 
             # Configure transport and SSL based on HTTPS setting and cloud deployment
             if settings.is_cloud_deployment:
                 # FastMCP Cloud handles SSL automatically
-                run_args["transport"] = "http"
+                run_args["transport"] = transport_mode
                 logger.info(
-                    "☁️ Cloud deployment - FastMCP Cloud handles HTTPS/SSL automatically"
+                    f"☁️ Cloud deployment - using {transport_mode} transport (SSL handled by FastMCP Cloud)"
                 )
             elif settings.enable_https:
                 ssl_config = settings.get_uvicorn_ssl_config()
                 if ssl_config:
-                    run_args["transport"] = (
-                        "http"  # FastMCP uses http transport with SSL via uvicorn_config
-                    )
+                    run_args["transport"] = transport_mode
                     run_args["uvicorn_config"] = ssl_config
-                    logger.info("🔒 Starting server with HTTPS/SSL support")
-                    logger.info("Transport: http (with SSL)")
+                    logger.info(f"🔒 Starting server with {transport_mode.upper()} transport + SSL")
                     logger.info(f"SSL Certificate: {ssl_config['ssl_certfile']}")
                     logger.info(f"SSL Private Key: {ssl_config['ssl_keyfile']}")
                 else:
                     logger.warning(
                         "⚠️ HTTPS enabled but SSL config unavailable, falling back to HTTP"
                     )
-                    run_args["transport"] = "http"
+                    run_args["transport"] = transport_mode
             else:
-                run_args["transport"] = "http"
-                logger.info("🌐 Starting server with HTTP support")
+                run_args["transport"] = transport_mode
+                logger.info(f"🌐 Starting server with {transport_mode.upper()} transport")
 
             # Run the server with appropriate transport and SSL configuration
             mcp.run(**run_args)

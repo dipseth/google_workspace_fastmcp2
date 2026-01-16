@@ -496,33 +496,122 @@ class ModuleWrapper:
             logger.error(f"❌ Failed to initialize Qdrant client: {e}")
             raise
 
-    def _initialize_embedder(self):
-        """Initialize the embedding model."""
+    def _clear_fastembed_cache(self, model_name: str = None) -> bool:
+        """
+        Clear corrupted FastEmbed cache to allow re-download.
+
+        Args:
+            model_name: Optional specific model name to clear (clears all if None)
+
+        Returns:
+            bool: True if cache was cleared successfully
+        """
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        cleared = False
+        cache_locations = [
+            Path(tempfile.gettempdir()) / "fastembed_cache",
+            Path.home() / ".cache" / "fastembed",
+        ]
+
+        # Also check macOS-specific temp locations
         try:
-            TextEmbedding = _get_fastembed()
-            self.embedder = TextEmbedding(model_name=self.embedding_model_name)
+            import os
+            # Get the actual temp directory which may be in /var/folders on macOS
+            actual_temp = Path(os.path.realpath(tempfile.gettempdir()))
+            if actual_temp not in cache_locations:
+                cache_locations.append(actual_temp / "fastembed_cache")
+        except Exception:
+            pass
 
-            # Try to get embedding dimension dynamically
+        for cache_dir in cache_locations:
+            if cache_dir.exists():
+                try:
+                    if model_name:
+                        # Clear specific model cache
+                        # Model names like "sentence-transformers/all-MiniLM-L6-v2"
+                        # are stored as "models--qdrant--all-MiniLM-L6-v2-onnx"
+                        model_short = model_name.split("/")[-1]
+                        for subdir in cache_dir.iterdir():
+                            if model_short in subdir.name or "MiniLM" in subdir.name:
+                                logger.info(f"🗑️ Clearing corrupted cache: {subdir}")
+                                shutil.rmtree(subdir)
+                                cleared = True
+                    else:
+                        # Clear entire cache
+                        logger.info(f"🗑️ Clearing entire FastEmbed cache: {cache_dir}")
+                        shutil.rmtree(cache_dir)
+                        cleared = True
+                except Exception as clear_error:
+                    logger.warning(f"⚠️ Could not clear cache {cache_dir}: {clear_error}")
+
+        return cleared
+
+    def _initialize_embedder(self):
+        """Initialize the embedding model with retry logic for corrupted cache."""
+        max_retries = 2
+        last_error = None
+
+        for attempt in range(max_retries + 1):
             try:
-                # Generate a test embedding to get the dimension
-                test_embedding = list(self.embedder.embed(["test"]))[0]
-                self.embedding_dim = (
-                    len(test_embedding) if hasattr(test_embedding, "__len__") else 384
-                )
-            except Exception:
-                # Fallback to known dimensions for common models
-                model_dims = {
-                    "sentence-transformers/all-MiniLM-L6-v2": 384,
-                    "sentence-transformers/all-mpnet-base-v2": 768,
-                }
-                self.embedding_dim = model_dims.get(self.embedding_model_name, 384)
+                TextEmbedding = _get_fastembed()
+                self.embedder = TextEmbedding(model_name=self.embedding_model_name)
 
-            logger.info(
-                f"✅ Embedding model loaded: {self.embedding_model_name} (dim: {self.embedding_dim})"
-            )
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize embedding model: {e}")
-            raise
+                # Try to get embedding dimension dynamically
+                try:
+                    # Generate a test embedding to get the dimension
+                    test_embedding = list(self.embedder.embed(["test"]))[0]
+                    self.embedding_dim = (
+                        len(test_embedding) if hasattr(test_embedding, "__len__") else 384
+                    )
+                except Exception:
+                    # Fallback to known dimensions for common models
+                    model_dims = {
+                        "sentence-transformers/all-MiniLM-L6-v2": 384,
+                        "sentence-transformers/all-mpnet-base-v2": 768,
+                    }
+                    self.embedding_dim = model_dims.get(self.embedding_model_name, 384)
+
+                logger.info(
+                    f"✅ Embedding model loaded: {self.embedding_model_name} (dim: {self.embedding_dim})"
+                )
+                return  # Success!
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+
+                # Check if this is a cache/file corruption error that we can recover from
+                is_recoverable = any(keyword in error_str for keyword in [
+                    "no_suchfile", "file doesn't exist", "corrupted",
+                    "model.onnx", "failed to load", "invalid model"
+                ])
+
+                if is_recoverable and attempt < max_retries:
+                    logger.warning(
+                        f"⚠️ Embedding model load failed (attempt {attempt + 1}/{max_retries + 1}): {e}"
+                    )
+                    logger.info("🔄 Attempting to clear corrupted cache and re-download model...")
+
+                    # Clear the cache and retry
+                    if self._clear_fastembed_cache(self.embedding_model_name):
+                        logger.info("✅ Cache cleared, retrying model download...")
+                        # Reset the global fastembed reference to force reload
+                        global _fastembed
+                        _fastembed = None
+                        continue
+                    else:
+                        logger.warning("⚠️ Could not clear cache, retrying anyway...")
+                        continue
+                else:
+                    # Non-recoverable error or out of retries
+                    break
+
+        # All retries exhausted
+        logger.error(f"❌ Failed to initialize embedding model after {max_retries + 1} attempts: {last_error}")
+        raise last_error
 
     def _ensure_collection(self):
         """Ensure the Qdrant collection exists and check if it needs indexing."""
@@ -629,20 +718,41 @@ class ModuleWrapper:
                         # Split path and traverse to get the actual object
                         parts = path.split(".")
 
-                        # Check if first part is the module name
-                        if parts[0] == self.module_name:
+                        # Qdrant stores `full_path` like:
+                        #   card_framework.v2.card.CardWithId
+                        # but this wrapper's `self.module` is *root* `card_framework`.
+                        # So we must drop the root module name and traverse the remainder.
+                        if parts and parts[0] == self.module_name:
                             parts = parts[1:]
+
+                        # Handle when wrapper was constructed for a submodule (e.g. `card_framework.v2`)
+                        # but `self.module` is already that submodule. In that case, drop the submodule
+                        # prefix from parts too.
+                        if self._module_name and self._module_name.startswith(self.module_name + "."):
+                            subparts = self._module_name.split(".")[1:]
+                            if parts[: len(subparts)] == subparts:
+                                parts = parts[len(subparts):]
 
                         # Start with the module
                         obj = self.module
 
-                        # Traverse the path
+                        # Traverse the path, handling lazy-loaded submodules
                         for part in parts:
-                            obj = getattr(obj, part)
+                            try:
+                                obj = getattr(obj, part)
+                            except AttributeError:
+                                # Some packages don't eagerly expose submodules on the parent
+                                # (e.g. `card_framework` doesn't have `v2` until imported).
+                                module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip('.')
+                                try:
+                                    obj = importlib.import_module(module_candidate)
+                                except (ImportError, ModuleNotFoundError):
+                                    # Not a module, re-raise the original AttributeError
+                                    raise AttributeError(f"'{type(obj).__name__}' has no attribute '{part}'")
 
-                    except (AttributeError, IndexError):
+                    except (AttributeError, IndexError) as e:
                         # Could not resolve object, it will remain None
-                        logger.debug(f"Could not resolve object for path: {path}")
+                        logger.debug(f"Could not resolve object for path: {path} ({e})")
                         obj = None
 
                     # Create component object
@@ -1483,18 +1593,19 @@ class ModuleWrapper:
                 logger.error(f"Failed to generate embedding for query: {query}")
                 return []
 
-            # Search in Qdrant
-            # Use the correct parameter name for query_points: 'query' instead of 'query_vector'
+            # Search in Qdrant (prefer the newer `query_points` API)
             # Convert embedding to list format
             if hasattr(query_embedding, "tolist"):
                 query_vector = query_embedding.tolist()
             else:
                 query_vector = list(query_embedding)
 
+            # Search in Qdrant using the modern API (qdrant-client >= 1.16)
+            # NOTE: This repo currently uses qdrant-client 1.16.2 where `QdrantClient.search` does not exist.
             search_results = await asyncio.to_thread(
-                self.client.search,
+                self.client.query_points,
                 collection_name=self.collection_name,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=limit,
                 score_threshold=score_threshold,
             )
@@ -1564,8 +1675,16 @@ class ModuleWrapper:
 
                 # Handle different payload structures
                 if isinstance(payload, dict):
-                    path = payload.get("full_path")
+                    # Prefer module_path + name as canonical identifier when present.
+                    # This is more reliable than legacy/bad full_path values stored in Qdrant.
+                    module_path = payload.get("module_path")
                     name = payload.get("name")
+
+                    canonical_path = None
+                    if module_path and name:
+                        canonical_path = f"{module_path}.{name}"
+
+                    path = canonical_path or payload.get("full_path")
                     type_info = payload.get("type")
                     docstring = payload.get("docstring")
                 elif isinstance(payload, list) and len(payload) > 0:
@@ -1574,24 +1693,47 @@ class ModuleWrapper:
                     name = str(payload[1]) if len(payload) > 1 else ""
                     type_info = str(payload[2]) if len(payload) > 2 else ""
                     docstring = str(payload[3]) if len(payload) > 3 else ""
+                    module_path = None
                 else:
                     # Default values if payload is neither dict nor list
                     path = str(payload) if payload else ""
                     name = ""
                     type_info = ""
                     docstring = ""
+                    module_path = None
 
-                # Get the actual component
-                component = self.components.get(path) if path else None
+                # Get the actual component - try full_path first (what's stored in components dict),
+                # then fall back to canonical path, then try runtime resolution
+                full_path = payload.get("full_path") if isinstance(payload, dict) else None
+                component = None
+                component_obj = None
+
+                # Strategy 1: Look up by full_path (the key used in self.components)
+                if full_path:
+                    component = self.components.get(full_path)
+                    if component and component.obj is not None:
+                        component_obj = component.obj
+
+                # Strategy 2: Look up by canonical path
+                if component_obj is None and path:
+                    component = self.components.get(path)
+                    if component and component.obj is not None:
+                        component_obj = component.obj
+
+                # Strategy 3: Runtime resolution using get_component_by_path
+                if component_obj is None and full_path:
+                    component_obj = self.get_component_by_path(full_path)
 
                 results.append(
                     {
                         "score": score,
                         "name": name,
                         "path": path,
+                        "full_path": full_path,
+                        "module_path": module_path if isinstance(payload, dict) else None,
                         "type": type_info,
                         "docstring": docstring,
-                        "component": component.obj if component else None,
+                        "component": component_obj,
                     }
                 )
 
@@ -1708,8 +1850,16 @@ class ModuleWrapper:
 
                 # Handle different payload structures
                 if isinstance(payload, dict):
-                    path = payload.get("full_path")
+                    # Prefer module_path + name as canonical identifier when present.
+                    # This is more reliable than legacy/bad full_path values stored in Qdrant.
+                    module_path = payload.get("module_path")
                     name = payload.get("name")
+
+                    canonical_path = None
+                    if module_path and name:
+                        canonical_path = f"{module_path}.{name}"
+
+                    path = canonical_path or payload.get("full_path")
                     type_info = payload.get("type")
                     docstring = payload.get("docstring")
                 elif isinstance(payload, list) and len(payload) > 0:
@@ -1718,24 +1868,47 @@ class ModuleWrapper:
                     name = str(payload[1]) if len(payload) > 1 else ""
                     type_info = str(payload[2]) if len(payload) > 2 else ""
                     docstring = str(payload[3]) if len(payload) > 3 else ""
+                    module_path = None
                 else:
                     # Default values if payload is neither dict nor list
                     path = str(payload) if payload else ""
                     name = ""
                     type_info = ""
                     docstring = ""
+                    module_path = None
 
-                # Get the actual component
-                component = self.components.get(path) if path else None
+                # Get the actual component - try full_path first (what's stored in components dict),
+                # then fall back to canonical path, then try runtime resolution
+                full_path = payload.get("full_path") if isinstance(payload, dict) else None
+                component = None
+                component_obj = None
+
+                # Strategy 1: Look up by full_path (the key used in self.components)
+                if full_path:
+                    component = self.components.get(full_path)
+                    if component and component.obj is not None:
+                        component_obj = component.obj
+
+                # Strategy 2: Look up by canonical path
+                if component_obj is None and path:
+                    component = self.components.get(path)
+                    if component and component.obj is not None:
+                        component_obj = component.obj
+
+                # Strategy 3: Runtime resolution using get_component_by_path
+                if component_obj is None and full_path:
+                    component_obj = self.get_component_by_path(full_path)
 
                 results.append(
                     {
                         "score": score,
                         "name": name,
                         "path": path,
+                        "full_path": full_path,
+                        "module_path": module_path if isinstance(payload, dict) else None,
                         "type": type_info,
                         "docstring": docstring,
-                        "component": component.obj if component else None,
+                        "component": component_obj,
                     }
                 )
 
@@ -1888,7 +2061,7 @@ class ModuleWrapper:
         """
         # Check if path is in components
         component = self.components.get(path)
-        if component:
+        if component and component.obj is not None:
             return component.obj
 
         # Try to resolve path
@@ -1896,16 +2069,36 @@ class ModuleWrapper:
             # Split path into parts
             parts = path.split(".")
 
-            # Check if first part is the module name
-            if parts[0] == self.module_name:
+            # Normalize paths coming from Qdrant payloads.
+            # Example payload full_path: `card_framework.v2.card.CardWithId`
+            # But `self.module` is `card_framework`, so drop the root and traverse.
+            if parts and parts[0] == self.module_name:
                 parts = parts[1:]
+
+            # Some indexes store paths relative to a submodule (e.g. wrapper constructed for
+            # `card_framework.v2` but `self.module` is `card_framework`). In that case,
+            # drop the explicit submodule prefix too.
+            if self._module_name and parts and self._module_name.startswith(self.module_name + "."):
+                subparts = self._module_name.split(".")[1:]
+                if parts[: len(subparts)] == subparts:
+                    parts = parts[len(subparts) :]
 
             # Start with the module
             obj = self.module
 
             # Traverse the path
             for part in parts:
-                obj = getattr(obj, part)
+                try:
+                    obj = getattr(obj, part)
+                except AttributeError:
+                    # Some packages don't eagerly expose submodules on the parent package
+                    # (e.g. `card_framework` doesn't have attribute `v2` until imported).
+                    module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip('.')
+                    try:
+                        obj = importlib.import_module(module_candidate)
+                    except (ImportError, ModuleNotFoundError):
+                        # Not a module, re-raise as AttributeError so outer handler catches it
+                        raise AttributeError(f"'{type(obj).__name__}' has no attribute '{part}'")
 
             return obj
 
