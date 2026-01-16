@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "google-workspace-unlimited"
-version = "1.0.2"
+version = "1.0.3"
 description = "Comprehensive MCP server for Google Workspace integration - 72+ tools across Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos with OAuth 2.1 + PKCE authentication"
 readme = "README.md"
 license = "Apache-2.0"
@@ -139,6 +139,7 @@ dev = [
 ]
 
 [project.scripts]
+google-workspace-unlimited = "server:main"
 drive-upload-server = "server:main"
 
 [tool.pytest.ini_options]
