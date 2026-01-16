@@ -24,7 +24,30 @@ GoogleUnlimited provides AI assistants with access to Google Workspace services 
 
 ![Architecture Overview](mermaid-images/architecture-overview.png)
 
-### 🛠️ Installation Steps
+### 🛠️ Installation Methods
+
+#### Method 1: Quick Install via uvx (Recommended)
+
+The fastest way to get started - install directly from PyPI:
+
+```json
+{
+  "mcpServers": {
+    "google-workspace-unlimited": {
+      "command": "uvx",
+      "args": ["google-workspace-unlimited"],
+      "disabled": false,
+      "timeout": 300
+    }
+  }
+}
+```
+
+> ⚡ **That's it!** The server runs in stdio mode by default, perfect for MCP clients like Claude Desktop, Cursor, Roo, etc.
+
+#### Method 2: Clone and Development Setup
+
+For development or customization:
 
 1. **Clone and setup:**
    ```bash

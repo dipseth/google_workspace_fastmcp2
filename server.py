@@ -475,38 +475,47 @@ def main():
     Path(settings.credentials_dir).mkdir(parents=True, exist_ok=True)
 
     try:
-        # Prepare run arguments
-        run_args = {"host": settings.server_host, "port": settings.server_port}
-
-        # Configure transport and SSL based on HTTPS setting and cloud deployment
-        if settings.is_cloud_deployment:
-            # FastMCP Cloud handles SSL automatically
-            run_args["transport"] = "http"
-            logger.info(
-                "☁️ Cloud deployment - FastMCP Cloud handles HTTPS/SSL automatically"
-            )
-        elif settings.enable_https:
-            ssl_config = settings.get_uvicorn_ssl_config()
-            if ssl_config:
-                run_args["transport"] = (
-                    "http"  # FastMCP uses http transport with SSL via uvicorn_config
-                )
-                run_args["uvicorn_config"] = ssl_config
-                logger.info("🔒 Starting server with HTTPS/SSL support")
-                logger.info("Transport: http (with SSL)")
-                logger.info(f"SSL Certificate: {ssl_config['ssl_certfile']}")
-                logger.info(f"SSL Private Key: {ssl_config['ssl_keyfile']}")
-            else:
-                logger.warning(
-                    "⚠️ HTTPS enabled but SSL config unavailable, falling back to HTTP"
-                )
-                run_args["transport"] = "http"
+        # Check for transport mode via environment variable
+        # Default to stdio for command-based usage (uvx), use http for network deployment
+        transport_mode = os.getenv("MCP_TRANSPORT", "stdio").lower()
+        
+        if transport_mode == "stdio":
+            # Stdio transport for command-based MCP clients (uvx, npx, etc.)
+            logger.info("📡 Starting server with STDIO transport (command-based)")
+            mcp.run(transport="stdio")
         else:
-            run_args["transport"] = "http"
-            logger.info("🌐 Starting server with HTTP support")
+            # HTTP transport for network-based deployment
+            run_args = {"host": settings.server_host, "port": settings.server_port}
 
-        # Run the server with appropriate transport and SSL configuration
-        mcp.run(**run_args)
+            # Configure transport and SSL based on HTTPS setting and cloud deployment
+            if settings.is_cloud_deployment:
+                # FastMCP Cloud handles SSL automatically
+                run_args["transport"] = "http"
+                logger.info(
+                    "☁️ Cloud deployment - FastMCP Cloud handles HTTPS/SSL automatically"
+                )
+            elif settings.enable_https:
+                ssl_config = settings.get_uvicorn_ssl_config()
+                if ssl_config:
+                    run_args["transport"] = (
+                        "http"  # FastMCP uses http transport with SSL via uvicorn_config
+                    )
+                    run_args["uvicorn_config"] = ssl_config
+                    logger.info("🔒 Starting server with HTTPS/SSL support")
+                    logger.info("Transport: http (with SSL)")
+                    logger.info(f"SSL Certificate: {ssl_config['ssl_certfile']}")
+                    logger.info(f"SSL Private Key: {ssl_config['ssl_keyfile']}")
+                else:
+                    logger.warning(
+                        "⚠️ HTTPS enabled but SSL config unavailable, falling back to HTTP"
+                    )
+                    run_args["transport"] = "http"
+            else:
+                run_args["transport"] = "http"
+                logger.info("🌐 Starting server with HTTP support")
+
+            # Run the server with appropriate transport and SSL configuration
+            mcp.run(**run_args)
 
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
