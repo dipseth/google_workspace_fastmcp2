@@ -1,4 +1,4 @@
-name: Publish (TestPyPI)
+name: Publish to PyPI
 
 on:
   push:
@@ -29,8 +29,8 @@ jobs:
       - name: Build
         run: uv build
 
-      - name: Publish to TestPyPI
+      - name: Publish to PyPI
         env:
           UV_PUBLISH_USERNAME: "__token__"
           UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: uv publish --publish-url https://test.pypi.org/legacy/
+        run: uv publish
