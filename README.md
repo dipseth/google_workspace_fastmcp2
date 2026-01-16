@@ -57,16 +57,40 @@ For development or customization:
    ```
 
 2. **Configure Google OAuth:**
-   - Visit [Google Cloud Console](https://console.cloud.google.com/) 🔗
-   - Enable APIs: Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos
-   - Create OAuth 2.0 credentials (Web application type)
-   - Download client secrets JSON file
+
+   a. Go to [Google Cloud Console](https://console.cloud.google.com/)
+
+   b. Create a new project (or select existing)
+
+   c. Enable the APIs you need: Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos
+
+   d. Go to **APIs & Services > Credentials > Create Credentials > OAuth client ID**
+
+   e. Select **Web application** as the application type
+
+   f. Under **Authorized redirect URIs**, add:
+      ```
+      http://localhost:8002/oauth2callback
+      ```
+
+   g. Click **Create** and copy your **Client ID** and **Client Secret**
 
 3. **Setup environment:**
    ```bash
    cp .env.example .env
-   # Edit .env with your Google OAuth credentials path
    ```
+
+   Edit `.env` with your credentials:
+   ```bash
+   # Your OAuth credentials from Google Cloud Console
+   GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=your-client-secret
+
+   # Must match EXACTLY what you set in Google Cloud Console
+   OAUTH_REDIRECT_URI=http://localhost:8002/oauth2callback
+   ```
+
+   > **Alternative:** Instead of `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, you can download the JSON file from Google and set `GOOGLE_CLIENT_SECRETS_FILE=credentials.json`
 
 4. **Start the server:**
    ```bash
@@ -78,6 +102,30 @@ For development or customization:
 > - 🤖 **[Claude.ai Integration Guide](documentation/config/claude_ai_integration_guide.md)** - Setup for Claude.ai remote MCP server usage
 > - 🔒 **[HTTPS Setup Guide](documentation/config/https_setup_guide.md)** - SSL certificate configuration for secure connections
 > - ⚙️ **[MCP JSON Configuration Guide](documentation/config/mcp_config_fastmcp.md)** - Standard MCP configuration for any compatible client
+
+### 📋 Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | Yes* | - | OAuth 2.0 client ID from Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | Yes* | - | OAuth 2.0 client secret from Google Cloud Console |
+| `GOOGLE_CLIENT_SECRETS_FILE` | Yes* | - | Alternative: path to OAuth JSON file |
+| `OAUTH_REDIRECT_URI` | Yes | `http://localhost:8002/oauth2callback` | Must match Google Console exactly |
+| `SERVER_HOST` | No | `localhost` | Server bind address |
+| `SERVER_PORT` | No | `8002` | Server port |
+| `ENABLE_HTTPS` | No | `false` | Enable HTTPS/SSL |
+| `SSL_CERT_FILE` | If HTTPS | - | Path to SSL certificate |
+| `SSL_KEY_FILE` | If HTTPS | - | Path to SSL private key |
+| `CREDENTIAL_STORAGE_MODE` | No | `FILE_ENCRYPTED` | `FILE_ENCRYPTED`, `FILE_PLAINTEXT`, `MEMORY_ONLY` |
+| `CREDENTIALS_DIR` | No | `./credentials` | Directory for stored credentials |
+| `LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `SESSION_TIMEOUT_MINUTES` | No | `60` | Session idle timeout |
+| `GMAIL_ALLOW_LIST` | No | - | Comma-separated allowed email addresses |
+| `QDRANT_URL` | No | `http://localhost:6333` | Qdrant vector database URL |
+| `QDRANT_KEY` | No | `NONE` | Qdrant API key (use `NONE` for no auth) |
+| `FASTMCP_CLOUD` | No | `false` | Enable cloud deployment mode |
+
+*Either `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` OR `GOOGLE_CLIENT_SECRETS_FILE` is required.
 
 ## 🔗 Client Connections
 

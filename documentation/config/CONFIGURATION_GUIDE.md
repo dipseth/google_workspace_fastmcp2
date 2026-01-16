@@ -205,26 +205,67 @@ ENABLE_RESOURCE_TEMPLATING=true
 
 ## Environment Variables Reference
 
+### Quick Reference (Most Common Variables)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | Yes* | - | OAuth 2.0 client ID from Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | Yes* | - | OAuth 2.0 client secret from Google Cloud Console |
+| `GOOGLE_CLIENT_SECRETS_FILE` | Yes* | - | Alternative: path to OAuth JSON file |
+| `OAUTH_REDIRECT_URI` | Yes | `http://localhost:8002/oauth2callback` | Must match Google Console exactly |
+| `SERVER_HOST` | No | `localhost` | Server bind address |
+| `SERVER_PORT` | No | `8002` | Server port |
+| `ENABLE_HTTPS` | No | `false` | Enable HTTPS/SSL |
+| `SSL_CERT_FILE` | If HTTPS | - | Path to SSL certificate |
+| `SSL_KEY_FILE` | If HTTPS | - | Path to SSL private key |
+| `CREDENTIAL_STORAGE_MODE` | No | `FILE_ENCRYPTED` | `FILE_ENCRYPTED`, `FILE_PLAINTEXT`, `MEMORY_ONLY` |
+| `CREDENTIALS_DIR` | No | `./credentials` | Directory for stored credentials |
+| `LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `SESSION_TIMEOUT_MINUTES` | No | `60` | Session idle timeout |
+| `AUTH_SECURITY_LEVEL` | No | `standard` | `standard`, `high`, or `custom` |
+| `GMAIL_ALLOW_LIST` | No | - | Comma-separated allowed email addresses |
+| `GMAIL_ENABLE_ELICITATION` | No | `true` | Enable elicitation for untrusted recipients |
+| `SAMPLING_TOOLS` | No | `false` | Enable sampling middleware tools |
+| `CHAT_SERVICE_ACCOUNT_FILE` | No | - | Path to Chat service account JSON |
+| `JINJA_TEMPLATE_STRICT_MODE` | No | `true` | Fail on template errors vs log only |
+| `QDRANT_URL` | No | `http://localhost:6333` | Qdrant vector database URL |
+| `QDRANT_KEY` | No | `NONE` | Qdrant API key (use `NONE` for no auth) |
+| `TOOL_COLLECTION` | No | `mcp_tool_responses` | Qdrant collection name |
+| `MCP_TOOL_RESPONSES_COLLECTION_CACHE_DAYS` | No | `5` | Data retention in days |
+| `ENABLE_UNIFIED_AUTH` | No | `true` | Enable unified authentication |
+| `LEGACY_COMPAT_MODE` | No | `true` | Enable legacy compatibility |
+| `CREDENTIAL_MIGRATION` | No | `true` | Enable credential migration |
+| `SERVICE_CACHING` | No | `true` | Enable service caching |
+| `ENHANCED_LOGGING` | No | `true` | Enable enhanced logging |
+| `FASTMCP_SERVER_AUTH` | No | - | FastMCP GoogleProvider auth type |
+| `FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID` | No | - | FastMCP GoogleProvider client ID |
+| `FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET` | No | - | FastMCP GoogleProvider client secret |
+| `FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL` | No | - | FastMCP GoogleProvider base URL |
+| `FASTMCP_CLOUD` | No | `false` | Enable cloud deployment mode |
+| `MCP_REQUIRE_EXISTING_CREDENTIALS` | No | `true` | Require pre-existing credentials for remote access |
+
+*Either `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` OR `GOOGLE_CLIENT_SECRETS_FILE` is required.
+
+---
+
 ### Core Server Settings
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
 | `SERVER_NAME` | string | "FastMCP Google MCP Server" | Server display name | No |
 | `SERVER_HOST` | string | "localhost" | Server bind address | No |
-| `SERVER_PORT` | integer | 6339 | Server port | No |
-| `BASE_URL` | string | "https://google-mcp.FastMCP.internal:6339" | Base URL for callbacks | Yes |
+| `SERVER_PORT` | integer | 8002 | Server port | No |
+| `BASE_URL` | string | Auto-generated | Base URL for callbacks | No |
 | `LOG_LEVEL` | string | "INFO" | Logging level (DEBUG, INFO, WARNING, ERROR) | No |
 
 ### Google OAuth Settings
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `GOOGLE_CLIENT_ID` | string | - | OAuth 2.0 client ID | Yes |
-| `GOOGLE_CLIENT_SECRET` | string | - | OAuth 2.0 client secret | Yes |
-| `OAUTH_REDIRECT_URI` | string | Auto-generated | OAuth callback URI | No |
-| `USE_GOOGLE_OAUTH` | boolean | true | Enable Google OAuth | No |
-| `ENABLE_JWT_AUTH` | boolean | false | Enable JWT authentication | No |
-| `OAUTH_SCOPES` | string | See defaults | Space-separated OAuth scopes | No |
+| `GOOGLE_CLIENT_ID` | string | - | OAuth 2.0 client ID | Yes* |
+| `GOOGLE_CLIENT_SECRET` | string | - | OAuth 2.0 client secret | Yes* |
+| `GOOGLE_CLIENT_SECRETS_FILE` | string | - | Path to OAuth JSON file (alternative to ID/secret) | Yes* |
+| `OAUTH_REDIRECT_URI` | string | `http://localhost:8002/oauth2callback` | OAuth callback URI - must match Google Console | Yes |
 
 ### Security Settings
 
