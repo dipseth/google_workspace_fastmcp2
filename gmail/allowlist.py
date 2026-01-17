@@ -42,6 +42,7 @@ from .gmail_types import (
     AllowedGroupInfo,
     GmailAllowListResponse,
     GmailRecipientsOptional,
+    ManageAllowListResponse,
 )
 from .utils import _parse_email_addresses
 
@@ -443,7 +444,7 @@ async def manage_gmail_allow_list(
     email: GmailRecipientsOptional = None,
     label: Optional[str] = None,
     user_google_email: UserGoogleEmail = None,
-) -> Union[str, GmailAllowListResponse]:
+) -> Union[ManageAllowListResponse, GmailAllowListResponse]:
     """
     Manage the Gmail allow list and People contact labels.
 
@@ -465,8 +466,7 @@ async def manage_gmail_allow_list(
         user_google_email: The authenticated user's Google email address (for authorization)
 
     Returns:
-        Union[str, GmailAllowListResponse]: Confirmation message for add/remove and label operations,
-        structured response for view.
+        Union[ManageAllowListResponse, GmailAllowListResponse]: Structured response for all operations.
     """
     action = action.lower().strip()
     logger.info(
@@ -476,7 +476,15 @@ async def manage_gmail_allow_list(
 
     valid_actions = {"add", "remove", "view", "label_add", "label_remove"}
     if action not in valid_actions:
-        return "❌ Invalid action. Must be one of: 'add', 'remove', 'view', 'label_add', or 'label_remove'"
+        return ManageAllowListResponse(
+            success=False,
+            action=action,
+            entries_processed=0,
+            current_list_count=0,
+            userEmail=user_google_email or "unknown",
+            message="",
+            error="❌ Invalid action. Must be one of: 'add', 'remove', 'view', 'label_add', or 'label_remove'",
+        )
 
     # Delegate People contact label operations to People tools
     if action in ("label_add", "label_remove"):
@@ -488,24 +496,49 @@ async def manage_gmail_allow_list(
             logger.error(
                 f"Failed to import manage_people_contact_labels from People tools: {exc}"
             )
-            return (
-                "❌ People contact label management is not available in this deployment"
+            return ManageAllowListResponse(
+                success=False,
+                action=action,
+                entries_processed=0,
+                current_list_count=0,
+                userEmail=user_google_email or "unknown",
+                message="",
+                error="❌ People contact label management is not available in this deployment",
             )
 
-        # Call the People tools function and ensure we return a string (not a dict or other type)
+        # Call the People tools function
         result = await manage_people_contact_labels(
             action, email, label, user_google_email
         )
 
-        # Ensure result is a string as expected by the Union[str, GmailAllowListResponse] return type
+        # Convert result to ManageAllowListResponse
         if isinstance(result, str):
+            # Parse success from message content
+            is_success = result.startswith("✅")
+            return ManageAllowListResponse(
+                success=is_success,
+                action=action,
+                entries_processed=0,  # Not easily extractable from string
+                current_list_count=0,
+                userEmail=user_google_email or "unknown",
+                message=result,
+                error=None if is_success else result,
+            )
+        elif isinstance(result, dict):
             return result
         else:
-            # If result is not a string, convert it to one
             logger.warning(
-                f"manage_people_contact_labels returned non-string type: {type(result)}"
+                f"manage_people_contact_labels returned unexpected type: {type(result)}"
             )
-            return str(result)
+            return ManageAllowListResponse(
+                success=False,
+                action=action,
+                entries_processed=0,
+                current_list_count=0,
+                userEmail=user_google_email or "unknown",
+                message=str(result),
+                error=None,
+            )
 
     # Handle view action
     if action == "view":
@@ -586,12 +619,28 @@ async def manage_gmail_allow_list(
 
     # For add/remove actions, email parameter is required
     if email is None:
-        return f"❌ Email parameter is required for '{action}' action"
+        return ManageAllowListResponse(
+            success=False,
+            action=action,
+            entries_processed=0,
+            current_list_count=len(settings.get_gmail_allow_list()),
+            userEmail=user_google_email or "unknown",
+            message="",
+            error=f"❌ Email parameter is required for '{action}' action",
+        )
 
     # Parse input tokens (emails and/or group specs)
     raw_tokens = [e.strip() for e in _parse_email_addresses(email)]
     if not raw_tokens:
-        return "❌ No valid email or group entries provided"
+        return ManageAllowListResponse(
+            success=False,
+            action=action,
+            entries_processed=0,
+            current_list_count=len(settings.get_gmail_allow_list()),
+            userEmail=user_google_email or "unknown",
+            message="",
+            error="❌ No valid email or group entries provided",
+        )
 
     # Split into email-like tokens and group specs (group: / groupId:)
     email_like_tokens, group_specs_to_process = split_allow_list_tokens(raw_tokens)
@@ -612,7 +661,16 @@ async def manage_gmail_allow_list(
 
         # For add operation, ensure we have at least one valid email or group spec
         if not valid_emails and not group_specs_to_process and action == "add":
-            return f"❌ No valid email or group entries found. Invalid: {', '.join(invalid_emails)}"
+            return ManageAllowListResponse(
+                success=False,
+                action=action,
+                entries_processed=0,
+                entries_invalid=invalid_emails,
+                current_list_count=len(settings.get_gmail_allow_list()),
+                userEmail=user_google_email or "unknown",
+                message="",
+                error=f"❌ No valid email or group entries found. Invalid: {', '.join(invalid_emails)}",
+            )
 
     # Combine validated emails and group specs into a single list for downstream processing
     emails_to_process = valid_emails + group_specs_to_process
@@ -694,7 +752,17 @@ async def manage_gmail_allow_list(
                     ]
                 )
 
-            return "\n".join(response_lines)
+            return ManageAllowListResponse(
+                success=True,
+                action=action,
+                entries_processed=len(emails_to_process),
+                entries_added=emails_added if emails_added else None,
+                entries_already_present=already_in_list if already_in_list else None,
+                entries_invalid=invalid_emails if invalid_emails else None,
+                current_list_count=len(updated_list),
+                userEmail=user_google_email or "unknown",
+                message="\n".join(response_lines),
+            )
 
         elif action == "remove":
             # Track which emails are not in the list and which are removed
@@ -771,11 +839,28 @@ async def manage_gmail_allow_list(
                     ]
                 )
 
-            return "\n".join(response_lines)
+            return ManageAllowListResponse(
+                success=True,
+                action=action,
+                entries_processed=len(emails_to_process),
+                entries_removed=emails_removed if emails_removed else None,
+                entries_not_found=not_in_list if not_in_list else None,
+                current_list_count=len(updated_list),
+                userEmail=user_google_email or "unknown",
+                message="\n".join(response_lines),
+            )
 
     except Exception as e:
         logger.error(f"Unexpected error in manage_gmail_allow_list ({action}): {e}")
-        return f"❌ Unexpected error: {e}"
+        return ManageAllowListResponse(
+            success=False,
+            action=action,
+            entries_processed=0,
+            current_list_count=0,
+            userEmail=user_google_email or "unknown",
+            message="",
+            error=f"❌ Unexpected error: {e}",
+        )
 
 
 def setup_allowlist_tools(mcp: FastMCP) -> None:
@@ -830,5 +915,5 @@ def setup_allowlist_tools(mcp: FastMCP) -> None:
             ),
         ] = None,
         user_google_email: UserGoogleEmail = None,
-    ) -> Union[str, GmailAllowListResponse]:
+    ) -> Union[ManageAllowListResponse, GmailAllowListResponse]:
         return await manage_gmail_allow_list(action, email, label, user_google_email)

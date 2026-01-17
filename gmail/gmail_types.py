@@ -81,6 +81,23 @@ class GmailAllowListResponse(TypedDict):
     error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
+class ManageAllowListResponse(TypedDict):
+    """Response structure for manage_gmail_allow_list add/remove/label operations."""
+
+    success: bool
+    action: str  # "add", "remove", "label_add", "label_remove"
+    entries_processed: int
+    entries_added: NotRequired[List[str]]
+    entries_removed: NotRequired[List[str]]
+    entries_already_present: NotRequired[List[str]]
+    entries_not_found: NotRequired[List[str]]
+    entries_invalid: NotRequired[List[str]]
+    current_list_count: int
+    userEmail: str
+    message: str  # Human-readable summary
+    error: NotRequired[Optional[str]]
+
+
 class EmailTemplateInfo(TypedDict):
     """Structure for a single email template entry."""
 

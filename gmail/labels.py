@@ -894,15 +894,36 @@ async def manage_gmail_label(
                     )
                     results.append(error_msg)
 
-            return "\n\n".join(results)
+            return ManageGmailLabelResponse(
+                success=True,
+                action=action,
+                labels_processed=len(primary_list),
+                results=results,
+                color_adjustments=None,
+                userEmail=user_google_email,
+            )
 
         else:
             # Handle single label (original logic)
             if action == "create" and not parsed_name:
-                return "❌ Label name is required for create action."
+                return ManageGmailLabelResponse(
+                    success=False,
+                    action=action,
+                    labels_processed=0,
+                    results=[],
+                    userEmail=user_google_email or "unknown",
+                    error="❌ Label name is required for create action.",
+                )
 
             if action in ["update", "delete"] and not parsed_label_id:
-                return f"❌ Label ID is required for {action} action. Please specify which label to {action}."
+                return ManageGmailLabelResponse(
+                    success=False,
+                    action=action,
+                    labels_processed=0,
+                    results=[],
+                    userEmail=user_google_email or "unknown",
+                    error=f"❌ Label ID is required for {action} action. Please specify which label to {action}.",
+                )
 
             # Validate and fix colors if provided - with enhanced error handling
             color_warnings = []
