@@ -315,6 +315,37 @@ manage_tools(action="disable", tool_names=["send_gmail_message"], scope="global"
 }
 ```
 
+### 🔗 URL-Based Service Filtering (HTTP Transport)
+
+When using HTTP/SSE transport, you can filter tools by service directly via URL query parameters - no code required:
+
+```bash
+# Enable only Gmail tools
+http://localhost:8002/mcp?service=gmail
+
+# Enable Gmail + Drive + Calendar
+http://localhost:8002/mcp?service=gmail,drive,calendar
+
+# Resume a previous session
+http://localhost:8002/mcp?uuid=your-session-id
+
+# Resume session with specific services
+http://localhost:8002/mcp?uuid=abc123&service=gmail,drive
+
+# Disable minimal startup (enable all tools)
+http://localhost:8002/mcp?minimal=false
+```
+
+**Available URL Parameters:**
+
+| Parameter | Example | Description |
+|-----------|---------|-------------|
+| `service` or `services` | `?service=gmail,drive` | Comma-separated list of services to enable |
+| `uuid` | `?uuid=abc123` | Resume a previous session by ID |
+| `minimal` | `?minimal=false` | Override minimal startup mode |
+
+**Available Services:** `gmail`, `drive`, `calendar`, `docs`, `sheets`, `slides`, `photos`, `chat`, `forms`, `people`
+
 > 📚 **Session Tool Management Resources:**
 > - 🔧 **[SessionToolFilteringMiddleware Guide](documentation/middleware/SESSION_TOOL_FILTERING_MIDDLEWARE.md)** - Complete documentation for per-session tool management
 

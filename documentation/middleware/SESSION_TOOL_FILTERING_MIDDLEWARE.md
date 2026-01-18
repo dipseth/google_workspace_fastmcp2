@@ -79,6 +79,39 @@ get_session_tool_state_summary(session_id: str = None) -> dict
 
 ## Usage
 
+### URL-Based Service Filtering (HTTP Transport)
+
+When using HTTP/SSE transport, you can filter tools by service directly via URL query parameters - no code required:
+
+```bash
+# Enable only Gmail tools
+http://localhost:8002/mcp?service=gmail
+
+# Enable Gmail + Drive + Calendar
+http://localhost:8002/mcp?service=gmail,drive,calendar
+
+# Resume a previous session
+http://localhost:8002/mcp?uuid=your-session-id
+
+# Resume session with specific services
+http://localhost:8002/mcp?uuid=abc123&service=gmail,drive
+
+# Disable minimal startup (enable all tools)
+http://localhost:8002/mcp?minimal=false
+```
+
+**Available URL Parameters:**
+
+| Parameter | Example | Description |
+|-----------|---------|-------------|
+| `service` or `services` | `?service=gmail,drive` | Comma-separated list of services to enable |
+| `uuid` | `?uuid=abc123` | Resume a previous session by ID |
+| `minimal` | `?minimal=false` | Override minimal startup mode |
+
+**Available Services:** `gmail`, `drive`, `calendar`, `docs`, `sheets`, `slides`, `photos`, `chat`, `forms`, `people`
+
+The middleware uses the `parse_http_connection_params()` function to extract these parameters from the HTTP request and applies them during session initialization in `on_list_tools`.
+
 ### Basic Setup
 
 The middleware is automatically configured in `server.py`:
