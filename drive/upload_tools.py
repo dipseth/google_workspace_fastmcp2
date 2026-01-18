@@ -312,6 +312,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
             # Get current session ID for reconnection support
             from auth.context import get_session_context
+
             current_session_id = get_session_context()
 
             response = StartAuthResponse(
@@ -391,6 +392,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
         # Get current session ID for reconnection support
         from auth.context import get_session_context
+
         current_session_id = get_session_context()
 
         # Validate that user_google_email is provided

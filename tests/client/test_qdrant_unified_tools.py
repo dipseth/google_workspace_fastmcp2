@@ -29,7 +29,9 @@ class TestQdrantUnifiedSearch:
             "get_tool_analytics",
             "get_response_details",
         ]
-        await assert_tools_registered(client, expected_tools, context="Qdrant unified tools")
+        await assert_tools_registered(
+            client, expected_tools, context="Qdrant unified tools"
+        )
 
     @pytest.mark.asyncio
     async def test_search_overview_capability(self, client):
@@ -344,7 +346,9 @@ class TestQdrantUnifiedFetch:
     async def test_fetch_with_valid_id(self, client):
         """Test fetching a document with a valid ID."""
         # First, verify that fetch tool is registered in the server
-        await assert_tools_registered(client, ["fetch", "search"], context="Qdrant tools")
+        await assert_tools_registered(
+            client, ["fetch", "search"], context="Qdrant tools"
+        )
 
         # Enable the tools needed for this test
         await client.call_tool(
@@ -390,14 +394,10 @@ class TestQdrantUnifiedFetch:
             assert "title" in fetch_data, "Fetch response must have 'title' field"
             assert "text" in fetch_data, "Fetch response must have 'text' field"
             assert "url" in fetch_data, "Fetch response must have 'url' field"
-            assert (
-                "metadata" in fetch_data
-            ), "Fetch response must have 'metadata' field"
+            assert "metadata" in fetch_data, "Fetch response must have 'metadata' field"
 
             # Verify ID matches
-            assert (
-                fetch_data["id"] == valid_id
-            ), "Fetched ID should match requested ID"
+            assert fetch_data["id"] == valid_id, "Fetched ID should match requested ID"
 
             # Check metadata structure
             assert isinstance(
@@ -406,7 +406,9 @@ class TestQdrantUnifiedFetch:
 
         except json.JSONDecodeError:
             # Acceptable if Qdrant is not available
-            pytest.skip("Search did not return valid JSON - Qdrant may not be available")
+            pytest.skip(
+                "Search did not return valid JSON - Qdrant may not be available"
+            )
 
     @pytest.mark.asyncio
     async def test_fetch_with_invalid_id(self, client):

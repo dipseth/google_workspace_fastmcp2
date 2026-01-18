@@ -156,7 +156,9 @@ class TestPhotosTools:
 
         all_expected_tools = expected_standard_tools + expected_advanced_tools
 
-        await assert_tools_registered(client, all_expected_tools, context="Photos tools")
+        await assert_tools_registered(
+            client, all_expected_tools, context="Photos tools"
+        )
 
         logger.info(f"All {len(all_expected_tools)} Photos tools registered")
 

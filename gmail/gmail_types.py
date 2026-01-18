@@ -60,7 +60,8 @@ class AllowedEmailInfo(BaseModel):
 
     email: str = Field(..., description="Full email address in the allow list")
     masked_email: str = Field(
-        ..., description="Privacy-masked version of the email (e.g., 'u***r@example.com')"
+        ...,
+        description="Privacy-masked version of the email (e.g., 'u***r@example.com')",
     )
 
 
@@ -72,7 +73,8 @@ class AllowedGroupInfo(BaseModel):
         description="Raw token from GMAIL_ALLOW_LIST (e.g., 'group:Team A' or 'groupId:contactGroups/123')",
     )
     type: Optional[str] = Field(
-        None, description="Group reference type: 'name' (human-readable) or 'id' (resource ID)"
+        None,
+        description="Group reference type: 'name' (human-readable) or 'id' (resource ID)",
     )
     group_name: Optional[str] = Field(
         None, description="Human-friendly group name when available"
@@ -108,7 +110,9 @@ class GmailAllowListResponse(BaseModel):
 class ManageAllowListResponse(BaseModel):
     """Response structure for manage_gmail_allow_list add/remove/label operations."""
 
-    success: bool = Field(..., description="Whether the operation completed successfully")
+    success: bool = Field(
+        ..., description="Whether the operation completed successfully"
+    )
     action: str = Field(
         ...,
         description="Action performed: 'add', 'remove', 'label_add', or 'label_remove'",
@@ -123,10 +127,12 @@ class ManageAllowListResponse(BaseModel):
         None, description="Email addresses successfully removed from the allow list"
     )
     entries_already_present: Optional[List[str]] = Field(
-        None, description="Email addresses that were already in the allow list (skipped)"
+        None,
+        description="Email addresses that were already in the allow list (skipped)",
     )
     entries_not_found: Optional[List[str]] = Field(
-        None, description="Email addresses that were not found in the allow list (for remove)"
+        None,
+        description="Email addresses that were not found in the allow list (for remove)",
     )
     entries_invalid: Optional[List[str]] = Field(
         None, description="Invalid email addresses or group specs that were rejected"
@@ -135,7 +141,9 @@ class ManageAllowListResponse(BaseModel):
         ..., description="Total number of entries in the allow list after the operation"
     )
     userEmail: str = Field(..., description="Email of the authenticated user")
-    message: str = Field(..., description="Human-readable summary of the operation result")
+    message: str = Field(
+        ..., description="Human-readable summary of the operation result"
+    )
     error: Optional[str] = Field(None, description="Error message if operation failed")
 
 
@@ -330,7 +338,9 @@ class GetGmailThreadContentResponse(TypedDict):
 class ManageGmailLabelResponse(BaseModel):
     """Response structure for manage_gmail_label tool."""
 
-    success: bool = Field(..., description="Whether the operation completed successfully")
+    success: bool = Field(
+        ..., description="Whether the operation completed successfully"
+    )
     action: str = Field(
         ..., description="Action performed: 'create', 'update', or 'delete'"
     )

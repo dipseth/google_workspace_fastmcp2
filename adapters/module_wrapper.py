@@ -315,7 +315,9 @@ class ModuleWrapper:
         clear_collection: bool = False,  # Clear collection before indexing to ensure clean state
         enable_colbert: bool = False,  # Enable ColBERT multi-vector embeddings
         colbert_model: str = "colbert-ir/colbertv2.0",  # ColBERT model to use
-        colbert_collection_name: Optional[str] = None,  # Separate collection for ColBERT (default: {collection_name}_colbert)
+        colbert_collection_name: Optional[
+            str
+        ] = None,  # Separate collection for ColBERT (default: {collection_name}_colbert)
     ):
         """
         Initialize the module wrapper.
@@ -392,7 +394,9 @@ class ModuleWrapper:
         # ColBERT configuration
         self.enable_colbert = enable_colbert
         self.colbert_model_name = colbert_model
-        self.colbert_collection_name = colbert_collection_name or f"{collection_name}_colbert"
+        self.colbert_collection_name = (
+            colbert_collection_name or f"{collection_name}_colbert"
+        )
         self.colbert_embedder = None
         self.colbert_embedding_dim = 128  # Default for colbert-ir/colbertv2.0
         self._colbert_initialized = False
@@ -471,7 +475,9 @@ class ModuleWrapper:
 
             # Initialize ColBERT if enabled
             if self.enable_colbert:
-                logger.info("🤖 ColBERT mode enabled - initializing ColBERT embedder...")
+                logger.info(
+                    "🤖 ColBERT mode enabled - initializing ColBERT embedder..."
+                )
                 self._initialize_colbert_embedder()
                 self._ensure_colbert_collection()
                 self._index_components_colbert()
@@ -559,6 +565,7 @@ class ModuleWrapper:
         # Also check macOS-specific temp locations
         try:
             import os
+
             # Get the actual temp directory which may be in /var/folders on macOS
             actual_temp = Path(os.path.realpath(tempfile.gettempdir()))
             if actual_temp not in cache_locations:
@@ -585,7 +592,9 @@ class ModuleWrapper:
                         shutil.rmtree(cache_dir)
                         cleared = True
                 except Exception as clear_error:
-                    logger.warning(f"⚠️ Could not clear cache {cache_dir}: {clear_error}")
+                    logger.warning(
+                        f"⚠️ Could not clear cache {cache_dir}: {clear_error}"
+                    )
 
         return cleared
 
@@ -604,7 +613,9 @@ class ModuleWrapper:
                     # Generate a test embedding to get the dimension
                     test_embedding = list(self.embedder.embed(["test"]))[0]
                     self.embedding_dim = (
-                        len(test_embedding) if hasattr(test_embedding, "__len__") else 384
+                        len(test_embedding)
+                        if hasattr(test_embedding, "__len__")
+                        else 384
                     )
                 except Exception:
                     # Fallback to known dimensions for common models
@@ -624,16 +635,25 @@ class ModuleWrapper:
                 error_str = str(e).lower()
 
                 # Check if this is a cache/file corruption error that we can recover from
-                is_recoverable = any(keyword in error_str for keyword in [
-                    "no_suchfile", "file doesn't exist", "corrupted",
-                    "model.onnx", "failed to load", "invalid model"
-                ])
+                is_recoverable = any(
+                    keyword in error_str
+                    for keyword in [
+                        "no_suchfile",
+                        "file doesn't exist",
+                        "corrupted",
+                        "model.onnx",
+                        "failed to load",
+                        "invalid model",
+                    ]
+                )
 
                 if is_recoverable and attempt < max_retries:
                     logger.warning(
                         f"⚠️ Embedding model load failed (attempt {attempt + 1}/{max_retries + 1}): {e}"
                     )
-                    logger.info("🔄 Attempting to clear corrupted cache and re-download model...")
+                    logger.info(
+                        "🔄 Attempting to clear corrupted cache and re-download model..."
+                    )
 
                     # Clear the cache and retry
                     if self._clear_fastembed_cache(self.embedding_model_name):
@@ -650,7 +670,9 @@ class ModuleWrapper:
                     break
 
         # All retries exhausted
-        logger.error(f"❌ Failed to initialize embedding model after {max_retries + 1} attempts: {last_error}")
+        logger.error(
+            f"❌ Failed to initialize embedding model after {max_retries + 1} attempts: {last_error}"
+        )
         raise last_error
 
     def _initialize_colbert_embedder(self):
@@ -695,9 +717,13 @@ class ModuleWrapper:
             collection_names = [c.name for c in collections.collections]
 
             if self.colbert_collection_name in collection_names:
-                logger.info(f"✅ ColBERT collection '{self.colbert_collection_name}' exists")
+                logger.info(
+                    f"✅ ColBERT collection '{self.colbert_collection_name}' exists"
+                )
                 # Check if it has data
-                collection_info = self.client.get_collection(self.colbert_collection_name)
+                collection_info = self.client.get_collection(
+                    self.colbert_collection_name
+                )
                 if collection_info.points_count > 0:
                     logger.info(
                         f"📊 ColBERT collection has {collection_info.points_count} points"
@@ -705,7 +731,9 @@ class ModuleWrapper:
                 return
 
             # Create ColBERT collection with multi-vector configuration
-            logger.info(f"📦 Creating ColBERT collection: {self.colbert_collection_name}")
+            logger.info(
+                f"📦 Creating ColBERT collection: {self.colbert_collection_name}"
+            )
 
             # For ColBERT, we use multi-vector storage
             # Each document produces multiple vectors (one per token)
@@ -716,12 +744,16 @@ class ModuleWrapper:
                         size=self.colbert_embedding_dim,
                         distance=qdrant_models["Distance"].COSINE,
                         multivector_config=qdrant_models["models"].MultiVectorConfig(
-                            comparator=qdrant_models["models"].MultiVectorComparator.MAX_SIM
+                            comparator=qdrant_models[
+                                "models"
+                            ].MultiVectorComparator.MAX_SIM
                         ),
                     )
                 },
             )
-            logger.info(f"✅ ColBERT collection created: {self.colbert_collection_name}")
+            logger.info(
+                f"✅ ColBERT collection created: {self.colbert_collection_name}"
+            )
 
         except Exception as e:
             logger.error(f"❌ Failed to ensure ColBERT collection: {e}")
@@ -842,10 +874,12 @@ class ModuleWrapper:
                         # Handle when wrapper was constructed for a submodule (e.g. `card_framework.v2`)
                         # but `self.module` is already that submodule. In that case, drop the submodule
                         # prefix from parts too.
-                        if self._module_name and self._module_name.startswith(self.module_name + "."):
+                        if self._module_name and self._module_name.startswith(
+                            self.module_name + "."
+                        ):
                             subparts = self._module_name.split(".")[1:]
                             if parts[: len(subparts)] == subparts:
-                                parts = parts[len(subparts):]
+                                parts = parts[len(subparts) :]
 
                         # Start with the module
                         obj = self.module
@@ -857,12 +891,16 @@ class ModuleWrapper:
                             except AttributeError:
                                 # Some packages don't eagerly expose submodules on the parent
                                 # (e.g. `card_framework` doesn't have `v2` until imported).
-                                module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip('.')
+                                module_candidate = (
+                                    f"{getattr(obj, '__name__', '')}.{part}".lstrip(".")
+                                )
                                 try:
                                     obj = importlib.import_module(module_candidate)
                                 except (ImportError, ModuleNotFoundError):
                                     # Not a module, re-raise the original AttributeError
-                                    raise AttributeError(f"'{type(obj).__name__}' has no attribute '{part}'")
+                                    raise AttributeError(
+                                        f"'{type(obj).__name__}' has no attribute '{part}'"
+                                    )
 
                     except (AttributeError, IndexError) as e:
                         # Could not resolve object, it will remain None
@@ -1674,7 +1712,9 @@ class ModuleWrapper:
     def _index_components_colbert(self):
         """Index components using ColBERT multi-vector embeddings."""
         if not self.enable_colbert or not self._colbert_initialized:
-            logger.warning("⚠️ ColBERT not enabled or initialized, skipping ColBERT indexing")
+            logger.warning(
+                "⚠️ ColBERT not enabled or initialized, skipping ColBERT indexing"
+            )
             return
 
         try:
@@ -1688,7 +1728,9 @@ class ModuleWrapper:
                 )
                 return
 
-            logger.info(f"🔄 Indexing {len(self.components)} components with ColBERT embeddings...")
+            logger.info(
+                f"🔄 Indexing {len(self.components)} components with ColBERT embeddings..."
+            )
 
             # Index version for tracking
             index_version = datetime.now(UTC).isoformat()
@@ -1708,9 +1750,13 @@ class ModuleWrapper:
                     # Generate ColBERT multi-vector embedding
                     # ColBERT returns a list of vectors (one per token)
                     try:
-                        embedding_result = list(self.colbert_embedder.embed([embed_text]))
+                        embedding_result = list(
+                            self.colbert_embedder.embed([embed_text])
+                        )
                         if not embedding_result:
-                            logger.warning(f"Failed to generate ColBERT embedding for: {path}")
+                            logger.warning(
+                                f"Failed to generate ColBERT embedding for: {path}"
+                            )
                             continue
 
                         # ColBERT returns a matrix (num_tokens x embedding_dim)
@@ -1723,7 +1769,9 @@ class ModuleWrapper:
                             vector_list = [list(v) for v in multi_vector]
 
                     except Exception as embed_error:
-                        logger.warning(f"ColBERT embedding failed for {path}: {embed_error}")
+                        logger.warning(
+                            f"ColBERT embedding failed for {path}: {embed_error}"
+                        )
                         continue
 
                     # Create deterministic ID
@@ -1734,7 +1782,9 @@ class ModuleWrapper:
                     # Add payload
                     payload = component.to_dict()
                     payload["indexed_at"] = index_version
-                    payload["module_version"] = getattr(self.module, "__version__", "unknown")
+                    payload["module_version"] = getattr(
+                        self.module, "__version__", "unknown"
+                    )
                     payload["embedding_type"] = "colbert"
 
                     point = qdrant_models["PointStruct"](
@@ -1746,7 +1796,9 @@ class ModuleWrapper:
 
                 # Store batch in Qdrant
                 if points:
-                    self.client.upsert(collection_name=self.colbert_collection_name, points=points)
+                    self.client.upsert(
+                        collection_name=self.colbert_collection_name, points=points
+                    )
                     processed += len(points)
                     logger.info(
                         f"📦 ColBERT batch {batch_idx+1}: stored {len(points)} components ({processed} total)"
@@ -1755,7 +1807,9 @@ class ModuleWrapper:
             logger.info(f"✅ ColBERT indexing complete: {processed} components indexed")
 
         except Exception as e:
-            logger.error(f"❌ Failed to index components with ColBERT: {e}", exc_info=True)
+            logger.error(
+                f"❌ Failed to index components with ColBERT: {e}", exc_info=True
+            )
             raise
 
     def colbert_search(
@@ -1822,17 +1876,21 @@ class ModuleWrapper:
                     score = float(getattr(result, "score", 0.0))
                     payload = getattr(result, "payload", {})
 
-                    component_path = payload.get("full_path") or payload.get("name", "unknown")
+                    component_path = payload.get("full_path") or payload.get(
+                        "name", "unknown"
+                    )
 
-                    results.append({
-                        "name": payload.get("name"),
-                        "path": component_path,
-                        "type": payload.get("type"),
-                        "score": score,
-                        "docstring": payload.get("docstring", ""),
-                        "component": self._get_component_from_path(component_path),
-                        "embedding_type": "colbert",
-                    })
+                    results.append(
+                        {
+                            "name": payload.get("name"),
+                            "path": component_path,
+                            "type": payload.get("type"),
+                            "score": score,
+                            "docstring": payload.get("docstring", ""),
+                            "component": self._get_component_from_path(component_path),
+                            "embedding_type": "colbert",
+                        }
+                    )
 
                     logger.info(f"  - {payload.get('name')} (score: {score:.4f})")
 
@@ -2002,7 +2060,9 @@ class ModuleWrapper:
 
                 # Get the actual component - try full_path first (what's stored in components dict),
                 # then fall back to canonical path, then try runtime resolution
-                full_path = payload.get("full_path") if isinstance(payload, dict) else None
+                full_path = (
+                    payload.get("full_path") if isinstance(payload, dict) else None
+                )
                 component = None
                 component_obj = None
 
@@ -2028,7 +2088,9 @@ class ModuleWrapper:
                         "name": name,
                         "path": path,
                         "full_path": full_path,
-                        "module_path": module_path if isinstance(payload, dict) else None,
+                        "module_path": (
+                            module_path if isinstance(payload, dict) else None
+                        ),
                         "type": type_info,
                         "docstring": docstring,
                         "component": component_obj,
@@ -2177,7 +2239,9 @@ class ModuleWrapper:
 
                 # Get the actual component - try full_path first (what's stored in components dict),
                 # then fall back to canonical path, then try runtime resolution
-                full_path = payload.get("full_path") if isinstance(payload, dict) else None
+                full_path = (
+                    payload.get("full_path") if isinstance(payload, dict) else None
+                )
                 component = None
                 component_obj = None
 
@@ -2203,7 +2267,9 @@ class ModuleWrapper:
                         "name": name,
                         "path": path,
                         "full_path": full_path,
-                        "module_path": module_path if isinstance(payload, dict) else None,
+                        "module_path": (
+                            module_path if isinstance(payload, dict) else None
+                        ),
                         "type": type_info,
                         "docstring": docstring,
                         "component": component_obj,
@@ -2376,7 +2442,11 @@ class ModuleWrapper:
             # Some indexes store paths relative to a submodule (e.g. wrapper constructed for
             # `card_framework.v2` but `self.module` is `card_framework`). In that case,
             # drop the explicit submodule prefix too.
-            if self._module_name and parts and self._module_name.startswith(self.module_name + "."):
+            if (
+                self._module_name
+                and parts
+                and self._module_name.startswith(self.module_name + ".")
+            ):
                 subparts = self._module_name.split(".")[1:]
                 if parts[: len(subparts)] == subparts:
                     parts = parts[len(subparts) :]
@@ -2391,12 +2461,16 @@ class ModuleWrapper:
                 except AttributeError:
                     # Some packages don't eagerly expose submodules on the parent package
                     # (e.g. `card_framework` doesn't have attribute `v2` until imported).
-                    module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip('.')
+                    module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip(
+                        "."
+                    )
                     try:
                         obj = importlib.import_module(module_candidate)
                     except (ImportError, ModuleNotFoundError):
                         # Not a module, re-raise as AttributeError so outer handler catches it
-                        raise AttributeError(f"'{type(obj).__name__}' has no attribute '{part}'")
+                        raise AttributeError(
+                            f"'{type(obj).__name__}' has no attribute '{part}'"
+                        )
 
             return obj
 

@@ -334,7 +334,11 @@ async def get_registered_tools(client: Client) -> List[str]:
     Other tools are registered but disabled by default.
     """
     result = await client.call_tool("manage_tools", {"action": "list"})
-    content = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
+    content = (
+        result.content[0].text
+        if hasattr(result.content[0], "text")
+        else str(result.content[0])
+    )
 
     try:
         data = json.loads(content)
@@ -344,7 +348,9 @@ async def get_registered_tools(client: Client) -> List[str]:
         return []
 
 
-async def assert_tools_registered(client: Client, expected_tools: List[str], context: str = ""):
+async def assert_tools_registered(
+    client: Client, expected_tools: List[str], context: str = ""
+):
     """Assert that specified tools are registered in the server.
 
     This checks the tool registry via manage_tools, not client.list_tools().

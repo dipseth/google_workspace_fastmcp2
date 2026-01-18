@@ -66,7 +66,8 @@ class StartAuthResponse(BaseModel):
     """Response structure for start_google_auth tool."""
 
     status: str = Field(
-        ..., description="Authentication status: 'success' if auth URL generated, 'error' if failed"
+        ...,
+        description="Authentication status: 'success' if auth URL generated, 'error' if failed",
     )
     message: str = Field(
         ..., description="Human-readable message describing the authentication status"
@@ -77,9 +78,7 @@ class StartAuthResponse(BaseModel):
     clickableLink: Optional[str] = Field(
         None, description="Formatted clickable link for terminal/UI display"
     )
-    userEmail: str = Field(
-        ..., description="Google email address being authenticated"
-    )
+    userEmail: str = Field(..., description="Google email address being authenticated")
     sessionId: Optional[str] = Field(
         None,
         description="Session UUID for this connection. Save this to reconnect with same tool state using ?uuid= parameter",
@@ -92,19 +91,23 @@ class StartAuthResponse(BaseModel):
         None, description="Step-by-step instructions for completing the OAuth flow"
     )
     scopesIncluded: Optional[List[str]] = Field(
-        None, description="List of OAuth scopes being requested for the selected services"
+        None,
+        description="List of OAuth scopes being requested for the selected services",
     )
     note: Optional[str] = Field(
         None, description="Additional notes or warnings about the authentication"
     )
-    error: Optional[str] = Field(None, description="Error message if authentication failed")
+    error: Optional[str] = Field(
+        None, description="Error message if authentication failed"
+    )
 
 
 class CheckAuthResponse(BaseModel):
     """Response structure for check_drive_auth tool."""
 
     authenticated: bool = Field(
-        ..., description="Whether the user is currently authenticated with valid credentials"
+        ...,
+        description="Whether the user is currently authenticated with valid credentials",
     )
     userEmail: str = Field(
         ..., description="Google email address that was checked for authentication"
@@ -116,4 +119,6 @@ class CheckAuthResponse(BaseModel):
         None,
         description="Session UUID for this connection. Save this to reconnect with same tool state using ?uuid= parameter",
     )
-    error: Optional[str] = Field(None, description="Error message if authentication check failed")
+    error: Optional[str] = Field(
+        None, description="Error message if authentication check failed"
+    )

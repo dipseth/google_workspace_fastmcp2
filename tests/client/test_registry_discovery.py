@@ -136,7 +136,11 @@ class TestRegistryDiscovery:
                     service = "slides"
                 elif "form" in name_lower:
                     service = "forms"
-                elif "chat" in name_lower or "space" in name_lower or "card" in name_lower:
+                elif (
+                    "chat" in name_lower
+                    or "space" in name_lower
+                    or "card" in name_lower
+                ):
                     service = "chat"
                 elif "photo" in name_lower or "album" in name_lower:
                     service = "photos"
@@ -178,7 +182,11 @@ class TestRegistryDiscovery:
 
         # Get tool info with descriptions from manage_tools list action
         result = await client.call_tool("manage_tools", {"action": "list"})
-        content = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
+        content = (
+            result.content[0].text
+            if hasattr(result.content[0], "text")
+            else str(result.content[0])
+        )
         data = json.loads(content)
 
         # Find the gmail labels tool in the tool list
@@ -194,12 +202,14 @@ class TestRegistryDiscovery:
 
         # Check metadata completeness from ToolInfo
         assert gmail_label_tool.get("name"), "Tool should have name"
-        assert gmail_label_tool.get("description"), "Tool should have description from registry"
+        assert gmail_label_tool.get(
+            "description"
+        ), "Tool should have description from registry"
         assert "enabled" in gmail_label_tool, "Tool should have enabled status"
 
         print("Registry provides complete metadata for tools")
         print(f"   Tool: {gmail_label_tool['name']}")
-        desc = gmail_label_tool['description']
+        desc = gmail_label_tool["description"]
         print(f"   Description: {desc[:100] if len(desc) > 100 else desc}...")
 
     @pytest.mark.asyncio
@@ -265,7 +275,9 @@ class TestRegistryDiscovery:
         ), f"Registry query took {registry_time:.2f}s, should be under 2s"
 
         # Verify we got a reasonable number of tools registered
-        assert len(registered_tools) > 50, f"Expected 50+ tools registered, got {len(registered_tools)}"
+        assert (
+            len(registered_tools) > 50
+        ), f"Expected 50+ tools registered, got {len(registered_tools)}"
 
         # Also measure list_tools performance for enabled tools
         start_time = time.time()
@@ -278,9 +290,15 @@ class TestRegistryDiscovery:
         ), f"Tool discovery took {discovery_time:.2f}s, should be under 2s"
 
         print("Registry tool discovery performance:")
-        print(f"   Registry has {len(registered_tools)} tools (queried in {registry_time:.3f}s)")
-        print(f"   Currently {len(tools)} tools enabled (discovered in {discovery_time:.3f}s)")
-        print(f"   Average registry query: {(registry_time * 1000) / len(registered_tools):.2f}ms per tool")
+        print(
+            f"   Registry has {len(registered_tools)} tools (queried in {registry_time:.3f}s)"
+        )
+        print(
+            f"   Currently {len(tools)} tools enabled (discovered in {discovery_time:.3f}s)"
+        )
+        print(
+            f"   Average registry query: {(registry_time * 1000) / len(registered_tools):.2f}ms per tool"
+        )
 
 
 class TestRegistryIntegration:

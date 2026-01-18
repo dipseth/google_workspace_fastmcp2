@@ -258,9 +258,7 @@ class TestRoutingServicePriority:
             if tool_name in tool_names:
                 gmail_found += 1
                 # These should be routed with high confidence (0.95)
-                print(
-                    f"Gmail tool '{tool_name}' available (95% confidence expected)"
-                )
+                print(f"Gmail tool '{tool_name}' available (95% confidence expected)")
 
         assert gmail_found > 0, "Should have Gmail tools with high confidence routing"
         print(f"Total Gmail tools found: {gmail_found}")

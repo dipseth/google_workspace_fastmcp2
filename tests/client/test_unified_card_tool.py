@@ -65,7 +65,9 @@ class TestUnifiedCardTool:
     @pytest.mark.asyncio
     async def test_send_dynamic_card_tool_available(self, client):
         """Test that the send_dynamic_card tool is available."""
-        await assert_tools_registered(client, ["send_dynamic_card"], context="Unified card tools")
+        await assert_tools_registered(
+            client, ["send_dynamic_card"], context="Unified card tools"
+        )
         print("send_dynamic_card tool is registered")
 
     @pytest.mark.asyncio

@@ -304,7 +304,9 @@ class ComponentSearchInfo(BaseModel):
         None,
         description="Full module path of the matched component",
     )
-    componentType: Optional[Literal["class", "function", "module", "simple_fallback", "fallback"]] = Field(
+    componentType: Optional[
+        Literal["class", "function", "module", "simple_fallback", "fallback"]
+    ] = Field(
         None,
         description="Type of component found: 'class' for Card/Widget classes, 'function' for factory functions, 'module' for module-level components, 'simple_fallback' when no match found",
     )
@@ -426,24 +428,60 @@ class IconMapping(BaseModel):
 
 # Pre-defined icon mappings for reference
 ICON_MAPPINGS: List[IconMapping] = [
-    IconMapping(naturalLanguage=["check", "green check", "success", "complete", "done"], googleChatIcon="CHECK_CIRCLE"),
-    IconMapping(naturalLanguage=["error", "red x", "failure", "failed", "x"], googleChatIcon="ERROR"),
-    IconMapping(naturalLanguage=["warning", "yellow warning", "caution", "alert"], googleChatIcon="WARNING"),
-    IconMapping(naturalLanguage=["info", "information", "details", "about"], googleChatIcon="INFO"),
-    IconMapping(naturalLanguage=["star", "favorite", "starred", "important"], googleChatIcon="STAR"),
-    IconMapping(naturalLanguage=["person", "user", "profile", "account"], googleChatIcon="PERSON"),
-    IconMapping(naturalLanguage=["email", "mail", "envelope", "message"], googleChatIcon="EMAIL"),
-    IconMapping(naturalLanguage=["clock", "time", "schedule", "timer"], googleChatIcon="CLOCK"),
-    IconMapping(naturalLanguage=["calendar", "date", "event"], googleChatIcon="EVENT_SEAT"),
+    IconMapping(
+        naturalLanguage=["check", "green check", "success", "complete", "done"],
+        googleChatIcon="CHECK_CIRCLE",
+    ),
+    IconMapping(
+        naturalLanguage=["error", "red x", "failure", "failed", "x"],
+        googleChatIcon="ERROR",
+    ),
+    IconMapping(
+        naturalLanguage=["warning", "yellow warning", "caution", "alert"],
+        googleChatIcon="WARNING",
+    ),
+    IconMapping(
+        naturalLanguage=["info", "information", "details", "about"],
+        googleChatIcon="INFO",
+    ),
+    IconMapping(
+        naturalLanguage=["star", "favorite", "starred", "important"],
+        googleChatIcon="STAR",
+    ),
+    IconMapping(
+        naturalLanguage=["person", "user", "profile", "account"],
+        googleChatIcon="PERSON",
+    ),
+    IconMapping(
+        naturalLanguage=["email", "mail", "envelope", "message"], googleChatIcon="EMAIL"
+    ),
+    IconMapping(
+        naturalLanguage=["clock", "time", "schedule", "timer"], googleChatIcon="CLOCK"
+    ),
+    IconMapping(
+        naturalLanguage=["calendar", "date", "event"], googleChatIcon="EVENT_SEAT"
+    ),
     IconMapping(naturalLanguage=["phone", "call", "telephone"], googleChatIcon="PHONE"),
-    IconMapping(naturalLanguage=["video", "camera", "meeting"], googleChatIcon="VIDEO_CAMERA"),
-    IconMapping(naturalLanguage=["location", "map", "place", "pin"], googleChatIcon="MAP_PIN"),
+    IconMapping(
+        naturalLanguage=["video", "camera", "meeting"], googleChatIcon="VIDEO_CAMERA"
+    ),
+    IconMapping(
+        naturalLanguage=["location", "map", "place", "pin"], googleChatIcon="MAP_PIN"
+    ),
     IconMapping(naturalLanguage=["link", "chain", "url"], googleChatIcon="LINK"),
-    IconMapping(naturalLanguage=["file", "document", "doc"], googleChatIcon="DESCRIPTION"),
+    IconMapping(
+        naturalLanguage=["file", "document", "doc"], googleChatIcon="DESCRIPTION"
+    ),
     IconMapping(naturalLanguage=["folder", "directory"], googleChatIcon="FOLDER"),
-    IconMapping(naturalLanguage=["settings", "gear", "config"], googleChatIcon="SETTINGS"),
-    IconMapping(naturalLanguage=["chart", "graph", "analytics"], googleChatIcon="TRENDING_UP"),
+    IconMapping(
+        naturalLanguage=["settings", "gear", "config"], googleChatIcon="SETTINGS"
+    ),
+    IconMapping(
+        naturalLanguage=["chart", "graph", "analytics"], googleChatIcon="TRENDING_UP"
+    ),
     IconMapping(naturalLanguage=["cloud", "upload", "sync"], googleChatIcon="CLOUD"),
     IconMapping(naturalLanguage=["lock", "secure", "private"], googleChatIcon="LOCK"),
-    IconMapping(naturalLanguage=["unlock", "open", "public"], googleChatIcon="LOCK_OPEN"),
+    IconMapping(
+        naturalLanguage=["unlock", "open", "public"], googleChatIcon="LOCK_OPEN"
+    ),
 ]

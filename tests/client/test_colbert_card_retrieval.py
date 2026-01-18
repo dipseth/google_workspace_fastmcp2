@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Add project root to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 # Test configuration
 TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test@example.com")
@@ -84,8 +86,12 @@ class TestColBERTComponentRetrieval:
 
             # The card may fail if NLP wasn't run - that's the bug we're detecting
             if data.get("nlpExtraction") is None and not data.get("success"):
-                print("\n*** NOTE: NLP extraction was null - this is expected with the current bug ***")
-                print("ColBERT found the component but no parameters were extracted to populate it.")
+                print(
+                    "\n*** NOTE: NLP extraction was null - this is expected with the current bug ***"
+                )
+                print(
+                    "ColBERT found the component but no parameters were extracted to populate it."
+                )
 
         except json.JSONDecodeError:
             print(f"Non-JSON response: {content}")
@@ -134,13 +140,21 @@ class TestColBERTComponentRetrieval:
 
             print(f"\nColBERT Mode:")
             print(f"  - Card Type: {colbert_data.get('cardType')}")
-            print(f"  - Component: {colbert_data.get('componentInfo', {}).get('componentName')}")
-            print(f"  - Score: {colbert_data.get('componentInfo', {}).get('searchScore')}")
+            print(
+                f"  - Component: {colbert_data.get('componentInfo', {}).get('componentName')}"
+            )
+            print(
+                f"  - Score: {colbert_data.get('componentInfo', {}).get('searchScore')}"
+            )
 
             print(f"\nStandard Mode:")
             print(f"  - Card Type: {standard_data.get('cardType')}")
-            print(f"  - Component: {standard_data.get('componentInfo', {}).get('componentName')}")
-            print(f"  - Score: {standard_data.get('componentInfo', {}).get('searchScore')}")
+            print(
+                f"  - Component: {standard_data.get('componentInfo', {}).get('componentName')}"
+            )
+            print(
+                f"  - Score: {standard_data.get('componentInfo', {}).get('searchScore')}"
+            )
 
             # Check if NLP was used in both modes (the key fix we're testing)
             # Note: Card may still fail validation for complex descriptions,
@@ -310,7 +324,9 @@ class TestComponentPathLookup:
             if component_info.get("componentType") == "simple_fallback":
                 print("\n*** BUG DETECTED ***")
                 print("Component lookup failed - fell back to simple_fallback")
-                print("ColBERT found a match but couldn't retrieve the component object")
+                print(
+                    "ColBERT found a match but couldn't retrieve the component object"
+                )
 
         except json.JSONDecodeError:
             print(f"Response: {content}")
@@ -356,7 +372,9 @@ class TestEndToEndColBERTCardGeneration:
             print(f"  - Success: {data.get('success')}")
             print(f"  - HTTP Status: {data.get('httpStatus')}")
             print(f"  - Card Type: {data.get('cardType')}")
-            print(f"  - Component: {data.get('componentInfo', {}).get('componentName')}")
+            print(
+                f"  - Component: {data.get('componentInfo', {}).get('componentName')}"
+            )
 
             # Check the message for content
             message = data.get("message", "")
@@ -415,9 +433,7 @@ def _extract_content(result) -> str:
     """Extract text content from tool result."""
     if hasattr(result, "content"):
         content_items = (
-            result.content
-            if hasattr(result.content, "__iter__")
-            else [result.content]
+            result.content if hasattr(result.content, "__iter__") else [result.content]
         )
         return (
             content_items[0].text

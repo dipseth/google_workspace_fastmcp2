@@ -50,7 +50,9 @@ def get_session_context() -> Optional[str]:
         if hasattr(ctx, "session_id"):
             native_session_id = ctx.session_id
             if native_session_id:
-                logger.debug(f"Using native FastMCP session_id: {native_session_id[:8]}...")
+                logger.debug(
+                    f"Using native FastMCP session_id: {native_session_id[:8]}..."
+                )
                 return native_session_id
 
         return None
@@ -84,7 +86,9 @@ def set_effective_session_id(session_id: str) -> None:
         ctx.set_state("effective_session_id", session_id)
         logger.debug(f"Set effective session ID: {session_id[:8]}...")
     except RuntimeError:
-        logger.debug("Cannot set effective session ID - not in a FastMCP request context")
+        logger.debug(
+            "Cannot set effective session ID - not in a FastMCP request context"
+        )
 
 
 def get_effective_session_id() -> Optional[str]:
@@ -110,7 +114,9 @@ def get_effective_session_id() -> Optional[str]:
         # Fall back to regular session context
         return get_session_context()
     except RuntimeError:
-        logger.debug("Cannot get effective session ID - not in a FastMCP request context")
+        logger.debug(
+            "Cannot get effective session ID - not in a FastMCP request context"
+        )
         return None
 
 
@@ -658,10 +664,14 @@ def get_session_disabled_tools(session_id: str = None) -> set:
 
     disabled = get_session_data(session_id, "session_disabled_tools", set())
     # Ensure we always return a set (in case None was stored)
-    return disabled if isinstance(disabled, set) else set(disabled) if disabled else set()
+    return (
+        disabled if isinstance(disabled, set) else set(disabled) if disabled else set()
+    )
 
 
-def disable_tool_for_session(tool_name: str, session_id: str = None, persist: bool = False) -> bool:
+def disable_tool_for_session(
+    tool_name: str, session_id: str = None, persist: bool = False
+) -> bool:
     """
     Disable a tool for the current session only.
 
@@ -694,7 +704,9 @@ def disable_tool_for_session(tool_name: str, session_id: str = None, persist: bo
     return True
 
 
-def enable_tool_for_session(tool_name: str, session_id: str = None, persist: bool = False) -> bool:
+def enable_tool_for_session(
+    tool_name: str, session_id: str = None, persist: bool = False
+) -> bool:
     """
     Re-enable a tool for the current session.
 
@@ -765,7 +777,9 @@ def clear_session_disabled_tools(session_id: str = None) -> bool:
         session_id = get_session_context()
 
     if not session_id:
-        logger.warning("Cannot clear session disabled tools - no session context available")
+        logger.warning(
+            "Cannot clear session disabled tools - no session context available"
+        )
         return False
 
     store_session_data(session_id, "session_disabled_tools", set())
@@ -864,6 +878,7 @@ def _get_session_tool_state_path() -> Path:
     """Get the path for session tool state persistence file."""
     try:
         from config.settings import settings
+
         return settings.session_tool_state_path
     except Exception as e:
         logger.warning(f"Could not get session tool state path from settings: {e}")
@@ -890,9 +905,15 @@ def persist_session_tool_states() -> bool:
                 disabled_tools = session_data.get("session_disabled_tools", set())
                 if disabled_tools or session_data.get("minimal_startup_applied"):
                     persisted_states[session_id] = {
-                        "disabled_tools": list(disabled_tools) if disabled_tools else [],
-                        "last_accessed": session_data.get("last_accessed", datetime.now()).isoformat(),
-                        "minimal_startup_applied": session_data.get("minimal_startup_applied", False),
+                        "disabled_tools": (
+                            list(disabled_tools) if disabled_tools else []
+                        ),
+                        "last_accessed": session_data.get(
+                            "last_accessed", datetime.now()
+                        ).isoformat(),
+                        "minimal_startup_applied": session_data.get(
+                            "minimal_startup_applied", False
+                        ),
                         "user_email": session_data.get("user_email"),
                     }
 
@@ -905,7 +926,9 @@ def persist_session_tool_states() -> bool:
         with open(state_file, "w") as f:
             json.dump(persisted_states, f, indent=2)
 
-        logger.info(f"✅ Persisted tool states for {len(persisted_states)} sessions to {state_file}")
+        logger.info(
+            f"✅ Persisted tool states for {len(persisted_states)} sessions to {state_file}"
+        )
         return True
 
     except Exception as e:
@@ -935,7 +958,9 @@ def load_persisted_session_tool_states() -> Dict[str, Dict[str, Any]]:
             if "disabled_tools" in state:
                 state["disabled_tools"] = set(state["disabled_tools"])
 
-        logger.info(f"✅ Loaded persisted tool states for {len(persisted_states)} sessions from {state_file}")
+        logger.info(
+            f"✅ Loaded persisted tool states for {len(persisted_states)} sessions from {state_file}"
+        )
         return persisted_states
 
     except json.JSONDecodeError as e:
@@ -962,7 +987,9 @@ def restore_session_tool_state(session_id: str) -> bool:
     persisted_states = load_persisted_session_tool_states()
 
     if session_id not in persisted_states:
-        logger.debug(f"No persisted state found for session {session_id[:8]}... (new session)")
+        logger.debug(
+            f"No persisted state found for session {session_id[:8]}... (new session)"
+        )
         return False
 
     state = persisted_states[session_id]
@@ -974,8 +1001,12 @@ def restore_session_tool_state(session_id: str) -> bool:
                 "last_accessed": datetime.now(),
             }
 
-        _session_store[session_id]["session_disabled_tools"] = state.get("disabled_tools", set())
-        _session_store[session_id]["minimal_startup_applied"] = state.get("minimal_startup_applied", False)
+        _session_store[session_id]["session_disabled_tools"] = state.get(
+            "disabled_tools", set()
+        )
+        _session_store[session_id]["minimal_startup_applied"] = state.get(
+            "minimal_startup_applied", False
+        )
         _session_store[session_id]["last_accessed"] = datetime.now()
 
         if state.get("user_email"):
@@ -1092,7 +1123,9 @@ def cleanup_old_persisted_sessions(max_age_days: int = 7) -> int:
         if sessions_to_remove:
             with open(state_file, "w") as f:
                 json.dump(persisted_states, f, indent=2)
-            logger.info(f"🧹 Cleaned up {len(sessions_to_remove)} old persisted sessions")
+            logger.info(
+                f"🧹 Cleaned up {len(sessions_to_remove)} old persisted sessions"
+            )
 
         return len(sessions_to_remove)
 

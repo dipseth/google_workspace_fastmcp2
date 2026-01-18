@@ -251,9 +251,7 @@ class TestServiceListResourceFixes:
         ]
 
         await assert_tools_registered(
-            client,
-            required_tools,
-            context="Service list resource tools"
+            client, required_tools, context="Service list resource tools"
         )
 
     @pytest.mark.asyncio

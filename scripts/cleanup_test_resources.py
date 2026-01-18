@@ -123,6 +123,7 @@ def parse_mcp_response(response) -> dict | list | str:
     except json.JSONDecodeError:
         # If not JSON, it might be a Python repr - try ast.literal_eval
         import ast
+
         try:
             return ast.literal_eval(text)
         except (ValueError, SyntaxError):
@@ -164,11 +165,13 @@ async def find_test_calendar_events(client, email: str) -> CleanupResult:
                             start_time = start.get("dateTime", start.get("date"))
                         else:
                             start_time = start  # Already a string
-                        result.items.append({
-                            "id": event.get("id"),
-                            "summary": summary,
-                            "start": start_time,
-                        })
+                        result.items.append(
+                            {
+                                "id": event.get("id"),
+                                "summary": summary,
+                                "start": start_time,
+                            }
+                        )
 
         result.found = len(result.items)
 
@@ -196,10 +199,12 @@ async def find_test_gmail_filters(client, email: str) -> CleanupResult:
                     criteria = f.get("criteria", {})
                     from_addr = criteria.get("from", "")
                     if matches_test_pattern(from_addr, TEST_PATTERNS["gmail_filters"]):
-                        result.items.append({
-                            "id": f.get("id"),
-                            "criteria": criteria,
-                        })
+                        result.items.append(
+                            {
+                                "id": f.get("id"),
+                                "criteria": criteria,
+                            }
+                        )
 
         result.found = len(result.items)
 
@@ -227,11 +232,15 @@ async def find_test_gmail_labels(client, email: str) -> CleanupResult:
                     name = label.get("name", "")
                     # Only match user-created labels (not system labels)
                     label_type = label.get("type", "user")
-                    if label_type == "user" and matches_test_pattern(name, TEST_PATTERNS["gmail_labels"]):
-                        result.items.append({
-                            "id": label.get("id"),
-                            "name": name,
-                        })
+                    if label_type == "user" and matches_test_pattern(
+                        name, TEST_PATTERNS["gmail_labels"]
+                    ):
+                        result.items.append(
+                            {
+                                "id": label.get("id"),
+                                "name": name,
+                            }
+                        )
 
         result.found = len(result.items)
 
@@ -264,11 +273,13 @@ async def find_test_drive_files(client, email: str) -> CleanupResult:
                 for f in files:
                     name = f.get("name", "")
                     if matches_test_pattern(name, TEST_PATTERNS["drive_files"]):
-                        result.items.append({
-                            "id": f.get("id"),
-                            "name": name,
-                            "mimeType": f.get("mimeType"),
-                        })
+                        result.items.append(
+                            {
+                                "id": f.get("id"),
+                                "name": name,
+                                "mimeType": f.get("mimeType"),
+                            }
+                        )
 
         result.found = len(result.items)
 
@@ -278,7 +289,9 @@ async def find_test_drive_files(client, email: str) -> CleanupResult:
     return result
 
 
-async def delete_calendar_events(client, email: str, event_ids: list[str]) -> tuple[int, list[str]]:
+async def delete_calendar_events(
+    client, email: str, event_ids: list[str]
+) -> tuple[int, list[str]]:
     """Delete calendar events by ID."""
     deleted = 0
     errors = []
@@ -296,7 +309,9 @@ async def delete_calendar_events(client, email: str, event_ids: list[str]) -> tu
     return deleted, errors
 
 
-async def delete_gmail_filters(client, email: str, filter_ids: list[str]) -> tuple[int, list[str]]:
+async def delete_gmail_filters(
+    client, email: str, filter_ids: list[str]
+) -> tuple[int, list[str]]:
     """Delete Gmail filters by ID."""
     deleted = 0
     errors = []
@@ -314,7 +329,9 @@ async def delete_gmail_filters(client, email: str, filter_ids: list[str]) -> tup
     return deleted, errors
 
 
-async def delete_gmail_labels(client, email: str, label_ids: list[str]) -> tuple[int, list[str]]:
+async def delete_gmail_labels(
+    client, email: str, label_ids: list[str]
+) -> tuple[int, list[str]]:
     """Delete Gmail labels by ID."""
     deleted = 0
     errors = []
@@ -332,7 +349,9 @@ async def delete_gmail_labels(client, email: str, label_ids: list[str]) -> tuple
     return deleted, errors
 
 
-async def delete_drive_files(client, email: str, file_ids: list[str]) -> tuple[int, list[str]]:
+async def delete_drive_files(
+    client, email: str, file_ids: list[str]
+) -> tuple[int, list[str]]:
     """Delete Drive files by ID (moves to trash)."""
     errors = []
 
@@ -366,8 +385,12 @@ async def run_cleanup(
     print("🧹 TEST RESOURCE CLEANUP")
     print(f"{'='*60}")
     print(f"   Email: {email}")
-    print(f"   Mode: {'EXECUTE (will delete)' if execute else 'DRY RUN (preview only)'}")
-    print(f"   Resources: calendar={calendar}, gmail_filters={gmail_filters}, gmail_labels={gmail_labels}, drive={drive}")
+    print(
+        f"   Mode: {'EXECUTE (will delete)' if execute else 'DRY RUN (preview only)'}"
+    )
+    print(
+        f"   Resources: calendar={calendar}, gmail_filters={gmail_filters}, gmail_labels={gmail_labels}, drive={drive}"
+    )
     print()
 
     try:
@@ -381,7 +404,9 @@ async def run_cleanup(
                 print(f"   Found: {cal_result.found} event(s)")
                 if cal_result.items:
                     for item in cal_result.items[:5]:
-                        print(f"     - {item.get('summary', 'N/A')} ({item.get('id', 'N/A')[:20]}...)")
+                        print(
+                            f"     - {item.get('summary', 'N/A')} ({item.get('id', 'N/A')[:20]}...)"
+                        )
                     if len(cal_result.items) > 5:
                         print(f"     ... and {len(cal_result.items) - 5} more")
                 if cal_result.errors:
@@ -395,7 +420,9 @@ async def run_cleanup(
                 if filter_result.items:
                     for item in filter_result.items[:5]:
                         criteria = item.get("criteria", {})
-                        print(f"     - from:{criteria.get('from', 'N/A')} ({item.get('id', 'N/A')[:20]}...)")
+                        print(
+                            f"     - from:{criteria.get('from', 'N/A')} ({item.get('id', 'N/A')[:20]}...)"
+                        )
                     if len(filter_result.items) > 5:
                         print(f"     ... and {len(filter_result.items) - 5} more")
                 if filter_result.errors:
@@ -408,7 +435,9 @@ async def run_cleanup(
                 print(f"   Found: {label_result.found} label(s)")
                 if label_result.items:
                     for item in label_result.items[:5]:
-                        print(f"     - {item.get('name', 'N/A')} ({item.get('id', 'N/A')[:20]}...)")
+                        print(
+                            f"     - {item.get('name', 'N/A')} ({item.get('id', 'N/A')[:20]}...)"
+                        )
                     if len(label_result.items) > 5:
                         print(f"     ... and {len(label_result.items) - 5} more")
                 if label_result.errors:
@@ -421,7 +450,9 @@ async def run_cleanup(
                 print(f"   Found: {drive_result.found} file(s)")
                 if drive_result.items:
                     for item in drive_result.items[:5]:
-                        print(f"     - {item.get('name', 'N/A')} ({item.get('id', 'N/A')[:20]}...)")
+                        print(
+                            f"     - {item.get('name', 'N/A')} ({item.get('id', 'N/A')[:20]}...)"
+                        )
                     if len(drive_result.items) > 5:
                         print(f"     ... and {len(drive_result.items) - 5} more")
                 if drive_result.errors:
@@ -435,21 +466,35 @@ async def run_cleanup(
 
                 if calendar and results.get("calendar") and results["calendar"].items:
                     event_ids = [item["id"] for item in results["calendar"].items]
-                    deleted, errors = await delete_calendar_events(client, email, event_ids)
+                    deleted, errors = await delete_calendar_events(
+                        client, email, event_ids
+                    )
                     results["calendar"].deleted = deleted
                     results["calendar"].errors.extend(errors)
                     print(f"   Calendar events deleted: {deleted}/{len(event_ids)}")
 
-                if gmail_filters and results.get("gmail_filters") and results["gmail_filters"].items:
+                if (
+                    gmail_filters
+                    and results.get("gmail_filters")
+                    and results["gmail_filters"].items
+                ):
                     filter_ids = [item["id"] for item in results["gmail_filters"].items]
-                    deleted, errors = await delete_gmail_filters(client, email, filter_ids)
+                    deleted, errors = await delete_gmail_filters(
+                        client, email, filter_ids
+                    )
                     results["gmail_filters"].deleted = deleted
                     results["gmail_filters"].errors.extend(errors)
                     print(f"   Gmail filters deleted: {deleted}/{len(filter_ids)}")
 
-                if gmail_labels and results.get("gmail_labels") and results["gmail_labels"].items:
+                if (
+                    gmail_labels
+                    and results.get("gmail_labels")
+                    and results["gmail_labels"].items
+                ):
                     label_ids = [item["id"] for item in results["gmail_labels"].items]
-                    deleted, errors = await delete_gmail_labels(client, email, label_ids)
+                    deleted, errors = await delete_gmail_labels(
+                        client, email, label_ids
+                    )
                     results["gmail_labels"].deleted = deleted
                     results["gmail_labels"].errors.extend(errors)
                     print(f"   Gmail labels deleted: {deleted}/{len(label_ids)}")
@@ -530,7 +575,12 @@ def main():
     args = parser.parse_args()
 
     # If no specific resources requested, clean all
-    if args.calendar is None and args.gmail_filters is None and args.gmail_labels is None and args.drive is None:
+    if (
+        args.calendar is None
+        and args.gmail_filters is None
+        and args.gmail_labels is None
+        and args.drive is None
+    ):
         args.calendar = True
         args.gmail_filters = True
         args.gmail_labels = True

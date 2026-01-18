@@ -22,6 +22,7 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 # Import HTTP request access for query parameter parsing
 try:
     from fastmcp.server.dependencies import get_http_request
+
     HTTP_REQUEST_AVAILABLE = True
 except ImportError:
     HTTP_REQUEST_AVAILABLE = False
@@ -60,22 +61,36 @@ def get_service_for_tool(tool_name: str) -> str:
     """
     try:
         from middleware.qdrant_core.query_parser import extract_service_from_tool
+
         return extract_service_from_tool(tool_name)
     except ImportError:
         logger.warning("Could not import extract_service_from_tool, using fallback")
         # Fallback: basic keyword matching
         tool_lower = tool_name.lower()
         service_keywords = {
-            "gmail": "gmail", "mail": "gmail", "email": "gmail",
-            "drive": "drive", "file": "drive", "folder": "drive",
-            "calendar": "calendar", "event": "calendar",
-            "docs": "docs", "document": "docs",
-            "sheets": "sheets", "spreadsheet": "sheets",
-            "slides": "slides", "presentation": "slides",
-            "photos": "photos", "photo": "photos",
-            "chat": "chat", "message": "chat", "space": "chat",
-            "forms": "forms", "form": "forms",
-            "people": "people", "contact": "people",
+            "gmail": "gmail",
+            "mail": "gmail",
+            "email": "gmail",
+            "drive": "drive",
+            "file": "drive",
+            "folder": "drive",
+            "calendar": "calendar",
+            "event": "calendar",
+            "docs": "docs",
+            "document": "docs",
+            "sheets": "sheets",
+            "spreadsheet": "sheets",
+            "slides": "slides",
+            "presentation": "slides",
+            "photos": "photos",
+            "photo": "photos",
+            "chat": "chat",
+            "message": "chat",
+            "space": "chat",
+            "forms": "forms",
+            "form": "forms",
+            "people": "people",
+            "contact": "people",
         }
         for keyword, service in service_keywords.items():
             if keyword in tool_lower:
@@ -173,17 +188,23 @@ def parse_http_connection_params() -> Dict[str, Any]:
             uuid_value = query_params["session_id"].strip()
             if uuid_value:
                 result["uuid"] = uuid_value
-                logger.info(f"🔗 HTTP connection parameter: session_id={uuid_value[:8]}...")
+                logger.info(
+                    f"🔗 HTTP connection parameter: session_id={uuid_value[:8]}..."
+                )
 
         # Parse minimal override: ?minimal=false
         if "minimal" in query_params:
             minimal_value = query_params["minimal"].strip().lower()
             if minimal_value in ("true", "1", "yes"):
                 result["minimal_override"] = True
-                logger.info("🔗 HTTP connection parameter: minimal=true (force minimal startup)")
+                logger.info(
+                    "🔗 HTTP connection parameter: minimal=true (force minimal startup)"
+                )
             elif minimal_value in ("false", "0", "no"):
                 result["minimal_override"] = False
-                logger.info("🔗 HTTP connection parameter: minimal=false (disable minimal startup)")
+                logger.info(
+                    "🔗 HTTP connection parameter: minimal=false (disable minimal startup)"
+                )
 
         return result
 
@@ -263,11 +284,19 @@ class SessionToolFilteringMiddleware(Middleware):
         self._processed_sessions: Set[str] = set()
 
         if self.minimal_startup:
-            logger.info("🚀 SessionToolFilteringMiddleware: Minimal startup mode ENABLED")
-            logger.info(f"   Protected tools (always available): {sorted(self.protected_tools)}")
+            logger.info(
+                "🚀 SessionToolFilteringMiddleware: Minimal startup mode ENABLED"
+            )
+            logger.info(
+                f"   Protected tools (always available): {sorted(self.protected_tools)}"
+            )
             if self.default_enabled_services:
-                logger.info(f"   Default enabled services: {self.default_enabled_services}")
-                logger.info("   (Service tools will be computed dynamically using extract_service_from_tool)")
+                logger.info(
+                    f"   Default enabled services: {self.default_enabled_services}"
+                )
+                logger.info(
+                    "   (Service tools will be computed dynamically using extract_service_from_tool)"
+                )
 
     def set_all_tools_callback(self, callback: Callable[[], List[str]]) -> None:
         """
@@ -281,7 +310,9 @@ class SessionToolFilteringMiddleware(Middleware):
         """
         self.get_all_tools_callback = callback
         if self.enable_debug:
-            logger.debug("SessionToolFilteringMiddleware: Tool list callback registered")
+            logger.debug(
+                "SessionToolFilteringMiddleware: Tool list callback registered"
+            )
 
     def _get_all_tool_names(self) -> List[str]:
         """Get all registered tool names using the callback."""
@@ -310,23 +341,31 @@ class SessionToolFilteringMiddleware(Middleware):
         # Check if already applied (in-memory or persisted)
         if session_id in self._processed_sessions:
             if self.enable_debug:
-                logger.debug(f"Minimal startup already applied for session {session_id[:8]}... (in-memory)")
+                logger.debug(
+                    f"Minimal startup already applied for session {session_id[:8]}... (in-memory)"
+                )
             return
 
         if was_minimal_startup_applied(session_id):
             self._processed_sessions.add(session_id)
             if self.enable_debug:
-                logger.debug(f"Minimal startup already applied for session {session_id[:8]}... (persisted)")
+                logger.debug(
+                    f"Minimal startup already applied for session {session_id[:8]}... (persisted)"
+                )
             return
 
         # Get all tool names
         all_tools = self._get_all_tool_names()
         if not all_tools:
-            logger.warning("SessionToolFilteringMiddleware: No tools available for minimal startup")
+            logger.warning(
+                "SessionToolFilteringMiddleware: No tools available for minimal startup"
+            )
             return
 
         # Determine which services to enable (HTTP params override default)
-        enabled_services = custom_services if custom_services else self.default_enabled_services
+        enabled_services = (
+            custom_services if custom_services else self.default_enabled_services
+        )
         from_http = custom_services is not None
 
         # Compute tools for enabled services dynamically
@@ -361,7 +400,9 @@ class SessionToolFilteringMiddleware(Middleware):
             source_msg = f" (from ?service= URL param)"
         else:
             source_msg = ""
-        services_msg = f", services: {enabled_services}{source_msg}" if enabled_services else ""
+        services_msg = (
+            f", services: {enabled_services}{source_msg}" if enabled_services else ""
+        )
 
         logger.info(
             f"🔒 Minimal startup applied for NEW session {session_id[:8]}... "
@@ -425,7 +466,9 @@ class SessionToolFilteringMiddleware(Middleware):
             if restored:
                 self._processed_sessions.add(effective_session_id)
                 if self.enable_debug:
-                    logger.debug(f"Session {effective_session_id[:8]}... restored from persistence")
+                    logger.debug(
+                        f"Session {effective_session_id[:8]}... restored from persistence"
+                    )
                 return effective_session_id, True
 
         # New session - determine if minimal startup should be applied
@@ -435,9 +478,13 @@ class SessionToolFilteringMiddleware(Middleware):
         if minimal_override is not None:
             should_apply_minimal = minimal_override
             if minimal_override:
-                logger.info(f"🔗 Minimal startup FORCED via ?minimal=true for session {effective_session_id[:8]}...")
+                logger.info(
+                    f"🔗 Minimal startup FORCED via ?minimal=true for session {effective_session_id[:8]}..."
+                )
             else:
-                logger.info(f"🔗 Minimal startup DISABLED via ?minimal=false for session {effective_session_id[:8]}...")
+                logger.info(
+                    f"🔗 Minimal startup DISABLED via ?minimal=false for session {effective_session_id[:8]}..."
+                )
 
         # Get custom services from HTTP params (overrides default_enabled_services)
         custom_services = http_params.get("services")
@@ -445,8 +492,7 @@ class SessionToolFilteringMiddleware(Middleware):
         # Apply minimal startup if enabled
         if should_apply_minimal:
             self._apply_minimal_startup_for_session(
-                effective_session_id,
-                custom_services=custom_services
+                effective_session_id, custom_services=custom_services
             )
         elif custom_services:
             # Even without minimal startup, if services are specified, enable only those
@@ -454,7 +500,9 @@ class SessionToolFilteringMiddleware(Middleware):
                 f"🔗 Applying custom service filter for session {effective_session_id[:8]}...: "
                 f"services={custom_services}"
             )
-            self._apply_service_filter_for_session(effective_session_id, custom_services)
+            self._apply_service_filter_for_session(
+                effective_session_id, custom_services
+            )
 
         return effective_session_id, was_restored
 
@@ -473,7 +521,9 @@ class SessionToolFilteringMiddleware(Middleware):
         """
         all_tools = self._get_all_tool_names()
         if not all_tools:
-            logger.warning("SessionToolFilteringMiddleware: No tools available for service filter")
+            logger.warning(
+                "SessionToolFilteringMiddleware: No tools available for service filter"
+            )
             return
 
         # Get tools for the specified services
@@ -499,9 +549,7 @@ class SessionToolFilteringMiddleware(Middleware):
             f"services={services}, {disabled_count} disabled, {enabled_count} enabled"
         )
 
-    async def on_list_tools(
-        self, context: MiddlewareContext, call_next
-    ) -> List[Any]:
+    async def on_list_tools(self, context: MiddlewareContext, call_next) -> List[Any]:
         """
         Filter the tool list based on session-specific disabled tools.
 
@@ -530,7 +578,9 @@ class SessionToolFilteringMiddleware(Middleware):
         if not session_id:
             # No session context - return all tools (global state only)
             if self.enable_debug:
-                logger.debug("SessionToolFilteringMiddleware: No session context, returning all tools")
+                logger.debug(
+                    "SessionToolFilteringMiddleware: No session context, returning all tools"
+                )
             return all_tools
 
         # Parse HTTP connection parameters (for HTTP/SSE transport)
@@ -563,7 +613,9 @@ class SessionToolFilteringMiddleware(Middleware):
         if not session_disabled:
             # No session-specific disables - return all tools
             if self.enable_debug:
-                logger.debug(f"SessionToolFilteringMiddleware: Session {session_id[:8]}... has no disabled tools")
+                logger.debug(
+                    f"SessionToolFilteringMiddleware: Session {session_id[:8]}... has no disabled tools"
+                )
             return all_tools
 
         # Filter out session-disabled tools (except protected ones)
@@ -587,7 +639,9 @@ class SessionToolFilteringMiddleware(Middleware):
             if tool_name in session_disabled:
                 hidden_count += 1
                 if self.enable_debug:
-                    logger.debug(f"SessionToolFilteringMiddleware: Hiding tool '{tool_name}' for session {session_id[:8]}...")
+                    logger.debug(
+                        f"SessionToolFilteringMiddleware: Hiding tool '{tool_name}' for session {session_id[:8]}..."
+                    )
                 continue
 
             # Tool is enabled for this session
@@ -601,9 +655,7 @@ class SessionToolFilteringMiddleware(Middleware):
 
         return filtered_tools
 
-    async def on_call_tool(
-        self, context: MiddlewareContext, call_next
-    ) -> Any:
+    async def on_call_tool(self, context: MiddlewareContext, call_next) -> Any:
         """
         Block execution of session-disabled tools.
 
@@ -684,6 +736,7 @@ def setup_session_tool_filtering_middleware(
     # Load settings if not explicitly provided
     try:
         from config.settings import settings
+
         if minimal_startup is None:
             minimal_startup = settings.minimal_tools_startup
         if default_enabled_services is None:
@@ -722,15 +775,21 @@ def setup_session_tool_filtering_middleware(
     mcp.add_middleware(middleware)
 
     if minimal_startup:
-        logger.info("✅ SessionToolFilteringMiddleware enabled with MINIMAL STARTUP mode")
+        logger.info(
+            "✅ SessionToolFilteringMiddleware enabled with MINIMAL STARTUP mode"
+        )
         logger.info("   • New sessions start with only protected tools")
         if default_enabled_services:
             logger.info(f"   • Default enabled services: {default_enabled_services}")
-            logger.info("   • Service-to-tool mapping via extract_service_from_tool (qdrant_core)")
+            logger.info(
+                "   • Service-to-tool mapping via extract_service_from_tool (qdrant_core)"
+            )
         logger.info("   • Returning sessions restore their previous tool state")
         logger.info("   • Tool states persist across server restarts")
     else:
-        logger.info("✅ SessionToolFilteringMiddleware enabled for per-session tool management")
+        logger.info(
+            "✅ SessionToolFilteringMiddleware enabled for per-session tool management"
+        )
 
     return middleware
 

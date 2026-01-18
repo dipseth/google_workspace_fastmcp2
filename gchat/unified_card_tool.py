@@ -436,7 +436,9 @@ def _initialize_colbert_wrapper(force_reset: bool = False):
     global _card_framework_wrapper_colbert
 
     if not CARD_FRAMEWORK_AVAILABLE:
-        logger.warning("❌ Card Framework not available - cannot initialize ColBERT wrapper")
+        logger.warning(
+            "❌ Card Framework not available - cannot initialize ColBERT wrapper"
+        )
         return None
 
     if force_reset:
@@ -521,7 +523,9 @@ async def _find_card_component_colbert(
         if results:
             logger.info(f"✅ ColBERT search returned {len(results)} results")
             for i, r in enumerate(results[:3]):
-                logger.info(f"  {i+1}. {r.get('name')} (score: {r.get('score', 0):.4f})")
+                logger.info(
+                    f"  {i+1}. {r.get('name')} (score: {r.get('score', 0):.4f})"
+                )
 
         return results
 
@@ -699,7 +703,9 @@ async def _find_card_component(
             ]
             for preferred in preferred_suffixes:
                 if preferred in _card_framework_wrapper.components:
-                    logger.info(f"✅ Preferred exact match: {search_path} -> {preferred}")
+                    logger.info(
+                        f"✅ Preferred exact match: {search_path} -> {preferred}"
+                    )
                     return preferred
 
             for path in available_paths:
@@ -904,9 +910,7 @@ async def _find_card_component(
                 # No component resolved - DO NOT add to results
                 # Unresolved components can't be instantiated, so keeping them
                 # causes valid components with lower scores to be skipped
-                logger.warning(
-                    f"⚠️ No component resolved, skipping: {search_path}"
-                )
+                logger.warning(f"⚠️ No component resolved, skipping: {search_path}")
 
         # Log top results for debugging
         if filtered_results:
@@ -1155,7 +1159,9 @@ def _create_card_with_hybrid_approach(
                 card_dict = component_dict
                 logger.info("🎯 Component is a full Card, using directly")
             else:
-                logger.info("🧩 Component is a widget, incorporating into card structure")
+                logger.info(
+                    "🧩 Component is a widget, incorporating into card structure"
+                )
                 card_dict = _build_card_from_widget(
                     created_component, processed_params, sections
                 )
@@ -1359,7 +1365,9 @@ def _build_card_structure_from_params(
         card_dict["sections"] = sections
     elif isinstance(params.get("sections"), list) and params.get("sections"):
         card_dict["sections"] = params["sections"]
-        logger.info(f"✅ Using sections from params: {len(params['sections'])} section(s)")
+        logger.info(
+            f"✅ Using sections from params: {len(params['sections'])} section(s)"
+        )
     else:
         widgets = []
 
@@ -1647,7 +1655,7 @@ def _build_header_from_params(params: Dict[str, Any]) -> Optional[Dict[str, Any]
 def _add_widgets_from_params(
     widgets: List[Dict[str, Any]],
     params: Dict[str, Any],
-    skip_types: Optional[set] = None
+    skip_types: Optional[set] = None,
 ) -> Dict[str, bool]:
     """
     Add widgets from params to the widgets list.
@@ -1666,12 +1674,12 @@ def _add_widgets_from_params(
         {'text': bool, 'image': bool, 'buttons': bool}
     """
     skip_types = skip_types or set()
-    added = {'text': False, 'image': False, 'buttons': False}
+    added = {"text": False, "image": False, "buttons": False}
 
     # Add text widget if provided
     if "text" not in skip_types and "text" in params:
         widgets.append({"textParagraph": {"text": params["text"]}})
-        added['text'] = True
+        added["text"] = True
         logger.info(f"✅ Added text widget: {params['text'][:50]}...")
 
     # Add image widget if provided
@@ -1680,11 +1688,15 @@ def _add_widgets_from_params(
         if "image_alt_text" in params:
             image_widget["image"]["altText"] = params["image_alt_text"]
         widgets.append(image_widget)
-        added['image'] = True
+        added["image"] = True
         logger.info(f"✅ Added image widget: {params['image_url']}")
 
     # Add buttons widget if provided
-    if "buttons" not in skip_types and "buttons" in params and isinstance(params["buttons"], list):
+    if (
+        "buttons" not in skip_types
+        and "buttons" in params
+        and isinstance(params["buttons"], list)
+    ):
         button_widgets = []
         for button_data in params["buttons"]:
             if isinstance(button_data, dict):
@@ -1714,7 +1726,7 @@ def _add_widgets_from_params(
 
         if button_widgets:
             widgets.append({"buttonList": {"buttons": button_widgets}})
-            added['buttons'] = True
+            added["buttons"] = True
             logger.info(f"✅ Added buttonList with {len(button_widgets)} buttons")
 
     return added
@@ -1751,7 +1763,9 @@ def _build_card_from_widget(
         component_dict = component.to_dict()
         component_name = type(component).__name__
 
-        logger.info(f"🔓 Using trusted universal unpacker for component: {component_name}")
+        logger.info(
+            f"🔓 Using trusted universal unpacker for component: {component_name}"
+        )
         unpacked_widgets = _universal_component_unpacker(component_dict, component_name)
 
         # Filter out duplicates from params
@@ -1766,7 +1780,9 @@ def _build_card_from_widget(
                 logger.info("🔧 Skipping duplicate image widget (using params image)")
                 continue
             if added["buttons"] and "buttonList" in widget:
-                logger.info("🔧 Skipping duplicate button widget (using params buttons)")
+                logger.info(
+                    "🔧 Skipping duplicate button widget (using params buttons)"
+                )
                 continue
             widgets.append(widget)
 
@@ -1775,8 +1791,16 @@ def _build_card_from_widget(
     elif isinstance(component, dict):
         # Plain dictionary - validate and add as widget
         valid_widget_types = {
-            "textParagraph", "image", "decoratedText", "buttonList",
-            "selectionInput", "textInput", "dateTimePicker", "divider", "grid", "columns",
+            "textParagraph",
+            "image",
+            "decoratedText",
+            "buttonList",
+            "selectionInput",
+            "textInput",
+            "dateTimePicker",
+            "divider",
+            "grid",
+            "columns",
         }
 
         if "text" in component and len(component) <= 2:
@@ -1784,8 +1808,16 @@ def _build_card_from_widget(
         elif any(key in valid_widget_types for key in component.keys()):
             widgets.append(component)
         else:
-            logger.warning(f"⚠️ Unknown component dict structure: {list(component.keys())}, creating fallback")
-            widgets.append({"textParagraph": {"text": f"Component data: {str(component)[:100]}..."}})
+            logger.warning(
+                f"⚠️ Unknown component dict structure: {list(component.keys())}, creating fallback"
+            )
+            widgets.append(
+                {
+                    "textParagraph": {
+                        "text": f"Component data: {str(component)[:100]}..."
+                    }
+                }
+            )
 
     else:
         # Raw component without to_dict() - extract from __dict__
@@ -2125,7 +2157,11 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                         google_format_card = {
                             "cardId": f"simple_card_{int(time.time())}_{hash(str(card_params)) % 10000}",
                             "card": _build_card_structure_from_params(
-                                {k: v for k, v in card_params.items() if k != "sections"},
+                                {
+                                    k: v
+                                    for k, v in card_params.items()
+                                    if k != "sections"
+                                },
                                 sections=card_params.get("sections"),
                             ),
                         }

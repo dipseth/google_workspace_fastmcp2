@@ -328,7 +328,9 @@ async def session_cleanup():
             if results["errors"]:
                 print(f"   - Errors: {len(results['errors'])}")
                 for err in results["errors"][:5]:  # Show first 5 errors
-                    print(f"     ⚠️  {err['type']}: {err.get('id', err.get('ids', 'N/A'))}")
+                    print(
+                        f"     ⚠️  {err['type']}: {err.get('id', err.get('ids', 'N/A'))}"
+                    )
     except Exception as e:
         print(f"\n❌ Cleanup failed: {e}")
         print("   Run scripts/cleanup_test_resources.py for manual cleanup")

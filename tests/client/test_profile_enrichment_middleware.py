@@ -28,7 +28,7 @@ class TestProfileEnrichmentMiddleware:
         await assert_tools_registered(
             client,
             ["list_messages", "search_messages"],
-            context="Chat tools for profile enrichment middleware"
+            context="Chat tools for profile enrichment middleware",
         )
 
     @pytest.mark.asyncio

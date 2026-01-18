@@ -214,7 +214,9 @@ class TestMiddlewareServerIntegration:
             "list_calendars",
         ]
 
-        await assert_tools_registered(client, expected_tools, context="Middleware resolution tools")
+        await assert_tools_registered(
+            client, expected_tools, context="Middleware resolution tools"
+        )
 
     @pytest.mark.asyncio
     async def test_resources_still_accessible(self, client):

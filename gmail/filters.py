@@ -129,7 +129,9 @@ async def apply_filter_to_existing_messages(
 
             # Report progress on total messages found so far
             if progress:
-                await progress.set_message(f"Found {len(all_message_ids)} messages so far...")
+                await progress.set_message(
+                    f"Found {len(all_message_ids)} messages so far..."
+                )
 
             # Check if we've reached the maximum message limit
             if max_messages and len(all_message_ids) >= max_messages:

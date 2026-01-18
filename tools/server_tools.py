@@ -688,7 +688,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
             if session_id:
                 disabled = get_session_disabled_tools(session_id)
                 return SessionToolState(
-                    sessionId=session_id[:8] + "..." if len(session_id) > 8 else session_id,
+                    sessionId=(
+                        session_id[:8] + "..." if len(session_id) > 8 else session_id
+                    ),
                     sessionAvailable=True,
                     sessionDisabledTools=sorted(list(disabled)),
                     sessionDisabledCount=len(disabled),
@@ -709,7 +711,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 enabledCount=0,
                 disabledCount=0,
                 protectedTools=list(protected_tools_set),
-                sessionState=_get_session_state() if scope_normalized == "session" else None,
+                sessionState=(
+                    _get_session_state() if scope_normalized == "session" else None
+                ),
                 message=f"Invalid action '{action}'",
                 error="Valid actions: list, disable, enable, disable_all_except, enable_all",
             )
@@ -725,7 +729,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 enabledCount=0,
                 disabledCount=0,
                 protectedTools=list(protected_tools_set),
-                sessionState=_get_session_state() if scope_normalized == "session" else None,
+                sessionState=(
+                    _get_session_state() if scope_normalized == "session" else None
+                ),
                 message="Unable to access FastMCP tool registry",
                 error="Tool registry not available",
             )
@@ -756,8 +762,13 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
             # Include session state info in list response
             session_info = ""
-            if session_state.sessionAvailable and session_state.sessionDisabledCount > 0:
-                session_info = f", {session_state.sessionDisabledCount} session-disabled"
+            if (
+                session_state.sessionAvailable
+                and session_state.sessionDisabledCount > 0
+            ):
+                session_info = (
+                    f", {session_state.sessionDisabledCount} session-disabled"
+                )
 
             return ManageToolsResponse(
                 success=True,
@@ -788,7 +799,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         names.append(str(parsed))
                 except json.JSONDecodeError:
                     if "," in names_input:
-                        names.extend(n.strip() for n in names_input.split(",") if n.strip())
+                        names.extend(
+                            n.strip() for n in names_input.split(",") if n.strip()
+                        )
                     else:
                         names.append(names_input.strip())
             else:
@@ -804,7 +817,10 @@ def setup_server_tools(mcp: FastMCP) -> None:
         target_names = _normalize_tool_names(tool_names)
 
         # For some actions, we require at least one concrete tool name
-        if action_normalized in {"disable", "enable", "disable_all_except"} and not target_names:
+        if (
+            action_normalized in {"disable", "enable", "disable_all_except"}
+            and not target_names
+        ):
             return ManageToolsResponse(
                 success=False,
                 action=action,
@@ -813,7 +829,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 enabledCount=enabled_count,
                 disabledCount=disabled_count,
                 protectedTools=list(protected_tools_set),
-                sessionState=_get_session_state() if scope_normalized == "session" else None,
+                sessionState=(
+                    _get_session_state() if scope_normalized == "session" else None
+                ),
                 message="'tool_names' parameter is required for this action",
                 error="Missing required parameter: tool_names",
             )
@@ -848,7 +866,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         continue
                     if name in protected_tools_set:
                         skipped.append(name)
-                        errors.append(f"Tool '{name}' is protected and cannot be disabled")
+                        errors.append(
+                            f"Tool '{name}' is protected and cannot be disabled"
+                        )
                         continue
                     # Disable for session only (persist=True for cross-client visibility)
                     if disable_tool_for_session(name, session_id, persist=True):
@@ -869,7 +889,8 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     toolsSkipped=skipped if skipped else None,
                     protectedTools=list(protected_tools_set),
                     sessionState=session_state,
-                    message=f"Disabled {len(affected)} tools for this session" + (f", skipped {len(skipped)}" if skipped else ""),
+                    message=f"Disabled {len(affected)} tools for this session"
+                    + (f", skipped {len(skipped)}" if skipped else ""),
                     errors=errors if errors else None,
                 )
 
@@ -890,7 +911,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         affected.append(name)
                     else:
                         skipped.append(name)
-                        errors.append(f"Tool '{name}' does not support dynamic disable()")
+                        errors.append(
+                            f"Tool '{name}' does not support dynamic disable()"
+                        )
                 except Exception as e:
                     logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
                     errors.append(f"Failed to disable tool '{name}': {e}")
@@ -905,7 +928,8 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
                 protectedTools=list(protected_tools_set),
-                message=f"Disabled {len(affected)} tools globally" + (f", skipped {len(skipped)}" if skipped else ""),
+                message=f"Disabled {len(affected)} tools globally"
+                + (f", skipped {len(skipped)}" if skipped else ""),
                 errors=errors if errors else None,
             )
 
@@ -1033,7 +1057,8 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     toolsSkipped=skipped if skipped else None,
                     protectedTools=list(protected_tools_set),
                     sessionState=session_state,
-                    message=f"Enabled {len(affected)} tools for this session" + (f", skipped {len(skipped)}" if skipped else ""),
+                    message=f"Enabled {len(affected)} tools for this session"
+                    + (f", skipped {len(skipped)}" if skipped else ""),
                     errors=errors if errors else None,
                 )
 
@@ -1050,7 +1075,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         affected.append(name)
                     else:
                         skipped.append(name)
-                        errors.append(f"Tool '{name}' does not support dynamic enable()")
+                        errors.append(
+                            f"Tool '{name}' does not support dynamic enable()"
+                        )
                 except Exception as e:
                     logger.error(f"Error enabling tool {name}: {e}", exc_info=True)
                     errors.append(f"Failed to enable tool '{name}': {e}")
@@ -1065,7 +1092,8 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
                 protectedTools=list(protected_tools_set),
-                message=f"Enabled {len(affected)} tools globally" + (f", skipped {len(skipped)}" if skipped else ""),
+                message=f"Enabled {len(affected)} tools globally"
+                + (f", skipped {len(skipped)}" if skipped else ""),
                 errors=errors if errors else None,
             )
 
@@ -1158,7 +1186,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
             enabledCount=enabled_count,
             disabledCount=disabled_count,
             protectedTools=list(protected_tools_set),
-            sessionState=_get_session_state() if scope_normalized == "session" else None,
+            sessionState=(
+                _get_session_state() if scope_normalized == "session" else None
+            ),
             message="Unknown error while managing tools",
             error="Unexpected code path reached",
         )
@@ -1358,7 +1388,11 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     name=t["tool_name"],
                     usageCount=t["usage_count"],
                     service=t["service"],
-                    lastUsed=t["recent_activity"].get("last_used") if t["recent_activity"] else None,
+                    lastUsed=(
+                        t["recent_activity"].get("last_used")
+                        if t["recent_activity"]
+                        else None
+                    ),
                     currentlyEnabled=t["tool_name"] in registry,
                 )
                 for t in matched_tools

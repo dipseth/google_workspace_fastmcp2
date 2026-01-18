@@ -45,7 +45,9 @@ class StructuredResponseDemoPrompts:
         self.structured_tools_map = self._get_structured_tools_mapping()
 
         # Pre-generate tool optimization content for different demo types
-        self.multi_service_optimization = ToolOptimizationHelper.generate_multi_service_section()
+        self.multi_service_optimization = (
+            ToolOptimizationHelper.generate_multi_service_section()
+        )
 
         if JINJA2_AVAILABLE:
             # Built-in templates for structured response demos

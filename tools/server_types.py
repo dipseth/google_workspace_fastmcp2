@@ -37,9 +37,7 @@ class HealthCheckResponse(BaseModel):
         ...,
         description="Overall health status: 'healthy', 'degraded', or 'unhealthy'",
     )
-    healthy: bool = Field(
-        ..., description="Whether the server is in a healthy state"
-    )
+    healthy: bool = Field(..., description="Whether the server is in a healthy state")
     serverName: str = Field(..., description="Name of the MCP server")
     serverVersion: str = Field(..., description="Version of the MCP server")
     host: str = Field(..., description="Server host address")
@@ -63,7 +61,9 @@ class HealthCheckResponse(BaseModel):
     oauthCallbackUrl: str = Field(
         ..., description="OAuth callback URL for authentication redirects"
     )
-    error: Optional[str] = Field(None, description="Error message if health check failed")
+    error: Optional[str] = Field(
+        None, description="Error message if health check failed"
+    )
 
 
 # =============================================================================
@@ -123,9 +123,7 @@ class ManageCredentialsResponse(BaseModel):
     message: str = Field(
         ..., description="Human-readable message describing the operation result"
     )
-    error: Optional[str] = Field(
-        None, description="Error message if operation failed"
-    )
+    error: Optional[str] = Field(None, description="Error message if operation failed")
 
 
 # =============================================================================
@@ -141,7 +139,9 @@ class ToolInfo(BaseModel):
     isProtected: bool = Field(
         ..., description="Whether the tool is protected from being disabled"
     )
-    description: Optional[str] = Field(None, description="Tool description if available")
+    description: Optional[str] = Field(
+        None, description="Tool description if available"
+    )
 
 
 class SessionToolState(BaseModel):
@@ -176,9 +176,7 @@ class ManageToolsResponse(BaseModel):
         "global",
         description="Scope of the operation: 'global' affects all clients, 'session' affects only the current session",
     )
-    totalTools: int = Field(
-        ..., description="Total number of tools in the registry"
-    )
+    totalTools: int = Field(..., description="Total number of tools in the registry")
     enabledCount: int = Field(
         ..., description="Number of currently enabled tools (global state)"
     )
@@ -186,10 +184,12 @@ class ManageToolsResponse(BaseModel):
         ..., description="Number of currently disabled tools (global state)"
     )
     toolsAffected: Optional[List[str]] = Field(
-        None, description="List of tool names that were enabled/disabled by this operation"
+        None,
+        description="List of tool names that were enabled/disabled by this operation",
     )
     toolsSkipped: Optional[List[str]] = Field(
-        None, description="List of tool names that were skipped (protected or not found)"
+        None,
+        description="List of tool names that were skipped (protected or not found)",
     )
     toolList: Optional[List[ToolInfo]] = Field(
         None, description="Full list of tools with their status (for 'list' action)"
@@ -201,11 +201,10 @@ class ManageToolsResponse(BaseModel):
         None,
         description="Session-specific tool state (included when scope='session' or action='list')",
     )
-    message: str = Field(
-        ..., description="Human-readable summary of the operation"
-    )
+    message: str = Field(..., description="Human-readable summary of the operation")
     errors: Optional[List[str]] = Field(
-        None, description="List of error messages for individual tool operations that failed"
+        None,
+        description="List of error messages for individual tool operations that failed",
     )
     error: Optional[str] = Field(
         None, description="Error message if the overall operation failed"
@@ -223,7 +222,8 @@ class ToolUsageInfo(BaseModel):
     name: str = Field(..., description="Name of the tool")
     usageCount: int = Field(..., description="Number of times the tool has been used")
     service: Optional[str] = Field(
-        None, description="Service category the tool belongs to (e.g., 'gmail', 'drive')"
+        None,
+        description="Service category the tool belongs to (e.g., 'gmail', 'drive')",
     )
     lastUsed: Optional[str] = Field(
         None, description="Timestamp of the most recent usage"
@@ -249,9 +249,7 @@ class ManageToolsByAnalyticsResponse(BaseModel):
     minUsageCount: int = Field(
         ..., description="Minimum usage count threshold that was applied"
     )
-    limit: int = Field(
-        ..., description="Maximum number of tools that were considered"
-    )
+    limit: int = Field(..., description="Maximum number of tools that were considered")
     toolsMatched: int = Field(
         ..., description="Number of tools that matched the filter criteria"
     )
@@ -264,11 +262,10 @@ class ManageToolsByAnalyticsResponse(BaseModel):
     usageAnalytics: Optional[List[ToolUsageInfo]] = Field(
         None, description="Usage analytics for matched tools (for 'preview' action)"
     )
-    message: str = Field(
-        ..., description="Human-readable summary of the operation"
-    )
+    message: str = Field(..., description="Human-readable summary of the operation")
     errors: Optional[List[str]] = Field(
-        None, description="List of error messages for individual tool operations that failed"
+        None,
+        description="List of error messages for individual tool operations that failed",
     )
     error: Optional[str] = Field(
         None, description="Error message if the overall operation failed"

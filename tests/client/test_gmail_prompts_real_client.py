@@ -135,7 +135,9 @@ class TestGmailPrompts:
         has_template_syntax = ("{{" in content and "}}" in content) or (
             "{" in content and "://" in content
         )
-        assert has_template_syntax, "Prompt should contain template expressions or resource URIs"
+        assert (
+            has_template_syntax
+        ), "Prompt should contain template expressions or resource URIs"
         assert "gmail" in content.lower() or "email" in content.lower()
 
         print("✅ quick_email_demo prompt test passed")

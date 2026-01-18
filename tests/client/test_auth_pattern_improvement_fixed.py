@@ -178,7 +178,9 @@ class TestImprovedAuthPattern:
     async def test_list_gmail_labels_tool_available(self, client):
         """Test that list_gmail_labels tool is available and has proper signature, and actually call it."""
         # Check that Gmail labels tool is registered using standardized helper
-        await assert_tools_registered(client, ["list_gmail_labels"], context="Auth pattern tools")
+        await assert_tools_registered(
+            client, ["list_gmail_labels"], context="Auth pattern tools"
+        )
 
         print("\n✅ list_gmail_labels tool registered and available")
 

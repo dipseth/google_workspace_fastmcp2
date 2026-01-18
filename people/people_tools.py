@@ -439,9 +439,7 @@ async def manage_people_contact_labels(
     )
     lines.append(f"Removed {removed_count} contact(s) from label.")
     if no_match_emails:
-        lines.append(
-            f"No matching contacts found for {len(no_match_emails)} email(s)."
-        )
+        lines.append(f"No matching contacts found for {len(no_match_emails)} email(s).")
     if failed_emails:
         unique_failed = sorted(set(failed_emails))
         lines.append(

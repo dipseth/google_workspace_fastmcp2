@@ -307,9 +307,7 @@ class TestMetadataSourceOfTruth:
         ]
 
         await assert_tools_registered(
-            client,
-            legacy_tools,
-            context="Legacy tools for backwards compatibility"
+            client, legacy_tools, context="Legacy tools for backwards compatibility"
         )
 
         print("✅ Metadata maintains backwards compatibility")

@@ -892,7 +892,11 @@ class TestSheetsFormatRangeComparison:
 
         # Get tool info from manage_tools list action to verify it has metadata
         result = await client.call_tool("manage_tools", {"action": "list"})
-        content = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
+        content = (
+            result.content[0].text
+            if hasattr(result.content[0], "text")
+            else str(result.content[0])
+        )
         data = json.loads(content)
 
         # Find the format_sheet_range tool in the tool list
@@ -907,10 +911,13 @@ class TestSheetsFormatRangeComparison:
         ), "format_sheet_range tool should be in manage_tools list"
 
         # The tool should have a description indicating it covers formatting functionality
-        assert format_range_tool.get("description"), "format_sheet_range should have a description"
+        assert format_range_tool.get(
+            "description"
+        ), "format_sheet_range should have a description"
         desc_lower = format_range_tool["description"].lower()
-        assert "format" in desc_lower or "range" in desc_lower, \
-            "format_sheet_range description should mention formatting"
+        assert (
+            "format" in desc_lower or "range" in desc_lower
+        ), "format_sheet_range description should mention formatting"
 
 
 @pytest.mark.service("sheets")

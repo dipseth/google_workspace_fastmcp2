@@ -192,7 +192,9 @@ session_tool_filter_middleware = setup_session_tool_filtering_middleware(
     minimal_startup=MINIMAL_TOOLS_STARTUP,  # Use setting from config
 )
 if MINIMAL_TOOLS_STARTUP:
-    logger.info("  ✅ Minimal startup mode active - new sessions get only essential tools")
+    logger.info(
+        "  ✅ Minimal startup mode active - new sessions get only essential tools"
+    )
 else:
     logger.info("  ✅ Per-session tool enable/disable supported via scope='session'")
 
@@ -350,16 +352,25 @@ setup_unified_card_tool(mcp)
 
 # Initialize ColBERT wrapper on startup if COLBERT_EMBEDDING_DEV=true
 if settings.colbert_embedding_dev:
-    logger.info("🤖 COLBERT_EMBEDDING_DEV=true - Initializing ColBERT wrapper on startup...")
+    logger.info(
+        "🤖 COLBERT_EMBEDDING_DEV=true - Initializing ColBERT wrapper on startup..."
+    )
     try:
         from gchat.unified_card_tool import _initialize_colbert_wrapper
+
         _initialize_colbert_wrapper()
-        logger.info("✅ ColBERT wrapper initialized on startup - multi-vector embeddings ready")
+        logger.info(
+            "✅ ColBERT wrapper initialized on startup - multi-vector embeddings ready"
+        )
     except Exception as e:
         logger.error(f"❌ Failed to initialize ColBERT wrapper on startup: {e}")
-        logger.warning("⚠️ ColBERT mode will still work on-demand if called via use_colbert=True")
+        logger.warning(
+            "⚠️ ColBERT mode will still work on-demand if called via use_colbert=True"
+        )
 else:
-    logger.info("⏭️ ColBERT embedding initialization skipped - set COLBERT_EMBEDDING_DEV=true in .env to enable")
+    logger.info(
+        "⏭️ ColBERT embedding initialization skipped - set COLBERT_EMBEDDING_DEV=true in .env to enable"
+    )
 
 # DEPRECATED: Smart Card Tool removed due to formatting issues with Google Chat Cards v2 API
 # The send_smart_card function had structural problems that prevented proper card rendering
@@ -466,7 +477,7 @@ except Exception as e:
 logger.info("📋 Building dynamic MCP instructions from Qdrant analytics...")
 try:
     import asyncio
-    
+
     # Run the async instruction update in a sync context
     asyncio.run(update_mcp_instructions(mcp, qdrant_middleware))
     logger.info("✅ MCP instructions updated with dynamic content from Qdrant")
@@ -530,21 +541,23 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="FastMCP Google Workspace Server")
     parser.add_argument(
-        "--transport", "-t",
+        "--transport",
+        "-t",
         choices=["stdio", "http", "sse"],
         default=None,
-        help="Transport mode: stdio (default), http, or sse"
+        help="Transport mode: stdio (default), http, or sse",
     )
     parser.add_argument(
-        "--port", "-p",
+        "--port",
+        "-p",
         type=int,
         default=None,
-        help="Port for HTTP/SSE transport (default: from settings)"
+        help="Port for HTTP/SSE transport (default: from settings)",
     )
     parser.add_argument(
         "--host",
         default=None,
-        help="Host for HTTP/SSE transport (default: from settings)"
+        help="Host for HTTP/SSE transport (default: from settings)",
     )
     args = parser.parse_args()
 
@@ -577,7 +590,7 @@ def main():
     try:
         # Check for transport mode: CLI args > environment variable > default (stdio)
         transport_mode = args.transport or os.getenv("MCP_TRANSPORT", "stdio").lower()
-        
+
         if transport_mode == "stdio":
             # Stdio transport for command-based MCP clients (uvx, npx, etc.)
             logger.info("📡 Starting server with STDIO transport (command-based)")
@@ -602,7 +615,9 @@ def main():
                 if ssl_config:
                     run_args["transport"] = transport_mode
                     run_args["uvicorn_config"] = ssl_config
-                    logger.info(f"🔒 Starting server with {transport_mode.upper()} transport + SSL")
+                    logger.info(
+                        f"🔒 Starting server with {transport_mode.upper()} transport + SSL"
+                    )
                     logger.info(f"SSL Certificate: {ssl_config['ssl_certfile']}")
                     logger.info(f"SSL Private Key: {ssl_config['ssl_keyfile']}")
                 else:
@@ -612,7 +627,9 @@ def main():
                     run_args["transport"] = transport_mode
             else:
                 run_args["transport"] = transport_mode
-                logger.info(f"🌐 Starting server with {transport_mode.upper()} transport")
+                logger.info(
+                    f"🌐 Starting server with {transport_mode.upper()} transport"
+                )
 
             # Run the server with appropriate transport and SSL configuration
             mcp.run(**run_args)

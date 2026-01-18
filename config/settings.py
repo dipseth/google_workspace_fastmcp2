@@ -389,7 +389,10 @@ class Settings(BaseSettings):
             List[str]: List of service names (e.g., ['drive', 'gmail']).
                        Returns empty list if not configured.
         """
-        if not self.minimal_startup_services or self.minimal_startup_services.strip() == "":
+        if (
+            not self.minimal_startup_services
+            or self.minimal_startup_services.strip() == ""
+        ):
             return []
 
         # Parse comma-separated list, strip whitespace, filter empty strings
@@ -402,6 +405,7 @@ class Settings(BaseSettings):
         # Validate against ScopeRegistry services
         try:
             from auth.scope_registry import ScopeRegistry
+
             valid_services = ScopeRegistry.get_all_services()
             validated = [s for s in services if s in valid_services]
 

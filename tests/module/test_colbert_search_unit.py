@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 
 class TestModuleWrapperColBERTSearch:
@@ -103,7 +105,7 @@ class TestModuleWrapperColBERTSearch:
             )
             print(f"\nThreshold {threshold}: {len(results)} results")
             if results:
-                scores = [r.get('score', 0) for r in results]
+                scores = [r.get("score", 0) for r in results]
                 print(f"  Score range: {min(scores):.2f} - {max(scores):.2f}")
 
     def test_component_object_retrieval(self, colbert_wrapper):
@@ -124,9 +126,9 @@ class TestModuleWrapperColBERTSearch:
         components_missing = 0
 
         for r in results:
-            name = r.get('name')
-            path = r.get('path')
-            component = r.get('component')
+            name = r.get("name")
+            path = r.get("path")
+            component = r.get("component")
 
             if component is not None:
                 components_found += 1
@@ -143,7 +145,9 @@ class TestModuleWrapperColBERTSearch:
         print(f"  Components missing: {components_missing}")
 
         if components_missing > 0:
-            print("\n*** BUG: Some components could not be retrieved from their paths ***")
+            print(
+                "\n*** BUG: Some components could not be retrieved from their paths ***"
+            )
             print("This causes ColBERT search to fail even when it finds matches.")
 
     def test_get_component_from_path_directly(self, colbert_wrapper):
@@ -165,7 +169,7 @@ class TestModuleWrapperColBERTSearch:
 
         print(f"\nColBERT search returned paths:")
         for r in results:
-            path = r.get('path')
+            path = r.get("path")
             exists = path in colbert_wrapper.components
             print(f"  - {path}: {'EXISTS' if exists else 'NOT FOUND'}")
 
@@ -182,7 +186,9 @@ class TestNLPCardParser:
         except ImportError:
             pytest.skip("Could not import nlp_card_parser")
 
-        description = "Create a card titled 'Project Status' with subtitle 'Weekly Update'"
+        description = (
+            "Create a card titled 'Project Status' with subtitle 'Weekly Update'"
+        )
 
         print(f"\n{'='*60}")
         print(f"NLP Parser Header Extraction Test")
@@ -197,7 +203,7 @@ class TestNLPCardParser:
 
         assert result is not None, "NLP parser should extract parameters"
         # Check for title or header in extracted params
-        has_title = any(k in result for k in ['title', 'header', 'header_title'])
+        has_title = any(k in result for k in ["title", "header", "header_title"])
         print(f"\nTitle/header extracted: {has_title}")
 
     def test_nlp_parser_extracts_buttons(self):
@@ -297,7 +303,9 @@ class TestColBERTWithNLPIntegration:
 
         print(f"\nResults: {len(results)}")
         for r in results:
-            print(f"  - {r.get('name')}: score={r.get('score', 0):.4f}, component={r.get('component')}")
+            print(
+                f"  - {r.get('name')}: score={r.get('score', 0):.4f}, component={r.get('component')}"
+            )
 
     @pytest.mark.asyncio
     async def test_colbert_plus_nlp_combined(self, unified_card_functions):

@@ -150,25 +150,60 @@ class ToolOptimizationHelper:
     # Tool categories for better organization in documentation
     TOOL_CATEGORIES: Dict[str, Dict[str, List[str]]] = {
         "gmail": {
-            "Send/Draft": ["send_gmail_message", "draft_gmail_message", "reply_to_gmail_message", "forward_gmail_message"],
-            "Search/Read": ["search_gmail_messages", "get_gmail_message_content", "get_gmail_thread_content"],
-            "Labels": ["list_gmail_labels", "manage_gmail_label", "modify_gmail_message_labels"],
-            "Filters": ["list_gmail_filters", "create_gmail_filter", "delete_gmail_filter"],
+            "Send/Draft": [
+                "send_gmail_message",
+                "draft_gmail_message",
+                "reply_to_gmail_message",
+                "forward_gmail_message",
+            ],
+            "Search/Read": [
+                "search_gmail_messages",
+                "get_gmail_message_content",
+                "get_gmail_thread_content",
+            ],
+            "Labels": [
+                "list_gmail_labels",
+                "manage_gmail_label",
+                "modify_gmail_message_labels",
+            ],
+            "Filters": [
+                "list_gmail_filters",
+                "create_gmail_filter",
+                "delete_gmail_filter",
+            ],
         },
         "drive": {
             "Upload/Create": ["upload_to_drive", "create_drive_file"],
-            "Search/List": ["search_drive_files", "list_drive_items", "get_drive_file_content"],
-            "Manage": ["share_drive_files", "make_drive_files_public", "manage_drive_files"],
+            "Search/List": [
+                "search_drive_files",
+                "list_drive_items",
+                "get_drive_file_content",
+            ],
+            "Manage": [
+                "share_drive_files",
+                "make_drive_files_public",
+                "manage_drive_files",
+            ],
         },
         "calendar": {
             "List/Get": ["list_calendars", "list_events", "get_event"],
             "Create/Modify": ["create_calendar", "create_event", "modify_event"],
-            "Delete/Bulk": ["delete_event", "bulk_calendar_operations", "move_events_between_calendars"],
+            "Delete/Bulk": [
+                "delete_event",
+                "bulk_calendar_operations",
+                "move_events_between_calendars",
+            ],
         },
         "chat": {
             "Spaces": ["list_spaces", "list_messages", "search_messages"],
             "Basic": ["send_message", "send_card_message"],
-            "Cards": ["send_simple_card", "send_interactive_card", "send_form_card", "send_rich_card", "send_dynamic_card"],
+            "Cards": [
+                "send_simple_card",
+                "send_interactive_card",
+                "send_form_card",
+                "send_rich_card",
+                "send_dynamic_card",
+            ],
         },
         "sheets": {
             "Read": ["list_spreadsheets", "get_spreadsheet_info", "read_sheet_values"],
@@ -182,17 +217,33 @@ class ToolOptimizationHelper:
         },
         "slides": {
             "Create": ["create_presentation", "add_slide"],
-            "Manage": ["get_presentation_info", "update_slide_content", "export_and_download_presentation"],
+            "Manage": [
+                "get_presentation_info",
+                "update_slide_content",
+                "export_and_download_presentation",
+            ],
         },
         "photos": {
-            "Albums": ["list_photos_albums", "list_album_photos", "create_photos_album"],
+            "Albums": [
+                "list_photos_albums",
+                "list_album_photos",
+                "create_photos_album",
+            ],
             "Search": ["search_photos", "photos_smart_search"],
-            "Details": ["get_photo_details", "photos_batch_details", "get_photos_library_info"],
+            "Details": [
+                "get_photo_details",
+                "photos_batch_details",
+                "get_photos_library_info",
+            ],
             "Upload": ["upload_photos", "upload_folder_photos"],
             "Advanced": ["photos_performance_stats", "photos_optimized_album_sync"],
         },
         "people": {
-            "Labels": ["list_people_contact_labels", "get_people_contact_group_members", "manage_people_contact_labels"],
+            "Labels": [
+                "list_people_contact_labels",
+                "get_people_contact_group_members",
+                "manage_people_contact_labels",
+            ],
         },
         "docs": {
             "Read": ["search_docs", "get_doc_content", "list_docs_in_folder"],
@@ -275,7 +326,7 @@ class ToolOptimizationHelper:
             # Break into lines of ~4 tools each for readability
             lines = []
             for i in range(0, len(tool_strings), 4):
-                chunk = tool_strings[i:i + 4]
+                chunk = tool_strings[i : i + 4]
                 lines.append(", ".join(chunk))
             return ",\n        ".join(lines)
 
@@ -348,19 +399,21 @@ class ToolOptimizationHelper:
 
         if include_code_block:
             services_comment = ", ".join([s.title() for s in include_services])
-            lines.extend([
-                "```python",
-                f"# Disable all tools except {services_comment}-related ones for better performance",
-                "await manage_tools(",
-                '    action="disable_all_except",',
-                "    tool_names=[",
-                f"        {tool_list_str}",
-                "    ],",
-                '    scope="session"',
-                ")",
-                "```",
-                "",
-            ])
+            lines.extend(
+                [
+                    "```python",
+                    f"# Disable all tools except {services_comment}-related ones for better performance",
+                    "await manage_tools(",
+                    '    action="disable_all_except",',
+                    "    tool_names=[",
+                    f"        {tool_list_str}",
+                    "    ],",
+                    '    scope="session"',
+                    ")",
+                    "```",
+                    "",
+                ]
+            )
 
         if include_tool_categories:
             lines.append("**Relevant Tools for this prompt:**")
@@ -369,11 +422,13 @@ class ToolOptimizationHelper:
         if include_service_list:
             all_services = cls.get_all_service_names()
             service_list = ", ".join([f"`{s}`" for s in all_services])
-            lines.extend([
-                "**All available service names for manage_tools:**",
-                service_list,
-                "",
-            ])
+            lines.extend(
+                [
+                    "**All available service names for manage_tools:**",
+                    service_list,
+                    "",
+                ]
+            )
 
         lines.append("---")
         lines.append("")
@@ -399,15 +454,26 @@ class ToolOptimizationHelper:
         if service_examples is None:
             # Default representative tools per service
             service_examples = {
-                "gmail": ["send_gmail_message", "search_gmail_messages", "draft_gmail_message"],
+                "gmail": [
+                    "send_gmail_message",
+                    "search_gmail_messages",
+                    "draft_gmail_message",
+                ],
                 "drive": ["upload_to_drive", "search_drive_files", "list_drive_items"],
                 "calendar": ["create_event", "list_events", "modify_event"],
                 "chat": ["send_message", "send_dynamic_card", "list_spaces"],
                 "forms": ["create_form", "add_questions_to_form", "get_form"],
                 "slides": ["create_presentation", "add_slide", "get_presentation_info"],
-                "sheets": ["list_spreadsheets", "read_sheet_values", "modify_sheet_values"],
+                "sheets": [
+                    "list_spreadsheets",
+                    "read_sheet_values",
+                    "modify_sheet_values",
+                ],
                 "photos": ["list_photos_albums", "search_photos", "upload_photos"],
-                "people": ["list_people_contact_labels", "get_people_contact_group_members"],
+                "people": [
+                    "list_people_contact_labels",
+                    "get_people_contact_group_members",
+                ],
                 "docs": ["search_docs", "get_doc_content", "create_doc"],
             }
 
@@ -428,14 +494,18 @@ class ToolOptimizationHelper:
             service_display = metadata["name"] if metadata else service.title()
             tool_str = ", ".join([f'"{t}"' for t in tools])
             lines.append(f"# For {service_display}:")
-            lines.append(f'await manage_tools(action="disable_all_except", tool_names=[{tool_str}], scope="session")')
+            lines.append(
+                f'await manage_tools(action="disable_all_except", tool_names=[{tool_str}], scope="session")'
+            )
             lines.append("")
 
-        lines.extend([
-            "```",
-            "",
-            "**All Google Service Names:**",
-        ])
+        lines.extend(
+            [
+                "```",
+                "",
+                "**All Google Service Names:**",
+            ]
+        )
 
         for service in sorted(service_examples.keys()):
             metadata = cls.get_service_metadata(service)
@@ -444,11 +514,13 @@ class ToolOptimizationHelper:
             else:
                 lines.append(f"- `{service}`")
 
-        lines.extend([
-            "",
-            "---",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "---",
+                "",
+            ]
+        )
 
         return "\n".join(lines)
 

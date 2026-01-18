@@ -33,6 +33,7 @@ def get_session_file_path() -> Path:
     """Get the path to the session tool states file."""
     try:
         from config.settings import settings
+
         return settings.session_tool_state_path
     except Exception:
         # Fallback to default location
@@ -120,7 +121,9 @@ def cleanup_sessions(
 
     result = {
         "file_path": str(file_path),
-        "file_size_mb": file_path.stat().st_size / (1024 * 1024) if file_path.exists() else 0,
+        "file_size_mb": (
+            file_path.stat().st_size / (1024 * 1024) if file_path.exists() else 0
+        ),
         "total_sessions": total,
         "sessions_to_remove": len(to_remove),
         "sessions_to_keep": len(to_keep),
@@ -130,12 +133,18 @@ def cleanup_sessions(
 
     if execute:
         if save_sessions(file_path, to_keep):
-            result["new_file_size_mb"] = file_path.stat().st_size / (1024 * 1024) if to_keep else 0
-            result["message"] = f"Removed {len(to_remove)} sessions, kept {len(to_keep)}"
+            result["new_file_size_mb"] = (
+                file_path.stat().st_size / (1024 * 1024) if to_keep else 0
+            )
+            result["message"] = (
+                f"Removed {len(to_remove)} sessions, kept {len(to_keep)}"
+            )
         else:
             result["message"] = "Failed to save cleaned sessions"
     else:
-        result["message"] = f"Would remove {len(to_remove)} sessions, keep {len(to_keep)} (dry run)"
+        result["message"] = (
+            f"Would remove {len(to_remove)} sessions, keep {len(to_keep)} (dry run)"
+        )
 
     return result
 
@@ -177,23 +186,23 @@ def main():
     )
 
     print(f"   File: {result['file_path']}")
-    if result.get('file_size_mb'):
+    if result.get("file_size_mb"):
         print(f"   File size: {result['file_size_mb']:.2f} MB")
     print(f"   Total sessions: {result['total_sessions']}")
     print(f"   Sessions to remove: {result['sessions_to_remove']}")
     print(f"   Sessions to keep: {result['sessions_to_keep']}")
-    if result.get('cutoff_time'):
+    if result.get("cutoff_time"):
         print(f"   Cutoff time: {result['cutoff_time']}")
     print(f"   Mode: {'EXECUTE' if result['executed'] else 'DRY RUN'}")
     print()
     print(f"   {result['message']}")
 
-    if result.get('new_file_size_mb') is not None:
+    if result.get("new_file_size_mb") is not None:
         print(f"   New file size: {result['new_file_size_mb']:.2f} MB")
 
     print("=" * 60 + "\n")
 
-    if not args.execute and result['sessions_to_remove'] > 0:
+    if not args.execute and result["sessions_to_remove"] > 0:
         print("Run with --execute to actually remove sessions")
 
 

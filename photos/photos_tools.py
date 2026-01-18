@@ -344,7 +344,9 @@ def setup_photos_tools(mcp: FastMCP) -> None:
                 photos.append(photo_info)
 
             if not photos:
-                text_summary = f"No photos found matching the criteria for {user_google_email}."
+                text_summary = (
+                    f"No photos found matching the criteria for {user_google_email}."
+                )
             else:
                 media_list = [_format_media_item(item) for item in media_items]
                 text_summary = (
@@ -498,7 +500,9 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             "openWorldHint": True,
         },
     )
-    async def get_photo_details(user_google_email: str, media_item_id: str) -> PhotoDetailsResponse:
+    async def get_photo_details(
+        user_google_email: str, media_item_id: str
+    ) -> PhotoDetailsResponse:
         """
         Get detailed information about a specific photo.
 
@@ -619,7 +623,9 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             "openWorldHint": True,
         },
     )
-    async def create_photos_album(user_google_email: str, title: str) -> CreateAlbumResponse:
+    async def create_photos_album(
+        user_google_email: str, title: str
+    ) -> CreateAlbumResponse:
         """
         Create a new album in Google Photos.
 

@@ -109,4 +109,8 @@ class TestManageToolsByAnalytics:
         if "preview: found" in lowered and "tool(s) matching criteria" in lowered:
             # The response is a structured ManageToolsByAnalyticsResponse
             # Check that it contains expected JSON fields
-            assert "toolsmatched" in lowered or "tools_matched" in lowered or '"action"' in content.lower()
+            assert (
+                "toolsmatched" in lowered
+                or "tools_matched" in lowered
+                or '"action"' in content.lower()
+            )
