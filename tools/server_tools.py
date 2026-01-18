@@ -708,7 +708,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
         def _get_enabled_tool_names(reg: Dict[str, Any]) -> List[str]:
             """Get list of tool names currently enabled for this session."""
             session_id = get_session_context()
-            session_disabled = get_session_disabled_tools(session_id) if session_id else set()
+            session_disabled = (
+                get_session_disabled_tools(session_id) if session_id else set()
+            )
             enabled_names = []
             for name, tool in sorted(reg.items()):
                 # Skip internal tools
