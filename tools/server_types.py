@@ -194,6 +194,12 @@ class ManageToolsResponse(BaseModel):
     toolList: Optional[List[ToolInfo]] = Field(
         None, description="Full list of tools with their status (for 'list' action)"
     )
+    enabledToolNames: Optional[List[str]] = Field(
+        None,
+        description="List of tool names currently enabled for this session. "
+        "Returned after modify actions (enable/disable) to allow clients to update "
+        "their tool list without requiring a separate list_tools call or notification handling.",
+    )
     protectedTools: List[str] = Field(
         ..., description="List of tool names that are protected from being disabled"
     )

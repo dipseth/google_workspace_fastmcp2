@@ -16,7 +16,7 @@ import json
 import os
 from pathlib import Path
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
 
@@ -584,6 +584,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
         },
     )
     async def manage_tools_tool(
+        ctx: Context,
         action: Annotated[
             Literal["list", "disable", "enable", "disable_all_except", "enable_all"],
             Field(
@@ -701,6 +702,26 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 sessionDisabledTools=[],
                 sessionDisabledCount=0,
             )
+
+        # Helper to get list of enabled tool names for this session
+        # This allows clients to update their tool list without notifications
+        def _get_enabled_tool_names(reg: Dict[str, Any]) -> List[str]:
+            """Get list of tool names currently enabled for this session."""
+            session_id = get_session_context()
+            session_disabled = get_session_disabled_tools(session_id) if session_id else set()
+            enabled_names = []
+            for name, tool in sorted(reg.items()):
+                # Skip internal tools
+                if name.startswith("_"):
+                    continue
+                # Check global enabled state
+                if not _get_tool_enabled_state(tool):
+                    continue
+                # Check session-disabled state
+                if name in session_disabled:
+                    continue
+                enabled_names.append(name)
+            return enabled_names
 
         if action_normalized not in valid_actions:
             return ManageToolsResponse(
@@ -878,6 +899,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         errors.append(f"Failed to disable tool '{name}' for session")
 
                 session_state = _get_session_state()
+                # Notify MCP client of tool list change
+                if affected:
+                    await ctx.send_tool_list_changed()
                 return ManageToolsResponse(
                     success=len(affected) > 0,
                     action=action,
@@ -887,6 +911,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     disabledCount=disabled_count,  # Global state unchanged
                     toolsAffected=affected if affected else None,
                     toolsSkipped=skipped if skipped else None,
+                    enabledToolNames=_get_enabled_tool_names(registry),
                     protectedTools=list(protected_tools_set),
                     sessionState=session_state,
                     message=f"Disabled {len(affected)} tools for this session"
@@ -918,6 +943,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
                     errors.append(f"Failed to disable tool '{name}': {e}")
 
+            # Notify MCP client of tool list change
+            if affected:
+                await ctx.send_tool_list_changed()
             return ManageToolsResponse(
                 success=len(affected) > 0,
                 action=action,
@@ -927,6 +955,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=disabled_count + len(affected),
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
+                enabledToolNames=_get_enabled_tool_names(registry),
                 protectedTools=list(protected_tools_set),
                 message=f"Disabled {len(affected)} tools globally"
                 + (f", skipped {len(skipped)}" if skipped else ""),
@@ -967,6 +996,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         errors.append(f"Failed to disable tool '{name}' for session")
 
                 session_state = _get_session_state()
+                # Notify MCP client of tool list change
+                if affected:
+                    await ctx.send_tool_list_changed()
                 return ManageToolsResponse(
                     success=True,
                     action=action,
@@ -976,6 +1008,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     disabledCount=disabled_count,  # Global state unchanged
                     toolsAffected=affected if affected else None,
                     toolsSkipped=skipped if skipped else None,
+                    enabledToolNames=_get_enabled_tool_names(registry),
                     protectedTools=list(protected_tools_set),
                     sessionState=session_state,
                     message=f"Kept {len(keep_set)} tools, disabled {len(affected)} tools for this session",
@@ -1000,6 +1033,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
                     errors.append(f"{name}: {e}")
 
+            # Notify MCP client of tool list change
+            if affected:
+                await ctx.send_tool_list_changed()
             return ManageToolsResponse(
                 success=True,
                 action=action,
@@ -1009,6 +1045,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=len(affected),
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
+                enabledToolNames=_get_enabled_tool_names(registry),
                 protectedTools=list(protected_tools_set),
                 message=f"Kept {len(keep_set)} tools, disabled {len(affected)} tools globally",
                 errors=errors if errors else None,
@@ -1046,6 +1083,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         errors.append(f"Failed to enable tool '{name}' for session")
 
                 session_state = _get_session_state()
+                # Notify MCP client of tool list change
+                if affected:
+                    await ctx.send_tool_list_changed()
                 return ManageToolsResponse(
                     success=len(affected) > 0,
                     action=action,
@@ -1055,6 +1095,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     disabledCount=disabled_count,  # Global state unchanged
                     toolsAffected=affected if affected else None,
                     toolsSkipped=skipped if skipped else None,
+                    enabledToolNames=_get_enabled_tool_names(registry),
                     protectedTools=list(protected_tools_set),
                     sessionState=session_state,
                     message=f"Enabled {len(affected)} tools for this session"
@@ -1082,6 +1123,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     logger.error(f"Error enabling tool {name}: {e}", exc_info=True)
                     errors.append(f"Failed to enable tool '{name}': {e}")
 
+            # Notify MCP client of tool list change
+            if affected:
+                await ctx.send_tool_list_changed()
             return ManageToolsResponse(
                 success=len(affected) > 0,
                 action=action,
@@ -1091,6 +1135,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=disabled_count - len(affected),
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
+                enabledToolNames=_get_enabled_tool_names(registry),
                 protectedTools=list(protected_tools_set),
                 message=f"Enabled {len(affected)} tools globally"
                 + (f", skipped {len(skipped)}" if skipped else ""),
@@ -1122,6 +1167,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 # Clear all session disables
                 if clear_session_disabled_tools(session_id):
                     session_state = _get_session_state()
+                    # Notify MCP client of tool list change
+                    if affected:
+                        await ctx.send_tool_list_changed()
                     return ManageToolsResponse(
                         success=True,
                         action=action,
@@ -1130,6 +1178,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         enabledCount=enabled_count,  # Global state unchanged
                         disabledCount=disabled_count,  # Global state unchanged
                         toolsAffected=affected if affected else None,
+                        enabledToolNames=_get_enabled_tool_names(registry),
                         protectedTools=list(protected_tools_set),
                         sessionState=session_state,
                         message=f"Enabled {len(affected)} session-disabled tools for this session",
@@ -1163,6 +1212,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     logger.error(f"Error enabling tool {name}: {e}", exc_info=True)
                     errors.append(f"{name}: {e}")
 
+            # Notify MCP client of tool list change
+            if affected:
+                await ctx.send_tool_list_changed()
             return ManageToolsResponse(
                 success=True,
                 action=action,
@@ -1172,6 +1224,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=len(skipped),
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
+                enabledToolNames=_get_enabled_tool_names(registry),
                 protectedTools=list(protected_tools_set),
                 message=f"Enabled {len(affected)} tools globally, skipped {len(skipped)}",
                 errors=errors if errors else None,
