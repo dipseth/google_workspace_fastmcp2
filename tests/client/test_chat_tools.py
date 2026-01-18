@@ -8,6 +8,7 @@ from fastmcp import Client
 
 from ..test_auth_utils import get_client_auth_config
 from .base_test_config import TEST_EMAIL
+from .test_helpers import assert_tools_registered
 
 # Load environment variables from .env file
 load_dotenv()
@@ -139,9 +140,6 @@ class TestChatTools:
     @pytest.mark.asyncio
     async def test_chat_tools_available(self, client):
         """Test that all Chat tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
         expected_chat_tools = [
             "list_spaces",
             "list_messages",
@@ -155,10 +153,7 @@ class TestChatTools:
             "send_dynamic_card",  # New unified card tool
         ]
 
-        for tool in expected_chat_tools:
-            assert (
-                tool in tool_names
-            ), f"Chat tool '{tool}' not found in available tools"
+        await assert_tools_registered(client, expected_chat_tools, context="Chat tools")
 
     @pytest.mark.asyncio
     async def test_list_spaces(self, client):

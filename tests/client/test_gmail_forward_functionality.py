@@ -70,8 +70,7 @@ class TestGmailForwardFunctionality:
     @pytest.mark.asyncio
     async def test_forward_tools_available(self, client):
         """Test that Gmail forward tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        from .test_helpers import assert_tools_registered
 
         expected_tools = [
             "forward_gmail_message",
@@ -79,10 +78,7 @@ class TestGmailForwardFunctionality:
             "search_gmail_messages",
         ]
 
-        for tool_name in expected_tools:
-            assert (
-                tool_name in tool_names
-            ), f"Tool '{tool_name}' not found in available tools"
+        await assert_tools_registered(client, expected_tools, context="Gmail tools")
 
     @pytest.mark.asyncio
     async def test_search_gmail_messages_basic(self, client):

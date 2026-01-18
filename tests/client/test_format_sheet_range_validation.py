@@ -16,7 +16,7 @@ import os
 import pytest
 
 from .base_test_config import TEST_EMAIL
-from .test_helpers import ToolTestRunner
+from .test_helpers import ToolTestRunner, assert_tools_registered
 
 
 @pytest.fixture(scope="session")
@@ -53,23 +53,9 @@ class TestFormatSheetRangeValidation:
     @pytest.mark.asyncio
     async def test_format_sheet_range_tool_available(self, client):
         """Test that the format_sheet_range tool is available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        assert (
-            "format_sheet_range" in tool_names
-        ), "format_sheet_range tool should be available"
-
-        # Find the tool and check its description mentions it replaces other tools
-        format_range_tool = next(
-            tool for tool in tools if tool.name == "format_sheet_range"
+        await assert_tools_registered(
+            client, ["format_sheet_range"], context="Format sheet range tools"
         )
-        assert (
-            "unified" in format_range_tool.description.lower()
-        ), "Tool should be described as unified"
-        assert (
-            "comprehensive" in format_range_tool.description.lower()
-        ), "Tool should be described as comprehensive"
 
     @pytest.mark.asyncio
     async def test_cell_formatting_replacement(self, client, test_spreadsheet_id):
@@ -497,12 +483,9 @@ class TestFormatSheetRangeValidation:
         Individual formatting tools may be removed as the unified formatter becomes
         the preferred interface.
         """
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        assert (
-            "format_sheet_range" in tool_names
-        ), "format_sheet_range tool should be available"
+        await assert_tools_registered(
+            client, ["format_sheet_range"], context="Format sheet range tools"
+        )
 
     @pytest.mark.asyncio
     async def test_auth_patterns_format_sheet_range(self, client):

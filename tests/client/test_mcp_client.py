@@ -4,6 +4,7 @@ import pytest
 import pytest_asyncio
 
 from .base_test_config import TEST_EMAIL
+from .test_helpers import assert_tools_registered
 
 
 @pytest.mark.core
@@ -45,6 +46,9 @@ class TestMCPServer:
     @pytest.mark.asyncio
     async def test_health_check_tool(self, client):
         """Test the health check tool."""
+        # Verify the health_check tool is registered
+        await assert_tools_registered(client, ["health_check"], context="Core tools")
+
         result = await client.call_tool("health_check", {})
 
         # Check that we get a result

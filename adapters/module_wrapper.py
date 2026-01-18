@@ -202,6 +202,22 @@ def _get_fastembed():
     return _fastembed
 
 
+# Global variable for ColBERT lazy loading
+_colbert_embed = None
+
+
+def _get_colbert_embed():
+    """Lazy load ColBERT LateInteractionTextEmbedding when first needed."""
+    global _colbert_embed
+    if _colbert_embed is None:
+        logger.info("🤖 Loading ColBERT LateInteractionTextEmbedding (first use)...")
+        from fastembed import LateInteractionTextEmbedding
+
+        _colbert_embed = LateInteractionTextEmbedding
+        logger.info("✅ ColBERT LateInteractionTextEmbedding loaded")
+    return _colbert_embed
+
+
 class ModuleComponent:
     """
     Represents a component (class, function, variable) within a module.
@@ -297,6 +313,9 @@ class ModuleWrapper:
         ] = None,  # List of module prefixes to exclude (blacklist)
         force_reindex: bool = False,  # Force re-indexing even if collection has data
         clear_collection: bool = False,  # Clear collection before indexing to ensure clean state
+        enable_colbert: bool = False,  # Enable ColBERT multi-vector embeddings
+        colbert_model: str = "colbert-ir/colbertv2.0",  # ColBERT model to use
+        colbert_collection_name: Optional[str] = None,  # Separate collection for ColBERT (default: {collection_name}_colbert)
     ):
         """
         Initialize the module wrapper.
@@ -324,6 +343,12 @@ class ModuleWrapper:
                           updating the index after module changes. Default is False for performance.
             clear_collection: If True, delete and recreate the collection before indexing. This ensures
                             a completely clean state and removes all duplicates. Use with caution.
+            enable_colbert: If True, enable ColBERT multi-vector embeddings for more accurate semantic search.
+                           ColBERT creates token-level embeddings instead of a single document vector.
+            colbert_model: ColBERT model to use. Options: 'colbert-ir/colbertv2.0' (128-dim),
+                          'answerdotai/answerai-colbert-small-v1' (96-dim, multilingual).
+            colbert_collection_name: Name of the Qdrant collection for ColBERT multi-vectors.
+                                    Defaults to '{collection_name}_colbert' if not specified.
         """
         # Get Qdrant configuration from environment variables first
         env_config = get_qdrant_config_from_env()
@@ -363,6 +388,14 @@ class ModuleWrapper:
         self.exclude_modules = exclude_modules or []
         self.force_reindex = force_reindex
         self.clear_collection = clear_collection
+
+        # ColBERT configuration
+        self.enable_colbert = enable_colbert
+        self.colbert_model_name = colbert_model
+        self.colbert_collection_name = colbert_collection_name or f"{collection_name}_colbert"
+        self.colbert_embedder = None
+        self.colbert_embedding_dim = 128  # Default for colbert-ir/colbertv2.0
+        self._colbert_initialized = False
 
         # Initialize state
         self.module = self._resolve_module(module_or_name)
@@ -435,6 +468,13 @@ class ModuleWrapper:
 
             # Index module components
             self._index_module_components()
+
+            # Initialize ColBERT if enabled
+            if self.enable_colbert:
+                logger.info("🤖 ColBERT mode enabled - initializing ColBERT embedder...")
+                self._initialize_colbert_embedder()
+                self._ensure_colbert_collection()
+                self._index_components_colbert()
 
             self._initialized = True
             logger.info(f"✅ ModuleWrapper initialized for {self.module_name}")
@@ -612,6 +652,80 @@ class ModuleWrapper:
         # All retries exhausted
         logger.error(f"❌ Failed to initialize embedding model after {max_retries + 1} attempts: {last_error}")
         raise last_error
+
+    def _initialize_colbert_embedder(self):
+        """Initialize the ColBERT late interaction embedding model."""
+        if not self.enable_colbert:
+            return
+
+        try:
+            LateInteractionTextEmbedding = _get_colbert_embed()
+            logger.info(f"🤖 Initializing ColBERT model: {self.colbert_model_name}")
+            self.colbert_embedder = LateInteractionTextEmbedding(
+                model_name=self.colbert_model_name
+            )
+
+            # Get embedding dimension from model
+            colbert_dims = {
+                "colbert-ir/colbertv2.0": 128,
+                "answerdotai/answerai-colbert-small-v1": 96,
+            }
+            self.colbert_embedding_dim = colbert_dims.get(self.colbert_model_name, 128)
+
+            logger.info(
+                f"✅ ColBERT model loaded: {self.colbert_model_name} (dim: {self.colbert_embedding_dim})"
+            )
+            self._colbert_initialized = True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize ColBERT embedder: {e}")
+            self.enable_colbert = False
+            raise
+
+    def _ensure_colbert_collection(self):
+        """Ensure the Qdrant collection for ColBERT multi-vectors exists."""
+        if not self.enable_colbert or not self._colbert_initialized:
+            return
+
+        try:
+            _, qdrant_models = _get_qdrant_imports()
+
+            # Check if ColBERT collection exists
+            collections = self.client.get_collections()
+            collection_names = [c.name for c in collections.collections]
+
+            if self.colbert_collection_name in collection_names:
+                logger.info(f"✅ ColBERT collection '{self.colbert_collection_name}' exists")
+                # Check if it has data
+                collection_info = self.client.get_collection(self.colbert_collection_name)
+                if collection_info.points_count > 0:
+                    logger.info(
+                        f"📊 ColBERT collection has {collection_info.points_count} points"
+                    )
+                return
+
+            # Create ColBERT collection with multi-vector configuration
+            logger.info(f"📦 Creating ColBERT collection: {self.colbert_collection_name}")
+
+            # For ColBERT, we use multi-vector storage
+            # Each document produces multiple vectors (one per token)
+            self.client.create_collection(
+                collection_name=self.colbert_collection_name,
+                vectors_config={
+                    "colbert": qdrant_models["VectorParams"](
+                        size=self.colbert_embedding_dim,
+                        distance=qdrant_models["Distance"].COSINE,
+                        multivector_config=qdrant_models["models"].MultiVectorConfig(
+                            comparator=qdrant_models["models"].MultiVectorComparator.MAX_SIM
+                        ),
+                    )
+                },
+            )
+            logger.info(f"✅ ColBERT collection created: {self.colbert_collection_name}")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to ensure ColBERT collection: {e}")
+            raise
 
     def _ensure_collection(self):
         """Ensure the Qdrant collection exists and check if it needs indexing."""
@@ -1556,6 +1670,190 @@ class ModuleWrapper:
         # Skip source code and child information to reduce embedding size
 
         return "\n".join(text_parts)
+
+    def _index_components_colbert(self):
+        """Index components using ColBERT multi-vector embeddings."""
+        if not self.enable_colbert or not self._colbert_initialized:
+            logger.warning("⚠️ ColBERT not enabled or initialized, skipping ColBERT indexing")
+            return
+
+        try:
+            _, qdrant_models = _get_qdrant_imports()
+
+            # Check if collection already has data
+            collection_info = self.client.get_collection(self.colbert_collection_name)
+            if collection_info.points_count > 0 and not self.force_reindex:
+                logger.info(
+                    f"📊 ColBERT collection already has {collection_info.points_count} points, skipping indexing"
+                )
+                return
+
+            logger.info(f"🔄 Indexing {len(self.components)} components with ColBERT embeddings...")
+
+            # Index version for tracking
+            index_version = datetime.now(UTC).isoformat()
+
+            # Process components in batches
+            batch_size = 10  # Smaller batches for ColBERT (more memory intensive)
+            processed = 0
+
+            for batch_idx, batch_items in enumerate(
+                self._batch_items(list(self.components.items()), batch_size)
+            ):
+                points = []
+                for path, component in batch_items:
+                    # Generate text for embedding
+                    embed_text = self._generate_embedding_text(component)
+
+                    # Generate ColBERT multi-vector embedding
+                    # ColBERT returns a list of vectors (one per token)
+                    try:
+                        embedding_result = list(self.colbert_embedder.embed([embed_text]))
+                        if not embedding_result:
+                            logger.warning(f"Failed to generate ColBERT embedding for: {path}")
+                            continue
+
+                        # ColBERT returns a matrix (num_tokens x embedding_dim)
+                        multi_vector = embedding_result[0]
+
+                        # Convert to list format if needed
+                        if hasattr(multi_vector, "tolist"):
+                            vector_list = multi_vector.tolist()
+                        else:
+                            vector_list = [list(v) for v in multi_vector]
+
+                    except Exception as embed_error:
+                        logger.warning(f"ColBERT embedding failed for {path}: {embed_error}")
+                        continue
+
+                    # Create deterministic ID
+                    id_string = f"{self.colbert_collection_name}:{path}"
+                    hash_hex = hashlib.sha256(id_string.encode()).hexdigest()
+                    component_id = f"{hash_hex[:8]}-{hash_hex[8:12]}-{hash_hex[12:16]}-{hash_hex[16:20]}-{hash_hex[20:32]}"
+
+                    # Add payload
+                    payload = component.to_dict()
+                    payload["indexed_at"] = index_version
+                    payload["module_version"] = getattr(self.module, "__version__", "unknown")
+                    payload["embedding_type"] = "colbert"
+
+                    point = qdrant_models["PointStruct"](
+                        id=component_id,
+                        vector={"colbert": vector_list},
+                        payload=payload,
+                    )
+                    points.append(point)
+
+                # Store batch in Qdrant
+                if points:
+                    self.client.upsert(collection_name=self.colbert_collection_name, points=points)
+                    processed += len(points)
+                    logger.info(
+                        f"📦 ColBERT batch {batch_idx+1}: stored {len(points)} components ({processed} total)"
+                    )
+
+            logger.info(f"✅ ColBERT indexing complete: {processed} components indexed")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to index components with ColBERT: {e}", exc_info=True)
+            raise
+
+    def colbert_search(
+        self, query: str, limit: int = 5, score_threshold: float = 0.3
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for components using ColBERT multi-vector embeddings.
+
+        ColBERT uses late interaction (MaxSim) for more accurate semantic matching.
+        The query is embedded as multiple vectors (one per token) and compared
+        against document vectors using maximum similarity scoring.
+
+        Args:
+            query: Natural language search query
+            limit: Maximum number of results
+            score_threshold: Minimum similarity score
+
+        Returns:
+            List of matching components with their paths and scores
+        """
+        if not self._initialized:
+            raise RuntimeError("ModuleWrapper not initialized")
+
+        if not self.enable_colbert or not self._colbert_initialized:
+            logger.warning("⚠️ ColBERT not enabled, falling back to standard search")
+            return self.search(query, limit, score_threshold)
+
+        try:
+            logger.info(f"🔍 ColBERT search for: '{query}'")
+
+            # Generate ColBERT query embedding using query_embed (optimized for queries)
+            query_embedding_result = list(self.colbert_embedder.query_embed([query]))
+            if not query_embedding_result:
+                logger.error(f"Failed to generate ColBERT query embedding for: {query}")
+                return []
+
+            query_multi_vector = query_embedding_result[0]
+
+            # Convert to list format
+            if hasattr(query_multi_vector, "tolist"):
+                query_vector = query_multi_vector.tolist()
+            else:
+                query_vector = [list(v) for v in query_multi_vector]
+
+            # Search using ColBERT multi-vector with MaxSim
+            search_results = self.client.query_points(
+                collection_name=self.colbert_collection_name,
+                query=query_vector,
+                using="colbert",
+                limit=limit,
+                score_threshold=score_threshold,
+            )
+
+            # Extract points from results
+            points = []
+            if hasattr(search_results, "points"):
+                points = search_results.points
+                logger.info(f"✅ ColBERT search found {len(points)} results")
+
+            # Process results
+            results = []
+            for result in points:
+                try:
+                    score = float(getattr(result, "score", 0.0))
+                    payload = getattr(result, "payload", {})
+
+                    component_path = payload.get("full_path") or payload.get("name", "unknown")
+
+                    results.append({
+                        "name": payload.get("name"),
+                        "path": component_path,
+                        "type": payload.get("type"),
+                        "score": score,
+                        "docstring": payload.get("docstring", ""),
+                        "component": self._get_component_from_path(component_path),
+                        "embedding_type": "colbert",
+                    })
+
+                    logger.info(f"  - {payload.get('name')} (score: {score:.4f})")
+
+                except Exception as e:
+                    logger.warning(f"Error processing ColBERT result: {e}")
+                    continue
+
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ ColBERT search failed: {e}", exc_info=True)
+            # Fall back to standard search
+            logger.info("⚠️ Falling back to standard search")
+            return self.search(query, limit, score_threshold)
+
+    def _get_component_from_path(self, path: str) -> Any:
+        """Get component object from its path."""
+        if path in self.components:
+            component = self.components[path]
+            return component.obj if hasattr(component, "obj") else None
+        return None
 
     async def search_async(
         self, query: str, limit: int = 5, score_threshold: float = 0.3

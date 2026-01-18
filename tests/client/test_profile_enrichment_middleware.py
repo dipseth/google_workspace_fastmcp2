@@ -10,6 +10,7 @@ Following standardized testing framework from tests/client/TESTING_FRAMEWORK.md
 import pytest
 
 from .base_test_config import TEST_EMAIL
+from .test_helpers import assert_tools_registered
 
 
 @pytest.mark.service("chat")
@@ -22,14 +23,13 @@ class TestProfileEnrichmentMiddleware:
         """Test that the middleware is properly registered in the server."""
         # The middleware should be active and processing tool calls
         # We can test this by calling list_messages and checking for enrichment
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
 
-        # Verify Chat tools are available (prerequisite for enrichment)
-        assert "list_messages" in tool_names, "list_messages tool should be available"
-        assert (
-            "search_messages" in tool_names
-        ), "search_messages tool should be available"
+        # Verify Chat tools are registered (prerequisite for enrichment)
+        await assert_tools_registered(
+            client,
+            ["list_messages", "search_messages"],
+            context="Chat tools for profile enrichment middleware"
+        )
 
     @pytest.mark.asyncio
     async def test_list_messages_structure(self, client, real_chat_space_id):

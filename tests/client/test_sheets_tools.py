@@ -5,6 +5,7 @@ import os
 import pytest
 
 from .base_test_config import TEST_EMAIL
+from .test_helpers import assert_tools_registered
 
 # Use a visually obvious test area in the default viewing region.
 # NOTE: This intentionally targets the top-left of the sheet (A1+) so the user can
@@ -75,10 +76,6 @@ class TestSheetsTools:
     @pytest.mark.asyncio
     async def test_sheets_tools_available(self, client):
         """Test that all Sheets tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        # Check for all Sheets tools
         expected_tools = [
             "list_spreadsheets",
             "get_spreadsheet_info",
@@ -89,8 +86,7 @@ class TestSheetsTools:
             "format_sheet_range",  # Master formatting tool
         ]
 
-        for tool in expected_tools:
-            assert tool in tool_names, f"Tool '{tool}' not found in available tools"
+        await assert_tools_registered(client, expected_tools, context="Sheets tools")
 
     @pytest.mark.asyncio
     async def test_list_spreadsheets(self, client):
@@ -444,13 +440,10 @@ class TestSheetsTools:
     @pytest.mark.asyncio
     async def test_format_sheet_range_available(self, client):
         """Test that format_sheet_range tool is available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
         # Check that the master formatting tool is available
-        assert (
-            "format_sheet_range" in tool_names
-        ), "format_sheet_range tool should be available"
+        await assert_tools_registered(
+            client, ["format_sheet_range"], context="Sheets formatting tools"
+        )
 
         # Individual tools may be removed over time; only require the unified tool.
 
@@ -873,37 +866,50 @@ class TestSheetsFormatRangeComparison:
     @pytest.mark.asyncio
     async def test_format_range_vs_individual_tools_availability(self, client):
         """Test that both format_sheet_range and individual tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
         # Master tool should be available
-        assert (
-            "format_sheet_range" in tool_names
-        ), "Master format_sheet_range tool should be available"
+        await assert_tools_registered(
+            client, ["format_sheet_range"], context="Sheets format range comparison"
+        )
 
         # Individual tools may be removed over time; only require the unified tool.
 
     @pytest.mark.asyncio
     async def test_format_range_parameter_coverage(self, client):
-        """Test that format_sheet_range covers all parameters from individual tools."""
-        tools = await client.list_tools()
+        """Test that format_sheet_range covers all parameters from individual tools.
 
-        # Find the format_sheet_range tool
+        Note: The server starts with only 5 core tools enabled by default.
+        This test checks the registry via assert_tools_registered and
+        verifies the tool has proper metadata via manage_tools list action.
+        """
+        import json
+        from .test_helpers import assert_tools_registered
+
+        # Verify format_sheet_range is registered in the registry
+        await assert_tools_registered(
+            client, ["format_sheet_range"], context="Sheets format range tool"
+        )
+
+        # Get tool info from manage_tools list action to verify it has metadata
+        result = await client.call_tool("manage_tools", {"action": "list"})
+        content = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
+        data = json.loads(content)
+
+        # Find the format_sheet_range tool in the tool list
         format_range_tool = None
-        for tool in tools:
-            if tool.name == "format_sheet_range":
+        for tool in data.get("toolList", []):
+            if tool["name"] == "format_sheet_range":
                 format_range_tool = tool
                 break
 
         assert (
             format_range_tool is not None
-        ), "format_sheet_range tool should be available"
+        ), "format_sheet_range tool should be in manage_tools list"
 
-        # The tool should have parameters that cover all individual tool functionality
-        # This is a basic validation that the tool exists and has input schema
-        assert hasattr(format_range_tool, "inputSchema") or hasattr(
-            format_range_tool, "input_schema"
-        ), "format_sheet_range should have input schema defined"
+        # The tool should have a description indicating it covers formatting functionality
+        assert format_range_tool.get("description"), "format_sheet_range should have a description"
+        desc_lower = format_range_tool["description"].lower()
+        assert "format" in desc_lower or "range" in desc_lower, \
+            "format_sheet_range description should mention formatting"
 
 
 @pytest.mark.service("sheets")

@@ -28,15 +28,14 @@ class TestTemplateMiddlewareIntegration:
     @pytest.mark.asyncio
     async def test_gmail_tools_available(self, client):
         """Test that Gmail tools are available."""
+        from .test_helpers import assert_tools_registered
+
         logger.info("🧪 Testing Gmail tools availability")
 
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        # Check that at least one Gmail tool is registered
+        expected_tools = ["list_gmail_labels"]
+        await assert_tools_registered(client, expected_tools, context="Gmail tools")
 
-        gmail_tools = [name for name in tool_names if "gmail" in name.lower()]
-        logger.info(f"Found {len(gmail_tools)} Gmail tools: {gmail_tools[:5]}...")
-
-        assert len(gmail_tools) > 0, "Should have Gmail tools available"
         logger.info("✅ Gmail tools are available")
 
     @pytest.mark.asyncio

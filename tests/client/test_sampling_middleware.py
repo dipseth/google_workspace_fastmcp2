@@ -29,7 +29,7 @@ import logging
 import pytest
 
 from .base_test_config import TEST_EMAIL
-from .test_helpers import ToolTestRunner
+from .test_helpers import ToolTestRunner, assert_tools_registered, get_registered_tools
 
 logger = logging.getLogger(__name__)
 
@@ -302,9 +302,10 @@ class TestSamplingMiddleware:
 
         runner = ToolTestRunner(client, TEST_EMAIL)
 
-        # Test basic server functionality
-        tools = await client.list_tools()
-        assert len(tools) > 0, "Server should have tools available"
+        # Test basic server functionality - check registered tools via manage_tools
+        registered_tools = await get_registered_tools(client)
+        assert len(registered_tools) > 0, "Server should have tools available"
+        tools = registered_tools  # Use registered tools for subsequent checks
 
         # Test that middleware doesn't interfere with normal tool operations
         test_results = {
@@ -314,22 +315,22 @@ class TestSamplingMiddleware:
             "sampling_tools_found": 0,
         }
 
-        # Look for sampling-capable tools
+        # Look for sampling-capable tools by name pattern
+        # Note: tools is a list of tool name strings from get_registered_tools()
         sampling_tools = []
-        for tool in tools:
-            desc = tool.description.lower() if hasattr(tool, "description") else ""
+        for tool_name in tools:
+            # Check tool name for sampling-related keywords
+            name_lower = tool_name.lower()
             if any(
-                keyword in desc
+                keyword in name_lower
                 for keyword in [
                     "analyze",
                     "sentiment",
                     "summarize",
                     "generate",
-                    "llm",
-                    "ai",
                 ]
             ):
-                sampling_tools.append(tool.name)
+                sampling_tools.append(tool_name)
 
         test_results["sampling_tools_found"] = len(sampling_tools)
         test_results["potential_sampling_tools"] = sampling_tools[:3]
@@ -337,8 +338,9 @@ class TestSamplingMiddleware:
         # Test middleware stability
         try:
             # Make multiple tool calls to ensure middleware is stable
+            # tools is a list of strings (tool names)
             for i in range(min(3, len(tools))):
-                tool_name = tools[i].name
+                tool_name = tools[i]  # tools is already a list of strings
                 try:
                     await client.call_tool(tool_name, {})
                 except Exception as e:

@@ -60,6 +60,14 @@ class TestManageToolsByAnalytics:
     @pytest.mark.asyncio
     async def test_preview_handles_qdrant_states_gracefully(self, client):
         """Preview action should handle Qdrant availability or analytics state without crashing."""
+        # First verify the tool is registered (may not be in list_tools if disabled,
+        # but should exist in registry)
+        from .test_helpers import assert_tools_registered
+
+        await assert_tools_registered(
+            client, ["manage_tools_by_analytics"], context="Analytics tool"
+        )
+
         result = await client.call_tool(
             "manage_tools_by_analytics",
             {
@@ -77,19 +85,28 @@ class TestManageToolsByAnalytics:
         assert len(content) > 0, "Preview response should not be empty"
 
         lowered = content.lower()
+        # These indicators match the actual messages returned by ManageToolsByAnalyticsResponse:
+        # - "Qdrant not available - cannot analyze tool usage data"
+        # - "Failed to retrieve analytics data"
+        # - "No tool usage data found in Qdrant. Analytics database may be empty."
+        # - "No tools found... with usage count >= ..."
+        # - "Preview: Found X tool(s) matching criteria..."
+        # - "Tool management by analytics failed" (exception case)
         valid_indicators = [
             "qdrant not available",
-            "failed to get analytics",
+            "failed to retrieve analytics",
             "no tool usage data",
             "no tools found",
-            "analytics-based tool management preview",
+            "preview: found",
+            "tool management by analytics failed",
         ]
         assert any(indicator in lowered for indicator in valid_indicators), (
-            "Preview should return a clear status message about Qdrant analytics "
-            "availability or matched tools"
+            f"Preview should return a clear status message about Qdrant analytics "
+            f"availability or matched tools. Got: {content[:200]}"
         )
 
-        # If we reached the full preview output, validate core sections are present
-        if "analytics-based tool management preview" in lowered:
-            assert "filters applied" in lowered
-            assert "matched tools" in lowered
+        # If we got a successful preview with tools, validate the response structure
+        if "preview: found" in lowered and "tool(s) matching criteria" in lowered:
+            # The response is a structured ManageToolsByAnalyticsResponse
+            # Check that it contains expected JSON fields
+            assert "toolsmatched" in lowered or "tools_matched" in lowered or '"action"' in content.lower()

@@ -26,7 +26,7 @@ sys.path.insert(0, str(project_root))
 # Import the helper function we're testing
 from gmail.utils import extract_email_addresses
 from tests.client.base_test_config import TEST_EMAIL
-from tests.client.test_helpers import TestResponseValidator, ToolTestRunner
+from tests.client.test_helpers import TestResponseValidator, ToolTestRunner, assert_tools_registered
 
 
 @pytest.mark.service("gmail")
@@ -88,42 +88,9 @@ class TestGmailReplyImprovements:
     @pytest.mark.asyncio
     async def test_reply_tools_available(self, client):
         """Test that Gmail reply tools are available with new parameters."""
-        tools = await client.list_tools()
-        tool_dict = {tool.name: tool for tool in tools}
+        expected_tools = ["reply_to_gmail_message", "draft_gmail_reply"]
 
-        # Check reply tools exist
-        assert (
-            "reply_to_gmail_message" in tool_dict
-        ), "reply_to_gmail_message tool not found"
-        assert "draft_gmail_reply" in tool_dict, "draft_gmail_reply tool not found"
-
-        # Check for new parameters in reply_to_gmail_message
-        reply_tool = tool_dict["reply_to_gmail_message"]
-        if hasattr(reply_tool, "inputSchema") and reply_tool.inputSchema:
-            schema = reply_tool.inputSchema
-            if isinstance(schema, dict) and "properties" in schema:
-                properties = schema["properties"]
-
-                # Check for new parameters
-                expected_params = ["reply_mode", "to", "cc", "bcc"]
-                for param in expected_params:
-                    assert param in properties or "reply_mode" not in str(
-                        schema
-                    ), f"Parameter '{param}' should be in reply_to_gmail_message schema"
-
-        # Check for new parameters in draft_gmail_reply
-        draft_tool = tool_dict["draft_gmail_reply"]
-        if hasattr(draft_tool, "inputSchema") and draft_tool.inputSchema:
-            schema = draft_tool.inputSchema
-            if isinstance(schema, dict) and "properties" in schema:
-                properties = schema["properties"]
-
-                # Check for new parameters
-                expected_params = ["reply_mode", "to", "cc", "bcc"]
-                for param in expected_params:
-                    assert param in properties or "reply_mode" not in str(
-                        schema
-                    ), f"Parameter '{param}' should be in draft_gmail_reply schema"
+        await assert_tools_registered(client, expected_tools, context="Gmail tools")
 
     # ============================================================================
     # C. BACKWARD COMPATIBILITY TESTS

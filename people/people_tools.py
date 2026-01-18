@@ -15,6 +15,13 @@ from auth.context import get_auth_middleware
 from config.enhanced_logging import setup_logger
 from tools.common_types import UserGoogleEmail
 
+from .people_types import (
+    ContactLabelInfo,
+    GetPeopleContactGroupMembersResponse,
+    ListPeopleContactLabelsResponse,
+    ManagePeopleContactLabelsResponse,
+)
+
 logger = setup_logger()
 
 
@@ -220,7 +227,7 @@ async def manage_people_contact_labels(
     email: Union[str, List[str], None] = None,
     label: Optional[str] = None,
     user_google_email: UserGoogleEmail = None,
-) -> str:
+) -> ManagePeopleContactLabelsResponse:
     """
     Manage Google People contact labels (contact groups) for one or more emails.
 
@@ -230,30 +237,72 @@ async def manage_people_contact_labels(
     """
     normalized_action = action.lower().strip() if action else ""
     if normalized_action not in ("label_add", "label_remove"):
-        return f"❌ Unsupported label action: {action}"
+        return ManagePeopleContactLabelsResponse(
+            success=False,
+            action=action or "",
+            label_name=label or "",
+            error=f"Unsupported label action: {action}",
+            message=f"Unsupported label action: {action}",
+        )
 
     if not user_google_email:
-        return "❌ user_google_email is required for contact label operations"
+        return ManagePeopleContactLabelsResponse(
+            success=False,
+            action=normalized_action,
+            label_name=label or "",
+            error="user_google_email is required for contact label operations",
+            message="user_google_email is required for contact label operations",
+        )
 
     if not label or not label.strip():
-        return "❌ 'label' parameter is required for contact label actions"
+        return ManagePeopleContactLabelsResponse(
+            success=False,
+            action=normalized_action,
+            label_name="",
+            error="'label' parameter is required for contact label actions",
+            message="'label' parameter is required for contact label actions",
+        )
 
     if email is None:
-        return f"❌ Email parameter is required for '{normalized_action}' action"
+        return ManagePeopleContactLabelsResponse(
+            success=False,
+            action=normalized_action,
+            label_name=label,
+            error=f"Email parameter is required for '{normalized_action}' action",
+            message=f"Email parameter is required for '{normalized_action}' action",
+        )
 
     raw_tokens = [e.strip() for e in _parse_label_emails(email)]
     emails = sorted({token for token in raw_tokens if token})
     if not emails:
-        return "❌ No valid email addresses provided for label operation"
+        return ManagePeopleContactLabelsResponse(
+            success=False,
+            action=normalized_action,
+            label_name=label,
+            error="No valid email addresses provided for label operation",
+            message="No valid email addresses provided for label operation",
+        )
 
     people_service = await _get_people_service(user_google_email)
     if not people_service:
-        return "❌ People API service is not available. Please ensure People scopes are granted."
+        return ManagePeopleContactLabelsResponse(
+            success=False,
+            action=normalized_action,
+            label_name=label,
+            error="People API service is not available. Please ensure People scopes are granted.",
+            message="People API service is not available. Please ensure People scopes are granted.",
+        )
 
     label_name = label.strip()
     group_resource = await _ensure_contact_group(people_service, label_name)
     if not group_resource:
-        return f"❌ Failed to resolve or create contact label '{label_name}' via People API"
+        return ManagePeopleContactLabelsResponse(
+            success=False,
+            action=normalized_action,
+            label_name=label_name,
+            error=f"Failed to resolve or create contact label '{label_name}' via People API",
+            message=f"Failed to resolve or create contact label '{label_name}' via People API",
+        )
 
     if normalized_action == "label_add":
         created_contacts: List[str] = []
@@ -305,33 +354,41 @@ async def manage_people_contact_labels(
                 batch_errors += 1
                 logger.error(f"Error adding contacts to label '{label_name}': {exc}")
 
+        # Build message
         lines: List[str] = []
         lines.append(
-            f"✅ Processed {len(emails)} email(s) for People contact label '{label_name}' ({group_resource})"
+            f"Processed {len(emails)} email(s) for People contact label '{label_name}'"
         )
-        lines.append(f"• Added {modified_count} contact(s) to label.")
+        lines.append(f"Added {modified_count} contact(s) to label.")
         if created_contacts:
-            lines.append(f"• Created {len(created_contacts)} new contact(s).")
+            lines.append(f"Created {len(created_contacts)} new contact(s).")
         if existing_contacts:
             lines.append(
-                f"• Found existing contacts for {len(existing_contacts)} email(s)."
+                f"Found existing contacts for {len(existing_contacts)} email(s)."
             )
         if failed_emails:
             unique_failed = sorted(set(failed_emails))
             lines.append(
-                f"❌ Failed to process {len(unique_failed)} email(s): {', '.join(unique_failed)}"
+                f"Failed to process {len(unique_failed)} email(s): {', '.join(unique_failed)}"
             )
         if batch_errors:
             lines.append(
-                f"❌ {batch_errors} batch People API operation(s) encountered errors. See logs for details."
+                f"{batch_errors} batch People API operation(s) encountered errors."
             )
 
-        lines.append("")
-        lines.append("Label details:")
-        lines.append(f"• Label name: {label_name}")
-        lines.append(f"• Label resourceName: {group_resource}")
-
-        return "\n".join(lines)
+        return ManagePeopleContactLabelsResponse(
+            success=len(failed_emails) == 0 and batch_errors == 0,
+            action=normalized_action,
+            label_name=label_name,
+            label_resourceName=group_resource,
+            emails_processed=len(emails),
+            contacts_modified=modified_count,
+            contacts_created=len(created_contacts),
+            contacts_existing=len(existing_contacts),
+            failed_emails=sorted(set(failed_emails)),
+            batch_errors=batch_errors,
+            message=" ".join(lines),
+        )
 
     # label_remove
     resource_names_to_remove_set = set()
@@ -375,37 +432,44 @@ async def manage_people_contact_labels(
             batch_errors += 1
             logger.error(f"Error removing contacts from label '{label_name}': {exc}")
 
+    # Build message
     lines = []
     lines.append(
-        f"✅ Processed {len(emails)} email(s) for People contact label '{label_name}' ({group_resource})"
+        f"Processed {len(emails)} email(s) for People contact label '{label_name}'"
     )
-    lines.append(f"• Removed {removed_count} contact(s) from label.")
+    lines.append(f"Removed {removed_count} contact(s) from label.")
     if no_match_emails:
         lines.append(
-            f"ℹ️ No matching contacts found for {len(no_match_emails)} email(s): {', '.join(no_match_emails)}"
+            f"No matching contacts found for {len(no_match_emails)} email(s)."
         )
     if failed_emails:
         unique_failed = sorted(set(failed_emails))
         lines.append(
-            f"❌ Failed to process {len(unique_failed)} email(s): {', '.join(unique_failed)}"
+            f"Failed to process {len(unique_failed)} email(s): {', '.join(unique_failed)}"
         )
     if batch_errors:
         lines.append(
-            f"❌ {batch_errors} batch People API operation(s) encountered errors. See logs for details."
+            f"{batch_errors} batch People API operation(s) encountered errors."
         )
 
-    lines.append("")
-    lines.append("Label details:")
-    lines.append(f"• Label name: {label_name}")
-    lines.append(f"• Label resourceName: {group_resource}")
-
-    return "\n".join(lines)
+    return ManagePeopleContactLabelsResponse(
+        success=len(failed_emails) == 0 and batch_errors == 0,
+        action=normalized_action,
+        label_name=label_name,
+        label_resourceName=group_resource,
+        emails_processed=len(emails),
+        contacts_modified=removed_count,
+        contacts_not_found=len(no_match_emails),
+        failed_emails=sorted(set(failed_emails)),
+        batch_errors=batch_errors,
+        message=" ".join(lines),
+    )
 
 
 async def get_people_contact_group_members(
     label: str,
     user_google_email: UserGoogleEmail = None,
-) -> Dict[str, Any]:
+) -> GetPeopleContactGroupMembersResponse:
     """
     Get all member emails from a People API contact group/label.
 
@@ -416,52 +480,39 @@ async def get_people_contact_group_members(
         user_google_email: User's Google email address
 
     Returns:
-        Dictionary containing:
-        - emails: List of email addresses in the group
-        - member_count: Number of members
-        - label_name: The group name
-        - resourceName: The group's resource identifier
+        GetPeopleContactGroupMembersResponse containing emails, member_count, label_name, resourceName
     """
     if not user_google_email:
-        return {
-            "error": "user_google_email is required",
-            "emails": [],
-            "member_count": 0,
-            "label_name": label or "",
-            "resourceName": "",
-        }
+        return GetPeopleContactGroupMembersResponse(
+            success=False,
+            label_name=label or "",
+            error="user_google_email is required",
+        )
 
     if not label or not label.strip():
-        return {
-            "error": "'label' parameter is required",
-            "emails": [],
-            "member_count": 0,
-            "label_name": "",
-            "resourceName": "",
-        }
+        return GetPeopleContactGroupMembersResponse(
+            success=False,
+            error="'label' parameter is required",
+        )
 
     people_service = await _get_people_service(user_google_email)
     if not people_service:
-        return {
-            "error": "People API service is not available. Please ensure People scopes are granted.",
-            "emails": [],
-            "member_count": 0,
-            "label_name": label,
-            "resourceName": "",
-        }
+        return GetPeopleContactGroupMembersResponse(
+            success=False,
+            label_name=label,
+            error="People API service is not available. Please ensure People scopes are granted.",
+        )
 
     label_name = label.strip()
 
     # Find the group resource name
     group_resource = await _ensure_contact_group(people_service, label_name)
     if not group_resource:
-        return {
-            "error": f"Contact group '{label_name}' not found",
-            "emails": [],
-            "member_count": 0,
-            "label_name": label_name,
-            "resourceName": "",
-        }
+        return GetPeopleContactGroupMembersResponse(
+            success=False,
+            label_name=label_name,
+            error=f"Contact group '{label_name}' not found",
+        )
 
     try:
         # Get group with members (up to 1000)
@@ -479,12 +530,13 @@ async def get_people_contact_group_members(
         member_resource_names = group_data.get("memberResourceNames", [])
 
         if not member_resource_names:
-            return {
-                "emails": [],
-                "member_count": 0,
-                "label_name": label_name,
-                "resourceName": group_resource,
-            }
+            return GetPeopleContactGroupMembersResponse(
+                success=True,
+                emails=[],
+                member_count=0,
+                label_name=label_name,
+                resourceName=group_resource,
+            )
 
         # Batch get contact details for all members
         emails: List[str] = []
@@ -515,27 +567,27 @@ async def get_people_contact_group_members(
                     f"Error fetching batch of contact emails for group '{label_name}': {exc}"
                 )
 
-        return {
-            "emails": sorted(emails),
-            "member_count": len(emails),
-            "label_name": label_name,
-            "resourceName": group_resource,
-        }
+        return GetPeopleContactGroupMembersResponse(
+            success=True,
+            emails=sorted(emails),
+            member_count=len(emails),
+            label_name=label_name,
+            resourceName=group_resource,
+        )
 
     except Exception as exc:
         logger.error(f"Error getting members for contact group '{label_name}': {exc}")
-        return {
-            "error": f"Error getting members: {exc}",
-            "emails": [],
-            "member_count": 0,
-            "label_name": label_name,
-            "resourceName": group_resource,
-        }
+        return GetPeopleContactGroupMembersResponse(
+            success=False,
+            label_name=label_name,
+            resourceName=group_resource,
+            error=f"Error getting members: {exc}",
+        )
 
 
 async def list_people_contact_labels(
     user_google_email: UserGoogleEmail = None,
-) -> Dict[str, Any]:
+) -> ListPeopleContactLabelsResponse:
     """
     List Google People contact groups / labels for the authenticated user.
 
@@ -546,12 +598,11 @@ async def list_people_contact_labels(
     """
     people_service = await _get_people_service(user_google_email)
     if not people_service:
-        return {
-            "error": "People API service is not available. Please ensure People scopes are granted.",
-            "labels": [],
-            "total_count": 0,
-            "user_email": user_google_email or "",
-        }
+        return ListPeopleContactLabelsResponse(
+            success=False,
+            user_email=user_google_email or "",
+            error="People API service is not available. Please ensure People scopes are granted.",
+        )
 
     try:
 
@@ -571,15 +622,14 @@ async def list_people_contact_labels(
         logger.error(
             f"Error listing People contact groups for {user_google_email}: {exc}"
         )
-        return {
-            "error": f"Error listing People contact groups: {exc}",
-            "labels": [],
-            "total_count": 0,
-            "user_email": user_google_email or "",
-        }
+        return ListPeopleContactLabelsResponse(
+            success=False,
+            user_email=user_google_email or "",
+            error=f"Error listing People contact groups: {exc}",
+        )
 
     raw_groups: List[Dict[str, Any]] = result.get("contactGroups", []) or []
-    labels: List[Dict[str, Any]] = []
+    labels: List[ContactLabelInfo] = []
 
     for group in raw_groups:
         resource_name = group.get("resourceName")
@@ -591,20 +641,21 @@ async def list_people_contact_labels(
             continue
 
         labels.append(
-            {
-                "resourceName": resource_name,
-                "name": name,
-                "memberCount": member_count,
-                "formattedMemberCount": f"{member_count:,}",
-                "groupType": group_type,
-            }
+            ContactLabelInfo(
+                resourceName=resource_name,
+                name=name,
+                memberCount=member_count,
+                formattedMemberCount=f"{member_count:,}",
+                groupType=group_type,
+            )
         )
 
-    return {
-        "labels": labels,
-        "total_count": len(labels),
-        "user_email": user_google_email or "",
-    }
+    return ListPeopleContactLabelsResponse(
+        success=True,
+        labels=labels,
+        total_count=len(labels),
+        user_email=user_google_email or "",
+    )
 
 
 def setup_people_tools(mcp: FastMCP) -> None:
@@ -620,7 +671,7 @@ def setup_people_tools(mcp: FastMCP) -> None:
     )
     async def list_people_contact_labels_tool(
         user_google_email: UserGoogleEmail = None,
-    ) -> Dict[str, Any]:
+    ) -> ListPeopleContactLabelsResponse:
         return await list_people_contact_labels(user_google_email)
 
     @mcp.tool(
@@ -635,7 +686,7 @@ def setup_people_tools(mcp: FastMCP) -> None:
     async def get_people_contact_group_members_tool(
         label: str,
         user_google_email: UserGoogleEmail = None,
-    ) -> Dict[str, Any]:
+    ) -> GetPeopleContactGroupMembersResponse:
         return await get_people_contact_group_members(label, user_google_email)
 
     @mcp.tool(
@@ -652,7 +703,7 @@ def setup_people_tools(mcp: FastMCP) -> None:
         email: Union[str, List[str], None] = None,
         label: Optional[str] = None,
         user_google_email: UserGoogleEmail = None,
-    ) -> str:
+    ) -> ManagePeopleContactLabelsResponse:
         return await manage_people_contact_labels(
             action=action,
             email=email,

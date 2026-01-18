@@ -33,10 +33,27 @@ def set_session_context(session_id: str) -> None:
 
 
 def get_session_context() -> Optional[str]:
-    """Get the current session ID from the FastMCP context."""
+    """Get the current session ID from the FastMCP context.
+
+    Tries multiple sources in order:
+    1. Explicitly set session_id via set_session_context()
+    2. FastMCP's native session_id property from transport layer
+    """
     try:
         ctx = get_context()
-        return ctx.get_state("session_id")
+        # First try explicitly set session_id
+        session_id = ctx.get_state("session_id")
+        if session_id:
+            return session_id
+
+        # Fall back to FastMCP's native session_id property
+        if hasattr(ctx, "session_id"):
+            native_session_id = ctx.session_id
+            if native_session_id:
+                logger.debug(f"Using native FastMCP session_id: {native_session_id[:8]}...")
+                return native_session_id
+
+        return None
     except RuntimeError:
         logger.debug("Cannot get session context - not in a FastMCP request context")
         return None
@@ -50,6 +67,51 @@ def clear_session_context() -> None:
         logger.debug("Cleared session context")
     except RuntimeError:
         logger.debug("Cannot clear session context - not in a FastMCP request context")
+
+
+def set_effective_session_id(session_id: str) -> None:
+    """
+    Set the effective session ID for this request.
+
+    This is used when the session ID differs from the transport's native session ID,
+    such as when ?uuid= parameter is used to resume a specific session.
+
+    Args:
+        session_id: The effective session ID to use for tool filtering.
+    """
+    try:
+        ctx = get_context()
+        ctx.set_state("effective_session_id", session_id)
+        logger.debug(f"Set effective session ID: {session_id[:8]}...")
+    except RuntimeError:
+        logger.debug("Cannot set effective session ID - not in a FastMCP request context")
+
+
+def get_effective_session_id() -> Optional[str]:
+    """
+    Get the effective session ID for this request.
+
+    Returns the effective session ID if set (e.g., from ?uuid= parameter),
+    otherwise falls back to the transport's native session ID.
+
+    This should be used for tool filtering decisions to ensure consistency
+    between list_tools and call_tool operations.
+
+    Returns:
+        The effective session ID, or None if not available.
+    """
+    try:
+        ctx = get_context()
+        # First check for explicitly set effective session ID (from ?uuid= etc.)
+        effective_id = ctx.get_state("effective_session_id")
+        if effective_id:
+            return effective_id
+
+        # Fall back to regular session context
+        return get_session_context()
+    except RuntimeError:
+        logger.debug("Cannot get effective session ID - not in a FastMCP request context")
+        return None
 
 
 def set_user_email_context(user_email: str) -> None:
@@ -570,6 +632,177 @@ def is_service_selection_needed(session_id: str = None) -> bool:
     return False
 
 
+# =============================================================================
+# Session-Scoped Tool Management
+# =============================================================================
+# These functions manage per-session tool enable/disable state, allowing
+# different clients to have different tool availability without affecting
+# the global tool registry.
+
+
+def get_session_disabled_tools(session_id: str = None) -> set:
+    """
+    Get the set of tools disabled for a specific session.
+
+    Args:
+        session_id: Session identifier. If None, uses current FastMCP context.
+
+    Returns:
+        Set of tool names that are disabled for this session.
+    """
+    if not session_id:
+        session_id = get_session_context()
+
+    if not session_id:
+        return set()
+
+    disabled = get_session_data(session_id, "session_disabled_tools", set())
+    # Ensure we always return a set (in case None was stored)
+    return disabled if isinstance(disabled, set) else set(disabled) if disabled else set()
+
+
+def disable_tool_for_session(tool_name: str, session_id: str = None, persist: bool = False) -> bool:
+    """
+    Disable a tool for the current session only.
+
+    This does not affect the global tool registry - other sessions will
+    still see the tool as enabled.
+
+    Args:
+        tool_name: Name of the tool to disable.
+        session_id: Session identifier. If None, uses current FastMCP context.
+        persist: If True, immediately persist to disk for cross-client visibility.
+
+    Returns:
+        True if the tool was disabled, False if session not available.
+    """
+    if not session_id:
+        session_id = get_session_context()
+
+    if not session_id:
+        logger.warning("Cannot disable tool for session - no session context available")
+        return False
+
+    disabled = get_session_disabled_tools(session_id)
+    disabled.add(tool_name)
+    store_session_data(session_id, "session_disabled_tools", disabled)
+    logger.debug(f"Disabled tool '{tool_name}' for session {session_id}")
+
+    if persist:
+        persist_session_tool_states()
+
+    return True
+
+
+def enable_tool_for_session(tool_name: str, session_id: str = None, persist: bool = False) -> bool:
+    """
+    Re-enable a tool for the current session.
+
+    Removes the tool from the session's disabled list, restoring visibility.
+
+    Args:
+        tool_name: Name of the tool to enable.
+        session_id: Session identifier. If None, uses current FastMCP context.
+        persist: If True, immediately persist to disk for cross-client visibility.
+
+    Returns:
+        True if the tool was enabled, False if session not available.
+    """
+    if not session_id:
+        session_id = get_session_context()
+
+    if not session_id:
+        logger.warning("Cannot enable tool for session - no session context available")
+        return False
+
+    disabled = get_session_disabled_tools(session_id)
+    disabled.discard(tool_name)
+    store_session_data(session_id, "session_disabled_tools", disabled)
+    logger.debug(f"Enabled tool '{tool_name}' for session {session_id}")
+
+    if persist:
+        persist_session_tool_states()
+
+    return True
+
+
+def is_tool_enabled_for_session(tool_name: str, session_id: str = None) -> bool:
+    """
+    Check if a tool is enabled for the current session.
+
+    A tool is enabled for a session if it's not in the session's disabled list.
+    This does NOT check the global tool enabled state - that must be checked separately.
+
+    Args:
+        tool_name: Name of the tool to check.
+        session_id: Session identifier. If None, uses current FastMCP context.
+
+    Returns:
+        True if the tool is NOT in the session's disabled list.
+    """
+    if not session_id:
+        session_id = get_session_context()
+
+    if not session_id:
+        # No session context = treat all tools as enabled (fall back to global state)
+        return True
+
+    disabled = get_session_disabled_tools(session_id)
+    return tool_name not in disabled
+
+
+def clear_session_disabled_tools(session_id: str = None) -> bool:
+    """
+    Clear all session-specific tool disables (re-enable all tools for session).
+
+    Args:
+        session_id: Session identifier. If None, uses current FastMCP context.
+
+    Returns:
+        True if cleared successfully, False if session not available.
+    """
+    if not session_id:
+        session_id = get_session_context()
+
+    if not session_id:
+        logger.warning("Cannot clear session disabled tools - no session context available")
+        return False
+
+    store_session_data(session_id, "session_disabled_tools", set())
+    logger.debug(f"Cleared all session-disabled tools for session {session_id}")
+    return True
+
+
+def get_session_tool_state_summary(session_id: str = None) -> Dict[str, Any]:
+    """
+    Get a summary of session-specific tool state.
+
+    Args:
+        session_id: Session identifier. If None, uses current FastMCP context.
+
+    Returns:
+        Dictionary with session tool state information.
+    """
+    if not session_id:
+        session_id = get_session_context()
+
+    if not session_id:
+        return {
+            "session_id": None,
+            "session_available": False,
+            "disabled_tools": [],
+            "disabled_count": 0,
+        }
+
+    disabled = get_session_disabled_tools(session_id)
+    return {
+        "session_id": session_id,
+        "session_available": True,
+        "disabled_tools": sorted(list(disabled)),
+        "disabled_count": len(disabled),
+    }
+
+
 def store_custom_oauth_credentials(
     state: str,
     custom_client_id: str,
@@ -616,3 +849,253 @@ def retrieve_custom_oauth_credentials(
             "Cannot retrieve custom credentials from context - not in FastMCP request"
         )
         return None, None, None
+
+
+# =============================================================================
+# Session Tool State Persistence
+# =============================================================================
+# These functions handle persisting and restoring session tool states across
+# server restarts and client reconnections. This enables the "minimal startup"
+# mode where new sessions start with bare minimum tools, but returning sessions
+# restore their previously enabled tools.
+
+
+def _get_session_tool_state_path() -> Path:
+    """Get the path for session tool state persistence file."""
+    try:
+        from config.settings import settings
+        return settings.session_tool_state_path
+    except Exception as e:
+        logger.warning(f"Could not get session tool state path from settings: {e}")
+        return Path("session_tool_states.json")
+
+
+def persist_session_tool_states() -> bool:
+    """
+    Persist all session tool states to a JSON file.
+
+    This saves the enabled/disabled tool state for all active sessions,
+    allowing sessions to restore their tool configuration after reconnection.
+
+    Returns:
+        True if persistence succeeded, False otherwise.
+    """
+    state_file = _get_session_tool_state_path()
+
+    try:
+        with _store_lock:
+            # Collect all session tool states
+            persisted_states = {}
+            for session_id, session_data in _session_store.items():
+                disabled_tools = session_data.get("session_disabled_tools", set())
+                if disabled_tools or session_data.get("minimal_startup_applied"):
+                    persisted_states[session_id] = {
+                        "disabled_tools": list(disabled_tools) if disabled_tools else [],
+                        "last_accessed": session_data.get("last_accessed", datetime.now()).isoformat(),
+                        "minimal_startup_applied": session_data.get("minimal_startup_applied", False),
+                        "user_email": session_data.get("user_email"),
+                    }
+
+        if not persisted_states:
+            logger.debug("No session tool states to persist")
+            return True
+
+        # Write to file
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(state_file, "w") as f:
+            json.dump(persisted_states, f, indent=2)
+
+        logger.info(f"✅ Persisted tool states for {len(persisted_states)} sessions to {state_file}")
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Failed to persist session tool states: {e}")
+        return False
+
+
+def load_persisted_session_tool_states() -> Dict[str, Dict[str, Any]]:
+    """
+    Load persisted session tool states from file.
+
+    Returns:
+        Dictionary mapping session_id to their persisted tool state.
+    """
+    state_file = _get_session_tool_state_path()
+
+    if not state_file.exists():
+        logger.debug(f"No persisted session tool states file found at {state_file}")
+        return {}
+
+    try:
+        with open(state_file, "r") as f:
+            persisted_states = json.load(f)
+
+        # Convert disabled_tools lists back to sets
+        for session_id, state in persisted_states.items():
+            if "disabled_tools" in state:
+                state["disabled_tools"] = set(state["disabled_tools"])
+
+        logger.info(f"✅ Loaded persisted tool states for {len(persisted_states)} sessions from {state_file}")
+        return persisted_states
+
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ Invalid JSON in session tool states file: {e}")
+        return {}
+    except Exception as e:
+        logger.error(f"❌ Failed to load session tool states: {e}")
+        return {}
+
+
+def restore_session_tool_state(session_id: str) -> bool:
+    """
+    Restore a session's tool state from persisted storage.
+
+    If the session has persisted tool state, it will be restored to the
+    session store, effectively continuing where the session left off.
+
+    Args:
+        session_id: The session ID to restore.
+
+    Returns:
+        True if state was restored (session was known), False if new session.
+    """
+    persisted_states = load_persisted_session_tool_states()
+
+    if session_id not in persisted_states:
+        logger.debug(f"No persisted state found for session {session_id[:8]}... (new session)")
+        return False
+
+    state = persisted_states[session_id]
+
+    with _store_lock:
+        if session_id not in _session_store:
+            _session_store[session_id] = {
+                "created_at": datetime.now(),
+                "last_accessed": datetime.now(),
+            }
+
+        _session_store[session_id]["session_disabled_tools"] = state.get("disabled_tools", set())
+        _session_store[session_id]["minimal_startup_applied"] = state.get("minimal_startup_applied", False)
+        _session_store[session_id]["last_accessed"] = datetime.now()
+
+        if state.get("user_email"):
+            _session_store[session_id]["user_email"] = state["user_email"]
+
+    disabled_count = len(state.get("disabled_tools", set()))
+    logger.info(
+        f"✅ Restored session {session_id[:8]}... from persistence "
+        f"({disabled_count} tools disabled, minimal_startup={state.get('minimal_startup_applied', False)})"
+    )
+    return True
+
+
+def is_known_session(session_id: str) -> bool:
+    """
+    Check if a session ID is known (either in memory or persisted).
+
+    Args:
+        session_id: The session ID to check.
+
+    Returns:
+        True if session is known (has prior state), False if new.
+    """
+    # Check in-memory first
+    with _store_lock:
+        if session_id in _session_store:
+            return True
+
+    # Check persisted states
+    persisted_states = load_persisted_session_tool_states()
+    return session_id in persisted_states
+
+
+def mark_minimal_startup_applied(session_id: str) -> None:
+    """
+    Mark that minimal startup has been applied to a session.
+
+    This prevents re-applying minimal startup if the session reconnects
+    before tool state is modified.
+
+    Args:
+        session_id: The session ID to mark.
+    """
+    with _store_lock:
+        if session_id not in _session_store:
+            _session_store[session_id] = {
+                "created_at": datetime.now(),
+                "last_accessed": datetime.now(),
+            }
+
+        _session_store[session_id]["minimal_startup_applied"] = True
+        _session_store[session_id]["last_accessed"] = datetime.now()
+
+    # Persist immediately to ensure it's not lost
+    persist_session_tool_states()
+
+
+def was_minimal_startup_applied(session_id: str) -> bool:
+    """
+    Check if minimal startup was already applied to a session.
+
+    Args:
+        session_id: The session ID to check.
+
+    Returns:
+        True if minimal startup was already applied.
+    """
+    with _store_lock:
+        if session_id in _session_store:
+            return _session_store[session_id].get("minimal_startup_applied", False)
+
+    # Check persisted state
+    persisted_states = load_persisted_session_tool_states()
+    if session_id in persisted_states:
+        return persisted_states[session_id].get("minimal_startup_applied", False)
+
+    return False
+
+
+def cleanup_old_persisted_sessions(max_age_days: int = 7) -> int:
+    """
+    Clean up persisted sessions older than the specified age.
+
+    Args:
+        max_age_days: Maximum age in days for persisted sessions.
+
+    Returns:
+        Number of sessions cleaned up.
+    """
+    state_file = _get_session_tool_state_path()
+
+    if not state_file.exists():
+        return 0
+
+    try:
+        with open(state_file, "r") as f:
+            persisted_states = json.load(f)
+
+        cutoff = datetime.now() - timedelta(days=max_age_days)
+        sessions_to_remove = []
+
+        for session_id, state in persisted_states.items():
+            try:
+                last_accessed = datetime.fromisoformat(state.get("last_accessed", ""))
+                if last_accessed < cutoff:
+                    sessions_to_remove.append(session_id)
+            except (ValueError, TypeError):
+                # Invalid date format - remove the session
+                sessions_to_remove.append(session_id)
+
+        for session_id in sessions_to_remove:
+            del persisted_states[session_id]
+
+        if sessions_to_remove:
+            with open(state_file, "w") as f:
+                json.dump(persisted_states, f, indent=2)
+            logger.info(f"🧹 Cleaned up {len(sessions_to_remove)} old persisted sessions")
+
+        return len(sessions_to_remove)
+
+    except Exception as e:
+        logger.error(f"❌ Failed to cleanup old persisted sessions: {e}")
+        return 0

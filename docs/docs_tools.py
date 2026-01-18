@@ -40,7 +40,14 @@ from auth.service_helpers import get_injected_service, get_service, request_serv
 from config.enhanced_logging import setup_logger
 from tools.common_types import UserGoogleEmail
 
-from .docs_types import CreateDocResponse, DocInfo, DocsListResponse, EditConfig
+from .docs_types import (
+    CreateDocResponse,
+    DocInfo,
+    DocsListResponse,
+    EditConfig,
+    GetDocContentResponse,
+    SearchDocsResponse,
+)
 from .editing import apply_edit_config
 from .utils import extract_office_xml_text
 
@@ -49,7 +56,7 @@ logger = setup_logger()
 
 async def search_docs(
     query: str, page_size: int = 10, user_google_email: UserGoogleEmail = None
-) -> str:
+) -> SearchDocsResponse:
     """
     Searches for Google Docs by name using Drive API (mimeType filter).
 
@@ -59,7 +66,7 @@ async def search_docs(
         page_size: Maximum number of results to return (default: 10)
 
     Returns:
-        str: A formatted list of Google Docs matching the search query.
+        SearchDocsResponse: Structured response with list of matching Google Docs.
     """
     logger.info(f"[search_docs] Email={user_google_email}, Query='{query}'")
 
@@ -96,29 +103,22 @@ async def search_docs(
 
                 # Check for specific credential errors and return user-friendly messages
                 if "no valid credentials found" in error_str.lower():
-                    return (
-                        f"❌ **No Credentials Found**\n\n"
-                        f"No authentication credentials found for {user_google_email}.\n\n"
-                        f"**To authenticate:**\n"
-                        f"1. Run `start_google_auth` with your email: {user_google_email}\n"
-                        f"2. Follow the authentication flow in your browser\n"
-                        f"3. Grant Drive permissions when prompted\n"
-                        f"4. Return here after seeing the success page"
-                    )
+                    error_msg = f"No authentication credentials found for {user_google_email}. Run `start_google_auth` to authenticate."
                 elif (
                     "credentials do not contain the necessary fields"
                     in error_str.lower()
                 ):
-                    return (
-                        f"❌ **Invalid or Corrupted Credentials**\n\n"
-                        f"Your stored credentials for {user_google_email} are missing required OAuth fields.\n\n"
-                        f"**To fix this:**\n"
-                        f"1. Run `start_google_auth` with your email: {user_google_email}\n"
-                        f"2. Complete the authentication flow\n"
-                        f"3. Try your Docs command again"
-                    )
+                    error_msg = f"Invalid or corrupted credentials for {user_google_email}. Run `start_google_auth` to re-authenticate."
                 else:
-                    return f"❌ Authentication error: {error_str}"
+                    error_msg = f"Authentication error: {error_str}"
+
+                return SearchDocsResponse(
+                    docs=[],
+                    count=0,
+                    query=query,
+                    userEmail=user_google_email or "",
+                    error=error_msg,
+                )
         else:
             logger.error(f"[search_docs] Unexpected RuntimeError: {e}")
             raise
@@ -136,33 +136,56 @@ async def search_docs(
             .execute
         )
         files = response.get("files", [])
-        if not files:
-            return f"No Google Docs found matching '{query}'."
 
-        output = [f"Found {len(files)} Google Docs matching '{query}':"]
+        # Build structured response
+        docs: List[DocInfo] = []
         for f in files:
-            output.append(
-                f"- {f['name']} (ID: {f['id']}) Modified: {f.get('modifiedTime')} Link: {f.get('webViewLink')}"
+            doc_info = DocInfo(
+                id=f.get("id", ""),
+                name=f.get("name", "Unknown"),
+                modifiedTime=f.get("modifiedTime"),
+                webViewLink=f.get("webViewLink"),
             )
-        return "\n".join(output)
+            docs.append(doc_info)
+
+        return SearchDocsResponse(
+            docs=docs,
+            count=len(docs),
+            query=query,
+            userEmail=user_google_email or "",
+        )
 
     except HttpError as e:
         logger.error(f"Google API error in search_docs: {e}")
         if e.resp.status == 401:
-            return "❌ Authentication failed. Please check your Google credentials."
+            error_msg = "Authentication failed. Please check your Google credentials."
         elif e.resp.status == 403:
-            return "❌ Permission denied. Make sure you have access to Google Drive."
+            error_msg = "Permission denied. Make sure you have access to Google Drive."
         else:
-            return f"❌ Error searching docs: {str(e)}"
+            error_msg = f"Error searching docs: {str(e)}"
+
+        return SearchDocsResponse(
+            docs=[],
+            count=0,
+            query=query,
+            userEmail=user_google_email or "",
+            error=error_msg,
+        )
     except Exception as e:
         logger.error(f"Unexpected error in search_docs: {e}", exc_info=True)
-        return f"❌ Unexpected error: {str(e)}"
+        return SearchDocsResponse(
+            docs=[],
+            count=0,
+            query=query,
+            userEmail=user_google_email or "",
+            error=f"Unexpected error: {str(e)}",
+        )
 
 
 async def get_doc_content(
     document_id: str,
     user_google_email: UserGoogleEmail = None,
-) -> str:
+) -> GetDocContentResponse:
     """
     Retrieves content of a Google Doc or a Drive file (like .docx) identified by document_id.
     - Native Google Docs: Fetches content via Docs API.
@@ -173,7 +196,7 @@ async def get_doc_content(
         user_google_email: The user's Google email address
 
     Returns:
-        str: The document content with metadata header.
+        GetDocContentResponse: Structured response with document content and metadata.
     """
     logger.info(
         f"[get_doc_content] Document/File ID: '{document_id}' for user '{user_google_email}'"
@@ -211,29 +234,25 @@ async def get_doc_content(
 
                 # Check for specific credential errors and return user-friendly messages
                 if "no valid credentials found" in error_str.lower():
-                    return (
-                        f"❌ **No Credentials Found**\n\n"
-                        f"No authentication credentials found for {user_google_email}.\n\n"
-                        f"**To authenticate:**\n"
-                        f"1. Run `start_google_auth` with your email: {user_google_email}\n"
-                        f"2. Follow the authentication flow in your browser\n"
-                        f"3. Grant Drive permissions when prompted\n"
-                        f"4. Return here after seeing the success page"
-                    )
+                    error_msg = f"No authentication credentials found for {user_google_email}. Run `start_google_auth` to authenticate."
                 elif (
                     "credentials do not contain the necessary fields"
                     in error_str.lower()
                 ):
-                    return (
-                        f"❌ **Invalid or Corrupted Credentials**\n\n"
-                        f"Your stored credentials for {user_google_email} are missing required OAuth fields.\n\n"
-                        f"**To fix this:**\n"
-                        f"1. Run `start_google_auth` with your email: {user_google_email}\n"
-                        f"2. Complete the authentication flow\n"
-                        f"3. Try your Docs command again"
-                    )
+                    error_msg = f"Invalid or corrupted credentials for {user_google_email}. Run `start_google_auth` to re-authenticate."
                 else:
-                    return f"❌ Authentication error: {error_str}"
+                    error_msg = f"Authentication error: {error_str}"
+
+                return GetDocContentResponse(
+                    documentId=document_id,
+                    documentName="",
+                    mimeType="",
+                    webViewLink="",
+                    content="",
+                    contentLength=0,
+                    userEmail=user_google_email or "",
+                    error=error_msg,
+                )
         else:
             logger.error(f"[get_doc_content] Unexpected RuntimeError: {e}")
             raise
@@ -266,29 +285,25 @@ async def get_doc_content(
 
                 # Check for specific credential errors and return user-friendly messages
                 if "no valid credentials found" in error_str.lower():
-                    return (
-                        f"❌ **No Credentials Found**\n\n"
-                        f"No authentication credentials found for {user_google_email}.\n\n"
-                        f"**To authenticate:**\n"
-                        f"1. Run `start_google_auth` with your email: {user_google_email}\n"
-                        f"2. Follow the authentication flow in your browser\n"
-                        f"3. Grant Docs permissions when prompted\n"
-                        f"4. Return here after seeing the success page"
-                    )
+                    error_msg = f"No authentication credentials found for {user_google_email}. Run `start_google_auth` to authenticate."
                 elif (
                     "credentials do not contain the necessary fields"
                     in error_str.lower()
                 ):
-                    return (
-                        f"❌ **Invalid or Corrupted Credentials**\n\n"
-                        f"Your stored credentials for {user_google_email} are missing required OAuth fields.\n\n"
-                        f"**To fix this:**\n"
-                        f"1. Run `start_google_auth` with your email: {user_google_email}\n"
-                        f"2. Complete the authentication flow\n"
-                        f"3. Try your Docs command again"
-                    )
+                    error_msg = f"Invalid or corrupted credentials for {user_google_email}. Run `start_google_auth` to re-authenticate."
                 else:
-                    return f"❌ Authentication error: {error_str}"
+                    error_msg = f"Authentication error: {error_str}"
+
+                return GetDocContentResponse(
+                    documentId=document_id,
+                    documentName="",
+                    mimeType="",
+                    webViewLink="",
+                    content="",
+                    contentLength=0,
+                    userEmail=user_google_email or "",
+                    error=error_msg,
+                )
         else:
             logger.error(f"[get_doc_content] Unexpected RuntimeError: {e}")
             raise
@@ -376,25 +391,49 @@ async def get_doc_content(
                         f"{len(file_content_bytes)} bytes]"
                     )
 
-        header = (
-            f'File: "{file_name}" (ID: {document_id}, Type: {mime_type})\n'
-            f"Link: {web_view_link}\n\n--- CONTENT ---\n"
+        return GetDocContentResponse(
+            documentId=document_id,
+            documentName=file_name,
+            mimeType=mime_type,
+            webViewLink=web_view_link,
+            content=body_text,
+            contentLength=len(body_text),
+            userEmail=user_google_email or "",
         )
-        return header + body_text
 
     except HttpError as e:
         logger.error(f"Google API error in get_doc_content: {e}")
         if e.resp.status == 401:
-            return "❌ Authentication failed. Please check your Google credentials."
+            error_msg = "Authentication failed. Please check your Google credentials."
         elif e.resp.status == 403:
-            return "❌ Permission denied. Make sure you have access to this document."
+            error_msg = "Permission denied. Make sure you have access to this document."
         elif e.resp.status == 404:
-            return f"❌ Document not found: {document_id}"
+            error_msg = f"Document not found: {document_id}"
         else:
-            return f"❌ Error retrieving document: {str(e)}"
+            error_msg = f"Error retrieving document: {str(e)}"
+
+        return GetDocContentResponse(
+            documentId=document_id,
+            documentName="",
+            mimeType="",
+            webViewLink="",
+            content="",
+            contentLength=0,
+            userEmail=user_google_email or "",
+            error=error_msg,
+        )
     except Exception as e:
         logger.error(f"Unexpected error in get_doc_content: {e}", exc_info=True)
-        return f"❌ Unexpected error: {str(e)}"
+        return GetDocContentResponse(
+            documentId=document_id,
+            documentName="",
+            mimeType="",
+            webViewLink="",
+            content="",
+            contentLength=0,
+            userEmail=user_google_email or "",
+            error=f"Unexpected error: {str(e)}",
+        )
 
 
 async def list_docs_in_folder(
@@ -1328,7 +1367,7 @@ def setup_docs_tools(mcp: FastMCP):
     )
     async def search_docs_tool(
         query: str, page_size: int = 10, user_google_email: UserGoogleEmail = None
-    ) -> str:
+    ) -> SearchDocsResponse:
         """Search for Google Docs by name."""
         return await search_docs(query, page_size, user_google_email)
 
@@ -1346,7 +1385,7 @@ def setup_docs_tools(mcp: FastMCP):
     )
     async def get_doc_content_tool(
         document_id: str, user_google_email: UserGoogleEmail = None
-    ) -> str:
+    ) -> GetDocContentResponse:
         """Get content of a Google Doc or Drive file."""
         return await get_doc_content(document_id, user_google_email)
 

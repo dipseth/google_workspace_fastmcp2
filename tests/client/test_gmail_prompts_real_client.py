@@ -129,8 +129,13 @@ class TestGmailPrompts:
             "simple" in normalized or "zero configuration" in normalized
         ), "Prompt should communicate that it's a simple/zero-config demo."
 
-        # Should include resource templating examples
-        assert "{{" in content and "}}" in content  # Template expressions
+        # Should include resource templating examples or resolved resource URIs
+        # The Template Parameter Middleware may resolve {{...}} to single braces {resource://...}
+        # or fully resolve them to actual values
+        has_template_syntax = ("{{" in content and "}}" in content) or (
+            "{" in content and "://" in content
+        )
+        assert has_template_syntax, "Prompt should contain template expressions or resource URIs"
         assert "gmail" in content.lower() or "email" in content.lower()
 
         print("✅ quick_email_demo prompt test passed")

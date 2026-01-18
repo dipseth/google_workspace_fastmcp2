@@ -83,6 +83,39 @@ class Settings(BaseSettings):
     # Sampling Tools Configuration
     sampling_tools: bool = False  # Enable sampling middleware tools (default: False)
 
+    # Minimal Tools Startup Configuration
+    # When enabled, server starts with only essential tools (protected infra tools)
+    # Clients can enable tools as needed, and their state persists across reconnects
+    minimal_tools_startup: bool = Field(
+        default=False,
+        description="Start server with minimal tools enabled. New sessions get bare minimum, reconnecting sessions restore their previous tool state.",
+        json_schema_extra={"env": "MINIMAL_TOOLS_STARTUP"},
+    )
+
+    # Session tool state persistence file location
+    session_tool_state_file: str = Field(
+        default="",
+        description="Path to JSON file for persisting session tool states across server restarts. If empty, uses credentials_dir/session_tool_states.json",
+        json_schema_extra={"env": "SESSION_TOOL_STATE_FILE"},
+    )
+
+    # Default enabled services for minimal startup mode
+    # Comma-separated list of service names from ScopeRegistry (e.g., "drive,gmail,calendar")
+    # When minimal_tools_startup is enabled, tools for these services will be enabled by default
+    # If empty, only protected infrastructure tools are enabled
+    minimal_startup_services: str = Field(
+        default="",
+        description="Comma-separated list of services to enable by default in minimal startup mode (e.g., 'drive,gmail'). Empty = only protected tools.",
+        json_schema_extra={"env": "MINIMAL_STARTUP_SERVICES"},
+    )
+
+    # ColBERT Embedding Configuration (Development/Testing)
+    colbert_embedding_dev: bool = Field(
+        default=False,
+        description="Enable ColBERT multi-vector embeddings initialization on startup for development/testing",
+        json_schema_extra={"env": "COLBERT_EMBEDDING_DEV"},
+    )
+
     # Phase 1 OAuth Migration Feature Flags
     enable_unified_auth: bool = True
     legacy_compat_mode: bool = True
@@ -340,6 +373,49 @@ class Settings(BaseSettings):
         logging.debug(
             f"🔧 SETTINGS DEBUG - Parsed values: host='{self.qdrant_host}', port={self.qdrant_port}, api_key={'***' if self.qdrant_api_key else 'None'}"
         )
+
+    @property
+    def session_tool_state_path(self) -> Path:
+        """Get the path for session tool state persistence file."""
+        if self.session_tool_state_file:
+            return Path(self.session_tool_state_file)
+        return Path(self.credentials_dir) / "session_tool_states.json"
+
+    def get_minimal_startup_services(self) -> List[str]:
+        """
+        Parse and return the list of services enabled by default in minimal startup mode.
+
+        Returns:
+            List[str]: List of service names (e.g., ['drive', 'gmail']).
+                       Returns empty list if not configured.
+        """
+        if not self.minimal_startup_services or self.minimal_startup_services.strip() == "":
+            return []
+
+        # Parse comma-separated list, strip whitespace, filter empty strings
+        services = [
+            service.strip().lower()
+            for service in self.minimal_startup_services.split(",")
+            if service.strip()
+        ]
+
+        # Validate against ScopeRegistry services
+        try:
+            from auth.scope_registry import ScopeRegistry
+            valid_services = ScopeRegistry.get_all_services()
+            validated = [s for s in services if s in valid_services]
+
+            invalid = [s for s in services if s not in valid_services]
+            if invalid:
+                logging.warning(
+                    f"Invalid services in MINIMAL_STARTUP_SERVICES: {invalid}. "
+                    f"Valid services: {valid_services}"
+                )
+
+            return validated
+        except ImportError:
+            # ScopeRegistry not available - return as-is
+            return services
 
     def get_gmail_allow_list(self) -> List[str]:
         """

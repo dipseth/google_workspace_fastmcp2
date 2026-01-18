@@ -18,7 +18,16 @@ from auth.service_helpers import get_injected_service, request_service
 from config.enhanced_logging import setup_logger
 from tools.common_types import UserGoogleEmailPhotos
 
-from .photos_types import AlbumInfo, AlbumListResponse, PhotoInfo, PhotoListResponse
+from .photos_types import (
+    AlbumInfo,
+    AlbumListResponse,
+    CreateAlbumResponse,
+    LibraryInfoResponse,
+    PhotoDetailsResponse,
+    PhotoInfo,
+    PhotoListResponse,
+    SearchPhotosResponse,
+)
 
 logger = setup_logger()
 
@@ -188,17 +197,18 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             )
 
             return AlbumListResponse(
+                success=True,
                 albums=albums,
                 count=len(albums),
                 excludeNonAppCreated=exclude_non_app_created,
                 userEmail=user_google_email,
-                error=None,
             )
 
         except HttpError as e:
             error_msg = f"Failed to list photo albums: {e}"
             logger.error(error_msg)
             return AlbumListResponse(
+                success=False,
                 albums=[],
                 count=0,
                 excludeNonAppCreated=exclude_non_app_created,
@@ -209,6 +219,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"Unexpected error listing photo albums: {str(e)}"
             logger.error(error_msg)
             return AlbumListResponse(
+                success=False,
                 albums=[],
                 count=0,
                 excludeNonAppCreated=exclude_non_app_created,
@@ -235,7 +246,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
         date_start: Optional[str] = None,
         date_end: Optional[str] = None,
         max_results: int = 25,
-    ) -> str:
+    ) -> SearchPhotosResponse:
         """
         Search for photos in Google Photos using various filters.
 
@@ -248,9 +259,17 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             max_results (int): Maximum number of photos to return. Defaults to 25.
 
         Returns:
-            str: A formatted list of matching photos.
+            SearchPhotosResponse: Structured search results with photos and metadata.
         """
         logger.info(f"[search_photos] Invoked. Email: '{user_google_email}'")
+
+        filters_applied = {
+            "album_id": album_id,
+            "content_categories": content_categories,
+            "date_start": date_start,
+            "date_end": date_end,
+            "max_results": max_results,
+        }
 
         try:
             photos_service = await _get_photos_service_with_fallback(user_google_email)
@@ -298,29 +317,74 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             search_response = await asyncio.to_thread(search_request.execute)
 
             media_items = search_response.get("mediaItems", [])
-            if not media_items:
-                return f"No photos found matching the criteria for {user_google_email}."
 
-            media_list = [_format_media_item(item) for item in media_items]
+            # Convert to PhotoInfo objects
+            photos: List[PhotoInfo] = []
+            for item in media_items:
+                metadata = item.get("mediaMetadata", {})
+                photo_metadata = metadata.get("photo", {})
 
-            text_output = (
-                f"Successfully found {len(media_items)} photos for {user_google_email}:\n"
-                + "\n".join(media_list)
-            )
+                photo_info = PhotoInfo(
+                    id=item.get("id", ""),
+                    filename=item.get("filename", "Unknown"),
+                    mimeType=item.get("mimeType", "Unknown"),
+                    baseUrl=item.get("baseUrl", ""),
+                    productUrl=item.get("productUrl"),
+                    description=item.get("description"),
+                    creationTime=metadata.get("creationTime", "Unknown"),
+                    width=metadata.get("width"),
+                    height=metadata.get("height"),
+                    cameraMake=photo_metadata.get("cameraMake"),
+                    cameraModel=photo_metadata.get("cameraModel"),
+                    focalLength=photo_metadata.get("focalLength"),
+                    apertureFNumber=photo_metadata.get("apertureFNumber"),
+                    isoEquivalent=photo_metadata.get("isoEquivalent"),
+                    exposureTime=photo_metadata.get("exposureTime"),
+                )
+                photos.append(photo_info)
+
+            if not photos:
+                text_summary = f"No photos found matching the criteria for {user_google_email}."
+            else:
+                media_list = [_format_media_item(item) for item in media_items]
+                text_summary = (
+                    f"Successfully found {len(photos)} photos for {user_google_email}:\n"
+                    + "\n".join(media_list)
+                )
 
             logger.info(
-                f"Successfully found {len(media_items)} photos for {user_google_email}."
+                f"Successfully found {len(photos)} photos for {user_google_email}."
             )
-            return text_output
+
+            return SearchPhotosResponse(
+                success=True,
+                photos=photos,
+                count=len(photos),
+                filters_applied=filters_applied,
+                user_email=user_google_email or "",
+                text_summary=text_summary,
+            )
 
         except HttpError as e:
-            error_msg = f"❌ Failed to search photos: {e}"
+            error_msg = f"Failed to search photos: {e}"
             logger.error(error_msg)
-            return error_msg
+            return SearchPhotosResponse(
+                success=False,
+                user_email=user_google_email or "",
+                filters_applied=filters_applied,
+                text_summary=f"Failed to search photos: {e}",
+                error=error_msg,
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error searching photos: {str(e)}"
+            error_msg = f"Unexpected error searching photos: {str(e)}"
             logger.error(error_msg)
-            return error_msg
+            return SearchPhotosResponse(
+                success=False,
+                user_email=user_google_email or "",
+                filters_applied=filters_applied,
+                text_summary=f"Unexpected error searching photos: {str(e)}",
+                error=error_msg,
+            )
 
     @mcp.tool(
         name="list_album_photos",
@@ -392,17 +456,18 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             )
 
             return PhotoListResponse(
+                success=True,
                 photos=photos,
                 count=len(photos),
                 albumId=album_id,
                 userEmail=user_google_email,
-                error=None,
             )
 
         except HttpError as e:
             error_msg = f"Failed to get album photos: {e}"
             logger.error(error_msg)
             return PhotoListResponse(
+                success=False,
                 photos=[],
                 count=0,
                 albumId=album_id,
@@ -413,6 +478,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"Unexpected error getting album photos: {str(e)}"
             logger.error(error_msg)
             return PhotoListResponse(
+                success=False,
                 photos=[],
                 count=0,
                 albumId=album_id,
@@ -432,7 +498,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             "openWorldHint": True,
         },
     )
-    async def get_photo_details(user_google_email: str, media_item_id: str) -> str:
+    async def get_photo_details(user_google_email: str, media_item_id: str) -> PhotoDetailsResponse:
         """
         Get detailed information about a specific photo.
 
@@ -441,7 +507,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             media_item_id (str): The ID of the media item. Required.
 
         Returns:
-            str: Detailed information about the photo including metadata.
+            PhotoDetailsResponse: Structured photo details with metadata.
         """
         logger.info(
             f"[get_photo_details] Invoked. Email: '{user_google_email}', Media ID: {media_item_id}"
@@ -465,43 +531,81 @@ def setup_photos_tools(mcp: FastMCP) -> None:
 
             # Photo-specific metadata
             photo_metadata = metadata.get("photo", {})
-            camera_make = photo_metadata.get("cameraMake", "Unknown")
-            camera_model = photo_metadata.get("cameraModel", "Unknown")
-            focal_length = photo_metadata.get("focalLength", "Unknown")
-            aperture = photo_metadata.get("apertureFNumber", "Unknown")
-            iso = photo_metadata.get("isoEquivalent", "Unknown")
-            exposure_time = photo_metadata.get("exposureTime", "Unknown")
+            camera_make = photo_metadata.get("cameraMake")
+            camera_model = photo_metadata.get("cameraModel")
+            focal_length = photo_metadata.get("focalLength")
+            aperture = photo_metadata.get("apertureFNumber")
+            iso = photo_metadata.get("isoEquivalent")
+            exposure_time = photo_metadata.get("exposureTime")
 
-            text_output = (
-                f"📷 **Photo Details for {media_item_id}**\n\n"
-                f"**Basic Information:**\n"
+            # Build PhotoInfo object
+            photo_info = PhotoInfo(
+                id=media_item.get("id", media_item_id),
+                filename=filename,
+                mimeType=mime_type,
+                baseUrl=base_url,
+                productUrl=media_item.get("productUrl"),
+                description=media_item.get("description"),
+                creationTime=creation_time,
+                width=width if width != "Unknown" else None,
+                height=height if height != "Unknown" else None,
+                cameraMake=camera_make,
+                cameraModel=camera_model,
+                focalLength=focal_length,
+                apertureFNumber=aperture,
+                isoEquivalent=iso,
+                exposureTime=exposure_time,
+            )
+
+            text_summary = (
+                f"Photo Details for {media_item_id}\n\n"
+                f"Basic Information:\n"
                 f"- Filename: {filename}\n"
                 f"- Type: {mime_type}\n"
                 f"- Dimensions: {width}x{height}\n"
                 f"- Created: {creation_time}\n"
                 f"- Base URL: {base_url[:50]}{'...' if len(base_url) > 50 else ''}\n\n"
-                f"**Camera Information:**\n"
-                f"- Make: {camera_make}\n"
-                f"- Model: {camera_model}\n"
-                f"- Focal Length: {focal_length}\n"
-                f"- Aperture: f/{aperture}\n"
-                f"- ISO: {iso}\n"
-                f"- Exposure: {exposure_time}s"
+                f"Camera Information:\n"
+                f"- Make: {camera_make or 'Unknown'}\n"
+                f"- Model: {camera_model or 'Unknown'}\n"
+                f"- Focal Length: {focal_length or 'Unknown'}\n"
+                f"- Aperture: f/{aperture or 'Unknown'}\n"
+                f"- ISO: {iso or 'Unknown'}\n"
+                f"- Exposure: {exposure_time or 'Unknown'}s"
             )
 
             logger.info(
                 f"Successfully retrieved photo details for {user_google_email}."
             )
-            return text_output
+
+            return PhotoDetailsResponse(
+                success=True,
+                photo=photo_info,
+                media_item_id=media_item_id,
+                user_email=user_google_email,
+                text_summary=text_summary,
+            )
 
         except HttpError as e:
-            error_msg = f"❌ Failed to get photo details: {e}"
+            error_msg = f"Failed to get photo details: {e}"
             logger.error(error_msg)
-            return error_msg
+            return PhotoDetailsResponse(
+                success=False,
+                media_item_id=media_item_id,
+                user_email=user_google_email,
+                text_summary=f"Failed to get photo details: {e}",
+                error=error_msg,
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error getting photo details: {str(e)}"
+            error_msg = f"Unexpected error getting photo details: {str(e)}"
             logger.error(error_msg)
-            return error_msg
+            return PhotoDetailsResponse(
+                success=False,
+                media_item_id=media_item_id,
+                user_email=user_google_email,
+                text_summary=f"Unexpected error getting photo details: {str(e)}",
+                error=error_msg,
+            )
 
     @mcp.tool(
         name="create_photos_album",
@@ -515,7 +619,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             "openWorldHint": True,
         },
     )
-    async def create_photos_album(user_google_email: str, title: str) -> str:
+    async def create_photos_album(user_google_email: str, title: str) -> CreateAlbumResponse:
         """
         Create a new album in Google Photos.
 
@@ -524,7 +628,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             title (str): The title of the new album. Required.
 
         Returns:
-            str: Information about the newly created album including ID and URL.
+            CreateAlbumResponse: Structured response with album details.
         """
         logger.info(
             f"[create_photos_album] Invoked. Email: '{user_google_email}', Title: {title}"
@@ -541,24 +645,41 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             album_id = album.get("id")
             album_url = album.get("productUrl")
 
-            text_output = (
-                f"✅ Successfully created album '{title}' for {user_google_email}. "
-                f"ID: {album_id} | URL: {album_url}"
-            )
+            message = f"Successfully created album '{title}' for {user_google_email}. ID: {album_id}"
 
             logger.info(
                 f"Successfully created album for {user_google_email}. ID: {album_id}"
             )
-            return text_output
+
+            return CreateAlbumResponse(
+                success=True,
+                album_id=album_id,
+                album_title=title,
+                product_url=album_url,
+                user_email=user_google_email,
+                message=message,
+            )
 
         except HttpError as e:
-            error_msg = f"❌ Failed to create album: {e}"
+            error_msg = f"Failed to create album: {e}"
             logger.error(error_msg)
-            return error_msg
+            return CreateAlbumResponse(
+                success=False,
+                album_title=title,
+                user_email=user_google_email,
+                message=f"Failed to create album: {e}",
+                error=error_msg,
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error creating album: {str(e)}"
+            error_msg = f"Unexpected error creating album: {str(e)}"
             logger.error(error_msg)
-            return error_msg
+            return CreateAlbumResponse(
+                success=False,
+                album_title=title,
+                user_email=user_google_email,
+                message=f"Unexpected error creating album: {str(e)}",
+                error=error_msg,
+            )
 
     @mcp.tool(
         name="get_photos_library_info",
@@ -572,7 +693,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             "openWorldHint": True,
         },
     )
-    async def get_photos_library_info(user_google_email: str) -> str:
+    async def get_photos_library_info(user_google_email: str) -> LibraryInfoResponse:
         """
         Get summary information about the user's Google Photos library.
 
@@ -580,7 +701,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             user_google_email (str): The user's Google email address. Required.
 
         Returns:
-            str: Summary of the Photos library including album and photo counts.
+            LibraryInfoResponse: Structured summary of the Photos library including album and photo counts.
         """
         logger.info(f"[get_photos_library_info] Invoked. Email: '{user_google_email}'")
 
@@ -590,8 +711,8 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             # Get albums count
             albums_request = photos_service.albums().list(pageSize=50)
             albums_response = await asyncio.to_thread(albums_request.execute)
-            albums = albums_response.get("albums", [])
-            album_count = len(albums)
+            albums_raw = albums_response.get("albums", [])
+            album_count = len(albums_raw)
 
             # Get recent photos to estimate library size
             search_body = {"pageSize": 100}
@@ -599,32 +720,63 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             search_response = await asyncio.to_thread(search_request.execute)
             recent_photos = search_response.get("mediaItems", [])
 
-            text_output = (
-                f"📚 **Google Photos Library Summary for {user_google_email}**\n\n"
-                f"**Library Statistics:**\n"
+            # Convert albums to AlbumInfo objects
+            recent_albums: List[AlbumInfo] = []
+            for album in albums_raw[:5]:
+                album_info = AlbumInfo(
+                    id=album.get("id", ""),
+                    title=album.get("title", "Untitled Album"),
+                    productUrl=album.get("productUrl"),
+                    mediaItemsCount=album.get("mediaItemsCount"),
+                    coverPhotoBaseUrl=album.get("coverPhotoBaseUrl"),
+                    coverPhotoMediaItemId=album.get("coverPhotoMediaItemId"),
+                )
+                recent_albums.append(album_info)
+
+            text_summary = (
+                f"Google Photos Library Summary for {user_google_email}\n\n"
+                f"Library Statistics:\n"
                 f"- Albums: {album_count}\n"
                 f"- Recent photos accessed: {len(recent_photos)}\n"
                 f"- Total library size: Use search filters for accurate counts\n\n"
-                f"**Recent Albums:**\n"
+                f"Recent Albums:\n"
             )
 
             # Show recent albums
-            for album in albums[:5]:
-                text_output += f"- {_format_album(album)}\n"
+            for album in albums_raw[:5]:
+                text_summary += f"- {_format_album(album)}\n"
 
             if album_count > 5:
-                text_output += f"... and {album_count - 5} more albums\n"
+                text_summary += f"... and {album_count - 5} more albums\n"
 
             logger.info(f"Successfully retrieved library info for {user_google_email}.")
-            return text_output
+
+            return LibraryInfoResponse(
+                success=True,
+                album_count=album_count,
+                recent_photos_count=len(recent_photos),
+                recent_albums=recent_albums,
+                user_email=user_google_email,
+                text_summary=text_summary,
+            )
 
         except HttpError as e:
-            error_msg = f"❌ Failed to get library info: {e}"
+            error_msg = f"Failed to get library info: {e}"
             logger.error(error_msg)
-            return error_msg
+            return LibraryInfoResponse(
+                success=False,
+                user_email=user_google_email,
+                text_summary=f"Failed to get library info: {e}",
+                error=error_msg,
+            )
         except Exception as e:
-            error_msg = f"❌ Unexpected error getting library info: {str(e)}"
+            error_msg = f"Unexpected error getting library info: {str(e)}"
             logger.error(error_msg)
-            return error_msg
+            return LibraryInfoResponse(
+                success=False,
+                user_email=user_google_email,
+                text_summary=f"Unexpected error getting library info: {str(e)}",
+                error=error_msg,
+            )
 
     logger.info("✅ Google Photos tools setup complete")

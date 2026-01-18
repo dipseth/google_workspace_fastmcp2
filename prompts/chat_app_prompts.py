@@ -20,6 +20,20 @@ from fastmcp import Context, FastMCP
 from fastmcp.prompts.prompt import Message, PromptMessage, TextContent
 from pydantic import Field
 
+from prompts.tool_optimization_helper import ToolOptimizationHelper
+
+# Pre-generate tool optimization sections for reuse
+_CHAT_TOOL_OPTIMIZATION = ToolOptimizationHelper.generate_optimization_section(
+    include_services=["chat"],
+    include_service_list=False,
+)
+
+# For the service integration prompt that uses multiple services
+_MULTI_SERVICE_OPTIMIZATION = ToolOptimizationHelper.generate_optimization_section(
+    include_services=["chat", "drive", "calendar"],
+    include_service_list=True,
+)
+
 # ============================================================================
 # SETUP FUNCTION FOR FASTMCP REGISTRATION
 # ============================================================================
@@ -89,6 +103,8 @@ def setup_chat_app_prompts(mcp: FastMCP):
 
         card_guidance = f"""
 # Advanced Google Chat Card Creation Guide
+
+{_CHAT_TOOL_OPTIMIZATION}
 
 ## Card Configuration (Request ID: {request_id})
 - **Card Type**: {card_type.replace('_', ' ').title()}
@@ -212,6 +228,8 @@ This {complexity_description} implementation showcases FastMCP's advanced parame
                     text=f"""
 # Google Chat App Setup Guide
 *Request ID: {request_id}*
+
+{_CHAT_TOOL_OPTIMIZATION}
 
 ## Project Configuration
 - **App Name**: {app_name}
@@ -362,6 +380,8 @@ This setup guide demonstrates FastMCP's sophisticated parameter handling and mul
         integration_guide = f"""
 # Advanced Google Workspace Service Integration
 *Request ID: {request_id}*
+
+{_MULTI_SERVICE_OPTIMIZATION}
 
 ## Integration Overview
 - **Primary Service**: {primary_service.title()}
@@ -518,6 +538,8 @@ This integration pattern showcases FastMCP's advanced typing system and complex 
                     text=f"""
 # Production Deployment Guide
 *Request ID: {request_id}*
+
+{_CHAT_TOOL_OPTIMIZATION}
 
 ## Deployment Configuration
 - **Platform**: {deployment_target.replace('_', ' ').title()}
@@ -756,6 +778,8 @@ This deployment guide demonstrates FastMCP's ability to handle complex enterpris
         examples_content = f"""
 # Google Chat Examples Showcase
 *Request ID: {request_id}*
+
+{_CHAT_TOOL_OPTIMIZATION}
 
 ## Showcase Configuration
 - **Use Case**: {use_case_category.replace('_', ' ').title()}

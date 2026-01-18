@@ -54,77 +54,46 @@ from config.enhanced_logging import setup_logger
 # Import enhanced NLP parser
 from .nlp_card_parser import parse_enhanced_natural_language_description
 
+# Import structured response types
+from .unified_card_types import (
+    ComponentSearchInfo,
+    NLPExtractionInfo,
+    SendDynamicCardResponse,
+)
+
 logger = setup_logger()
 logger.info("Card Framework v2 is available for rich card creation")
+
+
+def _extract_thread_id(thread_key: Optional[str]) -> Optional[str]:
+    """Extract thread ID from thread key (handles full resource name or raw ID)."""
+    if not thread_key:
+        return None
+    # Format: "spaces/{space}/threads/{threadId}" -> use just the threadId
+    return thread_key.split("threads/")[-1] if "threads/" in thread_key else thread_key
 
 
 def _process_thread_key_for_request(
     request_params: Dict[str, Any], thread_key: Optional[str] = None
 ) -> None:
-    """
-    Process thread key for Google Chat API request and update request parameters.
-
-    This function handles the correct thread reply implementation by:
-    1. Extracting the thread ID from full resource name format
-    2. Setting threadKey parameter with just the thread ID
-    3. Adding messageReplyOption for proper thread reply behavior
-
-    Args:
-        request_params: Dictionary of request parameters to modify in-place
-        thread_key: Optional thread key (can be full resource name or just thread ID)
-    """
-    if thread_key:
-        # Extract thread ID from the full thread resource name
-        # Format: "spaces/{space}/threads/{threadId}" -> use just the threadId
-        if "threads/" in thread_key:
-            thread_id = thread_key.split("threads/")[-1]
-        else:
-            thread_id = thread_key
-
-        # Add query parameters for thread reply
+    """Process thread key for Google Chat API request (modifies request_params in-place)."""
+    thread_id = _extract_thread_id(thread_key)
+    if thread_id:
         request_params["threadKey"] = thread_id
         request_params["messageReplyOption"] = "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
-
         logger.debug(f"Thread key processed: {thread_key} -> {thread_id}")
 
 
 def _process_thread_key_for_webhook_url(
     webhook_url: str, thread_key: Optional[str] = None
 ) -> str:
-    """
-    Process thread key for Google Chat webhook URL and append thread parameters.
-
-    This function handles the correct thread reply implementation for webhook URLs by:
-    1. Extracting the thread ID from full resource name format
-    2. Appending threadKey and messageReplyOption as query parameters
-
-    Args:
-        webhook_url: The original webhook URL
-        thread_key: Optional thread key (can be full resource name or just thread ID)
-
-    Returns:
-        Modified webhook URL with thread parameters appended
-    """
-    if not thread_key:
+    """Process thread key for webhook URL (returns modified URL with thread params)."""
+    thread_id = _extract_thread_id(thread_key)
+    if not thread_id:
         return webhook_url
 
-    # Extract thread ID from the full thread resource name
-    # Format: "spaces/{space}/threads/{threadId}" -> use just the threadId
-    if "threads/" in thread_key:
-        thread_id = thread_key.split("threads/")[-1]
-    else:
-        thread_id = thread_key
-
-    # Determine URL separator (& if already has query params, ? if not)
     separator = "&" if "?" in webhook_url else "?"
-
-    # Append thread parameters to webhook URL
-    threaded_webhook_url = f"{webhook_url}{separator}threadKey={thread_id}&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
-
-    logger.debug(f"Webhook thread key processed: {thread_key} -> {thread_id}")
-    logger.debug(f"Webhook URL updated: {webhook_url} -> {threaded_webhook_url}")
-
-    return threaded_webhook_url
+    return f"{webhook_url}{separator}threadKey={thread_id}&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
 
 
 # Try to import Card Framework with graceful fallback
@@ -166,13 +135,13 @@ except ImportError:
 
 # Global variables for module wrappers and caches
 _card_framework_wrapper = None
+_card_framework_wrapper_colbert = None  # ColBERT-enabled wrapper for raw query mode
 _card_types_cache = {}
 _qdrant_client = None
 _card_templates_collection = "card_templates"
 
-# Field conversion caches for performance optimization
+# Field conversion cache for performance optimization
 _camel_to_snake_cache = {}
-_snake_to_camel_cache = {}
 
 
 async def _get_chat_service_with_fallback(user_google_email: str):
@@ -460,6 +429,105 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
         )
 
     return _card_framework_wrapper
+
+
+def _initialize_colbert_wrapper(force_reset: bool = False):
+    """Initialize the ColBERT-enabled ModuleWrapper for raw query mode."""
+    global _card_framework_wrapper_colbert
+
+    if not CARD_FRAMEWORK_AVAILABLE:
+        logger.warning("❌ Card Framework not available - cannot initialize ColBERT wrapper")
+        return None
+
+    if force_reset:
+        logger.info("🔄 Force reset ColBERT wrapper")
+        _card_framework_wrapper_colbert = None
+
+    if _card_framework_wrapper_colbert is None:
+        try:
+            import card_framework
+
+            from config.settings import settings
+
+            logger.info("🤖 Initializing ColBERT-enabled ModuleWrapper...")
+
+            _card_framework_wrapper_colbert = ModuleWrapper(
+                module_or_name="card_framework.v2",
+                qdrant_url=settings.qdrant_url,
+                qdrant_api_key=settings.qdrant_api_key,
+                collection_name="card_framework_components_fastembed",
+                enable_colbert=True,  # Enable ColBERT multi-vector embeddings
+                colbert_model="colbert-ir/colbertv2.0",
+                colbert_collection_name="card_framework_components_colbert",
+                index_nested=True,
+                index_private=False,
+                max_depth=2,
+                skip_standard_library=True,
+                include_modules=["card_framework", "gchat"],
+                exclude_modules=["numpy", "pandas", "matplotlib", "scipy"],
+                force_reindex=False,
+                clear_collection=False,
+            )
+
+            logger.info("✅ ColBERT ModuleWrapper created successfully!")
+            logger.info(
+                f"📊 ColBERT components indexed: {len(_card_framework_wrapper_colbert.components)}"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize ColBERT wrapper: {e}", exc_info=True)
+            return None
+
+    return _card_framework_wrapper_colbert
+
+
+async def _find_card_component_colbert(
+    query: str, limit: int = 5, score_threshold: float = 0.1
+) -> List[Dict[str, Any]]:
+    """
+    Find card components using ColBERT multi-vector semantic search.
+
+    This uses the raw query directly without NLP preprocessing,
+    relying on ColBERT's superior semantic matching capabilities.
+
+    Args:
+        query: Raw natural language query
+        limit: Maximum number of results
+        score_threshold: Minimum similarity score threshold
+
+    Returns:
+        List of matching components
+    """
+    global _card_framework_wrapper_colbert
+
+    # Initialize ColBERT wrapper if needed
+    if not _card_framework_wrapper_colbert:
+        _initialize_colbert_wrapper(force_reset=True)
+
+    if not _card_framework_wrapper_colbert:
+        logger.error("❌ ColBERT ModuleWrapper not available")
+        return []
+
+    try:
+        logger.info(f"🔍 ColBERT raw query search: '{query}'")
+
+        # Use ColBERT search directly with raw query
+        results = _card_framework_wrapper_colbert.colbert_search(
+            query=query,
+            limit=limit,
+            score_threshold=score_threshold,
+        )
+
+        if results:
+            logger.info(f"✅ ColBERT search returned {len(results)} results")
+            for i, r in enumerate(results[:3]):
+                logger.info(f"  {i+1}. {r.get('name')} (score: {r.get('score', 0):.4f})")
+
+        return results
+
+    except Exception as e:
+        logger.error(f"❌ ColBERT search failed: {e}", exc_info=True)
+        return []
 
 
 async def _find_card_component(
@@ -833,10 +901,11 @@ async def _find_card_component(
                         f"⚠️ Unknown component type, keeping for fallback: {component_path} ({type(component)})"
                     )
             else:
-                # No component resolved - keep for fallback
-                filtered_results.append(result)
+                # No component resolved - DO NOT add to results
+                # Unresolved components can't be instantiated, so keeping them
+                # causes valid components with lower scores to be skipped
                 logger.warning(
-                    f"⚠️ No component resolved, keeping for fallback: {search_path}"
+                    f"⚠️ No component resolved, skipping: {search_path}"
                 )
 
         # Log top results for debugging
@@ -1073,43 +1142,21 @@ def _create_card_with_hybrid_approach(
             logger.info(f"✅ Component created: {type(created_component)}")
 
             # Try to use the component's to_dict() if available
+            # Check if component is a full card (has sections) or a widget
+            component_dict = None
             if hasattr(created_component, "to_dict"):
                 component_dict = created_component.to_dict()
                 logger.info("✅ Used component.to_dict() after recursive processing")
-
-                # Check if this looks like a full card (has sections) or a widget
-                if "sections" in component_dict:
-                    # This is a full card - use it directly
-                    card_dict = component_dict
-                    logger.info("🎯 Component is a full Card, using directly")
-                else:
-                    # This is a widget - incorporate it into a proper card structure
-                    logger.info(
-                        "🧩 Component is a widget, incorporating into card structure"
-                    )
-                    card_dict = _build_card_with_widget_component(
-                        created_component, processed_params, sections
-                    )
-
             elif isinstance(created_component, dict):
-                # Component returned a dict - check if it's a full card or widget
-                if "sections" in created_component:
-                    card_dict = created_component
-                    logger.info("🎯 Component dict is a full Card, using directly")
-                else:
-                    logger.info(
-                        "🧩 Component dict is a widget, incorporating into card structure"
-                    )
-                    card_dict = _build_card_with_widget_dict(
-                        created_component, processed_params, sections
-                    )
+                component_dict = created_component
 
+            # If it's a full card, use directly; otherwise build from widget
+            if component_dict and "sections" in component_dict:
+                card_dict = component_dict
+                logger.info("🎯 Component is a full Card, using directly")
             else:
-                # Component doesn't have to_dict() - try to use it as a widget
-                logger.info(
-                    "🧩 Component has no to_dict(), treating as widget and building card structure"
-                )
-                card_dict = _build_card_with_raw_component(
+                logger.info("🧩 Component is a widget, incorporating into card structure")
+                card_dict = _build_card_from_widget(
                     created_component, processed_params, sections
                 )
 
@@ -1673,300 +1720,82 @@ def _add_widgets_from_params(
     return added
 
 
-def _build_card_with_widget_component(
+def _build_card_from_widget(
     component: Any, params: Dict[str, Any], sections: List[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """Build card structure incorporating a widget component with to_dict()."""
+    """Build card structure from any widget component type.
+
+    Handles three component types:
+    - Objects with to_dict() method (widget components)
+    - Plain dictionaries (widget dicts)
+    - Raw objects without to_dict() (fallback)
+    """
     card_dict = {}
 
-    # Handle header from params
+    # Build header from params
     header = _build_header_from_params(params)
     if header:
         card_dict["header"] = header
 
-    # Use provided sections or build from widget component
+    # If sections provided, use them directly
     if sections:
         card_dict["sections"] = sections
-    else:
-        widgets = []
+        return card_dict
 
-        # Add widgets from params using unified helper
-        added = _add_widgets_from_params(widgets, params)
+    # Build widgets based on component type
+    widgets = []
+    added = _add_widgets_from_params(widgets, params)
 
-        # TRUST UNIVERSAL UNPACKER: Extract all widget data from component
+    if hasattr(component, "to_dict"):
+        # Widget component with to_dict() - use universal unpacker
         component_dict = component.to_dict()
         component_name = type(component).__name__
 
-        logger.info(
-            f"🔓 Using trusted universal unpacker for component: {component_name}"
-        )
+        logger.info(f"🔓 Using trusted universal unpacker for component: {component_name}")
         unpacked_widgets = _universal_component_unpacker(component_dict, component_name)
 
-        # Filter out duplicate widgets if we already have them from params
-        filtered_unpacked = []
+        # Filter out duplicates from params
         for widget in unpacked_widgets:
             if not isinstance(widget, dict):
-                filtered_unpacked.append(widget)
+                widgets.append(widget)
                 continue
-
-            # Skip text widgets from component if we already added text from params
-            if added['text'] and "textParagraph" in widget:
+            if added["text"] and "textParagraph" in widget:
                 logger.info("🔧 Skipping duplicate text widget (using params text)")
                 continue
-
-            # Skip image widgets from component if we already added image from params
-            if added['image'] and "image" in widget:
+            if added["image"] and "image" in widget:
                 logger.info("🔧 Skipping duplicate image widget (using params image)")
                 continue
-
-            # Skip button widgets from component if we already added buttons from params
-            if added['buttons'] and "buttonList" in widget:
+            if added["buttons"] and "buttonList" in widget:
                 logger.info("🔧 Skipping duplicate button widget (using params buttons)")
                 continue
+            widgets.append(widget)
 
-            filtered_unpacked.append(widget)
+        logger.info(f"✅ Universal unpacker extracted widgets from {component_name}")
 
-        widgets.extend(filtered_unpacked)
-        logger.info(
-            f"✅ Universal unpacker extracted {len(filtered_unpacked)} widgets from {component_name} (filtered {len(unpacked_widgets) - len(filtered_unpacked)} duplicates)"
-        )
-
-        card_dict["sections"] = [{"widgets": widgets}]
-
-    return card_dict
-
-
-def _build_card_with_widget_dict(
-    component_dict: Dict[str, Any],
-    params: Dict[str, Any],
-    sections: List[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Build card structure incorporating a widget dictionary."""
-    card_dict = {}
-
-    # Handle header from params using unified helper
-    header = _build_header_from_params(params)
-    if header:
-        card_dict["header"] = header
-
-    # Use provided sections or build from widget dict
-    if sections:
-        card_dict["sections"] = sections
-    else:
-        widgets = []
-
-        # Add widgets from params using unified helper
-        _add_widgets_from_params(widgets, params)
-
-        # Validate the component dict and ensure it maps to valid Google Chat widget types
+    elif isinstance(component, dict):
+        # Plain dictionary - validate and add as widget
         valid_widget_types = {
-            "textParagraph",
-            "image",
-            "decoratedText",
-            "buttonList",
-            "selectionInput",
-            "textInput",
-            "dateTimePicker",
-            "divider",
-            "grid",
-            "columns",
+            "textParagraph", "image", "decoratedText", "buttonList",
+            "selectionInput", "textInput", "dateTimePicker", "divider", "grid", "columns",
         }
 
-        # Check if the dict looks like a simple text component
-        if "text" in component_dict and len(component_dict) <= 2:
-            widgets.append({"textParagraph": component_dict})
-        # Check if the dict has a valid widget type as a key
-        elif any(key in valid_widget_types for key in component_dict.keys()):
-            widgets.append(component_dict)
+        if "text" in component and len(component) <= 2:
+            widgets.append({"textParagraph": component})
+        elif any(key in valid_widget_types for key in component.keys()):
+            widgets.append(component)
         else:
-            # Unknown component dict - create a safe fallback
-            logger.warning(
-                f"⚠️ Unknown component dict structure: {list(component_dict.keys())}, creating fallback"
-            )
-            widgets.append(
-                {
-                    "textParagraph": {
-                        "text": f"Component data: {str(component_dict)[:100]}..."
-                    }
-                }
-            )
+            logger.warning(f"⚠️ Unknown component dict structure: {list(component.keys())}, creating fallback")
+            widgets.append({"textParagraph": {"text": f"Component data: {str(component)[:100]}..."}})
 
-        card_dict["sections"] = [{"widgets": widgets}]
-
-    return card_dict
-
-
-def _build_card_with_raw_component(
-    component: Any, params: Dict[str, Any], sections: List[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """Build card structure with a raw component that has no to_dict()."""
-    card_dict = {}
-
-    # Handle header from params using unified helper
-    header = _build_header_from_params(params)
-    if header:
-        card_dict["header"] = header
-
-    # Use provided sections or build basic structure
-    if sections:
-        card_dict["sections"] = sections
     else:
-        widgets = []
-
-        # Add text, image, and buttons using unified helper
-        added = _add_widgets_from_params(widgets, params)
-
-        # Try to extract useful data from the raw component
-        # Only add component text if we didn't already add text from params
-        if not added['text'] and hasattr(component, "__dict__"):
+        # Raw component without to_dict() - extract from __dict__
+        if not added["text"] and hasattr(component, "__dict__"):
             component_data = component.__dict__
-            if component_data:
-                # Try to create a widget from component attributes
-                if "text" in component_data:
-                    widgets.append(
-                        {"textParagraph": {"text": str(component_data["text"])}}
-                    )
+            if component_data and "text" in component_data:
+                widgets.append({"textParagraph": {"text": str(component_data["text"])}})
 
-        card_dict["sections"] = [{"widgets": widgets}]
-
+    card_dict["sections"] = [{"widgets": widgets}]
     return card_dict
-
-
-def _fix_widgets_format(widgets: List[Dict[str, Any]]) -> None:
-    """
-    Fix widget formatting for Google Chat API compatibility.
-
-    This function recursively processes widgets to ensure they are properly
-    formatted for the Google Chat API. It handles nested widgets, button lists,
-    and other complex structures.
-
-    Args:
-        widgets: List of widgets to fix
-    """
-    if not widgets or not isinstance(widgets, list):
-        return
-
-    for widget in widgets:
-        if not isinstance(widget, dict):
-            continue
-
-        # Handle button lists
-        if "buttonList" in widget:
-            button_list = widget["buttonList"]
-            if "buttons" in button_list and isinstance(button_list["buttons"], list):
-                for button in button_list["buttons"]:
-                    # Fix onClick format
-                    if "onClick" in button and isinstance(button["onClick"], dict):
-                        on_click = button["onClick"]
-
-                        # Fix openLink format
-                        if "openLink" in on_click and isinstance(
-                            on_click["openLink"], dict
-                        ):
-                            open_link = on_click["openLink"]
-                            if "url" in open_link and isinstance(open_link["url"], str):
-                                # Already in correct format
-                                pass
-                            elif hasattr(open_link, "url") and isinstance(
-                                open_link.url, str
-                            ):
-                                # Convert from object to dict
-                                on_click["openLink"] = {"url": open_link.url}
-
-        # Handle columns
-        if "columns" in widget and isinstance(widget["columns"], list):
-            for column in widget["columns"]:
-                if "widgets" in column and isinstance(column["widgets"], list):
-                    # Recursively fix nested widgets
-                    _fix_widgets_format(column["widgets"])
-
-        # Handle decoratedText
-        if "decoratedText" in widget and isinstance(widget["decoratedText"], dict):
-            decorated_text = widget["decoratedText"]
-
-            # Fix icon format: convert snake_case to camelCase for Google Chat API
-            # Card Framework uses start_icon/end_icon, but API expects startIcon/endIcon
-            if "start_icon" in decorated_text:
-                decorated_text["startIcon"] = decorated_text.pop("start_icon")
-            if "end_icon" in decorated_text:
-                decorated_text["endIcon"] = decorated_text.pop("end_icon")
-
-            # Fix icon content: ensure knownIcon is properly formatted
-            for icon_key in ["startIcon", "endIcon"]:
-                if icon_key in decorated_text and isinstance(decorated_text[icon_key], dict):
-                    icon_data = decorated_text[icon_key]
-                    # Convert snake_case known_icon to camelCase knownIcon
-                    if "known_icon" in icon_data:
-                        known_icon_value = icon_data.pop("known_icon")
-                        # Handle enum objects (have .name attribute)
-                        if hasattr(known_icon_value, "name"):
-                            icon_data["knownIcon"] = known_icon_value.name
-                        else:
-                            icon_data["knownIcon"] = known_icon_value
-                    # Convert snake_case icon_url to camelCase iconUrl
-                    if "icon_url" in icon_data:
-                        icon_data["iconUrl"] = icon_data.pop("icon_url")
-
-            # Fix button format
-            if "button" in decorated_text and isinstance(
-                decorated_text["button"], dict
-            ):
-                button = decorated_text["button"]
-
-                # Fix onClick format
-                if "onClick" in button and isinstance(button["onClick"], dict):
-                    on_click = button["onClick"]
-
-                    # Fix openLink format
-                    if "openLink" in on_click and isinstance(
-                        on_click["openLink"], dict
-                    ):
-                        open_link = on_click["openLink"]
-                        if "url" in open_link and isinstance(open_link["url"], str):
-                            # Already in correct format
-                            pass
-                        elif hasattr(open_link, "url") and isinstance(
-                            open_link.url, str
-                        ):
-                            # Convert from object to dict
-                            on_click["openLink"] = {"url": open_link.url}
-
-
-# REMOVED: _transform_card_params_to_google_format function - replaced with simple _build_simple_card_structure
-
-
-def _snake_to_camel(snake_str: str) -> str:
-    """Convert snake_case string to camelCase with caching for performance."""
-    global _snake_to_camel_cache
-
-    if snake_str in _snake_to_camel_cache:
-        return _snake_to_camel_cache[snake_str]
-
-    if "_" not in snake_str:
-        result = snake_str
-    else:
-        components = snake_str.split("_")
-        result = components[0] + "".join(word.capitalize() for word in components[1:])
-
-    _snake_to_camel_cache[snake_str] = result
-    return result
-
-
-def _convert_field_names_to_camel_case(obj: Any) -> Any:
-    """Convert snake_case field names to camelCase recursively."""
-    if isinstance(obj, dict):
-        converted = {}
-        for key, value in obj.items():
-            # Convert snake_case to camelCase
-            camel_key = _snake_to_camel(key)
-            if camel_key != key:
-                logger.info(f"FIELD CONVERSION: {key} -> {camel_key}")
-            converted[camel_key] = _convert_field_names_to_camel_case(value)
-        return converted
-    elif isinstance(obj, list):
-        return [_convert_field_names_to_camel_case(item) for item in obj]
-    else:
-        return obj
 
 
 def _convert_field_names_to_snake_case(obj: Any) -> Any:
@@ -2074,100 +1903,45 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
         card_params: Optional[Dict[str, Any]] = None,
         thread_key: Optional[str] = None,
         webhook_url: Optional[str] = None,
-    ) -> str:
+        use_colbert: bool = False,
+    ) -> SendDynamicCardResponse:
         """
         Send any type of card to Google Chat using natural language description with enhanced NLP.
 
         This unified tool combines ModuleWrapper semantic search with advanced NLP parameter extraction
-        to create complex Google Chat cards from natural language descriptions. The NLP parser can
-        extract complete card structures including sections, decoratedText widgets, icons, and buttons.
+        to create complex Google Chat cards from natural language descriptions.
 
-        ## Enhanced NLP Features:
-        - **Automatic parameter extraction** from natural language descriptions
-        - **Section parsing** from numbered (1., 2.) or bulleted (-, •) lists
-        - **DecoratedText creation** with topLabel, bottomLabel, and icons
-        - **Icon mapping** from descriptions like "green check" → CHECK_CIRCLE
-        - **Button extraction** with text and onClick actions from URLs
-        - **Grid layouts** and column arrangements
-        - **Collapsible sections** with header configuration
-        - **HTML content** formatting support
-        - **Switch controls** and interactive elements
-
-        ## Natural Language Examples:
-        ```
-        "Create a monitoring dashboard with title 'Server Status' and three sections:
-        1. 'Health Check' section with decoratedText 'All Systems Go' with topLabel 'Status' and green check icon
-        2. 'Performance' section with decoratedText 'Response Time: 120ms' with topLabel 'API Latency'
-        3. 'Actions' section with a button 'View Logs' linking to https://logs.example.com"
-        ```
-
-        ## Supported Card Elements:
-        - **Header**: title, subtitle (max 200 chars each)
-        - **Sections**: Multiple sections with optional headers and collapsibility
-        - **Text widgets**: textParagraph with formatting (max 4000 chars)
-        - **DecoratedText**: Rich text with labels, icons, buttons, switches
-        - **Buttons**: Up to 6 per buttonList with onClick actions
-        - **Images**: Image widgets with URLs and alt text
-        - **Icons**: 20+ mapped icons (CHECK_CIRCLE, STAR, ERROR, etc.)
-        - **Grids**: Multi-column layouts with nested widgets
-        - **HTML**: Formatted HTML content in text widgets
-
-        ## Icon Mappings (Natural Language → Google Chat Icon):
-        - "check", "green check", "success" → CHECK_CIRCLE
-        - "error", "red x", "failure" → ERROR
-        - "warning", "yellow warning" → WARNING
-        - "info", "information" → INFO
-        - "star", "favorite" → STAR
-        - "person", "user" → PERSON
-        - "clock", "time" → CLOCK
-        - "email", "mail" → EMAIL
-        - And 12+ more mappings...
-
-        ## Technical Implementation:
-        - **NLP Parser**: Extracts parameters from card_description using regex patterns
-        - **Parameter Merging**: NLP-extracted params merged with user-provided card_params
-        - **ModuleWrapper Search**: Finds appropriate card components via semantic search
-        - **Hybrid Approach**: Combines component-based and parameter-based creation
-        - **Validation**: Automatic field length limits and structure validation
-        - **Error Recovery**: Always returns valid card structure with fallbacks
+        See SendDynamicCardResponse, CardParams, and ICON_MAPPINGS in unified_card_types.py for
+        detailed field descriptions, supported widget types, and icon mapping reference.
 
         Args:
             user_google_email: The user's Google email address for authentication
             space_id: The Google Chat space ID to send the card to
-            card_description: Natural language description of the card structure and content.
-                            Can include sections, widgets, icons, buttons, and formatting.
-            card_params: Optional dict of explicit parameters (title, text, buttons, etc.).
-                        These override any NLP-extracted parameters.
+            card_description: Natural language description of the card structure and content
+            card_params: Optional dict of explicit parameters that override NLP-extracted values
             thread_key: Optional thread key for threaded message replies
             webhook_url: Optional webhook URL for direct delivery (bypasses API auth)
+            use_colbert: If True, use ColBERT multi-vector embeddings for semantic search.
+                        This skips NLP parsing and uses the raw description directly as the
+                        query to the RAG database. ColBERT provides more accurate semantic
+                        matching at the token level. Default is False.
 
         Returns:
-            Success/failure message with details about the sent card and extraction type
-
-        Examples:
-            # Simple card with explicit params
-            await send_dynamic_card(
-                user_google_email="user@example.com",
-                space_id="spaces/AAAAA",
-                card_description="simple notification",
-                card_params={"title": "Alert", "text": "System update complete"}
-            )
-
-            # Complex card with NLP extraction
-            await send_dynamic_card(
-                user_google_email="user@example.com",
-                space_id="spaces/AAAAA",
-                card_description="Create a dashboard with sections: 1. 'Status' with green check..."
-            )
+            SendDynamicCardResponse with delivery status, component info, and NLP extraction details
         """
         try:
             logger.info(f"🔍 Finding card component for: {card_description}")
+            logger.info(f"🤖 ColBERT mode: {use_colbert}")
 
             # Default parameters if not provided
             if card_params is None:
                 card_params = {}
 
             # ENHANCED NLP INTEGRATION: Parse natural language description to extract parameters
+            # NOTE: NLP parsing runs for BOTH ColBERT and standard modes.
+            # ColBERT determines how we SEARCH for the right component template,
+            # but NLP extracts the PARAMETERS (title, buttons, text) to populate it.
+            # They are complementary, not alternatives!
             try:
                 logger.info(
                     f"🧠 Parsing natural language description: '{card_description}'"
@@ -2211,8 +1985,12 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
             best_match = {"type": "fallback", "name": "simple_fallback", "score": 0.0}
             google_format_card = None
 
-            # Find card components using ModuleWrapper
-            results = await _find_card_component(card_description)
+            # Find card components using ModuleWrapper (ColBERT or standard)
+            if use_colbert:
+                logger.info("🔍 Using ColBERT multi-vector search...")
+                results = await _find_card_component_colbert(card_description)
+            else:
+                results = await _find_card_component(card_description)
 
             if results:
                 # Get the best match component
@@ -2371,7 +2149,17 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 }
 
             if not google_format_card:
-                return "❌ Failed to create card structure"
+                return SendDynamicCardResponse(
+                    success=False,
+                    spaceId=space_id,
+                    deliveryMethod="webhook" if webhook_url else "api",
+                    cardType=best_match.get("type", "unknown"),
+                    cardDescription=card_description,
+                    userEmail=user_google_email,
+                    validationPassed=False,
+                    message="Failed to create card structure",
+                    error="Card structure generation returned None",
+                )
 
             # Create message payload
             message_obj = Message()
@@ -2422,7 +2210,27 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 )
 
                 # Return an error instead of sending a blank card
-                return f"❌ Prevented sending blank card. Issues: {'; '.join(content_issues)}. Check card_params and description."
+                return SendDynamicCardResponse(
+                    success=False,
+                    spaceId=space_id,
+                    deliveryMethod="webhook" if webhook_url else "api",
+                    cardType=best_match.get("type", "unknown"),
+                    componentInfo=ComponentSearchInfo(
+                        componentFound=bool(best_match.get("name")),
+                        componentName=best_match.get("name"),
+                        componentPath=best_match.get("path"),
+                        componentType=best_match.get("type"),
+                        searchScore=best_match.get("score"),
+                    ),
+                    cardDescription=card_description,
+                    threadKey=thread_key,
+                    webhookUrl=webhook_url,
+                    userEmail=user_google_email,
+                    validationPassed=False,
+                    validationIssues=content_issues,
+                    message="Prevented sending blank card - no renderable content",
+                    error=f"Validation issues: {'; '.join(content_issues)}",
+                )
 
             logger.info("✅ Pre-send validation passed - card has renderable content")
 
@@ -2535,6 +2343,16 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 logger.info(f"🔍 WEBHOOK RESPONSE - Headers: {dict(response.headers)}")
                 logger.info(f"🔍 WEBHOOK RESPONSE - Body: {response.text}")
 
+                # Build component info for response
+                component_info = ComponentSearchInfo(
+                    componentFound=bool(best_match.get("name")),
+                    componentName=best_match.get("name"),
+                    componentPath=best_match.get("path"),
+                    componentType=best_match.get("type"),
+                    searchScore=best_match.get("score"),
+                    extractedFromModule=best_match.get("extracted_from_module"),
+                )
+
                 # ANALYZE RESPONSE for content issues
                 if response.status_code == 200:
                     # Check if response indicates content issues
@@ -2546,18 +2364,58 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                         logger.warning(
                             f"⚠️ SUCCESS but possible content issue - Response: {response.text}"
                         )
-                        return f"⚠️ Card sent (Status 200) but may appear blank. Response: {response.text}. Card Type: {best_match.get('type')}"
+                        return SendDynamicCardResponse(
+                            success=True,
+                            spaceId=space_id,
+                            deliveryMethod="webhook",
+                            cardType=best_match.get("type", "unknown"),
+                            componentInfo=component_info,
+                            cardDescription=card_description,
+                            threadKey=thread_key,
+                            webhookUrl=webhook_url,
+                            userEmail=user_google_email,
+                            httpStatus=200,
+                            validationPassed=True,
+                            message=f"Card sent (Status 200) but may appear blank. Response: {response.text}",
+                        )
                     else:
                         logger.info(
                             f"✅ Card sent successfully via webhook. Status: {response.status_code}"
                         )
-                        return f"✅ Card message sent successfully via webhook! Status: {response.status_code}, Card Type: {best_match.get('type')}"
+                        return SendDynamicCardResponse(
+                            success=True,
+                            spaceId=space_id,
+                            deliveryMethod="webhook",
+                            cardType=best_match.get("type", "unknown"),
+                            componentInfo=component_info,
+                            cardDescription=card_description,
+                            threadKey=thread_key,
+                            webhookUrl=webhook_url,
+                            userEmail=user_google_email,
+                            httpStatus=200,
+                            validationPassed=True,
+                            message="Card message sent successfully via webhook",
+                        )
                 elif response.status_code == 429:
                     # Handle rate limiting with helpful message
                     logger.warning(
                         "⚠️ Rate limited by Google Chat API. This indicates successful card formatting but too many requests."
                     )
-                    return f"⚠️ Rate limited (429) - Card format is correct but hitting quota limits. Reduce request frequency. Card Type: {best_match.get('type')}"
+                    return SendDynamicCardResponse(
+                        success=False,
+                        spaceId=space_id,
+                        deliveryMethod="webhook",
+                        cardType=best_match.get("type", "unknown"),
+                        componentInfo=component_info,
+                        cardDescription=card_description,
+                        threadKey=thread_key,
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        httpStatus=429,
+                        validationPassed=True,
+                        message="Rate limited (429) - Card format is correct but hitting quota limits",
+                        error="Too many requests - reduce request frequency",
+                    )
                 else:
                     error_details = {
                         "status": response.status_code,
@@ -2571,13 +2429,37 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                     logger.error(
                         f"❌ Failed to send card via webhook: {json.dumps(error_details, indent=2)}"
                     )
-                    return f"❌ Webhook delivery failed. Status: {response.status_code}, Response: {response.text}"
+                    return SendDynamicCardResponse(
+                        success=False,
+                        spaceId=space_id,
+                        deliveryMethod="webhook",
+                        cardType=best_match.get("type", "unknown"),
+                        componentInfo=component_info,
+                        cardDescription=card_description,
+                        threadKey=thread_key,
+                        webhookUrl=webhook_url,
+                        userEmail=user_google_email,
+                        httpStatus=response.status_code,
+                        validationPassed=True,
+                        message=f"Webhook delivery failed with status {response.status_code}",
+                        error=response.text,
+                    )
             else:
                 # Send via API
                 chat_service = await _get_chat_service_with_fallback(user_google_email)
 
                 if not chat_service:
-                    return f"❌ Failed to create Google Chat service for {user_google_email}"
+                    return SendDynamicCardResponse(
+                        success=False,
+                        spaceId=space_id,
+                        deliveryMethod="api",
+                        cardType=best_match.get("type", "unknown"),
+                        cardDescription=card_description,
+                        userEmail=user_google_email,
+                        validationPassed=True,
+                        message=f"Failed to create Google Chat service for {user_google_email}",
+                        error="Chat service authentication failed",
+                    )
 
                 # Add thread key if provided
                 request_params = {"parent": space_id, "body": message_body}
@@ -2590,8 +2472,43 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 message_name = message.get("name", "")
                 create_time = message.get("createTime", "")
 
-                return f"✅ Card message sent to space '{space_id}' by {user_google_email}. Message ID: {message_name}, Time: {create_time}, Card Type: {best_match.get('type')}"
+                # Build component info for response
+                component_info = ComponentSearchInfo(
+                    componentFound=bool(best_match.get("name")),
+                    componentName=best_match.get("name"),
+                    componentPath=best_match.get("path"),
+                    componentType=best_match.get("type"),
+                    searchScore=best_match.get("score"),
+                    extractedFromModule=best_match.get("extracted_from_module"),
+                )
+
+                return SendDynamicCardResponse(
+                    success=True,
+                    messageId=message_name,
+                    spaceId=space_id,
+                    deliveryMethod="api",
+                    cardType=best_match.get("type", "unknown"),
+                    componentInfo=component_info,
+                    cardDescription=card_description,
+                    threadKey=thread_key,
+                    createTime=create_time,
+                    userEmail=user_google_email,
+                    validationPassed=True,
+                    message=f"Card message sent successfully to space '{space_id}'",
+                )
 
         except Exception as e:
             logger.error(f"❌ Error sending dynamic card: {e}", exc_info=True)
-            return f"❌ Error sending dynamic card: {str(e)}"
+            return SendDynamicCardResponse(
+                success=False,
+                spaceId=space_id,
+                deliveryMethod="webhook" if webhook_url else "api",
+                cardType="unknown",
+                cardDescription=card_description,
+                threadKey=thread_key,
+                webhookUrl=webhook_url,
+                userEmail=user_google_email,
+                validationPassed=False,
+                message="Error sending dynamic card",
+                error=str(e),
+            )

@@ -228,6 +228,56 @@ GoogleUnlimited uses a middleware architecture that provides seamless service in
 > - 🏷️ **[TagBasedResourceMiddleware](documentation/middleware/)** - URI pattern resource discovery and management
 > - 🧠 **[QdrantUnifiedMiddleware](documentation/middleware/)** - AI-powered semantic search and vector embeddings
 > - 🎨 **[TemplateMiddleware](documentation/middleware/)** - Advanced Jinja2 template system for output formatting
+> - 🔧 **[SessionToolFilteringMiddleware](documentation/middleware/SESSION_TOOL_FILTERING_MIDDLEWARE.md)** - Per-session tool enable/disable management
+
+### 🔧 Session-Scoped Tool Management
+
+GoogleUnlimited supports **per-session tool enable/disable** functionality, allowing different MCP clients to have different tool availability without affecting other connected clients.
+
+**Key Features:**
+- **Session Isolation**: Disable tools for one client session without affecting others
+- **Non-Invasive**: Session-scoped operations never modify the global tool registry
+- **Protected Tools**: Core management tools (`manage_tools`, `health_check`, etc.) always remain available
+- **Middleware-Based**: Uses `SessionToolFilteringMiddleware` for protocol-level filtering
+
+**Usage Examples:**
+
+```python
+# Disable tools for this session only (other clients unaffected)
+manage_tools(action="disable", tool_names=["send_gmail_message"], scope="session")
+
+# Disable all except specific tools for this session
+manage_tools(action="disable_all_except", tool_names=["search_drive_files", "list_events"], scope="session")
+
+# Re-enable all tools for this session
+manage_tools(action="enable_all", scope="session")
+
+# Global operations (original behavior, affects all clients)
+manage_tools(action="disable", tool_names=["send_gmail_message"], scope="global")
+```
+
+**Response Structure:**
+
+```json
+{
+  "success": true,
+  "action": "disable_all_except",
+  "scope": "session",
+  "enabledCount": 94,
+  "disabledCount": 0,
+  "toolsAffected": ["tool1", "tool2", "..."],
+  "sessionState": {
+    "sessionId": "f725be09...",
+    "sessionAvailable": true,
+    "sessionDisabledTools": ["tool1", "tool2"],
+    "sessionDisabledCount": 89
+  },
+  "message": "Kept 5 tools, disabled 89 tools for this session"
+}
+```
+
+> 📚 **Session Tool Management Resources:**
+> - 🔧 **[SessionToolFilteringMiddleware Guide](documentation/middleware/SESSION_TOOL_FILTERING_MIDDLEWARE.md)** - Complete documentation for per-session tool management
 
 ## 🎨 Template System
 

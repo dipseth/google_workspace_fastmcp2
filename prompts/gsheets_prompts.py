@@ -24,8 +24,15 @@ from fastmcp.prompts.prompt import PromptMessage, TextContent
 from pydantic import Field
 
 from config.enhanced_logging import setup_logger
+from prompts.tool_optimization_helper import ToolOptimizationHelper
 
 logger = setup_logger()
+
+# Pre-generate the Sheets tool optimization section for reuse
+_SHEETS_TOOL_OPTIMIZATION = ToolOptimizationHelper.generate_optimization_section(
+    include_services=["sheets"],
+    include_service_list=False,
+)
 
 
 def setup_gsheets_prompts(mcp: FastMCP):
@@ -92,6 +99,8 @@ def setup_gsheets_prompts(mcp: FastMCP):
         advanced_content = f"""
 # 📊 Smart Contextual Google Sheets Card (Advanced)
 *Request ID: {request_id} | Generated: {current_time}*
+
+{_SHEETS_TOOL_OPTIMIZATION}
 
 ## ⚡ Advanced Sheets Intelligence Integration
 
@@ -433,6 +442,8 @@ This advanced prompt showcases FastMCP2's sophisticated Sheets resource integrat
 # 📊 Professional Sheets Dashboard (Medium)
 *Request ID: {request_id} | Generated: {current_time}*
 
+{_SHEETS_TOOL_OPTIMIZATION}
+
 ## ✨ Professional Dashboard Features with Sheets Integration
 
 ### Configuration
@@ -661,6 +672,8 @@ This medium-complexity prompt delivers professional Sheets dashboards with smart
         simple_content = f"""
 # ⚡ Quick Sheets Card Demo (Simple)
 *Request ID: {request_id} | Generated: {current_time}*
+
+{_SHEETS_TOOL_OPTIMIZATION}
 
 ## 🎯 Zero-Configuration Sheets Card Demo
 

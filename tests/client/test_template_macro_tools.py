@@ -9,7 +9,7 @@ client testing patterns. Macro discovery is now handled via resources
 import pytest
 
 from .base_test_config import TEST_EMAIL
-from .test_helpers import TestResponseValidator, ToolTestRunner
+from .test_helpers import TestResponseValidator, ToolTestRunner, assert_tools_registered
 
 
 @pytest.mark.service("template")
@@ -21,11 +21,7 @@ class TestTemplateMacroTools:
         """Test that template macro creation tool is available."""
         expected_tools = ["create_template_macro"]
 
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        for tool_name in expected_tools:
-            assert tool_name in tool_names, f"Tool {tool_name} should be available"
+        await assert_tools_registered(client, expected_tools, context="Template tools")
 
     @pytest.mark.asyncio
     async def test_template_macros_resource_available(self, client):

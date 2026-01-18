@@ -38,6 +38,8 @@ from datetime import datetime
 import pytest
 from dotenv import load_dotenv
 
+from .test_helpers import assert_tools_registered
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -87,12 +89,7 @@ class TestSendDynamicCard:
     @pytest.mark.asyncio
     async def test_send_dynamic_card_tool_available(self, client):
         """Test that the send_dynamic_card tool is available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        assert (
-            "send_dynamic_card" in tool_names
-        ), "Tool 'send_dynamic_card' not found in available tools"
+        await assert_tools_registered(client, ["send_dynamic_card"], context="Dynamic card tools")
 
     @pytest.mark.asyncio
     async def test_send_simple_card(self, client):

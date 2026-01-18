@@ -269,6 +269,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"❌ Photos API error: {e}"
             logger.error(error_msg)
             return PhotosSmartSearchResponse(
+                success=False,
                 media_items=[],
                 total_found=0,
                 search_time_seconds=0,
@@ -282,6 +283,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"❌ Unexpected error in smart search: {str(e)}"
             logger.error(error_msg)
             return PhotosSmartSearchResponse(
+                success=False,
                 media_items=[],
                 total_found=0,
                 search_time_seconds=0,
@@ -444,6 +446,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"❌ Photos API error: {e}"
             logger.error(error_msg)
             return PhotosBatchDetailsResponse(
+                success=False,
                 successful_items=[],
                 failed_items=[],
                 total_requested=len(media_item_ids) if media_item_ids else 0,
@@ -459,6 +462,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"❌ Unexpected error in batch details: {str(e)}"
             logger.error(error_msg)
             return PhotosBatchDetailsResponse(
+                success=False,
                 successful_items=[],
                 failed_items=[],
                 total_requested=len(media_item_ids) if media_item_ids else 0,
@@ -504,6 +508,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             if user_google_email not in _client_cache:
                 no_client_msg = f"No optimized Photos client found for {user_google_email}. Make some API calls first."
                 return PhotosPerformanceStatsResponse(
+                    success=False,
                     cache_size=0,
                     max_cache_size=0,
                     cache_utilization_percent=0,
@@ -565,6 +570,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"❌ Unexpected error getting performance stats: {str(e)}"
             logger.error(error_msg)
             return PhotosPerformanceStatsResponse(
+                success=False,
                 cache_size=0,
                 max_cache_size=0,
                 cache_utilization_percent=0,
@@ -714,6 +720,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"❌ Photos API error: {e}"
             logger.error(error_msg)
             return PhotosAlbumSyncResponse(
+                success=False,
                 album_id=album_id,
                 total_items=0,
                 photos_count=0,
@@ -731,6 +738,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"❌ Unexpected error in album sync: {str(e)}"
             logger.error(error_msg)
             return PhotosAlbumSyncResponse(
+                success=False,
                 album_id=album_id,
                 total_items=0,
                 photos_count=0,
@@ -930,6 +938,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"File not found: {e}"
             logger.error(error_msg)
             return PhotoUploadResponse(
+                success=False,
                 successful=[],
                 failed=[],
                 total_count=len(file_list),
@@ -944,6 +953,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"Invalid file: {e}"
             logger.error(error_msg)
             return PhotoUploadResponse(
+                success=False,
                 successful=[],
                 failed=[],
                 total_count=len(file_list),
@@ -958,6 +968,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"Google Photos API error: {e}"
             logger.error(error_msg)
             return PhotoUploadResponse(
+                success=False,
                 successful=[],
                 failed=[],
                 total_count=len(file_list),
@@ -972,6 +983,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"Unexpected error uploading photos: {str(e)}"
             logger.error(error_msg)
             return PhotoUploadResponse(
+                success=False,
                 successful=[],
                 failed=[],
                 total_count=len(file_list),
@@ -1138,6 +1150,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"❌ Folder not found: {e}"
             logger.error(error_msg)
             return PhotosFolderUploadResponse(
+                success=False,
                 successful=[],
                 failed=[],
                 total_found=0,
@@ -1155,6 +1168,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             error_msg = f"❌ Unexpected error uploading folder: {str(e)}"
             logger.error(error_msg)
             return PhotosFolderUploadResponse(
+                success=False,
                 successful=[],
                 failed=[],
                 total_found=0,

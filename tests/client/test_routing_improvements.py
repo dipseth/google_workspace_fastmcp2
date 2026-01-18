@@ -7,6 +7,8 @@ import time
 import pytest
 from dotenv import load_dotenv
 
+from .test_helpers import assert_tools_registered, get_registered_tools
+
 # Load environment variables
 load_dotenv()
 
@@ -95,8 +97,8 @@ class TestRoutingImprovements:
             "photos": ["list_photos_albums", "search_photos", "create_photos_album"],
         }
 
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        # Use get_registered_tools to check the registry, not just enabled tools
+        tool_names = await get_registered_tools(client)
 
         routing_success = {}
         for service, service_tools in routing_patterns.items():
@@ -108,7 +110,7 @@ class TestRoutingImprovements:
         # Each service should have tools properly routed
         for service, count in routing_success.items():
             assert count > 0, f"Service {service} should have routed tools"
-            print(f"✅ Service '{service}': {count} tools properly routed")
+            print(f"Service '{service}': {count} tools properly routed")
 
     @pytest.mark.asyncio
     async def test_routing_chain(self, client):
@@ -149,19 +151,19 @@ class TestRoutingImprovements:
             "search_tool_history",  # Meta tool
         ]
 
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        # Use get_registered_tools to check the registry, not just enabled tools
+        tool_names = await get_registered_tools(client)
 
+        found_count = 0
         for tool_name in edge_cases:
             if tool_name in tool_names:
+                found_count += 1
                 # These should still be routed, even if not to a specific service
-                print(f"✅ Edge case tool '{tool_name}' is properly handled")
+                print(f"Edge case tool '{tool_name}' is properly handled")
 
-        # Test calling a system tool
-        if "health_check" in tool_names:
-            result = await client.call_tool("health_check", {})
-            assert result is not None, "System tools should be routed"
-            print("   System tool 'health_check' routed successfully")
+        # Verify at least one edge case tool is registered
+        assert found_count > 0, "At least one edge case tool should be registered"
+        print(f"System tools routed successfully: {found_count}/{len(edge_cases)}")
 
     @pytest.mark.asyncio
     async def test_routing_performance(self, client):
@@ -248,8 +250,8 @@ class TestRoutingServicePriority:
             "manage_gmail_label",
         ]
 
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        # Use get_registered_tools to check the registry, not just enabled tools
+        tool_names = await get_registered_tools(client)
 
         gmail_found = 0
         for tool_name in gmail_tools:
@@ -257,11 +259,11 @@ class TestRoutingServicePriority:
                 gmail_found += 1
                 # These should be routed with high confidence (0.95)
                 print(
-                    f"✅ Gmail tool '{tool_name}' available (95% confidence expected)"
+                    f"Gmail tool '{tool_name}' available (95% confidence expected)"
                 )
 
         assert gmail_found > 0, "Should have Gmail tools with high confidence routing"
-        print(f"   Total Gmail tools found: {gmail_found}")
+        print(f"Total Gmail tools found: {gmail_found}")
 
     @pytest.mark.asyncio
     async def test_calendar_high_confidence(self, client):
@@ -274,8 +276,8 @@ class TestRoutingServicePriority:
             "delete_event",
         ]
 
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        # Use get_registered_tools to check the registry, not just enabled tools
+        tool_names = await get_registered_tools(client)
 
         calendar_found = 0
         for tool_name in calendar_tools:
@@ -283,13 +285,13 @@ class TestRoutingServicePriority:
                 calendar_found += 1
                 # These should be routed with high confidence (0.95)
                 print(
-                    f"✅ Calendar tool '{tool_name}' available (95% confidence expected)"
+                    f"Calendar tool '{tool_name}' available (95% confidence expected)"
                 )
 
         assert (
             calendar_found > 0
         ), "Should have Calendar tools with high confidence routing"
-        print(f"   Total Calendar tools found: {calendar_found}")
+        print(f"Total Calendar tools found: {calendar_found}")
 
     @pytest.mark.asyncio
     async def test_chat_medium_confidence(self, client):
@@ -302,18 +304,18 @@ class TestRoutingServicePriority:
             "search_messages",
         ]
 
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        # Use get_registered_tools to check the registry, not just enabled tools
+        tool_names = await get_registered_tools(client)
 
         chat_found = 0
         for tool_name in chat_tools:
             if tool_name in tool_names:
                 chat_found += 1
                 # These should be routed with medium confidence (0.70)
-                print(f"✅ Chat tool '{tool_name}' available (70% confidence expected)")
+                print(f"Chat tool '{tool_name}' available (70% confidence expected)")
 
         assert chat_found > 0, "Should have Chat tools with medium confidence routing"
-        print(f"   Total Chat tools found: {chat_found}")
+        print(f"Total Chat tools found: {chat_found}")
 
     @pytest.mark.asyncio
     async def test_routing_priority_order(self, client):

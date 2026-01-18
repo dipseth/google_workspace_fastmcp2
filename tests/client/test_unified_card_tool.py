@@ -35,6 +35,8 @@ import os
 import pytest
 from dotenv import load_dotenv
 
+from .test_helpers import assert_tools_registered
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -63,14 +65,8 @@ class TestUnifiedCardTool:
     @pytest.mark.asyncio
     async def test_send_dynamic_card_tool_available(self, client):
         """Test that the send_dynamic_card tool is available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        # Check for the main tool we're testing
-        assert (
-            "send_dynamic_card" in tool_names
-        ), "Tool 'send_dynamic_card' not found in available tools"
-        print("✅ send_dynamic_card tool is available")
+        await assert_tools_registered(client, ["send_dynamic_card"], context="Unified card tools")
+        print("send_dynamic_card tool is registered")
 
     @pytest.mark.asyncio
     async def test_send_dynamic_card_simple(self, client):

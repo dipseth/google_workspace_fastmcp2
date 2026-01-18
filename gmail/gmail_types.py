@@ -1,10 +1,15 @@
 """
 Type definitions for Gmail tool responses.
 
-These TypedDict classes define the structure of data returned by Gmail tools,
+These classes define the structure of data returned by Gmail tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
+
+Note: Key response types (AllowedEmailInfo, AllowedGroupInfo, GmailAllowListResponse,
+ManageAllowListResponse, ManageGmailLabelResponse) use Pydantic BaseModel for rich
+field descriptions in JSON schemas. Other types use TypedDict for simplicity.
 """
 
+from pydantic import BaseModel, Field
 from typing_extensions import Dict, List, NotRequired, Optional, TypedDict, Union
 
 
@@ -50,52 +55,88 @@ class GmailFiltersResponse(TypedDict):
     error: NotRequired[Optional[str]]  # Optional error message for error responses
 
 
-class AllowedEmailInfo(TypedDict):
-    """Structure for a single allowed email entry."""
+class AllowedEmailInfo(BaseModel):
+    """Structure for a single allowed email entry in the Gmail allow list."""
 
-    email: str
-    masked_email: str  # Privacy-masked version of the email
+    email: str = Field(..., description="Full email address in the allow list")
+    masked_email: str = Field(
+        ..., description="Privacy-masked version of the email (e.g., 'u***r@example.com')"
+    )
 
 
-class AllowedGroupInfo(TypedDict):
+class AllowedGroupInfo(BaseModel):
     """Structure for a single allowed group entry based on People API contact groups."""
 
-    raw: str  # Raw token from GMAIL_ALLOW_LIST (e.g., "group:Team A" or "groupId:contactGroups/123")
-    type: NotRequired[str]  # "name" or "id"
-    group_name: NotRequired[str]  # Human-friendly group name when available
-    group_id: NotRequired[
-        str
-    ]  # Contact group resourceName when available (e.g., "contactGroups/123")
+    raw: str = Field(
+        ...,
+        description="Raw token from GMAIL_ALLOW_LIST (e.g., 'group:Team A' or 'groupId:contactGroups/123')",
+    )
+    type: Optional[str] = Field(
+        None, description="Group reference type: 'name' (human-readable) or 'id' (resource ID)"
+    )
+    group_name: Optional[str] = Field(
+        None, description="Human-friendly group name when available"
+    )
+    group_id: Optional[str] = Field(
+        None,
+        description="Contact group resourceName when available (e.g., 'contactGroups/123')",
+    )
 
 
-class GmailAllowListResponse(TypedDict):
-    """Response structure for view_gmail_allow_list tool."""
+class GmailAllowListResponse(BaseModel):
+    """Response structure for view_gmail_allow_list tool (action='view')."""
 
-    allowed_emails: List[AllowedEmailInfo]
-    # Optional list of group-based allow list entries (People API contact groups)
-    allowed_groups: NotRequired[List[AllowedGroupInfo]]
-    count: int
-    userEmail: str
-    is_configured: bool
-    source: str  # "GMAIL_ALLOW_LIST environment variable"
-    error: NotRequired[Optional[str]]  # Optional error message for error responses
+    allowed_emails: List[AllowedEmailInfo] = Field(
+        ..., description="List of individual email addresses in the allow list"
+    )
+    allowed_groups: Optional[List[AllowedGroupInfo]] = Field(
+        None,
+        description="List of group-based allow list entries (People API contact groups)",
+    )
+    count: int = Field(..., description="Total number of entries in the allow list")
+    userEmail: str = Field(..., description="Email of the authenticated user")
+    is_configured: bool = Field(
+        ..., description="Whether the GMAIL_ALLOW_LIST environment variable is set"
+    )
+    source: str = Field(
+        ...,
+        description="Source of the allow list configuration (e.g., 'GMAIL_ALLOW_LIST environment variable')",
+    )
+    error: Optional[str] = Field(None, description="Error message if operation failed")
 
 
-class ManageAllowListResponse(TypedDict):
+class ManageAllowListResponse(BaseModel):
     """Response structure for manage_gmail_allow_list add/remove/label operations."""
 
-    success: bool
-    action: str  # "add", "remove", "label_add", "label_remove"
-    entries_processed: int
-    entries_added: NotRequired[List[str]]
-    entries_removed: NotRequired[List[str]]
-    entries_already_present: NotRequired[List[str]]
-    entries_not_found: NotRequired[List[str]]
-    entries_invalid: NotRequired[List[str]]
-    current_list_count: int
-    userEmail: str
-    message: str  # Human-readable summary
-    error: NotRequired[Optional[str]]
+    success: bool = Field(..., description="Whether the operation completed successfully")
+    action: str = Field(
+        ...,
+        description="Action performed: 'add', 'remove', 'label_add', or 'label_remove'",
+    )
+    entries_processed: int = Field(
+        ..., description="Total number of entries that were processed"
+    )
+    entries_added: Optional[List[str]] = Field(
+        None, description="Email addresses successfully added to the allow list"
+    )
+    entries_removed: Optional[List[str]] = Field(
+        None, description="Email addresses successfully removed from the allow list"
+    )
+    entries_already_present: Optional[List[str]] = Field(
+        None, description="Email addresses that were already in the allow list (skipped)"
+    )
+    entries_not_found: Optional[List[str]] = Field(
+        None, description="Email addresses that were not found in the allow list (for remove)"
+    )
+    entries_invalid: Optional[List[str]] = Field(
+        None, description="Invalid email addresses or group specs that were rejected"
+    )
+    current_list_count: int = Field(
+        ..., description="Total number of entries in the allow list after the operation"
+    )
+    userEmail: str = Field(..., description="Email of the authenticated user")
+    message: str = Field(..., description="Human-readable summary of the operation result")
+    error: Optional[str] = Field(None, description="Error message if operation failed")
 
 
 class EmailTemplateInfo(TypedDict):
@@ -286,16 +327,26 @@ class GetGmailThreadContentResponse(TypedDict):
     error: NotRequired[Optional[str]]
 
 
-class ManageGmailLabelResponse(TypedDict):
+class ManageGmailLabelResponse(BaseModel):
     """Response structure for manage_gmail_label tool."""
 
-    success: bool
-    action: str
-    labels_processed: int
-    results: List[str]
-    color_adjustments: NotRequired[Optional[List[str]]]
-    userEmail: str
-    error: NotRequired[Optional[str]]
+    success: bool = Field(..., description="Whether the operation completed successfully")
+    action: str = Field(
+        ..., description="Action performed: 'create', 'update', or 'delete'"
+    )
+    labels_processed: int = Field(
+        ..., description="Number of labels that were processed in this operation"
+    )
+    results: List[str] = Field(
+        ...,
+        description="Status messages for each label operation (e.g., 'Created label: MyLabel (ID: Label_123)')",
+    )
+    color_adjustments: Optional[List[str]] = Field(
+        None,
+        description="Color correction messages when requested colors were adjusted to nearest Gmail-supported colors",
+    )
+    userEmail: str = Field(..., description="Email of the authenticated user")
+    error: Optional[str] = Field(None, description="Error message if operation failed")
 
 
 class ModifyGmailMessageLabelsResponse(TypedDict):

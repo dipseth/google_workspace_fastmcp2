@@ -310,12 +310,17 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 # If it's a display string, don't include it as service names
                 service_names_list = None
 
+            # Get current session ID for reconnection support
+            from auth.context import get_session_context
+            current_session_id = get_session_context()
+
             response = StartAuthResponse(
                 status="success",
                 message=message,
                 authUrl=auth_url,
                 clickableLink=f"[🚀 Click here to authenticate]({auth_url})",
                 userEmail=user_google_email,
+                sessionId=current_session_id,
                 serviceName=service_names_list,
                 instructions=instructions,
                 scopesIncluded=[
@@ -327,7 +332,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Google Calendar (event management)",
                     "And more Google services",
                 ],
-                note="The authentication will be linked to your current session and provide access to all Google services.",
+                note="The authentication will be linked to your current session and provide access to all Google services. Save your sessionId to reconnect with the same tool state using ?uuid= parameter.",
             )
 
             # Add browser-specific fields
@@ -384,11 +389,16 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         """
         logger.info(f"Checking authentication for {user_google_email}")
 
+        # Get current session ID for reconnection support
+        from auth.context import get_session_context
+        current_session_id = get_session_context()
+
         # Validate that user_google_email is provided
         if not user_google_email:
             return CheckAuthResponse(
                 authenticated=False,
                 userEmail="",
+                sessionId=current_session_id,
                 message="No user email provided. Please provide a Google email address to check authentication status.",
                 error="Missing user_google_email parameter",
             )
@@ -405,12 +415,14 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             return CheckAuthResponse(
                 authenticated=True,
                 userEmail=user_google_email,
-                message=f"{user_google_email} is authenticated for Google Drive",
+                sessionId=current_session_id,
+                message=f"{user_google_email} is authenticated for Google Drive. Save your sessionId to reconnect with the same tool state using ?uuid= parameter.",
             )
         except GoogleAuthError:
             return CheckAuthResponse(
                 authenticated=False,
                 userEmail=user_google_email,
+                sessionId=current_session_id,
                 message=f"{user_google_email} is not authenticated for Google Drive. Use the `start_google_auth` tool to authenticate.",
             )
         except Exception as e:
@@ -419,6 +431,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             return CheckAuthResponse(
                 authenticated=False,
                 userEmail=user_google_email,
+                sessionId=current_session_id,
                 message="",
                 error=error_msg,
             )

@@ -776,6 +776,8 @@ class EnhancedNaturalLanguageCardParser:
         # Look for explicit text patterns
         patterns_to_try = [
             r'(?:saying|with text|message|content)\s+["\']([^"\']+)["\']',
+            r'(?:and|with)\s+text\s+["\']([^"\']+)["\']',  # Handle "and text '...'" or "with text '...'"
+            r'\btext\s+["\']([^"\']+)["\']',  # Handle standalone "text '...'"
             r"(?:saying|with text|message|content)\s+([^,.\n]+?)(?:\s+(?:with|and)|$)",
         ]
 

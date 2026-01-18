@@ -40,17 +40,13 @@ class TestGmailElicitationSystem:
     @pytest.mark.asyncio
     async def test_gmail_tools_available(self, client):
         """Test that Gmail elicitation tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        from .test_helpers import assert_tools_registered
 
         # Check that Gmail elicitation tools are registered
         # Note: Allow list tools have been consolidated into manage_gmail_allow_list
         expected_tools = ["send_gmail_message", "manage_gmail_allow_list"]
 
-        for expected_tool in expected_tools:
-            assert (
-                expected_tool in tool_names
-            ), f"Gmail tool '{expected_tool}' not found in available tools"
+        await assert_tools_registered(client, expected_tools, context="Gmail tools")
 
     @pytest.mark.asyncio
     async def test_gmail_allow_list_resource_available(self, client):

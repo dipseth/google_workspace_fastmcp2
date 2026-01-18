@@ -9,7 +9,7 @@ Tests verify:
 import pytest
 
 from .base_test_config import TEST_EMAIL
-from .test_helpers import TestResponseValidator, ToolTestRunner
+from .test_helpers import TestResponseValidator, ToolTestRunner, assert_tools_registered
 
 
 @pytest.mark.service("gmail")
@@ -207,21 +207,14 @@ class TestMiddlewareServerIntegration:
     @pytest.mark.asyncio
     async def test_server_tools_still_available(self, client):
         """Verify tools are still available after middleware re-enablement."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        # Should have core tools
-        essential_tools = [
+        expected_tools = [
             "start_google_auth",
             "search_gmail_messages",
             "upload_to_drive",
             "list_calendars",
         ]
 
-        for tool_name in essential_tools:
-            assert (
-                tool_name in tool_names
-            ), f"Essential tool {tool_name} should be available after middleware re-enablement"
+        await assert_tools_registered(client, expected_tools, context="Middleware resolution tools")
 
     @pytest.mark.asyncio
     async def test_resources_still_accessible(self, client):

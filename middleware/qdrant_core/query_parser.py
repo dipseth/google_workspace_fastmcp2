@@ -333,6 +333,7 @@ def extract_service_from_tool(tool_name: str) -> str:
             break
 
     # Check for service names in remaining text
+    # Maps keywords to ScopeRegistry service names
     service_keywords = {
         "gmail": "gmail",
         "mail": "gmail",
@@ -355,12 +356,20 @@ def extract_service_from_tool(tool_name: str) -> str:
         "photos": "photos",
         "photo": "photos",
         "image": "photos",
+        "album": "photos",
         "chat": "chat",
         "message": "chat",
         "space": "chat",
+        "card": "chat",
         "forms": "forms",
         "form": "forms",
         "survey": "forms",
+        "question": "forms",
+        "people": "people",
+        "contact": "people",
+        "label": "people",
+        "tasks": "tasks",
+        "task": "tasks",
     }
 
     for keyword, service in service_keywords.items():

@@ -5,6 +5,8 @@ import os
 import pytest
 from dotenv import load_dotenv
 
+from .test_helpers import assert_tools_registered
+
 # Load environment variables
 load_dotenv()
 
@@ -297,26 +299,21 @@ class TestMetadataSourceOfTruth:
     @pytest.mark.asyncio
     async def test_metadata_backwards_compatibility(self, client):
         """Test that metadata maintains backwards compatibility."""
-        tools = await client.list_tools()
-
-        # Legacy tools should still work with metadata
-        legacy_patterns = [
+        # Legacy tools should still be registered with metadata
+        legacy_tools = [
             "list_gmail_labels",  # Original Gmail tool
             "list_calendars",  # Original Calendar tool
             "list_drive_items",  # Original Drive tool
         ]
 
-        for pattern in legacy_patterns:
-            tool = next((t for t in tools if t.name == pattern), None)
-            assert tool is not None, f"Legacy tool {pattern} should exist"
-
-            # Should have both old and new metadata fields
-            assert tool.name, "Should have name (legacy)"
-            assert tool.description, "Should have description (legacy)"
-            assert hasattr(tool, "inputSchema"), "Should have schema (new)"
+        await assert_tools_registered(
+            client,
+            legacy_tools,
+            context="Legacy tools for backwards compatibility"
+        )
 
         print("✅ Metadata maintains backwards compatibility")
-        print(f"   Verified {len(legacy_patterns)} legacy tools")
+        print(f"   Verified {len(legacy_tools)} legacy tools are registered")
 
     @pytest.mark.asyncio
     async def test_metadata_extensibility(self, client):

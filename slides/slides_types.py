@@ -5,7 +5,7 @@ These TypedDict classes define the structure of data returned by Slides tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from typing_extensions import Dict, List, Optional, TypedDict
+from typing_extensions import Dict, List, NotRequired, Optional, TypedDict
 
 
 class SlideInfo(TypedDict):
@@ -25,7 +25,7 @@ class PageSize(TypedDict):
     unit: str
 
 
-class CreatePresentationResponse(TypedDict, total=False):
+class CreatePresentationResponse(TypedDict):
     """Response structure for create_presentation tool."""
 
     presentationId: str
@@ -34,10 +34,11 @@ class CreatePresentationResponse(TypedDict, total=False):
     slideCount: int
     success: bool
     message: str
-    error: Optional[str]
+    userEmail: NotRequired[str]
+    error: NotRequired[Optional[str]]
 
 
-class PresentationInfoResponse(TypedDict, total=False):
+class PresentationInfoResponse(TypedDict):
     """Response structure for get_presentation_info tool."""
 
     presentationId: str
@@ -46,20 +47,22 @@ class PresentationInfoResponse(TypedDict, total=False):
     slideCount: int
     pageSize: PageSize
     slides: List[SlideInfo]
-    error: Optional[str]
+    userEmail: NotRequired[str]
+    error: NotRequired[Optional[str]]
 
 
-class AddSlideResponse(TypedDict, total=False):
+class AddSlideResponse(TypedDict):
     """Response structure for add_slide tool."""
 
     presentationId: str
     slideId: str
-    insertionIndex: Optional[int]
-    layoutId: Optional[str]
+    insertionIndex: NotRequired[Optional[int]]
+    layoutId: NotRequired[Optional[str]]
     presentationUrl: str
     success: bool
     message: str
-    error: Optional[str]
+    userEmail: NotRequired[str]
+    error: NotRequired[Optional[str]]
 
 
 class BatchUpdateReply(TypedDict):
@@ -67,11 +70,11 @@ class BatchUpdateReply(TypedDict):
 
     requestIndex: int
     operationType: str
-    objectId: Optional[str]
+    objectId: NotRequired[Optional[str]]
     details: str
 
 
-class UpdateSlideContentResponse(TypedDict, total=False):
+class UpdateSlideContentResponse(TypedDict):
     """Response structure for update_slide_content tool."""
 
     presentationId: str
@@ -81,10 +84,11 @@ class UpdateSlideContentResponse(TypedDict, total=False):
     replies: List[BatchUpdateReply]
     success: bool
     message: str
-    error: Optional[str]
+    userEmail: NotRequired[str]
+    error: NotRequired[Optional[str]]
 
 
-class ExportPresentationResponse(TypedDict, total=False):
+class ExportPresentationResponse(TypedDict):
     """Response structure for export_presentation tool."""
 
     presentationId: str
@@ -93,8 +97,9 @@ class ExportPresentationResponse(TypedDict, total=False):
     editUrl: str
     success: bool
     message: str
-    warning: Optional[str]
-    error: Optional[str]
+    userEmail: NotRequired[str]
+    warning: NotRequired[Optional[str]]
+    error: NotRequired[Optional[str]]
 
 
 class FileDownloadInfo(TypedDict):
@@ -108,7 +113,7 @@ class FileDownloadInfo(TypedDict):
     timestamp: str
 
 
-class GetPresentationFileResponse(TypedDict, total=False):
+class GetPresentationFileResponse(TypedDict):
     """Response structure for get_presentation_file tool."""
 
     presentationId: str
@@ -118,11 +123,12 @@ class GetPresentationFileResponse(TypedDict, total=False):
     editUrl: str
     success: bool
     message: str
-    warning: Optional[str]
-    error: Optional[str]
+    userEmail: NotRequired[str]
+    warning: NotRequired[Optional[str]]
+    error: NotRequired[Optional[str]]
 
 
-class ExportAndDownloadPresentationResponse(TypedDict, total=False):
+class ExportAndDownloadPresentationResponse(TypedDict):
     """Response structure for combined export_and_download_presentation tool."""
 
     presentationId: str
@@ -131,8 +137,9 @@ class ExportAndDownloadPresentationResponse(TypedDict, total=False):
     exportUrl: str
     editUrl: str
     downloaded: bool
-    fileInfo: Optional[FileDownloadInfo]  # Only present if downloaded=True
+    fileInfo: NotRequired[Optional[FileDownloadInfo]]  # Only present if downloaded=True
     success: bool
     message: str
-    warning: Optional[str]
-    error: Optional[str]
+    userEmail: NotRequired[str]
+    warning: NotRequired[Optional[str]]
+    error: NotRequired[Optional[str]]
