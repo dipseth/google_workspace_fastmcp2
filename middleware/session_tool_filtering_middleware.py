@@ -29,6 +29,8 @@ except ImportError:
     get_http_request = None
 
 from auth.context import (
+    clear_minimal_startup_applied,
+    clear_session_disabled_tools,
     disable_tool_for_session,
     get_effective_session_id,
     get_session_context,
@@ -420,8 +422,12 @@ class SessionToolFilteringMiddleware(Middleware):
 
         Supports HTTP connection parameters:
         - ?uuid=xyz123: Resume a specific persisted session
-        - ?service=drive,gmail: Enable only specific services for new sessions
+        - ?service=drive,gmail: Enable only specific services (ALWAYS applies, even on reconnect)
         - ?minimal=false: Override minimal startup mode
+
+        IMPORTANT: ?service= parameter ALWAYS takes precedence over session restoration.
+        This ensures that connecting with ?service=gmail,drive will always filter to those
+        services, even if the session was previously known with different tool states.
 
         Args:
             session_id: The session ID that just connected.
@@ -437,11 +443,27 @@ class SessionToolFilteringMiddleware(Middleware):
         effective_session_id = session_id
         was_restored = False
 
+        # IMPORTANT: Extract custom_services FIRST - it takes precedence over session restoration
+        # If ?service= is provided, we should NOT restore old session state, but apply the new filter
+        custom_services = http_params.get("services")
+        has_explicit_service_filter = (
+            custom_services is not None and len(custom_services) > 0
+        )
+
         # Check for UUID parameter to resume a specific session
         requested_uuid = http_params.get("uuid")
         if requested_uuid:
-            # Try to restore the requested session
-            if is_known_session(requested_uuid):
+            # If both ?uuid= and ?service= are provided, ?service= takes precedence
+            # The UUID is still used as the session identifier, but we apply fresh service filtering
+            if has_explicit_service_filter:
+                logger.info(
+                    f"🔗 Using UUID {requested_uuid[:8]}... with fresh service filter "
+                    f"(services={custom_services})"
+                )
+                effective_session_id = requested_uuid
+                # Don't restore - will apply service filter below
+            elif is_known_session(requested_uuid):
+                # No ?service= provided, try to restore the requested session
                 restored = restore_session_tool_state(requested_uuid)
                 if restored:
                     self._processed_sessions.add(requested_uuid)
@@ -454,6 +476,7 @@ class SessionToolFilteringMiddleware(Middleware):
                         f"⚠️ Could not restore session {requested_uuid[:8]}... "
                         f"(not found in persistence), using new session"
                     )
+                    effective_session_id = requested_uuid
             else:
                 # UUID provided but session not found - create new session with this UUID
                 logger.info(
@@ -461,34 +484,37 @@ class SessionToolFilteringMiddleware(Middleware):
                 )
                 effective_session_id = requested_uuid
 
-        # Check if this is a known session (returning client)
-        if is_known_session(effective_session_id):
-            # Try to restore persisted state
-            restored = restore_session_tool_state(effective_session_id)
-            if restored:
-                self._processed_sessions.add(effective_session_id)
-                if self.enable_debug:
-                    logger.debug(
-                        f"Session {effective_session_id[:8]}... restored from persistence"
-                    )
-                return effective_session_id, True
+        # If ?service= is provided, skip session restoration entirely
+        # This ensures the service filter is always applied fresh
+        if not has_explicit_service_filter:
+            # Check if this is a known session (returning client)
+            if is_known_session(effective_session_id):
+                # Try to restore persisted state
+                restored = restore_session_tool_state(effective_session_id)
+                if restored:
+                    self._processed_sessions.add(effective_session_id)
+                    if self.enable_debug:
+                        logger.debug(
+                            f"Session {effective_session_id[:8]}... restored from persistence"
+                        )
+                    return effective_session_id, True
 
-        # Session ID not known - try to restore by user email
-        # This handles STDIO transport reconnections where session ID changes but user is same
-        user_email = get_user_email_context()
-        if user_email:
-            restored_by_email = restore_session_tool_state_by_email(
-                effective_session_id, user_email
-            )
-            if restored_by_email:
-                self._processed_sessions.add(effective_session_id)
-                logger.info(
-                    f"🔄 Restored session {effective_session_id[:8]}... from previous "
-                    f"session for user {user_email}"
+            # Session ID not known - try to restore by user email
+            # This handles STDIO transport reconnections where session ID changes but user is same
+            user_email = get_user_email_context()
+            if user_email:
+                restored_by_email = restore_session_tool_state_by_email(
+                    effective_session_id, user_email
                 )
-                return effective_session_id, True
+                if restored_by_email:
+                    self._processed_sessions.add(effective_session_id)
+                    logger.info(
+                        f"🔄 Restored session {effective_session_id[:8]}... from previous "
+                        f"session for user {user_email}"
+                    )
+                    return effective_session_id, True
 
-        # New session - determine if minimal startup should be applied
+        # New session OR explicit service filter provided - determine startup mode
         minimal_override = http_params.get("minimal_override")
         should_apply_minimal = self.minimal_startup
 
@@ -503,18 +529,30 @@ class SessionToolFilteringMiddleware(Middleware):
                     f"🔗 Minimal startup DISABLED via ?minimal=false for session {effective_session_id[:8]}..."
                 )
 
-        # Get custom services from HTTP params (overrides default_enabled_services)
-        custom_services = http_params.get("services")
+        # If explicit ?service= is provided, clear any existing session state so we start fresh
+        # This must happen AFTER effective_session_id is finalized (e.g., after UUID processing)
+        if has_explicit_service_filter:
+            # Remove from processed sessions so it can be reprocessed
+            self._processed_sessions.discard(effective_session_id)
+            # Clear the session's disabled tools so we start fresh
+            clear_session_disabled_tools(effective_session_id)
+            # Clear the minimal startup flag so it can be reapplied with new services
+            clear_minimal_startup_applied(effective_session_id)
+            if self.enable_debug:
+                logger.debug(
+                    f"Cleared session state for {effective_session_id[:8]}... "
+                    f"due to explicit ?service= parameter"
+                )
 
-        # Apply minimal startup if enabled
+        # Apply minimal startup if enabled (uses custom_services if provided)
         if should_apply_minimal:
             self._apply_minimal_startup_for_session(
                 effective_session_id, custom_services=custom_services
             )
-        elif custom_services:
-            # Even without minimal startup, if services are specified, enable only those
+        elif has_explicit_service_filter:
+            # Explicit ?service= parameter always applies the service filter
             logger.info(
-                f"🔗 Applying custom service filter for session {effective_session_id[:8]}...: "
+                f"🔗 Applying explicit service filter for session {effective_session_id[:8]}...: "
                 f"services={custom_services}"
             )
             self._apply_service_filter_for_session(

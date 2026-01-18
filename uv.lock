@@ -686,7 +686,7 @@ wheels = [
 
 [[package]]
 name = "google-workspace-unlimited"
-version = "1.2.1"
+version = "1.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

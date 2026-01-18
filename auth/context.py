@@ -1192,6 +1192,25 @@ def was_minimal_startup_applied(session_id: str) -> bool:
     return False
 
 
+def clear_minimal_startup_applied(session_id: str) -> None:
+    """
+    Clear the minimal startup applied flag for a session.
+
+    This allows the session to be reprocessed with a new service filter
+    when reconnecting with ?service= URL parameter.
+
+    Args:
+        session_id: The session ID to clear the flag for.
+    """
+    with _store_lock:
+        if session_id in _session_store:
+            _session_store[session_id]["minimal_startup_applied"] = False
+            _session_store[session_id]["last_accessed"] = datetime.now()
+
+    # Also update persisted state
+    persist_session_tool_states()
+
+
 def cleanup_old_persisted_sessions(max_age_days: int = 7) -> int:
     """
     Clean up persisted sessions older than the specified age.
