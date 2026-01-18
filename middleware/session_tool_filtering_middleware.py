@@ -33,11 +33,13 @@ from auth.context import (
     get_effective_session_id,
     get_session_context,
     get_session_disabled_tools,
+    get_user_email_context,
     is_known_session,
     is_tool_enabled_for_session,
     mark_minimal_startup_applied,
     persist_session_tool_states,
     restore_session_tool_state,
+    restore_session_tool_state_by_email,
     set_effective_session_id,
     was_minimal_startup_applied,
 )
@@ -469,6 +471,21 @@ class SessionToolFilteringMiddleware(Middleware):
                     logger.debug(
                         f"Session {effective_session_id[:8]}... restored from persistence"
                     )
+                return effective_session_id, True
+
+        # Session ID not known - try to restore by user email
+        # This handles STDIO transport reconnections where session ID changes but user is same
+        user_email = get_user_email_context()
+        if user_email:
+            restored_by_email = restore_session_tool_state_by_email(
+                effective_session_id, user_email
+            )
+            if restored_by_email:
+                self._processed_sessions.add(effective_session_id)
+                logger.info(
+                    f"🔄 Restored session {effective_session_id[:8]}... from previous "
+                    f"session for user {user_email}"
+                )
                 return effective_session_id, True
 
         # New session - determine if minimal startup should be applied

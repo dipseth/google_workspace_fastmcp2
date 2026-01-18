@@ -699,6 +699,10 @@ def disable_tool_for_session(
     logger.debug(f"Disabled tool '{tool_name}' for session {session_id}")
 
     if persist:
+        # Also store user email for cross-session restoration
+        user_email = get_user_email_context()
+        if user_email:
+            store_session_data(session_id, "user_email", user_email)
         persist_session_tool_states()
 
     return True
@@ -733,6 +737,10 @@ def enable_tool_for_session(
     logger.debug(f"Enabled tool '{tool_name}' for session {session_id}")
 
     if persist:
+        # Also store user email for cross-session restoration
+        user_email = get_user_email_context()
+        if user_email:
+            store_session_data(session_id, "user_email", user_email)
         persist_session_tool_states()
 
     return True
@@ -1038,6 +1046,104 @@ def is_known_session(session_id: str) -> bool:
     # Check persisted states
     persisted_states = load_persisted_session_tool_states()
     return session_id in persisted_states
+
+
+def find_session_id_by_email(user_email: str) -> Optional[str]:
+    """
+    Find a persisted session ID by user email.
+
+    This enables session continuity across MCP reconnections where the
+    transport generates a new session ID but the user is the same.
+
+    Args:
+        user_email: The user's email address.
+
+    Returns:
+        The most recent session ID for this user, or None if not found.
+    """
+    if not user_email:
+        return None
+
+    persisted_states = load_persisted_session_tool_states()
+
+    # Find all sessions for this email, sorted by last_accessed (most recent first)
+    matching_sessions = []
+    for session_id, state in persisted_states.items():
+        if state.get("user_email") == user_email:
+            try:
+                last_accessed = datetime.fromisoformat(state.get("last_accessed", ""))
+                matching_sessions.append((session_id, last_accessed))
+            except (ValueError, TypeError):
+                # Invalid date - still include but with old timestamp
+                matching_sessions.append((session_id, datetime.min))
+
+    if not matching_sessions:
+        return None
+
+    # Return the most recently accessed session for this user
+    matching_sessions.sort(key=lambda x: x[1], reverse=True)
+    return matching_sessions[0][0]
+
+
+def restore_session_tool_state_by_email(new_session_id: str, user_email: str) -> bool:
+    """
+    Restore tool state from a previous session with the same user email.
+
+    This allows session continuity when the transport generates a new session ID
+    but the user is the same (common with STDIO transport reconnections).
+
+    The tool state from the old session is copied to the new session ID.
+
+    Args:
+        new_session_id: The new session ID to restore state into.
+        user_email: The user's email to search for previous sessions.
+
+    Returns:
+        True if state was restored from a previous session, False otherwise.
+    """
+    old_session_id = find_session_id_by_email(user_email)
+    if not old_session_id:
+        logger.debug(f"No previous session found for user {user_email} to restore from")
+        return False
+
+    if old_session_id == new_session_id:
+        # Same session, use regular restore
+        return restore_session_tool_state(new_session_id)
+
+    # Load the old session's state
+    persisted_states = load_persisted_session_tool_states()
+    old_state = persisted_states.get(old_session_id)
+    if not old_state:
+        return False
+
+    # Copy state to new session
+    with _store_lock:
+        if new_session_id not in _session_store:
+            _session_store[new_session_id] = {
+                "created_at": datetime.now(),
+                "last_accessed": datetime.now(),
+            }
+
+        _session_store[new_session_id]["session_disabled_tools"] = old_state.get(
+            "disabled_tools", set()
+        )
+        _session_store[new_session_id]["minimal_startup_applied"] = old_state.get(
+            "minimal_startup_applied", False
+        )
+        _session_store[new_session_id]["user_email"] = user_email
+        _session_store[new_session_id]["last_accessed"] = datetime.now()
+
+    disabled_count = len(old_state.get("disabled_tools", set()))
+    logger.info(
+        f"✅ Restored session {new_session_id[:8]}... from previous session "
+        f"{old_session_id[:8]}... for user {user_email} "
+        f"({disabled_count} tools disabled)"
+    )
+
+    # Persist the new session state and optionally clean up old one
+    persist_session_tool_states()
+
+    return True
 
 
 def mark_minimal_startup_applied(session_id: str) -> None:
