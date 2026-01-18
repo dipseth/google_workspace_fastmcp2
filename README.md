@@ -124,6 +124,8 @@ For development or customization:
 | `QDRANT_URL` | No | `http://localhost:6333` | Qdrant vector database URL |
 | `QDRANT_KEY` | No | `NONE` | Qdrant API key (use `NONE` for no auth) |
 | `FASTMCP_CLOUD` | No | `false` | Enable cloud deployment mode |
+| `MINIMAL_TOOLS_STARTUP` | No | `true` | Start with only 5 protected tools enabled |
+| `MINIMAL_STARTUP_SERVICES` | No | `` | Comma-separated services to enable at startup (e.g., `drive,gmail`) |
 
 *Either `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` OR `GOOGLE_CLIENT_SECRETS_FILE` is required.
 
@@ -229,6 +231,43 @@ GoogleUnlimited uses a middleware architecture that provides seamless service in
 > - 🧠 **[QdrantUnifiedMiddleware](documentation/middleware/)** - AI-powered semantic search and vector embeddings
 > - 🎨 **[TemplateMiddleware](documentation/middleware/)** - Advanced Jinja2 template system for output formatting
 > - 🔧 **[SessionToolFilteringMiddleware](documentation/middleware/SESSION_TOOL_FILTERING_MIDDLEWARE.md)** - Per-session tool enable/disable management
+
+### 🚀 Minimal Tools Startup
+
+By default, GoogleUnlimited starts with **only 5 protected tools enabled** for optimal performance and security. This allows clients to enable only the tools they need.
+
+**Protected Tools (Always Available):**
+- `manage_tools` - Enable/disable tools globally or per-session
+- `manage_tools_by_analytics` - Analytics-based tool management
+- `health_check` - Server health and configuration status
+- `start_google_auth` - Initiate OAuth authentication
+- `check_drive_auth` - Verify authentication status
+
+**Configuration:**
+
+```bash
+# Default: Start with minimal tools (only 5 protected tools)
+MINIMAL_TOOLS_STARTUP=true
+
+# Optional: Pre-enable specific services at startup
+MINIMAL_STARTUP_SERVICES=drive,gmail,calendar
+
+# Disable minimal startup (enable all 90+ tools immediately)
+MINIMAL_TOOLS_STARTUP=false
+```
+
+**Enabling Tools at Runtime:**
+
+```python
+# Enable all tools globally
+manage_tools(action="enable_all")
+
+# Enable specific tools
+manage_tools(action="enable", tool_names=["search_drive_files", "list_gmail_labels"])
+
+# List all registered tools (shows enabled/disabled status)
+manage_tools(action="list")
+```
 
 ### 🔧 Session-Scoped Tool Management
 
