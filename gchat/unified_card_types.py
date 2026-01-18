@@ -12,7 +12,6 @@ widgets, icons, and buttons that the unified card tool supports.
 from pydantic import BaseModel, Field
 from typing_extensions import Any, Dict, List, Literal, Optional
 
-
 # =============================================================================
 # Widget Types - Building blocks for card sections
 # =============================================================================

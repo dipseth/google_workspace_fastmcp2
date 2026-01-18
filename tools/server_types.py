@@ -10,7 +10,6 @@ for better MCP client integration.
 from pydantic import BaseModel, Field
 from typing_extensions import Dict, List, Literal, Optional
 
-
 # =============================================================================
 # Health Check Response Types
 # =============================================================================

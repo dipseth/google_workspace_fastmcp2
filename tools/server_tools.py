@@ -20,10 +20,6 @@ from fastmcp import FastMCP
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from auth.middleware import CredentialStorageMode
-from config.enhanced_logging import setup_logger
-from config.settings import settings
-from tools.common_types import UserGoogleEmail
 from auth.context import (
     clear_session_disabled_tools,
     disable_tool_for_session,
@@ -31,6 +27,10 @@ from auth.context import (
     get_session_context,
     get_session_disabled_tools,
 )
+from auth.middleware import CredentialStorageMode
+from config.enhanced_logging import setup_logger
+from config.settings import settings
+from tools.common_types import UserGoogleEmail
 from tools.server_types import (
     CredentialInfo,
     HealthCheckResponse,

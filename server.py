@@ -59,9 +59,9 @@ from resources.tool_output_resources import setup_tool_output_resources
 from resources.user_resources import setup_user_resources
 from sheets.sheets_tools import setup_sheets_tools
 from slides.slides_tools import setup_slides_tools
+from tools.dynamic_instructions import update_mcp_instructions
 from tools.server_tools import setup_server_tools
 from tools.template_macro_tools import setup_template_macro_tools
-from tools.dynamic_instructions import update_mcp_instructions
 
 # Authentication setup - choose between Google OAuth and custom JWT
 use_google_oauth = os.getenv("USE_GOOGLE_OAUTH", "true").lower() == "true"
@@ -182,7 +182,9 @@ logger.info("  ✅ All 18 unit tests passing")
 logger.info("  🔍 Monitoring for context lifecycle issues...")
 
 # Setup Session Tool Filtering Middleware for per-session tool enable/disable
-from middleware.session_tool_filtering_middleware import setup_session_tool_filtering_middleware
+from middleware.session_tool_filtering_middleware import (
+    setup_session_tool_filtering_middleware,
+)
 
 session_tool_filter_middleware = setup_session_tool_filtering_middleware(
     mcp,

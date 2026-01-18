@@ -26,7 +26,11 @@ sys.path.insert(0, str(project_root))
 # Import the helper function we're testing
 from gmail.utils import extract_email_addresses
 from tests.client.base_test_config import TEST_EMAIL
-from tests.client.test_helpers import TestResponseValidator, ToolTestRunner, assert_tools_registered
+from tests.client.test_helpers import (
+    TestResponseValidator,
+    ToolTestRunner,
+    assert_tools_registered,
+)
 
 
 @pytest.mark.service("gmail")

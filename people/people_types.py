@@ -7,9 +7,9 @@ enabling FastMCP to automatically generate JSON schemas with rich field descript
 for better MCP client integration.
 """
 
-from pydantic import BaseModel, Field
 from typing import List, Optional
 
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Contact Label/Group Types

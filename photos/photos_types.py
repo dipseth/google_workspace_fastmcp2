@@ -6,9 +6,9 @@ tools, enabling FastMCP to automatically generate JSON schemas with rich field d
 for better MCP client integration.
 """
 
-from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Album and Photo Info Types

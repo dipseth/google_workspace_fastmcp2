@@ -176,7 +176,9 @@ class TestNLPCardParser:
     def test_nlp_parser_extracts_header(self):
         """Test that NLP parser extracts header/title from description."""
         try:
-            from gchat.nlp_card_parser import parse_enhanced_natural_language_description
+            from gchat.nlp_card_parser import (
+                parse_enhanced_natural_language_description,
+            )
         except ImportError:
             pytest.skip("Could not import nlp_card_parser")
 
@@ -201,7 +203,9 @@ class TestNLPCardParser:
     def test_nlp_parser_extracts_buttons(self):
         """Test that NLP parser extracts button information."""
         try:
-            from gchat.nlp_card_parser import parse_enhanced_natural_language_description
+            from gchat.nlp_card_parser import (
+                parse_enhanced_natural_language_description,
+            )
         except ImportError:
             pytest.skip("Could not import nlp_card_parser")
 
@@ -223,7 +227,9 @@ class TestNLPCardParser:
     def test_nlp_parser_extracts_sections(self):
         """Test that NLP parser extracts section information."""
         try:
-            from gchat.nlp_card_parser import parse_enhanced_natural_language_description
+            from gchat.nlp_card_parser import (
+                parse_enhanced_natural_language_description,
+            )
         except ImportError:
             pytest.skip("Could not import nlp_card_parser")
 
@@ -259,11 +265,13 @@ class TestColBERTWithNLPIntegration:
     def unified_card_functions(self):
         """Import the unified card tool functions."""
         try:
-            from gchat.unified_card_tool import (
-                _find_card_component_colbert,
-                _find_card_component,
+            from gchat.nlp_card_parser import (
+                parse_enhanced_natural_language_description,
             )
-            from gchat.nlp_card_parser import parse_enhanced_natural_language_description
+            from gchat.unified_card_tool import (
+                _find_card_component,
+                _find_card_component_colbert,
+            )
 
             return {
                 "colbert_search": _find_card_component_colbert,

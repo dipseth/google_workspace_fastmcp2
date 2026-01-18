@@ -882,6 +882,7 @@ class TestSheetsFormatRangeComparison:
         verifies the tool has proper metadata via manage_tools list action.
         """
         import json
+
         from .test_helpers import assert_tools_registered
 
         # Verify format_sheet_range is registered in the registry
