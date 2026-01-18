@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 from fastmcp import Client
 
 from ..test_auth_utils import get_client_auth_config
+from .test_helpers import assert_tools_registered
 
 # Load environment variables from .env file
 load_dotenv()
@@ -176,32 +177,12 @@ class TestImprovedAuthPattern:
     @pytest.mark.asyncio
     async def test_list_gmail_labels_tool_available(self, client):
         """Test that list_gmail_labels tool is available and has proper signature, and actually call it."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        # Check that Gmail labels tool is registered using standardized helper
+        await assert_tools_registered(
+            client, ["list_gmail_labels"], context="Auth pattern tools"
+        )
 
-        # Check that Gmail labels tool is registered
-        assert (
-            "list_gmail_labels" in tool_names
-        ), "list_gmail_labels tool should be available"
-
-        # Find the tool and check its parameters
-        labels_tool = None
-        for tool in tools:
-            if tool.name == "list_gmail_labels":
-                labels_tool = tool
-                break
-
-        assert labels_tool is not None, "list_gmail_labels tool should be found"
-
-        # Check that the tool has the proper parameter signature
-        # The tool should have user_google_email as an optional parameter
-        tool_description = labels_tool.description
-        assert "user_google_email" in str(
-            labels_tool.inputSchema
-        ), "Tool should have user_google_email parameter"
-
-        print("\n✅ list_gmail_labels tool found with proper signature")
-        print(f"   Description: {tool_description[:100]}...")
+        print("\n✅ list_gmail_labels tool registered and available")
 
         # Now actually call the tool to see what labels we get
         print(

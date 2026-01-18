@@ -31,6 +31,7 @@ from fastmcp import Context, FastMCP
 from fastmcp.prompts.prompt import PromptMessage, TextContent
 
 from config.enhanced_logging import setup_logger
+from prompts.tool_optimization_helper import ToolOptimizationHelper
 
 logger = setup_logger()
 
@@ -42,6 +43,11 @@ class StructuredResponseDemoPrompts:
         """Initialize with Jinja2 template environment and tool mappings."""
         self.jinja_env = None
         self.structured_tools_map = self._get_structured_tools_mapping()
+
+        # Pre-generate tool optimization content for different demo types
+        self.multi_service_optimization = (
+            ToolOptimizationHelper.generate_multi_service_section()
+        )
 
         if JINJA2_AVAILABLE:
             # Built-in templates for structured response demos
@@ -177,6 +183,8 @@ class StructuredResponseDemoPrompts:
         return """# 🛠️ FastMCP2 Tool Showcase: {{ tool_name }}
 *Request ID: {{ request_id }} | Generated: {{ current_time }}*
 
+{{ tool_optimization }}
+
 ## 🎯 Featured Tool: **{{ tool_info.category }}** → `{{ tool_name }}`
 
 **Description:** {{ tool_info.description }}
@@ -225,6 +233,8 @@ class StructuredResponseDemoPrompts:
         """Template for comparing multiple tools side-by-side."""
         return """# 🔄 FastMCP2 Response Comparison Demo
 *Request ID: {{ request_id }} | Generated: {{ current_time }}*
+
+{{ tool_optimization }}
 
 ## 📊 **BEFORE vs AFTER: String Responses → Structured Data**
 
@@ -280,6 +290,8 @@ class StructuredResponseDemoPrompts:
         """Template for interactive demonstration prompt."""
         return """# 🎮 Interactive FastMCP2 Structured Response Demo
 *Request ID: {{ request_id }} | Generated: {{ current_time }}*
+
+{{ tool_optimization }}
 
 ## 🎲 **Random Tool Challenge!**
 
@@ -345,6 +357,8 @@ Today's featured tool: **{{ featured_tool.category }}** → `{{ featured_tool.na
         """Template explaining the benefits of structured responses."""
         return """# ✨ FastMCP2 Structured Response Benefits
 *Request ID: {{ request_id }} | Generated: {{ current_time }}*
+
+{{ tool_optimization }}
 
 ## 🎯 **Why Structured Responses Matter**
 
@@ -465,6 +479,7 @@ Chain structured tools together using their consistent response format for compl
                 "tool_params": tool_info["example_params"],
                 "original_response": tool_info["original_response_example"],
                 "structured_response": tool_info["structured_response_example"],
+                "tool_optimization": self.multi_service_optimization,
             }
 
             # Render with Jinja2
@@ -507,6 +522,7 @@ Chain structured tools together using their consistent response format for compl
                     "%Y-%m-%d %H:%M:%S UTC"
                 ),
                 "tools_comparison": tools_comparison,
+                "tool_optimization": self.multi_service_optimization,
             }
 
             # Render with Jinja2
@@ -561,6 +577,7 @@ Chain structured tools together using their consistent response format for compl
                 ),
                 "featured_tool": featured_tool,
                 "structured_categories": structured_categories,
+                "tool_optimization": self.multi_service_optimization,
             }
 
             # Render with Jinja2
@@ -656,6 +673,7 @@ Chain structured tools together using their consistent response format for compl
                 ),
                 "coverage_stats": coverage_stats,
                 "response_schemas": response_schemas,
+                "tool_optimization": self.multi_service_optimization,
             }
 
             # Render with Jinja2

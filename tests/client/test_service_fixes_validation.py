@@ -17,6 +17,8 @@ import os
 import pytest
 import pytest_asyncio
 
+from .test_helpers import assert_tools_registered
+
 # Server configuration - Updated for HTTPS
 SERVER_HOST = os.getenv("MCP_SERVER_HOST", "localhost")
 SERVER_PORT = os.getenv("MCP_SERVER_PORT", os.getenv("SERVER_PORT", "8000"))
@@ -240,10 +242,7 @@ class TestServiceListResourceFixes:
     @pytest.mark.asyncio
     async def test_tools_exist_and_callable(self, client):
         """Test that the underlying tools exist and are properly configured."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        # Test that required tools exist
+        # Test that required tools are registered in the server
         required_tools = [
             "list_gmail_filters",
             "list_gmail_labels",
@@ -251,20 +250,9 @@ class TestServiceListResourceFixes:
             "list_calendars",
         ]
 
-        for tool_name in required_tools:
-            assert tool_name in tool_names, f"Tool {tool_name} should be available"
-
-            # Get the tool details
-            tool = next((t for t in tools if t.name == tool_name), None)
-            assert tool is not None, f"Tool {tool_name} should be found"
-
-            # Tool should have proper schema
-            assert hasattr(
-                tool, "inputSchema"
-            ), f"Tool {tool_name} should have input schema"
-            assert (
-                tool.inputSchema is not None
-            ), f"Tool {tool_name} should have non-null input schema"
+        await assert_tools_registered(
+            client, required_tools, context="Service list resource tools"
+        )
 
     @pytest.mark.asyncio
     async def test_direct_tool_calls_work(self, client):

@@ -350,7 +350,8 @@ class EnhancedNaturalLanguageCardParser:
             text_lower = description.lower()
 
             wants_text_input = any(
-                k in text_lower for k in ["text input", "textinput", "input field", "enter your"]
+                k in text_lower
+                for k in ["text input", "textinput", "input field", "enter your"]
             )
             wants_dropdown = any(
                 k in text_lower for k in ["dropdown", "select", "pick one", "choose"]
@@ -359,7 +360,9 @@ class EnhancedNaturalLanguageCardParser:
             # Try to infer a label for a single text input (handles: labeled "X").
             import re
 
-            label_match = re.search(r"labeled\s+[\"']([^\"']+)[\"']", description, re.IGNORECASE)
+            label_match = re.search(
+                r"labeled\s+[\"']([^\"']+)[\"']", description, re.IGNORECASE
+            )
             inferred_label = label_match.group(1).strip() if label_match else None
 
             if wants_text_input:
@@ -367,7 +370,9 @@ class EnhancedNaturalLanguageCardParser:
                     {
                         "textInput": {
                             "label": inferred_label or "Your name",
-                            "name": (inferred_label or "your_name").lower().replace(" ", "_"),
+                            "name": (inferred_label or "your_name")
+                            .lower()
+                            .replace(" ", "_"),
                         }
                     }
                 )
@@ -388,7 +393,11 @@ class EnhancedNaturalLanguageCardParser:
                                 "label": "Select",
                                 "type": "DROPDOWN",
                                 "items": [
-                                    {"text": p, "value": p.lower().replace(" ", "_"), "selected": i == 0}
+                                    {
+                                        "text": p,
+                                        "value": p.lower().replace(" ", "_"),
+                                        "selected": i == 0,
+                                    }
                                     for i, p in enumerate(parts[:10])
                                 ],
                             }
@@ -776,6 +785,8 @@ class EnhancedNaturalLanguageCardParser:
         # Look for explicit text patterns
         patterns_to_try = [
             r'(?:saying|with text|message|content)\s+["\']([^"\']+)["\']',
+            r'(?:and|with)\s+text\s+["\']([^"\']+)["\']',  # Handle "and text '...'" or "with text '...'"
+            r'\btext\s+["\']([^"\']+)["\']',  # Handle standalone "text '...'"
             r"(?:saying|with text|message|content)\s+([^,.\n]+?)(?:\s+(?:with|and)|$)",
         ]
 
@@ -893,9 +904,9 @@ class EnhancedNaturalLanguageCardParser:
             # Pattern 1: quoted URLs after image/picture/etc keywords
             r'(?:image|picture|chart|graph|photo)\s+(?:from\s+)?["\']([^"\']+)["\']',
             # Pattern 2: https:// URLs after image/picture/etc keywords (capture full URL path)
-            r'(?:image|picture|chart|graph|photo)\s+(?:from\s+)?(https?://[^\s,]+)',
+            r"(?:image|picture|chart|graph|photo)\s+(?:from\s+)?(https?://[^\s,]+)",
             # Pattern 3: file extensions
-            r'(?:image|picture|chart|graph|photo)\s+(?:from\s+)?(\S+\.(?:png|jpg|jpeg|gif|svg|webp))',
+            r"(?:image|picture|chart|graph|photo)\s+(?:from\s+)?(\S+\.(?:png|jpg|jpeg|gif|svg|webp))",
             # Pattern 4: include keyword with file extension
             r"include\s+(?:the\s+)?([^.\s]+\.(?:png|jpg|jpeg|gif|svg|webp))",
         ]

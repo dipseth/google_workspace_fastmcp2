@@ -167,8 +167,7 @@ class TestSlidesTools:
     @pytest.mark.asyncio
     async def test_slides_tools_available(self, client):
         """Test that all Slides tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        from .test_helpers import assert_tools_registered
 
         # Check for all Slides tools
         # Note: export_presentation was renamed to export_and_download_presentation
@@ -181,8 +180,7 @@ class TestSlidesTools:
             "export_and_download_presentation",
         ]
 
-        for tool in expected_tools:
-            assert tool in tool_names, f"Tool '{tool}' not found in available tools"
+        await assert_tools_registered(client, expected_tools, context="Slides tools")
 
     @pytest.mark.asyncio
     async def test_create_presentation(self, client):

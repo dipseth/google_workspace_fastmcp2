@@ -45,6 +45,7 @@ from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
 from middleware.template_middleware import (
     setup_enhanced_template_middleware as setup_template_middleware,
 )
+from people.people_tools import setup_people_tools
 from photos.advanced_tools import setup_advanced_photos_tools
 from photos.photos_tools import setup_photos_tools
 from prompts.gmail_prompts import setup_gmail_prompts
@@ -58,6 +59,7 @@ from resources.tool_output_resources import setup_tool_output_resources
 from resources.user_resources import setup_user_resources
 from sheets.sheets_tools import setup_sheets_tools
 from slides.slides_tools import setup_slides_tools
+from tools.dynamic_instructions import update_mcp_instructions
 from tools.server_tools import setup_server_tools
 from tools.template_macro_tools import setup_template_macro_tools
 
@@ -87,6 +89,19 @@ logger.info(f"  LEGACY_COMPAT_MODE: {LEGACY_COMPAT_MODE}")
 logger.info(f"  CREDENTIAL_MIGRATION: {CREDENTIAL_MIGRATION}")
 logger.info(f"  SERVICE_CACHING: {SERVICE_CACHING}")
 logger.info(f"  ENHANCED_LOGGING: {ENHANCED_LOGGING}")
+
+# Minimal Tools Startup Configuration
+MINIMAL_TOOLS_STARTUP = settings.minimal_tools_startup
+MINIMAL_STARTUP_SERVICES = settings.get_minimal_startup_services()
+if MINIMAL_TOOLS_STARTUP:
+    logger.info("🚀 Minimal Tools Startup Mode: ENABLED")
+    logger.info("  • New sessions start with only essential tools")
+    if MINIMAL_STARTUP_SERVICES:
+        logger.info(f"  • Default enabled services: {MINIMAL_STARTUP_SERVICES}")
+    logger.info("  • Returning sessions restore their previous tool state")
+    logger.info(f"  • Session state file: {settings.session_tool_state_path}")
+else:
+    logger.info("🚀 Minimal Tools Startup Mode: DISABLED (all tools available)")
 
 # Credential storage configuration
 storage_mode_str = settings.credential_storage_mode.upper()
@@ -166,6 +181,22 @@ logger.info("  ✅ Simplified auto-injection (90 lines → 20 lines)")
 logger.info("  ✅ All 18 unit tests passing")
 logger.info("  🔍 Monitoring for context lifecycle issues...")
 
+# Setup Session Tool Filtering Middleware for per-session tool enable/disable
+from middleware.session_tool_filtering_middleware import (
+    setup_session_tool_filtering_middleware,
+)
+
+session_tool_filter_middleware = setup_session_tool_filtering_middleware(
+    mcp,
+    enable_debug=True,  # Enable verbose logging for testing
+    minimal_startup=MINIMAL_TOOLS_STARTUP,  # Use setting from config
+)
+if MINIMAL_TOOLS_STARTUP:
+    logger.info(
+        "  ✅ Minimal startup mode active - new sessions get only essential tools"
+    )
+else:
+    logger.info("  ✅ Per-session tool enable/disable supported via scope='session'")
 
 # Profile Enrichment Middleware will be initialized after Qdrant middleware
 # to enable optional Qdrant-backed persistent caching
@@ -319,6 +350,28 @@ setup_chat_tools(mcp)
 # Register Unified Card Tool with ModuleWrapper integration
 setup_unified_card_tool(mcp)
 
+# Initialize ColBERT wrapper on startup if COLBERT_EMBEDDING_DEV=true
+if settings.colbert_embedding_dev:
+    logger.info(
+        "🤖 COLBERT_EMBEDDING_DEV=true - Initializing ColBERT wrapper on startup..."
+    )
+    try:
+        from gchat.unified_card_tool import _initialize_colbert_wrapper
+
+        _initialize_colbert_wrapper()
+        logger.info(
+            "✅ ColBERT wrapper initialized on startup - multi-vector embeddings ready"
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize ColBERT wrapper on startup: {e}")
+        logger.warning(
+            "⚠️ ColBERT mode will still work on-demand if called via use_colbert=True"
+        )
+else:
+    logger.info(
+        "⏭️ ColBERT embedding initialization skipped - set COLBERT_EMBEDDING_DEV=true in .env to enable"
+    )
+
 # DEPRECATED: Smart Card Tool removed due to formatting issues with Google Chat Cards v2 API
 # The send_smart_card function had structural problems that prevented proper card rendering
 # Use the working card types instead: send_simple_card, send_interactive_card, send_form_card
@@ -361,6 +414,9 @@ setup_photos_tools(mcp)
 
 # Register Advanced Google Photos tools with optimization
 setup_advanced_photos_tools(mcp)
+
+# Register Google People tools
+setup_people_tools(mcp)
 
 # Setup OAuth callback handler
 setup_oauth_callback_handler(mcp)
@@ -416,6 +472,18 @@ try:
         logger.info("✅ Qdrant resources registered - qdrant:// URIs available")
 except Exception as e:
     logger.warning(f"⚠️ Could not register Qdrant tools and resources: {e}")
+
+# 8. Update MCP instructions with dynamic content from Qdrant
+logger.info("📋 Building dynamic MCP instructions from Qdrant analytics...")
+try:
+    import asyncio
+
+    # Run the async instruction update in a sync context
+    asyncio.run(update_mcp_instructions(mcp, qdrant_middleware))
+    logger.info("✅ MCP instructions updated with dynamic content from Qdrant")
+except Exception as e:
+    logger.warning(f"⚠️ Could not update dynamic instructions: {e}")
+    logger.info("  📋 Using static base instructions as fallback")
 
 
 # Setup OAuth endpoints (now using legacy system)
@@ -473,21 +541,23 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="FastMCP Google Workspace Server")
     parser.add_argument(
-        "--transport", "-t",
+        "--transport",
+        "-t",
         choices=["stdio", "http", "sse"],
         default=None,
-        help="Transport mode: stdio (default), http, or sse"
+        help="Transport mode: stdio (default), http, or sse",
     )
     parser.add_argument(
-        "--port", "-p",
+        "--port",
+        "-p",
         type=int,
         default=None,
-        help="Port for HTTP/SSE transport (default: from settings)"
+        help="Port for HTTP/SSE transport (default: from settings)",
     )
     parser.add_argument(
         "--host",
         default=None,
-        help="Host for HTTP/SSE transport (default: from settings)"
+        help="Host for HTTP/SSE transport (default: from settings)",
     )
     args = parser.parse_args()
 
@@ -520,7 +590,7 @@ def main():
     try:
         # Check for transport mode: CLI args > environment variable > default (stdio)
         transport_mode = args.transport or os.getenv("MCP_TRANSPORT", "stdio").lower()
-        
+
         if transport_mode == "stdio":
             # Stdio transport for command-based MCP clients (uvx, npx, etc.)
             logger.info("📡 Starting server with STDIO transport (command-based)")
@@ -545,7 +615,9 @@ def main():
                 if ssl_config:
                     run_args["transport"] = transport_mode
                     run_args["uvicorn_config"] = ssl_config
-                    logger.info(f"🔒 Starting server with {transport_mode.upper()} transport + SSL")
+                    logger.info(
+                        f"🔒 Starting server with {transport_mode.upper()} transport + SSL"
+                    )
                     logger.info(f"SSL Certificate: {ssl_config['ssl_certfile']}")
                     logger.info(f"SSL Private Key: {ssl_config['ssl_keyfile']}")
                 else:
@@ -555,7 +627,9 @@ def main():
                     run_args["transport"] = transport_mode
             else:
                 run_args["transport"] = transport_mode
-                logger.info(f"🌐 Starting server with {transport_mode.upper()} transport")
+                logger.info(
+                    f"🌐 Starting server with {transport_mode.upper()} transport"
+                )
 
             # Run the server with appropriate transport and SSL configuration
             mcp.run(**run_args)

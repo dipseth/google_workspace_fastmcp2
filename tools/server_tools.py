@@ -20,10 +20,28 @@ from fastmcp import FastMCP
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
 
+from auth.context import (
+    clear_session_disabled_tools,
+    disable_tool_for_session,
+    enable_tool_for_session,
+    get_session_context,
+    get_session_disabled_tools,
+)
 from auth.middleware import CredentialStorageMode
 from config.enhanced_logging import setup_logger
 from config.settings import settings
 from tools.common_types import UserGoogleEmail
+from tools.server_types import (
+    CredentialInfo,
+    HealthCheckResponse,
+    ManageCredentialsResponse,
+    ManageToolsByAnalyticsResponse,
+    ManageToolsResponse,
+    OAuthFlowStatus,
+    SessionToolState,
+    ToolInfo,
+    ToolUsageInfo,
+)
 
 logger = setup_logger()
 
@@ -171,7 +189,7 @@ async def health_check(
     google_auth_provider: Optional[Any] = None,
     credential_storage_mode: Optional[CredentialStorageMode] = None,
     user_google_email: Optional[str] = None,
-) -> str:
+) -> HealthCheckResponse:
     """
     Check server health and configuration.
 
@@ -181,7 +199,7 @@ async def health_check(
         user_google_email: Optional user email for context-specific health checks
 
     Returns:
-        str: Server health status
+        HealthCheckResponse: Structured server health status
     """
     try:
         # Check credentials directory
@@ -208,32 +226,59 @@ async def health_check(
             except KeyError:
                 credential_storage_mode = CredentialStorageMode.FILE_PLAINTEXT
 
-        # Phase 1 OAuth Migration Health Checks
-        oauth_flow_status = await check_oauth_flows_health(google_auth_provider)
+        # Determine OAuth flow status
+        ENABLE_UNIFIED_AUTH = settings.enable_unified_auth
+        LEGACY_COMPAT_MODE = settings.legacy_compat_mode
 
-        status = (
-            "✅ Healthy"
-            if (creds_accessible and oauth_configured)
-            else "⚠️ Configuration Issues"
+        if ENABLE_UNIFIED_AUTH and LEGACY_COMPAT_MODE:
+            oauth_mode = "dual"
+        elif ENABLE_UNIFIED_AUTH:
+            oauth_mode = "unified"
+        else:
+            oauth_mode = "legacy"
+
+        oauth_flow_status = OAuthFlowStatus(
+            unified_flow_enabled=ENABLE_UNIFIED_AUTH,
+            legacy_flow_enabled=LEGACY_COMPAT_MODE or not ENABLE_UNIFIED_AUTH,
+            mode=oauth_mode,
         )
 
-        return (
-            f"🏥 **Google Drive Upload Server Health Check**\n\n"
-            f"**Status:** {status}\n"
-            f"**Server:** {settings.server_name} v1.0.0\n"
-            f"**Host:** {settings.server_host}:{settings.server_port}\n"
-            f"**OAuth Configured:** {'✅' if oauth_configured else '❌'}\n"
-            f"**Credentials Directory:** {'✅' if creds_accessible else '❌'} ({settings.credentials_dir})\n"
-            f"**Active Sessions:** {active_sessions}\n"
-            f"**Log Level:** {settings.log_level}\n\n"
-            f"**🔄 Phase 1 OAuth Migration Status:**\n"
-            f"{oauth_flow_status}\n\n"
-            f"**OAuth Callback URL:** {settings.dynamic_oauth_redirect_uri}"
+        healthy = creds_accessible and oauth_configured
+        status = "healthy" if healthy else "degraded"
+
+        return HealthCheckResponse(
+            status=status,
+            healthy=healthy,
+            serverName=settings.server_name,
+            serverVersion="1.0.0",
+            host=settings.server_host,
+            port=settings.server_port,
+            oauthConfigured=oauth_configured,
+            credentialsDirectoryAccessible=creds_accessible,
+            credentialsDirectory=str(settings.credentials_dir),
+            activeSessions=active_sessions,
+            logLevel=settings.log_level,
+            oauthFlowStatus=oauth_flow_status,
+            oauthCallbackUrl=settings.dynamic_oauth_redirect_uri,
         )
 
     except Exception as e:
         logger.error(f"Health check error: {e}", exc_info=True)
-        return f"❌ Health check failed: {e}"
+        return HealthCheckResponse(
+            status="unhealthy",
+            healthy=False,
+            serverName=settings.server_name,
+            serverVersion="1.0.0",
+            host=settings.server_host,
+            port=settings.server_port,
+            oauthConfigured=False,
+            credentialsDirectoryAccessible=False,
+            credentialsDirectory=str(settings.credentials_dir),
+            activeSessions=0,
+            logLevel=settings.log_level,
+            oauthCallbackUrl=settings.dynamic_oauth_redirect_uri,
+            error=str(e),
+        )
 
 
 async def manage_credentials(
@@ -250,7 +295,7 @@ async def manage_credentials(
             description="Target storage mode for migration: 'FILE_PLAINTEXT', 'FILE_ENCRYPTED', 'MEMORY_ONLY', 'MEMORY_WITH_BACKUP'"
         ),
     ] = None,
-) -> str:
+) -> ManageCredentialsResponse:
     """
     Manage credential storage and security settings.
 
@@ -260,7 +305,7 @@ async def manage_credentials(
         new_storage_mode: Target storage mode for migration ('FILE_PLAINTEXT', 'FILE_ENCRYPTED', 'MEMORY_ONLY', 'MEMORY_WITH_BACKUP')
 
     Returns:
-        str: Result of the credential management operation
+        ManageCredentialsResponse: Structured result of the credential management operation
     """
     try:
         from auth.context import get_auth_middleware
@@ -268,56 +313,127 @@ async def manage_credentials(
         # Get the AuthMiddleware instance
         auth_middleware = get_auth_middleware()
         if not auth_middleware:
-            return "❌ AuthMiddleware not available"
+            return ManageCredentialsResponse(
+                success=False,
+                action=action,
+                email=email,
+                message="AuthMiddleware not available",
+                error="AuthMiddleware not initialized",
+            )
 
         if action == "status":
             # Get credential status
             summary = await auth_middleware.get_credential_summary(email)
             if summary:
-                return (
-                    f"📊 **Credential Status for {email}**\n\n"
-                    f"**Storage Mode:** {summary['storage_mode']}\n"
-                    f"**File Path:** {summary['file_path']}\n"
-                    f"**File Exists:** {'✅' if summary['file_exists'] else '❌'}\n"
-                    f"**In Memory:** {'✅' if summary['in_memory'] else '❌'}\n"
-                    f"**Is Encrypted:** {'✅' if summary['is_encrypted'] else '❌'}\n"
-                    f"**Last Modified:** {summary.get('last_modified', 'Unknown')}\n"
-                    f"**File Size:** {summary.get('file_size', 'Unknown')} bytes"
+                credential_info = CredentialInfo(
+                    storageMode=summary.get("storage_mode", "unknown"),
+                    filePath=summary.get("file_path"),
+                    fileExists=summary.get("file_exists", False),
+                    inMemory=summary.get("in_memory", False),
+                    isEncrypted=summary.get("is_encrypted", False),
+                    lastModified=summary.get("last_modified"),
+                    fileSize=summary.get("file_size"),
+                )
+                return ManageCredentialsResponse(
+                    success=True,
+                    action=action,
+                    email=email,
+                    credentialInfo=credential_info,
+                    message=f"Credential status retrieved for {email}",
                 )
             else:
-                return f"❌ No credentials found for {email}"
+                return ManageCredentialsResponse(
+                    success=False,
+                    action=action,
+                    email=email,
+                    message=f"No credentials found for {email}",
+                    error="Credentials not found",
+                )
 
         elif action == "migrate":
             if not new_storage_mode:
-                return "❌ new_storage_mode is required for migration"
+                return ManageCredentialsResponse(
+                    success=False,
+                    action=action,
+                    email=email,
+                    message="new_storage_mode parameter is required for migration",
+                    error="Missing required parameter: new_storage_mode",
+                )
 
             try:
                 target_mode = CredentialStorageMode[new_storage_mode.upper()]
             except KeyError:
-                return f"❌ Invalid storage mode '{new_storage_mode}'. Valid options: FILE_PLAINTEXT, FILE_ENCRYPTED, MEMORY_ONLY, MEMORY_WITH_BACKUP"
+                return ManageCredentialsResponse(
+                    success=False,
+                    action=action,
+                    email=email,
+                    message=f"Invalid storage mode '{new_storage_mode}'",
+                    error=f"Valid options: FILE_PLAINTEXT, FILE_ENCRYPTED, MEMORY_ONLY, MEMORY_WITH_BACKUP",
+                )
+
+            # Get current storage mode before migration
+            current_summary = await auth_middleware.get_credential_summary(email)
+            previous_mode = (
+                current_summary.get("storage_mode") if current_summary else None
+            )
 
             # Perform migration
             success = await auth_middleware.migrate_credentials(email, target_mode)
             if success:
-                return f"✅ Successfully migrated credentials for {email} to {target_mode.value} mode"
+                return ManageCredentialsResponse(
+                    success=True,
+                    action=action,
+                    email=email,
+                    previousStorageMode=previous_mode,
+                    newStorageMode=target_mode.value,
+                    message=f"Successfully migrated credentials to {target_mode.value} mode",
+                )
             else:
-                return f"❌ Failed to migrate credentials for {email} to {target_mode.value} mode"
+                return ManageCredentialsResponse(
+                    success=False,
+                    action=action,
+                    email=email,
+                    previousStorageMode=previous_mode,
+                    newStorageMode=target_mode.value,
+                    message=f"Failed to migrate credentials to {target_mode.value} mode",
+                    error="Migration operation failed",
+                )
 
         elif action == "summary":
-            # Get summary of all credentials
-            # This would require implementing a method to list all credential files
-            return f"📋 **Credential Summary**\n\nCurrent storage mode: {auth_middleware.storage_mode.value}\n\nUse 'status' action with specific email for detailed information."
+            return ManageCredentialsResponse(
+                success=True,
+                action=action,
+                email=email,
+                message=f"Current storage mode: {auth_middleware.storage_mode.value}. Use 'status' action with specific email for detailed information.",
+            )
 
         elif action == "delete":
-            # Delete credentials (this would need to be implemented in AuthMiddleware)
-            return "⚠️ Credential deletion not yet implemented. Please manually delete credential files if needed."
+            return ManageCredentialsResponse(
+                success=False,
+                action=action,
+                email=email,
+                message="Credential deletion not yet implemented",
+                error="Please manually delete credential files if needed",
+            )
 
         else:
-            return f"❌ Invalid action '{action}'. Valid actions: status, migrate, summary, delete"
+            return ManageCredentialsResponse(
+                success=False,
+                action=action,
+                email=email,
+                message=f"Invalid action '{action}'",
+                error="Valid actions: status, migrate, summary, delete",
+            )
 
     except Exception as e:
         logger.error(f"Credential management error: {e}", exc_info=True)
-        return f"❌ Credential management failed: {e}"
+        return ManageCredentialsResponse(
+            success=False,
+            action=action,
+            email=email,
+            message="Credential management failed",
+            error=str(e),
+        )
 
 
 def _get_tool_registry(mcp: FastMCP) -> Dict[str, Any]:
@@ -399,7 +515,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 description="The user's Google email address for Drive access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware)."
             ),
         ] = None,
-    ) -> str:
+    ) -> HealthCheckResponse:
         """
         Check server health and configuration.
 
@@ -408,7 +524,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                              authenticated user from FastMCP context (auto-injected by middleware).
 
         Returns:
-            str: Server health status including OAuth migration status, active sessions, and configuration
+            HealthCheckResponse: Structured server health status including OAuth migration status, active sessions, and configuration
         """
         return await health_check(user_google_email=user_google_email)
 
@@ -438,7 +554,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 description="Target storage mode for migration: 'FILE_PLAINTEXT', 'FILE_ENCRYPTED', 'MEMORY_ONLY', 'MEMORY_WITH_BACKUP'. Required when action='migrate'"
             ),
         ] = None,
-    ) -> str:
+    ) -> ManageCredentialsResponse:
         """
         Manage credential storage and security settings.
 
@@ -448,15 +564,15 @@ def setup_server_tools(mcp: FastMCP) -> None:
             new_storage_mode: Target storage mode for migration (required when action='migrate')
 
         Returns:
-            str: Result of the credential management operation
+            ManageCredentialsResponse: Structured result of the credential management operation
         """
         return await manage_credentials(email, action, new_storage_mode)
 
     @mcp.tool(
         name="manage_tools",
         description=(
-            "List, enable, or disable FastMCP tools at runtime using FastMCP 2.8.0 "
-            "tool enable/disable support"
+            "List, enable, or disable FastMCP tools at runtime. Supports both global scope "
+            "(affects all clients) and session scope (affects only current session)."
         ),
         tags={"server", "tools", "feature_flag", "management"},
         annotations={
@@ -487,6 +603,17 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 description="Tool name(s) to enable/disable. Single string ('tool_a'), list (['tool_a', 'tool_b']), comma-separated ('tool_a,tool_b'), or JSON ('[\"tool_a\",\"tool_b\"]'). Required for enable/disable actions."
             ),
         ] = None,
+        scope: Annotated[
+            Literal["global", "session"],
+            Field(
+                description=(
+                    "Scope of the operation: "
+                    "'global' (default) - affects all MCP clients connected to this server, "
+                    "'session' - affects only the current client session (other clients unaffected). "
+                    "Session scope requires SessionToolFilteringMiddleware to be enabled."
+                )
+            ),
+        ] = "global",
         include_internal: Annotated[
             bool,
             Field(
@@ -494,24 +621,30 @@ def setup_server_tools(mcp: FastMCP) -> None:
             ),
         ] = False,
         user_google_email: UserGoogleEmail = None,
-    ) -> str:
+    ) -> ManageToolsResponse:
         """
-        Manage FastMCP tool availability using FastMCP 2.8.0 enable/disable support.
+        Manage FastMCP tool availability with global or session scope.
+
+        Scope:
+            - 'global' (default): Changes affect ALL MCP clients connected to this server.
+              Uses FastMCP's built-in tool.enable()/disable() methods.
+            - 'session': Changes affect ONLY the current client session.
+              Other clients continue to see all tools. Requires SessionToolFilteringMiddleware.
 
         Actions:
             - 'list':
                 List all registered tools and their enabled/disabled state.
+                Includes session-specific state when scope='session'.
             - 'disable':
-                Disable one or more tools by exact name. Disabled tools are hidden from
-                list_tools and behave as unknown tools to clients.
+                Disable one or more tools by exact name. With scope='global', disabled tools
+                are hidden from all clients. With scope='session', only this session is affected.
             - 'enable':
                 Re-enable one or more previously disabled tools by exact name.
             - 'disable_all_except':
                 Disable every tool except a provided keep list and a built-in set of
                 protected infra/management tools (e.g., manage_tools, health_check).
             - 'enable_all':
-                Enable all tools in the registry (optionally excluding internal tools
-                whose names start with '_', depending on include_internal).
+                Enable all tools (optionally excluding internal tools whose names start with '_').
 
         Args:
             action:
@@ -522,13 +655,16 @@ def setup_server_tools(mcp: FastMCP) -> None:
                   - List: ["tool_a", "tool_b"]
                   - Comma-separated string: "tool_a,tool_b"
                   - JSON list string: '["tool_a", "tool_b"]'
+            scope:
+                'global' affects all clients, 'session' affects only current session.
             include_internal:
                 If True, include internal/system tools (names starting with '_') in listing.
 
         Returns:
-            Human-readable status string describing the result.
+            ManageToolsResponse: Structured result including scope and session state information.
         """
         action_normalized = action.lower().strip()
+        scope_normalized = scope.lower().strip() if scope else "global"
         valid_actions = {
             "list",
             "disable",
@@ -537,17 +673,8 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "enable_all",
         }
 
-        if action_normalized not in valid_actions:
-            return "❌ Invalid action. Valid actions are: " "list, disable, enable"
-
-        # Discover current tool registry (does not interfere with middleware tests,
-        # which rely on their own mock-based discovery logic).
-        registry = _get_tool_registry(mcp)
-        if not registry:
-            return "❌ Unable to access FastMCP tool registry"
-
         # Protect critical tools from being disabled
-        protected_tools = {
+        protected_tools_set = {
             "manage_tools",
             "manage_tools_by_analytics",
             "health_check",
@@ -555,44 +682,115 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "check_drive_auth",
         }
 
+        # Helper to get current session state
+        def _get_session_state() -> SessionToolState:
+            session_id = get_session_context()
+            if session_id:
+                disabled = get_session_disabled_tools(session_id)
+                return SessionToolState(
+                    sessionId=(
+                        session_id[:8] + "..." if len(session_id) > 8 else session_id
+                    ),
+                    sessionAvailable=True,
+                    sessionDisabledTools=sorted(list(disabled)),
+                    sessionDisabledCount=len(disabled),
+                )
+            return SessionToolState(
+                sessionId=None,
+                sessionAvailable=False,
+                sessionDisabledTools=[],
+                sessionDisabledCount=0,
+            )
+
+        if action_normalized not in valid_actions:
+            return ManageToolsResponse(
+                success=False,
+                action=action,
+                scope=scope_normalized,
+                totalTools=0,
+                enabledCount=0,
+                disabledCount=0,
+                protectedTools=list(protected_tools_set),
+                sessionState=(
+                    _get_session_state() if scope_normalized == "session" else None
+                ),
+                message=f"Invalid action '{action}'",
+                error="Valid actions: list, disable, enable, disable_all_except, enable_all",
+            )
+
+        # Discover current tool registry
+        registry = _get_tool_registry(mcp)
+        if not registry:
+            return ManageToolsResponse(
+                success=False,
+                action=action,
+                scope=scope_normalized,
+                totalTools=0,
+                enabledCount=0,
+                disabledCount=0,
+                protectedTools=list(protected_tools_set),
+                sessionState=(
+                    _get_session_state() if scope_normalized == "session" else None
+                ),
+                message="Unable to access FastMCP tool registry",
+                error="Tool registry not available",
+            )
+
+        # Count enabled/disabled tools
+        total_tools = len(registry)
+        enabled_count = sum(1 for t in registry.values() if _get_tool_enabled_state(t))
+        disabled_count = total_tools - enabled_count
+
         if action_normalized == "list":
-            lines = [
-                "🧰 **Registered FastMCP Tools**",
-                "",
-                "Name | Enabled | Protected",
-                "---- | ------- | ---------",
-            ]
+            tool_list = []
+            session_state = _get_session_state()
+            session_disabled = set(session_state.sessionDisabledTools)
+
             for name, tool in sorted(registry.items()):
                 if not include_internal and name.startswith("_"):
                     continue
                 enabled = _get_tool_enabled_state(tool)
-                is_protected = name in protected_tools
-                lines.append(
-                    f"{name} | {'✅' if enabled else '⭕'} | "
-                    f"{'🛡️' if is_protected else ''}"
+                is_protected = name in protected_tools_set
+                tool_list.append(
+                    ToolInfo(
+                        name=name,
+                        enabled=enabled,
+                        isProtected=is_protected,
+                        description=getattr(tool, "description", None),
+                    )
                 )
-            return "\n".join(lines)
+
+            # Include session state info in list response
+            session_info = ""
+            if (
+                session_state.sessionAvailable
+                and session_state.sessionDisabledCount > 0
+            ):
+                session_info = (
+                    f", {session_state.sessionDisabledCount} session-disabled"
+                )
+
+            return ManageToolsResponse(
+                success=True,
+                action=action,
+                scope=scope_normalized,
+                totalTools=total_tools,
+                enabledCount=enabled_count,
+                disabledCount=disabled_count,
+                toolList=tool_list,
+                protectedTools=list(protected_tools_set),
+                sessionState=session_state,
+                message=f"Listed {len(tool_list)} tools ({enabled_count} enabled, {disabled_count} disabled{session_info})",
+            )
 
         def _normalize_tool_names(names_input):
-            """
-            Normalize tool name(s) into a de-duplicated list.
-
-            Supports:
-              - Single string: "tool_a"
-              - List: ["tool_a", "tool_b"]
-              - Comma-separated string: "tool_a,tool_b"
-              - JSON list string: '["tool_a", "tool_b"]'
-            """
+            """Normalize tool name(s) into a de-duplicated list."""
             if not names_input:
                 return []
-
             names = []
-
-            # Handle different input types
             if isinstance(names_input, list):
                 names.extend(str(n) for n in names_input)
             elif isinstance(names_input, str):
-                # Try JSON parsing first
                 try:
                     parsed = json.loads(names_input)
                     if isinstance(parsed, list):
@@ -600,7 +798,6 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     else:
                         names.append(str(parsed))
                 except json.JSONDecodeError:
-                    # Fallback: comma-separated or single string
                     if "," in names_input:
                         names.extend(
                             n.strip() for n in names_input.split(",") if n.strip()
@@ -609,8 +806,6 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         names.append(names_input.strip())
             else:
                 names.append(str(names_input))
-
-            # De-duplicate while preserving order
             seen = set()
             deduped = []
             for n in names:
@@ -626,158 +821,377 @@ def setup_server_tools(mcp: FastMCP) -> None:
             action_normalized in {"disable", "enable", "disable_all_except"}
             and not target_names
         ):
-            return "❌ 'tool_names' parameter is required for disable/enable/disable_all_except actions"
+            return ManageToolsResponse(
+                success=False,
+                action=action,
+                scope=scope_normalized,
+                totalTools=total_tools,
+                enabledCount=enabled_count,
+                disabledCount=disabled_count,
+                protectedTools=list(protected_tools_set),
+                sessionState=(
+                    _get_session_state() if scope_normalized == "session" else None
+                ),
+                message="'tool_names' parameter is required for this action",
+                error="Missing required parameter: tool_names",
+            )
 
-        results = []
+        affected = []
+        skipped = []
+        errors = []
 
         if action_normalized == "disable":
+            # Session-scoped disable
+            if scope_normalized == "session":
+                session_id = get_session_context()
+                if not session_id:
+                    return ManageToolsResponse(
+                        success=False,
+                        action=action,
+                        scope=scope_normalized,
+                        totalTools=total_tools,
+                        enabledCount=enabled_count,
+                        disabledCount=disabled_count,
+                        protectedTools=list(protected_tools_set),
+                        sessionState=_get_session_state(),
+                        message="Session scope requires active session context",
+                        error="No session context available. Ensure SessionToolFilteringMiddleware is enabled.",
+                    )
+
+                for name in target_names:
+                    # Verify tool exists in registry
+                    if name not in registry:
+                        skipped.append(name)
+                        errors.append(f"Tool '{name}' not found in registry")
+                        continue
+                    if name in protected_tools_set:
+                        skipped.append(name)
+                        errors.append(
+                            f"Tool '{name}' is protected and cannot be disabled"
+                        )
+                        continue
+                    # Disable for session only (persist=True for cross-client visibility)
+                    if disable_tool_for_session(name, session_id, persist=True):
+                        affected.append(name)
+                    else:
+                        skipped.append(name)
+                        errors.append(f"Failed to disable tool '{name}' for session")
+
+                session_state = _get_session_state()
+                return ManageToolsResponse(
+                    success=len(affected) > 0,
+                    action=action,
+                    scope=scope_normalized,
+                    totalTools=total_tools,
+                    enabledCount=enabled_count,  # Global state unchanged
+                    disabledCount=disabled_count,  # Global state unchanged
+                    toolsAffected=affected if affected else None,
+                    toolsSkipped=skipped if skipped else None,
+                    protectedTools=list(protected_tools_set),
+                    sessionState=session_state,
+                    message=f"Disabled {len(affected)} tools for this session"
+                    + (f", skipped {len(skipped)}" if skipped else ""),
+                    errors=errors if errors else None,
+                )
+
+            # Global scope disable (original behavior)
             for name in target_names:
                 target = registry.get(name)
                 if not target:
-                    results.append(f"❌ Tool '{name}' not found in registry")
+                    skipped.append(name)
+                    errors.append(f"Tool '{name}' not found in registry")
                     continue
-
-                if name in protected_tools:
-                    results.append(
-                        f"🛡️ Tool '{name}' is protected and cannot be disabled"
-                    )
+                if name in protected_tools_set:
+                    skipped.append(name)
+                    errors.append(f"Tool '{name}' is protected and cannot be disabled")
                     continue
-
-                # Call FastMCP 2.8.0 tool disable API if available
                 try:
                     if hasattr(target, "disable") and callable(target.disable):
                         target.disable()
-                        results.append(
-                            f"⭕ Tool '{name}' disabled. It will no longer appear in "
-                            "list_tools and calls will return Unknown tool."
-                        )
+                        affected.append(name)
                     else:
-                        results.append(
-                            f"❌ Tool '{name}' does not support dynamic disable() "
-                            "in this FastMCP version"
+                        skipped.append(name)
+                        errors.append(
+                            f"Tool '{name}' does not support dynamic disable()"
                         )
                 except Exception as e:
                     logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
-                    results.append(f"❌ Failed to disable tool '{name}': {e}")
+                    errors.append(f"Failed to disable tool '{name}': {e}")
 
-            header = "🧰 **Tool disable results**"
-            return "\n".join([header, ""] + results)
+            return ManageToolsResponse(
+                success=len(affected) > 0,
+                action=action,
+                scope=scope_normalized,
+                totalTools=total_tools,
+                enabledCount=enabled_count - len(affected),
+                disabledCount=disabled_count + len(affected),
+                toolsAffected=affected if affected else None,
+                toolsSkipped=skipped if skipped else None,
+                protectedTools=list(protected_tools_set),
+                message=f"Disabled {len(affected)} tools globally"
+                + (f", skipped {len(skipped)}" if skipped else ""),
+                errors=errors if errors else None,
+            )
 
         if action_normalized == "disable_all_except":
-            # Keep list is explicit target_names plus always-protected infra tools
-            keep_set = set(target_names) | protected_tools
-            disabled = []
-            skipped = []
-            errors = []
+            keep_set = set(target_names) | protected_tools_set
 
+            # Session-scoped disable_all_except
+            if scope_normalized == "session":
+                session_id = get_session_context()
+                if not session_id:
+                    return ManageToolsResponse(
+                        success=False,
+                        action=action,
+                        scope=scope_normalized,
+                        totalTools=total_tools,
+                        enabledCount=enabled_count,
+                        disabledCount=disabled_count,
+                        protectedTools=list(protected_tools_set),
+                        sessionState=_get_session_state(),
+                        message="Session scope requires active session context",
+                        error="No session context available. Ensure SessionToolFilteringMiddleware is enabled.",
+                    )
+
+                for name in registry.keys():
+                    if not include_internal and name.startswith("_"):
+                        skipped.append(name)
+                        continue
+                    if name in keep_set:
+                        skipped.append(name)
+                        continue
+                    # Disable for session only (persist=True for cross-client visibility)
+                    if disable_tool_for_session(name, session_id, persist=True):
+                        affected.append(name)
+                    else:
+                        errors.append(f"Failed to disable tool '{name}' for session")
+
+                session_state = _get_session_state()
+                return ManageToolsResponse(
+                    success=True,
+                    action=action,
+                    scope=scope_normalized,
+                    totalTools=total_tools,
+                    enabledCount=enabled_count,  # Global state unchanged
+                    disabledCount=disabled_count,  # Global state unchanged
+                    toolsAffected=affected if affected else None,
+                    toolsSkipped=skipped if skipped else None,
+                    protectedTools=list(protected_tools_set),
+                    sessionState=session_state,
+                    message=f"Kept {len(keep_set)} tools, disabled {len(affected)} tools for this session",
+                    errors=errors if errors else None,
+                )
+
+            # Global scope (original behavior)
             for name, target in registry.items():
-                # Optionally skip internal/system tools
                 if not include_internal and name.startswith("_"):
                     skipped.append(name)
                     continue
-
                 if name in keep_set:
                     skipped.append(name)
                     continue
-
                 if not hasattr(target, "disable") or not callable(target.disable):
                     skipped.append(name)
                     continue
-
                 try:
                     target.disable()
-                    disabled.append(name)
+                    affected.append(name)
                 except Exception as e:
                     logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
                     errors.append(f"{name}: {e}")
 
-            header_lines = [
-                "🧰 **Tool disable_all_except results**",
-                "",
-                f"Kept (explicit or protected): {len(keep_set)} tools",
-                f"Disabled: {len(disabled)} tools",
-                f"Skipped (internal/unsupported): {len(skipped)} tools",
-                "",
-            ]
-            detail_lines = []
-            if disabled:
-                detail_lines.append("⭕ Disabled tools:")
-                detail_lines.extend(f"  - {n}" for n in sorted(disabled))
-                detail_lines.append("")
-            if errors:
-                detail_lines.append("⚠️ Errors:")
-                detail_lines.extend(f"  - {e}" for e in errors)
-
-            return "\n".join(header_lines + detail_lines)
+            return ManageToolsResponse(
+                success=True,
+                action=action,
+                scope=scope_normalized,
+                totalTools=total_tools,
+                enabledCount=len(keep_set),
+                disabledCount=len(affected),
+                toolsAffected=affected if affected else None,
+                toolsSkipped=skipped if skipped else None,
+                protectedTools=list(protected_tools_set),
+                message=f"Kept {len(keep_set)} tools, disabled {len(affected)} tools globally",
+                errors=errors if errors else None,
+            )
 
         if action_normalized == "enable":
+            # Session-scoped enable
+            if scope_normalized == "session":
+                session_id = get_session_context()
+                if not session_id:
+                    return ManageToolsResponse(
+                        success=False,
+                        action=action,
+                        scope=scope_normalized,
+                        totalTools=total_tools,
+                        enabledCount=enabled_count,
+                        disabledCount=disabled_count,
+                        protectedTools=list(protected_tools_set),
+                        sessionState=_get_session_state(),
+                        message="Session scope requires active session context",
+                        error="No session context available. Ensure SessionToolFilteringMiddleware is enabled.",
+                    )
+
+                for name in target_names:
+                    # Verify tool exists in registry
+                    if name not in registry:
+                        skipped.append(name)
+                        errors.append(f"Tool '{name}' not found in registry")
+                        continue
+                    # Enable for session (persist=True for cross-client visibility)
+                    if enable_tool_for_session(name, session_id, persist=True):
+                        affected.append(name)
+                    else:
+                        skipped.append(name)
+                        errors.append(f"Failed to enable tool '{name}' for session")
+
+                session_state = _get_session_state()
+                return ManageToolsResponse(
+                    success=len(affected) > 0,
+                    action=action,
+                    scope=scope_normalized,
+                    totalTools=total_tools,
+                    enabledCount=enabled_count,  # Global state unchanged
+                    disabledCount=disabled_count,  # Global state unchanged
+                    toolsAffected=affected if affected else None,
+                    toolsSkipped=skipped if skipped else None,
+                    protectedTools=list(protected_tools_set),
+                    sessionState=session_state,
+                    message=f"Enabled {len(affected)} tools for this session"
+                    + (f", skipped {len(skipped)}" if skipped else ""),
+                    errors=errors if errors else None,
+                )
+
+            # Global scope (original behavior)
             for name in target_names:
                 target = registry.get(name)
                 if not target:
-                    results.append(f"❌ Tool '{name}' not found in registry")
+                    skipped.append(name)
+                    errors.append(f"Tool '{name}' not found in registry")
                     continue
-
-                # Call FastMCP 2.8.0 tool enable API if available
                 try:
                     if hasattr(target, "enable") and callable(target.enable):
                         target.enable()
-                        results.append(
-                            f"✅ Tool '{name}' enabled and available to clients."
-                        )
+                        affected.append(name)
                     else:
-                        results.append(
-                            f"❌ Tool '{name}' does not support dynamic enable() "
-                            "in this FastMCP version"
+                        skipped.append(name)
+                        errors.append(
+                            f"Tool '{name}' does not support dynamic enable()"
                         )
                 except Exception as e:
                     logger.error(f"Error enabling tool {name}: {e}", exc_info=True)
-                    results.append(f"❌ Failed to enable tool '{name}': {e}")
+                    errors.append(f"Failed to enable tool '{name}': {e}")
 
-            header = "🧰 **Tool enable results**"
-            return "\n".join([header, ""] + results)
+            return ManageToolsResponse(
+                success=len(affected) > 0,
+                action=action,
+                scope=scope_normalized,
+                totalTools=total_tools,
+                enabledCount=enabled_count + len(affected),
+                disabledCount=disabled_count - len(affected),
+                toolsAffected=affected if affected else None,
+                toolsSkipped=skipped if skipped else None,
+                protectedTools=list(protected_tools_set),
+                message=f"Enabled {len(affected)} tools globally"
+                + (f", skipped {len(skipped)}" if skipped else ""),
+                errors=errors if errors else None,
+            )
 
         if action_normalized == "enable_all":
-            enabled = []
-            skipped = []
-            errors = []
+            # Session-scoped enable_all (clears session disabled list)
+            if scope_normalized == "session":
+                session_id = get_session_context()
+                if not session_id:
+                    return ManageToolsResponse(
+                        success=False,
+                        action=action,
+                        scope=scope_normalized,
+                        totalTools=total_tools,
+                        enabledCount=enabled_count,
+                        disabledCount=disabled_count,
+                        protectedTools=list(protected_tools_set),
+                        sessionState=_get_session_state(),
+                        message="Session scope requires active session context",
+                        error="No session context available. Ensure SessionToolFilteringMiddleware is enabled.",
+                    )
 
+                # Get currently disabled tools for this session before clearing
+                session_disabled_before = get_session_disabled_tools(session_id)
+                affected = list(session_disabled_before)
+
+                # Clear all session disables
+                if clear_session_disabled_tools(session_id):
+                    session_state = _get_session_state()
+                    return ManageToolsResponse(
+                        success=True,
+                        action=action,
+                        scope=scope_normalized,
+                        totalTools=total_tools,
+                        enabledCount=enabled_count,  # Global state unchanged
+                        disabledCount=disabled_count,  # Global state unchanged
+                        toolsAffected=affected if affected else None,
+                        protectedTools=list(protected_tools_set),
+                        sessionState=session_state,
+                        message=f"Enabled {len(affected)} session-disabled tools for this session",
+                    )
+                else:
+                    return ManageToolsResponse(
+                        success=False,
+                        action=action,
+                        scope=scope_normalized,
+                        totalTools=total_tools,
+                        enabledCount=enabled_count,
+                        disabledCount=disabled_count,
+                        protectedTools=list(protected_tools_set),
+                        sessionState=_get_session_state(),
+                        message="Failed to clear session disabled tools",
+                        error="Could not clear session state",
+                    )
+
+            # Global scope (original behavior)
             for name, target in registry.items():
-                # Optionally skip internal/system tools
                 if not include_internal and name.startswith("_"):
                     skipped.append(name)
                     continue
-
                 if not hasattr(target, "enable") or not callable(target.enable):
                     skipped.append(name)
                     continue
-
                 try:
                     target.enable()
-                    enabled.append(name)
+                    affected.append(name)
                 except Exception as e:
                     logger.error(f"Error enabling tool {name}: {e}", exc_info=True)
                     errors.append(f"{name}: {e}")
 
-            header_lines = [
-                "🧰 **Tool enable_all results**",
-                "",
-                f"Enabled: {len(enabled)} tools",
-                f"Skipped (internal/unsupported): {len(skipped)} tools",
-                "",
-            ]
-            detail_lines = []
-            if enabled:
-                detail_lines.append("✅ Enabled tools:")
-                detail_lines.extend(f"  - {n}" for n in sorted(enabled))
-                detail_lines.append("")
-            if errors:
-                detail_lines.append("⚠️ Errors:")
-                detail_lines.extend(f"  - {e}" for e in errors)
-
-            return "\n".join(header_lines + detail_lines)
+            return ManageToolsResponse(
+                success=True,
+                action=action,
+                scope=scope_normalized,
+                totalTools=total_tools,
+                enabledCount=len(affected),
+                disabledCount=len(skipped),
+                toolsAffected=affected if affected else None,
+                toolsSkipped=skipped if skipped else None,
+                protectedTools=list(protected_tools_set),
+                message=f"Enabled {len(affected)} tools globally, skipped {len(skipped)}",
+                errors=errors if errors else None,
+            )
 
         # Should be unreachable due to earlier validation
-        return "❌ Unknown error while managing tools"
+        return ManageToolsResponse(
+            success=False,
+            action=action,
+            scope=scope_normalized,
+            totalTools=total_tools,
+            enabledCount=enabled_count,
+            disabledCount=disabled_count,
+            protectedTools=list(protected_tools_set),
+            sessionState=(
+                _get_session_state() if scope_normalized == "session" else None
+            ),
+            message="Unknown error while managing tools",
+            error="Unexpected code path reached",
+        )
 
     @mcp.tool(
         name="manage_tools_by_analytics",
@@ -827,7 +1241,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
             ),
         ] = None,
         user_google_email: UserGoogleEmail = None,
-    ) -> str:
+    ) -> ManageToolsByAnalyticsResponse:
         """
         Manage tools based on Qdrant usage analytics with intelligent filtering.
 
@@ -844,7 +1258,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
             user_google_email: User's email for access control
 
         Returns:
-            Human-readable summary of matched tools and actions taken
+            ManageToolsByAnalyticsResponse with operation results and usage analytics
         """
         try:
             # Import Qdrant components
@@ -868,17 +1282,43 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 await client_manager.initialize()
 
             if not client_manager.is_available:
-                return "❌ Qdrant not available - cannot analyze tool usage data. Ensure Qdrant is running."
+                return ManageToolsByAnalyticsResponse(
+                    success=False,
+                    action=action,
+                    serviceFilter=service_filter,
+                    minUsageCount=min_usage_count,
+                    limit=limit,
+                    toolsMatched=0,
+                    message="Qdrant not available - cannot analyze tool usage data",
+                    error="Qdrant is not running or not accessible",
+                )
 
             # Get analytics grouped by tool_name
             logger.info("📊 Fetching Qdrant analytics for tool management...")
             analytics = await search_manager.get_analytics(group_by="tool_name")
 
             if "error" in analytics:
-                return f"❌ Failed to get analytics: {analytics['error']}"
+                return ManageToolsByAnalyticsResponse(
+                    success=False,
+                    action=action,
+                    serviceFilter=service_filter,
+                    minUsageCount=min_usage_count,
+                    limit=limit,
+                    toolsMatched=0,
+                    message="Failed to retrieve analytics data",
+                    error=str(analytics["error"]),
+                )
 
             if not analytics.get("groups"):
-                return "⚠️ No tool usage data found in Qdrant. Analytics database may be empty."
+                return ManageToolsByAnalyticsResponse(
+                    success=True,
+                    action=action,
+                    serviceFilter=service_filter,
+                    minUsageCount=min_usage_count,
+                    limit=limit,
+                    toolsMatched=0,
+                    message="No tool usage data found in Qdrant. Analytics database may be empty.",
+                )
 
             # Filter and rank tools based on criteria
             matched_tools = []
@@ -918,63 +1358,58 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 filter_desc = (
                     f" matching service '{service_filter}'" if service_filter else ""
                 )
-                return f"ℹ️ No tools found{filter_desc} with usage count >= {min_usage_count}"
+                return ManageToolsByAnalyticsResponse(
+                    success=True,
+                    action=action,
+                    serviceFilter=service_filter,
+                    minUsageCount=min_usage_count,
+                    limit=limit,
+                    toolsMatched=0,
+                    message=f"No tools found{filter_desc} with usage count >= {min_usage_count}",
+                )
 
             # Get current tool registry
             registry = _get_tool_registry(mcp)
             if not registry:
-                return "❌ Unable to access FastMCP tool registry"
+                return ManageToolsByAnalyticsResponse(
+                    success=False,
+                    action=action,
+                    serviceFilter=service_filter,
+                    minUsageCount=min_usage_count,
+                    limit=limit,
+                    toolsMatched=len(matched_tools),
+                    message="Unable to access FastMCP tool registry",
+                    error="Tool registry not available",
+                )
+
+            # Build ToolUsageInfo objects for all matched tools
+            usage_analytics = [
+                ToolUsageInfo(
+                    name=t["tool_name"],
+                    usageCount=t["usage_count"],
+                    service=t["service"],
+                    lastUsed=(
+                        t["recent_activity"].get("last_used")
+                        if t["recent_activity"]
+                        else None
+                    ),
+                    currentlyEnabled=t["tool_name"] in registry,
+                )
+                for t in matched_tools
+            ]
 
             # Build results based on action
             if action == "preview":
-                lines = [
-                    "🔍 **Analytics-Based Tool Management Preview**",
-                    "",
-                    "**Filters Applied:**",
-                    f"  - Service: {service_filter or 'All services'}",
-                    f"  - Min Usage Count: {min_usage_count}",
-                    f"  - Limit: Top {limit} tools",
-                    "",
-                    f"**Matched Tools:** {len(matched_tools)} tool(s)",
-                    "",
-                    "Rank | Tool Name | Service | Usage Count | Users | Error Rate | In Registry",
-                    "---- | --------- | ------- | ----------- | ----- | ---------- | -----------",
-                ]
-
-                for idx, tool_info in enumerate(matched_tools, 1):
-                    tool_name = tool_info["tool_name"]
-                    in_registry = "✅" if tool_name in registry else "❌"
-
-                    lines.append(
-                        f"{idx} | {tool_name} | {tool_info['service']} | "
-                        f"{tool_info['usage_count']} | {tool_info['unique_users']} | "
-                        f"{tool_info['error_rate']:.1%} | {in_registry}"
-                    )
-
-                lines.extend(
-                    [
-                        "",
-                        "**Sample Point IDs for Investigation:**",
-                    ]
+                return ManageToolsByAnalyticsResponse(
+                    success=True,
+                    action=action,
+                    serviceFilter=service_filter,
+                    minUsageCount=min_usage_count,
+                    limit=limit,
+                    toolsMatched=len(matched_tools),
+                    usageAnalytics=usage_analytics,
+                    message=f"Preview: Found {len(matched_tools)} tool(s) matching criteria. Use action='disable' or 'enable' to modify.",
                 )
-
-                for tool_info in matched_tools[:5]:  # Show point IDs for top 5
-                    if tool_info["sample_point_ids"]:
-                        lines.append(
-                            f"  - {tool_info['tool_name']}: {', '.join(tool_info['sample_point_ids'])}"
-                        )
-
-                lines.extend(
-                    [
-                        "",
-                        "💡 **Next Steps:**",
-                        f"  - Use action='disable' to disable these {len(matched_tools)} tools",
-                        "  - Use action='enable' to re-enable previously disabled tools",
-                        "  - Adjust filters to refine tool selection",
-                    ]
-                )
-
-                return "\n".join(lines)
 
             elif action in ["disable", "enable"]:
                 # Extract tool names to manage
@@ -987,7 +1422,17 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 ]
 
                 if not available_targets:
-                    return "❌ None of the matched tools are currently registered in FastMCP"
+                    return ManageToolsByAnalyticsResponse(
+                        success=False,
+                        action=action,
+                        serviceFilter=service_filter,
+                        minUsageCount=min_usage_count,
+                        limit=limit,
+                        toolsMatched=len(matched_tools),
+                        usageAnalytics=usage_analytics,
+                        message="None of the matched tools are currently registered in FastMCP",
+                        error="No available targets in registry",
+                    )
 
                 # Check for protected tools
                 protected_tools = {
@@ -1005,13 +1450,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     name for name in available_targets if name not in protected_tools
                 ]
 
-                results = []
-
-                # Report protected tools
-                if protected_in_targets and action == "disable":
-                    results.append(
-                        f"🛡️ Skipped {len(protected_in_targets)} protected tool(s): {', '.join(protected_in_targets)}"
-                    )
+                affected_tools: List[str] = []
+                skipped_tools: List[str] = list(protected_in_targets)
+                errors: List[str] = []
 
                 # Execute action on safe targets
                 if action == "disable":
@@ -1020,26 +1461,16 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         try:
                             if hasattr(target, "disable") and callable(target.disable):
                                 target.disable()
-                                # Find usage info for this tool
-                                tool_info = next(
-                                    (
-                                        t
-                                        for t in matched_tools
-                                        if t["tool_name"] == name
-                                    ),
-                                    {},
-                                )
-                                usage = tool_info.get("usage_count", "?")
-                                results.append(f"⭕ Disabled '{name}' (usage: {usage})")
+                                affected_tools.append(name)
                             else:
-                                results.append(
-                                    f"❌ '{name}' doesn't support disable() in this FastMCP version"
+                                errors.append(
+                                    f"'{name}' doesn't support disable() in this FastMCP version"
                                 )
                         except Exception as e:
                             logger.error(
                                 f"Error disabling tool {name}: {e}", exc_info=True
                             )
-                            results.append(f"❌ Failed to disable '{name}': {e}")
+                            errors.append(f"Failed to disable '{name}': {e}")
 
                 elif action == "enable":
                     for name in safe_targets:
@@ -1047,58 +1478,60 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         try:
                             if hasattr(target, "enable") and callable(target.enable):
                                 target.enable()
-                                # Find usage info for this tool
-                                tool_info = next(
-                                    (
-                                        t
-                                        for t in matched_tools
-                                        if t["tool_name"] == name
-                                    ),
-                                    {},
-                                )
-                                usage = tool_info.get("usage_count", "?")
-                                results.append(f"✅ Enabled '{name}' (usage: {usage})")
+                                affected_tools.append(name)
                             else:
-                                results.append(
-                                    f"❌ '{name}' doesn't support enable() in this FastMCP version"
+                                errors.append(
+                                    f"'{name}' doesn't support enable() in this FastMCP version"
                                 )
                         except Exception as e:
                             logger.error(
                                 f"Error enabling tool {name}: {e}", exc_info=True
                             )
-                            results.append(f"❌ Failed to enable '{name}': {e}")
+                            errors.append(f"Failed to enable '{name}': {e}")
 
-                # Report missing tools
-                if missing_targets:
-                    results.append(
-                        f"ℹ️ {len(missing_targets)} tool(s) not in registry: {', '.join(missing_targets[:5])}"
-                    )
+                # Add missing targets to skipped
+                skipped_tools.extend(missing_targets)
 
-                # Build summary
-                header_lines = [
-                    f"🧰 **Analytics-Based Tool {action.title()} Results**",
-                    "",
-                    "**Query Filters:**",
-                    f"  - Service: {service_filter or 'All'}",
-                    f"  - Min Usage: {min_usage_count}",
-                    f"  - Top N: {limit}",
-                    "",
-                    f"**Matched:** {len(matched_tools)} tools from analytics",
-                    f"**Affected:** {len(safe_targets)} tools {action}d",
-                    f"**Protected:** {len(protected_in_targets)} tools skipped",
-                    "",
-                ]
-
-                return "\n".join(header_lines + results)
+                return ManageToolsByAnalyticsResponse(
+                    success=len(errors) == 0,
+                    action=action,
+                    serviceFilter=service_filter,
+                    minUsageCount=min_usage_count,
+                    limit=limit,
+                    toolsMatched=len(matched_tools),
+                    toolsAffected=affected_tools if affected_tools else None,
+                    toolsSkipped=skipped_tools if skipped_tools else None,
+                    usageAnalytics=usage_analytics,
+                    message=f"Successfully {action}d {len(affected_tools)} tool(s). {len(skipped_tools)} skipped (protected or missing).",
+                    errors=errors if errors else None,
+                )
 
             else:
-                return f"❌ Invalid action '{action}'. Valid actions: preview, disable, enable"
+                return ManageToolsByAnalyticsResponse(
+                    success=False,
+                    action=action,
+                    serviceFilter=service_filter,
+                    minUsageCount=min_usage_count,
+                    limit=limit,
+                    toolsMatched=0,
+                    message=f"Invalid action '{action}'",
+                    error="Valid actions are: preview, disable, enable",
+                )
 
         except Exception as e:
             logger.error(
                 f"❌ Analytics-based tool management failed: {e}", exc_info=True
             )
-            return f"❌ Tool management by analytics failed: {e}"
+            return ManageToolsByAnalyticsResponse(
+                success=False,
+                action=action,
+                serviceFilter=service_filter,
+                minUsageCount=min_usage_count,
+                limit=limit,
+                toolsMatched=0,
+                message="Tool management by analytics failed",
+                error=str(e),
+            )
 
     logger.info(
         "✅ Server management tools registered: health_check, server_info, manage_credentials, manage_tools, manage_tools_by_analytics"

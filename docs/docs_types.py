@@ -94,3 +94,26 @@ class CreateDocResponse(TypedDict):
     contentLength: NotRequired[int]  # Length of original content
     hasFormatting: NotRequired[bool]  # Whether rich formatting was applied
     error: NotRequired[Optional[str]]
+
+
+class SearchDocsResponse(TypedDict):
+    """Response structure for search_docs tool."""
+
+    docs: List[DocInfo]
+    count: int
+    query: str
+    userEmail: str
+    error: NotRequired[Optional[str]]
+
+
+class GetDocContentResponse(TypedDict):
+    """Response structure for get_doc_content tool."""
+
+    documentId: str
+    documentName: str
+    mimeType: str
+    webViewLink: str
+    content: str
+    contentLength: int
+    userEmail: str
+    error: NotRequired[Optional[str]]

@@ -686,7 +686,7 @@ wheels = [
 
 [[package]]
 name = "google-workspace-unlimited"
-version = "1.0.8"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -720,6 +720,7 @@ dev = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "black" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-mock" },
@@ -755,6 +756,7 @@ provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "black", specifier = ">=25.1.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "pytest-mock", specifier = ">=3.12.0" },

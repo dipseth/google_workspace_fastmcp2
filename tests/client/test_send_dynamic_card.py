@@ -38,6 +38,8 @@ from datetime import datetime
 import pytest
 from dotenv import load_dotenv
 
+from .test_helpers import assert_tools_registered
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -87,12 +89,9 @@ class TestSendDynamicCard:
     @pytest.mark.asyncio
     async def test_send_dynamic_card_tool_available(self, client):
         """Test that the send_dynamic_card tool is available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        assert (
-            "send_dynamic_card" in tool_names
-        ), "Tool 'send_dynamic_card' not found in available tools"
+        await assert_tools_registered(
+            client, ["send_dynamic_card"], context="Dynamic card tools"
+        )
 
     @pytest.mark.asyncio
     async def test_send_simple_card(self, client):
@@ -2644,7 +2643,7 @@ class TestNLPFormCards:
         test_payload = {
             "user_google_email": TEST_EMAIL,
             "space_id": TEST_SPACE_ID,
-            "card_description": f"Create a form card with a single text input labeled \"Your name\" and a submit button that opens https://example.com (test: {timestamp})",
+            "card_description": f'Create a form card with a single text input labeled "Your name" and a submit button that opens https://example.com (test: {timestamp})',
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
@@ -2739,17 +2738,12 @@ class TestNLPFormCards:
         test_payload = {
             "user_google_email": TEST_EMAIL,
             "space_id": TEST_SPACE_ID,
-            "card_description": f"Create a form card with a single text input labeled \"Your name\" (test: {timestamp}).",
+            "card_description": f'Create a form card with a single text input labeled "Your name" (test: {timestamp}).',
             "card_params": {
                 "sections": [
                     {
                         "widgets": [
-                            {
-                                "textInput": {
-                                    "label": "Your name",
-                                    "name": "your_name"
-                                }
-                            }
+                            {"textInput": {"label": "Your name", "name": "your_name"}}
                         ]
                     }
                 ]
@@ -2900,8 +2894,7 @@ class TestNLPDescriptionExamples:
     async def test_nlp_simple_titled_card(self, client):
         """Test: card titled 'Welcome' with text 'Hello, team!'"""
         content = await self._send_nlp_card(
-            client,
-            "Create a card titled 'Welcome' with text 'Hello, team!'"
+            client, "Create a card titled 'Welcome' with text 'Hello, team!'"
         )
         self._validate_response(content, "simple_titled_card")
 
@@ -2911,7 +2904,7 @@ class TestNLPDescriptionExamples:
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
             client,
-            "Create a card titled 'Project Status' with subtitle 'Weekly Update' and text 'All systems operational'"
+            "Create a card titled 'Project Status' with subtitle 'Weekly Update' and text 'All systems operational'",
         )
         self._validate_response(content, "card_with_subtitle")
 
@@ -2923,7 +2916,7 @@ class TestNLPDescriptionExamples:
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
             client,
-            "Create a card with a green 'Approve' button and red 'Reject' button"
+            "Create a card with a green 'Approve' button and red 'Reject' button",
         )
         self._validate_response(content, "approve_reject_buttons")
 
@@ -2933,7 +2926,7 @@ class TestNLPDescriptionExamples:
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
             client,
-            "Create a card with button 'View Docs' linking to https://docs.example.com"
+            "Create a card with button 'View Docs' linking to https://docs.example.com",
         )
         self._validate_response(content, "button_with_link")
 
@@ -2943,7 +2936,7 @@ class TestNLPDescriptionExamples:
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
             client,
-            "Create a card titled 'Actions' with buttons: 'Save', 'Cancel', 'Help'"
+            "Create a card titled 'Actions' with buttons: 'Save', 'Cancel', 'Help'",
         )
         self._validate_response(content, "multiple_buttons")
 
@@ -2954,8 +2947,7 @@ class TestNLPDescriptionExamples:
         """Test: form with text input."""
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
-            client,
-            "Create a form card with a text input labeled 'Your name'"
+            client, "Create a form card with a text input labeled 'Your name'"
         )
         self._validate_response(content, "text_input_labeled")
 
@@ -2965,7 +2957,7 @@ class TestNLPDescriptionExamples:
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
             client,
-            "Create a form card with a text input labeled 'Email' and a submit button"
+            "Create a form card with a text input labeled 'Email' and a submit button",
         )
         self._validate_response(content, "form_with_submit")
 
@@ -2976,8 +2968,7 @@ class TestNLPDescriptionExamples:
         """Test: card with multiple sections."""
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
-            client,
-            "Create a card with sections: 'Overview', 'Details', and 'Actions'"
+            client, "Create a card with sections: 'Overview', 'Details', and 'Actions'"
         )
         self._validate_response(content, "multiple_sections")
 
@@ -2986,8 +2977,7 @@ class TestNLPDescriptionExamples:
         """Test: card with collapsible section."""
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
-            client,
-            "Create a card with a collapsible section 'Advanced Options'"
+            client, "Create a card with a collapsible section 'Advanced Options'"
         )
         self._validate_response(content, "collapsible_section")
 
@@ -2999,7 +2989,7 @@ class TestNLPDescriptionExamples:
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
             client,
-            "Create a card with decoratedText showing 'John Doe' with person icon"
+            "Create a card with decoratedText showing 'John Doe' with person icon",
         )
         self._validate_response(content, "decorated_text_icon")
 
@@ -3009,7 +2999,7 @@ class TestNLPDescriptionExamples:
         await asyncio.sleep(2)
         content = await self._send_nlp_card(
             client,
-            "Create a status card with decoratedText showing 'Online' with check icon"
+            "Create a status card with decoratedText showing 'Online' with check icon",
         )
         self._validate_response(content, "status_check_icon")
 
@@ -3022,7 +3012,7 @@ class TestNLPDescriptionExamples:
         content = await self._send_nlp_card(
             client,
             "Create a card titled 'System Status' with subtitle 'Live Dashboard' "
-            "and text 'All services operational' with a green 'Refresh' button"
+            "and text 'All services operational' with a green 'Refresh' button",
         )
         self._validate_response(content, "information_card")
 
@@ -3034,7 +3024,7 @@ class TestNLPDescriptionExamples:
             client,
             "Create a dashboard with sections: "
             "'Server Health' with decoratedText showing 'Online' with check icon, "
-            "'Actions' with buttons 'Restart' in red and 'Backup' in blue"
+            "'Actions' with buttons 'Restart' in red and 'Backup' in blue",
         )
         self._validate_response(content, "dashboard_sections")
 
@@ -3047,7 +3037,7 @@ class TestNLPDescriptionExamples:
             "Create a form card titled 'Feedback' with: "
             "text input labeled 'Your name', "
             "text input labeled 'Comments', "
-            "and buttons: 'Submit' in green, 'Cancel' in gray"
+            "and buttons: 'Submit' in green, 'Cancel' in gray",
         )
         self._validate_response(content, "interactive_form")
 
@@ -3058,7 +3048,7 @@ class TestNLPDescriptionExamples:
         content = await self._send_nlp_card(
             client,
             "Create an alert card titled 'Warning' with warning icon "
-            "and text 'System maintenance scheduled for tonight'"
+            "and text 'System maintenance scheduled for tonight'",
         )
         self._validate_response(content, "alert_warning")
 
@@ -3069,7 +3059,7 @@ class TestNLPDescriptionExamples:
         content = await self._send_nlp_card(
             client,
             "Create a card titled 'Product' with image https://picsum.photos/200/100 "
-            "and a 'Learn More' button"
+            "and a 'Learn More' button",
         )
         self._validate_response(content, "card_with_image")
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "google-workspace-unlimited"
-version = "1.1.11"
+version = "1.2.0"
 description = "Comprehensive MCP server for Google Workspace integration - 72+ tools across Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos with OAuth 2.1 + PKCE authentication"
 readme = "README.md"
 license = "Apache-2.0"
@@ -133,9 +133,10 @@ dev = [
 
 [dependency-groups]
 dev = [
+    "black>=25.1.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "pytest-mock>=3.12.0"
+    "pytest-mock>=3.12.0",
 ]
 
 [project.scripts]

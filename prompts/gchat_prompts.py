@@ -24,8 +24,15 @@ from fastmcp.prompts.prompt import PromptMessage, TextContent
 from pydantic import Field
 
 from config.enhanced_logging import setup_logger
+from prompts.tool_optimization_helper import ToolOptimizationHelper
 
 logger = setup_logger()
+
+# Pre-generate the Chat tool optimization section for reuse
+_CHAT_TOOL_OPTIMIZATION = ToolOptimizationHelper.generate_optimization_section(
+    include_services=["chat"],
+    include_service_list=False,
+)
 
 
 def setup_gchat_prompts(mcp: FastMCP):
@@ -90,6 +97,8 @@ def setup_gchat_prompts(mcp: FastMCP):
         advanced_content = f"""
 # 🤖 Smart Contextual Google Chat Card (Advanced)
 *Request ID: {request_id} | Generated: {current_time}*
+
+{_CHAT_TOOL_OPTIMIZATION}
 
 ## ⚡ Advanced Chat Intelligence Integration
 
@@ -389,6 +398,8 @@ This advanced prompt showcases FastMCP2's sophisticated resource integration cap
 # 📊 Professional Chat Dashboard (Medium)
 *Request ID: {request_id} | Generated: {current_time}*
 
+{_CHAT_TOOL_OPTIMIZATION}
+
 ## ✨ Professional Dashboard Features with Chat Integration
 
 ### Configuration
@@ -560,6 +571,8 @@ This medium-complexity prompt delivers professional Chat dashboards with smart s
         simple_content = f"""
 # ⚡ Quick Chat Card Demo (Simple)
 *Request ID: {request_id} | Generated: {current_time}*
+
+{_CHAT_TOOL_OPTIMIZATION}
 
 ## 🎯 Zero-Configuration Chat Card Demo
 

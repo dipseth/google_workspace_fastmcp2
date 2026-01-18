@@ -28,6 +28,7 @@ from fastmcp import Context, FastMCP
 from fastmcp.prompts.prompt import PromptMessage, TextContent
 
 from config.enhanced_logging import setup_logger
+from prompts.tool_optimization_helper import ToolOptimizationHelper
 
 logger = setup_logger()
 
@@ -174,8 +175,16 @@ Run: `start_google_auth('your.email@gmail.com')`
 
     def _get_template_content_with_resources(self) -> str:
         """Get template content with resource variables that middleware will resolve."""
-        return """# ⚡ Quick Email Demo - Template Middleware Resource Resolution
-*Request ID: {{ request_id }} | Generated: {{ current_time }}*
+        # Generate tool optimization section dynamically using the helper
+        tool_optimization = ToolOptimizationHelper.generate_optimization_section(
+            include_services=["gmail"],
+            include_service_list=False,
+        )
+
+        return f"""# ⚡ Quick Email Demo - Template Middleware Resource Resolution
+*Request ID: {{{{ request_id }}}} | Generated: {{{{ current_time }}}}*
+
+{tool_optimization}
 
 ## 🎯 Zero-Configuration Demo with Live Gmail Data
 

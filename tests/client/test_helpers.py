@@ -314,3 +314,60 @@ def get_common_test_tools(service: str) -> List[str]:
     }
 
     return service_tools.get(service.lower(), [])
+
+
+async def get_registered_tools(client: Client) -> List[str]:
+    """Get list of all registered tools from the server via manage_tools.
+
+    This returns ALL tools in the registry, regardless of whether they are
+    currently enabled/exposed via list_tools(). Use this to verify tools
+    exist in the server rather than checking client.list_tools() which
+    only shows currently enabled tools.
+
+    By design, the server starts with only 5 core tools enabled:
+    - start_google_auth
+    - check_drive_auth
+    - health_check
+    - manage_tools
+    - manage_tools_by_analytics
+
+    Other tools are registered but disabled by default.
+    """
+    result = await client.call_tool("manage_tools", {"action": "list"})
+    content = (
+        result.content[0].text
+        if hasattr(result.content[0], "text")
+        else str(result.content[0])
+    )
+
+    try:
+        data = json.loads(content)
+        tool_list = data.get("toolList", [])
+        return [t["name"] for t in tool_list]
+    except (json.JSONDecodeError, KeyError):
+        return []
+
+
+async def assert_tools_registered(
+    client: Client, expected_tools: List[str], context: str = ""
+):
+    """Assert that specified tools are registered in the server.
+
+    This checks the tool registry via manage_tools, not client.list_tools().
+    Tools may be registered but not currently enabled/exposed.
+
+    Args:
+        client: The MCP client
+        expected_tools: List of tool names that should be registered
+        context: Optional context string for error messages
+    """
+    registered = await get_registered_tools(client)
+
+    missing = [t for t in expected_tools if t not in registered]
+    if missing:
+        ctx = f" ({context})" if context else ""
+        raise AssertionError(
+            f"Tools not registered{ctx}: {missing}\n"
+            f"Expected: {expected_tools}\n"
+            f"Registered: {len(registered)} tools"
+        )

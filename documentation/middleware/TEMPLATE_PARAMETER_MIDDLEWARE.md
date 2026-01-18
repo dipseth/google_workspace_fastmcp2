@@ -82,35 +82,6 @@ mindmap
       Developer DX
 ```
 
-```mermaid
-mindmap
-  root)Template Parameter Middleware(
-    (🎯 Core Features)
-      ::icon(fa fa-cogs)
-      Auto Substitution
-      JSON Path Extract
-      Resource Caching
-      Security Controls
-    (📚 Resources)
-      ::icon(fa fa-database)
-      User Auth
-      Gmail Services
-      Workspace Content
-      Tools Directory
-    (🛠️ Integration)
-      ::icon(fa fa-puzzle-piece)
-      FastMCP Server
-      Auth Middleware
-      Custom Tools
-      Client SDK
-    (🚀 Benefits)
-      ::icon(fa fa-rocket)
-      Context Aware
-      Performance
-      User Friendly
-      Developer DX
-```
-
 ## 🔧 Template Expression Syntax
 
 ### 🎯 NEW: Natural Resource URI Syntax (Breakthrough Feature!)
@@ -395,9 +366,6 @@ middleware = TemplateParameterMiddleware(
 mcp.add_middleware(middleware)
 ```
 
-### Tool with Jinja2 Template Parameters
-
-```python
 ### 🆕 Tool with Natural Resource URI Syntax (Latest Update!)
 
 ```python
@@ -1658,4 +1626,4 @@ async def inefficient_template(
     return content
 ```
 
-> 🚀 **The enhanced Template Parameter Middleware with comprehensive API documentation transforms your FastMCP platform into a professional, well-documented system that's easy to understand, integrate, and extend!** ✨�
+> 🚀 **The enhanced Template Parameter Middleware with comprehensive API documentation transforms your FastMCP platform into a professional, well-documented system that's easy to understand, integrate, and extend!** ✨

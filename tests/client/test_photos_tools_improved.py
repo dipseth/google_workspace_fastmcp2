@@ -19,6 +19,7 @@ import pytest
 from dotenv import load_dotenv
 
 from .base_test_config import TEST_EMAIL, create_test_client
+from .test_helpers import assert_tools_registered
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -133,9 +134,6 @@ class TestPhotosTools:
     @pytest.mark.order(1)
     async def test_photos_tools_available(self, client):
         """Test that both standard and advanced Google Photos tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
         # Standard Photos tools
         expected_standard_tools = [
             "list_photos_albums",
@@ -158,28 +156,15 @@ class TestPhotosTools:
 
         all_expected_tools = expected_standard_tools + expected_advanced_tools
 
-        missing_tools = []
-        found_tools = []
-
-        for tool_name in all_expected_tools:
-            if tool_name not in tool_names:
-                missing_tools.append(tool_name)
-            else:
-                found_tools.append(tool_name)
-
-        if missing_tools:
-            logger.warning(f"Missing Photos tools: {missing_tools}")
-            logger.info(f"Available tools: {sorted(tool_names)}")
-
-        # Verify that we found at least some Photos tools
-        assert len(found_tools) > 0, f"No Photos tools found in: {tool_names}"
-        logger.info(
-            f"Found {len(found_tools)}/{len(all_expected_tools)} Photos tools: {found_tools}"
+        await assert_tools_registered(
+            client, all_expected_tools, context="Photos tools"
         )
+
+        logger.info(f"All {len(all_expected_tools)} Photos tools registered")
 
         print_tool_result(
             "test_photos_tools_available",
-            f"Found {len(found_tools)} tools: Standard={len([t for t in found_tools if t in expected_standard_tools])}, Advanced={len([t for t in found_tools if t in expected_advanced_tools])}",
+            f"Verified {len(all_expected_tools)} tools registered: Standard={len(expected_standard_tools)}, Advanced={len(expected_advanced_tools)}",
         )
 
     @pytest.mark.asyncio

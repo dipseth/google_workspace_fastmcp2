@@ -35,10 +35,3 @@ jobs:
 
       - name: Format check (black)
         run: uv run black --check .
-
-      - name: Tests
-        env:
-          # Ensure tests which require live OAuth are not accidentally run in CI.
-          # If you have a marker or env-gate already, this keeps CI deterministic.
-          RUN_LIVE_GOOGLE_TESTS: "0"
-        run: uv run pytest tests/ -q

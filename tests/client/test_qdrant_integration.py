@@ -5,6 +5,7 @@ import os
 
 import httpx
 import pytest
+import pytest_asyncio
 
 from .base_test_config import TEST_EMAIL
 
@@ -15,7 +16,7 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 class TestQdrantStorageIntegration:
     """Test Qdrant storage and retrieval functionality."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def qdrant_client(self):
         """Create an HTTP client for direct Qdrant checks."""
         async with httpx.AsyncClient() as client:

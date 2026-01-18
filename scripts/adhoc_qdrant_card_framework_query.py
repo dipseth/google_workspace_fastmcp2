@@ -56,7 +56,9 @@ def main() -> int:
     if not qdrant_url or not qdrant_key:
         raise SystemExit("Missing QDRANT_URL/QDRANT_KEY (set env or add to .env)")
 
-    collection = os.environ.get("QDRANT_COLLECTION", "card_framework_components_fastembed")
+    collection = os.environ.get(
+        "QDRANT_COLLECTION", "card_framework_components_fastembed"
+    )
     query_text = os.environ.get("QDRANT_QUERY", "simple card with title and button")
     limit = int(os.environ.get("QDRANT_LIMIT", "5"))
 

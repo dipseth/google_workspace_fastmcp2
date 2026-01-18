@@ -10,6 +10,7 @@ import uuid
 import pytest
 
 from .base_test_config import TEST_EMAIL
+from .test_helpers import assert_tools_registered
 
 
 @pytest.mark.service("qdrant")
@@ -19,23 +20,18 @@ class TestQdrantUnifiedSearch:
     @pytest.mark.asyncio
     async def test_search_tool_available(self, client):
         """Test that the new search tool is available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        # New unified tools should be available
-        assert "search" in tool_names, "Unified search tool should be available"
-        assert "fetch" in tool_names, "Unified fetch tool should be available"
-
-        # Legacy tools should still be available (backward compatibility)
-        assert (
-            "search_tool_history" in tool_names
-        ), "Legacy search_tool_history should still be available"
-        assert (
-            "get_tool_analytics" in tool_names
-        ), "Legacy get_tool_analytics should still be available"
-        assert (
-            "get_response_details" in tool_names
-        ), "Legacy get_response_details should still be available"
+        expected_tools = [
+            # New unified tools
+            "search",
+            "fetch",
+            # Legacy tools (backward compatibility)
+            "search_tool_history",
+            "get_tool_analytics",
+            "get_response_details",
+        ]
+        await assert_tools_registered(
+            client, expected_tools, context="Qdrant unified tools"
+        )
 
     @pytest.mark.asyncio
     async def test_search_overview_capability(self, client):
@@ -344,15 +340,28 @@ class TestQdrantUnifiedFetch:
     @pytest.mark.asyncio
     async def test_fetch_tool_available(self, client):
         """Test that the fetch tool is available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-        assert "fetch" in tool_names, "Unified fetch tool should be available"
+        await assert_tools_registered(client, ["fetch"], context="Qdrant fetch tool")
 
     @pytest.mark.asyncio
     async def test_fetch_with_valid_id(self, client):
         """Test fetching a document with a valid ID."""
-        # First, create some data by calling tools
-        await client.call_tool("health_check", {})
+        # First, verify that fetch tool is registered in the server
+        await assert_tools_registered(
+            client, ["fetch", "search"], context="Qdrant tools"
+        )
+
+        # Enable the tools needed for this test
+        await client.call_tool(
+            "manage_tools",
+            {"action": "enable", "tool_names": ["fetch", "search", "health_check"]},
+        )
+
+        # First, create some data by calling tools (ignore errors, just need execution)
+        try:
+            await client.call_tool("health_check", {})
+        except Exception:
+            # health_check may fail due to validation errors but still logs to Qdrant
+            pass
         await asyncio.sleep(1)
 
         # Search to get a valid ID
@@ -365,41 +374,41 @@ class TestQdrantUnifiedFetch:
 
         try:
             search_data = json.loads(search_content)
-            if search_data.get("results") and len(search_data["results"]) > 0:
-                valid_id = search_data["results"][0]["id"]
+            if not search_data.get("results") or len(search_data["results"]) == 0:
+                pytest.skip("No search results available in Qdrant to test fetch")
 
-                # Now fetch with this valid ID using canonical point_id parameter
-                fetch_result = await client.call_tool("fetch", {"point_id": valid_id})
-                fetch_content = (
-                    fetch_result.content[0].text
-                    if hasattr(fetch_result, "content")
-                    else str(fetch_result)
-                )
+            valid_id = search_data["results"][0]["id"]
 
-                fetch_data = json.loads(fetch_content)
+            # Now fetch with this valid ID using canonical point_id parameter
+            fetch_result = await client.call_tool("fetch", {"point_id": valid_id})
+            fetch_content = (
+                fetch_result.content[0].text
+                if hasattr(fetch_result, "content")
+                else str(fetch_result)
+            )
 
-                # Check OpenAI MCP standard format
-                assert "id" in fetch_data, "Fetch response must have 'id' field"
-                assert "title" in fetch_data, "Fetch response must have 'title' field"
-                assert "text" in fetch_data, "Fetch response must have 'text' field"
-                assert "url" in fetch_data, "Fetch response must have 'url' field"
-                assert (
-                    "metadata" in fetch_data
-                ), "Fetch response must have 'metadata' field"
+            fetch_data = json.loads(fetch_content)
 
-                # Verify ID matches
-                assert (
-                    fetch_data["id"] == valid_id
-                ), "Fetched ID should match requested ID"
+            # Check OpenAI MCP standard format
+            assert "id" in fetch_data, "Fetch response must have 'id' field"
+            assert "title" in fetch_data, "Fetch response must have 'title' field"
+            assert "text" in fetch_data, "Fetch response must have 'text' field"
+            assert "url" in fetch_data, "Fetch response must have 'url' field"
+            assert "metadata" in fetch_data, "Fetch response must have 'metadata' field"
 
-                # Check metadata structure
-                assert isinstance(
-                    fetch_data["metadata"], dict
-                ), "Metadata should be a dictionary"
+            # Verify ID matches
+            assert fetch_data["id"] == valid_id, "Fetched ID should match requested ID"
+
+            # Check metadata structure
+            assert isinstance(
+                fetch_data["metadata"], dict
+            ), "Metadata should be a dictionary"
 
         except json.JSONDecodeError:
             # Acceptable if Qdrant is not available
-            pass
+            pytest.skip(
+                "Search did not return valid JSON - Qdrant may not be available"
+            )
 
     @pytest.mark.asyncio
     async def test_fetch_with_invalid_id(self, client):

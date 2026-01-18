@@ -4,6 +4,7 @@ import pytest
 from dotenv import load_dotenv
 
 from .base_test_config import TEST_EMAIL
+from .test_helpers import assert_tools_registered
 
 # Load environment variables from .env file
 load_dotenv()
@@ -599,10 +600,13 @@ class TestListToolsAvailability:
 
     @pytest.mark.asyncio
     async def test_all_list_tools_available(self, client):
-        """Test that all expected list tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        """Test that all expected list tools are registered.
 
+        NOTE: By design, the server starts with only 5 core tools exposed
+        via client.list_tools(). Other tools are registered but disabled
+        by default. This test verifies that list tools are REGISTERED
+        (available in the tool registry) rather than currently exposed.
+        """
         # All expected list tools (core service tools)
         # NOTE: Chat App Dev tools (list_available_card_types, list_available_card_components,
         # list_card_templates) have been removed from the supported surface area.
@@ -631,16 +635,13 @@ class TestListToolsAvailability:
             "list_album_photos",
         ]
 
-        missing_tools = []
-        for tool in expected_list_tools:
-            if tool not in tool_names:
-                missing_tools.append(tool)
-
-        assert len(missing_tools) == 0, f"Missing list tools: {missing_tools}"
+        # Use assert_tools_registered to check the tool registry via manage_tools,
+        # not client.list_tools() which only shows currently enabled tools
+        await assert_tools_registered(client, expected_list_tools, context="List tools")
 
         # Print summary
         print(
-            f"\n✅ All {len(expected_list_tools)} list tools are available in the server"
+            f"\nAll {len(expected_list_tools)} list tools are registered in the server"
         )
         print("\nGoogle Service List Tools Summary:")
         print("  Gmail: 2 tools")

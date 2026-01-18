@@ -5,6 +5,8 @@ import os
 import pytest
 from dotenv import load_dotenv
 
+from .test_helpers import assert_tools_registered, get_registered_tools
+
 # Load environment variables
 load_dotenv()
 
@@ -19,11 +21,16 @@ class TestRegistryDiscovery:
 
     @pytest.mark.asyncio
     async def test_registry_tools_available(self, client):
-        """Test that tools are discovered through the registry system."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        """Test that tools are discovered through the registry system.
 
-        # Verify key service tools are discovered via registry
+        Note: The server starts with only 5 core tools enabled by default.
+        This test uses assert_tools_registered to check the full registry,
+        not just the currently enabled/exposed tools.
+        """
+        # Get all registered tools from the registry (not just enabled ones)
+        registered_tools = await get_registered_tools(client)
+
+        # Verify key service tools are registered in the registry
         expected_services = {
             "gmail": [
                 "list_gmail_labels",
@@ -44,36 +51,45 @@ class TestRegistryDiscovery:
         for service, service_tools in expected_services.items():
             discovered_services[service] = []
             for tool in service_tools:
-                if tool in tool_names:
+                if tool in registered_tools:
                     discovered_services[service].append(tool)
 
-        # Each service should have at least some tools discovered
+        # Each service should have at least some tools registered
         for service, tools_found in discovered_services.items():
             assert (
                 len(tools_found) > 0
-            ), f"No tools discovered for {service} service via registry"
+            ), f"No tools registered for {service} service in registry"
 
-        print("✅ Registry discovery found tools for all services")
+        print("Registry discovery found tools for all services")
         for service, tools in discovered_services.items():
-            print(f"   {service}: {len(tools)} tools discovered")
+            print(f"   {service}: {len(tools)} tools registered")
 
     @pytest.mark.asyncio
     async def test_registry_dynamic_loading(self, client):
-        """Test that registry supports dynamic tool loading."""
-        # Get initial tool count
-        initial_tools = await client.list_tools()
-        initial_count = len(initial_tools)
+        """Test that registry supports dynamic tool loading.
 
-        print(f"Initial tool count: {initial_count}")
+        Note: The server starts with only 5 core tools enabled by default.
+        This test checks the full registry via get_registered_tools, then
+        enables all tools to verify metadata.
+        """
+        # Get all registered tools from the registry (not just enabled ones)
+        registered_tools = await get_registered_tools(client)
+        initial_count = len(registered_tools)
+
+        print(f"Registered tool count: {initial_count}")
 
         # Verify registry has loaded a substantial number of tools
         # The system should have at least 80+ tools from all services
         assert (
             initial_count > 80
-        ), f"Registry should discover 80+ tools, found {initial_count}"
+        ), f"Registry should have 80+ tools registered, found {initial_count}"
 
-        # Check that tools have proper metadata from registry
-        sample_tools = initial_tools[:5]  # Check first 5 tools
+        # Enable all tools to check metadata
+        await client.call_tool("manage_tools", {"action": "enable_all"})
+
+        # Now get enabled tools and check their metadata
+        enabled_tools = await client.list_tools()
+        sample_tools = enabled_tools[:5]  # Check first 5 tools
         for tool in sample_tools:
             assert tool.name, "Tool should have a name from registry"
             assert tool.description, "Tool should have a description from registry"
@@ -83,101 +99,126 @@ class TestRegistryDiscovery:
 
     @pytest.mark.asyncio
     async def test_registry_service_grouping(self, client):
-        """Test that registry properly groups tools by service."""
-        tools = await client.list_tools()
+        """Test that registry properly groups tools by service.
 
-        # Group tools by service prefix
+        Note: The server starts with only 5 core tools enabled by default.
+        This test uses get_registered_tools() to analyze the full registry
+        and groups tools by service based on naming patterns.
+        """
+        # Get all registered tools from the registry (not just enabled ones)
+        registered_tools = await get_registered_tools(client)
+
+        # Group tools by service prefix based on tool names
         service_groups = {}
-        for tool in tools:
+        for tool_name in registered_tools:
             # Most Google service tools follow naming patterns
             if (
-                tool.name.startswith("list_")
-                or tool.name.startswith("create_")
-                or tool.name.startswith("send_")
+                tool_name.startswith("list_")
+                or tool_name.startswith("create_")
+                or tool_name.startswith("send_")
+                or tool_name.startswith("search_")
+                or tool_name.startswith("get_")
+                or tool_name.startswith("upload_")
             ):
                 # Extract service from tool name patterns
-                if "gmail" in tool.name.lower():
+                name_lower = tool_name.lower()
+                if "gmail" in name_lower:
                     service = "gmail"
-                elif "drive" in tool.name.lower():
+                elif "drive" in name_lower:
                     service = "drive"
-                elif "calendar" in tool.name.lower() or "event" in tool.name.lower():
+                elif "calendar" in name_lower or "event" in name_lower:
                     service = "calendar"
-                elif "doc" in tool.name.lower():
+                elif "doc" in name_lower:
                     service = "docs"
-                elif "sheet" in tool.name.lower() or "spreadsheet" in tool.name.lower():
+                elif "sheet" in name_lower or "spreadsheet" in name_lower:
                     service = "sheets"
-                elif (
-                    "slide" in tool.name.lower() or "presentation" in tool.name.lower()
-                ):
+                elif "slide" in name_lower or "presentation" in name_lower:
                     service = "slides"
-                elif "form" in tool.name.lower():
+                elif "form" in name_lower:
                     service = "forms"
                 elif (
-                    "chat" in tool.name.lower()
-                    or "space" in tool.name.lower()
-                    or "card" in tool.name.lower()
+                    "chat" in name_lower
+                    or "space" in name_lower
+                    or "card" in name_lower
                 ):
                     service = "chat"
-                elif "photo" in tool.name.lower() or "album" in tool.name.lower():
+                elif "photo" in name_lower or "album" in name_lower:
                     service = "photos"
                 else:
                     service = "other"
 
                 if service not in service_groups:
                     service_groups[service] = []
-                service_groups[service].append(tool.name)
+                service_groups[service].append(tool_name)
 
         # Verify we have tools grouped by service
         expected_services = ["gmail", "drive", "calendar", "docs", "sheets", "chat"]
         for service in expected_services:
             assert (
                 service in service_groups
-            ), f"Registry should group tools for {service}"
+            ), f"Registry should have tools registered for {service}"
             assert (
                 len(service_groups[service]) > 0
             ), f"Registry should have tools for {service}"
 
-        print("✅ Registry groups tools by service:")
+        print("Registry groups tools by service:")
         for service, tools in service_groups.items():
             print(f"   {service}: {len(tools)} tools")
 
     @pytest.mark.asyncio
     async def test_registry_tool_metadata(self, client):
-        """Test that registry provides complete metadata for tools."""
-        tools = await client.list_tools()
+        """Test that registry provides complete metadata for tools.
 
-        # Test a specific tool's metadata
+        Note: The server starts with only 5 core tools enabled by default.
+        This test verifies the tool is registered and has metadata via
+        the manage_tools list action which returns ToolInfo with descriptions.
+        """
+        import json
+
+        # First verify the tool is registered
+        await assert_tools_registered(
+            client, ["list_gmail_labels"], "checking gmail labels tool"
+        )
+
+        # Get tool info with descriptions from manage_tools list action
+        result = await client.call_tool("manage_tools", {"action": "list"})
+        content = (
+            result.content[0].text
+            if hasattr(result.content[0], "text")
+            else str(result.content[0])
+        )
+        data = json.loads(content)
+
+        # Find the gmail labels tool in the tool list
         gmail_label_tool = None
-        for tool in tools:
-            if tool.name == "list_gmail_labels":
+        for tool in data.get("toolList", []):
+            if tool["name"] == "list_gmail_labels":
                 gmail_label_tool = tool
                 break
 
         assert (
             gmail_label_tool is not None
-        ), "list_gmail_labels tool should be in registry"
+        ), "list_gmail_labels tool should be in manage_tools list"
 
-        # Check metadata completeness
-        assert (
-            gmail_label_tool.description
+        # Check metadata completeness from ToolInfo
+        assert gmail_label_tool.get("name"), "Tool should have name"
+        assert gmail_label_tool.get(
+            "description"
         ), "Tool should have description from registry"
-        assert hasattr(gmail_label_tool, "inputSchema"), "Tool should have input schema"
+        assert "enabled" in gmail_label_tool, "Tool should have enabled status"
 
-        # Check that input schema has proper structure
-        if hasattr(gmail_label_tool.inputSchema, "properties"):
-            schema_props = gmail_label_tool.inputSchema.properties
-            # Should have user_google_email parameter
-            assert "user_google_email" in str(
-                schema_props
-            ), "Gmail tool should have email parameter"
-
-        print("✅ Registry provides complete metadata for tools")
-        print(f"   Tool: {gmail_label_tool.name}")
-        print(f"   Description: {gmail_label_tool.description[:100]}...")
+        print("Registry provides complete metadata for tools")
+        print(f"   Tool: {gmail_label_tool['name']}")
+        desc = gmail_label_tool["description"]
+        print(f"   Description: {desc[:100] if len(desc) > 100 else desc}...")
 
     @pytest.mark.asyncio
     async def test_registry_hot_reload_capability(self, client):
-        """Test that registry supports hot-reload of tool definitions."""
+        """Test that registry supports hot-reload of tool definitions.
+
+        Note: This test verifies consistency of list_tools() calls.
+        It works with the default enabled tools (no need to enable all).
+        """
         # Get tools twice to verify consistency
         tools_1 = await client.list_tools()
         tools_2 = await client.list_tools()
@@ -190,7 +231,7 @@ class TestRegistryDiscovery:
             tool_names_1 == tool_names_2
         ), "Registry should provide consistent tool list"
 
-        print("✅ Registry provides consistent tool discovery")
+        print("Registry provides consistent tool discovery")
         print(f"   Total tools: {len(tools_1)}")
         print("   Consistency verified across multiple calls")
 
@@ -211,14 +252,34 @@ class TestRegistryDiscovery:
                 or "invalid" in error_msg
             ), f"Should get clear error for unknown tool, got: {e}"
 
-        print("✅ Registry properly handles invalid tool requests")
+        print("Registry properly handles invalid tool requests")
 
     @pytest.mark.asyncio
     async def test_registry_performance(self, client):
-        """Test registry tool discovery performance."""
+        """Test registry tool discovery performance.
+
+        Note: The server starts with only 5 core tools enabled by default.
+        This test measures the performance of querying the full registry
+        via manage_tools list action, which returns all registered tools.
+        """
         import time
 
-        # Measure time to discover all tools
+        # Measure time to query full registry via manage_tools
+        start_time = time.time()
+        registered_tools = await get_registered_tools(client)
+        registry_time = time.time() - start_time
+
+        # Registry query should be fast (under 2 seconds)
+        assert (
+            registry_time < 2.0
+        ), f"Registry query took {registry_time:.2f}s, should be under 2s"
+
+        # Verify we got a reasonable number of tools registered
+        assert (
+            len(registered_tools) > 50
+        ), f"Expected 50+ tools registered, got {len(registered_tools)}"
+
+        # Also measure list_tools performance for enabled tools
         start_time = time.time()
         tools = await client.list_tools()
         discovery_time = time.time() - start_time
@@ -228,12 +289,16 @@ class TestRegistryDiscovery:
             discovery_time < 2.0
         ), f"Tool discovery took {discovery_time:.2f}s, should be under 2s"
 
-        # Verify we got a reasonable number of tools
-        assert len(tools) > 50, f"Expected 50+ tools, got {len(tools)}"
-
-        print("✅ Registry tool discovery performance:")
-        print(f"   Discovered {len(tools)} tools in {discovery_time:.3f}s")
-        print(f"   Average: {(discovery_time * 1000) / len(tools):.2f}ms per tool")
+        print("Registry tool discovery performance:")
+        print(
+            f"   Registry has {len(registered_tools)} tools (queried in {registry_time:.3f}s)"
+        )
+        print(
+            f"   Currently {len(tools)} tools enabled (discovered in {discovery_time:.3f}s)"
+        )
+        print(
+            f"   Average registry query: {(registry_time * 1000) / len(registered_tools):.2f}ms per tool"
+        )
 
 
 class TestRegistryIntegration:
@@ -243,7 +308,14 @@ class TestRegistryIntegration:
 
     @pytest.mark.asyncio
     async def test_registry_with_middleware(self, client):
-        """Test that registry works with middleware components."""
+        """Test that registry works with middleware components.
+
+        Note: The server starts with only 5 core tools enabled by default.
+        This test enables all tools first to test middleware integration.
+        """
+        # Enable all tools first
+        await client.call_tool("manage_tools", {"action": "enable_all"})
+
         # Call a tool that requires middleware (template resolution)
         result = await client.call_tool(
             "list_gmail_labels", {"user_google_email": TEST_EMAIL}
@@ -255,12 +327,19 @@ class TestRegistryIntegration:
         # Should get a response (auth error or success)
         assert len(content) > 0, "Should get response through registry + middleware"
 
-        print("✅ Registry integrates with middleware")
+        print("Registry integrates with middleware")
         print(f"   Response length: {len(content)} chars")
 
     @pytest.mark.asyncio
     async def test_registry_with_auth_patterns(self, client):
-        """Test registry tools work with authentication patterns."""
+        """Test registry tools work with authentication patterns.
+
+        Note: The server starts with only 5 core tools enabled by default.
+        This test enables all tools first to test auth patterns.
+        """
+        # Enable all tools first
+        await client.call_tool("manage_tools", {"action": "enable_all"})
+
         # Test tools that require authentication
         auth_required_tools = [
             ("list_gmail_labels", {"user_google_email": TEST_EMAIL}),
@@ -276,12 +355,19 @@ class TestRegistryIntegration:
             # Should get auth error or success
             assert len(content) > 0, f"{tool_name} should return response"
 
-        print("✅ Registry tools work with auth patterns")
+        print("Registry tools work with auth patterns")
         print(f"   Tested {len(auth_required_tools)} auth-required tools")
 
     @pytest.mark.asyncio
     async def test_registry_tool_routing(self, client):
-        """Test that registry properly routes tools to correct handlers."""
+        """Test that registry properly routes tools to correct handlers.
+
+        Note: The server starts with only 5 core tools enabled by default.
+        This test enables all tools first to test routing.
+        """
+        # Enable all tools first
+        await client.call_tool("manage_tools", {"action": "enable_all"})
+
         # Test tools from different services
         test_cases = [
             ("list_gmail_labels", "gmail"),
@@ -306,7 +392,7 @@ class TestRegistryIntegration:
                     or tool_name.replace("_", " ") in desc_lower
                 ), f"{tool_name} should be associated with {expected_service}"
 
-        print("✅ Registry properly routes tools to services")
+        print("Registry properly routes tools to services")
         print(f"   Verified routing for {len(test_cases)} tools")
 
 

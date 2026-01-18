@@ -31,6 +31,8 @@ import logging
 import pytest
 from dotenv import load_dotenv
 
+from .test_helpers import assert_tools_registered
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -412,10 +414,6 @@ class TestQdrantTools:
     @pytest.mark.asyncio
     async def test_qdrant_tools_available(self, client):
         """Test that Qdrant tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        # Check for Qdrant tools
         expected_tools = [
             "search",  # Semantic search
             "fetch",  # Fetch point by ID
@@ -423,17 +421,7 @@ class TestQdrantTools:
             "get_tool_analytics",  # Get analytics
             "cleanup_qdrant_data",  # Cleanup old data
         ]
-
-        found_tools = []
-        for expected_tool in expected_tools:
-            if expected_tool in tool_names:
-                found_tools.append(expected_tool)
-                logger.info(f"✅ Found Qdrant tool: {expected_tool}")
-
-        # We should have at least some Qdrant tools
-        assert (
-            len(found_tools) > 0
-        ), f"No Qdrant tools found. Available tools: {tool_names[:10]}"
+        await assert_tools_registered(client, expected_tools, context="Qdrant tools")
 
     @pytest.mark.asyncio
     async def test_search_tool(self, client):

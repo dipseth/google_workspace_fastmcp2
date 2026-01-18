@@ -64,11 +64,11 @@ class TestCalendarTools:
 
     @pytest.mark.asyncio
     async def test_calendar_tools_available(self, client):
-        """Test that all Calendar tools are available."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        """Test that all Calendar tools are registered in the server."""
+        from .test_helpers import assert_tools_registered
 
-        # Check for all Calendar tools
+        # Check for all Calendar tools in the registry
+        # Note: Tools may be registered but not enabled by default
         expected_tools = [
             "list_calendars",
             "list_events",
@@ -78,8 +78,7 @@ class TestCalendarTools:
             "get_event",
         ]
 
-        for tool in expected_tools:
-            assert tool in tool_names, f"Tool '{tool}' not found in available tools"
+        await assert_tools_registered(client, expected_tools, context="Calendar tools")
 
     @pytest.mark.asyncio
     async def test_list_calendars(self, client):

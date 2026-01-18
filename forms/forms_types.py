@@ -35,7 +35,7 @@ class FormResponsesListResponse(TypedDict):
     userEmail: str
     pageToken: Optional[str]  # For pagination
     nextPageToken: Optional[str]  # Next page token if more results available
-    error: NotRequired[Optional[str]]  # Optional error message for error responses
+    error: NotRequired[Optional[str]]
 
 
 class FormCreationResult(TypedDict):
@@ -47,6 +47,7 @@ class FormCreationResult(TypedDict):
     title: str
     editUrl: Optional[str]
     responseUrl: Optional[str]
+    userEmail: NotRequired[str]
     error: NotRequired[Optional[str]]
 
 
@@ -59,6 +60,7 @@ class FormUpdateResult(TypedDict):
     title: Optional[str]
     editUrl: str
     questionsUpdated: NotRequired[int]
+    userEmail: NotRequired[str]
     error: NotRequired[Optional[str]]
 
 
@@ -84,6 +86,7 @@ class FormDetails(TypedDict):
     responseUrl: Optional[str]
     questions: List[FormQuestion]
     questionCount: int
+    userEmail: NotRequired[str]
     error: NotRequired[Optional[str]]
 
 
@@ -100,6 +103,7 @@ class FormPublishResult(TypedDict):
     publicAccess: NotRequired[bool]  # Whether form is publicly accessible
     sharedWith: NotRequired[List[str]]  # List of emails shared with
     sharingResults: NotRequired[List[str]]  # Detailed sharing operation results
+    userEmail: NotRequired[str]
     error: NotRequired[Optional[str]]
 
 
@@ -113,4 +117,5 @@ class FormResponseDetails(TypedDict):
     respondentEmail: Optional[str]
     answers: List[FormResponseAnswer]
     answerCount: int
+    userEmail: NotRequired[str]
     error: NotRequired[Optional[str]]

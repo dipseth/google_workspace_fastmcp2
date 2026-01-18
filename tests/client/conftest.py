@@ -21,6 +21,8 @@ Note: This is the pytest framework configuration file.
 
 import asyncio
 import os
+from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -36,7 +38,7 @@ os.environ.setdefault(
     os.path.abspath("localhost+2.pem"),
 )
 
-from .base_test_config import create_test_client, print_test_configuration
+from .base_test_config import TEST_EMAIL, create_test_client, print_test_configuration
 from .resource_helpers import (
     get_real_calendar_event_id,
     get_real_chat_space_id,
@@ -51,6 +53,201 @@ from .resource_helpers import (
 # NOTE:
 # Pytest 8+ no longer supports defining `pytest_plugins` in non-top-level conftest.
 # Keep this file fixture-only.
+
+
+# =============================================================================
+# Resource Cleanup Infrastructure
+# =============================================================================
+
+
+@dataclass
+class ResourceCleanupTracker:
+    """Tracks resources created during tests for cleanup at session end.
+
+    This tracker helps prevent orphaned resources in Google Workspace by
+    collecting resource IDs created during test runs and cleaning them up
+    automatically when the test session completes.
+
+    Supported resource types:
+    - calendar_events: Cleaned via delete_event tool
+    - gmail_filters: Cleaned via delete_gmail_filter tool
+    - drive_files: Cleaned via manage_drive_files (delete) tool
+
+    Resources without delete APIs (photos, chat, docs, forms, slides) must be
+    cleaned manually or via the standalone cleanup script.
+
+    Usage in tests:
+        def test_something(cleanup_tracker, client):
+            result = await client.call_tool("create_event", {...})
+            event_id = result["event_id"]
+            cleanup_tracker.track_calendar_event(event_id)
+    """
+
+    calendar_events: list[str] = field(default_factory=list)
+    gmail_filters: list[str] = field(default_factory=list)
+    drive_files: list[str] = field(default_factory=list)
+    # Resources without delete APIs - tracked for manual cleanup reference
+    photos_albums: list[str] = field(default_factory=list)
+    docs: list[str] = field(default_factory=list)
+    forms: list[str] = field(default_factory=list)
+    presentations: list[str] = field(default_factory=list)
+    gmail_labels: list[str] = field(default_factory=list)
+    _cleanup_errors: list[dict[str, Any]] = field(default_factory=list)
+
+    def track_calendar_event(self, event_id: str) -> None:
+        """Track a calendar event for cleanup."""
+        if event_id and event_id not in self.calendar_events:
+            self.calendar_events.append(event_id)
+
+    def track_gmail_filter(self, filter_id: str) -> None:
+        """Track a Gmail filter for cleanup."""
+        if filter_id and filter_id not in self.gmail_filters:
+            self.gmail_filters.append(filter_id)
+
+    def track_drive_file(self, file_id: str) -> None:
+        """Track a Drive file for cleanup."""
+        if file_id and file_id not in self.drive_files:
+            self.drive_files.append(file_id)
+
+    def track_photos_album(self, album_id: str) -> None:
+        """Track a Photos album (manual cleanup required)."""
+        if album_id and album_id not in self.photos_albums:
+            self.photos_albums.append(album_id)
+
+    def track_doc(self, doc_id: str) -> None:
+        """Track a Google Doc (manual cleanup required)."""
+        if doc_id and doc_id not in self.docs:
+            self.docs.append(doc_id)
+
+    def track_form(self, form_id: str) -> None:
+        """Track a Google Form (manual cleanup required)."""
+        if form_id and form_id not in self.forms:
+            self.forms.append(form_id)
+
+    def track_presentation(self, presentation_id: str) -> None:
+        """Track a Google Slides presentation (manual cleanup required)."""
+        if presentation_id and presentation_id not in self.presentations:
+            self.presentations.append(presentation_id)
+
+    def track_gmail_label(self, label_id: str) -> None:
+        """Track a Gmail label (manual cleanup required)."""
+        if label_id and label_id not in self.gmail_labels:
+            self.gmail_labels.append(label_id)
+
+    def get_summary(self) -> dict[str, int]:
+        """Get a summary of tracked resources."""
+        return {
+            "calendar_events": len(self.calendar_events),
+            "gmail_filters": len(self.gmail_filters),
+            "drive_files": len(self.drive_files),
+            "photos_albums": len(self.photos_albums),
+            "docs": len(self.docs),
+            "forms": len(self.forms),
+            "presentations": len(self.presentations),
+            "gmail_labels": len(self.gmail_labels),
+            "cleanup_errors": len(self._cleanup_errors),
+        }
+
+    def get_manual_cleanup_needed(self) -> dict[str, list[str]]:
+        """Get resources that require manual cleanup (no delete API available)."""
+        return {
+            "photos_albums": self.photos_albums.copy(),
+            "docs": self.docs.copy(),
+            "forms": self.forms.copy(),
+            "presentations": self.presentations.copy(),
+            "gmail_labels": self.gmail_labels.copy(),
+        }
+
+
+# Global tracker instance - shared across test session
+_cleanup_tracker: ResourceCleanupTracker | None = None
+
+
+def get_cleanup_tracker() -> ResourceCleanupTracker:
+    """Get or create the global cleanup tracker."""
+    global _cleanup_tracker
+    if _cleanup_tracker is None:
+        _cleanup_tracker = ResourceCleanupTracker()
+    return _cleanup_tracker
+
+
+async def _cleanup_resources(client) -> dict[str, Any]:
+    """Clean up all tracked resources using MCP tools.
+
+    Returns a summary of cleanup operations performed.
+    """
+    tracker = get_cleanup_tracker()
+    results = {
+        "calendar_events_deleted": 0,
+        "gmail_filters_deleted": 0,
+        "drive_files_deleted": 0,
+        "errors": [],
+    }
+
+    # Clean up calendar events
+    if tracker.calendar_events:
+        print(f"\n🧹 Cleaning up {len(tracker.calendar_events)} calendar event(s)...")
+        for event_id in tracker.calendar_events:
+            try:
+                await client.call_tool(
+                    "delete_event",
+                    {"user_google_email": TEST_EMAIL, "event_id": event_id},
+                )
+                results["calendar_events_deleted"] += 1
+            except Exception as e:
+                error = {"type": "calendar_event", "id": event_id, "error": str(e)}
+                results["errors"].append(error)
+                tracker._cleanup_errors.append(error)
+
+    # Clean up Gmail filters
+    if tracker.gmail_filters:
+        print(f"🧹 Cleaning up {len(tracker.gmail_filters)} Gmail filter(s)...")
+        for filter_id in tracker.gmail_filters:
+            try:
+                await client.call_tool(
+                    "delete_gmail_filter",
+                    {"user_google_email": TEST_EMAIL, "filter_id": filter_id},
+                )
+                results["gmail_filters_deleted"] += 1
+            except Exception as e:
+                error = {"type": "gmail_filter", "id": filter_id, "error": str(e)}
+                results["errors"].append(error)
+                tracker._cleanup_errors.append(error)
+
+    # Clean up Drive files
+    if tracker.drive_files:
+        print(f"🧹 Cleaning up {len(tracker.drive_files)} Drive file(s)...")
+        try:
+            # Use batch delete for efficiency
+            await client.call_tool(
+                "manage_drive_files",
+                {
+                    "user_google_email": TEST_EMAIL,
+                    "operation": "delete",
+                    "file_ids": tracker.drive_files,
+                    "permanent": False,  # Move to trash instead of permanent delete
+                },
+            )
+            results["drive_files_deleted"] = len(tracker.drive_files)
+        except Exception as e:
+            error = {
+                "type": "drive_files",
+                "ids": tracker.drive_files,
+                "error": str(e),
+            }
+            results["errors"].append(error)
+            tracker._cleanup_errors.append(error)
+
+    # Report on resources that need manual cleanup
+    manual_cleanup = tracker.get_manual_cleanup_needed()
+    manual_count = sum(len(ids) for ids in manual_cleanup.values())
+    if manual_count > 0:
+        print(f"\n⚠️  {manual_count} resource(s) require manual cleanup:")
+        for resource_type, ids in manual_cleanup.items():
+            if ids:
+                print(f"   - {resource_type}: {len(ids)} item(s)")
+
+    return results
 
 
 def pytest_configure(config):
@@ -72,11 +269,82 @@ def print_global_test_config():
     print_test_configuration()
 
 
-@pytest_asyncio.fixture
+@pytest.fixture(scope="session")
+def cleanup_tracker() -> ResourceCleanupTracker:
+    """Session-scoped fixture providing the resource cleanup tracker.
+
+    Usage:
+        async def test_create_event(client, cleanup_tracker):
+            result = await client.call_tool("create_event", {...})
+            event_id = result.content[0].text  # Extract event ID
+            cleanup_tracker.track_calendar_event(event_id)
+    """
+    return get_cleanup_tracker()
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def session_cleanup():
+    """Automatically clean up tracked resources at end of test session.
+
+    This fixture runs after all tests complete and cleans up any resources
+    that were tracked via the cleanup_tracker fixture.
+
+    Set SKIP_TEST_CLEANUP=1 to disable automatic cleanup (useful for debugging).
+    """
+    # Setup: nothing to do
+    yield
+
+    # Teardown: clean up all tracked resources
+    if os.getenv("SKIP_TEST_CLEANUP", "").lower() in ("1", "true", "yes"):
+        print("\n⏭️  Skipping test cleanup (SKIP_TEST_CLEANUP=1)")
+        tracker = get_cleanup_tracker()
+        summary = tracker.get_summary()
+        total = sum(summary.values()) - summary.get("cleanup_errors", 0)
+        if total > 0:
+            print(f"   {total} resource(s) left for manual cleanup")
+        return
+
+    tracker = get_cleanup_tracker()
+    summary = tracker.get_summary()
+    total = sum(summary.values()) - summary.get("cleanup_errors", 0)
+
+    if total == 0:
+        return  # Nothing to clean up
+
+    print(f"\n{'='*60}")
+    print("🧹 TEST SESSION CLEANUP")
+    print(f"{'='*60}")
+    print(f"   Tracked resources: {summary}")
+
+    try:
+        # Create a fresh client for cleanup
+        client = await create_test_client(TEST_EMAIL)
+        async with client:
+            results = await _cleanup_resources(client)
+            print(f"\n✅ Cleanup complete:")
+            print(f"   - Calendar events deleted: {results['calendar_events_deleted']}")
+            print(f"   - Gmail filters deleted: {results['gmail_filters_deleted']}")
+            print(f"   - Drive files deleted: {results['drive_files_deleted']}")
+            if results["errors"]:
+                print(f"   - Errors: {len(results['errors'])}")
+                for err in results["errors"][:5]:  # Show first 5 errors
+                    print(
+                        f"     ⚠️  {err['type']}: {err.get('id', err.get('ids', 'N/A'))}"
+                    )
+    except Exception as e:
+        print(f"\n❌ Cleanup failed: {e}")
+        print("   Run scripts/cleanup_test_resources.py for manual cleanup")
+
+    print(f"{'='*60}\n")
+
+
+@pytest_asyncio.fixture(scope="session")
 async def client():
-    """Create a client connected to the running server with protocol auto-detection.
+    """Create a session-scoped client connected to the running server.
 
     IMPORTANT:
+    - Session-scoped so all tests share the same connection and session state
+    - Tools enabled in one test remain enabled for subsequent tests
     - Always use the shared connection logic in [`tests/client/base_test_config.create_test_client()`](tests/client/base_test_config.py:90)
       so tests don't depend on a valid local TLS/CA chain.
     - If the server is not running, skip the suite (this is an integration-style test harness).

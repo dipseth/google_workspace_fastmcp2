@@ -22,7 +22,7 @@ import pytest
 from config.enhanced_logging import setup_logger
 
 from .base_test_config import TEST_EMAIL
-from .test_helpers import ToolTestRunner
+from .test_helpers import ToolTestRunner, assert_tools_registered
 
 logger = setup_logger()
 
@@ -137,23 +137,16 @@ class TestQdrantRefactoredTools:
     @pytest.mark.asyncio
     async def test_qdrant_tools_available(self, client):
         """Test that Qdrant tools are available with refactored middleware."""
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
-
-        # New unified tools should be available
-        assert "search" in tool_names, "Unified search tool should be available"
-        assert "fetch" in tool_names, "Unified fetch tool should be available"
-
-        # Legacy tools should still be available (backward compatibility)
-        assert (
-            "search_tool_history" in tool_names
-        ), "Legacy search_tool_history should still be available"
-        assert (
-            "get_tool_analytics" in tool_names
-        ), "Legacy get_tool_analytics should still be available"
-        assert (
-            "get_response_details" in tool_names
-        ), "Legacy get_response_details should still be available"
+        expected_tools = [
+            # New unified tools
+            "search",
+            "fetch",
+            # Legacy tools (backward compatibility)
+            "search_tool_history",
+            "get_tool_analytics",
+            "get_response_details",
+        ]
+        await assert_tools_registered(client, expected_tools, context="Qdrant tools")
 
     @pytest.mark.asyncio
     async def test_search_tool_functionality(self, client):
