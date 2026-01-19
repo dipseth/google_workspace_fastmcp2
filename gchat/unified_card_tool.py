@@ -513,11 +513,12 @@ def _build_card_with_smart_builder(
     """
     Build a card using SmartCardBuilder.
 
-    SmartCardBuilder now handles the full flow:
+    SmartCardBuilder handles the full flow:
     1. Parses natural language description into sections/items
     2. Uses Qdrant vector search to find components
     3. Loads components via ModuleWrapper
-    4. Renders using component .render() methods
+    4. Infers layout from description (columns, image positioning)
+    5. Renders using component .render() methods
 
     Args:
         card_description: Natural language description (parsed by SmartCardBuilder)
@@ -530,64 +531,28 @@ def _build_card_with_smart_builder(
 
     builder = get_smart_card_builder()
 
-    # Extract header params
+    # Extract all params - pass everything to SmartCardBuilder
     title = card_params.get("title")
     subtitle = card_params.get("subtitle")
     image_url = card_params.get("image_url")
+    text = card_params.get("text")
+    buttons = card_params.get("buttons")
 
     logger.info(f"🔨 SmartCardBuilder parsing description: {card_description[:80]}...")
 
-    # Build card using new method that parses description internally
+    # Build card using SmartCardBuilder - pass text so it can be used in layout inference
     card_dict = builder.build_card_from_description(
         description=card_description,
         title=title,
         subtitle=subtitle,
         image_url=image_url,
+        text=text,  # Pass text for layout inference (columns, etc.)
+        buttons=buttons,  # Pass buttons too
     )
 
     if not card_dict:
         logger.warning("⚠️ SmartCardBuilder returned empty card")
         return {}
-
-    # Merge explicit card_params (text, buttons) into the card if provided
-    # These override or supplement what was parsed from the description
-    text = card_params.get("text")
-    buttons = card_params.get("buttons")
-
-    if text or buttons:
-        # Ensure we have sections
-        if "sections" not in card_dict or not card_dict["sections"]:
-            card_dict["sections"] = [{"widgets": []}]
-
-        # Find or create first section's widgets
-        first_section = card_dict["sections"][0]
-        if "widgets" not in first_section:
-            first_section["widgets"] = []
-
-        # Add text widget if provided
-        if text:
-            first_section["widgets"].insert(0, {"textParagraph": {"text": text}})
-            logger.info(f"✅ Added text from card_params: {text[:50]}...")
-
-        # Add buttons widget if provided
-        if buttons and isinstance(buttons, list):
-            button_widgets = []
-            for btn in buttons:
-                if isinstance(btn, dict):
-                    btn_widget = {"text": btn.get("text", "Button")}
-                    # Handle onclick action
-                    onclick = btn.get("onclick_action") or btn.get("url") or btn.get("action")
-                    if onclick:
-                        btn_widget["onClick"] = {"openLink": {"url": onclick}}
-                    # Handle button type/style
-                    btn_type = btn.get("type")
-                    if btn_type in ["FILLED", "FILLED_TONAL", "OUTLINED", "BORDERLESS"]:
-                        btn_widget["type"] = btn_type
-                    button_widgets.append(btn_widget)
-
-            if button_widgets:
-                first_section["widgets"].append({"buttonList": {"buttons": button_widgets}})
-                logger.info(f"✅ Added {len(button_widgets)} button(s) from card_params")
 
     # Wrap in cardsV2 format
     card_id = f"smart_card_{int(time.time())}_{hash(str(card_params)) % 10000}"

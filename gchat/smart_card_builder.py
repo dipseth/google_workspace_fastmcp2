@@ -51,6 +51,14 @@ class SmartCardBuilder:
         "Divider": "card_framework.v2.widgets.divider.Divider",
         "Icon": "card_framework.v2.widgets.decorated_text.Icon",
         "OnClick": "card_framework.v2.widgets.decorated_text.OnClick",
+        # Form input components
+        "TextInput": "card_framework.v2.widgets.text_input.TextInput",
+        "SelectionInput": "card_framework.v2.widgets.selection_input.SelectionInput",
+        "DateTimePicker": "card_framework.v2.widgets.date_time_picker.DateTimePicker",
+        # Grid components
+        "Grid": "card_framework.v2.widgets.grid.Grid",
+        "GridItem": "card_framework.v2.widgets.grid.GridItem",
+        "ImageComponent": "card_framework.v2.widgets.grid.ImageComponent",
     }
 
     # Ordinal words for section parsing (borrowed from nlp_parser)
@@ -335,6 +343,13 @@ class SmartCardBuilder:
             "ButtonList": "v2.widgets.button_list.ButtonList class buttons",
             "Button": "v2.widgets.decorated_text.Button class text onClick",
             "OnClick": "v2.widgets.decorated_text.OnClick class openLink",
+            # Form input components
+            "TextInput": "v2.widgets.text_input.TextInput class name label",
+            "SelectionInput": "v2.widgets.selection_input.SelectionInput class name type items",
+            "DateTimePicker": "v2.widgets.date_time_picker.DateTimePicker class name label",
+            # Grid components
+            "Grid": "v2.widgets.grid.Grid class items column_count",
+            "GridItem": "v2.widgets.grid.GridItem class title subtitle image",
         }
 
         for name, query in core_components.items():
@@ -603,6 +618,235 @@ class SmartCardBuilder:
         return Section(**kwargs)
 
     # =========================================================================
+    # FORM COMPONENT BUILDING
+    # =========================================================================
+
+    def build_text_input(
+        self,
+        name: str,
+        label: str = None,
+        hint_text: str = None,
+        value: str = None,
+        type_: str = "SINGLE_LINE",
+    ) -> Optional[Any]:
+        """
+        Build a TextInput component for form cards.
+
+        Args:
+            name: Input field name (required for form submission)
+            label: Display label above the input
+            hint_text: Placeholder/hint text inside the input
+            value: Pre-filled value
+            type_: Input type - "SINGLE_LINE" or "MULTIPLE_LINE"
+
+        Returns:
+            TextInput component or None
+        """
+        TextInput = self.get_component("TextInput")
+        if not TextInput:
+            logger.warning("TextInput component not available")
+            return None
+
+        kwargs = {"name": name}
+        if label:
+            kwargs["label"] = label
+        if hint_text:
+            kwargs["hint_text"] = hint_text
+        if value:
+            kwargs["value"] = value
+
+        # Handle type enum
+        try:
+            if hasattr(TextInput, "Type"):
+                kwargs["type"] = getattr(TextInput.Type, type_, TextInput.Type.SINGLE_LINE)
+        except Exception as e:
+            logger.debug(f"Could not set TextInput type: {e}")
+
+        return TextInput(**kwargs)
+
+    def build_selection_input(
+        self,
+        name: str,
+        label: str = None,
+        type_: str = "DROPDOWN",
+        items: List[Dict[str, str]] = None,
+    ) -> Optional[Any]:
+        """
+        Build a SelectionInput component for form cards.
+
+        Args:
+            name: Input field name (required for form submission)
+            label: Display label above the selection
+            type_: Selection type - "DROPDOWN", "RADIO_BUTTON", "CHECK_BOX", "SWITCH"
+            items: List of {text, value, selected} dicts for options
+
+        Returns:
+            SelectionInput component or None
+        """
+        SelectionInput = self.get_component("SelectionInput")
+        if not SelectionInput:
+            logger.warning("SelectionInput component not available")
+            return None
+
+        kwargs = {"name": name}
+        if label:
+            kwargs["label"] = label
+
+        # Handle type enum
+        try:
+            if hasattr(SelectionInput, "Type"):
+                kwargs["type"] = getattr(SelectionInput.Type, type_, SelectionInput.Type.DROPDOWN)
+        except Exception as e:
+            logger.debug(f"Could not set SelectionInput type: {e}")
+
+        # Handle items - need to convert to SelectionItem objects if available
+        if items:
+            try:
+                if hasattr(SelectionInput, "SelectionItem"):
+                    selection_items = []
+                    for item in items:
+                        si = SelectionInput.SelectionItem(
+                            text=item.get("text", ""),
+                            value=item.get("value", ""),
+                            selected=item.get("selected", False),
+                        )
+                        selection_items.append(si)
+                    kwargs["items"] = selection_items
+                else:
+                    # Fallback to raw dict format
+                    kwargs["items"] = items
+            except Exception as e:
+                logger.debug(f"Could not create SelectionItems: {e}")
+                kwargs["items"] = items
+
+        return SelectionInput(**kwargs)
+
+    def build_date_time_picker(
+        self,
+        name: str,
+        label: str = None,
+        type_: str = "DATE_AND_TIME",
+        value_ms_epoch: int = None,
+    ) -> Optional[Any]:
+        """
+        Build a DateTimePicker component for form cards.
+
+        Args:
+            name: Input field name (required for form submission)
+            label: Display label above the picker
+            type_: Picker type - "DATE_AND_TIME", "DATE_ONLY", "TIME_ONLY"
+            value_ms_epoch: Pre-selected value in milliseconds since epoch
+
+        Returns:
+            DateTimePicker component or None
+        """
+        DateTimePicker = self.get_component("DateTimePicker")
+        if not DateTimePicker:
+            logger.warning("DateTimePicker component not available")
+            return None
+
+        kwargs = {"name": name}
+        if label:
+            kwargs["label"] = label
+        if value_ms_epoch:
+            kwargs["value_ms_epoch"] = value_ms_epoch
+
+        # Handle type enum
+        try:
+            if hasattr(DateTimePicker, "Type"):
+                kwargs["type"] = getattr(DateTimePicker.Type, type_, DateTimePicker.Type.DATE_AND_TIME)
+        except Exception as e:
+            logger.debug(f"Could not set DateTimePicker type: {e}")
+
+        return DateTimePicker(**kwargs)
+
+    # =========================================================================
+    # GRID COMPONENT BUILDING
+    # =========================================================================
+
+    def build_grid(
+        self,
+        items: List[Dict[str, Any]],
+        title: str = None,
+        column_count: int = 2,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build a Grid widget for displaying items in a grid layout.
+
+        Args:
+            items: List of grid item dicts with {title, subtitle, image_url}
+            title: Optional grid title
+            column_count: Number of columns (default 2)
+
+        Returns:
+            Grid widget dict in Google Chat format
+        """
+        if not items:
+            logger.warning("No items provided for grid")
+            return None
+
+        grid_items = []
+        for i, item in enumerate(items):
+            grid_item = {
+                "id": item.get("id", f"item_{i}"),
+                "title": item.get("title", ""),
+            }
+            if item.get("subtitle"):
+                grid_item["subtitle"] = item["subtitle"]
+
+            if item.get("image_url"):
+                grid_item["image"] = {
+                    "imageUri": item["image_url"],
+                    "altText": item.get("alt_text", item.get("title", "")),
+                }
+
+            # Handle click action
+            if item.get("url"):
+                grid_item["layout"] = "TEXT_BELOW"
+
+            grid_items.append(grid_item)
+
+        grid_widget = {
+            "grid": {
+                "columnCount": column_count,
+                "items": grid_items,
+            }
+        }
+
+        if title:
+            grid_widget["grid"]["title"] = title
+
+        logger.info(f"✅ Built grid with {len(grid_items)} items, {column_count} columns")
+        return grid_widget
+
+    def build_grid_from_images(
+        self,
+        image_urls: List[str],
+        titles: List[str] = None,
+        column_count: int = 2,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build a Grid widget from a list of image URLs.
+
+        Args:
+            image_urls: List of image URLs
+            titles: Optional list of titles for each image
+            column_count: Number of columns (default 2)
+
+        Returns:
+            Grid widget dict in Google Chat format
+        """
+        items = []
+        for i, url in enumerate(image_urls):
+            item = {
+                "image_url": url,
+                "title": titles[i] if titles and i < len(titles) else f"Image {i + 1}",
+            }
+            items.append(item)
+
+        return self.build_grid(items, column_count=column_count)
+
+    # =========================================================================
     # NATURAL LANGUAGE DESCRIPTION PARSING
     # =========================================================================
 
@@ -866,6 +1110,8 @@ class SmartCardBuilder:
         title: str = None,
         subtitle: str = None,
         image_url: str = None,
+        text: str = None,
+        buttons: List[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Build a complete card by parsing natural language description.
@@ -873,13 +1119,16 @@ class SmartCardBuilder:
         This is the main entry point that:
         1. Parses description into sections/items
         2. Uses Qdrant to find/load components
-        3. Renders using component .render() methods
+        3. Infers layout from description (columns, image positioning)
+        4. Renders using component .render() methods
 
         Args:
             description: Natural language description of card content
             title: Optional card header title
             subtitle: Optional card header subtitle
             image_url: Optional image URL
+            text: Optional explicit text content (used in layout inference)
+            buttons: Optional list of button dicts [{text, url/onclick_action, type}]
 
         Returns:
             Rendered card JSON in Google Chat API format
@@ -890,22 +1139,42 @@ class SmartCardBuilder:
         # Parse description into structured content
         parsed = self.parse_description(description)
 
-        # If we have sections, build multi-section card
+        # If we have sections from NLP parsing, build multi-section card
         if parsed.get("sections"):
             return self._build_multi_section_card(
                 sections=parsed["sections"],
                 title=title,
                 subtitle=subtitle,
                 image_url=image_url,
+                text=text,
+                buttons=buttons,
             )
 
         # Otherwise, build single-section card with items
+        # Include explicit text as an item so it participates in layout inference
+        items = parsed.get("items", [])
+        if text:
+            # Add text as first item so it becomes part of text_widgets in build_card()
+            items.insert(0, text)
+
+        # Merge parsed buttons with explicit buttons
+        all_buttons = parsed.get("buttons", [])
+        if buttons:
+            # Convert button format from card_params to internal format
+            for btn in buttons:
+                if isinstance(btn, dict):
+                    btn_entry = {
+                        "text": btn.get("text", "Button"),
+                        "url": btn.get("onclick_action") or btn.get("url") or btn.get("action", "#"),
+                    }
+                    all_buttons.append(btn_entry)
+
         content = {
             "title": title,
             "subtitle": subtitle,
             "image_url": image_url,
-            "items": parsed.get("items", []),
-            "buttons": parsed.get("buttons", []),
+            "items": items,
+            "buttons": all_buttons,
         }
 
         return self.build_card(description, content)
@@ -916,6 +1185,8 @@ class SmartCardBuilder:
         title: str = None,
         subtitle: str = None,
         image_url: str = None,
+        text: str = None,
+        buttons: List[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Build a card with multiple sections.
@@ -924,10 +1195,16 @@ class SmartCardBuilder:
             sections: List of section dicts with 'header' and 'widgets'
             title: Card header title
             subtitle: Card header subtitle
-            image_url: Optional header image
+            image_url: Optional image URL (added as widget, NOT in header)
+            text: Optional explicit text content (added to first section)
+            buttons: Optional list of button dicts (added to last section)
 
         Returns:
             Rendered card JSON in Google Chat API format (camelCase)
+
+        Note:
+            Google Chat does NOT render images in header.imageUrl.
+            Images must be placed as widgets in sections.
         """
         rendered_sections = []
 
@@ -951,10 +1228,54 @@ class SmartCardBuilder:
                 "title": title,
                 "subtitle": subtitle or "",
             }
-            if image_url:
-                card["header"]["imageUrl"] = image_url
+            # NOTE: Do NOT put image_url in header - Google Chat doesn't render it there
 
-        card["sections"] = rendered_sections if rendered_sections else [{"widgets": []}]
+        # Ensure we have at least one section
+        if not rendered_sections:
+            rendered_sections = [{"widgets": []}]
+
+        # Add explicit text to first section if provided
+        if text:
+            text_widget = {"textParagraph": {"text": text}}
+            if rendered_sections[0].get("widgets"):
+                rendered_sections[0]["widgets"].insert(0, text_widget)
+            else:
+                rendered_sections[0]["widgets"] = [text_widget]
+            logger.info(f"✅ Added text widget to first section: {text[:50]}...")
+
+        # Add image as widget in first section (Google Chat requires images as widgets, not in header)
+        if image_url:
+            image_widget = {"image": {"imageUrl": image_url}}
+            # Insert after text if text was added, otherwise at beginning
+            insert_pos = 1 if text else 0
+            if rendered_sections[0].get("widgets"):
+                rendered_sections[0]["widgets"].insert(insert_pos, image_widget)
+            else:
+                rendered_sections[0]["widgets"] = [image_widget]
+            logger.info(f"✅ Added image widget to first section: {image_url}")
+
+        # Add buttons to last section if provided
+        if buttons and isinstance(buttons, list):
+            button_widgets = []
+            for btn in buttons:
+                if isinstance(btn, dict):
+                    btn_widget = {"text": btn.get("text", "Button")}
+                    onclick = btn.get("onclick_action") or btn.get("url") or btn.get("action")
+                    if onclick:
+                        btn_widget["onClick"] = {"openLink": {"url": onclick}}
+                    btn_type = btn.get("type")
+                    if btn_type in ["FILLED", "FILLED_TONAL", "OUTLINED", "BORDERLESS"]:
+                        btn_widget["type"] = btn_type
+                    button_widgets.append(btn_widget)
+
+            if button_widgets:
+                last_section = rendered_sections[-1]
+                if "widgets" not in last_section:
+                    last_section["widgets"] = []
+                last_section["widgets"].append({"buttonList": {"buttons": button_widgets}})
+                logger.info(f"✅ Added {len(button_widgets)} button(s) to last section")
+
+        card["sections"] = rendered_sections
 
         return card
 
