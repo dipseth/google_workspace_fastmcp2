@@ -1154,8 +1154,9 @@ class SmartCardBuilder:
         # Include explicit text as an item so it participates in layout inference
         items = parsed.get("items", [])
         if text:
-            # Add text as first item so it becomes part of text_widgets in build_card()
-            items.insert(0, text)
+            # Convert markdown and add text as first item so it becomes part of text_widgets in build_card()
+            converted_text = self.convert_markdown_to_chat(text)
+            items.insert(0, converted_text)
 
         # Merge parsed buttons with explicit buttons
         all_buttons = parsed.get("buttons", [])
@@ -1236,12 +1237,14 @@ class SmartCardBuilder:
 
         # Add explicit text to first section if provided
         if text:
-            text_widget = {"textParagraph": {"text": text}}
+            # Convert markdown to Google Chat format
+            converted_text = self.convert_markdown_to_chat(text)
+            text_widget = {"textParagraph": {"text": converted_text}}
             if rendered_sections[0].get("widgets"):
                 rendered_sections[0]["widgets"].insert(0, text_widget)
             else:
                 rendered_sections[0]["widgets"] = [text_widget]
-            logger.info(f"✅ Added text widget to first section: {text[:50]}...")
+            logger.info(f"✅ Added text widget to first section: {converted_text[:50]}...")
 
         # Add image as widget in first section (Google Chat requires images as widgets, not in header)
         if image_url:
@@ -1559,6 +1562,60 @@ class SmartCardBuilder:
         """
         hex_color = self.COLOR_MAP.get(color, color)
         return f'<font color="{hex_color}">{text}</font>'
+
+    # =========================================================================
+    # HELPER: Markdown conversion for Google Chat
+    # =========================================================================
+
+    @staticmethod
+    def convert_markdown_to_chat(text: str) -> str:
+        """
+        Convert standard markdown to Google Chat HTML format.
+
+        Google Chat textParagraph supports HTML tags:
+        - <b>bold</b>
+        - <i>italic</i>
+        - <s>strikethrough</s>
+        - <u>underline</u>
+        - <font color="#hex">colored text</font>
+        - <a href="url">link</a>
+
+        Args:
+            text: Text with standard markdown
+
+        Returns:
+            Text converted to HTML for Google Chat
+        """
+        if not text:
+            return text
+
+        # Convert **bold** to <b>bold</b>
+        text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+
+        # Convert *bold* (single asterisk) to <b>bold</b> - but not if part of bullet
+        # Only match *text* where text doesn't start with space (to avoid matching "• *")
+        text = re.sub(r'(?<!\*)\*([^*\s][^*]*[^*\s])\*(?!\*)', r'<b>\1</b>', text)
+        # Also handle single-word bold like *word*
+        text = re.sub(r'(?<!\*)\*(\w+)\*(?!\*)', r'<b>\1</b>', text)
+
+        # Convert ~~strikethrough~~ to <s>strikethrough</s>
+        text = re.sub(r'~~([^~]+)~~', r'<s>\1</s>', text)
+
+        # Convert ~strikethrough~ (single tilde) to <s>strikethrough</s>
+        text = re.sub(r'(?<!~)~([^~\s][^~]*[^~\s])~(?!~)', r'<s>\1</s>', text)
+
+        # Convert _italic_ to <i>italic</i>
+        text = re.sub(r'(?<!_)_([^_\s][^_]*[^_\s])_(?!_)', r'<i>\1</i>', text)
+        # Also handle single-word italic like _word_
+        text = re.sub(r'(?<!_)_(\w+)_(?!_)', r'<i>\1</i>', text)
+
+        # Convert __bold__ (double underscore sometimes used for bold)
+        text = re.sub(r'__([^_]+)__', r'<b>\1</b>', text)
+
+        # Convert `code` to monospace (Google Chat doesn't have code tag, use as-is)
+        # text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+
+        return text
 
 
 # Global instance for convenience
