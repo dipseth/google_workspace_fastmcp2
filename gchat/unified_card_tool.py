@@ -379,6 +379,25 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
     return _card_framework_wrapper
 
 
+def _initialize_colbert_wrapper():
+    """
+    Initialize ColBERT wrapper for multi-vector embeddings.
+
+    This is called on server startup when COLBERT_EMBEDDING_DEV=true.
+    SmartCardBuilder handles its own ColBERT initialization via _get_embedder(),
+    but this function ensures the embedder is pre-loaded for faster first queries.
+    """
+    try:
+        builder = get_smart_card_builder()
+        # Force initialization of Qdrant and ColBERT embedder
+        builder.initialize()
+        builder._get_embedder()
+        logger.info("✅ ColBERT wrapper initialized via SmartCardBuilder")
+    except Exception as e:
+        logger.warning(f"⚠️ ColBERT wrapper initialization failed: {e}")
+        # Non-fatal - will initialize on-demand when needed
+
+
 def _build_simple_card_structure(params: Dict[str, Any]) -> Dict[str, Any]:
     """
     Build a simple card structure when no ModuleWrapper components are found.
@@ -519,10 +538,11 @@ def _build_card_with_smart_builder(
     3. Loads components via ModuleWrapper
     4. Infers layout from description (columns, image positioning)
     5. Renders using component .render() methods
+    6. Builds form cards when fields are provided
 
     Args:
         card_description: Natural language description (parsed by SmartCardBuilder)
-        card_params: Parameters with title, subtitle, image_url, text, buttons overrides
+        card_params: Parameters with title, subtitle, image_url, text, buttons, fields, submit_action
 
     Returns:
         Card structure in cardsV2 format ready for Google Chat API
@@ -537,10 +557,14 @@ def _build_card_with_smart_builder(
     image_url = card_params.get("image_url")
     text = card_params.get("text")
     buttons = card_params.get("buttons")
+    fields = card_params.get("fields")  # Form fields
+    submit_action = card_params.get("submit_action")  # Form submit action
 
     logger.info(f"🔨 SmartCardBuilder parsing description: {card_description[:80]}...")
+    if fields:
+        logger.info(f"📝 Form card mode: {len(fields)} field(s)")
 
-    # Build card using SmartCardBuilder - pass text so it can be used in layout inference
+    # Build card using SmartCardBuilder - pass all params
     card_dict = builder.build_card_from_description(
         description=card_description,
         title=title,
@@ -548,6 +572,8 @@ def _build_card_with_smart_builder(
         image_url=image_url,
         text=text,  # Pass text for layout inference (columns, etc.)
         buttons=buttons,  # Pass buttons too
+        fields=fields,  # Form fields
+        submit_action=submit_action,  # Form submit action
     )
 
     if not card_dict:

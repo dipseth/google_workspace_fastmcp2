@@ -1112,6 +1112,8 @@ class SmartCardBuilder:
         image_url: str = None,
         text: str = None,
         buttons: List[Dict[str, Any]] = None,
+        fields: List[Dict[str, Any]] = None,
+        submit_action: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
         """
         Build a complete card by parsing natural language description.
@@ -1129,12 +1131,26 @@ class SmartCardBuilder:
             image_url: Optional image URL
             text: Optional explicit text content (used in layout inference)
             buttons: Optional list of button dicts [{text, url/onclick_action, type}]
+            fields: Optional list of form field dicts for form cards
+                    [{type: "TextInput"/"SelectionInput"/"DateTimePicker", name, label, ...}]
+            submit_action: Optional submit action for form cards
+                    {function: "functionName", parameters: {...}}
 
         Returns:
             Rendered card JSON in Google Chat API format
         """
         if not self._initialized:
             self.initialize()
+
+        # If fields are provided, build a form card
+        if fields:
+            return self._build_form_card(
+                title=title,
+                subtitle=subtitle,
+                text=text,
+                fields=fields,
+                submit_action=submit_action,
+            )
 
         # Parse description into structured content
         parsed = self.parse_description(description)
@@ -1281,6 +1297,276 @@ class SmartCardBuilder:
         card["sections"] = rendered_sections
 
         return card
+
+    def _build_form_card(
+        self,
+        title: str = None,
+        subtitle: str = None,
+        text: str = None,
+        fields: List[Dict[str, Any]] = None,
+        submit_action: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Build a form card with input fields using ModuleWrapper components.
+
+        Uses self.build_text_input(), self.build_selection_input(), etc. which
+        load components via Qdrant/ModuleWrapper and render them properly.
+
+        Args:
+            title: Card header title
+            subtitle: Card header subtitle
+            text: Optional descriptive text above the form
+            fields: List of field definitions:
+                - TextInput: {type: "TextInput", name: "field_name", label: "Label", hint: "Hint text"}
+                - SelectionInput: {type: "SelectionInput", name: "field_name", label: "Label",
+                                   selection_type: "DROPDOWN"/"RADIO_BUTTON"/"CHECK_BOX"/"SWITCH",
+                                   items: [{text: "Option 1", value: "opt1", selected: false}, ...]}
+                - DateTimePicker: {type: "DateTimePicker", name: "field_name", label: "Label",
+                                   picker_type: "DATE_AND_TIME"/"DATE_ONLY"/"TIME_ONLY"}
+            submit_action: Submit button configuration:
+                - {text: "Submit", function: "handleSubmit", parameters: {...}}
+                - or {text: "Submit", url: "https://..."} for URL action
+
+        Returns:
+            Form card JSON in Google Chat API format
+        """
+        widgets = []
+
+        # Add descriptive text if provided
+        if text:
+            converted_text = self.convert_markdown_to_chat(text)
+            widgets.append({"textParagraph": {"text": converted_text}})
+
+        # Build form field widgets using ModuleWrapper components
+        if fields:
+            for field in fields:
+                field_type = field.get("type", "TextInput")
+                field_name = field.get("name", "unnamed_field")
+                field_label = field.get("label", "")
+
+                if field_type == "TextInput":
+                    # Use build_text_input which loads via ModuleWrapper
+                    input_type = "MULTIPLE_LINE" if field.get("multiline") else "SINGLE_LINE"
+                    component = self.build_text_input(
+                        name=field_name,
+                        label=field_label,
+                        hint_text=field.get("hint"),
+                        value=field.get("value"),
+                        type_=input_type,
+                    )
+                    if component:
+                        try:
+                            rendered = component.render()
+                            widgets.append(rendered)
+                            logger.info(f"✅ Added TextInput field via ModuleWrapper: {field_name}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to render TextInput: {e}, using fallback")
+                            # Fallback to direct JSON
+                            widgets.append({
+                                "textInput": {
+                                    "name": field_name,
+                                    "label": field_label,
+                                    "type": input_type,
+                                }
+                            })
+                    else:
+                        # Component not available, use fallback JSON
+                        logger.warning(f"⚠️ TextInput component not available, using fallback")
+                        widgets.append({
+                            "textInput": {
+                                "name": field_name,
+                                "label": field_label,
+                                "type": input_type,
+                            }
+                        })
+
+                elif field_type == "SelectionInput":
+                    # Use build_selection_input which loads via ModuleWrapper
+                    selection_type = field.get("selection_type", "DROPDOWN")
+                    items = field.get("items", [])
+                    component = self.build_selection_input(
+                        name=field_name,
+                        label=field_label,
+                        type_=selection_type,
+                        items=items,
+                    )
+                    if component:
+                        try:
+                            rendered = component.render()
+                            widgets.append(rendered)
+                            logger.info(f"✅ Added SelectionInput field via ModuleWrapper: {field_name}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to render SelectionInput: {e}, using fallback")
+                            # Fallback to direct JSON
+                            widget = {
+                                "selectionInput": {
+                                    "name": field_name,
+                                    "label": field_label,
+                                    "type": selection_type,
+                                    "items": [
+                                        {"text": item.get("text", ""), "value": item.get("value", ""), "selected": item.get("selected", False)}
+                                        for item in items
+                                    ] if items else []
+                                }
+                            }
+                            widgets.append(widget)
+                    else:
+                        logger.warning(f"⚠️ SelectionInput component not available, using fallback")
+                        widget = {
+                            "selectionInput": {
+                                "name": field_name,
+                                "label": field_label,
+                                "type": selection_type,
+                                "items": [
+                                    {"text": item.get("text", ""), "value": item.get("value", ""), "selected": item.get("selected", False)}
+                                    for item in items
+                                ] if items else []
+                            }
+                        }
+                        widgets.append(widget)
+
+                elif field_type == "DateTimePicker":
+                    # Use build_date_time_picker which loads via ModuleWrapper
+                    picker_type = field.get("picker_type", "DATE_AND_TIME")
+                    component = self.build_date_time_picker(
+                        name=field_name,
+                        label=field_label,
+                        type_=picker_type,
+                        value_ms_epoch=field.get("value_ms"),
+                    )
+                    if component:
+                        try:
+                            rendered = component.render()
+                            widgets.append(rendered)
+                            logger.info(f"✅ Added DateTimePicker field via ModuleWrapper: {field_name}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to render DateTimePicker: {e}, using fallback")
+                            widgets.append({
+                                "dateTimePicker": {
+                                    "name": field_name,
+                                    "label": field_label,
+                                    "type": picker_type,
+                                }
+                            })
+                    else:
+                        logger.warning(f"⚠️ DateTimePicker component not available, using fallback")
+                        widgets.append({
+                            "dateTimePicker": {
+                                "name": field_name,
+                                "label": field_label,
+                                "type": picker_type,
+                            }
+                        })
+
+                else:
+                    logger.warning(f"⚠️ Unknown field type: {field_type}")
+
+        # Add submit button using ButtonList component
+        if submit_action:
+            submit_text = submit_action.get("text", "Submit")
+
+            # Try to use Button/ButtonList components via ModuleWrapper
+            Button = self.get_component("Button")
+            ButtonList = self.get_component("ButtonList")
+            OnClick = self.get_component("OnClick")
+
+            if Button and ButtonList and OnClick:
+                try:
+                    # Build onClick based on action type
+                    if submit_action.get("function"):
+                        # Function action for Apps Script/Cloud Function callbacks
+                        # OnClick doesn't directly support action, use dict
+                        on_click_dict = {
+                            "action": {
+                                "function": submit_action["function"],
+                            }
+                        }
+                        if submit_action.get("parameters"):
+                            params = submit_action["parameters"]
+                            if isinstance(params, dict):
+                                on_click_dict["action"]["parameters"] = [
+                                    {"key": k, "value": str(v)} for k, v in params.items()
+                                ]
+                        # Fallback to dict for action-based onClick
+                        widgets.append({
+                            "buttonList": {
+                                "buttons": [{
+                                    "text": submit_text,
+                                    "type": "FILLED",
+                                    "onClick": on_click_dict
+                                }]
+                            }
+                        })
+                    elif submit_action.get("url"):
+                        on_click = OnClick(open_link={"url": submit_action["url"]})
+                        button = Button(text=submit_text, on_click=on_click)
+                        button_list = ButtonList(buttons=[button])
+                        rendered = button_list.render()
+                        widgets.append(rendered)
+                    else:
+                        # No action, just a button
+                        button = Button(text=submit_text)
+                        button_list = ButtonList(buttons=[button])
+                        rendered = button_list.render()
+                        widgets.append(rendered)
+                    logger.info(f"✅ Added submit button via ModuleWrapper: {submit_text}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to render submit button via ModuleWrapper: {e}, using fallback")
+                    self._add_submit_button_fallback(widgets, submit_text, submit_action)
+            else:
+                self._add_submit_button_fallback(widgets, submit_text, submit_action)
+
+        # Build card structure
+        card = {}
+
+        if title:
+            card["header"] = {"title": title}
+            if subtitle:
+                card["header"]["subtitle"] = subtitle
+
+        card["sections"] = [{"widgets": widgets}]
+
+        logger.info(f"✅ Built form card with {len(fields or [])} fields")
+        return card
+
+    def _add_submit_button_fallback(
+        self, widgets: List[Dict[str, Any]], submit_text: str, submit_action: Dict[str, Any]
+    ) -> None:
+        """
+        Add a submit button using direct JSON fallback when ModuleWrapper components unavailable.
+
+        Args:
+            widgets: List to append the button widget to
+            submit_text: Text to display on the button
+            submit_action: Dict with 'function', 'url', or 'parameters' keys
+        """
+        button_dict = {
+            "text": submit_text,
+            "type": "FILLED",
+        }
+
+        if submit_action.get("function"):
+            on_click = {
+                "action": {
+                    "function": submit_action["function"],
+                }
+            }
+            if submit_action.get("parameters"):
+                params = submit_action["parameters"]
+                if isinstance(params, dict):
+                    on_click["action"]["parameters"] = [
+                        {"key": k, "value": str(v)} for k, v in params.items()
+                    ]
+            button_dict["onClick"] = on_click
+        elif submit_action.get("url"):
+            button_dict["onClick"] = {"openLink": {"url": submit_action["url"]}}
+
+        widgets.append({
+            "buttonList": {
+                "buttons": [button_dict]
+            }
+        })
+        logger.info(f"✅ Added submit button via fallback: {submit_text}")
 
     def _dict_to_widget(self, widget_dict: Dict[str, Any]) -> Optional[Any]:
         """
