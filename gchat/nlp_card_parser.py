@@ -206,6 +206,28 @@ BUTTON_TYPE_MAPPINGS = {
     "accent": "FILLED_TONAL",
 }
 
+# Ordinal word to number mapping for natural language section parsing
+ORDINAL_WORDS = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+    "1st": 1,
+    "2nd": 2,
+    "3rd": 3,
+    "4th": 4,
+    "5th": 5,
+}
+
+# Regex pattern for ordinal words (compiled once for efficiency)
+ORDINAL_PATTERN = r"(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th)"
+
 
 class EnhancedNaturalLanguageCardParser:
     """Enhanced parser that extracts complex card parameters from natural language descriptions."""
@@ -430,8 +452,73 @@ class EnhancedNaturalLanguageCardParser:
         return "standard"
 
     def _extract_sections(self, text: str) -> List[ExtractedSection]:
-        """Extract section information from text."""
+        """Extract section information from text.
+
+        Supports multiple natural language patterns:
+        - Numbered: "1. 'Section Name' section with..."
+        - Ordinal with titled: "First section titled 'Name' showing..."
+        - Dash/bullet: "- First section 'Name' with..."
+        - Explicit sections: "sections: 'A', 'B', 'C'"
+        """
         sections = []
+
+        # PATTERN 0 (NEW): Ordinal words with "titled" keyword - most natural format
+        # Example: "First section titled 'Deployments' showing X. Second section titled 'Commits' showing Y."
+        # This handles: "First section titled "X" showing Y" or "First section titled 'X' showing Y"
+        ordinal_titled_pattern = re.compile(
+            rf"({ORDINAL_PATTERN})\s+section\s+titled\s+['\"]([^'\"]+)['\"]?\s+(?:showing|with|containing|that\s+shows?|displaying)?\s*(.+?)(?=(?:{ORDINAL_PATTERN})\s+section|$)",
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        ordinal_matches = ordinal_titled_pattern.findall(text)
+        if ordinal_matches:
+            logger.info(f"✅ Found {len(ordinal_matches)} sections using ordinal+titled pattern")
+            for ordinal_word, section_name, section_content in ordinal_matches:
+                logger.info(f"  📋 Section '{section_name}' (ordinal: {ordinal_word})")
+                section = ExtractedSection(
+                    header=section_name.strip(),
+                    collapsible=bool(self.patterns["collapsible"].search(text)),
+                )
+
+                # Parse the section content to extract widgets
+                section.widgets = self._parse_section_content_enhanced(
+                    section_content.strip(), section_name
+                )
+
+                if section.collapsible:
+                    section.uncollapsible_widgets_count = min(2, len(section.widgets))
+
+                sections.append(section)
+
+            return sections
+
+        # PATTERN 0b: Ordinal without "titled" but with quoted name
+        # Example: "First section 'Deployments' showing X"
+        ordinal_quoted_pattern = re.compile(
+            rf"({ORDINAL_PATTERN})\s+section\s+['\"]([^'\"]+)['\"]?\s+(?:showing|with|containing|that\s+shows?|displaying)?\s*(.+?)(?=(?:{ORDINAL_PATTERN})\s+section|$)",
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        ordinal_quoted_matches = ordinal_quoted_pattern.findall(text)
+        if ordinal_quoted_matches:
+            logger.info(f"✅ Found {len(ordinal_quoted_matches)} sections using ordinal+quoted pattern")
+            for ordinal_word, section_name, section_content in ordinal_quoted_matches:
+                logger.info(f"  📋 Section '{section_name}' (ordinal: {ordinal_word})")
+                section = ExtractedSection(
+                    header=section_name.strip(),
+                    collapsible=bool(self.patterns["collapsible"].search(text)),
+                )
+
+                section.widgets = self._parse_section_content_enhanced(
+                    section_content.strip(), section_name
+                )
+
+                if section.collapsible:
+                    section.uncollapsible_widgets_count = min(2, len(section.widgets))
+
+                sections.append(section)
+
+            return sections
 
         # Pattern 1: Numbered list format with quoted sections
         # Example: "1. 'Health Check' section with decoratedText..."
@@ -568,6 +655,285 @@ class EnhancedNaturalLanguageCardParser:
                     names.append(part)
 
         return names[:5]  # Limit to 5 sections max
+
+    def _parse_section_content_enhanced(
+        self, content: str, section_name: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Enhanced content parser for natural language section descriptions.
+
+        Handles complex content patterns like:
+        - Multiple items/deployments in one section
+        - URLs and links embedded in text (including multiple URLs)
+        - Numbered lists (1), 2), 3) or 1. 2. 3.)
+        - Warning/status messages
+        - Commit/PR references
+        - @ mentions and technical references
+
+        Args:
+            content: The raw text content for this section
+            section_name: The section header name (for context)
+
+        Returns:
+            List of widget dictionaries
+        """
+        widgets = []
+        content = content.strip()
+
+        logger.info(f"🔍 Enhanced parsing section '{section_name}': {content[:100]}...")
+
+        # STEP 1: Clean out instructional/meta phrases that shouldn't appear in output
+        # These are instructions to the parser, not actual content
+        instructional_patterns = [
+            r"\bdecorated\s+text\s+(?:showing|with|displaying)\s*",  # "decorated text showing"
+            r"\bwith\s+(?:a\s+)?(?:link|open)\s+button\b[,.]?\s*",  # "with a link button"
+            r"\bwith\s+(?:a\s+)?(\w+)\s+icon\b[,.]?\s*",  # "with a bookmark icon" - capture icon name
+            r"\buse\s+(?:a\s+)?(\w+)\s+icon\s+(?:for\s+\w+)?\b[,.]?\s*",  # "use a star icon for warning"
+            r"\b(?:and\s+)?another\s+decorated\s+text\s+(?:showing|with|displaying)\s*",  # "and another decorated text showing"
+        ]
+
+        # Track any icons mentioned in instructional phrases
+        mentioned_icons = []
+        for pattern in instructional_patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+            for match in matches:
+                # Check if there's a captured group (icon name)
+                if match.lastindex and match.group(1):
+                    mentioned_icons.append(match.group(1).lower())
+            content = re.sub(pattern, "", content, flags=re.IGNORECASE)
+
+        # Clean up extra whitespace and punctuation left behind
+        content = re.sub(r"\s+", " ", content).strip()
+        content = re.sub(r"^[,.\s]+|[,.\s]+$", "", content).strip()
+
+        logger.info(f"🧹 Cleaned content: {content[:100]}...")
+        if mentioned_icons:
+            logger.info(f"  🎨 Mentioned icons: {mentioned_icons}")
+
+        # IMPROVED URL pattern - better captures URLs with query params, fragments, and special chars
+        # Captures full URLs including ?key=value&other=val and #fragments
+        url_pattern = re.compile(
+            r"(https?://[^\s\[\]<>\"']+(?<![.,;:!?\)]))"  # Negative lookbehind for trailing punct
+        )
+        urls_found = url_pattern.findall(content)
+        logger.info(f"  📎 Found {len(urls_found)} URLs: {urls_found[:5]}...")
+
+        # Detect content type based on keywords
+        content_lower = content.lower()
+        is_warning = any(w in content_lower for w in ["warning", "stale", "inactive", "removal", "marked for"])
+        is_deployment = any(w in content_lower for w in ["deployed", "preview", "deployment", ".app", "staging", "production"])
+        is_commit = any(w in content_lower for w in ["commit", "pushed", "merge", "pull request", "pr #", "branch"])
+
+        # STEP 2: Split content into parts - handle multiple patterns
+        content_parts = []
+
+        # Pattern A: Numbered lists like "1) item 2) item" or "1. item 2. item"
+        numbered_list_pattern = re.compile(r"(?:^|\s)(\d+)[).\s]+")
+        if numbered_list_pattern.search(content):
+            # Split on numbered patterns but preserve the content
+            parts = re.split(r"(?:^|\s)\d+[).\s]+", content)
+            parts = [p.strip() for p in parts if p.strip()]
+            if len(parts) > 1:
+                content_parts = parts
+                logger.info(f"  📋 Split into {len(content_parts)} parts using numbered list pattern")
+
+        # Pattern B: "X and Y" where Y starts with capital (only if no numbered list found)
+        if not content_parts:
+            and_split_pattern = re.compile(r"\s+and\s+(?=[A-Z@])")
+            # Don't split warning messages - they tend to be single cohesive sentences
+            if not is_warning:
+                parts = and_split_pattern.split(content)
+                if len(parts) > 1:
+                    content_parts = parts
+                    logger.info(f"  📋 Split into {len(content_parts)} parts using 'and' delimiter")
+
+        # If no splitting occurred, use the whole content as one part
+        if not content_parts:
+            content_parts = [content]
+
+        # STEP 3: Process each part and create widgets
+        for part in content_parts:
+            part = part.strip()
+            if not part:
+                continue
+
+            # Extract ALL URLs in this part (not just the first one)
+            part_urls = url_pattern.findall(part)
+
+            # If multiple URLs in one part, create a widget for each URL
+            if len(part_urls) > 1:
+                logger.info(f"  🔗 Part has {len(part_urls)} URLs, creating separate widgets")
+                # Split the part by URLs to get text associated with each
+                remaining_text = part
+                for i, url in enumerate(part_urls):
+                    # Find the text before this URL
+                    url_pos = remaining_text.find(url)
+                    text_before = remaining_text[:url_pos].strip() if url_pos > 0 else ""
+
+                    # Clean up conjunction/punctuation artifacts
+                    text_before = re.sub(r"^\s*and\s+", "", text_before, flags=re.IGNORECASE)
+                    text_before = re.sub(r"\s*(at|deployed at|available at|link:?)\s*$", "", text_before, flags=re.IGNORECASE)
+                    # Remove leading/trailing punctuation and brackets
+                    text_before = re.sub(r"^[\s,;:\(\)\[\]]+|[\s,;:\(\)\[\]]+$", "", text_before)
+                    text_before = text_before.strip()
+
+                    # Skip fragments that are just conjunctions, punctuation, or very short
+                    skip_fragments = {"and", "or", "also", ",", ";", "(", ")", "[", "]", ""}
+                    if text_before.lower() in skip_fragments or len(text_before) < 3:
+                        # Use URL as display text instead
+                        text_before = ""
+
+                    # Always create a widget for each URL
+                    display = text_before if text_before else url
+                    widget = self._create_url_widget(display, url, is_deployment, is_commit, mentioned_icons)
+                    widgets.append(widget)
+
+                    remaining_text = remaining_text[url_pos + len(url):].strip()
+                continue
+
+            # Single URL or no URL case
+            part_url = part_urls[0] if part_urls else None
+
+            # Clean the text (remove the URL from display text)
+            display_text = part
+            if part_url:
+                display_text = re.sub(re.escape(part_url), "", display_text).strip()
+                # Clean up common URL prefixes and conjunctions
+                display_text = re.sub(r"^\s*and\s+", "", display_text, flags=re.IGNORECASE)
+                display_text = re.sub(r"\s*(at|deployed at|available at|link:?)\s*$", "", display_text, flags=re.IGNORECASE)
+                # Clean brackets/parens that might surround removed URL
+                display_text = re.sub(r"\(\s*\)|\[\s*\]", "", display_text)
+                # Remove leading/trailing punctuation
+                display_text = re.sub(r"^[\s,;:\(\)\[\]]+|[\s,;:\(\)\[\]]+$", "", display_text).strip()
+                # If only short fragments remain, use URL as display
+                skip_fragments = {"and", "or", "also", ",", ";", "(", ")", "[", "]", ""}
+                if display_text.lower() in skip_fragments or len(display_text) < 3:
+                    display_text = part_url
+
+            # Determine widget type based on content
+            # NOTE: Valid Google Chat knownIcon values are limited:
+            # AIRPLANE, BOOKMARK, BUS, CAR, CLOCK, CONFIRMATION_NUMBER_ICON, DESCRIPTION,
+            # DOLLAR, EMAIL, EVENT_SEAT, FLIGHT_ARRIVAL, FLIGHT_DEPARTURE, HOTEL,
+            # HOTEL_ROOM_TYPE, INVITE, MAP_PIN, MEMBERSHIP, MULTIPLE_PEOPLE, PERSON,
+            # PHONE, RESTAURANT_ICON, SHOPPING_CART, STAR, STORE, TICKET, TRAIN, VIDEO_CAMERA, VIDEO_PLAY
+            if is_warning:
+                # Warning message - use decoratedText with STAR icon (no WARNING icon available)
+                widget = {
+                    "decoratedText": {
+                        "text": display_text,
+                        "startIcon": {"knownIcon": "STAR"},  # Using STAR for warnings/alerts
+                        "wrapText": True,
+                    }
+                }
+                if part_url:
+                    widget["decoratedText"]["button"] = {
+                        "text": "View",
+                        "onClick": {"openLink": {"url": part_url}}
+                    }
+                widgets.append(widget)
+
+            elif part_url:
+                # Content with URL - create decoratedText with link button
+                widget = {
+                    "decoratedText": {
+                        "text": display_text if display_text else part_url,
+                        "wrapText": True,
+                        "button": {
+                            "text": "Open",
+                            "onClick": {"openLink": {"url": part_url}}
+                        }
+                    }
+                }
+
+                # Add appropriate icon based on content type
+                if is_deployment:
+                    widget["decoratedText"]["startIcon"] = {"knownIcon": "STORE"}  # STORE for deployments (no CLOUD available)
+                elif is_commit:
+                    widget["decoratedText"]["startIcon"] = {"knownIcon": "DESCRIPTION"}
+
+                widgets.append(widget)
+
+            elif "@" in part or re.search(r"commit [a-f0-9]+", part, re.IGNORECASE):
+                # Commit/user reference - use decoratedText with person/code icon
+                widget = {
+                    "decoratedText": {
+                        "text": display_text,
+                        "wrapText": True,
+                    }
+                }
+                # Use mentioned icon if available, otherwise default based on content
+                if mentioned_icons and mentioned_icons[0] in KNOWN_ICONS:
+                    widget["decoratedText"]["startIcon"] = {"knownIcon": KNOWN_ICONS[mentioned_icons[0]]}
+                elif "@" in part:
+                    widget["decoratedText"]["startIcon"] = {"knownIcon": "PERSON"}
+                else:
+                    widget["decoratedText"]["startIcon"] = {"knownIcon": "BOOKMARK"}
+                widgets.append(widget)
+
+            else:
+                # Plain text content - prefer decoratedText for better formatting
+                if display_text:
+                    # Use decoratedText if we have icons mentioned or significant content
+                    if mentioned_icons and mentioned_icons[0] in KNOWN_ICONS:
+                        widget = {
+                            "decoratedText": {
+                                "text": display_text,
+                                "wrapText": True,
+                                "startIcon": {"knownIcon": KNOWN_ICONS[mentioned_icons[0]]}
+                            }
+                        }
+                        widgets.append(widget)
+                    else:
+                        widgets.append({"textParagraph": {"text": display_text}})
+
+        # If no widgets were created, fall back to simple text
+        if not widgets:
+            widgets.append({"textParagraph": {"text": content}})
+
+        logger.info(f"  ✅ Created {len(widgets)} widget(s) for section '{section_name}'")
+        return widgets
+
+    def _create_url_widget(
+        self,
+        text: str,
+        url: str,
+        is_deployment: bool = False,
+        is_commit: bool = False,
+        mentioned_icons: List[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a decoratedText widget with a URL button.
+
+        Args:
+            text: Display text for the widget
+            url: URL for the button
+            is_deployment: Whether this is deployment-related content
+            is_commit: Whether this is commit-related content
+            mentioned_icons: List of icon names mentioned in instructional text
+
+        Returns:
+            Widget dictionary
+        """
+        widget = {
+            "decoratedText": {
+                "text": text if text else url,
+                "wrapText": True,
+                "button": {
+                    "text": "Open",
+                    "onClick": {"openLink": {"url": url}}
+                }
+            }
+        }
+
+        # Add appropriate icon based on content type
+        if mentioned_icons and mentioned_icons[0] in KNOWN_ICONS:
+            widget["decoratedText"]["startIcon"] = {"knownIcon": KNOWN_ICONS[mentioned_icons[0]]}
+        elif is_deployment:
+            widget["decoratedText"]["startIcon"] = {"knownIcon": "STORE"}
+        elif is_commit:
+            widget["decoratedText"]["startIcon"] = {"knownIcon": "DESCRIPTION"}
+
+        return widget
 
     def _parse_section_content(
         self, content: str, section_name: str

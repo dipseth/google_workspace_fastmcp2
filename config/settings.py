@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     qdrant_host: Optional[str] = None  # Will be set from qdrant_url
     qdrant_port: Optional[int] = None  # Will be set from qdrant_url
     qdrant_api_key: Optional[str] = None  # Will be set from qdrant_key
+    qdrant_prefer_grpc: bool = True  # Use gRPC to avoid SSL certificate issues with cloud Qdrant
 
     # Primary Qdrant collection for MCP tool responses / analytics
     tool_collection: str = Field(

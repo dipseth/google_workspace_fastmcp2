@@ -100,6 +100,7 @@ def get_qdrant_config_from_env() -> Dict[str, Union[str, int, bool, None]]:
             and settings.qdrant_url.startswith("https://"),
             "api_key": settings.qdrant_api_key,
             "url": settings.qdrant_url,
+            "prefer_grpc": settings.qdrant_prefer_grpc,  # Use gRPC to avoid SSL issues
         }
 
         if settings.qdrant_url:
@@ -374,6 +375,9 @@ class ModuleWrapper:
             self.qdrant_use_https = env_config.get("use_https", False)
             self.qdrant_url = env_config.get("url")
 
+        # Get prefer_grpc from config (use gRPC to avoid SSL issues with cloud Qdrant)
+        self.qdrant_prefer_grpc = env_config.get("prefer_grpc", True)
+
         # API key: use explicit parameter first, then environment
         self.qdrant_api_key = (
             qdrant_api_key if qdrant_api_key is not None else env_config.get("api_key")
@@ -490,56 +494,20 @@ class ModuleWrapper:
             raise
 
     def _initialize_qdrant(self):
-        """Initialize Qdrant client with support for HTTPS and API key authentication."""
+        """Initialize Qdrant client using centralized singleton."""
         try:
-            QdrantClient, _ = _get_qdrant_imports()
+            # Use centralized Qdrant client singleton
+            from config.qdrant_client import get_qdrant_client
 
-            # Prepare client arguments
-            client_args = {}
+            self.client = get_qdrant_client()
 
-            if self.qdrant_url:
-                # Use URL-based initialization for cloud instances
-                client_args["url"] = self.qdrant_url
-                if self.qdrant_api_key:
-                    client_args["api_key"] = self.qdrant_api_key
+            if self.client is None:
+                raise RuntimeError("Centralized Qdrant client not available")
 
-                logger.info(
-                    f"🌐 Connecting to Qdrant using URL: {self.qdrant_url} (API Key: {'***' if self.qdrant_api_key else 'None'})"
-                )
-            else:
-                # Use host/port initialization for local instances or when URL is not available
-                client_args["host"] = self.qdrant_host
-                client_args["port"] = self.qdrant_port
-
-                # Add HTTPS support
-                if self.qdrant_use_https:
-                    client_args["https"] = True
-
-                # Add API key if provided
-                if self.qdrant_api_key:
-                    client_args["api_key"] = self.qdrant_api_key
-
-                protocol = "https" if self.qdrant_use_https else "http"
-                logger.info(
-                    f"🌐 Connecting to Qdrant at {protocol}://{self.qdrant_host}:{self.qdrant_port} (API Key: {'***' if self.qdrant_api_key else 'None'})"
-                )
-
-            # Create the client
-            self.client = QdrantClient(**client_args)
-
-            # Test the connection
-            try:
-                collections = self.client.get_collections()
-                logger.info(
-                    f"✅ Connected to Qdrant successfully - found {len(collections.collections)} collections"
-                )
-            except Exception as test_e:
-                logger.warning(
-                    f"⚠️ Qdrant connection established but test failed: {test_e}"
-                )
+            logger.info("✅ ModuleWrapper using centralized Qdrant client")
 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Qdrant client: {e}")
+            logger.error(f"❌ Failed to get Qdrant client: {e}")
             raise
 
     def _clear_fastembed_cache(self, model_name: str = None) -> bool:
