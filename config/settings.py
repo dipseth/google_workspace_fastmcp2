@@ -164,6 +164,15 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "CARD_COLLECTION"},
     )
 
+    # Google Chat Default Webhook URL
+    # When set, this becomes the default webhook for all card tools (send_dynamic_card, etc.)
+    # Useful for development/testing when you always want to send to the same space
+    mcp_chat_webhook: str = Field(
+        default="",
+        description="Default Google Chat webhook URL for card tools. When set, card tools use this as the default webhook_url parameter.",
+        json_schema_extra={"env": "MCP_CHAT_WEBHOOK"},
+    )
+
     # Phase 1 OAuth Migration Feature Flags
     enable_unified_auth: bool = True
     legacy_compat_mode: bool = True

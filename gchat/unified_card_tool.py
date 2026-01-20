@@ -51,6 +51,9 @@ from auth.service_helpers import get_service, request_service
 # Import TypedDict response types for structured responses
 from config.enhanced_logging import setup_logger
 
+# Import settings for default webhook configuration
+from config.settings import settings
+
 # NLP parser commented out - SmartCardBuilder handles all parsing and rendering
 # SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
 # from .nlp_card_parser import parse_enhanced_natural_language_description
@@ -873,7 +876,7 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
             Optional[str],
             Field(
                 default=None,
-                description="Optional webhook URL for direct delivery (bypasses API auth, useful for incoming webhooks)",
+                description="Webhook URL for direct delivery (bypasses API auth). If not provided, uses MCP_CHAT_WEBHOOK from settings.",
             ),
         ] = None,
         use_colbert: Annotated[
@@ -903,6 +906,11 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
         try:
             logger.info(f"🔍 Finding card component for: {card_description}")
             logger.info(f"🤖 ColBERT mode: {use_colbert}")
+
+            # Use default webhook from settings if not provided
+            if not webhook_url and settings.mcp_chat_webhook:
+                webhook_url = settings.mcp_chat_webhook
+                logger.info(f"📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
 
             # Default parameters if not provided
             if card_params is None:

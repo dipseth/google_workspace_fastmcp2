@@ -87,6 +87,14 @@ QDRANT_HTTPS=false
 QDRANT_GRPC_PORT=6334
 QDRANT_PREFER_GRPC=false
 
+# Qdrant Docker Auto-Launch (for local development)
+QDRANT_AUTO_LAUNCH=true
+QDRANT_DOCKER_IMAGE=qdrant/qdrant:latest
+QDRANT_DOCKER_CONTAINER_NAME=mcp-qdrant
+QDRANT_DOCKER_DATA_DIR=
+QDRANT_DOCKER_STARTUP_TIMEOUT=30
+QDRANT_DOCKER_STOP_ON_EXIT=false
+
 # ============================================
 # PERFORMANCE CONFIGURATION
 # ============================================
@@ -227,9 +235,13 @@ ENABLE_RESOURCE_TEMPLATING=true
 | `GMAIL_ENABLE_ELICITATION` | No | `true` | Enable elicitation for untrusted recipients |
 | `SAMPLING_TOOLS` | No | `false` | Enable sampling middleware tools |
 | `CHAT_SERVICE_ACCOUNT_FILE` | No | - | Path to Chat service account JSON |
+| `MCP_CHAT_WEBHOOK` | No | - | Default webhook URL for all Google Chat card tools |
 | `JINJA_TEMPLATE_STRICT_MODE` | No | `true` | Fail on template errors vs log only |
 | `QDRANT_URL` | No | `http://localhost:6333` | Qdrant vector database URL |
 | `QDRANT_KEY` | No | `NONE` | Qdrant API key (use `NONE` for no auth) |
+| `QDRANT_AUTO_LAUNCH` | No | `true` | Auto-launch Qdrant via Docker if not reachable |
+| `QDRANT_DOCKER_IMAGE` | No | `qdrant/qdrant:latest` | Docker image for auto-launch |
+| `QDRANT_DOCKER_CONTAINER_NAME` | No | `mcp-qdrant` | Container name for auto-launched Qdrant |
 | `TOOL_COLLECTION` | No | `mcp_tool_responses` | Qdrant collection name |
 | `MCP_TOOL_RESPONSES_COLLECTION_CACHE_DAYS` | No | `5` | Data retention in days |
 | `ENABLE_UNIFIED_AUTH` | No | `true` | Enable unified authentication |
@@ -305,6 +317,73 @@ ENABLE_RESOURCE_TEMPLATING=true
 | `QDRANT_GRPC_PORT` | integer | 6334 | Qdrant gRPC port | No |
 | `QDRANT_PREFER_GRPC` | boolean | false | Prefer gRPC over HTTP | No |
 
+### Qdrant Docker Auto-Launch
+
+GoogleUnlimited can automatically launch Qdrant via Docker when no remote Qdrant instance is configured or reachable. This provides a zero-config experience for local development.
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `QDRANT_AUTO_LAUNCH` | boolean | true | Auto-launch Qdrant via Docker if not reachable | No |
+| `QDRANT_DOCKER_IMAGE` | string | "qdrant/qdrant:latest" | Docker image for Qdrant container | No |
+| `QDRANT_DOCKER_CONTAINER_NAME` | string | "mcp-qdrant" | Name for the Docker container | No |
+| `QDRANT_DOCKER_GRPC_PORT` | integer | 6334 | gRPC port to expose | No |
+| `QDRANT_DOCKER_DATA_DIR` | string | "{CREDENTIALS_DIR}/qdrant_data" | Persistent data directory | No |
+| `QDRANT_DOCKER_STARTUP_TIMEOUT` | integer | 30 | Seconds to wait for Qdrant readiness | No |
+| `QDRANT_DOCKER_STOP_ON_EXIT` | boolean | false | Stop container when server exits | No |
+
+**How Auto-Launch Works:**
+
+1. On startup, the server checks if Qdrant is reachable at the configured URL/host
+2. If not reachable and `QDRANT_AUTO_LAUNCH=true`:
+   - Checks if Docker is available on the system
+   - Looks for an existing container with the configured name
+   - If found stopped, starts it; if not found, creates a new container
+   - Waits for Qdrant to be ready (health check)
+3. Data persists in `QDRANT_DOCKER_DATA_DIR` across container restarts
+
+**Auto-Launch vs Docker-Compose:**
+
+When running inside a Docker container (detected automatically), auto-launch is disabled. Use docker-compose to manage Qdrant as a companion service instead:
+
+```yaml
+# docker-compose.yml
+services:
+  fastmcp-server:
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_AUTO_LAUNCH=false
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+```
+
+**Example Configurations:**
+
+```bash
+# Local development (auto-launch enabled - default)
+QDRANT_AUTO_LAUNCH=true
+# No other Qdrant config needed - Docker handles it
+
+# Cloud/Remote Qdrant (auto-launch disabled)
+QDRANT_URL=https://your-cluster.cloud.qdrant.io
+QDRANT_KEY=your-api-key
+QDRANT_PREFER_GRPC=true
+QDRANT_AUTO_LAUNCH=false
+
+# Custom Docker settings
+QDRANT_AUTO_LAUNCH=true
+QDRANT_DOCKER_IMAGE=qdrant/qdrant:v1.7.0
+QDRANT_DOCKER_CONTAINER_NAME=my-qdrant
+QDRANT_DOCKER_DATA_DIR=/data/qdrant
+```
+
 ## Service-Specific Configuration
 
 ### Google Drive
@@ -352,6 +431,41 @@ CHAT_USE_SERVICE_ACCOUNT=false        # Use service account auth
 CHAT_SERVICE_ACCOUNT_FILE=            # Service account JSON file
 CHAT_ENABLE_WEBHOOKS=true             # Enable webhook support
 CHAT_WEBHOOK_TIMEOUT=10               # Webhook timeout seconds
+
+# Default webhook for card tools (send_dynamic_card, send_simple_card, etc.)
+# When set, all card tools use this webhook by default (no webhook_url param needed)
+# Format: https://chat.googleapis.com/v1/spaces/SPACE_ID/messages?key=KEY&token=TOKEN
+MCP_CHAT_WEBHOOK=
+```
+
+**Default Webhook Configuration:**
+
+The `MCP_CHAT_WEBHOOK` setting provides a convenient default webhook URL for all Google Chat card tools:
+- `send_dynamic_card`
+- `send_simple_card`
+- `send_interactive_card`
+- `send_form_card`
+- `send_rich_card`
+- `send_card_message`
+
+When set, you can call these tools without specifying `webhook_url` - they'll automatically use the configured default. This is especially useful for development/testing when you always send to the same space.
+
+```python
+# Without MCP_CHAT_WEBHOOK - must provide webhook_url every time
+send_dynamic_card(
+    user_google_email="user@example.com",
+    space_id="spaces/ABC123",
+    card_description="...",
+    webhook_url="https://chat.googleapis.com/v1/spaces/..."  # Required
+)
+
+# With MCP_CHAT_WEBHOOK configured - webhook_url is optional
+send_dynamic_card(
+    user_google_email="user@example.com",
+    space_id="spaces/ABC123",
+    card_description="..."
+    # webhook_url automatically uses MCP_CHAT_WEBHOOK
+)
 ```
 
 ## Security Configuration

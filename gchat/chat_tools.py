@@ -46,6 +46,7 @@ from typing_extensions import Any, Dict, List, Optional
 
 from auth.context import get_injected_service
 from auth.service_helpers import get_service, request_service
+from config.settings import settings
 from resources.user_resources import get_current_user_email_simple
 from tools.common_types import UserGoogleEmail
 
@@ -942,11 +943,16 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             fields: List of form field configurations for form cards
             submit_action: Submit button action for form cards
             thread_key: Optional thread key for threaded replies
-            webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
+            webhook_url: Webhook URL for card delivery (bypasses API restrictions). If not provided, uses MCP_CHAT_WEBHOOK from settings.
 
         Returns:
             SendCardMessageResponse: Structured response with sent message details
         """
+        # Use default webhook from settings if not provided
+        if not webhook_url and settings.mcp_chat_webhook:
+            webhook_url = settings.mcp_chat_webhook
+            logger.info("📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
+
         logger.info(
             f"[send_card_message] Email: '{user_google_email}', Space: '{space_id}', Type: '{card_type}'"
         )
@@ -1307,11 +1313,16 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             subtitle: Optional subtitle
             image_url: Optional image URL
             thread_key: Optional thread key for threaded replies
-            webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
+            webhook_url: Webhook URL for card delivery (bypasses API restrictions). If not provided, uses MCP_CHAT_WEBHOOK from settings.
 
         Returns:
             SendSimpleCardResponse: Structured response with sent message details
         """
+        # Use default webhook from settings if not provided
+        if not webhook_url and settings.mcp_chat_webhook:
+            webhook_url = settings.mcp_chat_webhook
+            logger.info("📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
+
         if webhook_url:
             # Use webhook delivery like send_rich_card
             try:
@@ -1475,11 +1486,16 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 NOTE: Do NOT use "actionMethodName" - use "function" instead for action callbacks
 
             thread_key: Optional thread key for threaded replies
-            webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
+            webhook_url: Webhook URL for card delivery (bypasses API restrictions). If not provided, uses MCP_CHAT_WEBHOOK from settings.
 
         Returns:
             SendInteractiveCardResponse: Structured response with sent message details
         """
+        # Use default webhook from settings if not provided
+        if not webhook_url and settings.mcp_chat_webhook:
+            webhook_url = settings.mcp_chat_webhook
+            logger.info("📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
+
         if webhook_url:
             # Use webhook delivery like send_rich_card
             try:
@@ -1672,11 +1688,16 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 NOTE: Use "function" not "actionMethodName"
 
             thread_key: Optional thread key for threaded replies
-            webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
+            webhook_url: Webhook URL for card delivery (bypasses API restrictions). If not provided, uses MCP_CHAT_WEBHOOK from settings.
 
         Returns:
             SendFormCardResponse: Structured response with sent message details
         """
+        # Use default webhook from settings if not provided
+        if not webhook_url and settings.mcp_chat_webhook:
+            webhook_url = settings.mcp_chat_webhook
+            logger.info("📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
+
         if webhook_url:
             # Use webhook delivery like send_rich_card
             try:
@@ -1979,11 +2000,16 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             image_url: Optional image URL
             sections: Optional list of section configurations for advanced layouts
             thread_key: Optional thread key for threaded replies
-            webhook_url: Optional webhook URL for card delivery (bypasses API restrictions)
+            webhook_url: Webhook URL for card delivery (bypasses API restrictions). If not provided, uses MCP_CHAT_WEBHOOK from settings.
 
         Returns:
             SendRichCardResponse: Structured response with sent message details
         """
+        # Use default webhook from settings if not provided
+        if not webhook_url and settings.mcp_chat_webhook:
+            webhook_url = settings.mcp_chat_webhook
+            logger.info("📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
+
         try:
             logger.info("=== RICH CARD CREATION START ===")
             logger.info(f"User: {user_google_email}, Space: {space_id}, Title: {title}")
