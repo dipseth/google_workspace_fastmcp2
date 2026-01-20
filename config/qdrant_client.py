@@ -5,6 +5,11 @@ This module provides a single, shared QdrantClient instance used across
 the entire application. All modules should import from here instead of
 creating their own QdrantClient instances.
 
+Features:
+- Auto-launches Qdrant via Docker if not reachable (when enabled)
+- Seamless fallback for local development
+- Persistent data storage
+
 Usage:
     from config.qdrant_client import get_qdrant_client
 
@@ -22,6 +27,40 @@ logger = setup_logger()
 # Global singleton instance
 _qdrant_client = None
 _initialization_attempted = False
+_docker_launch_attempted = False
+
+
+def _ensure_qdrant_available() -> bool:
+    """
+    Ensure Qdrant is available, auto-launching via Docker if needed.
+
+    Returns:
+        bool: True if Qdrant is available
+    """
+    global _docker_launch_attempted
+
+    # Only attempt Docker launch once
+    if _docker_launch_attempted:
+        return True
+
+    _docker_launch_attempted = True
+
+    try:
+        from config.qdrant_docker import ensure_qdrant_running
+
+        success, url = ensure_qdrant_running()
+        if success:
+            logger.info(f"Qdrant available at: {url}")
+            return True
+        else:
+            logger.warning("Qdrant not available - features requiring vector storage will be disabled")
+            return False
+    except ImportError as e:
+        logger.debug(f"Docker auto-launch module not available: {e}")
+        return True  # Continue with normal initialization
+    except Exception as e:
+        logger.warning(f"Error checking Qdrant availability: {e}")
+        return True  # Continue with normal initialization
 
 
 def get_qdrant_client(force_reinit: bool = False) -> Optional["QdrantClient"]:
@@ -48,6 +87,9 @@ def get_qdrant_client(force_reinit: bool = False) -> Optional["QdrantClient"]:
         return _qdrant_client  # Return cached result (even if None)
 
     _initialization_attempted = True
+
+    # Ensure Qdrant is available (auto-launch via Docker if needed)
+    _ensure_qdrant_available()
 
     try:
         from qdrant_client import QdrantClient
@@ -102,7 +144,7 @@ def get_qdrant_client(force_reinit: bool = False) -> Optional["QdrantClient"]:
 
 def close_qdrant_client():
     """Close and reset the Qdrant client singleton."""
-    global _qdrant_client, _initialization_attempted
+    global _qdrant_client, _initialization_attempted, _docker_launch_attempted
 
     if _qdrant_client is not None:
         try:
@@ -113,6 +155,7 @@ def close_qdrant_client():
 
     _qdrant_client = None
     _initialization_attempted = False
+    _docker_launch_attempted = False
 
 
 def is_qdrant_available() -> bool:
@@ -126,3 +169,49 @@ def is_qdrant_available() -> bool:
         return True
     except Exception:
         return False
+
+
+def get_qdrant_status() -> dict:
+    """
+    Get comprehensive Qdrant status including Docker info.
+
+    Returns:
+        dict: Status information including connection state and Docker details
+    """
+    try:
+        from config.settings import settings
+
+        status = {
+            "client_initialized": _qdrant_client is not None,
+            "initialization_attempted": _initialization_attempted,
+            "docker_launch_attempted": _docker_launch_attempted,
+            "qdrant_url": settings.qdrant_url,
+            "qdrant_host": settings.qdrant_host,
+            "qdrant_port": settings.qdrant_port,
+            "auto_launch_enabled": getattr(settings, 'qdrant_auto_launch', True),
+        }
+
+        # Check if actually connected
+        if _qdrant_client is not None:
+            try:
+                collections = _qdrant_client.get_collections()
+                status["connected"] = True
+                status["collections_count"] = len(collections.collections)
+            except Exception as e:
+                status["connected"] = False
+                status["connection_error"] = str(e)
+        else:
+            status["connected"] = False
+
+        # Get Docker status if available
+        try:
+            from config.qdrant_docker import get_qdrant_status as get_docker_status
+            status["docker"] = get_docker_status()
+        except ImportError:
+            status["docker"] = {"available": False, "reason": "module_not_found"}
+        except Exception as e:
+            status["docker"] = {"available": False, "error": str(e)}
+
+        return status
+    except Exception as e:
+        return {"error": str(e)}

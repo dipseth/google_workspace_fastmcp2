@@ -63,6 +63,44 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "TOOL_COLLECTION"},
     )
 
+    # Qdrant Docker Auto-Launch Configuration
+    # When enabled, automatically launches Qdrant via Docker if not reachable
+    qdrant_auto_launch: bool = Field(
+        default=True,
+        description="Automatically launch Qdrant via Docker if not reachable (local URLs only)",
+        json_schema_extra={"env": "QDRANT_AUTO_LAUNCH"},
+    )
+    qdrant_docker_image: str = Field(
+        default="qdrant/qdrant:latest",
+        description="Docker image for Qdrant container",
+        json_schema_extra={"env": "QDRANT_DOCKER_IMAGE"},
+    )
+    qdrant_docker_container_name: str = Field(
+        default="mcp-qdrant",
+        description="Name for the Qdrant Docker container",
+        json_schema_extra={"env": "QDRANT_DOCKER_CONTAINER_NAME"},
+    )
+    qdrant_docker_grpc_port: int = Field(
+        default=6334,
+        description="gRPC port to expose for Qdrant container",
+        json_schema_extra={"env": "QDRANT_DOCKER_GRPC_PORT"},
+    )
+    qdrant_docker_data_dir: str = Field(
+        default="",
+        description="Persistent data directory for Qdrant. If empty, uses credentials_dir/qdrant_data",
+        json_schema_extra={"env": "QDRANT_DOCKER_DATA_DIR"},
+    )
+    qdrant_docker_startup_timeout: int = Field(
+        default=30,
+        description="Seconds to wait for Qdrant container to become ready",
+        json_schema_extra={"env": "QDRANT_DOCKER_STARTUP_TIMEOUT"},
+    )
+    qdrant_docker_stop_on_exit: bool = Field(
+        default=False,
+        description="Stop Qdrant container when MCP server exits (only if we started it)",
+        json_schema_extra={"env": "QDRANT_DOCKER_STOP_ON_EXIT"},
+    )
+
     # Logging
     log_level: str = "INFO"
 
