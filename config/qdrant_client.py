@@ -53,7 +53,9 @@ def _ensure_qdrant_available() -> bool:
             logger.info(f"Qdrant available at: {url}")
             return True
         else:
-            logger.warning("Qdrant not available - features requiring vector storage will be disabled")
+            logger.warning(
+                "Qdrant not available - features requiring vector storage will be disabled"
+            )
             return False
     except ImportError as e:
         logger.debug(f"Docker auto-launch module not available: {e}")
@@ -93,6 +95,7 @@ def get_qdrant_client(force_reinit: bool = False) -> Optional["QdrantClient"]:
 
     try:
         from qdrant_client import QdrantClient
+
         from config.settings import settings
 
         logger.info("🔗 Initializing centralized Qdrant client...")
@@ -127,7 +130,9 @@ def get_qdrant_client(force_reinit: bool = False) -> Optional["QdrantClient"]:
         # Test the connection
         try:
             collections = _qdrant_client.get_collections()
-            logger.info(f"✅ Qdrant connection verified - {len(collections.collections)} collections")
+            logger.info(
+                f"✅ Qdrant connection verified - {len(collections.collections)} collections"
+            )
         except Exception as test_err:
             logger.warning(f"⚠️ Qdrant connection test failed: {test_err}")
             # Don't fail completely - client might still work for some operations
@@ -188,7 +193,7 @@ def get_qdrant_status() -> dict:
             "qdrant_url": settings.qdrant_url,
             "qdrant_host": settings.qdrant_host,
             "qdrant_port": settings.qdrant_port,
-            "auto_launch_enabled": getattr(settings, 'qdrant_auto_launch', True),
+            "auto_launch_enabled": getattr(settings, "qdrant_auto_launch", True),
         }
 
         # Check if actually connected
@@ -206,6 +211,7 @@ def get_qdrant_status() -> dict:
         # Get Docker status if available
         try:
             from config.qdrant_docker import get_qdrant_status as get_docker_status
+
             status["docker"] = get_docker_status()
         except ImportError:
             status["docker"] = {"available": False, "reason": "module_not_found"}

@@ -142,11 +142,15 @@ def launch_qdrant_container(
     global _container_started_by_us, _container_name
 
     cmd = [
-        "docker", "run",
+        "docker",
+        "run",
         "-d",  # Detached mode
-        "--name", container_name,
-        "-p", f"{port}:6333",
-        "-p", f"{grpc_port}:6334",
+        "--name",
+        container_name,
+        "-p",
+        f"{port}:6333",
+        "-p",
+        f"{grpc_port}:6334",
     ]
 
     # Add volume mount for persistent storage
@@ -205,8 +209,8 @@ def wait_for_qdrant_ready(
     Returns:
         bool: True if Qdrant is ready
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = f"http://{host}:{port}/collections"
     start_time = time.time()
@@ -240,8 +244,8 @@ def check_qdrant_reachable(host: str = "localhost", port: int = 6333) -> bool:
     Returns:
         bool: True if Qdrant responds
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = f"http://{host}:{port}/collections"
 
@@ -274,7 +278,8 @@ def cleanup_on_exit():
         # Check settings to see if we should stop on exit
         try:
             from config.settings import settings
-            if getattr(settings, 'qdrant_docker_stop_on_exit', False):
+
+            if getattr(settings, "qdrant_docker_stop_on_exit", False):
                 logger.info(f"Stopping Qdrant container on exit: {_container_name}")
                 stop_container(_container_name)
         except Exception:
@@ -312,7 +317,7 @@ def ensure_qdrant_running() -> Tuple[bool, str]:
     qdrant_port = settings.qdrant_port or 6333
 
     # Check if auto-launch is enabled (default: True for local URLs)
-    auto_launch = getattr(settings, 'qdrant_auto_launch', True)
+    auto_launch = getattr(settings, "qdrant_auto_launch", True)
 
     # Determine if this is a remote/cloud URL (don't auto-launch for remote)
     is_local = qdrant_host in ("localhost", "127.0.0.1", "0.0.0.0")
@@ -350,10 +355,10 @@ def ensure_qdrant_running() -> Tuple[bool, str]:
         return False, ""
 
     # Get Docker configuration
-    container_name = getattr(settings, 'qdrant_docker_container_name', 'mcp-qdrant')
-    image = getattr(settings, 'qdrant_docker_image', 'qdrant/qdrant:latest')
-    grpc_port = getattr(settings, 'qdrant_docker_grpc_port', 6334)
-    data_dir = getattr(settings, 'qdrant_docker_data_dir', None)
+    container_name = getattr(settings, "qdrant_docker_container_name", "mcp-qdrant")
+    image = getattr(settings, "qdrant_docker_image", "qdrant/qdrant:latest")
+    grpc_port = getattr(settings, "qdrant_docker_grpc_port", 6334)
+    data_dir = getattr(settings, "qdrant_docker_data_dir", None)
 
     # Use credentials dir for data if not explicitly set
     if not data_dir:
@@ -381,7 +386,7 @@ def ensure_qdrant_running() -> Tuple[bool, str]:
             return False, ""
 
     # Wait for Qdrant to be ready
-    startup_timeout = getattr(settings, 'qdrant_docker_startup_timeout', 30)
+    startup_timeout = getattr(settings, "qdrant_docker_startup_timeout", 30)
     if wait_for_qdrant_ready(qdrant_host, qdrant_port, timeout=startup_timeout):
         url = f"http://{qdrant_host}:{qdrant_port}"
         logger.info(f"Qdrant running at {url}")
@@ -409,7 +414,7 @@ def get_qdrant_status() -> dict:
 
         host = settings.qdrant_host or "localhost"
         port = settings.qdrant_port or 6333
-        container_name = getattr(settings, 'qdrant_docker_container_name', 'mcp-qdrant')
+        container_name = getattr(settings, "qdrant_docker_container_name", "mcp-qdrant")
 
         return {
             "docker_available": is_docker_available(),
@@ -422,7 +427,7 @@ def get_qdrant_status() -> dict:
             "container_exists": container_exists(container_name),
             "container_running": is_container_running(container_name),
             "started_by_us": _container_started_by_us,
-            "auto_launch_enabled": getattr(settings, 'qdrant_auto_launch', True),
+            "auto_launch_enabled": getattr(settings, "qdrant_auto_launch", True),
         }
     except Exception as e:
         return {"error": str(e)}

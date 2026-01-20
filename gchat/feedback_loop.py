@@ -53,6 +53,7 @@ class FeedbackLoop:
         if self._client is None:
             try:
                 from config.qdrant_client import get_qdrant_client
+
                 self._client = get_qdrant_client()
             except Exception as e:
                 logger.warning(f"Failed to get Qdrant client: {e}")
@@ -63,6 +64,7 @@ class FeedbackLoop:
         if self._embedder is None:
             try:
                 from fastembed import LateInteractionTextEmbedding
+
                 self._embedder = LateInteractionTextEmbedding(
                     model_name="colbert-ir/colbertv2.0"
                 )
@@ -126,7 +128,9 @@ class FeedbackLoop:
 
             logger.info(f"📦 Creating collection: {COLLECTION_NAME}")
             logger.info(f"   Named vectors: colbert, description_colbert")
-            logger.info(f"   Dimension: {COLBERT_DIM}, Distance: COSINE, Comparator: MAX_SIM")
+            logger.info(
+                f"   Dimension: {COLBERT_DIM}, Distance: COSINE, Comparator: MAX_SIM"
+            )
 
             # Create collection with both named vectors
             client.create_collection(
@@ -180,7 +184,9 @@ class FeedbackLoop:
             logger.error(f"❌ Failed to create collection: {e}")
             return False
 
-    def _migrate_module_components(self, source_collection: str = "card_framework_components_colbert_v2") -> int:
+    def _migrate_module_components(
+        self, source_collection: str = "card_framework_components_colbert_v2"
+    ) -> int:
         """
         Migrate module components from a source collection to the new collection.
 
@@ -201,19 +207,28 @@ class FeedbackLoop:
         try:
             collections = client.get_collections().collections
             if not any(c.name == source_collection for c in collections):
-                logger.warning(f"⚠️ Source collection {source_collection} not found, skipping module migration")
+                logger.warning(
+                    f"⚠️ Source collection {source_collection} not found, skipping module migration"
+                )
                 return 0
         except Exception as e:
             logger.warning(f"⚠️ Could not check source collection: {e}")
             return 0
 
         try:
-            from qdrant_client.models import Filter, FieldCondition, MatchValue, PointStruct
+            from qdrant_client.models import (
+                FieldCondition,
+                Filter,
+                MatchValue,
+                PointStruct,
+            )
 
             # Get source collection info
             source_info = client.get_collection(source_collection)
             total_points = source_info.points_count
-            logger.info(f"📋 Migrating module components from {source_collection} ({total_points} points)")
+            logger.info(
+                f"📋 Migrating module components from {source_collection} ({total_points} points)"
+            )
 
             # Scroll through source collection and copy non-pattern points
             offset = None
@@ -364,7 +379,9 @@ class FeedbackLoop:
             },
         ]
 
-        logger.info(f"🌱 Warm-starting collection with {len(warm_start_patterns)} known-good patterns...")
+        logger.info(
+            f"🌱 Warm-starting collection with {len(warm_start_patterns)} known-good patterns..."
+        )
 
         stored = 0
         for pattern in warm_start_patterns:
@@ -383,7 +400,9 @@ class FeedbackLoop:
             except Exception as e:
                 logger.warning(f"   ⚠️ Failed to store {pattern['source']}: {e}")
 
-        logger.info(f"🌱 Warm-start complete: {stored}/{len(warm_start_patterns)} patterns stored")
+        logger.info(
+            f"🌱 Warm-start complete: {stored}/{len(warm_start_patterns)} patterns stored"
+        )
         return stored
 
     def ensure_description_vector_exists(self) -> bool:
@@ -520,7 +539,9 @@ class FeedbackLoop:
                 points=[point],
             )
 
-            logger.info(f"✅ Stored instance_pattern: {point_id[:8]}... (feedback={feedback})")
+            logger.info(
+                f"✅ Stored instance_pattern: {point_id[:8]}... (feedback={feedback})"
+            )
             return point_id
 
         except Exception as e:
@@ -580,7 +601,9 @@ class FeedbackLoop:
                 points=[point_id],
             )
 
-            logger.info(f"✅ Updated feedback for card {card_id[:8]}... (point {str(point_id)[:8]}...): {feedback}")
+            logger.info(
+                f"✅ Updated feedback for card {card_id[:8]}... (point {str(point_id)[:8]}...): {feedback}"
+            )
 
             # Check for promotion if positive feedback
             if feedback == "positive":
@@ -635,14 +658,18 @@ class FeedbackLoop:
                 # Promote to template type in Qdrant
                 return self._promote_to_template(point_id, payload, current_count)
 
-            logger.debug(f"Pattern {str(point_id)[:8]}... has {current_count} positive feedbacks")
+            logger.debug(
+                f"Pattern {str(point_id)[:8]}... has {current_count} positive feedbacks"
+            )
             return False
 
         except Exception as e:
             logger.warning(f"Failed to check promotion: {e}")
             return False
 
-    def _promote_to_template(self, point_id: str, payload: Dict[str, Any], count: int) -> bool:
+    def _promote_to_template(
+        self, point_id: str, payload: Dict[str, Any], count: int
+    ) -> bool:
         """
         Promote an instance_pattern to a template in Qdrant.
 
@@ -664,7 +691,9 @@ class FeedbackLoop:
         try:
             # Generate template name from description
             description = payload.get("card_description", "")[:50]
-            safe_name = "".join(c if c.isalnum() or c == " " else "_" for c in description)
+            safe_name = "".join(
+                c if c.isalnum() or c == " " else "_" for c in description
+            )
             safe_name = "_".join(safe_name.split())[:30]
             template_name = f"approved_{safe_name}_{str(point_id)[:8]}"
 
@@ -681,7 +710,8 @@ class FeedbackLoop:
                 # Try to infer which params belong to this component
                 if "DecoratedText" in path:
                     comp_def["params"] = {
-                        k: v for k, v in instance_params.items()
+                        k: v
+                        for k, v in instance_params.items()
                         if k in ["text", "top_label", "bottom_label", "wrap_text"]
                     }
                 elif "ButtonList" in path:
@@ -721,7 +751,9 @@ class FeedbackLoop:
             logger.error(f"Failed to promote to template: {e}")
             return False
 
-    def _promote_to_file(self, point_id: str, payload: Dict[str, Any], count: int) -> bool:
+    def _promote_to_file(
+        self, point_id: str, payload: Dict[str, Any], count: int
+    ) -> bool:
         """
         Promote a template to a YAML file.
 
@@ -757,7 +789,9 @@ class FeedbackLoop:
             }
 
             # Save to file
-            filepath = registry.save_template_to_file(payload.get("name"), template_data)
+            filepath = registry.save_template_to_file(
+                payload.get("name"), template_data
+            )
 
             # Update Qdrant to mark as file-promoted
             client = self._get_client()
@@ -889,15 +923,15 @@ class FeedbackLoop:
         except Exception as e:
             logger.error(f"❌ Hybrid query failed: {e}")
             # Fallback to simple search
-            return self._simple_component_search(
-                self._embed_description(component_query) or [],
-                limit
-            ), []
+            return (
+                self._simple_component_search(
+                    self._embed_description(component_query) or [], limit
+                ),
+                [],
+            )
 
     def _simple_component_search(
-        self,
-        vectors: List[List[float]],
-        limit: int
+        self, vectors: List[List[float]], limit: int
     ) -> List[Dict[str, Any]]:
         """Fallback: simple ColBERT search for components."""
         client = self._get_client()
@@ -923,10 +957,7 @@ class FeedbackLoop:
                 with_payload=True,
             )
 
-            return [
-                {"id": p.id, "score": p.score, **p.payload}
-                for p in results.points
-            ]
+            return [{"id": p.id, "score": p.score, **p.payload} for p in results.points]
         except Exception as e:
             logger.error(f"Simple search failed: {e}")
             return []

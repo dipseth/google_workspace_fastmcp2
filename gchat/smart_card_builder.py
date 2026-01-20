@@ -69,9 +69,21 @@ class SmartCardBuilder:
 
     # Ordinal words for section parsing (borrowed from nlp_parser)
     ORDINAL_WORDS = {
-        "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
-        "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
-        "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, "5th": 5,
+        "first": 1,
+        "second": 2,
+        "third": 3,
+        "fourth": 4,
+        "fifth": 5,
+        "sixth": 6,
+        "seventh": 7,
+        "eighth": 8,
+        "ninth": 9,
+        "tenth": 10,
+        "1st": 1,
+        "2nd": 2,
+        "3rd": 3,
+        "4th": 4,
+        "5th": 5,
     }
     ORDINAL_PATTERN = r"(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th)"
 
@@ -83,50 +95,101 @@ class SmartCardBuilder:
     #        VIDEO_CAMERA, VIDEO_PLAY
     KNOWN_ICONS = {
         # People & Communication
-        "person": "PERSON", "user": "PERSON", "profile": "PERSON", "account": "PERSON",
-        "people": "MULTIPLE_PEOPLE", "team": "MULTIPLE_PEOPLE", "group": "MULTIPLE_PEOPLE",
-        "email": "EMAIL", "mail": "EMAIL", "message": "EMAIL",
-        "phone": "PHONE", "call": "PHONE",
+        "person": "PERSON",
+        "user": "PERSON",
+        "profile": "PERSON",
+        "account": "PERSON",
+        "people": "MULTIPLE_PEOPLE",
+        "team": "MULTIPLE_PEOPLE",
+        "group": "MULTIPLE_PEOPLE",
+        "email": "EMAIL",
+        "mail": "EMAIL",
+        "message": "EMAIL",
+        "phone": "PHONE",
+        "call": "PHONE",
         # Status & Actions (using available icons)
-        "star": "STAR", "favorite": "STAR", "rating": "STAR",
-        "check": "CONFIRMATION_NUMBER_ICON", "complete": "CONFIRMATION_NUMBER_ICON",
-        "done": "CONFIRMATION_NUMBER_ICON", "success": "CONFIRMATION_NUMBER_ICON",
-        "warning": "STAR", "alert": "STAR", "caution": "STAR",
-        "info": "DESCRIPTION", "information": "DESCRIPTION", "details": "DESCRIPTION",
+        "star": "STAR",
+        "favorite": "STAR",
+        "rating": "STAR",
+        "check": "CONFIRMATION_NUMBER_ICON",
+        "complete": "CONFIRMATION_NUMBER_ICON",
+        "done": "CONFIRMATION_NUMBER_ICON",
+        "success": "CONFIRMATION_NUMBER_ICON",
+        "warning": "STAR",
+        "alert": "STAR",
+        "caution": "STAR",
+        "info": "DESCRIPTION",
+        "information": "DESCRIPTION",
+        "details": "DESCRIPTION",
         # Business & Finance
-        "dollar": "DOLLAR", "money": "DOLLAR", "price": "DOLLAR", "cost": "DOLLAR",
-        "store": "STORE", "shop": "STORE", "deployment": "STORE",
-        "cart": "SHOPPING_CART", "shopping": "SHOPPING_CART",
-        "membership": "MEMBERSHIP", "subscription": "MEMBERSHIP",
+        "dollar": "DOLLAR",
+        "money": "DOLLAR",
+        "price": "DOLLAR",
+        "cost": "DOLLAR",
+        "store": "STORE",
+        "shop": "STORE",
+        "deployment": "STORE",
+        "cart": "SHOPPING_CART",
+        "shopping": "SHOPPING_CART",
+        "membership": "MEMBERSHIP",
+        "subscription": "MEMBERSHIP",
         # Time & Travel
-        "clock": "CLOCK", "time": "CLOCK", "schedule": "CLOCK",
-        "calendar": "EVENT_SEAT", "date": "EVENT_SEAT", "event": "EVENT_SEAT",
-        "plane": "AIRPLANE", "flight": "AIRPLANE", "travel": "AIRPLANE",
-        "car": "CAR", "drive": "CAR", "vehicle": "CAR",
-        "bus": "BUS", "transit": "BUS",
-        "train": "TRAIN", "rail": "TRAIN",
-        "hotel": "HOTEL", "lodging": "HOTEL", "stay": "HOTEL",
-        "location": "MAP_PIN", "map": "MAP_PIN", "place": "MAP_PIN", "pin": "MAP_PIN",
+        "clock": "CLOCK",
+        "time": "CLOCK",
+        "schedule": "CLOCK",
+        "calendar": "EVENT_SEAT",
+        "date": "EVENT_SEAT",
+        "event": "EVENT_SEAT",
+        "plane": "AIRPLANE",
+        "flight": "AIRPLANE",
+        "travel": "AIRPLANE",
+        "car": "CAR",
+        "drive": "CAR",
+        "vehicle": "CAR",
+        "bus": "BUS",
+        "transit": "BUS",
+        "train": "TRAIN",
+        "rail": "TRAIN",
+        "hotel": "HOTEL",
+        "lodging": "HOTEL",
+        "stay": "HOTEL",
+        "location": "MAP_PIN",
+        "map": "MAP_PIN",
+        "place": "MAP_PIN",
+        "pin": "MAP_PIN",
         # Content & Media
-        "bookmark": "BOOKMARK", "save": "BOOKMARK", "saved": "BOOKMARK",
-        "description": "DESCRIPTION", "document": "DESCRIPTION", "file": "DESCRIPTION", "doc": "DESCRIPTION",
-        "video": "VIDEO_CAMERA", "camera": "VIDEO_CAMERA", "meeting": "VIDEO_CAMERA",
-        "play": "VIDEO_PLAY", "media": "VIDEO_PLAY",
-        "ticket": "TICKET", "pass": "TICKET", "admission": "TICKET",
-        "invite": "INVITE", "invitation": "INVITE",
-        "restaurant": "RESTAURANT_ICON", "food": "RESTAURANT_ICON", "dining": "RESTAURANT_ICON",
+        "bookmark": "BOOKMARK",
+        "save": "BOOKMARK",
+        "saved": "BOOKMARK",
+        "description": "DESCRIPTION",
+        "document": "DESCRIPTION",
+        "file": "DESCRIPTION",
+        "doc": "DESCRIPTION",
+        "video": "VIDEO_CAMERA",
+        "camera": "VIDEO_CAMERA",
+        "meeting": "VIDEO_CAMERA",
+        "play": "VIDEO_PLAY",
+        "media": "VIDEO_PLAY",
+        "ticket": "TICKET",
+        "pass": "TICKET",
+        "admission": "TICKET",
+        "invite": "INVITE",
+        "invitation": "INVITE",
+        "restaurant": "RESTAURANT_ICON",
+        "food": "RESTAURANT_ICON",
+        "dining": "RESTAURANT_ICON",
     }
 
     # Patterns for smart inference
     LAYOUT_PATTERNS = {
-        "columns": re.compile(
-            r"\b(columns?|side.?by.?side|two.?column|split)\b", re.I
-        ),
+        "columns": re.compile(r"\b(columns?|side.?by.?side|two.?column|split)\b", re.I),
         "image_right": re.compile(
-            r"\b(image\s+(on\s+)?(the\s+)?right|right\s+(side\s+)?image|with\s+image\s+on\s+right|image\s+on\s+right)\b", re.I
+            r"\b(image\s+(on\s+)?(the\s+)?right|right\s+(side\s+)?image|with\s+image\s+on\s+right|image\s+on\s+right)\b",
+            re.I,
         ),
         "image_left": re.compile(
-            r"\b(image\s+(on\s+)?(the\s+)?left|left\s+(side\s+)?image|with\s+image\s+on\s+left|image\s+on\s+left)\b", re.I
+            r"\b(image\s+(on\s+)?(the\s+)?left|left\s+(side\s+)?image|with\s+image\s+on\s+left|image\s+on\s+left)\b",
+            re.I,
         ),
     }
 
@@ -146,9 +209,9 @@ class SmartCardBuilder:
     # Color mappings for semantic colors
     COLOR_MAP = {
         "success": "#34a853",  # Green
-        "error": "#ea4335",    # Red
+        "error": "#ea4335",  # Red
         "warning": "#fbbc04",  # Yellow
-        "info": "#1a73e8",     # Blue
+        "info": "#1a73e8",  # Blue
         "green": "#34a853",
         "red": "#ea4335",
         "blue": "#1a73e8",
@@ -201,7 +264,9 @@ class SmartCardBuilder:
             feedback_loop = get_feedback_loop()
             if feedback_loop.ensure_description_vector_exists():
                 self._collection_verified = True
-                logger.debug(f"✅ Collection {_settings.card_collection} verified/created")
+                logger.debug(
+                    f"✅ Collection {_settings.card_collection} verified/created"
+                )
             else:
                 logger.warning(f"⚠️ Collection {_settings.card_collection} not ready")
         except Exception as e:
@@ -273,12 +338,14 @@ class SmartCardBuilder:
             components = []
             for r in results.points:
                 p = r.payload
-                components.append({
-                    "name": p.get("name"),
-                    "type": p.get("type"),
-                    "full_path": p.get("full_path"),
-                    "score": r.score,
-                })
+                components.append(
+                    {
+                        "name": p.get("name"),
+                        "type": p.get("type"),
+                        "full_path": p.get("full_path"),
+                        "score": r.score,
+                    }
+                )
 
             return components
 
@@ -343,7 +410,11 @@ class SmartCardBuilder:
                         return template
 
                 # Handle class types
-                if r["name"] == name and r["type"] == "class" and "v2" in r["full_path"]:
+                if (
+                    r["name"] == name
+                    and r["type"] == "class"
+                    and "v2" in r["full_path"]
+                ):
                     cls = self._load_component_by_path(r["full_path"])
                     if cls:
                         self._components[name] = cls
@@ -458,7 +529,9 @@ class SmartCardBuilder:
             self._find_and_load_component(name, query)
 
         self._initialized = True
-        logger.info(f"SmartCardBuilder initialized with {len(self._components)} components (Qdrant: {self._qdrant_available})")
+        logger.info(
+            f"SmartCardBuilder initialized with {len(self._components)} components (Qdrant: {self._qdrant_available})"
+        )
 
     def get_component(self, name: str) -> Optional[Any]:
         """Get a loaded component class by name."""
@@ -470,7 +543,11 @@ class SmartCardBuilder:
             return self._components[name]
 
         # Try to find via Qdrant
-        query = f"v2.widgets.{name.lower()}.{name} class" if name not in ["Section", "Card", "CardHeader"] else f"v2.{name.lower()}.{name} class"
+        query = (
+            f"v2.widgets.{name.lower()}.{name} class"
+            if name not in ["Section", "Card", "CardHeader"]
+            else f"v2.{name.lower()}.{name} class"
+        )
         return self._find_and_load_component(name, query)
 
     # =========================================================================
@@ -760,7 +837,9 @@ class SmartCardBuilder:
         # Handle type enum
         try:
             if hasattr(TextInput, "Type"):
-                kwargs["type"] = getattr(TextInput.Type, type_, TextInput.Type.SINGLE_LINE)
+                kwargs["type"] = getattr(
+                    TextInput.Type, type_, TextInput.Type.SINGLE_LINE
+                )
         except Exception as e:
             logger.debug(f"Could not set TextInput type: {e}")
 
@@ -797,7 +876,9 @@ class SmartCardBuilder:
         # Handle type enum
         try:
             if hasattr(SelectionInput, "Type"):
-                kwargs["type"] = getattr(SelectionInput.Type, type_, SelectionInput.Type.DROPDOWN)
+                kwargs["type"] = getattr(
+                    SelectionInput.Type, type_, SelectionInput.Type.DROPDOWN
+                )
         except Exception as e:
             logger.debug(f"Could not set SelectionInput type: {e}")
 
@@ -856,7 +937,9 @@ class SmartCardBuilder:
         # Handle type enum
         try:
             if hasattr(DateTimePicker, "Type"):
-                kwargs["type"] = getattr(DateTimePicker.Type, type_, DateTimePicker.Type.DATE_AND_TIME)
+                kwargs["type"] = getattr(
+                    DateTimePicker.Type, type_, DateTimePicker.Type.DATE_AND_TIME
+                )
         except Exception as e:
             logger.debug(f"Could not set DateTimePicker type: {e}")
 
@@ -918,7 +1001,9 @@ class SmartCardBuilder:
         if title:
             grid_widget["grid"]["title"] = title
 
-        logger.info(f"✅ Built grid with {len(grid_items)} items, {column_count} columns")
+        logger.info(
+            f"✅ Built grid with {len(grid_items)} items, {column_count} columns"
+        )
         return grid_widget
 
     def build_grid_from_images(
@@ -1007,7 +1092,9 @@ class SmartCardBuilder:
 
         return result
 
-    def _extract_form_fields(self, description: str) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    def _extract_form_fields(
+        self, description: str
+    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """
         Extract form fields from a natural language description.
 
@@ -1024,7 +1111,14 @@ class SmartCardBuilder:
         description_lower = description.lower()
 
         # Check for form intent keywords
-        form_keywords = ["form card", "text input", "input field", "dropdown", "selection field", "submit button"]
+        form_keywords = [
+            "form card",
+            "text input",
+            "input field",
+            "dropdown",
+            "selection field",
+            "submit button",
+        ]
         has_form_intent = any(kw in description_lower for kw in form_keywords)
 
         if not has_form_intent:
@@ -1076,7 +1170,11 @@ class SmartCardBuilder:
                 options = option_pattern.findall(options_str)
                 if options:
                     field["items"] = [
-                        {"text": opt, "value": opt.lower().replace(" ", "_"), "selected": i == 0}
+                        {
+                            "text": opt,
+                            "value": opt.lower().replace(" ", "_"),
+                            "selected": i == 0,
+                        }
                         for i, opt in enumerate(options)
                     ]
             fields.append(field)
@@ -1106,7 +1204,9 @@ class SmartCardBuilder:
             if match:
                 button_text, function = match.groups()
                 submit_action = {"function": function, "text": button_text}
-                logger.info(f"  📝 Submit button: text={button_text}, function={function}")
+                logger.info(
+                    f"  📝 Submit button: text={button_text}, function={function}"
+                )
 
         return fields, submit_action
 
@@ -1135,10 +1235,12 @@ class SmartCardBuilder:
                 # Parse section content into widgets
                 widgets = self._parse_section_content(section_content.strip())
 
-                sections.append({
-                    "header": section_name.strip(),
-                    "widgets": widgets,
-                })
+                sections.append(
+                    {
+                        "header": section_name.strip(),
+                        "widgets": widgets,
+                    }
+                )
 
         return sections
 
@@ -1163,11 +1265,13 @@ class SmartCardBuilder:
         for icon_name, text in icon_text_pattern.findall(description):
             icon_key = icon_name.lower()
             known_icon = self.KNOWN_ICONS.get(icon_key)
-            items.append({
-                "text": text,
-                "icon": known_icon,
-                "top_label": icon_name.capitalize() if not known_icon else None,
-            })
+            items.append(
+                {
+                    "text": text,
+                    "icon": known_icon,
+                    "top_label": icon_name.capitalize() if not known_icon else None,
+                }
+            )
 
         # Pattern: labeled content ("Status: Active", "Memory usage at 78%")
         labeled_pattern = re.compile(
@@ -1189,16 +1293,20 @@ class SmartCardBuilder:
             phrases = re.split(r"[.,;]", text_before)
             label = phrases[-1].strip() if phrases else "Link"
             # Clean label
-            label = re.sub(r"^\s*(for|to|at|linking|opens?)\s+", "", label, flags=re.IGNORECASE)
+            label = re.sub(
+                r"^\s*(for|to|at|linking|opens?)\s+", "", label, flags=re.IGNORECASE
+            )
             label = re.sub(r"['\"]", "", label).strip()
             if len(label) < 3:
                 label = url
 
-            items.append({
-                "text": label,
-                "button_url": url,
-                "button_text": "Open",
-            })
+            items.append(
+                {
+                    "text": label,
+                    "button_url": url,
+                    "button_text": "Open",
+                }
+            )
 
         return items
 
@@ -1274,8 +1382,13 @@ class SmartCardBuilder:
 
         # Detect content type
         content_lower = content.lower()
-        is_warning = any(w in content_lower for w in ["warning", "stale", "inactive", "alert"])
-        is_status = any(w in content_lower for w in ["success", "complete", "done", "active", "running"])
+        is_warning = any(
+            w in content_lower for w in ["warning", "stale", "inactive", "alert"]
+        )
+        is_status = any(
+            w in content_lower
+            for w in ["success", "complete", "done", "active", "running"]
+        )
 
         if urls:
             # Content with URLs - create decoratedText with button
@@ -1285,9 +1398,16 @@ class SmartCardBuilder:
                 text_before = content[:url_pos].strip() if url_pos > 0 else ""
 
                 # Clean leading conjunctions/prepositions
-                text_before = re.sub(r"^\s*(and|at|,|;|:)\s*", "", text_before, flags=re.IGNORECASE).strip()
+                text_before = re.sub(
+                    r"^\s*(and|at|,|;|:)\s*", "", text_before, flags=re.IGNORECASE
+                ).strip()
                 # Clean trailing instruction words
-                text_before = re.sub(r"\s*(button|linking|links?|goes?|to|at)\s*$", "", text_before, flags=re.IGNORECASE).strip()
+                text_before = re.sub(
+                    r"\s*(button|linking|links?|goes?|to|at)\s*$",
+                    "",
+                    text_before,
+                    flags=re.IGNORECASE,
+                ).strip()
                 # Remove orphaned quotes at edges
                 text_before = re.sub(r'^["\']|["\']$', "", text_before).strip()
 
@@ -1299,8 +1419,8 @@ class SmartCardBuilder:
                         "wrapText": True,
                         "button": {
                             "text": "Open",
-                            "onClick": {"openLink": {"url": url}}
-                        }
+                            "onClick": {"openLink": {"url": url}},
+                        },
                     }
                 }
 
@@ -1308,22 +1428,26 @@ class SmartCardBuilder:
                 if mentioned_icons:
                     icon_key = mentioned_icons[0]
                     if icon_key in self.KNOWN_ICONS:
-                        widget["decoratedText"]["startIcon"] = {"knownIcon": self.KNOWN_ICONS[icon_key]}
+                        widget["decoratedText"]["startIcon"] = {
+                            "knownIcon": self.KNOWN_ICONS[icon_key]
+                        }
 
                 widgets.append(widget)
                 # Update content to process remaining
-                content = content[url_pos + len(url):].strip()
+                content = content[url_pos + len(url) :].strip()
 
         elif is_warning or is_status:
             # Status/warning content (use valid KnownIcon enum values)
             icon = "CONFIRMATION_NUMBER_ICON" if is_status else "STAR"
-            widgets.append({
-                "decoratedText": {
-                    "text": content,
-                    "wrapText": True,
-                    "startIcon": {"knownIcon": icon},
+            widgets.append(
+                {
+                    "decoratedText": {
+                        "text": content,
+                        "wrapText": True,
+                        "startIcon": {"knownIcon": icon},
+                    }
                 }
-            })
+            )
 
         elif content:
             # Plain text - check for quoted segments
@@ -1334,7 +1458,9 @@ class SmartCardBuilder:
                 for text in quoted_matches:
                     widget = {"decoratedText": {"text": text, "wrapText": True}}
                     if mentioned_icons and mentioned_icons[0] in self.KNOWN_ICONS:
-                        widget["decoratedText"]["startIcon"] = {"knownIcon": self.KNOWN_ICONS[mentioned_icons[0]]}
+                        widget["decoratedText"]["startIcon"] = {
+                            "knownIcon": self.KNOWN_ICONS[mentioned_icons[0]]
+                        }
                     widgets.append(widget)
             else:
                 # Just use the whole content as text
@@ -1385,7 +1511,9 @@ class SmartCardBuilder:
         # =====================================================================
         proven_params = self._get_proven_params(description)
         if proven_params:
-            logger.info(f"🎯 Found proven pattern for similar description, merging params")
+            logger.info(
+                f"🎯 Found proven pattern for similar description, merging params"
+            )
             # Merge proven params with explicit params (explicit takes priority)
             # This allows learned patterns to fill in gaps while respecting user intent
             title = title or proven_params.get("title")
@@ -1434,7 +1562,9 @@ class SmartCardBuilder:
 
                 return rendered
             except Exception as e:
-                logger.warning(f"Template rendering failed, falling back to normal build: {e}")
+                logger.warning(
+                    f"Template rendering failed, falling back to normal build: {e}"
+                )
 
         # If fields are provided, build a form card
         if fields:
@@ -1488,7 +1618,9 @@ class SmartCardBuilder:
                 if isinstance(btn, dict):
                     btn_entry = {
                         "text": btn.get("text", "Button"),
-                        "url": btn.get("onclick_action") or btn.get("url") or btn.get("action", "#"),
+                        "url": btn.get("onclick_action")
+                        or btn.get("url")
+                        or btn.get("action", "#"),
                     }
                     all_buttons.append(btn_entry)
 
@@ -1566,7 +1698,9 @@ class SmartCardBuilder:
                 rendered_sections[0]["widgets"].insert(0, text_widget)
             else:
                 rendered_sections[0]["widgets"] = [text_widget]
-            logger.info(f"✅ Added text widget to first section: {converted_text[:50]}...")
+            logger.info(
+                f"✅ Added text widget to first section: {converted_text[:50]}..."
+            )
 
         # Add image as widget in first section (Google Chat requires images as widgets, not in header)
         if image_url:
@@ -1585,7 +1719,9 @@ class SmartCardBuilder:
             for btn in buttons:
                 if isinstance(btn, dict):
                     btn_widget = {"text": btn.get("text", "Button")}
-                    onclick = btn.get("onclick_action") or btn.get("url") or btn.get("action")
+                    onclick = (
+                        btn.get("onclick_action") or btn.get("url") or btn.get("action")
+                    )
                     if onclick:
                         btn_widget["onClick"] = {"openLink": {"url": onclick}}
                     btn_type = btn.get("type")
@@ -1597,7 +1733,9 @@ class SmartCardBuilder:
                 last_section = rendered_sections[-1]
                 if "widgets" not in last_section:
                     last_section["widgets"] = []
-                last_section["widgets"].append({"buttonList": {"buttons": button_widgets}})
+                last_section["widgets"].append(
+                    {"buttonList": {"buttons": button_widgets}}
+                )
                 logger.info(f"✅ Added {len(button_widgets)} button(s) to last section")
 
         # Add feedback section if enabled
@@ -1613,7 +1751,11 @@ class SmartCardBuilder:
                     card_id=card_id,
                     description=f"multi-section card: {title or 'untitled'}",
                     component_paths=["Section", "DecoratedText"],  # Common components
-                    instance_params={"title": title, "subtitle": subtitle, "sections": len(sections)},
+                    instance_params={
+                        "title": title,
+                        "subtitle": subtitle,
+                        "sections": len(sections),
+                    },
                 )
             except Exception as e:
                 logger.debug(f"Could not store card pattern: {e}")
@@ -1671,7 +1813,9 @@ class SmartCardBuilder:
 
                 if field_type == "TextInput":
                     # Use build_text_input which loads via ModuleWrapper
-                    input_type = "MULTIPLE_LINE" if field.get("multiline") else "SINGLE_LINE"
+                    input_type = (
+                        "MULTIPLE_LINE" if field.get("multiline") else "SINGLE_LINE"
+                    )
                     component = self.build_text_input(
                         name=field_name,
                         label=field_label,
@@ -1683,27 +1827,37 @@ class SmartCardBuilder:
                         try:
                             rendered = component.render()
                             widgets.append(rendered)
-                            logger.info(f"✅ Added TextInput field via ModuleWrapper: {field_name}")
+                            logger.info(
+                                f"✅ Added TextInput field via ModuleWrapper: {field_name}"
+                            )
                         except Exception as e:
-                            logger.warning(f"⚠️ Failed to render TextInput: {e}, using fallback")
+                            logger.warning(
+                                f"⚠️ Failed to render TextInput: {e}, using fallback"
+                            )
                             # Fallback to direct JSON
-                            widgets.append({
+                            widgets.append(
+                                {
+                                    "textInput": {
+                                        "name": field_name,
+                                        "label": field_label,
+                                        "type": input_type,
+                                    }
+                                }
+                            )
+                    else:
+                        # Component not available, use fallback JSON
+                        logger.warning(
+                            f"⚠️ TextInput component not available, using fallback"
+                        )
+                        widgets.append(
+                            {
                                 "textInput": {
                                     "name": field_name,
                                     "label": field_label,
                                     "type": input_type,
                                 }
-                            })
-                    else:
-                        # Component not available, use fallback JSON
-                        logger.warning(f"⚠️ TextInput component not available, using fallback")
-                        widgets.append({
-                            "textInput": {
-                                "name": field_name,
-                                "label": field_label,
-                                "type": input_type,
                             }
-                        })
+                        )
 
                 elif field_type == "SelectionInput":
                     # Use build_selection_input which loads via ModuleWrapper
@@ -1719,33 +1873,55 @@ class SmartCardBuilder:
                         try:
                             rendered = component.render()
                             widgets.append(rendered)
-                            logger.info(f"✅ Added SelectionInput field via ModuleWrapper: {field_name}")
+                            logger.info(
+                                f"✅ Added SelectionInput field via ModuleWrapper: {field_name}"
+                            )
                         except Exception as e:
-                            logger.warning(f"⚠️ Failed to render SelectionInput: {e}, using fallback")
+                            logger.warning(
+                                f"⚠️ Failed to render SelectionInput: {e}, using fallback"
+                            )
                             # Fallback to direct JSON
                             widget = {
                                 "selectionInput": {
                                     "name": field_name,
                                     "label": field_label,
                                     "type": selection_type,
-                                    "items": [
-                                        {"text": item.get("text", ""), "value": item.get("value", ""), "selected": item.get("selected", False)}
-                                        for item in items
-                                    ] if items else []
+                                    "items": (
+                                        [
+                                            {
+                                                "text": item.get("text", ""),
+                                                "value": item.get("value", ""),
+                                                "selected": item.get("selected", False),
+                                            }
+                                            for item in items
+                                        ]
+                                        if items
+                                        else []
+                                    ),
                                 }
                             }
                             widgets.append(widget)
                     else:
-                        logger.warning(f"⚠️ SelectionInput component not available, using fallback")
+                        logger.warning(
+                            f"⚠️ SelectionInput component not available, using fallback"
+                        )
                         widget = {
                             "selectionInput": {
                                 "name": field_name,
                                 "label": field_label,
                                 "type": selection_type,
-                                "items": [
-                                    {"text": item.get("text", ""), "value": item.get("value", ""), "selected": item.get("selected", False)}
-                                    for item in items
-                                ] if items else []
+                                "items": (
+                                    [
+                                        {
+                                            "text": item.get("text", ""),
+                                            "value": item.get("value", ""),
+                                            "selected": item.get("selected", False),
+                                        }
+                                        for item in items
+                                    ]
+                                    if items
+                                    else []
+                                ),
                             }
                         }
                         widgets.append(widget)
@@ -1763,25 +1939,35 @@ class SmartCardBuilder:
                         try:
                             rendered = component.render()
                             widgets.append(rendered)
-                            logger.info(f"✅ Added DateTimePicker field via ModuleWrapper: {field_name}")
+                            logger.info(
+                                f"✅ Added DateTimePicker field via ModuleWrapper: {field_name}"
+                            )
                         except Exception as e:
-                            logger.warning(f"⚠️ Failed to render DateTimePicker: {e}, using fallback")
-                            widgets.append({
+                            logger.warning(
+                                f"⚠️ Failed to render DateTimePicker: {e}, using fallback"
+                            )
+                            widgets.append(
+                                {
+                                    "dateTimePicker": {
+                                        "name": field_name,
+                                        "label": field_label,
+                                        "type": picker_type,
+                                    }
+                                }
+                            )
+                    else:
+                        logger.warning(
+                            f"⚠️ DateTimePicker component not available, using fallback"
+                        )
+                        widgets.append(
+                            {
                                 "dateTimePicker": {
                                     "name": field_name,
                                     "label": field_label,
                                     "type": picker_type,
                                 }
-                            })
-                    else:
-                        logger.warning(f"⚠️ DateTimePicker component not available, using fallback")
-                        widgets.append({
-                            "dateTimePicker": {
-                                "name": field_name,
-                                "label": field_label,
-                                "type": picker_type,
                             }
-                        })
+                        )
 
                 else:
                     logger.warning(f"⚠️ Unknown field type: {field_type}")
@@ -1810,18 +1996,23 @@ class SmartCardBuilder:
                             params = submit_action["parameters"]
                             if isinstance(params, dict):
                                 on_click_dict["action"]["parameters"] = [
-                                    {"key": k, "value": str(v)} for k, v in params.items()
+                                    {"key": k, "value": str(v)}
+                                    for k, v in params.items()
                                 ]
                         # Fallback to dict for action-based onClick
-                        widgets.append({
-                            "buttonList": {
-                                "buttons": [{
-                                    "text": submit_text,
-                                    "type": "FILLED",
-                                    "onClick": on_click_dict
-                                }]
+                        widgets.append(
+                            {
+                                "buttonList": {
+                                    "buttons": [
+                                        {
+                                            "text": submit_text,
+                                            "type": "FILLED",
+                                            "onClick": on_click_dict,
+                                        }
+                                    ]
+                                }
                             }
-                        })
+                        )
                     elif submit_action.get("url"):
                         on_click = OnClick(open_link={"url": submit_action["url"]})
                         button = Button(text=submit_text, on_click=on_click)
@@ -1834,10 +2025,16 @@ class SmartCardBuilder:
                         button_list = ButtonList(buttons=[button])
                         rendered = button_list.render()
                         widgets.append(rendered)
-                    logger.info(f"✅ Added submit button via ModuleWrapper: {submit_text}")
+                    logger.info(
+                        f"✅ Added submit button via ModuleWrapper: {submit_text}"
+                    )
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to render submit button via ModuleWrapper: {e}, using fallback")
-                    self._add_submit_button_fallback(widgets, submit_text, submit_action)
+                    logger.warning(
+                        f"⚠️ Failed to render submit button via ModuleWrapper: {e}, using fallback"
+                    )
+                    self._add_submit_button_fallback(
+                        widgets, submit_text, submit_action
+                    )
             else:
                 self._add_submit_button_fallback(widgets, submit_text, submit_action)
 
@@ -1855,7 +2052,10 @@ class SmartCardBuilder:
         return card
 
     def _add_submit_button_fallback(
-        self, widgets: List[Dict[str, Any]], submit_text: str, submit_action: Dict[str, Any]
+        self,
+        widgets: List[Dict[str, Any]],
+        submit_text: str,
+        submit_action: Dict[str, Any],
     ) -> None:
         """
         Add a submit button using direct JSON fallback when ModuleWrapper components unavailable.
@@ -1886,11 +2086,7 @@ class SmartCardBuilder:
         elif submit_action.get("url"):
             button_dict["onClick"] = {"openLink": {"url": submit_action["url"]}}
 
-        widgets.append({
-            "buttonList": {
-                "buttons": [button_dict]
-            }
-        })
+        widgets.append({"buttonList": {"buttons": [button_dict]}})
         logger.info(f"✅ Added submit button via fallback: {submit_text}")
 
     def _dict_to_widget(self, widget_dict: Dict[str, Any]) -> Optional[Any]:
@@ -1936,10 +2132,16 @@ class SmartCardBuilder:
                 btn_data = data["button"]
                 Button = self.get_component("Button")
                 OnClick = self.get_component("OnClick")
-                if Button and OnClick and btn_data.get("onClick", {}).get("openLink", {}).get("url"):
+                if (
+                    Button
+                    and OnClick
+                    and btn_data.get("onClick", {}).get("openLink", {}).get("url")
+                ):
                     url = btn_data["onClick"]["openLink"]["url"]
                     on_click = OnClick(open_link={"url": url})
-                    kwargs["button"] = Button(text=btn_data.get("text", "Open"), on_click=on_click)
+                    kwargs["button"] = Button(
+                        text=btn_data.get("text", "Open"), on_click=on_click
+                    )
 
             return DecoratedText(**kwargs)
 
@@ -1958,9 +2160,13 @@ class SmartCardBuilder:
             if ButtonList and Button and OnClick:
                 buttons = []
                 for btn_data in data.get("buttons", []):
-                    url = btn_data.get("onClick", {}).get("openLink", {}).get("url", "#")
+                    url = (
+                        btn_data.get("onClick", {}).get("openLink", {}).get("url", "#")
+                    )
                     on_click = OnClick(open_link={"url": url})
-                    buttons.append(Button(text=btn_data.get("text", "Click"), on_click=on_click))
+                    buttons.append(
+                        Button(text=btn_data.get("text", "Click"), on_click=on_click)
+                    )
                 if buttons:
                     return ButtonList(buttons=buttons)
 
@@ -2010,7 +2216,9 @@ class SmartCardBuilder:
                 logger.debug(f"Inferred '{item[:30]}...' as {inference['type']}")
 
                 if inference["suggested_component"] == "Image":
-                    image_widget = self.build_image(inference["suggested_params"]["image_url"])
+                    image_widget = self.build_image(
+                        inference["suggested_params"]["image_url"]
+                    )
                 elif inference["suggested_component"] == "DecoratedText":
                     params = inference["suggested_params"]
                     widget = self.build_decorated_text(
@@ -2110,7 +2318,9 @@ class SmartCardBuilder:
                 buttons = []
                 for btn in content["buttons"]:
                     on_click = OnClick(open_link={"url": btn.get("url", "#")})
-                    buttons.append(Button(text=btn.get("text", "Click"), on_click=on_click))
+                    buttons.append(
+                        Button(text=btn.get("text", "Click"), on_click=on_click)
+                    )
 
                 if buttons:
                     widgets.append(ButtonList(buttons=buttons))
@@ -2144,7 +2354,9 @@ class SmartCardBuilder:
                 self._store_card_pattern(
                     card_id=card_id,
                     description=description,
-                    component_paths=[self.FALLBACK_PATHS.get(p, p) for p in component_paths],
+                    component_paths=[
+                        self.FALLBACK_PATHS.get(p, p) for p in component_paths
+                    ],
                     instance_params=content,
                 )
             except Exception as e:
@@ -2227,27 +2439,27 @@ class SmartCardBuilder:
             return text
 
         # Convert **bold** to <b>bold</b>
-        text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+        text = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", text)
 
         # Convert *bold* (single asterisk) to <b>bold</b> - but not if part of bullet
         # Only match *text* where text doesn't start with space (to avoid matching "• *")
-        text = re.sub(r'(?<!\*)\*([^*\s][^*]*[^*\s])\*(?!\*)', r'<b>\1</b>', text)
+        text = re.sub(r"(?<!\*)\*([^*\s][^*]*[^*\s])\*(?!\*)", r"<b>\1</b>", text)
         # Also handle single-word bold like *word*
-        text = re.sub(r'(?<!\*)\*(\w+)\*(?!\*)', r'<b>\1</b>', text)
+        text = re.sub(r"(?<!\*)\*(\w+)\*(?!\*)", r"<b>\1</b>", text)
 
         # Convert ~~strikethrough~~ to <s>strikethrough</s>
-        text = re.sub(r'~~([^~]+)~~', r'<s>\1</s>', text)
+        text = re.sub(r"~~([^~]+)~~", r"<s>\1</s>", text)
 
         # Convert ~strikethrough~ (single tilde) to <s>strikethrough</s>
-        text = re.sub(r'(?<!~)~([^~\s][^~]*[^~\s])~(?!~)', r'<s>\1</s>', text)
+        text = re.sub(r"(?<!~)~([^~\s][^~]*[^~\s])~(?!~)", r"<s>\1</s>", text)
 
         # Convert _italic_ to <i>italic</i>
-        text = re.sub(r'(?<!_)_([^_\s][^_]*[^_\s])_(?!_)', r'<i>\1</i>', text)
+        text = re.sub(r"(?<!_)_([^_\s][^_]*[^_\s])_(?!_)", r"<i>\1</i>", text)
         # Also handle single-word italic like _word_
-        text = re.sub(r'(?<!_)_(\w+)_(?!_)', r'<i>\1</i>', text)
+        text = re.sub(r"(?<!_)_(\w+)_(?!_)", r"<i>\1</i>", text)
 
         # Convert __bold__ (double underscore sometimes used for bold)
-        text = re.sub(r'__([^_]+)__', r'<b>\1</b>', text)
+        text = re.sub(r"__([^_]+)__", r"<b>\1</b>", text)
 
         # Convert `code` to monospace (Google Chat doesn't have code tag, use as-is)
         # text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
@@ -2258,7 +2470,9 @@ class SmartCardBuilder:
     # FEEDBACK LOOP INTEGRATION
     # =========================================================================
 
-    def _create_feedback_section(self, card_id: str, feedback_webhook_url: str = None) -> Dict[str, Any]:
+    def _create_feedback_section(
+        self, card_id: str, feedback_webhook_url: str = None
+    ) -> Dict[str, Any]:
         """
         Create a feedback section with 👍/👎 buttons using the component system.
 
@@ -2281,6 +2495,7 @@ class SmartCardBuilder:
             if not base_url:
                 try:
                     from config.settings import settings
+
                     base_url = f"{settings.base_url}/card-feedback"
                 except Exception:
                     base_url = "https://example.com/card-feedback"  # Fallback
@@ -2296,12 +2511,14 @@ class SmartCardBuilder:
             widgets.append(prompt_widget.render())
         else:
             # Fallback if component not available
-            widgets.append({
-                "decoratedText": {
-                    "text": "<i>Was this card helpful?</i>",
-                    "wrapText": True,
+            widgets.append(
+                {
+                    "decoratedText": {
+                        "text": "<i>Was this card helpful?</i>",
+                        "wrapText": True,
+                    }
                 }
-            })
+            )
 
         # Build feedback buttons using ButtonList component
         ButtonList = self.get_component("ButtonList")
@@ -2311,40 +2528,82 @@ class SmartCardBuilder:
         if ButtonList and Button and OnClick:
             try:
                 # Create Good button
-                good_on_click = OnClick(open_link={"url": f"{base_url}?card_id={card_id}&feedback=positive"})
+                good_on_click = OnClick(
+                    open_link={"url": f"{base_url}?card_id={card_id}&feedback=positive"}
+                )
                 good_button = Button(text="👍 Good", on_click=good_on_click)
 
                 # Create Bad button
-                bad_on_click = OnClick(open_link={"url": f"{base_url}?card_id={card_id}&feedback=negative"})
+                bad_on_click = OnClick(
+                    open_link={"url": f"{base_url}?card_id={card_id}&feedback=negative"}
+                )
                 bad_button = Button(text="👎 Bad", on_click=bad_on_click)
 
                 # Create ButtonList with both buttons
                 button_list = ButtonList(buttons=[good_button, bad_button])
                 widgets.append(button_list.render())
 
-                logger.debug(f"✅ Built feedback buttons via ModuleWrapper for card {card_id[:8]}...")
+                logger.debug(
+                    f"✅ Built feedback buttons via ModuleWrapper for card {card_id[:8]}..."
+                )
             except Exception as e:
-                logger.warning(f"⚠️ Failed to build feedback buttons via ModuleWrapper: {e}, using fallback")
+                logger.warning(
+                    f"⚠️ Failed to build feedback buttons via ModuleWrapper: {e}, using fallback"
+                )
                 # Fallback to manual JSON
-                widgets.append({
-                    "buttonList": {
-                        "buttons": [
-                            {"text": "👍 Good", "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=positive"}}},
-                            {"text": "👎 Bad", "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=negative"}}},
-                        ]
+                widgets.append(
+                    {
+                        "buttonList": {
+                            "buttons": [
+                                {
+                                    "text": "👍 Good",
+                                    "onClick": {
+                                        "openLink": {
+                                            "url": f"{base_url}?card_id={card_id}&feedback=positive"
+                                        }
+                                    },
+                                },
+                                {
+                                    "text": "👎 Bad",
+                                    "onClick": {
+                                        "openLink": {
+                                            "url": f"{base_url}?card_id={card_id}&feedback=negative"
+                                        }
+                                    },
+                                },
+                            ]
+                        }
                     }
-                })
+                )
         else:
             # Fallback if components not available
-            logger.warning("⚠️ ButtonList/Button/OnClick components not available, using fallback JSON")
-            widgets.append({
-                "buttonList": {
-                    "buttons": [
-                        {"text": "👍 Good", "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=positive"}}},
-                        {"text": "👎 Bad", "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=negative"}}},
-                    ]
+            logger.warning(
+                "⚠️ ButtonList/Button/OnClick components not available, using fallback JSON"
+            )
+            widgets.append(
+                {
+                    "buttonList": {
+                        "buttons": [
+                            {
+                                "text": "👍 Good",
+                                "onClick": {
+                                    "openLink": {
+                                        "url": f"{base_url}?card_id={card_id}&feedback=positive"
+                                    }
+                                },
+                            },
+                            {
+                                "text": "👎 Bad",
+                                "onClick": {
+                                    "openLink": {
+                                        "url": f"{base_url}?card_id={card_id}&feedback=negative"
+                                    }
+                                },
+                            },
+                        ]
+                    }
                 }
-            })
+            )
 
         return {"widgets": widgets}
 

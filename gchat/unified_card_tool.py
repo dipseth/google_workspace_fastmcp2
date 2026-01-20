@@ -37,9 +37,8 @@ import time
 
 # Import MCP-related components
 from fastmcp import FastMCP
-from typing_extensions import Annotated, Any, Dict, List, Optional, Tuple
-
 from pydantic import Field
+from typing_extensions import Annotated, Any, Dict, List, Optional, Tuple
 
 # Template middleware integration handled at server level - no imports needed here
 # Import ModuleWrapper
@@ -55,7 +54,6 @@ from config.enhanced_logging import setup_logger
 # NLP parser commented out - SmartCardBuilder handles all parsing and rendering
 # SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
 # from .nlp_card_parser import parse_enhanced_natural_language_description
-
 # Import SmartCardBuilder for component-based card creation
 from .smart_card_builder import get_smart_card_builder
 
@@ -195,7 +193,9 @@ def _get_qdrant_client():
             _qdrant_client = get_central_client()
 
             if _qdrant_client is None:
-                logger.warning("⚠️ Qdrant client not available - template storage disabled")
+                logger.warning(
+                    "⚠️ Qdrant client not available - template storage disabled"
+                )
                 return None
 
             # Ensure card templates collection exists
@@ -502,11 +502,15 @@ def _validate_card_content(card_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
                 elif any(
                     key in widget
                     for key in [
-                        "decoratedText", "decorated_text",
-                        "selectionInput", "selection_input",
-                        "textInput", "text_input",
+                        "decoratedText",
+                        "decorated_text",
+                        "selectionInput",
+                        "selection_input",
+                        "textInput",
+                        "text_input",
                         "divider",
-                        "buttonList", "button_list",
+                        "buttonList",
+                        "button_list",
                         "columns",
                         "grid",
                     ]
@@ -635,7 +639,9 @@ def _build_card_structure_from_params(
                 sections[0]["widgets"].insert(0, image_widget)
             else:
                 sections[0]["widgets"] = [image_widget]
-            logger.info(f"✅ Added image widget to first section: {params['image_url']}")
+            logger.info(
+                f"✅ Added image widget to first section: {params['image_url']}"
+            )
     elif isinstance(params.get("sections"), list) and params.get("sections"):
         card_dict["sections"] = params["sections"]
         logger.info(
@@ -651,7 +657,9 @@ def _build_card_structure_from_params(
                 card_dict["sections"][0]["widgets"].insert(0, image_widget)
             else:
                 card_dict["sections"][0]["widgets"] = [image_widget]
-            logger.info(f"✅ Added image widget to first section: {params['image_url']}")
+            logger.info(
+                f"✅ Added image widget to first section: {params['image_url']}"
+            )
     else:
         widgets = []
 
@@ -831,16 +839,20 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
     async def send_dynamic_card(
         user_google_email: Annotated[
             str,
-            Field(description="The user's Google email address for authentication and API access"),
+            Field(
+                description="The user's Google email address for authentication and API access"
+            ),
         ],
         space_id: Annotated[
             str,
-            Field(description="The Google Chat space ID (e.g., 'spaces/AAAA1234') to send the card to"),
+            Field(
+                description="The Google Chat space ID (e.g., 'spaces/AAAA1234') to send the card to"
+            ),
         ],
         card_description: Annotated[
             str,
             Field(
-                description="Natural language description of the card. Use pattern: 'First section titled \"NAME\" showing CONTENT. Second section titled \"NAME\" showing CONTENT.' URLs become clickable buttons automatically."
+                description='Natural language description of the card. Use pattern: \'First section titled "NAME" showing CONTENT. Second section titled "NAME" showing CONTENT.\' URLs become clickable buttons automatically.'
             ),
         ],
         card_params: Annotated[
@@ -960,7 +972,7 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
             except Exception as smart_err:
                 logger.warning(
                     f"⚠️ SmartCardBuilder failed, falling back to simple card: {smart_err}",
-                    exc_info=True
+                    exc_info=True,
                 )
                 google_format_card = None
 
@@ -974,7 +986,9 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
             # - Layout inference (columns, image positioning)
             # =================================================================
             if not google_format_card:
-                logger.warning("⚠️ SmartCardBuilder didn't create a card, using simple fallback")
+                logger.warning(
+                    "⚠️ SmartCardBuilder didn't create a card, using simple fallback"
+                )
                 google_format_card = _build_simple_card_structure(card_params)
                 best_match = {
                     "type": "simple_fallback",
