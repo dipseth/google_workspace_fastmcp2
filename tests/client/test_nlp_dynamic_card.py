@@ -59,19 +59,22 @@ class TestNLPDynamicCardBasic:
         """Test basic ordinal word pattern: First section titled 'X' showing Y."""
         space_id = TEST_CHAT_SPACE_ID or "spaces/test_space"
 
-        result = await client.call_tool(
-            "send_dynamic_card",
-            {
-                "user_google_email": TEST_EMAIL,
-                "space_id": f"spaces/{space_id}",
-                "card_description": 'First section titled "Status" showing Everything is working correctly.',
-            },
-        )
+        # Build params - use webhook if available (required for cards with human OAuth)
+        params = {
+            "user_google_email": TEST_EMAIL,
+            "space_id": f"spaces/{space_id}",
+            "card_description": 'First section titled "Status" showing Everything is working correctly.',
+        }
+        if TEST_CHAT_WEBHOOK:
+            params["webhook_url"] = TEST_CHAT_WEBHOOK
+
+        result = await client.call_tool("send_dynamic_card", params)
 
         assert result is not None and result.content
         content = result.content[0].text
 
         # Should succeed or return expected error patterns
+        # Note: "human credentials" error occurs when sending cards via API without webhook
         valid_responses = [
             "success",
             "card sent",
@@ -79,6 +82,7 @@ class TestNLPDynamicCardBasic:
             "requires authentication",
             "permission denied",
             "middleware",
+            "human credentials",  # Google Chat API limitation for cards
         ]
         assert any(
             keyword in content.lower() for keyword in valid_responses

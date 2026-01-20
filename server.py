@@ -454,6 +454,11 @@ setup_health_endpoints(
     credential_storage_mode=credential_storage_mode,
 )
 
+# Setup feedback endpoints for SmartCardBuilder feedback loop
+from tools.feedback_endpoints import setup_feedback_endpoints
+
+setup_feedback_endpoints(mcp)
+
 # Register template macro management tools
 logger.info("🎨 Registering template macro management tools...")
 setup_template_macro_tools(mcp)

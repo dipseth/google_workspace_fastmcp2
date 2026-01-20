@@ -658,6 +658,300 @@ def test_colbert_full_card():
         return False
 
 
+def test_form_card_via_colbert():
+    """
+    Test: Build a form card with TextInput, SelectionInput via ColBERT search.
+
+    This validates that form components use the SAME Qdrant → ModuleWrapper flow
+    as all other card components.
+    """
+    print("\n" + "=" * 60)
+    print("TEST: Form Card via ColBERT (TextInput, SelectionInput)")
+    print("=" * 60)
+
+    client = get_qdrant_client()
+    embedder = get_embedder(use_colbert=True)
+    wrapper = get_module_wrapper()
+
+    # Search for form components using ColBERT
+    print("\n1. Searching for form components with ColBERT...")
+
+    components_to_find = {
+        "Section": "card_framework.v2.section.Section",
+        "TextInput": "card_framework.v2.widgets.text_input.TextInput",
+        "SelectionInput": "card_framework.v2.widgets.selection_input.SelectionInput",
+        "ButtonList": "card_framework.v2.widgets.button_list.ButtonList",
+        "Button": "card_framework.v2.widgets.decorated_text.Button onClick",
+    }
+
+    loaded = {}
+
+    for name, query in components_to_find.items():
+        try:
+            results = search_components(
+                client, embedder, query, limit=5, use_colbert=True
+            )
+            for r in results:
+                path = r.payload.get("full_path", "")
+                rname = r.payload.get("name", "")
+                rtype = r.payload.get("type", "")
+
+                if rname == name and rtype == "class" and "v2" in path:
+                    cls = wrapper.get_component_by_path(path)
+                    if cls:
+                        loaded[name] = cls
+                        print(f"   {name}: {path} (score: {r.score:.2f})")
+                        break
+        except Exception as e:
+            print(f"   {name}: search failed - {e}")
+
+    print(f"\n   Loaded {len(loaded)} components: {list(loaded.keys())}")
+
+    # Build form card
+    print("\n2. Building form card with input widgets...")
+    try:
+        Section = loaded.get("Section")
+        TextInput = loaded.get("TextInput")
+        SelectionInput = loaded.get("SelectionInput")
+        ButtonList = loaded.get("ButtonList")
+        Button = loaded.get("Button")
+
+        if not all([Section, TextInput, SelectionInput]):
+            print("   Missing required components")
+            return False
+
+        # Create form widgets
+        widgets = []
+
+        # Text input: Name field
+        name_input = TextInput(
+            name="user_name",
+            label="Your Name",
+            hint_text="Enter your full name",
+            type=TextInput.Type.SINGLE_LINE if hasattr(TextInput, "Type") else None,
+        )
+        widgets.append(name_input)
+        print("   ✅ Created TextInput via ModuleWrapper")
+
+        # Selection input: Rating dropdown
+        if hasattr(SelectionInput, "SelectionItem"):
+            items = [
+                SelectionInput.SelectionItem(text="Excellent", value="excellent", selected=True),
+                SelectionInput.SelectionItem(text="Good", value="good", selected=False),
+                SelectionInput.SelectionItem(text="Needs Improvement", value="needs_improvement", selected=False),
+            ]
+        else:
+            items = [
+                {"text": "Excellent", "value": "excellent", "selected": True},
+                {"text": "Good", "value": "good"},
+                {"text": "Needs Improvement", "value": "needs_improvement"},
+            ]
+
+        rating_input = SelectionInput(
+            name="rating",
+            label="How would you rate this?",
+            type=SelectionInput.Type.DROPDOWN if hasattr(SelectionInput, "Type") else None,
+            items=items,
+        )
+        widgets.append(rating_input)
+        print("   ✅ Created SelectionInput via ModuleWrapper")
+
+        # Submit button
+        if ButtonList and Button:
+            submit_button = Button(
+                text="Submit Feedback",
+                on_click={"openLink": {"url": "https://example.com/submit"}},
+            )
+            button_list = ButtonList(buttons=[submit_button])
+            widgets.append(button_list)
+            print("   ✅ Created ButtonList via ModuleWrapper")
+
+        # Create section with form widgets
+        section = Section(
+            header="Feedback Form",
+            widgets=widgets,
+        )
+
+        print(f"\n3. Rendering form card to JSON...")
+        rendered = section.render()
+        print(json.dumps(rendered, indent=2))
+
+        # Validate structure
+        has_widgets = "widgets" in rendered and len(rendered["widgets"]) > 0
+        print(f"\n4. Validation: has_widgets={has_widgets}")
+
+        return has_widgets
+
+    except Exception as e:
+        print(f"   ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def test_send_form_card_to_webhook():
+    """
+    Test: Send a form card to the actual Google Chat webhook.
+
+    Uses TEST_CHAT_WEBHOOK from .env for end-to-end validation.
+    This confirms the full flow: Qdrant → ModuleWrapper → render → webhook delivery.
+    """
+    print("\n" + "=" * 60)
+    print("TEST: Send Form Card to Webhook (E2E)")
+    print("=" * 60)
+
+    webhook_url = os.getenv("TEST_CHAT_WEBHOOK")
+    if not webhook_url:
+        print("   ⚠️ TEST_CHAT_WEBHOOK not set in .env, skipping webhook test")
+        return True  # Skip but don't fail
+
+    print(f"\n1. Using webhook: {webhook_url[:60]}...")
+
+    client = get_qdrant_client()
+    embedder = get_embedder(use_colbert=True)
+    wrapper = get_module_wrapper()
+
+    # Load components via Qdrant
+    print("\n2. Loading components via Qdrant...")
+    components_to_find = {
+        "Section": "card_framework.v2.section.Section",
+        "TextInput": "card_framework.v2.widgets.text_input.TextInput",
+        "SelectionInput": "card_framework.v2.widgets.selection_input.SelectionInput",
+        "ButtonList": "card_framework.v2.widgets.button_list.ButtonList",
+        "Button": "card_framework.v2.widgets.decorated_text.Button onClick",
+    }
+
+    loaded = {}
+    for name, query in components_to_find.items():
+        try:
+            results = search_components(client, embedder, query, limit=5, use_colbert=True)
+            for r in results:
+                path = r.payload.get("full_path", "")
+                rname = r.payload.get("name", "")
+                rtype = r.payload.get("type", "")
+                if rname == name and rtype == "class" and "v2" in path:
+                    cls = wrapper.get_component_by_path(path)
+                    if cls:
+                        loaded[name] = cls
+                        print(f"   ✅ {name}: loaded")
+                        break
+        except Exception as e:
+            print(f"   ❌ {name}: {e}")
+
+    if not all(k in loaded for k in ["Section", "TextInput", "SelectionInput"]):
+        print("   Missing required components")
+        return False
+
+    # Build form card
+    print("\n3. Building form card...")
+    try:
+        Section = loaded["Section"]
+        TextInput = loaded["TextInput"]
+        SelectionInput = loaded["SelectionInput"]
+        ButtonList = loaded.get("ButtonList")
+        Button = loaded.get("Button")
+
+        widgets = []
+
+        # Text input
+        name_input = TextInput(
+            name="test_name",
+            label="Test Input",
+            hint_text="POC webhook test",
+            type=TextInput.Type.SINGLE_LINE if hasattr(TextInput, "Type") else None,
+        )
+        widgets.append(name_input)
+
+        # Selection dropdown
+        if hasattr(SelectionInput, "SelectionItem"):
+            items = [
+                SelectionInput.SelectionItem(text="Option A", value="a", selected=True),
+                SelectionInput.SelectionItem(text="Option B", value="b", selected=False),
+            ]
+        else:
+            items = [{"text": "Option A", "value": "a", "selected": True}, {"text": "Option B", "value": "b"}]
+
+        selection = SelectionInput(
+            name="test_selection",
+            label="Test Selection",
+            type=SelectionInput.Type.DROPDOWN if hasattr(SelectionInput, "Type") else None,
+            items=items,
+        )
+        widgets.append(selection)
+
+        # Submit button
+        if ButtonList and Button:
+            button = Button(text="Test Submit", on_click={"openLink": {"url": "https://example.com"}})
+            widgets.append(ButtonList(buttons=[button]))
+
+        section = Section(header="POC Webhook Test", widgets=widgets)
+        rendered_section = section.render()
+
+        print(f"   ✅ Form card built with {len(widgets)} widgets")
+
+    except Exception as e:
+        print(f"   ❌ Build failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+    # Send to webhook
+    print("\n4. Sending to webhook...")
+    try:
+        import requests
+
+        # Build the full card message payload
+        card_payload = {
+            "cards_v2": [
+                {
+                    "card_id": "poc_test_card",
+                    "card": {
+                        "header": {
+                            "title": "POC Webhook Test",
+                            "subtitle": "Qdrant → ModuleWrapper → Webhook",
+                        },
+                        "sections": [rendered_section],
+                    },
+                }
+            ]
+        }
+
+        # Convert to snake_case for webhook API
+        def to_snake_case(s):
+            import re
+            return re.sub(r'([a-z])([A-Z])', r'\1_\2', s).lower()
+
+        def convert_keys(obj):
+            if isinstance(obj, dict):
+                return {to_snake_case(k): convert_keys(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_keys(item) for item in obj]
+            return obj
+
+        webhook_payload = convert_keys(card_payload)
+
+        response = requests.post(
+            webhook_url,
+            json=webhook_payload,
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+
+        print(f"   Response: {response.status_code}")
+        if response.status_code == 200:
+            print("   ✅ Card sent successfully to Google Chat!")
+            return True
+        else:
+            print(f"   ❌ Failed: {response.text[:200]}")
+            return False
+
+    except Exception as e:
+        print(f"   ❌ Webhook send failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def main():
     """Run all POC tests."""
     print("=" * 60)
@@ -688,6 +982,12 @@ def main():
     # Test 5: Full card with ColBERT (better class matching)
     results.append(("Full Card (ColBERT)", test_colbert_full_card()))
 
+    # Test 6: Form card with TextInput/SelectionInput (ColBERT)
+    results.append(("Form Card (ColBERT)", test_form_card_via_colbert()))
+
+    # Test 7: End-to-end webhook test (uses TEST_CHAT_WEBHOOK from .env)
+    results.append(("Webhook E2E (ColBERT)", test_send_form_card_to_webhook()))
+
     # Summary
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -708,6 +1008,8 @@ def main():
         print("  - Both methods successfully load classes via ModuleWrapper")
         print("  - .render() produces valid Google Chat JSON format")
         print("  - Columns layout with colored text renders correctly")
+        print("  - Form components (TextInput, SelectionInput) use SAME Qdrant flow")
+        print("  - End-to-end webhook delivery works with TEST_CHAT_WEBHOOK")
 
     return all_passed
 

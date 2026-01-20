@@ -1,0 +1,46 @@
+# Example Template File
+#
+# This file shows the format for approved card templates.
+# Templates are automatically created when patterns receive enough positive feedback.
+#
+# Promotion thresholds:
+# - 3+ positive feedbacks: Promoted to type="template" in Qdrant
+# - 10+ positive feedbacks: Promoted to YAML file (like this one)
+#
+# Templates can also be manually created for common card patterns.
+
+name: example_product_card
+
+# Components define which card_framework classes to instantiate
+# Each component has a path (full module path) and params
+components:
+  - path: card_framework.v2.widgets.decorated_text.DecoratedText
+    params:
+      text: "${price}"
+      top_label: "Price"
+      wrap_text: true
+
+  - path: card_framework.v2.widgets.button_list.ButtonList
+    params:
+      buttons:
+        - text: "${button_text}"
+          url: "${button_url}"
+
+# Default values for parameters
+# These are used when the template is instantiated without overrides
+defaults:
+  title: "Product"
+  subtitle: ""
+  price: "$99.99"
+  button_text: "Buy Now"
+  button_url: "#"
+
+# Layout hints for how to assemble the card
+layout:
+  type: standard  # Options: standard, sections, columns
+
+# Metadata (auto-populated for promoted templates)
+metadata:
+  source_description: "Example template for demonstration"
+  positive_count: 0
+  created_at: "2026-01-20"

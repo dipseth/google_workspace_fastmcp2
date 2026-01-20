@@ -263,6 +263,19 @@ def pytest_configure(config):
     )
 
 
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create a session-scoped event loop for async fixtures.
+
+    This is required for session-scoped async fixtures to work properly
+    with pytest-asyncio. Without this, session-scoped async fixtures
+    will hang because they try to use a function-scoped event loop.
+    """
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def print_global_test_config():
     """Print test configuration once per session."""
@@ -338,13 +351,14 @@ async def session_cleanup():
     print(f"{'='*60}\n")
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def client():
-    """Create a session-scoped client connected to the running server.
+    """Create a function-scoped client connected to the running server.
+
+    NOTE: Changed from session-scoped to function-scoped to fix hanging issue
+    with pytest-asyncio event loop scope. Each test gets a fresh client.
 
     IMPORTANT:
-    - Session-scoped so all tests share the same connection and session state
-    - Tools enabled in one test remain enabled for subsequent tests
     - Always use the shared connection logic in [`tests/client/base_test_config.create_test_client()`](tests/client/base_test_config.py:90)
       so tests don't depend on a valid local TLS/CA chain.
     - If the server is not running, skip the suite (this is an integration-style test harness).

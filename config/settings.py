@@ -117,6 +117,13 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "COLBERT_EMBEDDING_DEV"},
     )
 
+    # Google Chat Card Collection Configuration
+    card_collection: str = Field(
+        default="card_framework_components_colbert_v2",
+        description="Qdrant collection for Google Chat card components, templates, and feedback patterns",
+        json_schema_extra={"env": "CARD_COLLECTION"},
+    )
+
     # Phase 1 OAuth Migration Feature Flags
     enable_unified_auth: bool = True
     legacy_compat_mode: bool = True

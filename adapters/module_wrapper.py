@@ -2387,10 +2387,15 @@ class ModuleWrapper:
 
         Args:
             path: Path to the component (e.g., "module.submodule.function")
+                  Can also be a template path like "card_framework.templates.my_template"
 
         Returns:
             The component if found, None otherwise
         """
+        # Check for template paths (card_framework.templates.* or card_framework.patterns.*)
+        if ".templates." in path or ".patterns." in path:
+            return self._get_template_component(path)
+
         # Check if path is in components
         component = self.components.get(path)
         if component and component.obj is not None:
@@ -2460,6 +2465,78 @@ class ModuleWrapper:
         if component:
             return component.to_dict()
         return None
+
+    def _get_template_component(self, path: str) -> Optional[Any]:
+        """
+        Get a template component by its path.
+
+        Template paths look like:
+        - card_framework.templates.approved_product_card_v1
+        - card_framework.patterns.my_custom_template
+
+        This method:
+        1. Tries to load from the TemplateRegistry (YAML files)
+        2. Falls back to searching Qdrant for type="template"
+
+        Args:
+            path: Template path
+
+        Returns:
+            TemplateComponent instance or None
+        """
+        try:
+            from gchat.template_component import TemplateComponent, get_template_registry
+
+            # Extract template name from path
+            # card_framework.templates.my_template -> my_template
+            parts = path.split(".")
+            template_name = parts[-1] if parts else path
+
+            # Try registry first (YAML files)
+            registry = get_template_registry()
+            template_data = registry.get_template(template_name)
+
+            if template_data:
+                logger.info(f"📄 Loaded template from registry: {template_name}")
+                return TemplateComponent(template_data, module_wrapper=self)
+
+            # Try Qdrant for type="template"
+            if self.client:
+                try:
+                    from qdrant_client import models
+
+                    results, _ = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="type",
+                                    match=models.MatchValue(value="template"),
+                                ),
+                                models.FieldCondition(
+                                    key="name",
+                                    match=models.MatchValue(value=template_name),
+                                ),
+                            ]
+                        ),
+                        limit=1,
+                        with_payload=True,
+                    )
+
+                    if results:
+                        payload = results[0].payload
+                        logger.info(f"🔍 Loaded template from Qdrant: {template_name}")
+                        return TemplateComponent(payload, module_wrapper=self)
+
+                except Exception as e:
+                    logger.debug(f"Qdrant template lookup failed: {e}")
+
+            logger.warning(f"⚠️ Template not found: {template_name}")
+            return None
+
+        except ImportError as e:
+            logger.warning(f"Could not import template_component: {e}")
+            return None
 
     def list_components(self, component_type: Optional[str] = None) -> List[str]:
         """

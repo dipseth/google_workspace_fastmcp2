@@ -16,13 +16,19 @@ import importlib
 import logging
 import os
 import re
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
+from config.settings import settings as _settings
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Feature flag for feedback buttons (can be disabled if needed)
+ENABLE_FEEDBACK_BUTTONS = os.getenv("ENABLE_CARD_FEEDBACK", "true").lower() == "true"
 
 
 class SmartCardBuilder:
@@ -158,6 +164,7 @@ class SmartCardBuilder:
         self._components: Dict[str, Any] = {}
         self._initialized = False
         self._qdrant_available = False
+        self._collection_verified = False
 
     def _get_qdrant_client(self):
         """Get Qdrant client from centralized singleton."""
@@ -177,7 +184,28 @@ class SmartCardBuilder:
                 logger.warning(f"Could not get Qdrant client: {e}")
                 self._qdrant_available = False
 
+        # Ensure collection exists (auto-creates if missing)
+        if self._qdrant_client and not self._collection_verified:
+            self._ensure_collection_exists()
+
         return self._qdrant_client
+
+    def _ensure_collection_exists(self):
+        """Ensure the card collection exists, creating it if necessary."""
+        if self._collection_verified:
+            return
+
+        try:
+            from gchat.feedback_loop import get_feedback_loop
+
+            feedback_loop = get_feedback_loop()
+            if feedback_loop.ensure_description_vector_exists():
+                self._collection_verified = True
+                logger.debug(f"✅ Collection {_settings.card_collection} verified/created")
+            else:
+                logger.warning(f"⚠️ Collection {_settings.card_collection} not ready")
+        except Exception as e:
+            logger.warning(f"Could not verify collection: {e}")
 
     def _get_embedder(self):
         """Get ColBERT embedder for semantic search."""
@@ -204,7 +232,7 @@ class SmartCardBuilder:
                 module_or_name="card_framework",
                 qdrant_url=os.getenv("QDRANT_URL"),
                 qdrant_api_key=os.getenv("QDRANT_KEY"),
-                collection_name="card_framework_components_colbert",
+                collection_name=_settings.card_collection,
                 auto_initialize=False,  # Don't re-index, just load module
             )
 
@@ -234,7 +262,7 @@ class SmartCardBuilder:
             query_vectors = [vec.tolist() for vec in query_vectors_raw]
 
             results = client.query_points(
-                collection_name="card_framework_components_colbert",
+                collection_name=_settings.card_collection,
                 query=query_vectors,
                 using="colbert",
                 limit=limit,
@@ -306,6 +334,15 @@ class SmartCardBuilder:
         if self._qdrant_available:
             results = self._search_component(query, limit=10)
             for r in results:
+                # Handle template types
+                if r["type"] == "template":
+                    template = self._load_component_by_path(r["full_path"])
+                    if template:
+                        self._components[r["name"]] = template
+                        logger.info(f"🎯 Loaded template from Qdrant: {r['name']}")
+                        return template
+
+                # Handle class types
                 if r["name"] == name and r["type"] == "class" and "v2" in r["full_path"]:
                     cls = self._load_component_by_path(r["full_path"])
                     if cls:
@@ -322,6 +359,71 @@ class SmartCardBuilder:
                 return cls
 
         return None
+
+    def _find_matching_template(self, description: str) -> Optional[Any]:
+        """
+        Search for a matching template by description similarity.
+
+        This is used to find promoted templates that match the user's description.
+        Templates are prioritized over building from scratch when available.
+
+        Args:
+            description: Card description to match
+
+        Returns:
+            TemplateComponent instance or None
+        """
+        if not self._qdrant_available:
+            return None
+
+        try:
+            from qdrant_client import models
+
+            # Embed the description
+            embedder = self._get_embedder()
+            if not embedder:
+                return None
+
+            description_vectors_raw = list(embedder.query_embed(description))[0]
+            description_vectors = [vec.tolist() for vec in description_vectors_raw]
+
+            # Search for templates by description similarity
+            client = self._get_qdrant_client()
+            results = client.query_points(
+                collection_name=_settings.card_collection,
+                query=description_vectors,
+                using="description_colbert",
+                query_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="template"),
+                        )
+                    ]
+                ),
+                limit=1,
+                with_payload=True,
+                score_threshold=0.7,  # Higher threshold for template matching
+            )
+
+            if results.points:
+                best = results.points[0]
+                template_name = best.payload.get("name")
+                full_path = best.payload.get("full_path")
+
+                logger.info(
+                    f"🎯 Found matching template: {template_name} "
+                    f"(score={best.score:.3f})"
+                )
+
+                # Load via ModuleWrapper (which handles templates)
+                return self._load_component_by_path(full_path)
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Template search failed: {e}")
+            return None
 
     def initialize(self):
         """Initialize Qdrant connection and load core components."""
@@ -854,16 +956,17 @@ class SmartCardBuilder:
         """
         Parse a natural language description into structured content.
 
-        Extracts sections, items, buttons, and icons from patterns like:
+        Extracts sections, items, buttons, icons, AND form fields from patterns like:
         - "First section titled 'X' showing Y. Second section titled 'Z' showing W."
         - "A status card with check icon showing 'Success' and warning showing 'Alert'"
         - "Include buttons for 'View' linking to https://..."
+        - "A form card with text input field named 'name' with label 'Your Name'..."
 
         Args:
             description: Natural language card description
 
         Returns:
-            Dict with: sections, items, buttons ready for build_card()
+            Dict with: sections, items, buttons, fields, submit_action ready for build_card()
         """
         logger.info(f"📝 Parsing description: {description[:100]}...")
 
@@ -871,7 +974,17 @@ class SmartCardBuilder:
             "sections": [],
             "items": [],
             "buttons": [],
+            "fields": [],
+            "submit_action": None,
         }
+
+        # Check for form intent first - if detected, extract form fields
+        form_fields, submit_action = self._extract_form_fields(description)
+        if form_fields:
+            result["fields"] = form_fields
+            result["submit_action"] = submit_action
+            logger.info(f"✅ Extracted {len(form_fields)} form field(s)")
+            return result
 
         # Try to extract sections first (most structured format)
         sections = self._extract_sections(description)
@@ -893,6 +1006,109 @@ class SmartCardBuilder:
             logger.info(f"✅ Extracted {len(buttons)} button(s)")
 
         return result
+
+    def _extract_form_fields(self, description: str) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """
+        Extract form fields from a natural language description.
+
+        Detects patterns like:
+        - "text input field named 'name' with label 'Your Name' and hint 'Enter your name'"
+        - "dropdown selection field named 'rating' with label 'Rating' and options 'A', 'B', 'C'"
+        - "submit button with text 'Submit' that opens URL 'https://...'"
+
+        Returns:
+            Tuple of (fields list, submit_action dict)
+            fields: [{type: "TextInput"/"SelectionInput", name, label, hint_text, ...}]
+            submit_action: {url: "..."} or {function: "..."}
+        """
+        description_lower = description.lower()
+
+        # Check for form intent keywords
+        form_keywords = ["form card", "text input", "input field", "dropdown", "selection field", "submit button"]
+        has_form_intent = any(kw in description_lower for kw in form_keywords)
+
+        if not has_form_intent:
+            return [], None
+
+        logger.info("📝 Form intent detected, extracting form fields...")
+        fields = []
+        submit_action = None
+
+        # Extract text input fields
+        # Pattern: "text input field named 'X' with label 'Y' and hint 'Z'"
+        text_input_pattern = re.compile(
+            r"text\s+input\s+(?:field\s+)?named\s+['\"](\w+)['\"]"
+            r"\s+with\s+label\s+['\"]([^'\"]+)['\"]"
+            r"(?:\s+(?:and\s+)?hint\s+['\"]([^'\"]+)['\"])?",
+            re.IGNORECASE,
+        )
+        for match in text_input_pattern.finditer(description):
+            name, label, hint = match.groups()
+            field = {
+                "type": "TextInput",
+                "name": name,
+                "label": label,
+            }
+            if hint:
+                field["hint_text"] = hint
+            fields.append(field)
+            logger.info(f"  📝 TextInput: name={name}, label={label}")
+
+        # Extract dropdown/selection fields
+        # Pattern: "dropdown selection field named 'X' with label 'Y' and options 'A', 'B', 'C'"
+        selection_pattern = re.compile(
+            r"(?:dropdown\s+)?selection\s+field\s+named\s+['\"](\w+)['\"]"
+            r"\s+with\s+label\s+['\"]([^'\"]+)['\"]"
+            r"(?:\s+(?:and\s+)?options?\s+(.+?))?(?:\.|$)",
+            re.IGNORECASE,
+        )
+        for match in selection_pattern.finditer(description):
+            name, label, options_str = match.groups()
+            field = {
+                "type": "SelectionInput",
+                "name": name,
+                "label": label,
+                "selection_type": "DROPDOWN",
+            }
+            if options_str:
+                # Parse options: "Excellent", "Good", "Needs Improvement"
+                option_pattern = re.compile(r"['\"]([^'\"]+)['\"]")
+                options = option_pattern.findall(options_str)
+                if options:
+                    field["items"] = [
+                        {"text": opt, "value": opt.lower().replace(" ", "_"), "selected": i == 0}
+                        for i, opt in enumerate(options)
+                    ]
+            fields.append(field)
+            logger.info(f"  📝 SelectionInput: name={name}, label={label}")
+
+        # Extract submit button
+        # Pattern: "submit button with text 'X' that opens URL 'Y'"
+        submit_url_pattern = re.compile(
+            r"submit\s+button\s+(?:with\s+text\s+)?['\"]([^'\"]+)['\"]"
+            r"\s+(?:that\s+)?opens?\s+(?:URL\s+)?['\"]?(https?://[^\s'\"]+)['\"]?",
+            re.IGNORECASE,
+        )
+        match = submit_url_pattern.search(description)
+        if match:
+            button_text, url = match.groups()
+            submit_action = {"url": url, "text": button_text}
+            logger.info(f"  📝 Submit button: text={button_text}, url={url}")
+
+        # Pattern: "submit button that calls function 'X'"
+        if not submit_action:
+            submit_func_pattern = re.compile(
+                r"submit\s+button\s+(?:with\s+text\s+)?['\"]([^'\"]+)['\"]"
+                r"\s+(?:that\s+)?calls?\s+(?:function\s+)?['\"]?([a-zA-Z_]\w*)['\"]?",
+                re.IGNORECASE,
+            )
+            match = submit_func_pattern.search(description)
+            if match:
+                button_text, function = match.groups()
+                submit_action = {"function": function, "text": button_text}
+                logger.info(f"  📝 Submit button: text={button_text}, function={function}")
+
+        return fields, submit_action
 
     def _extract_sections(self, description: str) -> List[Dict[str, Any]]:
         """
@@ -1019,11 +1235,27 @@ class SmartCardBuilder:
         widgets = []
         content = content.strip()
 
-        # Clean instructional phrases
+        # Clean instructional phrases - these describe HOW to render, not WHAT to display
         instructional_patterns = [
-            r"\bdecorated\s+text\s+(?:showing|with|displaying)\s*",
+            # "decorated text" variations
+            r"\bdecorated\s+text\s+(?:showing|with|displaying)?\s*",
+            # "with a link/open button"
             r"\bwith\s+(?:a\s+)?(?:link|open)\s+button\b[,.]?\s*",
+            # "with a X icon"
             r"\bwith\s+(?:a\s+)?(\w+)\s+icon\b[,.]?\s*",
+            # Trailing "button" before URL (e.g., "Buy this" button https://...)
+            r"\s+button\s+(?=https?://)",
+            r"\s+button$",
+            # "linking to", "links to", "goes to" (but keep the URL)
+            r"\s+(?:linking|links?|goes?)\s+to\s+(?=https?://)",
+            # "add/include/create X button(s)"
+            r"\b(?:add|include|create|show)\s+(?:a\s+)?(?:\w+\s+)?buttons?\s*:?\s*",
+            # Button style descriptors before button text
+            r"\bFILLED\s+",
+            r"\bOUTLINED\s+",
+            r"\bBORDERLESS\s+",
+            # "at" before URL (e.g., "Click here at https://...")
+            r"\s+at\s+(?=https?://)",
         ]
         mentioned_icons = []
         for pattern in instructional_patterns:
@@ -1051,7 +1283,13 @@ class SmartCardBuilder:
                 # Get text before URL
                 url_pos = content.find(url)
                 text_before = content[:url_pos].strip() if url_pos > 0 else ""
-                text_before = re.sub(r"^\s*(and|at|,|;)\s*", "", text_before, flags=re.IGNORECASE).strip()
+
+                # Clean leading conjunctions/prepositions
+                text_before = re.sub(r"^\s*(and|at|,|;|:)\s*", "", text_before, flags=re.IGNORECASE).strip()
+                # Clean trailing instruction words
+                text_before = re.sub(r"\s*(button|linking|links?|goes?|to|at)\s*$", "", text_before, flags=re.IGNORECASE).strip()
+                # Remove orphaned quotes at edges
+                text_before = re.sub(r'^["\']|["\']$', "", text_before).strip()
 
                 display_text = text_before if len(text_before) > 3 else url
 
@@ -1142,6 +1380,62 @@ class SmartCardBuilder:
         if not self._initialized:
             self.initialize()
 
+        # =====================================================================
+        # FEEDBACK LOOP: Check for proven patterns from similar successful cards
+        # =====================================================================
+        proven_params = self._get_proven_params(description)
+        if proven_params:
+            logger.info(f"🎯 Found proven pattern for similar description, merging params")
+            # Merge proven params with explicit params (explicit takes priority)
+            # This allows learned patterns to fill in gaps while respecting user intent
+            title = title or proven_params.get("title")
+            subtitle = subtitle or proven_params.get("subtitle")
+            image_url = image_url or proven_params.get("image_url")
+            text = text or proven_params.get("text")
+            # Merge buttons: explicit buttons first, then proven buttons
+            if not buttons and proven_params.get("buttons"):
+                buttons = proven_params.get("buttons")
+            # Merge fields for form cards
+            if not fields and proven_params.get("fields"):
+                fields = proven_params.get("fields")
+            if not submit_action and proven_params.get("submit_action"):
+                submit_action = proven_params.get("submit_action")
+
+        # =====================================================================
+        # TEMPLATE SYSTEM: Check for highly-matched promoted templates
+        # =====================================================================
+        # Templates are patterns that have received many positive feedbacks
+        # and have been "promoted" to first-class components.
+        # Using a template is faster and more reliable than building from scratch.
+        matching_template = self._find_matching_template(description)
+        if matching_template:
+            try:
+                logger.info(f"🎯 Using promoted template for card generation")
+                # Render the template with any override params
+                rendered = matching_template.render()
+
+                # Apply explicit overrides if provided
+                if title and "header" not in rendered:
+                    rendered["header"] = {"title": title, "subtitle": subtitle or ""}
+                elif title and "header" in rendered:
+                    rendered["header"]["title"] = title
+                    if subtitle:
+                        rendered["header"]["subtitle"] = subtitle
+
+                # Add feedback section
+                if ENABLE_FEEDBACK_BUTTONS:
+                    card_id = str(uuid.uuid4())
+                    feedback_section = self._create_feedback_section(card_id)
+                    if "sections" in rendered:
+                        rendered["sections"].append(feedback_section)
+                    else:
+                        rendered["sections"] = [feedback_section]
+                    rendered["_card_id"] = card_id
+
+                return rendered
+            except Exception as e:
+                logger.warning(f"Template rendering failed, falling back to normal build: {e}")
+
         # If fields are provided, build a form card
         if fields:
             return self._build_form_card(
@@ -1154,6 +1448,18 @@ class SmartCardBuilder:
 
         # Parse description into structured content
         parsed = self.parse_description(description)
+
+        # If form fields were extracted from description, build form card
+        # This uses the same Qdrant → ModuleWrapper flow via build_text_input(), etc.
+        if parsed.get("fields"):
+            logger.info(f"📝 Form fields detected in description, building form card")
+            return self._build_form_card(
+                title=title,
+                subtitle=subtitle,
+                text=text,
+                fields=parsed["fields"],
+                submit_action=parsed.get("submit_action"),
+            )
 
         # If we have sections from NLP parsing, build multi-section card
         if parsed.get("sections"):
@@ -1294,7 +1600,26 @@ class SmartCardBuilder:
                 last_section["widgets"].append({"buttonList": {"buttons": button_widgets}})
                 logger.info(f"✅ Added {len(button_widgets)} button(s) to last section")
 
+        # Add feedback section if enabled
+        card_id = None
+        if ENABLE_FEEDBACK_BUTTONS:
+            card_id = str(uuid.uuid4())
+            feedback_section = self._create_feedback_section(card_id)
+            rendered_sections.append(feedback_section)
+
+            # Store pattern for feedback collection
+            try:
+                self._store_card_pattern(
+                    card_id=card_id,
+                    description=f"multi-section card: {title or 'untitled'}",
+                    component_paths=["Section", "DecoratedText"],  # Common components
+                    instance_params={"title": title, "subtitle": subtitle, "sections": len(sections)},
+                )
+            except Exception as e:
+                logger.debug(f"Could not store card pattern: {e}")
+
         card["sections"] = rendered_sections
+        card["_card_id"] = card_id  # Internal: for tracking
 
         return card
 
@@ -1350,7 +1675,7 @@ class SmartCardBuilder:
                     component = self.build_text_input(
                         name=field_name,
                         label=field_label,
-                        hint_text=field.get("hint"),
+                        hint_text=field.get("hint_text") or field.get("hint"),
                         value=field.get("value"),
                         type_=input_type,
                     )
@@ -1803,6 +2128,28 @@ class SmartCardBuilder:
         # Render to JSON
         rendered = section.render()
 
+        # Build sections list
+        sections = [rendered]
+
+        # Add feedback section if enabled
+        card_id = None
+        if ENABLE_FEEDBACK_BUTTONS:
+            card_id = str(uuid.uuid4())
+            feedback_section = self._create_feedback_section(card_id)
+            sections.append(feedback_section)
+
+            # Store pattern for feedback collection (async-safe, non-blocking)
+            try:
+                component_paths = list(self._components.keys())  # Components used
+                self._store_card_pattern(
+                    card_id=card_id,
+                    description=description,
+                    component_paths=[self.FALLBACK_PATHS.get(p, p) for p in component_paths],
+                    instance_params=content,
+                )
+            except Exception as e:
+                logger.debug(f"Could not store card pattern: {e}")
+
         # Wrap in card structure if title provided
         if content.get("title"):
             return {
@@ -1810,10 +2157,14 @@ class SmartCardBuilder:
                     "title": content["title"],
                     "subtitle": content.get("subtitle", ""),
                 },
-                "sections": [rendered],
+                "sections": sections,
+                "_card_id": card_id,  # Internal: for tracking
             }
 
-        return rendered
+        # If no title, return just the section(s)
+        if len(sections) == 1:
+            return rendered
+        return {"sections": sections, "_card_id": card_id}
 
     # =========================================================================
     # HELPER: Format colored price
@@ -1902,6 +2253,163 @@ class SmartCardBuilder:
         # text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
 
         return text
+
+    # =========================================================================
+    # FEEDBACK LOOP INTEGRATION
+    # =========================================================================
+
+    def _create_feedback_section(self, card_id: str, feedback_webhook_url: str = None) -> Dict[str, Any]:
+        """
+        Create a feedback section with 👍/👎 buttons using the component system.
+
+        Uses the same Qdrant → ModuleWrapper → render() flow as all other components.
+
+        Args:
+            card_id: Unique ID for this card (used to link feedback)
+            feedback_webhook_url: Optional custom webhook URL for feedback
+
+        Returns:
+            Section dict with feedback buttons
+        """
+        # Default feedback URL - use server's /card-feedback endpoint
+        # Can be overridden via CARD_FEEDBACK_WEBHOOK env var
+        if feedback_webhook_url:
+            base_url = feedback_webhook_url
+        else:
+            # Try to get from env, fall back to settings base_url
+            base_url = os.getenv("CARD_FEEDBACK_WEBHOOK")
+            if not base_url:
+                try:
+                    from config.settings import settings
+                    base_url = f"{settings.base_url}/card-feedback"
+                except Exception:
+                    base_url = "https://example.com/card-feedback"  # Fallback
+
+        widgets = []
+
+        # Build the prompt text using DecoratedText component
+        prompt_widget = self.build_decorated_text(
+            text="<i>Was this card helpful?</i>",
+            wrap_text=True,
+        )
+        if prompt_widget:
+            widgets.append(prompt_widget.render())
+        else:
+            # Fallback if component not available
+            widgets.append({
+                "decoratedText": {
+                    "text": "<i>Was this card helpful?</i>",
+                    "wrapText": True,
+                }
+            })
+
+        # Build feedback buttons using ButtonList component
+        ButtonList = self.get_component("ButtonList")
+        Button = self.get_component("Button")
+        OnClick = self.get_component("OnClick")
+
+        if ButtonList and Button and OnClick:
+            try:
+                # Create Good button
+                good_on_click = OnClick(open_link={"url": f"{base_url}?card_id={card_id}&feedback=positive"})
+                good_button = Button(text="👍 Good", on_click=good_on_click)
+
+                # Create Bad button
+                bad_on_click = OnClick(open_link={"url": f"{base_url}?card_id={card_id}&feedback=negative"})
+                bad_button = Button(text="👎 Bad", on_click=bad_on_click)
+
+                # Create ButtonList with both buttons
+                button_list = ButtonList(buttons=[good_button, bad_button])
+                widgets.append(button_list.render())
+
+                logger.debug(f"✅ Built feedback buttons via ModuleWrapper for card {card_id[:8]}...")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to build feedback buttons via ModuleWrapper: {e}, using fallback")
+                # Fallback to manual JSON
+                widgets.append({
+                    "buttonList": {
+                        "buttons": [
+                            {"text": "👍 Good", "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=positive"}}},
+                            {"text": "👎 Bad", "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=negative"}}},
+                        ]
+                    }
+                })
+        else:
+            # Fallback if components not available
+            logger.warning("⚠️ ButtonList/Button/OnClick components not available, using fallback JSON")
+            widgets.append({
+                "buttonList": {
+                    "buttons": [
+                        {"text": "👍 Good", "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=positive"}}},
+                        {"text": "👎 Bad", "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=negative"}}},
+                    ]
+                }
+            })
+
+        return {"widgets": widgets}
+
+    def _store_card_pattern(
+        self,
+        card_id: str,
+        description: str,
+        component_paths: List[str],
+        instance_params: Dict[str, Any],
+        user_email: str = None,
+    ) -> bool:
+        """
+        Store a card usage pattern for feedback collection.
+
+        Args:
+            card_id: Unique ID for this card
+            description: Original card description
+            component_paths: List of component paths used
+            instance_params: Parameters used to build the card
+            user_email: User who created the card
+
+        Returns:
+            True if stored successfully
+        """
+        try:
+            from gchat.feedback_loop import get_feedback_loop
+
+            feedback_loop = get_feedback_loop()
+            point_id = feedback_loop.store_instance_pattern(
+                card_description=description,
+                component_paths=component_paths,
+                instance_params=instance_params,
+                feedback=None,  # Will be updated when user clicks 👍/👎
+                user_email=user_email,
+                card_id=card_id,
+            )
+
+            if point_id:
+                logger.info(f"📝 Stored card pattern for feedback: {card_id}")
+                return True
+            return False
+
+        except Exception as e:
+            logger.warning(f"Failed to store card pattern: {e}")
+            return False
+
+    def _get_proven_params(self, description: str) -> Optional[Dict[str, Any]]:
+        """
+        Get proven parameters from similar successful cards.
+
+        Args:
+            description: Card description to match
+
+        Returns:
+            instance_params from best matching positive pattern, or None
+        """
+        try:
+            from gchat.feedback_loop import get_feedback_loop
+
+            feedback_loop = get_feedback_loop()
+            return feedback_loop.get_proven_params_for_description(description)
+
+        except Exception as e:
+            logger.debug(f"Could not get proven params: {e}")
+            return None
 
 
 # Global instance for convenience

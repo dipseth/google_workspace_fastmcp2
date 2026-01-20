@@ -498,14 +498,17 @@ def _validate_card_content(card_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
                                 section_has_content = True
                                 break
 
-                # Check other widget types
+                # Check other widget types (support both camelCase and snake_case)
                 elif any(
                     key in widget
                     for key in [
-                        "decoratedText",
-                        "selectionInput",
-                        "textInput",
+                        "decoratedText", "decorated_text",
+                        "selectionInput", "selection_input",
+                        "textInput", "text_input",
                         "divider",
+                        "buttonList", "button_list",
+                        "columns",
+                        "grid",
                     ]
                 ):
                     section_has_content = True
@@ -768,6 +771,25 @@ def _camel_to_snake(camel_str: str) -> str:
 
     _camel_to_snake_cache[camel_str] = result
     return result
+
+
+def _strip_internal_fields(obj: Any) -> Any:
+    """
+    Recursively strip internal fields (starting with _) from dictionaries.
+
+    These fields are used internally (e.g., _card_id for feedback tracking)
+    but should not be sent to external APIs like Google Chat.
+    """
+    if isinstance(obj, dict):
+        return {
+            key: _strip_internal_fields(value)
+            for key, value in obj.items()
+            if not key.startswith("_")
+        }
+    elif isinstance(obj, list):
+        return [_strip_internal_fields(item) for item in obj]
+    else:
+        return obj
 
 
 def setup_unified_card_tool(mcp: FastMCP) -> None:
@@ -1067,6 +1089,9 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 )
                 webhook_message_body = _convert_field_names_to_snake_case(message_body)
 
+                # Strip internal fields (like _card_id) that shouldn't be sent to the API
+                webhook_message_body = _strip_internal_fields(webhook_message_body)
+
                 # CRITICAL FIX: Add thread to message body for webhook threading
                 if thread_key:
                     webhook_message_body["thread"] = {"name": thread_key}
@@ -1274,7 +1299,9 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                     )
 
                 # Add thread key if provided
-                request_params = {"parent": space_id, "body": message_body}
+                # Strip internal fields (like _card_id) before sending to API
+                api_message_body = _strip_internal_fields(message_body)
+                request_params = {"parent": space_id, "body": api_message_body}
                 _process_thread_key_for_request(request_params, thread_key)
 
                 message = await asyncio.to_thread(
