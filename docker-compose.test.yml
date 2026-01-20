@@ -1,0 +1,18 @@
+# Docker Compose override for testing on alternate ports
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.test.yml up
+
+services:
+  fastmcp-server:
+    container_name: fastmcp-google-workspace-test
+    # Override ports - docker-compose replaces arrays when !override is used
+    ports: !override
+      - "9002:8002"
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - MCP_TRANSPORT=http
+
+  qdrant:
+    container_name: fastmcp-qdrant-test
+    ports: !override
+      - "9333:6333"
+      - "9334:6334"
