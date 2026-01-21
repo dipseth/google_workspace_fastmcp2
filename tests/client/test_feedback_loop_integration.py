@@ -88,7 +88,12 @@ class TestFeedbackButtonsPresent:
         except json.JSONDecodeError:
             # Text response - check for success indicators
             # Note: "human credentials" error occurs when sending cards via API without webhook
-            valid_responses = ["success", "card sent", "requires authentication", "human credentials"]
+            valid_responses = [
+                "success",
+                "card sent",
+                "requires authentication",
+                "human credentials",
+            ]
             assert any(keyword in content.lower() for keyword in valid_responses)
 
 
@@ -107,7 +112,9 @@ class TestFeedbackPatternStorage:
             pytest.skip("TEST_CHAT_SPACE_ID not configured")
 
         # Send a distinctive card
-        card_description = 'Product card showing price "$299.99" with a "Purchase" button'
+        card_description = (
+            'Product card showing price "$299.99" with a "Purchase" button'
+        )
 
         result = await client.call_tool(
             "send_dynamic_card",
@@ -159,7 +166,7 @@ class TestProvenParamsMerging:
 
         # Query similar to cards that may have received positive feedback
         # (like the product cards from the warm-start patterns)
-        card_description = 'Show a product with price and buy button'
+        card_description = "Show a product with price and buy button"
 
         result = await client.call_tool(
             "send_dynamic_card",
@@ -271,7 +278,7 @@ class TestFeedbackCollectionConfiguration:
         class_results, pattern_results = fl.query_with_feedback(
             component_query="card widget",
             description="product card with price",
-            limit=5
+            limit=5,
         )
 
         print(f"\nHybrid query results:")
@@ -311,7 +318,9 @@ class TestEndToEndFeedbackFlow:
             pytest.skip("TEST_CHAT_SPACE_ID not configured")
 
         # Step 1: Send a distinctive card
-        unique_desc = 'Dashboard card showing "Server Uptime: 99.9%" with monitoring link'
+        unique_desc = (
+            'Dashboard card showing "Server Uptime: 99.9%" with monitoring link'
+        )
 
         result = await client.call_tool(
             "send_dynamic_card",

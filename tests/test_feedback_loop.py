@@ -122,7 +122,9 @@ def test_get_proven_params():
         print(f"   Result: PASS")
         return True
     else:
-        print(f"   No proven params found (may be expected if no positive feedback yet)")
+        print(
+            f"   No proven params found (may be expected if no positive feedback yet)"
+        )
         print(f"   Result: PASS (graceful failure)")
         return True
 
@@ -133,7 +135,7 @@ def test_feedback_buttons_in_card():
     print("TEST: Feedback buttons in card output")
     print("=" * 60)
 
-    from gchat.smart_card_builder import SmartCardBuilder, ENABLE_FEEDBACK_BUTTONS
+    from gchat.smart_card_builder import ENABLE_FEEDBACK_BUTTONS, SmartCardBuilder
 
     print(f"   ENABLE_FEEDBACK_BUTTONS: {ENABLE_FEEDBACK_BUTTONS}")
 
@@ -188,6 +190,7 @@ def test_proven_params_merged_into_card():
     # First, store a pattern with specific params and mark as positive
     test_description = "A notification card with alert message and dismiss button"
     import uuid
+
     test_card_id = f"test-merge-{uuid.uuid4().hex[:8]}"
     point_id = feedback_loop.store_instance_pattern(
         card_description=test_description,
@@ -240,7 +243,9 @@ def main():
     results = []
 
     # Test 1: Ensure vector exists
-    results.append(("Ensure description_colbert vector", test_ensure_description_vector()))
+    results.append(
+        ("Ensure description_colbert vector", test_ensure_description_vector())
+    )
 
     # Test 2: Store instance pattern
     results.append(("Store instance_pattern", test_store_instance_pattern()))

@@ -28,8 +28,9 @@ def show_collection_stats():
     print("COLLECTION STATISTICS")
     print("=" * 70)
 
-    from config.qdrant_client import get_qdrant_client
     from qdrant_client import models
+
+    from config.qdrant_client import get_qdrant_client
 
     client = get_qdrant_client()
     collection = _settings.card_collection
@@ -85,8 +86,9 @@ def show_recent_patterns():
     print("RECENT FEEDBACK PATTERNS")
     print("=" * 70)
 
-    from config.qdrant_client import get_qdrant_client
     from qdrant_client import models
+
+    from config.qdrant_client import get_qdrant_client
 
     client = get_qdrant_client()
     collection = _settings.card_collection
@@ -119,8 +121,10 @@ def show_recent_patterns():
         neg_count = payload.get("negative_count", 0)
         point_type = payload.get("type", "unknown")
 
-        emoji = "👍" if feedback == "positive" else "👎" if feedback == "negative" else "⏳"
-        print(f"   {i}. {emoji} [{point_type}] \"{desc}...\"")
+        emoji = (
+            "👍" if feedback == "positive" else "👎" if feedback == "negative" else "⏳"
+        )
+        print(f'   {i}. {emoji} [{point_type}] "{desc}..."')
         print(f"      Feedback: {feedback} | +{pos_count} / -{neg_count}")
         print()
 
@@ -142,7 +146,7 @@ def query_with_feedback_comparison(test_queries):
 
     for query in test_queries:
         print(f"\n{'─' * 60}")
-        print(f"Query: \"{query}\"")
+        print(f'Query: "{query}"')
         print("─" * 60)
 
         # Get proven params (this uses description_colbert search)
@@ -154,7 +158,9 @@ def query_with_feedback_comparison(test_queries):
         if proven:
             print("\n✅ FOUND MATCHING PATTERN (feedback-boosted):")
             for key, value in proven.items():
-                value_str = str(value)[:50] + "..." if len(str(value)) > 50 else str(value)
+                value_str = (
+                    str(value)[:50] + "..." if len(str(value)) > 50 else str(value)
+                )
                 print(f"      {key}: {value_str}")
         else:
             print("\n⚠️ No matching pattern found (score below threshold)")
@@ -165,7 +171,7 @@ def query_with_feedback_comparison(test_queries):
         class_results, pattern_results = feedback_loop.query_with_feedback(
             component_query="card widget",  # Generic component search
             description=query,
-            limit=5
+            limit=5,
         )
 
         if pattern_results:
@@ -177,7 +183,9 @@ def query_with_feedback_comparison(test_queries):
                 score = result.get("score", 0)
 
                 feedback_emoji = "👍" if feedback == "positive" else ""
-                print(f"      {i}. 📝 {name[:40]}... - score: {score:.3f} {feedback_emoji}")
+                print(
+                    f"      {i}. 📝 {name[:40]}... - score: {score:.3f} {feedback_emoji}"
+                )
         else:
             print("   No pattern matches")
 
@@ -203,11 +211,9 @@ def test_similar_queries():
         # Similar to: Product card showing price "$149.99" with label "Sale Price"
         "Show a product with price and buy button",
         "Create a pricing card with purchase option",
-
         # Similar to: Status card showing "Deployment Complete"
         "Display deployment status with success message",
         "Show system status card",
-
         # Similar to: Multi-section server info card
         "Show server metrics with uptime and latency",
         "Create a dashboard card with environment info",
@@ -260,7 +266,8 @@ def main():
     print("\n" + "=" * 70)
     print("SUMMARY")
     print("=" * 70)
-    print("""
+    print(
+        """
 The feedback loop works as follows:
 
 1. STORE: When you rate a card positively, store_instance_pattern() saves:
@@ -281,7 +288,8 @@ The feedback loop works as follows:
    - These params are merged into new card builds
 
 This creates a learning loop where user feedback improves future results!
-""")
+"""
+    )
 
 
 if __name__ == "__main__":

@@ -53,7 +53,9 @@ def test_template_component_basic():
     print(f"   Rendered has sections: {'sections' in rendered}")
 
     has_sections = "sections" in rendered
-    has_widgets = has_sections and len(rendered.get("sections", [{}])[0].get("widgets", [])) > 0
+    has_widgets = (
+        has_sections and len(rendered.get("sections", [{}])[0].get("widgets", [])) > 0
+    )
 
     print(f"   Has widgets: {has_widgets}")
     print(f"   Result: {'PASS' if has_widgets else 'FAIL'}")
@@ -84,7 +86,9 @@ def test_template_param_substitution():
     component = TemplateComponent(template_data, price="$49.99", label="Sale Price")
 
     # Check substitution
-    substituted = component._substitute_params({"text": "${price}", "label": "${label}"})
+    substituted = component._substitute_params(
+        {"text": "${price}", "label": "${label}"}
+    )
 
     print(f"   Original: ${{price}}, ${{label}}")
     print(f"   Substituted: {substituted['text']}, {substituted['label']}")
@@ -123,8 +127,9 @@ def test_template_registry_save():
     print("TEST: TemplateRegistry saves template to YAML")
     print("=" * 60)
 
-    from gchat.template_component import get_template_registry
     import uuid
+
+    from gchat.template_component import get_template_registry
 
     registry = get_template_registry()
 
@@ -170,16 +175,19 @@ def test_module_wrapper_template_path():
 
     # First, register a template
     registry = get_template_registry()
-    registry.register_template("test_wrapper_template", {
-        "name": "test_wrapper_template",
-        "components": [
-            {
-                "path": "card_framework.v2.widgets.text_paragraph.TextParagraph",
-                "params": {"text": "Loaded via ModuleWrapper"},
-            }
-        ],
-        "defaults": {},
-    })
+    registry.register_template(
+        "test_wrapper_template",
+        {
+            "name": "test_wrapper_template",
+            "components": [
+                {
+                    "path": "card_framework.v2.widgets.text_paragraph.TextParagraph",
+                    "params": {"text": "Loaded via ModuleWrapper"},
+                }
+            ],
+            "defaults": {},
+        },
+    )
 
     # Now try to load via ModuleWrapper
     wrapper = ModuleWrapper(
@@ -187,7 +195,9 @@ def test_module_wrapper_template_path():
         auto_initialize=False,
     )
 
-    component = wrapper.get_component_by_path("card_framework.templates.test_wrapper_template")
+    component = wrapper.get_component_by_path(
+        "card_framework.templates.test_wrapper_template"
+    )
 
     print(f"   Component loaded: {component is not None}")
 
@@ -215,8 +225,9 @@ def test_promotion_to_template():
     print("TEST: Pattern promotion to template")
     print("=" * 60)
 
-    from gchat.feedback_loop import get_feedback_loop
     import uuid
+
+    from gchat.feedback_loop import get_feedback_loop
 
     feedback_loop = get_feedback_loop()
 
@@ -257,6 +268,7 @@ def test_promotion_to_template():
             # Simulate another positive feedback to trigger promotion check
             # Actually call _check_and_promote
             from qdrant_client import models
+
             results, _ = client.scroll(
                 collection_name=_settings.card_collection,
                 scroll_filter=models.Filter(

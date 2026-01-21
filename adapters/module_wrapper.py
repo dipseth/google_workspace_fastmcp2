@@ -2485,7 +2485,10 @@ class ModuleWrapper:
             TemplateComponent instance or None
         """
         try:
-            from gchat.template_component import TemplateComponent, get_template_registry
+            from gchat.template_component import (
+                TemplateComponent,
+                get_template_registry,
+            )
 
             # Extract template name from path
             # card_framework.templates.my_template -> my_template

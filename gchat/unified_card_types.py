@@ -305,7 +305,15 @@ class ComponentSearchInfo(BaseModel):
         description="Full module path of the matched component",
     )
     componentType: Optional[
-        Literal["class", "function", "module", "simple_fallback", "fallback", "nlp_sections", "smart_builder"]
+        Literal[
+            "class",
+            "function",
+            "module",
+            "simple_fallback",
+            "fallback",
+            "nlp_sections",
+            "smart_builder",
+        ]
     ] = Field(
         None,
         description="Type of component found: 'class' for Card/Widget classes, 'function' for factory functions, 'module' for module-level components, 'simple_fallback' when no match found, 'nlp_sections' for NLP-parsed multi-section cards, 'smart_builder' for SmartCardBuilder with Qdrant vector search",

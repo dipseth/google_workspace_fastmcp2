@@ -41,13 +41,17 @@ def get_embedder(use_colbert: bool = True):
     """Get ColBERT embedder for multi-vector search."""
     if use_colbert:
         from fastembed import LateInteractionTextEmbedding
+
         return LateInteractionTextEmbedding(model_name="colbert-ir/colbertv2.0")
     else:
         from fastembed import TextEmbedding
+
         return TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 
-def search_components(client, embedder, query: str, limit: int = 10, use_colbert: bool = True):
+def search_components(
+    client, embedder, query: str, limit: int = 10, use_colbert: bool = True
+):
     """Search for components in vector DB."""
     collection_name = (
         "card_framework_components_colbert"
@@ -108,15 +112,18 @@ def test_search_text_input():
     # Search for TextInput
     print("\n1. Searching Qdrant for TextInput...")
     results = search_components(
-        client, embedder,
+        client,
+        embedder,
         "v2.widgets.text_input.TextInput class name label hint_text",
-        limit=10
+        limit=10,
     )
 
     print(f"   Found {len(results)} results:")
     for r in results[:5]:
         p = r.payload
-        print(f"   [{r.score:.2f}] {p.get('name')} ({p.get('type')}) @ {p.get('full_path')}")
+        print(
+            f"   [{r.score:.2f}] {p.get('name')} ({p.get('type')}) @ {p.get('full_path')}"
+        )
 
     # Find TextInput class
     text_input_path = None
@@ -169,6 +176,7 @@ def test_search_text_input():
     except Exception as e:
         print(f"   ERROR during instantiation: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -188,15 +196,18 @@ def test_search_selection_input():
     # Search for SelectionInput
     print("\n1. Searching Qdrant for SelectionInput...")
     results = search_components(
-        client, embedder,
+        client,
+        embedder,
         "v2.widgets.selection_input.SelectionInput class name label items type DROPDOWN",
-        limit=10
+        limit=10,
     )
 
     print(f"   Found {len(results)} results:")
     for r in results[:5]:
         p = r.payload
-        print(f"   [{r.score:.2f}] {p.get('name')} ({p.get('type')}) @ {p.get('full_path')}")
+        print(
+            f"   [{r.score:.2f}] {p.get('name')} ({p.get('type')}) @ {p.get('full_path')}"
+        )
 
     # Find SelectionInput class
     selection_input_path = None
@@ -226,7 +237,9 @@ def test_search_selection_input():
     # Check available attributes
     print("\n4. Inspecting SelectionInput class...")
     if hasattr(SelectionInput, "Type"):
-        print(f"   SelectionInput.Type enum: {list(SelectionInput.Type.__members__.keys())}")
+        print(
+            f"   SelectionInput.Type enum: {list(SelectionInput.Type.__members__.keys())}"
+        )
     if hasattr(SelectionInput, "SelectionItem"):
         print(f"   SelectionInput.SelectionItem: {SelectionInput.SelectionItem}")
 
@@ -237,22 +250,34 @@ def test_search_selection_input():
         items = []
         if hasattr(SelectionInput, "SelectionItem"):
             items = [
-                SelectionInput.SelectionItem(text="Excellent", value="excellent", selected=True),
+                SelectionInput.SelectionItem(
+                    text="Excellent", value="excellent", selected=True
+                ),
                 SelectionInput.SelectionItem(text="Good", value="good", selected=False),
-                SelectionInput.SelectionItem(text="Needs Improvement", value="needs_improvement", selected=False),
+                SelectionInput.SelectionItem(
+                    text="Needs Improvement", value="needs_improvement", selected=False
+                ),
             ]
         else:
             # Fallback to dict format
             items = [
                 {"text": "Excellent", "value": "excellent", "selected": True},
                 {"text": "Good", "value": "good", "selected": False},
-                {"text": "Needs Improvement", "value": "needs_improvement", "selected": False},
+                {
+                    "text": "Needs Improvement",
+                    "value": "needs_improvement",
+                    "selected": False,
+                },
             ]
 
         selection_input = SelectionInput(
             name="rating",
             label="How would you rate this?",
-            type=SelectionInput.Type.DROPDOWN if hasattr(SelectionInput, "Type") else None,
+            type=(
+                SelectionInput.Type.DROPDOWN
+                if hasattr(SelectionInput, "Type")
+                else None
+            ),
             items=items,
         )
         print(f"   Created: {selection_input}")
@@ -267,6 +292,7 @@ def test_search_selection_input():
     except Exception as e:
         print(f"   ERROR during instantiation: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -345,9 +371,13 @@ def test_build_form_card_via_qdrant():
         # Selection input: Rating dropdown
         if hasattr(SelectionInput, "SelectionItem"):
             items = [
-                SelectionInput.SelectionItem(text="Excellent", value="excellent", selected=True),
+                SelectionInput.SelectionItem(
+                    text="Excellent", value="excellent", selected=True
+                ),
                 SelectionInput.SelectionItem(text="Good", value="good", selected=False),
-                SelectionInput.SelectionItem(text="Needs Improvement", value="needs_improvement", selected=False),
+                SelectionInput.SelectionItem(
+                    text="Needs Improvement", value="needs_improvement", selected=False
+                ),
             ]
         else:
             items = [
@@ -359,7 +389,11 @@ def test_build_form_card_via_qdrant():
         rating_input = SelectionInput(
             name="rating",
             label="How would you rate this?",
-            type=SelectionInput.Type.DROPDOWN if hasattr(SelectionInput, "Type") else None,
+            type=(
+                SelectionInput.Type.DROPDOWN
+                if hasattr(SelectionInput, "Type")
+                else None
+            ),
             items=items,
         )
         widgets.append(rating_input)
@@ -400,6 +434,7 @@ def test_build_form_card_via_qdrant():
     except Exception as e:
         print(f"   ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -409,7 +444,9 @@ def main():
     print("=" * 60)
     print("POC: Form Components via Qdrant → ModuleWrapper → Render")
     print("=" * 60)
-    print("\nThis POC verifies form components use the SAME flow as all other components:")
+    print(
+        "\nThis POC verifies form components use the SAME flow as all other components:"
+    )
     print("  1. Search Qdrant for TextInput, SelectionInput, etc.")
     print("  2. Load via ModuleWrapper.get_component_by_path()")
     print("  3. Instantiate with form field data")

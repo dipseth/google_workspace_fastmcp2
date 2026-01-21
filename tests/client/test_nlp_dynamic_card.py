@@ -111,7 +111,7 @@ class TestNLPDynamicCardMultiSection:
         if not space_id:
             pytest.skip("TEST_CHAT_SPACE_ID not configured")
 
-        card_description = '''Create a GitHub activity update card for Sunday January 18 2026. Include three sections: First section titled "Deployments - PR #1672" showing AIDG React FE preview deployed at pr-1672-aidg-react-fe-rzpt3.ondigitalocean.app and Admin React FE preview deployed at pr-1672-admin-react-fe-gxzol.ondigitalocean.app. Second section titled "Commits" showing @ctzaruba pushed commit 9966fbe for ENC-2390 temporal structural improvements. Third section titled "Stale PRs" warning that PR #1550 MAD-4142 env var for google scraper has had no activity for 10 days and is marked for removal.'''
+        card_description = """Create a GitHub activity update card for Sunday January 18 2026. Include three sections: First section titled "Deployments - PR #1672" showing AIDG React FE preview deployed at pr-1672-aidg-react-fe-rzpt3.ondigitalocean.app and Admin React FE preview deployed at pr-1672-admin-react-fe-gxzol.ondigitalocean.app. Second section titled "Commits" showing @ctzaruba pushed commit 9966fbe for ENC-2390 temporal structural improvements. Third section titled "Stale PRs" warning that PR #1550 MAD-4142 env var for google scraper has had no activity for 10 days and is marked for removal."""
 
         result = await client.call_tool(
             "send_dynamic_card",
@@ -131,7 +131,9 @@ class TestNLPDynamicCardMultiSection:
             response_data = json.loads(content)
 
             # Verify success
-            assert response_data.get("success") is True, f"Card send failed: {response_data.get('error')}"
+            assert (
+                response_data.get("success") is True
+            ), f"Card send failed: {response_data.get('error')}"
 
             # Verify HTTP status for webhook delivery
             http_status = response_data.get("httpStatus")
@@ -165,7 +167,7 @@ class TestNLPDynamicCardMultiSection:
         if not space_id:
             pytest.skip("TEST_CHAT_SPACE_ID not configured")
 
-        card_description = '''Create a deployment notification. First section titled "Frontend" showing Preview deployed at preview.example.com. Second section titled "Backend" showing API deployed at api.example.com.'''
+        card_description = """Create a deployment notification. First section titled "Frontend" showing Preview deployed at preview.example.com. Second section titled "Backend" showing API deployed at api.example.com."""
 
         result = await client.call_tool(
             "send_dynamic_card",
@@ -210,7 +212,7 @@ class TestNLPDynamicCardWidgets:
         if not space_id:
             pytest.skip("TEST_CHAT_SPACE_ID not configured")
 
-        card_description = '''First section titled "Links" showing Check out the documentation at docs.example.com for more information.'''
+        card_description = """First section titled "Links" showing Check out the documentation at docs.example.com for more information."""
 
         result = await client.call_tool(
             "send_dynamic_card",
@@ -240,7 +242,7 @@ class TestNLPDynamicCardWidgets:
         if not space_id:
             pytest.skip("TEST_CHAT_SPACE_ID not configured")
 
-        card_description = '''First section titled "Alerts" showing warning: Database connection pool is running low.'''
+        card_description = """First section titled "Alerts" showing warning: Database connection pool is running low."""
 
         result = await client.call_tool(
             "send_dynamic_card",
@@ -270,7 +272,7 @@ class TestNLPDynamicCardWidgets:
         if not space_id:
             pytest.skip("TEST_CHAT_SPACE_ID not configured")
 
-        card_description = '''First section titled "Recent Changes" showing @developer pushed commit abc123 with bug fixes.'''
+        card_description = """First section titled "Recent Changes" showing @developer pushed commit abc123 with bug fixes."""
 
         result = await client.call_tool(
             "send_dynamic_card",
@@ -306,7 +308,7 @@ class TestNLPDynamicCardEdgeCases:
         if not space_id:
             pytest.skip("TEST_CHAT_SPACE_ID not configured")
 
-        card_description = '''First section titled "Services" showing Frontend running at frontend.example.com and Backend running at backend.example.com.'''
+        card_description = """First section titled "Services" showing Frontend running at frontend.example.com and Backend running at backend.example.com."""
 
         result = await client.call_tool(
             "send_dynamic_card",
@@ -336,7 +338,7 @@ class TestNLPDynamicCardEdgeCases:
         if not space_id:
             pytest.skip("TEST_CHAT_SPACE_ID not configured")
 
-        card_description = '''First section titled "Warning" showing PR has been inactive for 10 days and is marked for removal.'''
+        card_description = """First section titled "Warning" showing PR has been inactive for 10 days and is marked for removal."""
 
         result = await client.call_tool(
             "send_dynamic_card",
@@ -405,7 +407,7 @@ class TestNLPParserUnit:
         """Test that enhanced parser extracts sections from ordinal+titled pattern."""
         from gchat.nlp_card_parser import parse_enhanced_natural_language_description
 
-        description = '''First section titled "Section A" showing content A. Second section titled "Section B" showing content B.'''
+        description = """First section titled "Section A" showing content A. Second section titled "Section B" showing content B."""
 
         result = parse_enhanced_natural_language_description(description)
 
@@ -419,7 +421,7 @@ class TestNLPParserUnit:
         """Test the exact GitHub activity card description."""
         from gchat.nlp_card_parser import parse_enhanced_natural_language_description
 
-        description = '''Create a GitHub activity update card. First section titled "Deployments" showing Frontend deployed at preview.example.com. Second section titled "Commits" showing @dev pushed commit abc123. Third section titled "Warnings" showing PR has been stale for 7 days.'''
+        description = """Create a GitHub activity update card. First section titled "Deployments" showing Frontend deployed at preview.example.com. Second section titled "Commits" showing @dev pushed commit abc123. Third section titled "Warnings" showing PR has been stale for 7 days."""
 
         result = parse_enhanced_natural_language_description(description)
 
@@ -437,7 +439,7 @@ class TestNLPParserUnit:
         """Test that URLs are extracted and prefixed with https://."""
         from gchat.nlp_card_parser import parse_enhanced_natural_language_description
 
-        description = '''First section titled "Links" showing Check docs at docs.example.com for info.'''
+        description = """First section titled "Links" showing Check docs at docs.example.com for info."""
 
         result = parse_enhanced_natural_language_description(description)
 
@@ -454,4 +456,6 @@ class TestNLPParserUnit:
             button = widget["decoratedText"].get("button", {})
             if button:
                 url = button.get("onClick", {}).get("openLink", {}).get("url", "")
-                assert url.startswith("https://"), f"URL should have https:// prefix: {url}"
+                assert url.startswith(
+                    "https://"
+                ), f"URL should have https:// prefix: {url}"

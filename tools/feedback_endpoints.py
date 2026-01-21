@@ -46,7 +46,9 @@ def setup_feedback_endpoints(mcp: FastMCP):
             card_id = query_params.get("card_id", "")
             feedback = query_params.get("feedback", "")
 
-            logger.info(f"📝 Feedback received: card_id={card_id[:8]}..., feedback={feedback}")
+            logger.info(
+                f"📝 Feedback received: card_id={card_id[:8]}..., feedback={feedback}"
+            )
 
             if not card_id or not feedback:
                 return HTMLResponse(
@@ -116,8 +118,9 @@ def setup_feedback_endpoints(mcp: FastMCP):
         from starlette.responses import JSONResponse
 
         try:
-            from config.qdrant_client import get_qdrant_client
             from qdrant_client import models
+
+            from config.qdrant_client import get_qdrant_client
 
             client = get_qdrant_client()
             collection = _settings.card_collection
@@ -175,7 +178,7 @@ def setup_feedback_endpoints(mcp: FastMCP):
                             key="feedback",
                             match=models.MatchValue(value="negative"),
                         ),
-                    ]
+                    ],
                 ),
             ).count
 
@@ -187,7 +190,9 @@ def setup_feedback_endpoints(mcp: FastMCP):
                         "positive": positive_count,
                         "negative": negative_count,
                         "pending": pending_count,
-                        "total_patterns": positive_count + negative_count + pending_count,
+                        "total_patterns": positive_count
+                        + negative_count
+                        + pending_count,
                     },
                 },
             )
@@ -208,7 +213,11 @@ def _render_feedback_page(success: bool, message: str, feedback: str = None) -> 
     """Render a simple HTML page for feedback response."""
     bg_color = "#1a1a2e" if success else "#2e1a1a"
     text_color = "#e0e0e0"
-    accent_color = "#4ade80" if feedback == "positive" else "#f87171" if feedback == "negative" else "#60a5fa"
+    accent_color = (
+        "#4ade80"
+        if feedback == "positive"
+        else "#f87171" if feedback == "negative" else "#60a5fa"
+    )
 
     emoji = ""
     if feedback == "positive":

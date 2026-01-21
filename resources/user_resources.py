@@ -413,7 +413,6 @@ def setup_user_resources(mcp: FastMCP) -> None:
         description="Get the currently authenticated user's email address for session-based authentication",
         mime_type="application/json",
         tags={"authentication", "user", "email", "session", "template"},
-        enabled=True,
         meta={
             "template_accessible": True,
             "property_paths": ["email", "session_id", "timestamp"],

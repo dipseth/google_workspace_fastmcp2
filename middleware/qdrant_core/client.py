@@ -175,7 +175,9 @@ class QdrantClientManager:
 
         # Use URL if provided, otherwise use host/port
         if self.qdrant_url:
-            logger.info(f"🔗 Connecting to Qdrant using URL: {self.qdrant_url} (gRPC: {self.prefer_grpc})")
+            logger.info(
+                f"🔗 Connecting to Qdrant using URL: {self.qdrant_url} (gRPC: {self.prefer_grpc})"
+            )
             self.client = QdrantClient(
                 url=self.qdrant_url,
                 api_key=self.qdrant_api_key,
@@ -204,8 +206,13 @@ class QdrantClientManager:
             central_client = get_qdrant_client()
             if central_client:
                 self.client = central_client
-                self.discovered_url = settings.qdrant_url or f"http://{settings.qdrant_host}:{settings.qdrant_port}"
-                logger.info(f"✅ Using centralized Qdrant client at {self.discovered_url}")
+                self.discovered_url = (
+                    settings.qdrant_url
+                    or f"http://{settings.qdrant_host}:{settings.qdrant_port}"
+                )
+                logger.info(
+                    f"✅ Using centralized Qdrant client at {self.discovered_url}"
+                )
                 return
         except Exception as e:
             logger.debug(f"Centralized client not available for discovery: {e}")
@@ -215,7 +222,9 @@ class QdrantClientManager:
         # If we have a full URL, try that first
         if self.qdrant_url:
             try:
-                logger.info(f"🔍 Trying Qdrant at URL: {self.qdrant_url} (gRPC: {self.prefer_grpc})")
+                logger.info(
+                    f"🔍 Trying Qdrant at URL: {self.qdrant_url} (gRPC: {self.prefer_grpc})"
+                )
                 # Use gRPC to avoid SSL certificate verification issues with cloud instances
                 client = QdrantClient(
                     url=self.qdrant_url,

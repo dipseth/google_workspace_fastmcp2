@@ -130,7 +130,9 @@ def migrate_points(client, dry_run: bool = False):
     old_info = get_collection_info(client, OLD_COLLECTION)
     total_points = old_info.points_count
 
-    print(f"\n📋 Migrating {total_points} points from {OLD_COLLECTION} to {NEW_COLLECTION}")
+    print(
+        f"\n📋 Migrating {total_points} points from {OLD_COLLECTION} to {NEW_COLLECTION}"
+    )
 
     if total_points == 0:
         print("   ⚠️ No points to migrate")
@@ -219,12 +221,20 @@ def swap_collections(client, dry_run: bool = False):
 
     try:
         # Try to use aliases (more elegant)
-        from qdrant_client.models import CreateAliasOperation, DeleteAliasOperation, AliasOperations
+        from qdrant_client.models import (
+            AliasOperations,
+            CreateAliasOperation,
+            DeleteAliasOperation,
+        )
 
         # Update alias to point to new collection
         client.update_collection_aliases(
             change_aliases_operations=[
-                DeleteAliasOperation(alias_name=OLD_COLLECTION) if check_alias_exists(client, OLD_COLLECTION) else None,
+                (
+                    DeleteAliasOperation(alias_name=OLD_COLLECTION)
+                    if check_alias_exists(client, OLD_COLLECTION)
+                    else None
+                ),
                 CreateAliasOperation(
                     alias_name=OLD_COLLECTION,
                     collection_name=NEW_COLLECTION,
@@ -301,9 +311,19 @@ def main():
     """Run the migration."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Migrate ColBERT collection for feedback loop")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
-    parser.add_argument("--skip-swap", action="store_true", help="Don't swap collections, keep new collection with _v2 suffix")
+    parser = argparse.ArgumentParser(
+        description="Migrate ColBERT collection for feedback loop"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be done without making changes",
+    )
+    parser.add_argument(
+        "--skip-swap",
+        action="store_true",
+        help="Don't swap collections, keep new collection with _v2 suffix",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -354,8 +374,12 @@ def main():
 
     if args.skip_swap or args.dry_run:
         print(f"\nNext steps:")
-        print(f"1. Update COLLECTION_NAME in gchat/feedback_loop.py to: {NEW_COLLECTION}")
-        print(f"2. Update COLLECTION_NAME in gchat/smart_card_builder.py to: {NEW_COLLECTION}")
+        print(
+            f"1. Update COLLECTION_NAME in gchat/feedback_loop.py to: {NEW_COLLECTION}"
+        )
+        print(
+            f"2. Update COLLECTION_NAME in gchat/smart_card_builder.py to: {NEW_COLLECTION}"
+        )
         print(f"3. Run tests to verify functionality")
 
     return 0

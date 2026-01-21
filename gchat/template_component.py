@@ -20,7 +20,9 @@ import yaml
 logger = logging.getLogger(__name__)
 
 # Directory for promoted template YAML files
-TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "..", "card_framework", "patterns")
+TEMPLATES_DIR = os.path.join(
+    os.path.dirname(__file__), "..", "card_framework", "patterns"
+)
 
 
 class TemplateComponent:
@@ -72,6 +74,7 @@ class TemplateComponent:
         if self._module_wrapper is None:
             try:
                 from adapters.module_wrapper import ModuleWrapper
+
                 self._module_wrapper = ModuleWrapper(
                     module_or_name="card_framework",
                     auto_initialize=False,
@@ -114,7 +117,8 @@ class TemplateComponent:
         if isinstance(value, str):
             # Handle ${param_name} substitution
             import re
-            pattern = r'\$\{(\w+)\}'
+
+            pattern = r"\$\{(\w+)\}"
 
             def replace(match):
                 param_name = match.group(1)
@@ -218,7 +222,9 @@ class TemplateComponent:
                     section["widgets"] = widgets
                 elif isinstance(widget_spec, list):
                     # Indices of widgets for this section
-                    section["widgets"] = [widgets[i] for i in widget_spec if i < len(widgets)]
+                    section["widgets"] = [
+                        widgets[i] for i in widget_spec if i < len(widgets)
+                    ]
 
                 sections.append(section)
 
@@ -270,7 +276,9 @@ class TemplateRegistry:
                         # Single template per file
                         if "name" in data:
                             self._templates[data["name"]] = data
-                            logger.info(f"Loaded template: {data['name']} from {filename}")
+                            logger.info(
+                                f"Loaded template: {data['name']} from {filename}"
+                            )
                         # Multiple templates per file
                         else:
                             for name, template_data in data.items():
@@ -342,10 +350,7 @@ class TemplateRegistry:
         return list(self._templates.keys())
 
     def create_component(
-        self,
-        name: str,
-        module_wrapper: Optional[Any] = None,
-        **params
+        self, name: str, module_wrapper: Optional[Any] = None, **params
     ) -> Optional[TemplateComponent]:
         """
         Create a TemplateComponent instance from a registered template.

@@ -116,7 +116,9 @@ def test_search_and_load_columns():
 
     # Step 1: Search for columns component
     print("\n1. Searching vector DB for 'columns layout widget'...")
-    results = search_components(client, embedder, "Columns widget column_items layout", limit=10)
+    results = search_components(
+        client, embedder, "Columns widget column_items layout", limit=10
+    )
 
     print(f"   Found {len(results)} results:")
     for r in results[:5]:
@@ -139,7 +141,11 @@ def test_search_and_load_columns():
     if not columns_path:
         for r in results:
             path = r.payload.get("full_path", "")
-            if path.endswith(".Columns") and r.payload.get("type") == "class" and "v2" in path:
+            if (
+                path.endswith(".Columns")
+                and r.payload.get("type") == "class"
+                and "v2" in path
+            ):
                 columns_path = path
                 break
 
@@ -154,7 +160,10 @@ def test_search_and_load_columns():
     # If not found, do explicit search
     if not column_path:
         results2 = search_components(
-            client, embedder, "Column class widgets horizontal_alignment vertical_alignment HorizontalSizeStyle", limit=15
+            client,
+            embedder,
+            "Column class widgets horizontal_alignment vertical_alignment HorizontalSizeStyle",
+            limit=15,
         )
         for r in results2:
             path = r.payload.get("full_path", "")
@@ -198,12 +207,18 @@ def test_search_and_load_columns():
         path = r.payload.get("full_path", "")
         name = r.payload.get("name", "")
         rtype = r.payload.get("type", "")
-        if name == "DecoratedText" and rtype == "class" and "v2.widgets.decorated_text" in path:
+        if (
+            name == "DecoratedText"
+            and rtype == "class"
+            and "v2.widgets.decorated_text" in path
+        ):
             dt_path = path
             break
 
     # Search for Image
-    img_results = search_components(client, embedder, "Image widget class imageUrl render", limit=10)
+    img_results = search_components(
+        client, embedder, "Image widget class imageUrl render", limit=10
+    )
     img_path = None
     for r in img_results:
         path = r.payload.get("full_path", "")
@@ -273,7 +288,9 @@ def test_search_and_load_columns():
 
             return True
         else:
-            print("   WARNING: Missing Column class, trying direct Columns instantiation")
+            print(
+                "   WARNING: Missing Column class, trying direct Columns instantiation"
+            )
 
             # Try simpler approach
             columns = Columns(column_items=[])
@@ -304,7 +321,10 @@ def test_search_and_load_decorated_text():
     # Search for DecoratedText - use very specific query to get class not variables
     print("\n1. Searching for DecoratedText...")
     results = search_components(
-        client, embedder, "DecoratedText widget class render top_label text wrap_text", limit=15
+        client,
+        embedder,
+        "DecoratedText widget class render top_label text wrap_text",
+        limit=15,
     )
 
     print(f"   Found {len(results)} results:")
@@ -529,7 +549,9 @@ def test_colbert_vs_fastembed_comparison():
     )
     for r in fastembed_results:
         p = r.payload
-        print(f"   [{r.score:.3f}] {p.get('name')} ({p.get('type')}) @ {p.get('full_path')}")
+        print(
+            f"   [{r.score:.3f}] {p.get('name')} ({p.get('type')}) @ {p.get('full_path')}"
+        )
 
     # ColBERT embedding structure (for documentation)
     print("\n2. ColBERT embedding structure:")
@@ -538,10 +560,18 @@ def test_colbert_vs_fastembed_comparison():
         colbert_embedding = list(colbert_embedder.query_embed(query))[0]
         print(f"   ColBERT returns {len(colbert_embedding)} token vectors")
         print(f"   Each token vector has {len(colbert_embedding[0])} dimensions")
-        print(f"   Total: {len(colbert_embedding)} x {len(colbert_embedding[0])} = multi-vector")
-        print("\n   NOTE: ColBERT multi-vector queries require special Qdrant API handling.")
-        print("   The collection 'card_framework_components_colbert' uses MAX_SIM comparator.")
-        print("   Future work: Use Qdrant's multi-vector query API for late interaction search.")
+        print(
+            f"   Total: {len(colbert_embedding)} x {len(colbert_embedding[0])} = multi-vector"
+        )
+        print(
+            "\n   NOTE: ColBERT multi-vector queries require special Qdrant API handling."
+        )
+        print(
+            "   The collection 'card_framework_components_colbert' uses MAX_SIM comparator."
+        )
+        print(
+            "   Future work: Use Qdrant's multi-vector query API for late interaction search."
+        )
     except Exception as e:
         print(f"   ColBERT info failed: {e}")
 
@@ -654,6 +684,7 @@ def test_colbert_full_card():
     except Exception as e:
         print(f"   ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -736,9 +767,13 @@ def test_form_card_via_colbert():
         # Selection input: Rating dropdown
         if hasattr(SelectionInput, "SelectionItem"):
             items = [
-                SelectionInput.SelectionItem(text="Excellent", value="excellent", selected=True),
+                SelectionInput.SelectionItem(
+                    text="Excellent", value="excellent", selected=True
+                ),
                 SelectionInput.SelectionItem(text="Good", value="good", selected=False),
-                SelectionInput.SelectionItem(text="Needs Improvement", value="needs_improvement", selected=False),
+                SelectionInput.SelectionItem(
+                    text="Needs Improvement", value="needs_improvement", selected=False
+                ),
             ]
         else:
             items = [
@@ -750,7 +785,11 @@ def test_form_card_via_colbert():
         rating_input = SelectionInput(
             name="rating",
             label="How would you rate this?",
-            type=SelectionInput.Type.DROPDOWN if hasattr(SelectionInput, "Type") else None,
+            type=(
+                SelectionInput.Type.DROPDOWN
+                if hasattr(SelectionInput, "Type")
+                else None
+            ),
             items=items,
         )
         widgets.append(rating_input)
@@ -785,6 +824,7 @@ def test_form_card_via_colbert():
     except Exception as e:
         print(f"   ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -824,7 +864,9 @@ def test_send_form_card_to_webhook():
     loaded = {}
     for name, query in components_to_find.items():
         try:
-            results = search_components(client, embedder, query, limit=5, use_colbert=True)
+            results = search_components(
+                client, embedder, query, limit=5, use_colbert=True
+            )
             for r in results:
                 path = r.payload.get("full_path", "")
                 rname = r.payload.get("name", "")
@@ -866,22 +908,34 @@ def test_send_form_card_to_webhook():
         if hasattr(SelectionInput, "SelectionItem"):
             items = [
                 SelectionInput.SelectionItem(text="Option A", value="a", selected=True),
-                SelectionInput.SelectionItem(text="Option B", value="b", selected=False),
+                SelectionInput.SelectionItem(
+                    text="Option B", value="b", selected=False
+                ),
             ]
         else:
-            items = [{"text": "Option A", "value": "a", "selected": True}, {"text": "Option B", "value": "b"}]
+            items = [
+                {"text": "Option A", "value": "a", "selected": True},
+                {"text": "Option B", "value": "b"},
+            ]
 
         selection = SelectionInput(
             name="test_selection",
             label="Test Selection",
-            type=SelectionInput.Type.DROPDOWN if hasattr(SelectionInput, "Type") else None,
+            type=(
+                SelectionInput.Type.DROPDOWN
+                if hasattr(SelectionInput, "Type")
+                else None
+            ),
             items=items,
         )
         widgets.append(selection)
 
         # Submit button
         if ButtonList and Button:
-            button = Button(text="Test Submit", on_click={"openLink": {"url": "https://example.com"}})
+            button = Button(
+                text="Test Submit",
+                on_click={"openLink": {"url": "https://example.com"}},
+            )
             widgets.append(ButtonList(buttons=[button]))
 
         section = Section(header="POC Webhook Test", widgets=widgets)
@@ -892,6 +946,7 @@ def test_send_form_card_to_webhook():
     except Exception as e:
         print(f"   ❌ Build failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -919,7 +974,8 @@ def test_send_form_card_to_webhook():
         # Convert to snake_case for webhook API
         def to_snake_case(s):
             import re
-            return re.sub(r'([a-z])([A-Z])', r'\1_\2', s).lower()
+
+            return re.sub(r"([a-z])([A-Z])", r"\1_\2", s).lower()
 
         def convert_keys(obj):
             if isinstance(obj, dict):
@@ -948,6 +1004,7 @@ def test_send_form_card_to_webhook():
     except Exception as e:
         print(f"   ❌ Webhook send failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -959,7 +1016,9 @@ def main():
     print("=" * 60)
     print("\nThis POC demonstrates:")
     print("  1. Search vector DB for card components by semantic query")
-    print("  2. Get full_path from results (e.g., card_framework.v2.widgets.columns.Columns)")
+    print(
+        "  2. Get full_path from results (e.g., card_framework.v2.widgets.columns.Columns)"
+    )
     print("  3. Use ModuleWrapper.get_component_by_path() to load actual Python class")
     print("  4. Instantiate class with content (text, images, colors)")
     print("  5. Call .render() to produce valid Google Chat JSON")
@@ -1003,7 +1062,9 @@ def main():
         print("\n" + "=" * 60)
         print("KEY FINDINGS")
         print("=" * 60)
-        print("  - ColBERT provides BETTER class matching (finds classes before variables)")
+        print(
+            "  - ColBERT provides BETTER class matching (finds classes before variables)"
+        )
         print("  - FastEmbed works but returns variables/attributes before classes")
         print("  - Both methods successfully load classes via ModuleWrapper")
         print("  - .render() produces valid Google Chat JSON format")

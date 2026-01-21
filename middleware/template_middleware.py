@@ -27,7 +27,9 @@ from .template_core import (
     JinjaEnvironmentManager,
     MacroManager,
     ResourceHandler,
+    SilentUndefined,
     TemplateProcessor,
+    TemplateResolutionError,
 )
 
 logger = setup_logger()

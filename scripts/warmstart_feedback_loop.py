@@ -95,7 +95,9 @@ def verify_pattern_renders(pattern: dict) -> bool:
             print(f"   ❌ First section has no widgets")
             return False
 
-        print(f"   ✅ Card rendered: {len(sections)} section(s), {len(widgets)} widget(s)")
+        print(
+            f"   ✅ Card rendered: {len(sections)} section(s), {len(widgets)} widget(s)"
+        )
         return True
 
     except Exception as e:
@@ -167,9 +169,19 @@ def main():
     """Run warm-start population."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Warm-start feedback loop with known-good patterns")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
-    parser.add_argument("--verify-only", action="store_true", help="Only verify retrieval, don't store new patterns")
+    parser = argparse.ArgumentParser(
+        description="Warm-start feedback loop with known-good patterns"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be done without making changes",
+    )
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Only verify retrieval, don't store new patterns",
+    )
     args = parser.parse_args()
 
     print("=" * 60)

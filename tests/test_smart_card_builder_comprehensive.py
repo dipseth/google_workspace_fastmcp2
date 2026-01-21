@@ -89,8 +89,14 @@ def test_decorated_text_json_format():
         ("Has 'text' field", "text" in rendered.get("decorated_text", {})),
         ("Has 'top_label' field", "top_label" in rendered.get("decorated_text", {})),
         ("Has 'wrap_text' field", "wrap_text" in rendered.get("decorated_text", {})),
-        ("Text value correct", rendered.get("decorated_text", {}).get("text") == "Test content"),
-        ("Label value correct", rendered.get("decorated_text", {}).get("top_label") == "Label"),
+        (
+            "Text value correct",
+            rendered.get("decorated_text", {}).get("text") == "Test content",
+        ),
+        (
+            "Label value correct",
+            rendered.get("decorated_text", {}).get("top_label") == "Label",
+        ),
     ]
 
     print("\nValidation:")
@@ -134,7 +140,11 @@ def test_image_json_format():
     checks = [
         ("Has 'image' key", "image" in rendered),
         ("Has 'image_url' field", "image_url" in rendered.get("image", {})),
-        ("URL value correct", rendered.get("image", {}).get("image_url") == "https://example.com/image.jpg"),
+        (
+            "URL value correct",
+            rendered.get("image", {}).get("image_url")
+            == "https://example.com/image.jpg",
+        ),
     ]
 
     print("\nValidation:")
@@ -186,10 +196,23 @@ def test_columns_json_format():
     checks = [
         ("Has 'columns' key", "columns" in rendered),
         ("Has 'column_items' array", "column_items" in rendered.get("columns", {})),
-        ("Has 2 columns", len(rendered.get("columns", {}).get("column_items", [])) == 2),
-        ("Left column has widgets", "widgets" in rendered.get("columns", {}).get("column_items", [{}])[0]),
-        ("Right column has widgets", "widgets" in rendered.get("columns", {}).get("column_items", [{}, {}])[1]),
-        ("Left has horizontal_size_style", "horizontal_size_style" in rendered.get("columns", {}).get("column_items", [{}])[0]),
+        (
+            "Has 2 columns",
+            len(rendered.get("columns", {}).get("column_items", [])) == 2,
+        ),
+        (
+            "Left column has widgets",
+            "widgets" in rendered.get("columns", {}).get("column_items", [{}])[0],
+        ),
+        (
+            "Right column has widgets",
+            "widgets" in rendered.get("columns", {}).get("column_items", [{}, {}])[1],
+        ),
+        (
+            "Left has horizontal_size_style",
+            "horizontal_size_style"
+            in rendered.get("columns", {}).get("column_items", [{}])[0],
+        ),
     ]
 
     print("\nValidation:")
@@ -239,7 +262,10 @@ def test_section_json_format():
         ("Has 'widgets' array", "widgets" in rendered),
         ("Header value correct", rendered.get("header") == "Test Section"),
         ("Has 2 widgets", len(rendered.get("widgets", [])) == 2),
-        ("First widget is decorated_text", "decorated_text" in rendered.get("widgets", [{}])[0]),
+        (
+            "First widget is decorated_text",
+            "decorated_text" in rendered.get("widgets", [{}])[0],
+        ),
     ]
 
     print("\nValidation:")
@@ -386,9 +412,13 @@ def test_empty_content_handling():
     print(json.dumps(result, indent=2))
 
     # Should still produce valid structure
-    has_structure = "header" in result or "widgets" in result or isinstance(result, dict)
+    has_structure = (
+        "header" in result or "widgets" in result or isinstance(result, dict)
+    )
 
-    print(f"\n  {'✓' if has_structure else '✗'} Produces valid structure even with empty items")
+    print(
+        f"\n  {'✓' if has_structure else '✗'} Produces valid structure even with empty items"
+    )
 
     return has_structure
 
@@ -423,7 +453,9 @@ def test_special_characters_in_text():
     # Check text is preserved
     text_preserved = rendered.get("decorated_text", {}).get("text") == special_text
 
-    print(f"\n  {'✓' if text_preserved else '✗'} Special characters preserved in output")
+    print(
+        f"\n  {'✓' if text_preserved else '✗'} Special characters preserved in output"
+    )
 
     return text_preserved
 
@@ -527,8 +559,14 @@ def test_google_chat_api_ready():
         ("Has 'cardsV2' array", "cardsV2" in api_payload),
         ("Card has 'cardId'", "cardId" in api_payload.get("cardsV2", [{}])[0]),
         ("Card has 'card' object", "card" in api_payload.get("cardsV2", [{}])[0]),
-        ("Card content has header", "header" in api_payload.get("cardsV2", [{}])[0].get("card", {})),
-        ("Card content has sections", "sections" in api_payload.get("cardsV2", [{}])[0].get("card", {})),
+        (
+            "Card content has header",
+            "header" in api_payload.get("cardsV2", [{}])[0].get("card", {}),
+        ),
+        (
+            "Card content has sections",
+            "sections" in api_payload.get("cardsV2", [{}])[0].get("card", {}),
+        ),
     ]
 
     print("\ncardsV2 Format Validation:")

@@ -165,7 +165,10 @@ def test_build_card_columns_image_right():
             "section_header": "Spa Treatment",
             "items": [
                 {"text": "deal-spa-12345", "top_label": "Deal ID"},
-                {"text": builder.format_price("$199.00", "$99.00"), "top_label": "Price"},
+                {
+                    "text": builder.format_price("$199.00", "$99.00"),
+                    "top_label": "Price",
+                },
                 {"text": "Hot stone massage - 60 minutes", "top_label": "Description"},
             ],
             "image_url": "https://img.grouponcdn.com/iam/27v19pzxCz4ZSauQc96KTAQdvidV/27-2048x1229/v1/t1024x619.webp",
@@ -183,7 +186,9 @@ def test_build_card_columns_image_right():
             for widget in section["widgets"]:
                 if "columns" in widget:
                     has_columns = True
-                    print(f"\n✓ Found columns layout with {len(widget['columns']['column_items'])} columns")
+                    print(
+                        f"\n✓ Found columns layout with {len(widget['columns']['column_items'])} columns"
+                    )
                     break
 
     return has_columns
@@ -211,7 +216,10 @@ def test_build_card_with_buttons():
             ],
             "buttons": [
                 {"text": "View PR", "url": "https://github.com/org/repo/pull/123"},
-                {"text": "Approve", "url": "https://github.com/org/repo/pull/123/approve"},
+                {
+                    "text": "Approve",
+                    "url": "https://github.com/org/repo/pull/123/approve",
+                },
             ],
         },
     )
@@ -256,7 +264,7 @@ def test_colored_price_formatting():
     print(f"\nformat_colored_text('Error!', 'red'):")
     print(f"  Result: {error}")
 
-    return '<font color="#34a853">' in formatted and '<s>' in formatted
+    return '<font color="#34a853">' in formatted and "<s>" in formatted
 
 
 def test_full_deal_card():
@@ -283,7 +291,10 @@ def test_full_deal_card():
                     "text": f'{builder.format_colored_text("$105.00", "green")} → {builder.format_colored_text("$94.50", "red")}',
                     "top_label": "Price",
                 },
-                {"text": "4219281f-84c2-441b-b152-57515a514153", "top_label": "Quote ID"},
+                {
+                    "text": "4219281f-84c2-441b-b152-57515a514153",
+                    "top_label": "Quote ID",
+                },
                 {"text": "Program price deleted successfully", "top_label": "Status"},
             ],
             "image_url": "https://img.grouponcdn.com/iam/27v19pzxCz4ZSauQc96KTAQdvidV/27-2048x1229/v1/t1024x619.webp",

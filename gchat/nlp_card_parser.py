@@ -472,7 +472,9 @@ class EnhancedNaturalLanguageCardParser:
 
         ordinal_matches = ordinal_titled_pattern.findall(text)
         if ordinal_matches:
-            logger.info(f"✅ Found {len(ordinal_matches)} sections using ordinal+titled pattern")
+            logger.info(
+                f"✅ Found {len(ordinal_matches)} sections using ordinal+titled pattern"
+            )
             for ordinal_word, section_name, section_content in ordinal_matches:
                 logger.info(f"  📋 Section '{section_name}' (ordinal: {ordinal_word})")
                 section = ExtractedSection(
@@ -501,7 +503,9 @@ class EnhancedNaturalLanguageCardParser:
 
         ordinal_quoted_matches = ordinal_quoted_pattern.findall(text)
         if ordinal_quoted_matches:
-            logger.info(f"✅ Found {len(ordinal_quoted_matches)} sections using ordinal+quoted pattern")
+            logger.info(
+                f"✅ Found {len(ordinal_quoted_matches)} sections using ordinal+quoted pattern"
+            )
             for ordinal_word, section_name, section_content in ordinal_quoted_matches:
                 logger.info(f"  📋 Section '{section_name}' (ordinal: {ordinal_word})")
                 section = ExtractedSection(
@@ -720,9 +724,25 @@ class EnhancedNaturalLanguageCardParser:
 
         # Detect content type based on keywords
         content_lower = content.lower()
-        is_warning = any(w in content_lower for w in ["warning", "stale", "inactive", "removal", "marked for"])
-        is_deployment = any(w in content_lower for w in ["deployed", "preview", "deployment", ".app", "staging", "production"])
-        is_commit = any(w in content_lower for w in ["commit", "pushed", "merge", "pull request", "pr #", "branch"])
+        is_warning = any(
+            w in content_lower
+            for w in ["warning", "stale", "inactive", "removal", "marked for"]
+        )
+        is_deployment = any(
+            w in content_lower
+            for w in [
+                "deployed",
+                "preview",
+                "deployment",
+                ".app",
+                "staging",
+                "production",
+            ]
+        )
+        is_commit = any(
+            w in content_lower
+            for w in ["commit", "pushed", "merge", "pull request", "pr #", "branch"]
+        )
 
         # STEP 2: Split content into parts - handle multiple patterns
         content_parts = []
@@ -735,7 +755,9 @@ class EnhancedNaturalLanguageCardParser:
             parts = [p.strip() for p in parts if p.strip()]
             if len(parts) > 1:
                 content_parts = parts
-                logger.info(f"  📋 Split into {len(content_parts)} parts using numbered list pattern")
+                logger.info(
+                    f"  📋 Split into {len(content_parts)} parts using numbered list pattern"
+                )
 
         # Pattern B: "X and Y" where Y starts with capital (only if no numbered list found)
         if not content_parts:
@@ -745,7 +767,9 @@ class EnhancedNaturalLanguageCardParser:
                 parts = and_split_pattern.split(content)
                 if len(parts) > 1:
                     content_parts = parts
-                    logger.info(f"  📋 Split into {len(content_parts)} parts using 'and' delimiter")
+                    logger.info(
+                        f"  📋 Split into {len(content_parts)} parts using 'and' delimiter"
+                    )
 
         # If no splitting occurred, use the whole content as one part
         if not content_parts:
@@ -762,33 +786,59 @@ class EnhancedNaturalLanguageCardParser:
 
             # If multiple URLs in one part, create a widget for each URL
             if len(part_urls) > 1:
-                logger.info(f"  🔗 Part has {len(part_urls)} URLs, creating separate widgets")
+                logger.info(
+                    f"  🔗 Part has {len(part_urls)} URLs, creating separate widgets"
+                )
                 # Split the part by URLs to get text associated with each
                 remaining_text = part
                 for i, url in enumerate(part_urls):
                     # Find the text before this URL
                     url_pos = remaining_text.find(url)
-                    text_before = remaining_text[:url_pos].strip() if url_pos > 0 else ""
+                    text_before = (
+                        remaining_text[:url_pos].strip() if url_pos > 0 else ""
+                    )
 
                     # Clean up conjunction/punctuation artifacts
-                    text_before = re.sub(r"^\s*and\s+", "", text_before, flags=re.IGNORECASE)
-                    text_before = re.sub(r"\s*(at|deployed at|available at|link:?)\s*$", "", text_before, flags=re.IGNORECASE)
+                    text_before = re.sub(
+                        r"^\s*and\s+", "", text_before, flags=re.IGNORECASE
+                    )
+                    text_before = re.sub(
+                        r"\s*(at|deployed at|available at|link:?)\s*$",
+                        "",
+                        text_before,
+                        flags=re.IGNORECASE,
+                    )
                     # Remove leading/trailing punctuation and brackets
-                    text_before = re.sub(r"^[\s,;:\(\)\[\]]+|[\s,;:\(\)\[\]]+$", "", text_before)
+                    text_before = re.sub(
+                        r"^[\s,;:\(\)\[\]]+|[\s,;:\(\)\[\]]+$", "", text_before
+                    )
                     text_before = text_before.strip()
 
                     # Skip fragments that are just conjunctions, punctuation, or very short
-                    skip_fragments = {"and", "or", "also", ",", ";", "(", ")", "[", "]", ""}
+                    skip_fragments = {
+                        "and",
+                        "or",
+                        "also",
+                        ",",
+                        ";",
+                        "(",
+                        ")",
+                        "[",
+                        "]",
+                        "",
+                    }
                     if text_before.lower() in skip_fragments or len(text_before) < 3:
                         # Use URL as display text instead
                         text_before = ""
 
                     # Always create a widget for each URL
                     display = text_before if text_before else url
-                    widget = self._create_url_widget(display, url, is_deployment, is_commit, mentioned_icons)
+                    widget = self._create_url_widget(
+                        display, url, is_deployment, is_commit, mentioned_icons
+                    )
                     widgets.append(widget)
 
-                    remaining_text = remaining_text[url_pos + len(url):].strip()
+                    remaining_text = remaining_text[url_pos + len(url) :].strip()
                 continue
 
             # Single URL or no URL case
@@ -799,12 +849,21 @@ class EnhancedNaturalLanguageCardParser:
             if part_url:
                 display_text = re.sub(re.escape(part_url), "", display_text).strip()
                 # Clean up common URL prefixes and conjunctions
-                display_text = re.sub(r"^\s*and\s+", "", display_text, flags=re.IGNORECASE)
-                display_text = re.sub(r"\s*(at|deployed at|available at|link:?)\s*$", "", display_text, flags=re.IGNORECASE)
+                display_text = re.sub(
+                    r"^\s*and\s+", "", display_text, flags=re.IGNORECASE
+                )
+                display_text = re.sub(
+                    r"\s*(at|deployed at|available at|link:?)\s*$",
+                    "",
+                    display_text,
+                    flags=re.IGNORECASE,
+                )
                 # Clean brackets/parens that might surround removed URL
                 display_text = re.sub(r"\(\s*\)|\[\s*\]", "", display_text)
                 # Remove leading/trailing punctuation
-                display_text = re.sub(r"^[\s,;:\(\)\[\]]+|[\s,;:\(\)\[\]]+$", "", display_text).strip()
+                display_text = re.sub(
+                    r"^[\s,;:\(\)\[\]]+|[\s,;:\(\)\[\]]+$", "", display_text
+                ).strip()
                 # If only short fragments remain, use URL as display
                 skip_fragments = {"and", "or", "also", ",", ";", "(", ")", "[", "]", ""}
                 if display_text.lower() in skip_fragments or len(display_text) < 3:
@@ -821,14 +880,16 @@ class EnhancedNaturalLanguageCardParser:
                 widget = {
                     "decoratedText": {
                         "text": display_text,
-                        "startIcon": {"knownIcon": "STAR"},  # Using STAR for warnings/alerts
+                        "startIcon": {
+                            "knownIcon": "STAR"
+                        },  # Using STAR for warnings/alerts
                         "wrapText": True,
                     }
                 }
                 if part_url:
                     widget["decoratedText"]["button"] = {
                         "text": "View",
-                        "onClick": {"openLink": {"url": part_url}}
+                        "onClick": {"openLink": {"url": part_url}},
                     }
                 widgets.append(widget)
 
@@ -840,14 +901,16 @@ class EnhancedNaturalLanguageCardParser:
                         "wrapText": True,
                         "button": {
                             "text": "Open",
-                            "onClick": {"openLink": {"url": part_url}}
-                        }
+                            "onClick": {"openLink": {"url": part_url}},
+                        },
                     }
                 }
 
                 # Add appropriate icon based on content type
                 if is_deployment:
-                    widget["decoratedText"]["startIcon"] = {"knownIcon": "STORE"}  # STORE for deployments (no CLOUD available)
+                    widget["decoratedText"]["startIcon"] = {
+                        "knownIcon": "STORE"
+                    }  # STORE for deployments (no CLOUD available)
                 elif is_commit:
                     widget["decoratedText"]["startIcon"] = {"knownIcon": "DESCRIPTION"}
 
@@ -863,7 +926,9 @@ class EnhancedNaturalLanguageCardParser:
                 }
                 # Use mentioned icon if available, otherwise default based on content
                 if mentioned_icons and mentioned_icons[0] in KNOWN_ICONS:
-                    widget["decoratedText"]["startIcon"] = {"knownIcon": KNOWN_ICONS[mentioned_icons[0]]}
+                    widget["decoratedText"]["startIcon"] = {
+                        "knownIcon": KNOWN_ICONS[mentioned_icons[0]]
+                    }
                 elif "@" in part:
                     widget["decoratedText"]["startIcon"] = {"knownIcon": "PERSON"}
                 else:
@@ -879,7 +944,9 @@ class EnhancedNaturalLanguageCardParser:
                             "decoratedText": {
                                 "text": display_text,
                                 "wrapText": True,
-                                "startIcon": {"knownIcon": KNOWN_ICONS[mentioned_icons[0]]}
+                                "startIcon": {
+                                    "knownIcon": KNOWN_ICONS[mentioned_icons[0]]
+                                },
                             }
                         }
                         widgets.append(widget)
@@ -890,7 +957,9 @@ class EnhancedNaturalLanguageCardParser:
         if not widgets:
             widgets.append({"textParagraph": {"text": content}})
 
-        logger.info(f"  ✅ Created {len(widgets)} widget(s) for section '{section_name}'")
+        logger.info(
+            f"  ✅ Created {len(widgets)} widget(s) for section '{section_name}'"
+        )
         return widgets
 
     def _create_url_widget(
@@ -918,16 +987,15 @@ class EnhancedNaturalLanguageCardParser:
             "decoratedText": {
                 "text": text if text else url,
                 "wrapText": True,
-                "button": {
-                    "text": "Open",
-                    "onClick": {"openLink": {"url": url}}
-                }
+                "button": {"text": "Open", "onClick": {"openLink": {"url": url}}},
             }
         }
 
         # Add appropriate icon based on content type
         if mentioned_icons and mentioned_icons[0] in KNOWN_ICONS:
-            widget["decoratedText"]["startIcon"] = {"knownIcon": KNOWN_ICONS[mentioned_icons[0]]}
+            widget["decoratedText"]["startIcon"] = {
+                "knownIcon": KNOWN_ICONS[mentioned_icons[0]]
+            }
         elif is_deployment:
             widget["decoratedText"]["startIcon"] = {"knownIcon": "STORE"}
         elif is_commit:
