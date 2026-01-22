@@ -352,7 +352,7 @@ async def get_google_service(
             return service
 
     # Try to get from session cache first
-    session_id = get_session_context()
+    session_id = await get_session_context()
     if session_id:
         session_key = f"service_{user_email}_{service_type}_{service_version}"
         cached_service = get_session_data(session_id, session_key)

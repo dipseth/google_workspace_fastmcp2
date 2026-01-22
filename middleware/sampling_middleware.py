@@ -1067,7 +1067,7 @@ class EnhancedSamplingMiddleware(Middleware):
 
             if has_target_tags:
                 # Store enhanced context for this tool call
-                self._store_enhanced_context(context, tool_name)
+                await self._store_enhanced_context(context, tool_name)
                 if self.enable_debug:
                     logger.debug(
                         f"✅ Enhanced context stored for elicitation-enabled tool: {tool_name}"
@@ -1082,7 +1082,7 @@ class EnhancedSamplingMiddleware(Middleware):
             # Continue without elicitation on error
             return await call_next(context)
 
-    def _store_enhanced_context(self, context: MiddlewareContext, tool_name: str):
+    async def _store_enhanced_context(self, context: MiddlewareContext, tool_name: str):
         """Store enhanced sampling context for tools that support elicitation."""
         try:
             # Create resource context manager
@@ -1111,7 +1111,7 @@ class EnhancedSamplingMiddleware(Middleware):
             )
 
             # Store in context state for tools to access
-            context.fastmcp_context.set_state(
+            await context.fastmcp_context.set_state(
                 f"enhanced_sampling_{tool_name}", enhanced_context
             )
 
@@ -1184,7 +1184,7 @@ class EnhancedSamplingMiddleware(Middleware):
                     enhanced_context = await self._create_enhanced_context(
                         ctx, original_tool.name
                     )
-                    ctx.set_state(
+                    await ctx.set_state(
                         f"enhanced_sampling_{original_tool.name}", enhanced_context
                     )
 
@@ -1294,7 +1294,7 @@ def setup_enhanced_sampling_middleware(
             response = await ctx.sample(f"Compose an email to {recipient} about {topic}")
 
             # Enhanced sampling (if available via our middleware)
-            enhanced_ctx = ctx.get_state("enhanced_sampling_send_smart_email")
+            enhanced_ctx = await ctx.get_state("enhanced_sampling_send_smart_email")
             if enhanced_ctx:
                 response = await enhanced_ctx.enhanced_sample(
                     f"Compose email with user context",

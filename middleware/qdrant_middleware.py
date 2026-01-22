@@ -274,7 +274,7 @@ class QdrantUnifiedMiddleware(Middleware):
             try:
                 from auth.context import get_user_email_context
 
-                user_email = get_user_email_context()
+                user_email = await get_user_email_context()
                 if user_email:
                     logger.debug(f"📧 User email from auth context: {user_email}")
             except Exception as e:
@@ -296,7 +296,7 @@ class QdrantUnifiedMiddleware(Middleware):
                         break
 
             # Get session_id from context
-            session_id = get_session_context()
+            session_id = await get_session_context()
 
             # Store response in Qdrant asynchronously (non-blocking via storage manager)
             logger.info(f"📝 Storing response for tool: {tool_name}")
@@ -348,12 +348,12 @@ class QdrantUnifiedMiddleware(Middleware):
             # Use FastMCP context pattern (same as TagBasedResourceMiddleware)
             cache_key = f"qdrant_resource_{uri}"
             if hasattr(context, "fastmcp_context") and context.fastmcp_context:
-                context.fastmcp_context.set_state(cache_key, result)
+                await context.fastmcp_context.set_state(cache_key, result)
                 logger.info(f"✅ Cached Qdrant resource result for key: {cache_key}")
                 logger.debug(f"📦 Cached result type: {type(result).__name__}")
 
                 # Verify the cache was set
-                verify = context.fastmcp_context.get_state(cache_key)
+                verify = await context.fastmcp_context.get_state(cache_key)
                 if verify is None:
                     logger.error(
                         "❌ Cache verification FAILED - value not found immediately after set_state!"
@@ -383,7 +383,7 @@ class QdrantUnifiedMiddleware(Middleware):
             # Cache the error response for the resource handler
             cache_key = f"qdrant_resource_{uri}"
             if hasattr(context, "set_state"):
-                context.set_state(cache_key, error_response)
+                await context.set_state(cache_key, error_response)
 
             # Let the registered resource handler process with cached error
             return await call_next(context)

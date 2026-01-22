@@ -27,7 +27,9 @@ from .template_core import (
     JinjaEnvironmentManager,
     MacroManager,
     ResourceHandler,
+    SilentUndefined,
     TemplateProcessor,
+    TemplateResolutionError,
 )
 
 logger = setup_logger()
@@ -195,7 +197,7 @@ class EnhancedTemplateMiddleware(Middleware):
             if tool_name in template_macro_tools:
                 if context.fastmcp_context:
                     # Store reference to this middleware for template macro tools
-                    context.fastmcp_context.set_state(
+                    await context.fastmcp_context.set_state(
                         "template_middleware_instance", self
                     )
                     if self.enable_debug_logging:

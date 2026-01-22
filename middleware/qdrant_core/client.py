@@ -46,6 +46,7 @@ class QdrantClientManager:
         qdrant_api_key: Optional[str] = None,
         qdrant_url: Optional[str] = None,
         auto_discovery: bool = True,
+        prefer_grpc: bool = True,  # Use gRPC to avoid SSL issues with cloud Qdrant
     ):
         """
         Initialize the Qdrant client manager.
@@ -55,10 +56,12 @@ class QdrantClientManager:
             qdrant_api_key: API key for cloud Qdrant authentication
             qdrant_url: Full Qdrant URL (overrides host/port if provided)
             auto_discovery: Whether to auto-discover Qdrant ports
+            prefer_grpc: Use gRPC to avoid SSL certificate issues (default True)
         """
         self.config = config
         self.qdrant_api_key = qdrant_api_key
         self.auto_discovery = auto_discovery
+        self.prefer_grpc = prefer_grpc
 
         # Parse URL if provided
         if qdrant_url:
@@ -154,23 +157,32 @@ class QdrantClientManager:
         return await self._ensure_initialized()
 
     async def _connect_direct(self):
-        """Connect directly using configured host/port or URL."""
+        """Connect directly using centralized client or configured host/port/URL."""
+        # First, try to use the centralized Qdrant client singleton
+        try:
+            from config.qdrant_client import get_qdrant_client
+
+            central_client = get_qdrant_client()
+            if central_client:
+                self.client = central_client
+                logger.info("🔗 QdrantClientManager using centralized Qdrant client")
+                return
+        except Exception as e:
+            logger.debug(f"Centralized client not available, creating own: {e}")
+
+        # Fallback: create own client
         QdrantClient, _ = get_qdrant_imports()
 
         # Use URL if provided, otherwise use host/port
         if self.qdrant_url:
-            logger.info(f"🔗 Connecting to Qdrant using URL: {self.qdrant_url}")
-            # Disable SSL verification for HTTPS URLs (common for cloud Qdrant)
-            if self.qdrant_url.startswith("https://"):
-                self.client = QdrantClient(
-                    url=self.qdrant_url,
-                    api_key=self.qdrant_api_key,
-                    verify=False,  # Disable SSL verification for cloud instances
-                )
-            else:
-                self.client = QdrantClient(
-                    url=self.qdrant_url, api_key=self.qdrant_api_key
-                )
+            logger.info(
+                f"🔗 Connecting to Qdrant using URL: {self.qdrant_url} (gRPC: {self.prefer_grpc})"
+            )
+            self.client = QdrantClient(
+                url=self.qdrant_url,
+                api_key=self.qdrant_api_key,
+                prefer_grpc=self.prefer_grpc,
+            )
         else:
             logger.info(
                 f"🔗 Connecting to Qdrant at {self.config.host}:{self.config.ports[0]}"
@@ -186,26 +198,40 @@ class QdrantClientManager:
         if self.discovered_url and self.client:
             return
 
+        # First, try to use the centralized Qdrant client singleton
+        try:
+            from config.qdrant_client import get_qdrant_client
+            from config.settings import settings
+
+            central_client = get_qdrant_client()
+            if central_client:
+                self.client = central_client
+                self.discovered_url = (
+                    settings.qdrant_url
+                    or f"http://{settings.qdrant_host}:{settings.qdrant_port}"
+                )
+                logger.info(
+                    f"✅ Using centralized Qdrant client at {self.discovered_url}"
+                )
+                return
+        except Exception as e:
+            logger.debug(f"Centralized client not available for discovery: {e}")
+
         QdrantClient, _ = get_qdrant_imports()
 
         # If we have a full URL, try that first
         if self.qdrant_url:
             try:
-                logger.info(f"🔍 Trying Qdrant at URL: {self.qdrant_url}")
-                # Disable SSL verification for HTTPS URLs (common for cloud Qdrant)
-                if self.qdrant_url.startswith("https://"):
-                    client = QdrantClient(
-                        url=self.qdrant_url,
-                        api_key=self.qdrant_api_key,
-                        timeout=self.config.connection_timeout / 1000,
-                        verify=False,  # Disable SSL verification for cloud instances
-                    )
-                else:
-                    client = QdrantClient(
-                        url=self.qdrant_url,
-                        api_key=self.qdrant_api_key,
-                        timeout=self.config.connection_timeout / 1000,
-                    )
+                logger.info(
+                    f"🔍 Trying Qdrant at URL: {self.qdrant_url} (gRPC: {self.prefer_grpc})"
+                )
+                # Use gRPC to avoid SSL certificate verification issues with cloud instances
+                client = QdrantClient(
+                    url=self.qdrant_url,
+                    api_key=self.qdrant_api_key,
+                    timeout=self.config.connection_timeout / 1000,
+                    prefer_grpc=self.prefer_grpc,
+                )
 
                 # Test connection
                 await asyncio.to_thread(client.get_collections)
@@ -999,6 +1025,7 @@ def get_or_create_client_manager(
     qdrant_api_key: Optional[str] = None,
     qdrant_url: Optional[str] = None,
     auto_discovery: bool = True,
+    prefer_grpc: Optional[bool] = None,
 ) -> "QdrantClientManager":
     """
     Get a singleton QdrantClientManager instance.
@@ -1018,10 +1045,21 @@ def get_or_create_client_manager(
 
         config = load_config_from_settings()
 
+    # Get defaults from centralized settings if not provided
+    from config.settings import settings
+
+    if qdrant_api_key is None:
+        qdrant_api_key = settings.qdrant_api_key
+    if qdrant_url is None:
+        qdrant_url = settings.qdrant_url
+    if prefer_grpc is None:
+        prefer_grpc = settings.qdrant_prefer_grpc
+
     _global_client_manager = QdrantClientManager(
         config=config,
         qdrant_api_key=qdrant_api_key,
         qdrant_url=qdrant_url,
         auto_discovery=auto_discovery,
+        prefer_grpc=prefer_grpc,
     )
     return _global_client_manager

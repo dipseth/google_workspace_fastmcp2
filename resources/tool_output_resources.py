@@ -89,60 +89,87 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             "idempotentHint": False,  # Results may vary due to caching
         },
     )
-    async def get_recent_gmail_messages(ctx: Context) -> dict:
+    async def get_recent_gmail_messages(ctx: Context) -> str:
         """Internal implementation for recent Gmail messages cache resource."""
+        import json
+
         try:
             # Get authenticated user from context
-            user_email = get_user_email_context()
+            user_email = await get_user_email_context()
             if not user_email:
-                return {
-                    "error": "No authenticated user found in current session",
-                    "suggestion": "Use start_google_auth tool to authenticate first",
-                    "timestamp": datetime.now().isoformat(),
-                }
+                return json.dumps(
+                    {
+                        "error": "No authenticated user found in current session",
+                        "suggestion": "Use start_google_auth tool to authenticate first",
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
 
             cache_key = _get_cache_key(user_email, "recent_gmail_messages")
 
             # Check cache first
             cached_result = _get_cached_output(cache_key)
             if cached_result:
-                return {
-                    "cached": True,
-                    "user_email": user_email,
-                    "data": cached_result,
-                    "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
-                    "ttl_minutes": _cache_ttl_minutes,
-                }
+                return json.dumps(
+                    {
+                        "cached": True,
+                        "user_email": user_email,
+                        "data": cached_result,
+                        "cache_timestamp": _tool_output_cache[cache_key]["timestamp"],
+                        "ttl_minutes": _cache_ttl_minutes,
+                    },
+                    default=str,
+                )
 
             # Cache miss - fetch fresh data using FastMCP tool registry (following middleware pattern)
             if not hasattr(ctx, "fastmcp") or not ctx.fastmcp:
-                return {
-                    "error": "FastMCP context not available",
-                    "cached": False,
-                    "timestamp": datetime.now().isoformat(),
-                }
+                return json.dumps(
+                    {
+                        "error": "FastMCP context not available",
+                        "cached": False,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
 
-            # Access the tool registry directly via _tool_manager (following middleware pattern)
+            # Access the tool registry (supports FastMCP 2.x and 3.0.0b1+)
             mcp_server = ctx.fastmcp
-            if not hasattr(mcp_server, "_tool_manager") or not hasattr(
+            tools_dict = {}
+
+            # FastMCP 2.x path
+            if hasattr(mcp_server, "_tool_manager") and hasattr(
                 mcp_server._tool_manager, "_tools"
             ):
-                return {
-                    "error": "Cannot access tool registry from FastMCP server",
-                    "cached": False,
-                    "timestamp": datetime.now().isoformat(),
+                tools_dict = mcp_server._tool_manager._tools
+            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
+            elif hasattr(mcp_server, "_local_provider") and hasattr(
+                mcp_server._local_provider, "_components"
+            ):
+                from fastmcp.tools.tool import Tool
+
+                components = mcp_server._local_provider._components
+                tools_dict = {
+                    v.name: v for v in components.values() if isinstance(v, Tool)
                 }
 
-            tools_dict = mcp_server._tool_manager._tools
+            if not tools_dict:
+                return json.dumps(
+                    {
+                        "error": "Cannot access tool registry from FastMCP server",
+                        "cached": False,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
             tool_name = "search_gmail_messages"
 
             if tool_name not in tools_dict:
-                return {
-                    "error": f"Tool '{tool_name}' not found in registry",
-                    "available_tools": list(tools_dict.keys()),
-                    "cached": False,
-                    "timestamp": datetime.now().isoformat(),
-                }
+                return json.dumps(
+                    {
+                        "error": f"Tool '{tool_name}' not found in registry",
+                        "available_tools": list(tools_dict.keys()),
+                        "cached": False,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
 
             # Get the tool and call it (following middleware pattern)
             tool_instance = tools_dict[tool_name]
@@ -155,11 +182,13 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             elif hasattr(tool_instance, "__call__"):
                 tool_func = tool_instance
             else:
-                return {
-                    "error": f"Tool '{tool_name}' is not callable",
-                    "cached": False,
-                    "timestamp": datetime.now().isoformat(),
-                }
+                return json.dumps(
+                    {
+                        "error": f"Tool '{tool_name}' is not callable",
+                        "cached": False,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
 
             # Call the tool with parameters
             tool_params = {
@@ -175,11 +204,13 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
 
             # Handle the structured response from the Gmail tool
             if hasattr(messages_result, "error") and messages_result.error:
-                return {
-                    "error": f"Gmail tool error: {messages_result.error}",
-                    "cached": False,
-                    "timestamp": datetime.now().isoformat(),
-                }
+                return json.dumps(
+                    {
+                        "error": f"Gmail tool error: {messages_result.error}",
+                        "cached": False,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
 
             # Extract messages from the structured response
             messages = (
@@ -215,21 +246,26 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             # Cache the result
             _cache_tool_output(cache_key, output_data)
 
-            return {
-                "cached": False,
-                "user_email": user_email,
-                "data": output_data,
-                "cache_timestamp": datetime.now().isoformat(),
-                "ttl_minutes": _cache_ttl_minutes,
-            }
+            return json.dumps(
+                {
+                    "cached": False,
+                    "user_email": user_email,
+                    "data": output_data,
+                    "cache_timestamp": datetime.now().isoformat(),
+                    "ttl_minutes": _cache_ttl_minutes,
+                },
+                default=str,
+            )
 
         except Exception as e:
             logger.error(f"Error fetching recent Gmail messages: {e}")
-            return {
-                "error": f"Failed to fetch recent Gmail messages: {str(e)}",
-                "cached": False,
-                "timestamp": datetime.now().isoformat(),
-            }
+            return json.dumps(
+                {
+                    "error": f"Failed to fetch recent Gmail messages: {str(e)}",
+                    "cached": False,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
     # COMMENTED OUT: Original cache://status resource - replaced with qdrant://cache
     # @mcp.resource(

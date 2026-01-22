@@ -123,6 +123,10 @@ For development or customization:
 | `GMAIL_ALLOW_LIST` | No | - | Comma-separated allowed email addresses |
 | `QDRANT_URL` | No | `http://localhost:6333` | Qdrant vector database URL |
 | `QDRANT_KEY` | No | `NONE` | Qdrant API key (use `NONE` for no auth) |
+| `QDRANT_AUTO_LAUNCH` | No | `true` | Auto-launch Qdrant via Docker if not reachable |
+| `QDRANT_DOCKER_IMAGE` | No | `qdrant/qdrant:latest` | Docker image for auto-launch |
+| `QDRANT_DOCKER_CONTAINER_NAME` | No | `mcp-qdrant` | Container name for auto-launched Qdrant |
+| `MCP_CHAT_WEBHOOK` | No | - | Default webhook URL for all Google Chat card tools |
 | `FASTMCP_CLOUD` | No | `false` | Enable cloud deployment mode |
 | `MINIMAL_TOOLS_STARTUP` | No | `true` | Start with only 5 protected tools enabled |
 | `MINIMAL_STARTUP_SERVICES` | No | `` | Comma-separated services to enable at startup (e.g., `drive,gmail`) |

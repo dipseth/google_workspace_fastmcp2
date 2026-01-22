@@ -301,7 +301,7 @@ class TestCalendarTools:
         ), f"Response didn't match any expected pattern: {content}"
 
     @pytest.mark.asyncio
-    async def test_create_event(self, client, future_datetime):
+    async def test_create_event(self, client, future_datetime, cleanup_tracker):
         """Test creating a calendar event."""
         result = await client.call_tool(
             "create_event",
@@ -338,8 +338,10 @@ class TestCalendarTools:
             match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
             if match:
                 TestCalendarTools._created_event_id = match.group(1)
+                # Track for automatic cleanup
+                cleanup_tracker.track_calendar_event(match.group(1))
                 print(
-                    f"DEBUG: Captured event ID for reuse: {TestCalendarTools._created_event_id}"
+                    f"DEBUG: Captured event ID for reuse and cleanup: {TestCalendarTools._created_event_id}"
                 )
 
         # Check for valid responses (auth errors OR successful creation)
@@ -359,7 +361,7 @@ class TestCalendarTools:
         ), f"Response didn't match any expected pattern: {content}"
 
     @pytest.mark.asyncio
-    async def test_create_all_day_event(self, client):
+    async def test_create_all_day_event(self, client, cleanup_tracker):
         """Test creating an all-day event."""
         tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         day_after = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
@@ -389,6 +391,14 @@ class TestCalendarTools:
         else:
             content = str(result)
 
+        # Track created event for cleanup
+        if "successfully created" in content.lower() and "event id:" in content.lower():
+            import re
+
+            match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
+            if match:
+                cleanup_tracker.track_calendar_event(match.group(1))
+
         valid_responses = [
             "event",
             "created",
@@ -405,7 +415,9 @@ class TestCalendarTools:
         ), f"Response didn't match any expected pattern: {content}"
 
     @pytest.mark.asyncio
-    async def test_create_event_with_attendees(self, client, future_datetime):
+    async def test_create_event_with_attendees(
+        self, client, future_datetime, cleanup_tracker
+    ):
         """Test creating an event with attendees."""
         result = await client.call_tool(
             "create_event",
@@ -434,6 +446,14 @@ class TestCalendarTools:
         else:
             content = str(result)
 
+        # Track created event for cleanup
+        if "successfully created" in content.lower() and "event id:" in content.lower():
+            import re
+
+            match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
+            if match:
+                cleanup_tracker.track_calendar_event(match.group(1))
+
         valid_responses = [
             "event",
             "created",
@@ -450,7 +470,9 @@ class TestCalendarTools:
         ), f"Response didn't match any expected pattern: {content}"
 
     @pytest.mark.asyncio
-    async def test_create_event_with_attachments(self, client, future_datetime):
+    async def test_create_event_with_attachments(
+        self, client, future_datetime, cleanup_tracker
+    ):
         """Test creating an event with Google Drive attachments."""
         result = await client.call_tool(
             "create_event",
@@ -481,6 +503,14 @@ class TestCalendarTools:
         else:
             content = str(result)
 
+        # Track created event for cleanup
+        if "successfully created" in content.lower() and "event id:" in content.lower():
+            import re
+
+            match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
+            if match:
+                cleanup_tracker.track_calendar_event(match.group(1))
+
         valid_responses = [
             "event",
             "created",
@@ -498,7 +528,7 @@ class TestCalendarTools:
         ), f"Response didn't match any expected pattern: {content}"
 
     @pytest.mark.asyncio
-    async def test_create_bulk_events(self, client, future_datetime):
+    async def test_create_bulk_events(self, client, future_datetime, cleanup_tracker):
         """Test creating multiple events in bulk using the events parameter as JSON string."""
         import json
 
@@ -605,8 +635,11 @@ class TestCalendarTools:
                             f"\n✅ SUCCESS: Created {len(content_dict.get('eventsCreated', []))} events successfully!"
                         )
                         for event in content_dict.get("eventsCreated", []):
+                            event_id = event.get("eventId")
+                            if event_id:
+                                cleanup_tracker.track_calendar_event(event_id)
                             print(
-                                f"  - {event.get('summary', 'Unknown')} (ID: {event.get('eventId', 'N/A')})"
+                                f"  - {event.get('summary', 'Unknown')} (ID: {event_id or 'N/A'})"
                             )
                     else:
                         print("\n❌ FAILURE: Failed to create events")
@@ -657,7 +690,7 @@ class TestCalendarTools:
         ), f"Response didn't match any expected bulk pattern: {content_str}"
 
     @pytest.mark.asyncio
-    async def test_create_bulk_events_comprehensive(self, client):
+    async def test_create_bulk_events_comprehensive(self, client, cleanup_tracker):
         """Test comprehensive bulk event creation with all optional fields."""
         import json
 
@@ -710,6 +743,18 @@ class TestCalendarTools:
         else:
             # Fallback to string representation
             content = str(result)
+
+        # Track created events for cleanup (parse JSON response if available)
+        try:
+            if content.startswith("{") or content.startswith("["):
+                response_dict = json.loads(content)
+                if isinstance(response_dict, dict):
+                    for event in response_dict.get("eventsCreated", []):
+                        event_id = event.get("eventId")
+                        if event_id:
+                            cleanup_tracker.track_calendar_event(event_id)
+        except (json.JSONDecodeError, KeyError):
+            pass
 
         # Should handle bulk creation with comprehensive event data
         valid_responses = [
@@ -771,7 +816,9 @@ class TestCalendarTools:
         ), f"Expected validation error for missing fields, got: {content}"
 
     @pytest.mark.asyncio
-    async def test_create_bulk_events_json_string_birthday_reminders(self, client):
+    async def test_create_bulk_events_json_string_birthday_reminders(
+        self, client, cleanup_tracker
+    ):
         """Test creating birthday reminder events with JSON string (exact user scenario)."""
         import json
 
@@ -841,6 +888,11 @@ class TestCalendarTools:
                     print(
                         f"Created {len(response_dict.get('eventsCreated', []))} events"
                     )
+                    # Track created events for cleanup
+                    for event in response_dict.get("eventsCreated", []):
+                        event_id = event.get("eventId")
+                        if event_id:
+                            cleanup_tracker.track_calendar_event(event_id)
                 else:
                     print(f"\n❌ FAILED: {response_dict.get('error', 'Unknown error')}")
                     # This should NOT show the JSON parsing error anymore
@@ -874,7 +926,7 @@ class TestCalendarTools:
 
     @pytest.mark.asyncio
     async def test_create_bulk_events_backward_compatibility(
-        self, client, future_datetime
+        self, client, future_datetime, cleanup_tracker
     ):
         """Test that legacy single event creation still works with bulk implementation."""
         # This tests backward compatibility - legacy parameters should still work
@@ -902,6 +954,14 @@ class TestCalendarTools:
             # Fallback to string representation
             content = str(result)
 
+        # Track created event for cleanup
+        if "successfully created" in content.lower() and "event id:" in content.lower():
+            import re
+
+            match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
+            if match:
+                cleanup_tracker.track_calendar_event(match.group(1))
+
         # Should work exactly like before (single event response)
         valid_responses = [
             "event",
@@ -921,7 +981,7 @@ class TestCalendarTools:
 
     @pytest.mark.asyncio
     async def test_create_bulk_events_parameter_conflict_validation(
-        self, client, future_datetime
+        self, client, future_datetime, cleanup_tracker
     ):
         """Test that providing both events array and legacy parameters results in proper handling."""
         import json
@@ -962,6 +1022,18 @@ class TestCalendarTools:
         else:
             # Fallback to string representation
             content = str(result)
+
+        # Track created events for cleanup (parse JSON response if available)
+        try:
+            if content.startswith("{") or content.startswith("["):
+                response_dict = json.loads(content)
+                if isinstance(response_dict, dict):
+                    for event in response_dict.get("eventsCreated", []):
+                        event_id = event.get("eventId")
+                        if event_id:
+                            cleanup_tracker.track_calendar_event(event_id)
+        except (json.JSONDecodeError, KeyError):
+            pass
 
         # Should process as bulk mode, not legacy mode
         # Either bulk response or authentication error

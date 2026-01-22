@@ -5,13 +5,47 @@ This module provides utilities for dynamically discovering and accessing tools
 from the MCP registry instead of relying on hardcoded imports.
 """
 
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from fastmcp import FastMCP
 
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
+
+
+def _get_tool_registry(mcp_server: FastMCP) -> Dict[str, Any]:
+    """
+    Internal helper to access the FastMCP tool registry.
+
+    Supports both FastMCP 2.x and 3.0.0b1+ internal structures:
+    - FastMCP 2.x: mcp._tool_manager._tools
+    - FastMCP 3.0.0b1+: mcp._local_provider._components (filtered to tools)
+
+    Args:
+        mcp_server: FastMCP server instance
+
+    Returns:
+        Dict[str, Any]: Dictionary mapping tool names to tool instances
+    """
+    # FastMCP 2.x path
+    if hasattr(mcp_server, "_tool_manager") and hasattr(
+        mcp_server._tool_manager, "_tools"
+    ):
+        return mcp_server._tool_manager._tools
+
+    # FastMCP 3.0.0b1+ path - tools are in _local_provider._components
+    if hasattr(mcp_server, "_local_provider") and hasattr(
+        mcp_server._local_provider, "_components"
+    ):
+        from fastmcp.tools.tool import Tool
+
+        components = mcp_server._local_provider._components
+        # Filter to only Tool instances and rekey by tool name
+        return {v.name: v for v in components.values() if isinstance(v, Tool)}
+
+    logger.error("❌ Cannot access FastMCP tool manager; tool registry unavailable")
+    return {}
 
 
 def get_tools_for_service(
@@ -27,13 +61,9 @@ def get_tools_for_service(
     Returns:
         Dict mapping tool names to callable functions
     """
-    if not hasattr(mcp_server, "_tool_manager") or not hasattr(
-        mcp_server._tool_manager, "_tools"
-    ):
-        logger.error("❌ Cannot access FastMCP tool manager")
+    registered_tools = _get_tool_registry(mcp_server)
+    if not registered_tools:
         return {}
-
-    registered_tools = mcp_server._tool_manager._tools
     service_tools = {}
 
     for tool_name, tool_instance in registered_tools.items():
@@ -64,13 +94,9 @@ def get_tool_by_name(mcp_server: FastMCP, tool_name: str) -> Optional[Callable]:
     Returns:
         Tool callable or None if not found
     """
-    if not hasattr(mcp_server, "_tool_manager") or not hasattr(
-        mcp_server._tool_manager, "_tools"
-    ):
-        logger.error("❌ Cannot access FastMCP tool manager")
+    registered_tools = _get_tool_registry(mcp_server)
+    if not registered_tools:
         return None
-
-    registered_tools = mcp_server._tool_manager._tools
 
     if tool_name in registered_tools:
         tool_instance = registered_tools[tool_name]
@@ -90,13 +116,10 @@ def categorize_tools_by_service(mcp_server: FastMCP) -> Dict[str, List[str]]:
     Returns:
         Dict mapping service names to lists of tool names
     """
-    if not hasattr(mcp_server, "_tool_manager") or not hasattr(
-        mcp_server._tool_manager, "_tools"
-    ):
-        logger.error("❌ Cannot access FastMCP tool manager")
+    registered_tools = _get_tool_registry(mcp_server)
+    if not registered_tools:
         return {}
 
-    registered_tools = mcp_server._tool_manager._tools
     service_categories = {
         "gmail": [],
         "drive": [],

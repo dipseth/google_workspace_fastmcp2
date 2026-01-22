@@ -183,10 +183,14 @@ async def create_test_client(test_email: str = TEST_EMAIL):
                 # HTTP fallback uses default transport inference
                 test_client = Client(test_url, auth=auth_config, timeout=30.0)
 
+            # Verify connection by entering context, listing tools, then exiting
+            # The caller (conftest fixture) will re-enter the context for actual use
             async with test_client:
                 await test_client.list_tools()
                 print(f"   ✅ Successfully connected using {protocol.upper()}")
-                return test_client
+
+            # Return client OUTSIDE the context - it can be re-entered by the fixture
+            return test_client
 
         except Exception as e:
             last_error = e

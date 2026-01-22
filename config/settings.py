@@ -54,12 +54,53 @@ class Settings(BaseSettings):
     qdrant_host: Optional[str] = None  # Will be set from qdrant_url
     qdrant_port: Optional[int] = None  # Will be set from qdrant_url
     qdrant_api_key: Optional[str] = None  # Will be set from qdrant_key
+    qdrant_prefer_grpc: bool = (
+        True  # Use gRPC to avoid SSL certificate issues with cloud Qdrant
+    )
 
     # Primary Qdrant collection for MCP tool responses / analytics
     tool_collection: str = Field(
         default="mcp_tool_responses",
         description="Primary Qdrant collection for MCP tool responses and analytics",
         json_schema_extra={"env": "TOOL_COLLECTION"},
+    )
+
+    # Qdrant Docker Auto-Launch Configuration
+    # When enabled, automatically launches Qdrant via Docker if not reachable
+    qdrant_auto_launch: bool = Field(
+        default=True,
+        description="Automatically launch Qdrant via Docker if not reachable (local URLs only)",
+        json_schema_extra={"env": "QDRANT_AUTO_LAUNCH"},
+    )
+    qdrant_docker_image: str = Field(
+        default="qdrant/qdrant:latest",
+        description="Docker image for Qdrant container",
+        json_schema_extra={"env": "QDRANT_DOCKER_IMAGE"},
+    )
+    qdrant_docker_container_name: str = Field(
+        default="mcp-qdrant",
+        description="Name for the Qdrant Docker container",
+        json_schema_extra={"env": "QDRANT_DOCKER_CONTAINER_NAME"},
+    )
+    qdrant_docker_grpc_port: int = Field(
+        default=6334,
+        description="gRPC port to expose for Qdrant container",
+        json_schema_extra={"env": "QDRANT_DOCKER_GRPC_PORT"},
+    )
+    qdrant_docker_data_dir: str = Field(
+        default="",
+        description="Persistent data directory for Qdrant. If empty, uses credentials_dir/qdrant_data",
+        json_schema_extra={"env": "QDRANT_DOCKER_DATA_DIR"},
+    )
+    qdrant_docker_startup_timeout: int = Field(
+        default=30,
+        description="Seconds to wait for Qdrant container to become ready",
+        json_schema_extra={"env": "QDRANT_DOCKER_STARTUP_TIMEOUT"},
+    )
+    qdrant_docker_stop_on_exit: bool = Field(
+        default=False,
+        description="Stop Qdrant container when MCP server exits (only if we started it)",
+        json_schema_extra={"env": "QDRANT_DOCKER_STOP_ON_EXIT"},
     )
 
     # Logging
@@ -114,6 +155,22 @@ class Settings(BaseSettings):
         default=False,
         description="Enable ColBERT multi-vector embeddings initialization on startup for development/testing",
         json_schema_extra={"env": "COLBERT_EMBEDDING_DEV"},
+    )
+
+    # Google Chat Card Collection Configuration
+    card_collection: str = Field(
+        default="card_framework_components_colbert_v2",
+        description="Qdrant collection for Google Chat card components, templates, and feedback patterns",
+        json_schema_extra={"env": "CARD_COLLECTION"},
+    )
+
+    # Google Chat Default Webhook URL
+    # When set, this becomes the default webhook for all card tools (send_dynamic_card, etc.)
+    # Useful for development/testing when you always want to send to the same space
+    mcp_chat_webhook: str = Field(
+        default="",
+        description="Default Google Chat webhook URL for card tools. When set, card tools use this as the default webhook_url parameter.",
+        json_schema_extra={"env": "MCP_CHAT_WEBHOOK"},
     )
 
     # Phase 1 OAuth Migration Feature Flags

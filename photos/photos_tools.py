@@ -44,8 +44,8 @@ async def _get_photos_service_with_fallback(user_google_email: str):
     """
     try:
         # Try to get service from middleware injection
-        service_key = request_service("photos")
-        service = get_injected_service(service_key)
+        service_key = await request_service("photos")
+        service = await get_injected_service(service_key)
         if service:
             logger.debug("Using middleware-injected Photos service")
             return service

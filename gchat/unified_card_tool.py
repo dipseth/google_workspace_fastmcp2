@@ -33,12 +33,12 @@ more powerful approach that can handle any card type.
 import asyncio
 import inspect
 import json
-import os
 import time
 
 # Import MCP-related components
 from fastmcp import FastMCP
-from typing_extensions import Any, Dict, List, Optional, Tuple, Union
+from pydantic import Field
+from typing_extensions import Annotated, Any, Dict, List, Optional, Tuple
 
 # Template middleware integration handled at server level - no imports needed here
 # Import ModuleWrapper
@@ -51,13 +51,18 @@ from auth.service_helpers import get_service, request_service
 # Import TypedDict response types for structured responses
 from config.enhanced_logging import setup_logger
 
-# Import enhanced NLP parser
-from .nlp_card_parser import parse_enhanced_natural_language_description
+# Import settings for default webhook configuration
+from config.settings import settings
+
+# NLP parser commented out - SmartCardBuilder handles all parsing and rendering
+# SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
+# from .nlp_card_parser import parse_enhanced_natural_language_description
+# Import SmartCardBuilder for component-based card creation
+from .smart_card_builder import get_smart_card_builder
 
 # Import structured response types
 from .unified_card_types import (
     ComponentSearchInfo,
-    NLPExtractionInfo,
     SendDynamicCardResponse,
 )
 
@@ -98,23 +103,7 @@ def _process_thread_key_for_webhook_url(
 
 # Try to import Card Framework with graceful fallback
 try:
-    from card_framework.v2 import Card, CardHeader, Message, Section, Widget
-    from card_framework.v2.card import CardWithId
-    from card_framework.v2.widgets import (
-        Button,
-        ButtonList,
-        Column,
-        Columns,
-        DecoratedText,
-        Divider,
-        Icon,
-        Image,
-        OnClick,
-        OpenLink,
-        SelectionInput,
-        TextInput,
-        TextParagraph,
-    )
+    from card_framework.v2 import Message
 
     CARD_FRAMEWORK_AVAILABLE = True
 
@@ -122,21 +111,11 @@ except ImportError:
     CARD_FRAMEWORK_AVAILABLE = False
     logger.warning("Card Framework v2 not available. Falling back to REST API format.")
 
-    # Define placeholder classes for type hints when Card Framework is not available
-    class Card:
-        pass
-
-    class Section:
-        pass
-
-    class Widget:
-        pass
+    Message = None  # Placeholder for when Card Framework is not available
 
 
 # Global variables for module wrappers and caches
 _card_framework_wrapper = None
-_card_framework_wrapper_colbert = None  # ColBERT-enabled wrapper for raw query mode
-_card_types_cache = {}
 _qdrant_client = None
 _card_templates_collection = "card_templates"
 
@@ -155,11 +134,11 @@ async def _get_chat_service_with_fallback(user_google_email: str):
         Authenticated Google Chat service instance or None if unavailable
     """
     # First, try middleware injection
-    service_key = request_service("chat")
+    service_key = await request_service("chat")
 
     try:
         # Try to get the injected service from middleware
-        chat_service = get_injected_service(service_key)
+        chat_service = await get_injected_service(service_key)
         logger.info(
             f"Successfully retrieved injected Chat service for {user_google_email}"
         )
@@ -201,55 +180,30 @@ async def _get_chat_service_with_fallback(user_google_email: str):
 
 
 def _get_qdrant_client():
-    """Get or initialize the Qdrant client."""
+    """
+    Get the Qdrant client from centralized singleton.
+
+    Uses config.qdrant_client.get_qdrant_client() for the actual client,
+    then ensures the card_templates collection exists.
+    """
     global _qdrant_client
 
     if _qdrant_client is None:
         try:
-            from qdrant_client import QdrantClient
-            from qdrant_client.models import Distance, VectorParams
+            # Use centralized Qdrant client singleton
+            from config.qdrant_client import get_qdrant_client as get_central_client
 
-            # Import settings to get proper Qdrant configuration
-            from config.settings import settings
+            _qdrant_client = get_central_client()
 
-            logger.info("🔗 Initializing Qdrant client...")
-            logger.info(
-                f"📊 SETTINGS DEBUG - Using Qdrant config: URL={settings.qdrant_url}, Host={settings.qdrant_host}, Port={settings.qdrant_port}, API Key={'***' if settings.qdrant_api_key else 'None'}"
-            )
-
-            # Use settings-based configuration instead of hardcoded localhost
-            if settings.qdrant_url:
-                # Use URL-based initialization for cloud instances
-                if settings.qdrant_api_key:
-                    _qdrant_client = QdrantClient(
-                        url=settings.qdrant_url, api_key=settings.qdrant_api_key
-                    )
-                    logger.info(
-                        f"🌐 Connected to Qdrant cloud: {settings.qdrant_url} (API Key: ***)"
-                    )
-                else:
-                    _qdrant_client = QdrantClient(url=settings.qdrant_url)
-                    logger.info(
-                        f"🌐 Connected to Qdrant: {settings.qdrant_url} (No API Key)"
-                    )
-            else:
-                # Fallback to host/port configuration
-                if settings.qdrant_api_key:
-                    _qdrant_client = QdrantClient(
-                        host=settings.qdrant_host or "localhost",
-                        port=settings.qdrant_port or 6333,
-                        api_key=settings.qdrant_api_key,
-                    )
-                else:
-                    _qdrant_client = QdrantClient(
-                        host=settings.qdrant_host or "localhost",
-                        port=settings.qdrant_port or 6333,
-                    )
-                logger.info(
-                    f"🌐 Connected to Qdrant: {settings.qdrant_host}:{settings.qdrant_port} (API Key: {'***' if settings.qdrant_api_key else 'None'})"
+            if _qdrant_client is None:
+                logger.warning(
+                    "⚠️ Qdrant client not available - template storage disabled"
                 )
+                return None
 
             # Ensure card templates collection exists
+            from qdrant_client.models import Distance, VectorParams
+
             collections = _qdrant_client.get_collections()
             collection_names = [c.name for c in collections.collections]
 
@@ -270,13 +224,11 @@ def _get_qdrant_client():
                     f"✅ Using existing collection: {_card_templates_collection}"
                 )
 
-            logger.info("✅ Qdrant client initialized")
-
         except ImportError:
             logger.warning("⚠️ Qdrant client not available - template storage disabled")
             return None
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Qdrant client: {e}", exc_info=True)
+            logger.error(f"❌ Failed to get Qdrant client: {e}", exc_info=True)
             return None
 
     return _qdrant_client
@@ -284,9 +236,8 @@ def _get_qdrant_client():
 
 def _reset_card_framework_wrapper():
     """Reset the card framework wrapper to force reinitialization."""
-    global _card_framework_wrapper, _card_types_cache
+    global _card_framework_wrapper
     _card_framework_wrapper = None
-    _card_types_cache = {}
     logger.info("🔄 Card framework wrapper reset")
 
 
@@ -431,775 +382,23 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
     return _card_framework_wrapper
 
 
-def _initialize_colbert_wrapper(force_reset: bool = False):
-    """Initialize the ColBERT-enabled ModuleWrapper for raw query mode."""
-    global _card_framework_wrapper_colbert
-
-    if not CARD_FRAMEWORK_AVAILABLE:
-        logger.warning(
-            "❌ Card Framework not available - cannot initialize ColBERT wrapper"
-        )
-        return None
-
-    if force_reset:
-        logger.info("🔄 Force reset ColBERT wrapper")
-        _card_framework_wrapper_colbert = None
-
-    if _card_framework_wrapper_colbert is None:
-        try:
-            import card_framework
-
-            from config.settings import settings
-
-            logger.info("🤖 Initializing ColBERT-enabled ModuleWrapper...")
-
-            _card_framework_wrapper_colbert = ModuleWrapper(
-                module_or_name="card_framework.v2",
-                qdrant_url=settings.qdrant_url,
-                qdrant_api_key=settings.qdrant_api_key,
-                collection_name="card_framework_components_fastembed",
-                enable_colbert=True,  # Enable ColBERT multi-vector embeddings
-                colbert_model="colbert-ir/colbertv2.0",
-                colbert_collection_name="card_framework_components_colbert",
-                index_nested=True,
-                index_private=False,
-                max_depth=2,
-                skip_standard_library=True,
-                include_modules=["card_framework", "gchat"],
-                exclude_modules=["numpy", "pandas", "matplotlib", "scipy"],
-                force_reindex=False,
-                clear_collection=False,
-            )
-
-            logger.info("✅ ColBERT ModuleWrapper created successfully!")
-            logger.info(
-                f"📊 ColBERT components indexed: {len(_card_framework_wrapper_colbert.components)}"
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize ColBERT wrapper: {e}", exc_info=True)
-            return None
-
-    return _card_framework_wrapper_colbert
-
-
-async def _find_card_component_colbert(
-    query: str, limit: int = 5, score_threshold: float = 0.1
-) -> List[Dict[str, Any]]:
+def _initialize_colbert_wrapper():
     """
-    Find card components using ColBERT multi-vector semantic search.
-
-    This uses the raw query directly without NLP preprocessing,
-    relying on ColBERT's superior semantic matching capabilities.
-
-    Args:
-        query: Raw natural language query
-        limit: Maximum number of results
-        score_threshold: Minimum similarity score threshold
-
-    Returns:
-        List of matching components
-    """
-    global _card_framework_wrapper_colbert
-
-    # Initialize ColBERT wrapper if needed
-    if not _card_framework_wrapper_colbert:
-        _initialize_colbert_wrapper(force_reset=True)
-
-    if not _card_framework_wrapper_colbert:
-        logger.error("❌ ColBERT ModuleWrapper not available")
-        return []
-
-    try:
-        logger.info(f"🔍 ColBERT raw query search: '{query}'")
-
-        # Use ColBERT search directly with raw query
-        results = _card_framework_wrapper_colbert.colbert_search(
-            query=query,
-            limit=limit,
-            score_threshold=score_threshold,
-        )
-
-        if results:
-            logger.info(f"✅ ColBERT search returned {len(results)} results")
-            for i, r in enumerate(results[:3]):
-                logger.info(
-                    f"  {i+1}. {r.get('name')} (score: {r.get('score', 0):.4f})"
-                )
-
-        return results
-
-    except Exception as e:
-        logger.error(f"❌ ColBERT search failed: {e}", exc_info=True)
-        return []
-
-
-async def _find_card_component(
-    query: str, limit: int = 5, score_threshold: float = 0.1
-):
-    """
-    Find card components using ModuleWrapper semantic search.
-
-    REFACTORED: Now properly leverages ModuleWrapper.search() instead of duplicating functionality.
-
-    Args:
-        query: Natural language query describing the card
-        limit: Maximum number of results
-        score_threshold: Minimum similarity score threshold
-
-    Returns:
-        List of matching components
-    """
-    # Initialize wrapper if needed
-    if not _card_framework_wrapper:
-        _initialize_card_framework_wrapper(force_reset=True)
-
-    if not _card_framework_wrapper:
-        logger.error("❌ ModuleWrapper not available")
-        return []
-
-    # ENHANCED VALIDATION: Check if we have components, if not, force reinitialize
-    if len(_card_framework_wrapper.components) == 0:
-        logger.error(
-            "❌ CRITICAL: Existing wrapper has ZERO components! This will cause all searches to fail."
-        )
-        logger.info("🔄 Forcing reinitialization to attempt component recovery...")
-        _initialize_card_framework_wrapper(force_reset=True)
-
-        # Validate reinitialization worked
-        if not _card_framework_wrapper or len(_card_framework_wrapper.components) == 0:
-            logger.error("❌ REINITIALIZATION FAILED: Still no components available!")
-            logger.error(
-                "❌ ModuleWrapper is non-functional - all component searches will return empty results"
-            )
-            return []
-        else:
-            logger.info(
-                f"✅ Reinitialization successful: {len(_card_framework_wrapper.components)} components available"
-            )
-
-    # On-demand caching: check if query matches a common card type
-    #
-    # IMPORTANT:
-    # Historically we tried to speed things up by caching "card_type" searches like "text card".
-    # In practice this caused bad behavior for `send_dynamic_card`:
-    # - it returns *metadata-only* search results (no `component` field)
-    # - callers then treat that as a successful search but fail to build widgets and fall back
-    #   to empty "simple card" output.
-    #
-    # Fix: disable this cache shortcut by default so we always return the full search result
-    # objects (including `component`) from the normal ModuleWrapper path below.
-    enable_card_type_cache = os.getenv("ENABLE_CARD_TYPE_CACHE", "0") == "1"
-
-    common_card_types = [
-        "simple",
-        "interactive",
-        "form",
-        "rich",
-        "text",
-        "button",
-        "image",
-        "decorated",
-        "header",
-        "section",
-        "widget",
-        "divider",
-        "selection",
-        "chip",
-        "grid",
-        "column",
-    ]
-
-    if enable_card_type_cache:
-        # Check if query matches a card type we might want to cache
-        query_lower = query.lower()
-        for card_type in common_card_types:
-            if card_type in query_lower:
-                # Check if already cached
-                if card_type in _card_types_cache:
-                    logger.info(f"Using cached results for card type: {card_type}")
-                    return _card_types_cache[card_type]
-
-                # Not cached yet - search and cache now
-                logger.info(f"On-demand caching for card type: {card_type}")
-                results = _card_framework_wrapper.search(f"{card_type} card", limit=5)
-                if results:
-                    # Store only relevant information from the search results
-                    formatted_results = []
-                    for result in results:
-                        formatted_results.append(
-                            {
-                                "name": result.get("name"),
-                                "path": result.get("path"),
-                                "type": result.get("type"),
-                                "score": result.get("score"),
-                                "docstring": result.get("docstring", "")[:200],
-                            }
-                        )
-                    _card_types_cache[card_type] = formatted_results
-                    logger.info(
-                        f"✅ Cached {len(formatted_results)} results for card type: {card_type}"
-                    )
-                    return formatted_results
-
-    try:
-        # LEVERAGE MODULEWRAPPER: Use existing search functionality
-        try:
-            results = await _card_framework_wrapper.search_async(
-                query, limit=limit, score_threshold=score_threshold
-            )
-            logger.info(
-                f"✅ ModuleWrapper async search for '{query}' returned {len(results)} results"
-            )
-        except (AttributeError, NotImplementedError):
-            # Fall back to sync search if async not available
-            results = _card_framework_wrapper.search(
-                query, limit=limit, score_threshold=score_threshold
-            )
-            logger.info(
-                f"✅ ModuleWrapper sync search for '{query}' returned {len(results)} results"
-            )
-
-        # SIMPLIFIED: Resolve component paths with better error handling
-        def _map_search_path_to_actual_path(search_path: str) -> str:
-            """Map search index path to actual component path with enhanced error handling."""
-            if not search_path:
-                logger.warning("⚠️ Empty search path provided")
-                return search_path
-
-            logger.info(f"🔧 Mapping search path: {search_path}")
-
-            # Strategy 1: Direct match (path exists as-is)
-            if search_path in _card_framework_wrapper.components:
-                logger.info(f"✅ Direct path match: {search_path}")
-                return search_path
-
-            # Strategy 2: Common Card Framework v2 patterns
-            #
-            # NOTE: Many widgets live under card_framework.v2.widgets (e.g. TextInput),
-            # not directly under card_framework.v2. Prefer widgets.* before v2.*.
-            component_name = search_path.split(".")[-1]
-            common_patterns = [
-                f"card_framework.v2.widgets.{component_name}",
-                f"card_framework.v2.{component_name}",
-                f"card_framework.widgets.{component_name}",
-                f"card_framework.{component_name}",
-            ]
-
-            for pattern in common_patterns:
-                if pattern in _card_framework_wrapper.components:
-                    logger.info(f"✅ Pattern match: {search_path} -> {pattern}")
-                    return pattern
-
-            # Strategy 3: Fuzzy match on component name
-            # Prefer v2.widgets.* matches first (prevents bad paths like card_framework.v2.TextInput)
-            available_paths = list(_card_framework_wrapper.components.keys())
-
-            preferred_suffixes = [
-                f"card_framework.v2.widgets.{component_name}",
-                f"card_framework.v2.{component_name}",
-                f"card_framework.widgets.{component_name}",
-                f"card_framework.{component_name}",
-            ]
-            for preferred in preferred_suffixes:
-                if preferred in _card_framework_wrapper.components:
-                    logger.info(
-                        f"✅ Preferred exact match: {search_path} -> {preferred}"
-                    )
-                    return preferred
-
-            for path in available_paths:
-                if path.endswith(f".{component_name}"):
-                    # Skip the known-bad import path where a widget is treated as a submodule
-                    if path.startswith("card_framework.v2.") and (
-                        ".widgets." not in path and component_name.endswith("Input")
-                    ):
-                        continue
-                    logger.info(f"✅ Fuzzy match: {search_path} -> {path}")
-                    return path
-
-            # Strategy 4: Log available options for debugging
-            logger.warning(f"⚠️ No path mapping found for: {search_path}")
-            logger.info(f"🔍 Available component paths: {len(available_paths)} total")
-            if len(available_paths) <= 20:  # Only log if reasonable number
-                logger.info(f"🔍 Sample paths: {available_paths[:10]}")
-
-            # Fallback - return original path
-            return search_path
-
-        # ENHANCED: Resolve component objects with comprehensive error handling and fallback extraction
-        filtered_results = []
-        for i, result in enumerate(results):
-            # Prefer canonical module_path + name when available (more reliable than legacy full_path)
-            module_path = result.get("module_path")
-            name = result.get("name")
-            canonical = f"{module_path}.{name}" if module_path and name else None
-
-            search_path = canonical or result.get("path", "")
-            component = result.get("component")
-
-            logger.info(
-                f"🔍 Processing search result {i+1}/{len(results)}: {search_path}"
-            )
-
-            # ENHANCED COMPONENT RESOLUTION: Handle all component types including modules
-            if not component and search_path:
-                # Map search path to actual component path
-                actual_path = _map_search_path_to_actual_path(search_path)
-
-                if actual_path != search_path:
-                    logger.info(f"🔧 Mapped search path: {search_path} → {actual_path}")
-                    result["path"] = actual_path  # Update result with correct path
-                else:
-                    # Ensure the result dict stays aligned with the canonical path we attempted.
-                    result["path"] = actual_path
-
-                # TRUST THE WRAPPER: Use ModuleWrapper's get_component_by_path method
-                try:
-                    component = _card_framework_wrapper.get_component_by_path(
-                        actual_path
-                    )
-                    if component:
-                        result["component"] = component
-                        logger.info(
-                            f"✅ ModuleWrapper resolved component: {actual_path} -> {type(component).__name__}"
-                        )
-
-                        # ENHANCED: If component is a module, extract usable classes/functions
-                        if inspect.ismodule(component):
-                            logger.info(
-                                "🔍 Component is module, extracting usable members..."
-                            )
-                            module_members = inspect.getmembers(component)
-
-                            for name, member in module_members:
-                                if (
-                                    not name.startswith("_")
-                                    and (inspect.isclass(member) or callable(member))
-                                    and any(
-                                        keyword in name.lower()
-                                        for keyword in [
-                                            "card",
-                                            "widget",
-                                            "button",
-                                            "text",
-                                            "decorated",
-                                        ]
-                                    )
-                                ):
-
-                                    # Use the first suitable member found
-                                    result["component"] = member
-                                    result["extracted_from_module"] = component.__name__
-                                    result["extracted_member"] = name
-                                    logger.info(
-                                        f"✅ Extracted {type(member).__name__} '{name}' from module {component.__name__}"
-                                    )
-                                    component = member
-                                    break
-                    else:
-                        logger.warning(
-                            f"⚠️ ModuleWrapper could not resolve component: {actual_path}"
-                        )
-
-                        # ENHANCED FALLBACK: Try direct access with module extraction
-                        if actual_path in _card_framework_wrapper.components:
-                            component_data = _card_framework_wrapper.components[
-                                actual_path
-                            ]
-                            if hasattr(component_data, "obj") and component_data.obj:
-                                obj = component_data.obj
-
-                                # Check if it's already a class/callable we can use directly
-                                if inspect.isclass(obj) or callable(obj):
-                                    component = obj
-                                    result["component"] = component
-                                    logger.info(
-                                        f"✅ Direct fallback resolution: {type(obj).__name__}"
-                                    )
-
-                                # If it's a module, extract components from it
-                                elif inspect.ismodule(obj):
-                                    logger.info(
-                                        f"🔍 Fallback: Extracting from module {obj.__name__}"
-                                    )
-                                    module_members = inspect.getmembers(obj)
-
-                                    for name, member in module_members:
-                                        if not name.startswith("_") and (
-                                            inspect.isclass(member) or callable(member)
-                                        ):
-                                            component = member
-                                            result["component"] = component
-                                            result["fallback_extracted"] = (
-                                                f"{obj.__name__}.{name}"
-                                            )
-                                            logger.info(
-                                                f"✅ Fallback extracted: {type(member).__name__} '{name}'"
-                                            )
-                                            break
-                                else:
-                                    logger.warning(
-                                        f"⚠️ Component data object is not usable: {type(obj)}"
-                                    )
-                            else:
-                                logger.warning(
-                                    f"⚠️ Component data has no usable obj: {component_data}"
-                                )
-                        else:
-                            logger.warning(
-                                f"⚠️ Component path not in wrapper.components: {actual_path}"
-                            )
-
-                except Exception as resolution_error:
-                    logger.error(
-                        f"❌ Error resolving component via wrapper: {resolution_error}"
-                    )
-                    # Don't let resolution errors break the search
-                    component = None
-
-            # ENHANCED FILTERING: Better component validation
-            if component:
-                component_path = result.get("path", "")
-
-                # Check for usable component types
-                if inspect.isclass(component) or callable(component):
-                    # Skip bound methods
-                    if inspect.ismethod(component) or (
-                        hasattr(component, "__self__")
-                        and component.__self__ is not None
-                    ):
-                        logger.debug(f"❌ Skipping bound method: {component_path}")
-                        continue
-
-                    # Skip likely utility methods based on naming patterns
-                    if any(
-                        pattern in component_path.lower()
-                        for pattern in [
-                            ".add_",
-                            ".set_",
-                            ".get_",
-                            ".remove_",
-                            ".update_",
-                            ".create_",
-                        ]
-                    ):
-                        logger.debug(f"❌ Skipping utility method: {component_path}")
-                        continue
-
-                    # This is a valid component
-                    filtered_results.append(result)
-                    logger.info(
-                        f"✅ Added valid component: {component_path} ({type(component).__name__})"
-                    )
-
-                elif inspect.ismodule(component):
-                    # Module was not successfully processed - keep for fallback but note the issue
-                    filtered_results.append(result)
-                    logger.warning(
-                        f"⚠️ Module component not processed, keeping for fallback: {component_path}"
-                    )
-
-                else:
-                    # Unknown component type - keep for fallback
-                    filtered_results.append(result)
-                    logger.warning(
-                        f"⚠️ Unknown component type, keeping for fallback: {component_path} ({type(component)})"
-                    )
-            else:
-                # No component resolved - DO NOT add to results
-                # Unresolved components can't be instantiated, so keeping them
-                # causes valid components with lower scores to be skipped
-                logger.warning(f"⚠️ No component resolved, skipping: {search_path}")
-
-        # Log top results for debugging
-        if filtered_results:
-            logger.info(
-                f"Top result: {filtered_results[0]['name']} (score: {filtered_results[0]['score']:.4f})"
-            )
-
-        return filtered_results
-
-    except Exception as e:
-        logger.error(f"❌ ModuleWrapper search failed: {e}", exc_info=True)
-        return []
-
-
-def _create_card_from_component(
-    component: Any, params: Dict[str, Any]
-) -> Optional[Union[Card, Dict[str, Any]]]:
-    """
-    Create a card using a component found by the ModuleWrapper.
-
-    ENHANCED: Now includes post-construction configuration for DecoratedText widgets.
-
-    Args:
-        component: The component to use (class or function)
-        params: Parameters to pass to the component
-
-    Returns:
-        Card object or dictionary
-    """
-    if not component or not _card_framework_wrapper:
-        return None
-
-    # TRUST MODULEWRAPPER: Use create_card_component functionality
-    logger.info(
-        f"🔧 Using trusted ModuleWrapper.create_card_component for: {type(component).__name__}"
-    )
-
-    result = _card_framework_wrapper.create_card_component(component, params)
-
-    # POST-CONSTRUCTION ENHANCEMENT: Handle DecoratedText widgets specifically
-    if (
-        result
-        and hasattr(result, "__class__")
-        and "DecoratedText" in result.__class__.__name__
-    ):
-        logger.info("🎯 Post-construction configuration for DecoratedText widget")
-
-        # Apply DecoratedText-specific configurations after creation
-        try:
-            # Handle topLabel/top_label
-            top_label = params.get("topLabel") or params.get("top_label")
-            if top_label and hasattr(result, "top_label"):
-                result.top_label = top_label
-                logger.info(f"✅ Set DecoratedText top_label: {top_label}")
-
-            # Handle bottomLabel/bottom_label
-            bottom_label = params.get("bottomLabel") or params.get("bottom_label")
-            if bottom_label and hasattr(result, "bottom_label"):
-                result.bottom_label = bottom_label
-                logger.info(f"✅ Set DecoratedText bottom_label: {bottom_label}")
-
-            # Handle wrap_text
-            if "wrap_text" in params and hasattr(result, "wrap_text"):
-                result.wrap_text = params["wrap_text"]
-                logger.info(f"✅ Set DecoratedText wrap_text: {params['wrap_text']}")
-
-            # Handle horizontal_alignment
-            if "horizontal_alignment" in params and hasattr(
-                result, "horizontal_alignment"
-            ):
-                result.horizontal_alignment = params["horizontal_alignment"]
-                logger.info(
-                    f"✅ Set DecoratedText horizontal_alignment: {params['horizontal_alignment']}"
-                )
-
-            # Handle switch_control
-            if "switch_control" in params and hasattr(result, "switch_control"):
-                result.switch_control = params["switch_control"]
-                logger.info("✅ Set DecoratedText switch_control")
-
-            # Handle button configuration
-            if "button" in params and hasattr(result, "button"):
-                button_data = params["button"]
-                if isinstance(button_data, dict):
-                    # Try to create button using Card Framework
-                    try:
-                        from card_framework.v2.widgets import Button, OnClick, OpenLink
-
-                        # Create button with proper configuration
-                        button_text = button_data.get("text", "Button")
-                        button = Button(text=button_text)
-
-                        # Handle onClick action
-                        action_url = (
-                            button_data.get("onClick", {})
-                            .get("openLink", {})
-                            .get("url")
-                            or button_data.get("onclick_action")
-                            or button_data.get("url")
-                            or button_data.get("action")
-                        )
-                        if action_url:
-                            button.on_click = OnClick(
-                                open_link=OpenLink(url=action_url)
-                            )
-                            logger.info(
-                                f"✅ Set DecoratedText button onClick: {action_url}"
-                            )
-
-                        # Handle button type/style
-                        btn_type = button_data.get("type")
-                        if btn_type and hasattr(button, "type"):
-                            button.type = btn_type
-                            logger.info(f"✅ Set DecoratedText button type: {btn_type}")
-
-                        result.button = button
-                        logger.info(f"✅ Set DecoratedText button: {button_text}")
-
-                    except ImportError:
-                        # Fallback to direct assignment
-                        result.button = button_data
-                        logger.info(
-                            f"✅ Set DecoratedText button (fallback): {button_data}"
-                        )
-
-            # Handle icon configuration
-            if "icon" in params and hasattr(result, "icon"):
-                icon_data = params["icon"]
-                if isinstance(icon_data, dict):
-                    try:
-                        from card_framework.v2.widgets import Icon
-
-                        # Create icon with proper configuration
-                        if "icon_url" in icon_data:
-                            icon = Icon(icon_url=icon_data["icon_url"])
-                        elif "known_icon" in icon_data:
-                            icon = Icon(known_icon=icon_data["known_icon"])
-                        else:
-                            icon = icon_data
-
-                        result.icon = icon
-                        logger.info("✅ Set DecoratedText icon")
-
-                    except ImportError:
-                        # Fallback to direct assignment
-                        result.icon = icon_data
-                        logger.info("✅ Set DecoratedText icon (fallback)")
-
-        except Exception as config_error:
-            logger.warning(
-                f"⚠️ DecoratedText post-construction configuration failed: {config_error}"
-            )
-            # Don't fail the entire creation process due to configuration issues
-
-    if result:
-        logger.info(f"✅ ModuleWrapper created component: {type(result).__name__}")
-
-    return result
-
-
-# REMOVED: _recursively_process_components function - redundant with ModuleWrapper functionality
-
-
-def _create_card_with_hybrid_approach(
-    card_component: Any, params: Dict[str, Any], sections: List[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """
-    Create a card using the hybrid approach with RECURSIVE component processing.
-
-    This approach recursively processes all parameters to find and convert nested
-    components (like buttons, images, etc.) using to_dict() methods before
-    creating the main card component.
-
-    Args:
-        card_component: Any component found by semantic search
-        params: Parameters for the card (header, etc.)
-        sections: Optional sections to add directly
-
-    Returns:
-        Card in Google Chat API format
+    Initialize ColBERT wrapper for multi-vector embeddings.
+
+    This is called on server startup when COLBERT_EMBEDDING_DEV=true.
+    SmartCardBuilder handles its own ColBERT initialization via _get_embedder(),
+    but this function ensures the embedder is pre-loaded for faster first queries.
     """
     try:
-        logger.info(
-            f"🔧 Hybrid approach with recursive processing: {list(params.keys())}"
-        )
-
-        # DIRECT BUTTON PROCESSING: Handle button conversion directly in hybrid approach
-        processed_params = dict(params)  # Copy params
-
-        # Process buttons if they exist
-        if "buttons" in params and isinstance(params["buttons"], list):
-            processed_buttons = []
-            for btn_data in params["buttons"]:
-                if isinstance(btn_data, dict):
-                    # Convert to proper Google Chat format
-                    converted_btn = {"text": btn_data.get("text", "Button")}
-
-                    # Handle onclick action
-                    onclick_action = (
-                        btn_data.get("onclick_action")
-                        or btn_data.get("action")
-                        or btn_data.get("url")
-                    )
-                    if onclick_action:
-                        converted_btn["onClick"] = {"openLink": {"url": onclick_action}}
-
-                    # CRITICAL FIX: Use correct 'type' field for button styling (not 'style')
-                    btn_type = btn_data.get("type")
-                    if btn_type in ["FILLED", "FILLED_TONAL", "OUTLINED", "BORDERLESS"]:
-                        converted_btn["type"] = btn_type
-                        logger.info(f"🎨 Added button type: {btn_type}")
-
-                    processed_buttons.append(converted_btn)
-                    logger.info(f"🔄 Converted button: {converted_btn}")
-
-            processed_params["buttons"] = processed_buttons
-            logger.info(
-                f"✅ Button processing complete: {len(processed_buttons)} buttons"
-            )
-
-        # TRUST _create_card_from_component - it handles any component type intelligently
-        created_component = _create_card_from_component(
-            card_component, processed_params
-        )
-
-        if created_component is None:
-            logger.info(
-                "⚠️ Component creation returned None, building card from processed params"
-            )
-            # Build card structure from processed params directly
-            card_dict = _build_card_structure_from_params(processed_params, sections)
-        else:
-            logger.info(f"✅ Component created: {type(created_component)}")
-
-            # Try to use the component's to_dict() if available
-            # Check if component is a full card (has sections) or a widget
-            component_dict = None
-            if hasattr(created_component, "to_dict"):
-                component_dict = created_component.to_dict()
-                logger.info("✅ Used component.to_dict() after recursive processing")
-            elif isinstance(created_component, dict):
-                component_dict = created_component
-
-            # If it's a full card, use directly; otherwise build from widget
-            if component_dict and "sections" in component_dict:
-                card_dict = component_dict
-                logger.info("🎯 Component is a full Card, using directly")
-            else:
-                logger.info(
-                    "🧩 Component is a widget, incorporating into card structure"
-                )
-                card_dict = _build_card_from_widget(
-                    created_component, processed_params, sections
-                )
-
-        # Generate a unique card ID
-        card_id = (
-            f"hybrid_card_{int(time.time())}_{hash(str(processed_params)) % 10000}"
-        )
-
-        # Create the final card dictionary
-        result = {"cardId": card_id, "card": card_dict}
-
-        logger.info(
-            f"✅ Hybrid approach created card with structure: {list(card_dict.keys())}"
-        )
-        return result
-
+        builder = get_smart_card_builder()
+        # Force initialization of Qdrant and ColBERT embedder
+        builder.initialize()
+        builder._get_embedder()
+        logger.info("✅ ColBERT wrapper initialized via SmartCardBuilder")
     except Exception as e:
-        logger.error(
-            f"❌ Failed to create card with hybrid approach: {e}", exc_info=True
-        )
-
-        # Create a fallback card using processed_params if available
-        fallback_params = locals().get("processed_params", params)
-        return {
-            "cardId": f"fallback_{int(time.time())}",
-            "card": {
-                "header": {
-                    "title": fallback_params.get("title", "Fallback Card"),
-                    "subtitle": fallback_params.get(
-                        "subtitle", "Error occurred during card creation"
-                    ),
-                },
-                "sections": [
-                    {"widgets": [{"textParagraph": {"text": f"Error: {str(e)}"}}]}
-                ],
-            },
-        }
+        logger.warning(f"⚠️ ColBERT wrapper initialization failed: {e}")
+        # Non-fatal - will initialize on-demand when needed
 
 
 def _build_simple_card_structure(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1302,14 +501,21 @@ def _validate_card_content(card_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
                                 section_has_content = True
                                 break
 
-                # Check other widget types
+                # Check other widget types (support both camelCase and snake_case)
                 elif any(
                     key in widget
                     for key in [
                         "decoratedText",
+                        "decorated_text",
                         "selectionInput",
+                        "selection_input",
                         "textInput",
+                        "text_input",
                         "divider",
+                        "buttonList",
+                        "button_list",
+                        "columns",
+                        "grid",
                     ]
                 ):
                     section_has_content = True
@@ -1328,6 +534,69 @@ def _validate_card_content(card_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
         )
 
     return has_content, issues
+
+
+def _build_card_with_smart_builder(
+    card_description: str, card_params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Build a card using SmartCardBuilder.
+
+    SmartCardBuilder handles the full flow:
+    1. Parses natural language description into sections/items
+    2. Uses Qdrant vector search to find components
+    3. Loads components via ModuleWrapper
+    4. Infers layout from description (columns, image positioning)
+    5. Renders using component .render() methods
+    6. Builds form cards when fields are provided
+
+    Args:
+        card_description: Natural language description (parsed by SmartCardBuilder)
+        card_params: Parameters with title, subtitle, image_url, text, buttons, fields, submit_action
+
+    Returns:
+        Card structure in cardsV2 format ready for Google Chat API
+    """
+    import time
+
+    builder = get_smart_card_builder()
+
+    # Extract all params - pass everything to SmartCardBuilder
+    title = card_params.get("title")
+    subtitle = card_params.get("subtitle")
+    image_url = card_params.get("image_url")
+    text = card_params.get("text")
+    buttons = card_params.get("buttons")
+    fields = card_params.get("fields")  # Form fields
+    submit_action = card_params.get("submit_action")  # Form submit action
+
+    logger.info(f"🔨 SmartCardBuilder parsing description: {card_description[:80]}...")
+    if fields:
+        logger.info(f"📝 Form card mode: {len(fields)} field(s)")
+
+    # Build card using SmartCardBuilder - pass all params
+    card_dict = builder.build_card_from_description(
+        description=card_description,
+        title=title,
+        subtitle=subtitle,
+        image_url=image_url,
+        text=text,  # Pass text for layout inference (columns, etc.)
+        buttons=buttons,  # Pass buttons too
+        fields=fields,  # Form fields
+        submit_action=submit_action,  # Form submit action
+    )
+
+    if not card_dict:
+        logger.warning("⚠️ SmartCardBuilder returned empty card")
+        return {}
+
+    # Wrap in cardsV2 format
+    card_id = f"smart_card_{int(time.time())}_{hash(str(card_params)) % 10000}"
+
+    return {
+        "cardId": card_id,
+        "card": card_dict,
+    }
 
 
 def _build_card_structure_from_params(
@@ -1363,11 +632,37 @@ def _build_card_structure_from_params(
     # This ensures NLP-extracted sections don't get dropped in fallback paths
     if sections:
         card_dict["sections"] = sections
+        # ENHANCEMENT: Add image_url as widget in first section if provided
+        if "image_url" in params and sections:
+            image_widget = {"image": {"imageUrl": params["image_url"]}}
+            if "image_alt_text" in params:
+                image_widget["image"]["altText"] = params["image_alt_text"]
+            # Insert image at the beginning of first section's widgets
+            if sections[0].get("widgets"):
+                sections[0]["widgets"].insert(0, image_widget)
+            else:
+                sections[0]["widgets"] = [image_widget]
+            logger.info(
+                f"✅ Added image widget to first section: {params['image_url']}"
+            )
     elif isinstance(params.get("sections"), list) and params.get("sections"):
         card_dict["sections"] = params["sections"]
         logger.info(
             f"✅ Using sections from params: {len(params['sections'])} section(s)"
         )
+        # ENHANCEMENT: Add image_url as widget in first section if provided
+        if "image_url" in params and card_dict["sections"]:
+            image_widget = {"image": {"imageUrl": params["image_url"]}}
+            if "image_alt_text" in params:
+                image_widget["image"]["altText"] = params["image_alt_text"]
+            # Insert image at the beginning of first section's widgets
+            if card_dict["sections"][0].get("widgets"):
+                card_dict["sections"][0]["widgets"].insert(0, image_widget)
+            else:
+                card_dict["sections"][0]["widgets"] = [image_widget]
+            logger.info(
+                f"✅ Added image widget to first section: {params['image_url']}"
+            )
     else:
         widgets = []
 
@@ -1455,381 +750,6 @@ def _build_card_structure_from_params(
     return card_dict
 
 
-def _universal_component_unpacker(
-    component_data: Any, context: str = "component"
-) -> List[Dict[str, Any]]:
-    """
-    Universal component unpacker that recursively extracts all widget data
-    from any component's to_dict() output and converts to Google Chat format.
-
-    ENHANCED: Now properly handles advanced widgets like DecoratedText, preserving their structure.
-    """
-    widgets = []
-    logger.info(f"🔓 Universal unpacking: {context} data: {component_data}")
-
-    if not component_data:
-        return widgets
-
-    if isinstance(component_data, dict):
-        # CRITICAL FIX: Check for already-valid Google Chat widget types FIRST
-        # This prevents destructive conversion of advanced widgets to simple text
-        valid_widget_types = {
-            "textParagraph",
-            "image",
-            "decoratedText",
-            "buttonList",
-            "selectionInput",
-            "textInput",
-            "dateTimePicker",
-            "divider",
-            "grid",
-            "columns",
-            "chipList",
-        }
-
-        # If the component data already contains a valid widget type, preserve it
-        widget_type_found = None
-        for widget_type in valid_widget_types:
-            if widget_type in component_data:
-                widget_type_found = widget_type
-                break
-
-        if widget_type_found:
-            # This is already a properly formatted Google Chat widget - use it directly
-            widgets.append(component_data)
-            logger.info(f"✅ Preserved valid {widget_type_found} widget from {context}")
-            return widgets
-
-        # ENHANCED: Check for DecoratedText patterns specifically
-        # DecoratedText components often have topLabel, bottomLabel, text, button, etc.
-        if any(
-            key in component_data
-            for key in ["topLabel", "top_label", "bottomLabel", "bottom_label"]
-        ):
-            decorated_text_widget = {"decoratedText": {}}
-
-            # Map common fields to decoratedText format
-            if "text" in component_data:
-                decorated_text_widget["decoratedText"]["text"] = component_data["text"]
-
-            # Handle labels
-            top_label = component_data.get("topLabel", component_data.get("top_label"))
-            if top_label:
-                decorated_text_widget["decoratedText"]["topLabel"] = top_label
-
-            bottom_label = component_data.get(
-                "bottomLabel", component_data.get("bottom_label")
-            )
-            if bottom_label:
-                decorated_text_widget["decoratedText"]["bottomLabel"] = bottom_label
-
-            # Handle button
-            button_data = component_data.get("button")
-            if button_data and isinstance(button_data, dict):
-                button_widget = {"text": button_data.get("text", "Button")}
-                action_url = (
-                    button_data.get("onClick", {}).get("openLink", {}).get("url")
-                    or button_data.get("onclick_action")
-                    or button_data.get("url")
-                    or button_data.get("action")
-                )
-                if action_url:
-                    button_widget["onClick"] = {"openLink": {"url": action_url}}
-                decorated_text_widget["decoratedText"]["button"] = button_widget
-
-            widgets.append(decorated_text_widget)
-            logger.info(f"✅ Created decoratedText widget from {context}")
-            return widgets
-
-        # Look for button patterns (existing logic)
-        if "buttons" in component_data or "button" in component_data:
-            buttons_data = component_data.get("buttons", [component_data.get("button")])
-            if buttons_data and buttons_data != [None]:
-                button_widgets = []
-                for btn in (
-                    buttons_data if isinstance(buttons_data, list) else [buttons_data]
-                ):
-                    if isinstance(btn, dict):
-                        button_widget = {
-                            "text": btn.get("text", btn.get("label", "Button"))
-                        }
-                        # Look for various action patterns
-                        action_url = (
-                            btn.get("onClick", {}).get("openLink", {}).get("url")
-                            or btn.get("onclick_action")
-                            or btn.get("url")
-                            or btn.get("action")
-                        )
-                        if action_url:
-                            button_widget["onClick"] = {"openLink": {"url": action_url}}
-                        button_widgets.append(button_widget)
-
-                if button_widgets:
-                    widgets.append({"buttonList": {"buttons": button_widgets}})
-                    logger.info(
-                        f"✅ Unpacked {len(button_widgets)} buttons from {context}"
-                    )
-
-        # Look for text patterns (ONLY if not already processed as advanced widget)
-        elif "text" in component_data and not any(
-            key in component_data
-            for key in ["topLabel", "top_label", "bottomLabel", "bottom_label"]
-        ):
-            widgets.append({"textParagraph": {"text": component_data["text"]}})
-            logger.info(f"✅ Unpacked simple text from {context}")
-
-        # Look for image patterns
-        elif "imageUrl" in component_data or "image_url" in component_data:
-            image_url = component_data.get("imageUrl", component_data.get("image_url"))
-            image_widget = {"image": {"imageUrl": image_url}}
-            alt_text = component_data.get("altText", component_data.get("alt_text"))
-            if alt_text:
-                image_widget["image"]["altText"] = alt_text
-            widgets.append(image_widget)
-            logger.info(f"✅ Unpacked image from {context}")
-
-        # Recursively process nested structures (but skip already-processed keys)
-        processed_keys = {
-            "text",
-            "buttons",
-            "button",
-            "imageUrl",
-            "image_url",
-            "altText",
-            "alt_text",
-            "topLabel",
-            "top_label",
-            "bottomLabel",
-            "bottom_label",
-        }
-        for key, value in component_data.items():
-            if key not in processed_keys and not any(
-                wtype in key for wtype in valid_widget_types
-            ):
-                nested_widgets = _universal_component_unpacker(
-                    value, f"{context}.{key}"
-                )
-                widgets.extend(nested_widgets)
-
-    elif isinstance(component_data, list):
-        # Process list items
-        for i, item in enumerate(component_data):
-            nested_widgets = _universal_component_unpacker(item, f"{context}[{i}]")
-            widgets.extend(nested_widgets)
-
-    return widgets
-
-
-def _build_header_from_params(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Build card header from params.
-
-    Handles both flat structure (title/subtitle in params) and nested structure
-    (header object in params).
-
-    Args:
-        params: Card parameters
-
-    Returns:
-        Header dict or None if no title/subtitle provided
-    """
-    header = {}
-
-    # Check for nested header object first
-    if "header" in params and isinstance(params["header"], dict):
-        header_data = params["header"]
-        if "title" in header_data:
-            header["title"] = header_data["title"]
-        if "subtitle" in header_data:
-            header["subtitle"] = header_data["subtitle"]
-    else:
-        # Flat structure
-        if "title" in params:
-            header["title"] = params["title"]
-        if "subtitle" in params:
-            header["subtitle"] = params["subtitle"]
-
-    return header if header else None
-
-
-def _add_widgets_from_params(
-    widgets: List[Dict[str, Any]],
-    params: Dict[str, Any],
-    skip_types: Optional[set] = None,
-) -> Dict[str, bool]:
-    """
-    Add widgets from params to the widgets list.
-
-    This unified helper handles text, image_url, and buttons consistently
-    across all card building paths. It processes params and appends the
-    appropriate widgets to the provided list.
-
-    Args:
-        widgets: List to append widgets to (modified in place)
-        params: Card parameters containing text, image_url, buttons, etc.
-        skip_types: Optional set of widget types to skip ('text', 'image', 'buttons')
-
-    Returns:
-        Dict indicating which widget types were added:
-        {'text': bool, 'image': bool, 'buttons': bool}
-    """
-    skip_types = skip_types or set()
-    added = {"text": False, "image": False, "buttons": False}
-
-    # Add text widget if provided
-    if "text" not in skip_types and "text" in params:
-        widgets.append({"textParagraph": {"text": params["text"]}})
-        added["text"] = True
-        logger.info(f"✅ Added text widget: {params['text'][:50]}...")
-
-    # Add image widget if provided
-    if "image" not in skip_types and "image_url" in params:
-        image_widget = {"image": {"imageUrl": params["image_url"]}}
-        if "image_alt_text" in params:
-            image_widget["image"]["altText"] = params["image_alt_text"]
-        widgets.append(image_widget)
-        added["image"] = True
-        logger.info(f"✅ Added image widget: {params['image_url']}")
-
-    # Add buttons widget if provided
-    if (
-        "buttons" not in skip_types
-        and "buttons" in params
-        and isinstance(params["buttons"], list)
-    ):
-        button_widgets = []
-        for button_data in params["buttons"]:
-            if isinstance(button_data, dict):
-                # Check if button is already processed (has onClick)
-                if "onClick" in button_data:
-                    # Button already processed - use as-is
-                    button_widgets.append(button_data)
-                elif button_data.get("text"):
-                    # Process the button
-                    button_widget = {"text": button_data.get("text", "Button")}
-
-                    # Handle various onclick formats
-                    onclick_url = (
-                        button_data.get("onclick_action")
-                        or button_data.get("action")
-                        or button_data.get("url")
-                    )
-                    if onclick_url:
-                        button_widget["onClick"] = {"openLink": {"url": onclick_url}}
-
-                    # Handle button type/style
-                    btn_type = button_data.get("type")
-                    if btn_type in ["FILLED", "FILLED_TONAL", "OUTLINED", "BORDERLESS"]:
-                        button_widget["type"] = btn_type
-
-                    button_widgets.append(button_widget)
-
-        if button_widgets:
-            widgets.append({"buttonList": {"buttons": button_widgets}})
-            added["buttons"] = True
-            logger.info(f"✅ Added buttonList with {len(button_widgets)} buttons")
-
-    return added
-
-
-def _build_card_from_widget(
-    component: Any, params: Dict[str, Any], sections: List[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """Build card structure from any widget component type.
-
-    Handles three component types:
-    - Objects with to_dict() method (widget components)
-    - Plain dictionaries (widget dicts)
-    - Raw objects without to_dict() (fallback)
-    """
-    card_dict = {}
-
-    # Build header from params
-    header = _build_header_from_params(params)
-    if header:
-        card_dict["header"] = header
-
-    # If sections provided, use them directly
-    if sections:
-        card_dict["sections"] = sections
-        return card_dict
-
-    # Build widgets based on component type
-    widgets = []
-    added = _add_widgets_from_params(widgets, params)
-
-    if hasattr(component, "to_dict"):
-        # Widget component with to_dict() - use universal unpacker
-        component_dict = component.to_dict()
-        component_name = type(component).__name__
-
-        logger.info(
-            f"🔓 Using trusted universal unpacker for component: {component_name}"
-        )
-        unpacked_widgets = _universal_component_unpacker(component_dict, component_name)
-
-        # Filter out duplicates from params
-        for widget in unpacked_widgets:
-            if not isinstance(widget, dict):
-                widgets.append(widget)
-                continue
-            if added["text"] and "textParagraph" in widget:
-                logger.info("🔧 Skipping duplicate text widget (using params text)")
-                continue
-            if added["image"] and "image" in widget:
-                logger.info("🔧 Skipping duplicate image widget (using params image)")
-                continue
-            if added["buttons"] and "buttonList" in widget:
-                logger.info(
-                    "🔧 Skipping duplicate button widget (using params buttons)"
-                )
-                continue
-            widgets.append(widget)
-
-        logger.info(f"✅ Universal unpacker extracted widgets from {component_name}")
-
-    elif isinstance(component, dict):
-        # Plain dictionary - validate and add as widget
-        valid_widget_types = {
-            "textParagraph",
-            "image",
-            "decoratedText",
-            "buttonList",
-            "selectionInput",
-            "textInput",
-            "dateTimePicker",
-            "divider",
-            "grid",
-            "columns",
-        }
-
-        if "text" in component and len(component) <= 2:
-            widgets.append({"textParagraph": component})
-        elif any(key in valid_widget_types for key in component.keys()):
-            widgets.append(component)
-        else:
-            logger.warning(
-                f"⚠️ Unknown component dict structure: {list(component.keys())}, creating fallback"
-            )
-            widgets.append(
-                {
-                    "textParagraph": {
-                        "text": f"Component data: {str(component)[:100]}..."
-                    }
-                }
-            )
-
-    else:
-        # Raw component without to_dict() - extract from __dict__
-        if not added["text"] and hasattr(component, "__dict__"):
-            component_data = component.__dict__
-            if component_data and "text" in component_data:
-                widgets.append({"textParagraph": {"text": str(component_data["text"])}})
-
-    card_dict["sections"] = [{"widgets": widgets}]
-    return card_dict
-
-
 def _convert_field_names_to_snake_case(obj: Any) -> Any:
     """Convert camelCase field names to snake_case recursively for webhook API."""
     if isinstance(obj, dict):
@@ -1864,6 +784,25 @@ def _camel_to_snake(camel_str: str) -> str:
     return result
 
 
+def _strip_internal_fields(obj: Any) -> Any:
+    """
+    Recursively strip internal fields (starting with _) from dictionaries.
+
+    These fields are used internally (e.g., _card_id for feedback tracking)
+    but should not be sent to external APIs like Google Chat.
+    """
+    if isinstance(obj, dict):
+        return {
+            key: _strip_internal_fields(value)
+            for key, value in obj.items()
+            if not key.startswith("_")
+        }
+    elif isinstance(obj, list):
+        return [_strip_internal_fields(item) for item in obj]
+    else:
+        return obj
+
+
 def setup_unified_card_tool(mcp: FastMCP) -> None:
     """
     Setup the unified card tool for MCP.
@@ -1878,304 +817,185 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="send_dynamic_card",
-        description="Send any type of card to Google Chat using natural language description with advanced NLP parameter extraction",
+        description="Send any type of card to Google Chat using natural language description with NLP extraction",
         tags={"chat", "card", "dynamic", "google", "unified", "nlp"},
         annotations={
             "title": "Send Dynamic Card with NLP",
-            "description": "Unified tool for sending Google Chat Cards v2 with natural language processing for complex card creation. Automatically extracts card structure from descriptions including sections, decoratedText widgets, icons, and buttons.",
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
             "openWorldHint": True,
             "examples": [
                 {
-                    "description": "Simple text card",
+                    "description": "Simple card",
                     "card_description": "simple notification",
                     "card_params": {"title": "Alert", "text": "System update complete"},
                 },
                 {
-                    "description": "Natural language card with sections",
-                    "card_description": "Create a monitoring dashboard with title 'Server Status' and three sections: 1. 'Health Check' section with decoratedText 'All Systems Go' with topLabel 'Status' and green check icon 2. 'Performance' section with decoratedText 'Response Time: 120ms' with topLabel 'API Latency' 3. 'Actions' section with a button 'View Logs' linking to https://logs.example.com",
-                    "card_params": {},
+                    "description": "Multi-section card (recommended pattern)",
+                    "card_description": "First section titled 'Deployments' showing Frontend at https://app.example.com. Second section titled 'Status' showing All systems operational.",
+                    "card_params": {"title": "Dashboard"},
                 },
-                {
-                    "description": "Dashboard with decoratedText widgets",
-                    "card_description": "Create a project dashboard with sections showing metrics: first section 'Build Status' with decoratedText 'Passing' with topLabel 'Latest Build' and green check icon, second section 'Coverage' with decoratedText '92%' with topLabel 'Code Coverage' and chart icon",
-                    "card_params": {"title": "Project Dashboard"},
-                },
-                {
-                    "description": "Card with collapsible sections",
-                    "card_description": "Create a report card with collapsible sections: 'Summary' section (collapsible) with text about Q4 results, 'Details' section with a grid of metrics, and 'Actions' section with buttons 'Download PDF' and 'Share Report'",
-                    "card_params": {},
-                },
-            ],
-            "natural_language_features": [
-                "Automatic extraction of card title, subtitle, and text from descriptions",
-                "Support for numbered/bulleted sections (e.g., '1. Section Name' or '- Section Name')",
-                "DecoratedText widget creation with topLabel, bottomLabel, and icons",
-                "Icon mapping from natural language (e.g., 'green check' → CHECK_CIRCLE icon)",
-                "Button extraction with text and onClick actions from URLs",
-                "Grid layouts and column arrangements from descriptions",
-                "Collapsible section headers",
-                "HTML content formatting",
-                "Switch controls and interactive elements",
-            ],
-            "limitations": [
-                "Images cannot be placed in card headers - they become widgets in sections",
-                "Maximum 100 widgets per section, 6 buttons per buttonList",
-                "Field length limits: title/subtitle (200 chars), text (4000 chars)",
-                "Icon mapping supports 20+ common icons with color modifiers",
             ],
         },
     )
     async def send_dynamic_card(
-        user_google_email: str,
-        space_id: str,
-        card_description: str,
-        card_params: Optional[Dict[str, Any]] = None,
-        thread_key: Optional[str] = None,
-        webhook_url: Optional[str] = None,
-        use_colbert: bool = False,
+        user_google_email: Annotated[
+            str,
+            Field(
+                description="The user's Google email address for authentication and API access"
+            ),
+        ],
+        space_id: Annotated[
+            str,
+            Field(
+                description="The Google Chat space ID (e.g., 'spaces/AAAA1234') to send the card to"
+            ),
+        ],
+        card_description: Annotated[
+            str,
+            Field(
+                description='Natural language description of the card. Use pattern: \'First section titled "NAME" showing CONTENT. Second section titled "NAME" showing CONTENT.\' URLs become clickable buttons automatically.'
+            ),
+        ],
+        card_params: Annotated[
+            Optional[Dict[str, Any]],
+            Field(
+                default=None,
+                description="Optional dict of explicit parameters (title, subtitle, text, buttons) that override NLP-extracted values",
+            ),
+        ] = None,
+        thread_key: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description="Optional thread key for replying to existing message threads",
+            ),
+        ] = None,
+        webhook_url: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description="Webhook URL for direct delivery (bypasses API auth). If not provided, uses MCP_CHAT_WEBHOOK from settings.",
+            ),
+        ] = None,
+        use_colbert: Annotated[
+            bool,
+            Field(
+                default=True,
+                description="Use ColBERT multi-vector embeddings for semantic search. Provides more accurate matching.",
+            ),
+        ] = True,
     ) -> SendDynamicCardResponse:
         """
-        Send any type of card to Google Chat using natural language description with enhanced NLP.
+        Send any type of card to Google Chat using natural language description.
 
-        This unified tool combines ModuleWrapper semantic search with advanced NLP parameter extraction
-        to create complex Google Chat cards from natural language descriptions.
+        RECOMMENDED PATTERN for multi-section cards:
+            First section titled "NAME" showing CONTENT.
+            Second section titled "NAME" showing CONTENT.
 
-        See SendDynamicCardResponse, CardParams, and ICON_MAPPINGS in unified_card_types.py for
-        detailed field descriptions, supported widget types, and icon mapping reference.
-
-        Args:
-            user_google_email: The user's Google email address for authentication
-            space_id: The Google Chat space ID to send the card to
-            card_description: Natural language description of the card structure and content
-            card_params: Optional dict of explicit parameters that override NLP-extracted values
-            thread_key: Optional thread key for threaded message replies
-            webhook_url: Optional webhook URL for direct delivery (bypasses API auth)
-            use_colbert: If True, use ColBERT multi-vector embeddings for semantic search.
-                        This skips NLP parsing and uses the raw description directly as the
-                        query to the RAG database. ColBERT provides more accurate semantic
-                        matching at the token level. Default is False.
+        AUTOMATIC FEATURES:
+        - URLs become clickable "Open" buttons
+        - "warning/stale" keywords get warning icons
+        - "@username" and "commit HASH" get appropriate icons
+        - "X and Y" splits into separate widgets
 
         Returns:
-            SendDynamicCardResponse with delivery status, component info, and NLP extraction details
+            SendDynamicCardResponse with delivery status and component info
         """
         try:
             logger.info(f"🔍 Finding card component for: {card_description}")
             logger.info(f"🤖 ColBERT mode: {use_colbert}")
 
+            # Use default webhook from settings if not provided
+            if not webhook_url and settings.mcp_chat_webhook:
+                webhook_url = settings.mcp_chat_webhook
+                logger.info(f"📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
+
             # Default parameters if not provided
             if card_params is None:
                 card_params = {}
 
-            # ENHANCED NLP INTEGRATION: Parse natural language description to extract parameters
-            # NOTE: NLP parsing runs for BOTH ColBERT and standard modes.
-            # ColBERT determines how we SEARCH for the right component template,
-            # but NLP extracts the PARAMETERS (title, buttons, text) to populate it.
-            # They are complementary, not alternatives!
-            try:
-                logger.info(
-                    f"🧠 Parsing natural language description: '{card_description}'"
-                )
-                nlp_extracted_params = parse_enhanced_natural_language_description(
-                    card_description
-                )
-
-                if nlp_extracted_params:
-                    logger.info(
-                        f"✅ NLP extracted parameters: {list(nlp_extracted_params.keys())}"
-                    )
-
-                    # Merge NLP extracted parameters with user-provided card_params
-                    # User-provided card_params take priority over NLP-extracted ones
-                    merged_params: Dict[str, Any] = {}
-                    merged_params.update(
-                        nlp_extracted_params
-                    )  # Add NLP extracted params first
-                    merged_params.update(card_params)  # User params override NLP params
-
-                    # CRITICAL: Ensure NLP-extracted `sections` survive and are used.
-                    # Many descriptions imply sections/widgets, but older flows only used top-level `buttons`.
-                    if isinstance(merged_params.get("sections"), list):
-                        logger.info(
-                            f"✅ NLP produced sections: {len(merged_params['sections'])} section(s)"
-                        )
-
-                    card_params = merged_params
-                else:
-                    logger.info(
-                        "📝 No parameters extracted from natural language description"
-                    )
-
-            except Exception as nlp_error:
-                logger.warning(
-                    f"⚠️ NLP parsing failed, continuing with original card_params: {nlp_error}"
-                )
+            # =================================================================
+            # NLP PARSING COMMENTED OUT - SmartCardBuilder has its own inference
+            # SmartCardBuilder.infer_content_type() detects prices, IDs, URLs, etc.
+            # SmartCardBuilder.infer_layout() detects columns, image positioning
+            # If we need NLP parsing for multi-section cards, uncomment below.
+            # =================================================================
+            # try:
+            #     logger.info(
+            #         f"🧠 Parsing natural language description: '{card_description}'"
+            #     )
+            #     nlp_extracted_params = parse_enhanced_natural_language_description(
+            #         card_description
+            #     )
+            #
+            #     if nlp_extracted_params:
+            #         logger.info(
+            #             f"✅ NLP extracted parameters: {list(nlp_extracted_params.keys())}"
+            #         )
+            #
+            #         merged_params: Dict[str, Any] = {}
+            #         merged_params.update(nlp_extracted_params)
+            #         merged_params.update(card_params)
+            #
+            #         if isinstance(merged_params.get("sections"), list):
+            #             logger.info(
+            #                 f"✅ NLP produced sections: {len(merged_params['sections'])} section(s)"
+            #             )
+            #
+            #         card_params = merged_params
+            #     else:
+            #         logger.info("📝 No parameters extracted from NLP")
+            #
+            # except Exception as nlp_error:
+            #     logger.warning(f"⚠️ NLP parsing failed: {nlp_error}")
+            # =================================================================
 
             # Initialize default best_match to prevent UnboundLocalError
             best_match = {"type": "fallback", "name": "simple_fallback", "score": 0.0}
             google_format_card = None
 
-            # Find card components using ModuleWrapper (ColBERT or standard)
-            if use_colbert:
-                logger.info("🔍 Using ColBERT multi-vector search...")
-                results = await _find_card_component_colbert(card_description)
-            else:
-                results = await _find_card_component(card_description)
-
-            if results:
-                # Get the best match component
-                best_match = results[0]
-                component = best_match.get("component")
-
-                # ENHANCED COMPONENT VALIDATION: Handle module objects and extract usable classes/functions
-                usable_component = None
-                component_type = "unknown"
-
-                if component:
-                    if inspect.ismodule(component):
-                        logger.info(
-                            "🔍 Component is a module, extracting usable classes/functions..."
-                        )
-
-                        # Extract usable classes and functions from the module
-                        module_members = inspect.getmembers(component)
-                        potential_components = []
-
-                        for name, member in module_members:
-                            # Skip private members and built-in types
-                            if name.startswith("_"):
-                                continue
-
-                            # Look for classes that might be card components
-                            if inspect.isclass(member):
-                                # Check if it's likely a card component (has relevant methods or attributes)
-                                if (
-                                    hasattr(member, "to_dict")
-                                    or hasattr(member, "__init__")
-                                    or any(
-                                        keyword in name.lower()
-                                        for keyword in [
-                                            "card",
-                                            "widget",
-                                            "button",
-                                            "text",
-                                            "image",
-                                            "decorated",
-                                        ]
-                                    )
-                                ):
-                                    potential_components.append((name, member, "class"))
-                                    logger.info(
-                                        f"🔍 Found potential class component: {name}"
-                                    )
-
-                            # Look for functions that might create cards
-                            elif inspect.isfunction(member) or callable(member):
-                                if any(
-                                    keyword in name.lower()
-                                    for keyword in [
-                                        "create",
-                                        "make",
-                                        "build",
-                                        "card",
-                                        "widget",
-                                    ]
-                                ):
-                                    potential_components.append(
-                                        (name, member, "function")
-                                    )
-                                    logger.info(
-                                        f"🔍 Found potential function component: {name}"
-                                    )
-
-                        if potential_components:
-                            # Use the first potential component (could be enhanced with better selection logic)
-                            component_name, usable_component, component_type = (
-                                potential_components[0]
-                            )
-                            logger.info(
-                                f"✅ Extracted {component_type} component '{component_name}' from module"
-                            )
-                            best_match["extracted_component"] = component_name
-                            best_match["type"] = (
-                                "class" if component_type == "class" else "function"
-                            )
-                        else:
-                            logger.warning(
-                                "⚠️ Module contains no usable card components"
-                            )
-                            usable_component = None
-
-                    elif inspect.isclass(component) or callable(component):
-                        # Component is already a usable class or function
-                        usable_component = component
-                        component_type = (
-                            "class" if inspect.isclass(component) else "function"
-                        )
-                        logger.info(f"✅ Component is directly usable {component_type}")
-                        best_match["type"] = component_type
-
-                    else:
-                        logger.warning(
-                            f"⚠️ Component is neither module, class, nor callable: {type(component)}"
-                        )
-                        usable_component = None
-
-                # Use component if we found a usable one
-                if usable_component:
-                    logger.info(
-                        f"✅ Using {component_type} component: {best_match.get('path')} (score: {best_match.get('score'):.4f})"
-                    )
-
-                    # TRUST MODULEWRAPPER: Use hybrid approach for component-based card creation
-                    logger.info("🔧 Using trusted ModuleWrapper with hybrid approach")
-
-                    # If NLP provided explicit sections/widgets, pass them through so they aren't dropped.
-                    sections_from_params = (
-                        card_params.get("sections")
-                        if isinstance(card_params.get("sections"), list)
-                        else None
-                    )
-
-                    google_format_card = _create_card_with_hybrid_approach(
-                        card_component=usable_component,
-                        params=card_params,
-                        sections=sections_from_params,
-                    )
-                    logger.info(
-                        "✅ Successfully created card using ModuleWrapper hybrid approach"
-                    )
-                else:
-                    logger.warning(
-                        "⚠️ No usable component found, using simple card structure"
-                    )
-
-                    # If NLP extracted sections, prefer them over the legacy "buttons-only" fallback.
-                    if isinstance(card_params.get("sections"), list):
-                        google_format_card = {
-                            "cardId": f"simple_card_{int(time.time())}_{hash(str(card_params)) % 10000}",
-                            "card": _build_card_structure_from_params(
-                                {
-                                    k: v
-                                    for k, v in card_params.items()
-                                    if k != "sections"
-                                },
-                                sections=card_params.get("sections"),
-                            ),
-                        }
-                    else:
-                        google_format_card = _build_simple_card_structure(card_params)
-
+            # =================================================================
+            # SMART CARD BUILDER - PRIMARY PATH
+            # SmartCardBuilder is now the primary card building path because it:
+            # 1. Searches Qdrant vector DB for relevant components (ColBERT)
+            # 2. Loads components via ModuleWrapper.get_component_by_path()
+            # 3. Has smart content inference (prices, IDs, dates, URLs)
+            # 4. Has layout inference (columns, image positioning)
+            # 5. Renders via component .render() methods
+            # =================================================================
+            logger.info("🔨 Using SmartCardBuilder as primary card building path")
+            try:
+                google_format_card = _build_card_with_smart_builder(
+                    card_description, card_params
+                )
+                if google_format_card:
                     best_match = {
-                        "type": "simple_fallback",
-                        "name": "simple_card",
-                        "score": 0.0,
+                        "type": "smart_builder",
+                        "name": "SmartCardBuilder",
+                        "score": 1.0,
                     }
-            else:
+                    logger.info("✅ SmartCardBuilder created card successfully")
+            except Exception as smart_err:
                 logger.warning(
-                    f"⚠️ No search results found for: {card_description}, using simple card structure"
+                    f"⚠️ SmartCardBuilder failed, falling back to simple card: {smart_err}",
+                    exc_info=True,
+                )
+                google_format_card = None
+
+            # =================================================================
+            # SIMPLE FALLBACK - Only used if SmartCardBuilder failed
+            # The legacy ColBERT/standard component search code has been removed
+            # because SmartCardBuilder now handles:
+            # - Qdrant vector search for components
+            # - ModuleWrapper.get_component_by_path() for loading
+            # - Smart content inference (prices, IDs, URLs, dates)
+            # - Layout inference (columns, image positioning)
+            # =================================================================
+            if not google_format_card:
+                logger.warning(
+                    "⚠️ SmartCardBuilder didn't create a card, using simple fallback"
                 )
                 google_format_card = _build_simple_card_structure(card_params)
                 best_match = {
@@ -2291,6 +1111,9 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 )
                 webhook_message_body = _convert_field_names_to_snake_case(message_body)
 
+                # Strip internal fields (like _card_id) that shouldn't be sent to the API
+                webhook_message_body = _strip_internal_fields(webhook_message_body)
+
                 # CRITICAL FIX: Add thread to message body for webhook threading
                 if thread_key:
                     webhook_message_body["thread"] = {"name": thread_key}
@@ -2303,7 +1126,7 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                 logger.info("🧪 CARD DEBUG INFO:")
                 logger.info(f"  - Description: '{card_description}'")
                 logger.info(f"  - Params keys: {list(card_params.keys())}")
-                logger.info(f"  - Component found: {bool(results)}")
+                logger.info(f"  - Card source: {best_match.get('type', 'unknown')}")
                 logger.info(
                     f"  - Best match: {best_match.get('name', 'N/A')} (score: {best_match.get('score', 0):.3f})"
                 )
@@ -2498,7 +1321,9 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                     )
 
                 # Add thread key if provided
-                request_params = {"parent": space_id, "body": message_body}
+                # Strip internal fields (like _card_id) before sending to API
+                api_message_body = _strip_internal_fields(message_body)
+                request_params = {"parent": space_id, "body": api_message_body}
                 _process_thread_key_for_request(request_params, thread_key)
 
                 message = await asyncio.to_thread(

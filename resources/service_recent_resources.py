@@ -125,9 +125,9 @@ def _build_service_info() -> Dict[str, Dict[str, Any]]:
 SERVICE_INFO = _build_service_info()
 
 
-def _get_authenticated_user_email(ctx: Context) -> Optional[str]:
+async def _get_authenticated_user_email(ctx: Context) -> Optional[str]:
     """Get authenticated user email from context."""
-    return get_user_email_context()
+    return await get_user_email_context()
 
 
 def _create_auth_error_response(service: str) -> Dict[str, Any]:
@@ -308,18 +308,30 @@ async def _get_recent_photos_items(
                 "timestamp": datetime.now().isoformat(),
             }
 
-        # Access the tool registry directly via _tool_manager (following middleware pattern)
+        # Access the tool registry (supports FastMCP 2.x and 3.0.0b1+)
         mcp_server = ctx.fastmcp
-        if not hasattr(mcp_server, "_tool_manager") or not hasattr(
+        tools_dict = {}
+
+        # FastMCP 2.x path
+        if hasattr(mcp_server, "_tool_manager") and hasattr(
             mcp_server._tool_manager, "_tools"
         ):
+            tools_dict = mcp_server._tool_manager._tools
+        # FastMCP 3.0.0b1+ path - tools in _local_provider._components
+        elif hasattr(mcp_server, "_local_provider") and hasattr(
+            mcp_server._local_provider, "_components"
+        ):
+            from fastmcp.tools.tool import Tool
+
+            components = mcp_server._local_provider._components
+            tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
+
+        if not tools_dict:
             return {
                 "error": "Cannot access tool registry from FastMCP server",
                 "service": service,
                 "timestamp": datetime.now().isoformat(),
             }
-
-        tools_dict = mcp_server._tool_manager._tools
         tool_name = "list_photos_albums"
 
         if tool_name not in tools_dict:
@@ -465,25 +477,30 @@ Returns items modified within the last 30 days by default.""",
                 description="Service name: drive, docs, sheets, slides, forms, or photos"
             ),
         ],
-    ) -> Dict[str, Any]:
+    ) -> str:
         """Get recent items for a specific Drive-based service."""
+        import json
 
         # Validate service parameter
         if service.lower() not in SERVICE_INFO:
-            return {
-                "error": f"Unsupported service: {service}",
-                "supported_services": list(SERVICE_INFO.keys()),
-                "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
-                "timestamp": datetime.now().isoformat(),
-            }
+            return json.dumps(
+                {
+                    "error": f"Unsupported service: {service}",
+                    "supported_services": list(SERVICE_INFO.keys()),
+                    "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
         # Get authenticated user
-        user_email = _get_authenticated_user_email(ctx)
+        user_email = await _get_authenticated_user_email(ctx)
         if not user_email:
-            return _create_auth_error_response(service.lower())
+            return json.dumps(_create_auth_error_response(service.lower()))
 
         # Get recent items using unified function
-        return await _get_recent_items(service.lower(), user_email, ctx=ctx)
+        result = await _get_recent_items(service.lower(), user_email, ctx=ctx)
+        # FastMCP 3.0: Return JSON string instead of dict
+        return json.dumps(result, default=str)
 
     @mcp.resource(
         uri="recent://{service}/{days}",
@@ -508,27 +525,32 @@ Note: Photos service returns albums (day range affects Drive services only).""",
         days: Annotated[
             int, Field(description="Number of days back to search (1-90)", ge=1, le=90)
         ],
-    ) -> Dict[str, Any]:
+    ) -> str:
         """Get recent items for a specific service with custom day range."""
+        import json
 
         # Validate service parameter
         if service.lower() not in SERVICE_INFO:
-            return {
-                "error": f"Unsupported service: {service}",
-                "supported_services": list(SERVICE_INFO.keys()),
-                "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
-                "timestamp": datetime.now().isoformat(),
-            }
+            return json.dumps(
+                {
+                    "error": f"Unsupported service: {service}",
+                    "supported_services": list(SERVICE_INFO.keys()),
+                    "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
         # Get authenticated user
-        user_email = _get_authenticated_user_email(ctx)
+        user_email = await _get_authenticated_user_email(ctx)
         if not user_email:
-            return _create_auth_error_response(service.lower())
+            return json.dumps(_create_auth_error_response(service.lower()))
 
         # Get recent items with custom day range
-        return await _get_recent_items(
+        result = await _get_recent_items(
             service.lower(), user_email, days_back=days, ctx=ctx
         )
+        # FastMCP 3.0: Return JSON string instead of dict
+        return json.dumps(result, default=str)
 
     @mcp.resource(
         uri="recent://all",
@@ -537,13 +559,14 @@ Note: Photos service returns albums (day range affects Drive services only).""",
         mime_type="application/json",
         tags={"service", "recent", "all", "workspace", "unified"},
     )
-    async def get_all_recent_workspace_items(ctx: Context) -> Dict[str, Any]:
+    async def get_all_recent_workspace_items(ctx: Context) -> str:
         """Get recent items from all supported Drive-based services."""
+        import json
 
         # Get authenticated user
-        user_email = _get_authenticated_user_email(ctx)
+        user_email = await _get_authenticated_user_email(ctx)
         if not user_email:
-            return _create_auth_error_response("all")
+            return json.dumps(_create_auth_error_response("all"))
 
         # Get recent items from all services
         all_results = {}
@@ -564,7 +587,7 @@ Note: Photos service returns albums (day range affects Drive services only).""",
                     "service": service,
                 }
 
-        return {
+        result = {
             "user_email": user_email,
             "total_items_across_services": total_items,
             "services": all_results,
@@ -579,6 +602,8 @@ Note: Photos service returns albums (day range affects Drive services only).""",
             },
             "timestamp": datetime.now().isoformat(),
         }
+        # FastMCP 3.0: Return JSON string instead of dict
+        return json.dumps(result, default=str)
 
     logger.debug("✅ Service recent resources registered for Drive-based services")
     logger.debug(f"  Available services: {', '.join(SERVICE_INFO.keys())}")

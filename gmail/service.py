@@ -31,11 +31,11 @@ async def _get_gmail_service_with_fallback(user_google_email: str) -> Any:
         RuntimeError: If both middleware injection and direct creation fail
     """
     # First, try middleware injection
-    service_key = request_service("gmail")
+    service_key = await request_service("gmail")
 
     try:
         # Try to get the injected service from middleware
-        gmail_service = get_injected_service(service_key)
+        gmail_service = await get_injected_service(service_key)
         logger.info(
             f"Successfully retrieved injected Gmail service for {user_google_email}"
         )

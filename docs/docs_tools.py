@@ -72,14 +72,14 @@ async def search_docs(
 
     # Request Drive service through middleware
     logger.debug(f"[search_docs] Requesting drive service for {user_google_email}")
-    drive_key = request_service("drive")
+    drive_key = await request_service("drive")
     logger.debug(f"[search_docs] Got service key: {drive_key}")
 
     try:
         logger.debug(
             f"[search_docs] Attempting to get injected service with key: {drive_key}"
         )
-        drive_service = get_injected_service(drive_key)
+        drive_service = await get_injected_service(drive_key)
         logger.info(
             f"[search_docs] Successfully retrieved injected Drive service for {user_google_email}"
         )
@@ -203,12 +203,12 @@ async def get_doc_content(
     )
 
     # Request both Drive and Docs services through middleware
-    drive_key = request_service("drive")
-    docs_key = request_service("docs")
+    drive_key = await request_service("drive")
+    docs_key = await request_service("docs")
 
     # Get Drive service with fallback
     try:
-        drive_service = get_injected_service(drive_key)
+        drive_service = await get_injected_service(drive_key)
         logger.info(
             f"[get_doc_content] Successfully retrieved injected Drive service for {user_google_email}"
         )
@@ -259,7 +259,7 @@ async def get_doc_content(
 
     # Get Docs service with fallback
     try:
-        docs_service = get_injected_service(docs_key)
+        docs_service = await get_injected_service(docs_key)
         logger.info(
             f"[get_doc_content] Successfully retrieved injected Docs service for {user_google_email}"
         )
@@ -460,14 +460,14 @@ async def list_docs_in_folder(
     logger.debug(
         f"[list_docs_in_folder] Requesting drive service for {user_google_email}"
     )
-    drive_key = request_service("drive")
+    drive_key = await request_service("drive")
     logger.debug(f"[list_docs_in_folder] Got service key: {drive_key}")
 
     try:
         logger.debug(
             f"[list_docs_in_folder] Attempting to get injected service with key: {drive_key}"
         )
-        drive_service = get_injected_service(drive_key)
+        drive_service = await get_injected_service(drive_key)
         logger.info(
             f"[list_docs_in_folder] Successfully retrieved injected Drive service for {user_google_email}"
         )
@@ -860,12 +860,12 @@ async def create_doc(
         logger.info(f"[create_doc] Editing existing document: {document_id}")
 
         # Get both Docs and Drive services
-        docs_key = request_service("docs")
-        drive_key = request_service("drive")
+        docs_key = await request_service("docs")
+        drive_key = await request_service("drive")
 
         # Get Docs service
         try:
-            docs_service = get_injected_service(docs_key)
+            docs_service = await get_injected_service(docs_key)
             logger.info("[create_doc] Using injected Docs service for editing")
         except RuntimeError as e:
             logger.warning(f"[create_doc] Docs middleware injection failed: {e}")
@@ -880,7 +880,7 @@ async def create_doc(
 
         # Get Drive service
         try:
-            drive_service = get_injected_service(drive_key)
+            drive_service = await get_injected_service(drive_key)
             logger.info("[create_doc] Using injected Drive service for editing")
         except RuntimeError as e:
             logger.warning(f"[create_doc] Drive middleware injection failed: {e}")
@@ -1057,10 +1057,10 @@ async def create_doc(
 
     # Handle empty content case for new documents
     if not content:
-        docs_key = request_service("docs")
+        docs_key = await request_service("docs")
 
         try:
-            docs_service = get_injected_service(docs_key)
+            docs_service = await get_injected_service(docs_key)
             logger.info("[create_doc] Using injected Docs service for empty doc")
         except RuntimeError as e:
             logger.warning(f"[create_doc] Docs middleware injection failed: {e}")
@@ -1118,10 +1118,10 @@ async def create_doc(
             )
 
     # Get Drive service for content upload
-    drive_key = request_service("drive")
+    drive_key = await request_service("drive")
 
     try:
-        drive_service = get_injected_service(drive_key)
+        drive_service = await get_injected_service(drive_key)
         logger.info("[create_doc] Using injected Drive service for content conversion")
     except RuntimeError as e:
         logger.warning(f"[create_doc] Drive middleware injection failed: {e}")

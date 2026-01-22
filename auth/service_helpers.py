@@ -10,6 +10,7 @@ from typing_extensions import Any, Dict, List, Optional, Union
 from .context import (
     get_injected_service,
     get_user_email_context,
+    get_user_email_context_sync,
     request_google_service,
 )
 from .service_manager import (
@@ -146,7 +147,7 @@ async def get_service(
         user_email = None
 
     # Use provided email or get from context (set by middleware)
-    final_user_email = user_email or get_user_email_context()
+    final_user_email = user_email or await get_user_email_context()
 
     if not final_user_email:
         raise ValueError(
@@ -183,7 +184,7 @@ async def get_service(
     )
 
 
-def request_service(
+async def request_service(
     service_type: str,
     scopes: Union[str, List[str]] = None,
     version: Optional[str] = None,
@@ -203,11 +204,11 @@ def request_service(
 
     Examples:
         # Use defaults
-        drive_key = request_service("drive")
-        gmail_key = request_service("gmail")
+        drive_key = await request_service("drive")
+        gmail_key = await request_service("gmail")
 
         # Custom scopes
-        drive_key = request_service("drive", ["drive_full"])
+        drive_key = await request_service("drive", ["drive_full"])
     """
     # Get defaults for this service type
     defaults = SERVICE_DEFAULTS.get(service_type)
@@ -220,7 +221,7 @@ def request_service(
         final_version = version
         logger.warning(f"No defaults found for service type: {service_type}")
 
-    return request_google_service(
+    return await request_google_service(
         service_type=service_type,
         scopes=final_scopes,
         version=final_version,
@@ -229,8 +230,8 @@ def request_service(
 
 
 def get_current_user_email() -> Optional[str]:
-    """Get the current user email from context."""
-    return get_user_email_context()
+    """Get the current user email from context (sync version using OAuth file fallback)."""
+    return get_user_email_context_sync()
 
 
 def get_service_defaults(service_type: str) -> Optional[Dict]:
@@ -385,14 +386,14 @@ async def get_calendar_service(
     return await get_service("calendar", user_email, scopes)
 
 
-def request_drive_service(scopes: Union[str, List[str]] = None) -> str:
+async def request_drive_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Drive service through middleware - convenience alias."""
-    return request_service("drive", scopes)
+    return await request_service("drive", scopes)
 
 
-def request_gmail_service(scopes: Union[str, List[str]] = None) -> str:
+async def request_gmail_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Gmail service through middleware - convenience alias."""
-    return request_service("gmail", scopes)
+    return await request_service("gmail", scopes)
 
 
 async def get_photos_service(
@@ -402,9 +403,9 @@ async def get_photos_service(
     return await get_service("photos", user_email, scopes)
 
 
-def request_photos_service(scopes: Union[str, List[str]] = None) -> str:
+async def request_photos_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Photos service through middleware - convenience alias."""
-    return request_service("photos", scopes)
+    return await request_service("photos", scopes)
 
 
 async def get_tasks_service(
@@ -414,6 +415,6 @@ async def get_tasks_service(
     return await get_service("tasks", user_email, scopes)
 
 
-def request_tasks_service(scopes: Union[str, List[str]] = None) -> str:
+async def request_tasks_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Tasks service through middleware - convenience alias."""
-    return request_service("tasks", scopes)
+    return await request_service("tasks", scopes)

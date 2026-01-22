@@ -223,9 +223,9 @@ async def _store_oauth_user_data_async(
 
             # Try to set context if available (won't work outside FastMCP request but worth trying)
             try:
-                session_id = get_session_context() or session_state.session_id
-                set_session_context(session_id)
-                set_user_email_context(authenticated_email)
+                session_id = await get_session_context() or session_state.session_id
+                await set_session_context(session_id)
+                await set_user_email_context(authenticated_email)
                 logger.info(
                     f"🔗 Set session context for OAuth proxy user: {authenticated_email}"
                 )
@@ -1452,7 +1452,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
                 # Store user email in session context
                 try:
-                    session_id = get_session_context()
+                    session_id = await get_session_context()
                     if session_id:
                         store_session_data(session_id, "user_email", user_email)
                         logger.info(

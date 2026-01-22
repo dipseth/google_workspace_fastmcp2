@@ -49,8 +49,8 @@ async def _get_optimized_photos_client(user_google_email: str) -> OptimizedPhoto
 
     # Get the base photos service
     try:
-        service_key = request_service("photos")
-        photos_service = get_injected_service(service_key)
+        service_key = await request_service("photos")
+        photos_service = await get_injected_service(service_key)
         if not photos_service:
             raise RuntimeError("Service not available")
     except Exception as e:

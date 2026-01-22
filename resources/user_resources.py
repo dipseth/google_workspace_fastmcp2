@@ -7,6 +7,7 @@ information, eliminating the need for tools to manually require user_google_emai
 from datetime import datetime
 
 from fastmcp import Context, FastMCP
+from fastmcp.resources import ResourceContent
 from pydantic import Field
 from typing_extensions import (
     Annotated,
@@ -22,6 +23,7 @@ from auth.context import (
     get_session_context,
     get_session_data,
     get_user_email_context,
+    get_user_email_context_sync,
     list_sessions,
 )
 from auth.google_auth import get_valid_credentials
@@ -413,7 +415,6 @@ def setup_user_resources(mcp: FastMCP) -> None:
         description="Get the currently authenticated user's email address for session-based authentication",
         mime_type="application/json",
         tags={"authentication", "user", "email", "session", "template"},
-        enabled=True,
         meta={
             "template_accessible": True,
             "property_paths": ["email", "session_id", "timestamp"],
@@ -421,7 +422,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "detailed": True,
         },
     )
-    async def get_current_user_email(ctx: Context) -> UserEmailResponse:
+    async def get_current_user_email(ctx: Context) -> list[ResourceContent]:
         """Get the currently authenticated user's email address for session-based authentication.
 
         This resource provides the foundational authentication information needed by other
@@ -432,9 +433,9 @@ def setup_user_resources(mcp: FastMCP) -> None:
             ctx: FastMCP Context object providing access to server state and logging
 
         Returns:
-            UserEmailResponse: Contains the authenticated user's email, session ID, and
-            authentication status. If no user is authenticated, returns error information
-            with suggestions for resolving authentication issues.
+            list[ResourceContent]: JSON content containing the authenticated user's email,
+            session ID, and authentication status. If no user is authenticated, returns
+            error information with suggestions for resolving authentication issues.
 
         Example Response (Success):
             {
@@ -452,21 +453,23 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 "timestamp": "2024-01-15T10:30:00Z"
             }
         """
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         if not user_email:
-            return UserEmailResponse(
+            response = UserEmailResponse(
                 error="No authenticated user found in current session",
                 suggestion="Use start_google_auth tool to authenticate first",
                 authenticated=False,
                 timestamp=datetime.now().isoformat(),
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
-        return UserEmailResponse(
+        response = UserEmailResponse(
             email=user_email,
-            session_id=get_session_context(),
+            session_id=await get_session_context(),
             timestamp=datetime.now().isoformat(),
             authenticated=True,
         )
+        return [ResourceContent(response, mime_type="application/json")]
 
     @mcp.resource(
         uri="user://current/profile",
@@ -480,7 +483,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "includes_debug": True,
         },
     )
-    async def get_current_user_profile(ctx: Context) -> UserProfileResponse:
+    async def get_current_user_profile(ctx: Context) -> list[ResourceContent]:
         """Get comprehensive profile information for the current session user.
 
         Provides detailed authentication status, credential validity, and available Google
@@ -491,7 +494,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             ctx: FastMCP Context object providing access to server state and logging
 
         Returns:
-            UserProfileResponse: Comprehensive profile information including:
+            list[ResourceContent]: JSON content with comprehensive profile information including:
             - User email and session ID
             - Detailed authentication status with token validity
             - OAuth scopes and credential expiration information
@@ -523,8 +526,8 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 }
             }
         """
-        user_email = get_user_email_context()
-        session_id = get_session_context()
+        user_email = await get_user_email_context()
+        session_id = await get_session_context()
 
         # DIAGNOSTIC: Log context state for debugging OAuth vs start_google_auth disconnect
         logger.info("🔍 DEBUG: get_current_user_profile called")
@@ -532,7 +535,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
         logger.info(f"   session_context: {session_id}")
 
         if not user_email:
-            return UserProfileResponse(
+            response = UserProfileResponse(
                 error="No authenticated user found in current session",
                 authenticated=False,
                 timestamp=datetime.now().isoformat(),
@@ -542,6 +545,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                     "issue": "OAuth proxy authentication may not be setting session context",
                 },
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
         # Check credential validity
         credentials = get_valid_credentials(user_email)
@@ -558,12 +562,13 @@ def setup_user_resources(mcp: FastMCP) -> None:
             ),
         )
 
-        return UserProfileResponse(
+        response = UserProfileResponse(
             email=user_email,
-            session_id=get_session_context(),
+            session_id=session_id,  # Use already-awaited session_id
             auth_status=auth_status,
             timestamp=datetime.now().isoformat(),
         )
+        return [ResourceContent(response, mime_type="application/json")]
 
     @mcp.resource(
         uri="user://profile/{email}",
@@ -647,7 +652,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
         return UserProfileResponse(
             email=email,
             auth_status=auth_status,
-            is_current_user=email == get_user_email_context(),
+            is_current_user=email == await get_user_email_context(),
             timestamp=datetime.now().isoformat(),
         )
 
@@ -663,7 +668,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "includes_metadata": True,
         },
     )
-    async def get_current_session_info(ctx: Context) -> SessionInfoResponse:
+    async def get_current_session_info(ctx: Context) -> list[ResourceContent]:
         """Get detailed information about the current authentication session.
 
         Provides comprehensive session metadata including session lifecycle information,
@@ -674,7 +679,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             ctx: FastMCP Context object providing access to server state and logging
 
         Returns:
-            SessionInfoResponse: Complete session information including:
+            list[ResourceContent]: JSON content with complete session information including:
             - Session ID and associated user email
             - Session activity status and lifecycle timestamps
             - Creation time and last accessed timestamps when available
@@ -706,15 +711,16 @@ def setup_user_resources(mcp: FastMCP) -> None:
             and understanding the current authentication state for troubleshooting
             OAuth and session management issues.
         """
-        session_id = get_session_context()
-        user_email = get_user_email_context()
+        session_id = await get_session_context()
+        user_email = await get_user_email_context()
 
         if not session_id:
-            return SessionInfoResponse(
+            response = SessionInfoResponse(
                 error="No active session found",
                 session_active=False,
                 timestamp=datetime.now().isoformat(),
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
         # Get session metadata if available
         session_data = SessionInfoResponse(
@@ -736,7 +742,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
         except Exception as e:
             logger.debug(f"Could not retrieve session metadata: {e}")
 
-        return session_data
+        return [ResourceContent(session_data, mime_type="application/json")]
 
     @mcp.resource(
         uri="auth://sessions/list",
@@ -757,7 +763,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "administrative": True,
         },
     )
-    async def list_active_sessions(ctx: Context) -> SessionListResponse:
+    async def list_active_sessions(ctx: Context) -> list[ResourceContent]:
         """Get administrative view of all active authentication sessions.
 
         Provides comprehensive session management information for multi-user environments,
@@ -768,7 +774,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             ctx: FastMCP Context object providing access to server state and logging
 
         Returns:
-            SessionListResponse: Complete session listing including:
+            list[ResourceContent]: JSON content with complete session listing including:
             - List of all active sessions with metadata and user information
             - Total count of active sessions
             - Current session identifier for context
@@ -811,20 +817,22 @@ def setup_user_resources(mcp: FastMCP) -> None:
         try:
             active_sessions = list_sessions()
 
-            return SessionListResponse(
+            response = SessionListResponse(
                 active_sessions=active_sessions,
                 count=len(active_sessions),
-                current_session=get_session_context(),
+                current_session=await get_session_context(),
                 timestamp=datetime.now().isoformat(),
             )
+            return [ResourceContent(response, mime_type="application/json")]
         except Exception as e:
             logger.error(f"Error listing sessions: {e}")
-            return SessionListResponse(
+            response = SessionListResponse(
                 error=f"Failed to list sessions: {str(e)}",
                 active_sessions=[],
                 count=0,
                 timestamp=datetime.now().isoformat(),
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
     @mcp.resource(
         uri="auth://credentials/{email}/status",
@@ -1001,7 +1009,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             inject the current user's email into API calls or template strings without
             dealing with complex JSON response parsing.
         """
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         if not user_email:
             # Return a helpful error message as string instead of raising exception
             # This follows FastMCP2 resource patterns - resources should return data gracefully
@@ -1147,7 +1155,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "dynamic": True,
         },
     )
-    async def get_all_tools_list(ctx: Context) -> ToolsDirectoryResponse:
+    async def get_all_tools_list(ctx: Context) -> list[ResourceContent]:
         """Get comprehensive catalog of all available FastMCP tools organized by category.
 
         Dynamically discovers and categorizes all registered FastMCP tools including Drive,
@@ -1250,6 +1258,20 @@ def setup_user_resources(mcp: FastMCP) -> None:
                     registered_tools = fastmcp_server._tool_manager.tools
                     await ctx.info(
                         f"✅ Found {len(registered_tools)} tools via _tool_manager.tools"
+                    )
+
+            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
+            if not registered_tools and hasattr(fastmcp_server, "_local_provider"):
+                await ctx.info("Falling back to _local_provider (FastMCP 3.0+)")
+                if hasattr(fastmcp_server._local_provider, "_components"):
+                    from fastmcp.tools.tool import Tool
+
+                    components = fastmcp_server._local_provider._components
+                    registered_tools = {
+                        v.name: v for v in components.values() if isinstance(v, Tool)
+                    }
+                    await ctx.info(
+                        f"✅ Found {len(registered_tools)} tools via _local_provider"
                     )
 
             if not registered_tools:
@@ -1494,7 +1516,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 f"🔍 Dynamic tool discovery: Found {total_tools} tools, {detailed_tools_count} detailed"
             )
 
-            return ToolsDirectoryResponse(
+            response = ToolsDirectoryResponse(
                 total_tools=total_tools,
                 total_categories=len(
                     [cat for cat in categories.values() if cat["tool_count"] > 0]
@@ -1505,11 +1527,12 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 resource_templating_available=True,
                 migration_status="✅ Resource templating implemented - detailed tools available!",
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
         except Exception as e:
             await ctx.error(f"Error during dynamic tool discovery: {e}")
             # Fallback to minimal response
-            return ToolsDirectoryResponse(
+            response = ToolsDirectoryResponse(
                 total_tools=0,
                 total_categories=0,
                 detailed_tools_count=0,
@@ -1519,10 +1542,11 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 migration_status="❌ Error during tool discovery",
                 error=str(e),
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
         except Exception as e:
             logger.error(f"Error generating tools list: {e}")
-            return ToolsDirectoryResponse(
+            response = ToolsDirectoryResponse(
                 total_tools=0,
                 total_categories=0,
                 detailed_tools_count=0,
@@ -1532,6 +1556,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 migration_status="❌ Error generating tools list",
                 error=f"Failed to generate tools list: {str(e)}",
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
     @mcp.resource(
         uri="tools://detailed/list",
@@ -1553,7 +1578,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "oauth_enabled": True,
         },
     )
-    async def get_detailed_tools_only(ctx: Context) -> DetailedToolsResponse:
+    async def get_detailed_tools_only(ctx: Context) -> list[ResourceContent]:
         """Get curated list of detailed tools that use automatic resource templating.
 
         Dynamically discovers and returns only detailed tools that utilize automatic
@@ -1630,14 +1655,29 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 elif hasattr(fastmcp_server._tool_manager, "tools"):
                     registered_tools = fastmcp_server._tool_manager.tools
 
+            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
+            if not registered_tools and hasattr(fastmcp_server, "_local_provider"):
+                if hasattr(fastmcp_server._local_provider, "_components"):
+                    from fastmcp.tools.tool import Tool
+
+                    components = fastmcp_server._local_provider._components
+                    registered_tools = {
+                        v.name: v for v in components.values() if isinstance(v, Tool)
+                    }
+
             if not registered_tools:
                 await ctx.warning("Could not access tools from FastMCP server")
-                return DetailedToolsResponse(
-                    detailed_tools=[],
-                    count=0,
-                    benefit="No user_google_email parameter required - uses OAuth session automatically",
-                    timestamp=datetime.now().isoformat(),
-                )
+                return [
+                    ResourceContent(
+                        DetailedToolsResponse(
+                            detailed_tools=[],
+                            count=0,
+                            benefit="No user_google_email parameter required - uses OAuth session automatically",
+                            timestamp=datetime.now().isoformat(),
+                        ),
+                        mime_type="application/json",
+                    )
+                ]
 
             # Find detailed tools (tools without user_google_email parameter)
             detailed_tools = []
@@ -1713,22 +1753,32 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 f"🔍 Detailed tool discovery: Found {len(detailed_tools)} detailed tools out of {len(registered_tools)} total"
             )
 
-            return DetailedToolsResponse(
-                detailed_tools=detailed_tools,
-                count=len(detailed_tools),
-                benefit="No user_google_email parameter required - uses OAuth session automatically",
-                timestamp=datetime.now().isoformat(),
-            )
+            return [
+                ResourceContent(
+                    DetailedToolsResponse(
+                        detailed_tools=detailed_tools,
+                        count=len(detailed_tools),
+                        benefit="No user_google_email parameter required - uses OAuth session automatically",
+                        timestamp=datetime.now().isoformat(),
+                    ),
+                    mime_type="application/json",
+                )
+            ]
 
         except Exception as e:
             await ctx.error(f"Error during detailed tool discovery: {e}")
             # Fallback to empty response
-            return DetailedToolsResponse(
-                detailed_tools=[],
-                count=0,
-                benefit="No user_google_email parameter required - uses OAuth session automatically",
-                timestamp=datetime.now().isoformat(),
-            )
+            return [
+                ResourceContent(
+                    DetailedToolsResponse(
+                        detailed_tools=[],
+                        count=0,
+                        benefit="No user_google_email parameter required - uses OAuth session automatically",
+                        timestamp=datetime.now().isoformat(),
+                    ),
+                    mime_type="application/json",
+                )
+            ]
 
     @mcp.resource(
         uri="workspace://content/search/{query}",
@@ -1763,7 +1813,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             ),
         ],
         ctx: Context,
-    ) -> dict:
+    ) -> str:
         """Search Google Workspace content for email composition and content discovery.
 
         Performs comprehensive content-based search across Google Drive files including
@@ -1783,7 +1833,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             ctx: FastMCP Context object providing access to server state and logging
 
         Returns:
-            dict: Comprehensive search results including:
+            str: JSON string with comprehensive search results including:
             - Categorized results by file type (documents, spreadsheets, presentations, PDFs, images)
             - Email composition suggestions with ready-to-use references and links
             - Relevance scoring based on filename matches
@@ -1833,12 +1883,16 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 "query": "quarterly budget"
             }
         """
-        user_email = get_user_email_context()
+        import json
+
+        user_email = await get_user_email_context()
         if not user_email:
-            return {
-                "error": "No authenticated user found in current session",
-                "query": query,
-            }
+            return json.dumps(
+                {
+                    "error": "No authenticated user found in current session",
+                    "query": query,
+                }
+            )
 
         try:
             # Import and call tools directly (not using forward())
@@ -1888,36 +1942,41 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 else:
                     categorized_results["other"].append(file_entry)
 
-            return {
-                "search_query": query,
-                "user_email": user_email,
-                "total_results": len(search_results.get("files", [])),
-                "results_by_type": categorized_results,
-                "suggested_email_content": {
-                    "references": [
-                        f"📄 {file['name']}"
-                        for file in search_results.get("files", [])[:5]
-                    ],
-                    "links": [
-                        file.get("webViewLink")
-                        for file in search_results.get("files", [])[:3]
-                    ],
-                    "attachment_suggestions": [
-                        file
-                        for file in search_results.get("files", [])
-                        if file.get("mimeType", "").startswith("application/")
-                    ][:3],
+            return json.dumps(
+                {
+                    "search_query": query,
+                    "user_email": user_email,
+                    "total_results": len(search_results.get("files", [])),
+                    "results_by_type": categorized_results,
+                    "suggested_email_content": {
+                        "references": [
+                            f"📄 {file['name']}"
+                            for file in search_results.get("files", [])[:5]
+                        ],
+                        "links": [
+                            file.get("webViewLink")
+                            for file in search_results.get("files", [])[:3]
+                        ],
+                        "attachment_suggestions": [
+                            file
+                            for file in search_results.get("files", [])
+                            if file.get("mimeType", "").startswith("application/")
+                        ][:3],
+                    },
+                    "timestamp": datetime.now().isoformat(),
                 },
-                "timestamp": datetime.now().isoformat(),
-            }
+                default=str,
+            )
 
         except Exception as e:
             logger.error(f"Error searching workspace content: {e}")
-            return {
-                "error": f"Failed to search workspace content: {str(e)}",
-                "search_query": query,
-                "timestamp": datetime.now().isoformat(),
-            }
+            return json.dumps(
+                {
+                    "error": f"Failed to search workspace content: {str(e)}",
+                    "search_query": query,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
     @mcp.resource(
         uri="gmail://allow-list",
@@ -1938,7 +1997,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "security_related": True,
         },
     )
-    async def get_gmail_allow_list_resource(ctx: Context) -> GmailAllowListResponse:
+    async def get_gmail_allow_list_resource(ctx: Context) -> list[ResourceContent]:
         """Get the configured Gmail allow list for send_gmail_message tool.
 
         Retrieves the list of trusted email recipients that skip elicitation confirmation
@@ -1991,9 +2050,9 @@ def setup_user_resources(mcp: FastMCP) -> None:
         """
         from config.settings import settings
 
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         if not user_email:
-            return GmailAllowListResponse(
+            response = GmailAllowListResponse(
                 error="No authenticated user found in current session",
                 user_email="",
                 allow_list=[],
@@ -2002,6 +2061,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 last_updated="unknown",
                 timestamp=datetime.now().isoformat(),
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
         try:
             # Get the allow list from settings
@@ -2011,7 +2071,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             raw_value = settings.gmail_allow_list
             is_configured = bool(raw_value and raw_value.strip())
 
-            return GmailAllowListResponse(
+            response = GmailAllowListResponse(
                 user_email=user_email,
                 allow_list=allow_list,
                 count=len(allow_list),
@@ -2019,10 +2079,11 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 last_updated=datetime.now().isoformat(),
                 timestamp=datetime.now().isoformat(),
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
         except Exception as e:
             logger.error(f"Error retrieving Gmail allow list: {e}")
-            return GmailAllowListResponse(
+            response = GmailAllowListResponse(
                 error=f"Failed to retrieve Gmail allow list: {str(e)}",
                 user_email=user_email,
                 allow_list=[],
@@ -2031,6 +2092,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 last_updated="unknown",
                 timestamp=datetime.now().isoformat(),
             )
+            return [ResourceContent(response, mime_type="application/json")]
 
     logger.info("✅ User and authentication resources registered")
 
@@ -2047,7 +2109,7 @@ def get_current_user_email_simple() -> str:
     Raises:
         ValueError: If no authenticated user is found
     """
-    user_email = get_user_email_context()
+    user_email = get_user_email_context_sync()
     if not user_email:
         raise ValueError(
             "No authenticated user found in current session. "

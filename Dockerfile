@@ -22,11 +22,11 @@ WORKDIR /app
 # Copy dependency files first (for better caching)
 COPY pyproject.toml uv.lock README.md ./
 
+# Copy application code (needed before uv sync for hatchling build)
+COPY . .
+
 # Install Python dependencies using uv
 RUN uv sync --frozen
-
-# Copy application code
-COPY . .
 
 # Create credentials directory
 RUN mkdir -p /app/credentials && \

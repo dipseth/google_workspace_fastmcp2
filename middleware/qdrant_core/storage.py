@@ -398,8 +398,8 @@ class QdrantStorageManager:
                 # Extract user information from auth context
                 from auth.context import get_session_context, get_user_email_context
 
-                user_email = get_user_email_context() or "unknown"
-                session_id = get_session_context() or str(uuid.uuid4())
+                user_email = await get_user_email_context() or "unknown"
+                session_id = await get_session_context() or str(uuid.uuid4())
 
                 # Properly serialize response (handle ToolResult objects)
                 if hasattr(response, "content"):

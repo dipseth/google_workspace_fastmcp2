@@ -85,13 +85,14 @@ class ResourceCleanupTracker:
 
     calendar_events: list[str] = field(default_factory=list)
     gmail_filters: list[str] = field(default_factory=list)
+    gmail_labels: list[str] = field(default_factory=list)
     drive_files: list[str] = field(default_factory=list)
+    spreadsheets: list[str] = field(default_factory=list)
     # Resources without delete APIs - tracked for manual cleanup reference
     photos_albums: list[str] = field(default_factory=list)
     docs: list[str] = field(default_factory=list)
     forms: list[str] = field(default_factory=list)
     presentations: list[str] = field(default_factory=list)
-    gmail_labels: list[str] = field(default_factory=list)
     _cleanup_errors: list[dict[str, Any]] = field(default_factory=list)
 
     def track_calendar_event(self, event_id: str) -> None:
@@ -130,21 +131,27 @@ class ResourceCleanupTracker:
             self.presentations.append(presentation_id)
 
     def track_gmail_label(self, label_id: str) -> None:
-        """Track a Gmail label (manual cleanup required)."""
+        """Track a Gmail label for cleanup."""
         if label_id and label_id not in self.gmail_labels:
             self.gmail_labels.append(label_id)
+
+    def track_spreadsheet(self, spreadsheet_id: str) -> None:
+        """Track a Google Spreadsheet for cleanup (deleted via Drive API)."""
+        if spreadsheet_id and spreadsheet_id not in self.spreadsheets:
+            self.spreadsheets.append(spreadsheet_id)
 
     def get_summary(self) -> dict[str, int]:
         """Get a summary of tracked resources."""
         return {
             "calendar_events": len(self.calendar_events),
             "gmail_filters": len(self.gmail_filters),
+            "gmail_labels": len(self.gmail_labels),
             "drive_files": len(self.drive_files),
+            "spreadsheets": len(self.spreadsheets),
             "photos_albums": len(self.photos_albums),
             "docs": len(self.docs),
             "forms": len(self.forms),
             "presentations": len(self.presentations),
-            "gmail_labels": len(self.gmail_labels),
             "cleanup_errors": len(self._cleanup_errors),
         }
 
@@ -155,7 +162,6 @@ class ResourceCleanupTracker:
             "docs": self.docs.copy(),
             "forms": self.forms.copy(),
             "presentations": self.presentations.copy(),
-            "gmail_labels": self.gmail_labels.copy(),
         }
 
 
@@ -180,7 +186,9 @@ async def _cleanup_resources(client) -> dict[str, Any]:
     results = {
         "calendar_events_deleted": 0,
         "gmail_filters_deleted": 0,
+        "gmail_labels_deleted": 0,
         "drive_files_deleted": 0,
+        "spreadsheets_deleted": 0,
         "errors": [],
     }
 
@@ -214,6 +222,25 @@ async def _cleanup_resources(client) -> dict[str, Any]:
                 results["errors"].append(error)
                 tracker._cleanup_errors.append(error)
 
+    # Clean up Gmail labels
+    if tracker.gmail_labels:
+        print(f"🧹 Cleaning up {len(tracker.gmail_labels)} Gmail label(s)...")
+        for label_id in tracker.gmail_labels:
+            try:
+                await client.call_tool(
+                    "manage_gmail_label",
+                    {
+                        "user_google_email": TEST_EMAIL,
+                        "action": "delete",
+                        "label_id": label_id,
+                    },
+                )
+                results["gmail_labels_deleted"] += 1
+            except Exception as e:
+                error = {"type": "gmail_label", "id": label_id, "error": str(e)}
+                results["errors"].append(error)
+                tracker._cleanup_errors.append(error)
+
     # Clean up Drive files
     if tracker.drive_files:
         print(f"🧹 Cleaning up {len(tracker.drive_files)} Drive file(s)...")
@@ -233,6 +260,29 @@ async def _cleanup_resources(client) -> dict[str, Any]:
             error = {
                 "type": "drive_files",
                 "ids": tracker.drive_files,
+                "error": str(e),
+            }
+            results["errors"].append(error)
+            tracker._cleanup_errors.append(error)
+
+    # Clean up Spreadsheets (via Drive API - they're Drive files)
+    if tracker.spreadsheets:
+        print(f"🧹 Cleaning up {len(tracker.spreadsheets)} spreadsheet(s)...")
+        try:
+            await client.call_tool(
+                "manage_drive_files",
+                {
+                    "user_google_email": TEST_EMAIL,
+                    "operation": "delete",
+                    "file_ids": tracker.spreadsheets,
+                    "permanent": False,  # Move to trash instead of permanent delete
+                },
+            )
+            results["spreadsheets_deleted"] = len(tracker.spreadsheets)
+        except Exception as e:
+            error = {
+                "type": "spreadsheets",
+                "ids": tracker.spreadsheets,
                 "error": str(e),
             }
             results["errors"].append(error)
@@ -261,6 +311,19 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "integration: mark test as integration test requiring server"
     )
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create a session-scoped event loop for async fixtures.
+
+    This is required for session-scoped async fixtures to work properly
+    with pytest-asyncio. Without this, session-scoped async fixtures
+    will hang because they try to use a function-scoped event loop.
+    """
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -324,7 +387,9 @@ async def session_cleanup():
             print(f"\n✅ Cleanup complete:")
             print(f"   - Calendar events deleted: {results['calendar_events_deleted']}")
             print(f"   - Gmail filters deleted: {results['gmail_filters_deleted']}")
+            print(f"   - Gmail labels deleted: {results['gmail_labels_deleted']}")
             print(f"   - Drive files deleted: {results['drive_files_deleted']}")
+            print(f"   - Spreadsheets deleted: {results['spreadsheets_deleted']}")
             if results["errors"]:
                 print(f"   - Errors: {len(results['errors'])}")
                 for err in results["errors"][:5]:  # Show first 5 errors
@@ -338,13 +403,14 @@ async def session_cleanup():
     print(f"{'='*60}\n")
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def client():
-    """Create a session-scoped client connected to the running server.
+    """Create a function-scoped client connected to the running server.
+
+    NOTE: Changed from session-scoped to function-scoped to fix hanging issue
+    with pytest-asyncio event loop scope. Each test gets a fresh client.
 
     IMPORTANT:
-    - Session-scoped so all tests share the same connection and session state
-    - Tools enabled in one test remain enabled for subsequent tests
     - Always use the shared connection logic in [`tests/client/base_test_config.create_test_client()`](tests/client/base_test_config.py:90)
       so tests don't depend on a valid local TLS/CA chain.
     - If the server is not running, skip the suite (this is an integration-style test harness).

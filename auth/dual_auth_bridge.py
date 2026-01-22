@@ -21,7 +21,9 @@ from config.settings import settings
 
 from .context import (
     get_user_email_context,
+    get_user_email_context_sync,
     set_user_email_context,
+    set_user_email_context_in_session,
 )
 
 logger = setup_logger()
@@ -90,8 +92,8 @@ class DualAuthBridge:
         Returns:
             Active account email or None
         """
-        # Check context first
-        context_email = get_user_email_context()
+        # Check context first (sync version for non-async method)
+        context_email = get_user_email_context_sync()
         if context_email:
             logger.debug(f"Active account from context: {context_email}")
             return context_email
@@ -317,8 +319,8 @@ class DualAuthBridge:
             # Register as secondary account
             self.add_secondary_account(user_email)
 
-        # Set in context
-        set_user_email_context(user_email)
+        # Set in session storage (sync version - can't use async context setter here)
+        set_user_email_context_in_session(user_email)
         logger.info(f"🔄 Switched active account to: {user_email}")
         return True
 
