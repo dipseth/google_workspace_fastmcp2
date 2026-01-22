@@ -215,6 +215,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
             return cached_result.model_dump_json()
         elif isinstance(cached_result, dict):
             import json
+
             return json.dumps(cached_result)
         return str(cached_result)
 
@@ -329,6 +330,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
             return cached_result.model_dump_json()
         elif isinstance(cached_result, dict):
             import json
+
             return json.dumps(cached_result)
         return str(cached_result)
 
@@ -467,6 +469,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
             return cached_result.model_dump_json()
         elif isinstance(cached_result, dict):
             import json
+
             return json.dumps(cached_result)
         return str(cached_result)
 

@@ -67,15 +67,25 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 qdrant_enabled=False,
             )
-            return [ResourceContent(response.model_dump(), mime_type="application/json")]
+            return [
+                ResourceContent(response.model_dump(), mime_type="application/json")
+            ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, 'model_dump'):
-            return [ResourceContent(cached_result.model_dump(), mime_type="application/json")]
+        if hasattr(cached_result, "model_dump"):
+            return [
+                ResourceContent(
+                    cached_result.model_dump(), mime_type="application/json"
+                )
+            ]
         elif isinstance(cached_result, dict):
             return [ResourceContent(cached_result, mime_type="application/json")]
         else:
-            return [ResourceContent({"result": str(cached_result)}, mime_type="application/json")]
+            return [
+                ResourceContent(
+                    {"result": str(cached_result)}, mime_type="application/json"
+                )
+            ]
 
     @mcp.resource(
         uri="qdrant://collection/{collection_name}/info",
@@ -90,7 +100,9 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             "supports_parameters": True,
         },
     )
-    async def get_qdrant_collection_info(collection_name: str, ctx: Context) -> list[ResourceContent]:
+    async def get_qdrant_collection_info(
+        collection_name: str, ctx: Context
+    ) -> list[ResourceContent]:
         """Get detailed information about a specific Qdrant collection.
 
         Args:
@@ -119,15 +131,25 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 qdrant_enabled=False,
             )
-            return [ResourceContent(response.model_dump(), mime_type="application/json")]
+            return [
+                ResourceContent(response.model_dump(), mime_type="application/json")
+            ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, 'model_dump'):
-            return [ResourceContent(cached_result.model_dump(), mime_type="application/json")]
+        if hasattr(cached_result, "model_dump"):
+            return [
+                ResourceContent(
+                    cached_result.model_dump(), mime_type="application/json"
+                )
+            ]
         elif isinstance(cached_result, dict):
             return [ResourceContent(cached_result, mime_type="application/json")]
         else:
-            return [ResourceContent({"result": str(cached_result)}, mime_type="application/json")]
+            return [
+                ResourceContent(
+                    {"result": str(cached_result)}, mime_type="application/json"
+                )
+            ]
 
     @mcp.resource(
         uri="qdrant://collection/{collection_name}/responses/recent",
@@ -142,7 +164,9 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             "supports_parameters": True,
         },
     )
-    async def get_recent_collection_responses(collection_name: str, ctx: Context) -> list[ResourceContent]:
+    async def get_recent_collection_responses(
+        collection_name: str, ctx: Context
+    ) -> list[ResourceContent]:
         """Get recent tool responses from a specific collection.
 
         Args:
@@ -173,15 +197,25 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 qdrant_enabled=False,
             )
-            return [ResourceContent(response.model_dump(), mime_type="application/json")]
+            return [
+                ResourceContent(response.model_dump(), mime_type="application/json")
+            ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, 'model_dump'):
-            return [ResourceContent(cached_result.model_dump(), mime_type="application/json")]
+        if hasattr(cached_result, "model_dump"):
+            return [
+                ResourceContent(
+                    cached_result.model_dump(), mime_type="application/json"
+                )
+            ]
         elif isinstance(cached_result, dict):
             return [ResourceContent(cached_result, mime_type="application/json")]
         else:
-            return [ResourceContent({"result": str(cached_result)}, mime_type="application/json")]
+            return [
+                ResourceContent(
+                    {"result": str(cached_result)}, mime_type="application/json"
+                )
+            ]
 
     @mcp.resource(
         uri="qdrant://search/{query}",
@@ -223,15 +257,25 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 qdrant_enabled=False,
             )
-            return [ResourceContent(response.model_dump(), mime_type="application/json")]
+            return [
+                ResourceContent(response.model_dump(), mime_type="application/json")
+            ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, 'model_dump'):
-            return [ResourceContent(cached_result.model_dump(), mime_type="application/json")]
+        if hasattr(cached_result, "model_dump"):
+            return [
+                ResourceContent(
+                    cached_result.model_dump(), mime_type="application/json"
+                )
+            ]
         elif isinstance(cached_result, dict):
             return [ResourceContent(cached_result, mime_type="application/json")]
         else:
-            return [ResourceContent({"result": str(cached_result)}, mime_type="application/json")]
+            return [
+                ResourceContent(
+                    {"result": str(cached_result)}, mime_type="application/json"
+                )
+            ]
 
     @mcp.resource(
         uri="qdrant://search/{collection_name}/{query}",
@@ -254,7 +298,9 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             "search_type": "collection",
         },
     )
-    async def search_qdrant_collection(collection_name: str, query: str, ctx: Context) -> list[ResourceContent]:
+    async def search_qdrant_collection(
+        collection_name: str, query: str, ctx: Context
+    ) -> list[ResourceContent]:
         """Perform semantic search within a specific collection.
 
         Args:
@@ -281,15 +327,25 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 qdrant_enabled=False,
             )
-            return [ResourceContent(response.model_dump(), mime_type="application/json")]
+            return [
+                ResourceContent(response.model_dump(), mime_type="application/json")
+            ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, 'model_dump'):
-            return [ResourceContent(cached_result.model_dump(), mime_type="application/json")]
+        if hasattr(cached_result, "model_dump"):
+            return [
+                ResourceContent(
+                    cached_result.model_dump(), mime_type="application/json"
+                )
+            ]
         elif isinstance(cached_result, dict):
             return [ResourceContent(cached_result, mime_type="application/json")]
         else:
-            return [ResourceContent({"result": str(cached_result)}, mime_type="application/json")]
+            return [
+                ResourceContent(
+                    {"result": str(cached_result)}, mime_type="application/json"
+                )
+            ]
 
     @mcp.resource(
         uri="qdrant://cache",
@@ -329,15 +385,25 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 qdrant_enabled=False,
             )
-            return [ResourceContent(response.model_dump(), mime_type="application/json")]
+            return [
+                ResourceContent(response.model_dump(), mime_type="application/json")
+            ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, 'model_dump'):
-            return [ResourceContent(cached_result.model_dump(), mime_type="application/json")]
+        if hasattr(cached_result, "model_dump"):
+            return [
+                ResourceContent(
+                    cached_result.model_dump(), mime_type="application/json"
+                )
+            ]
         elif isinstance(cached_result, dict):
             return [ResourceContent(cached_result, mime_type="application/json")]
         else:
-            return [ResourceContent({"result": str(cached_result)}, mime_type="application/json")]
+            return [
+                ResourceContent(
+                    {"result": str(cached_result)}, mime_type="application/json"
+                )
+            ]
 
     @mcp.resource(
         uri="qdrant://collection/{collection_name}/{point_id}",
@@ -408,16 +474,26 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 qdrant_enabled=False,
             )
-            return [ResourceContent(response.model_dump(), mime_type="application/json")]
+            return [
+                ResourceContent(response.model_dump(), mime_type="application/json")
+            ]
 
         logger.info("✅ Returning cached result from resource handler")
         # Return cached result as ResourceContent
-        if hasattr(cached_result, 'model_dump'):
-            return [ResourceContent(cached_result.model_dump(), mime_type="application/json")]
+        if hasattr(cached_result, "model_dump"):
+            return [
+                ResourceContent(
+                    cached_result.model_dump(), mime_type="application/json"
+                )
+            ]
         elif isinstance(cached_result, dict):
             return [ResourceContent(cached_result, mime_type="application/json")]
         else:
-            return [ResourceContent({"result": str(cached_result)}, mime_type="application/json")]
+            return [
+                ResourceContent(
+                    {"result": str(cached_result)}, mime_type="application/json"
+                )
+            ]
 
     # Register validation resource for testing middleware integration
     @mcp.resource(
@@ -455,17 +531,31 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 qdrant_enabled=False,
             )
-            return [ResourceContent(response.model_dump(), mime_type="application/json")]
+            return [
+                ResourceContent(response.model_dump(), mime_type="application/json")
+            ]
 
         # Return cached result as ResourceContent
         if isinstance(cached_result, (QdrantStatusResponse, QdrantErrorResponse)):
-            return [ResourceContent(cached_result.model_dump(), mime_type="application/json")]
+            return [
+                ResourceContent(
+                    cached_result.model_dump(), mime_type="application/json"
+                )
+            ]
         elif isinstance(cached_result, dict):
             return [ResourceContent(cached_result, mime_type="application/json")]
-        elif hasattr(cached_result, 'model_dump'):
-            return [ResourceContent(cached_result.model_dump(), mime_type="application/json")]
+        elif hasattr(cached_result, "model_dump"):
+            return [
+                ResourceContent(
+                    cached_result.model_dump(), mime_type="application/json"
+                )
+            ]
         else:
-            return [ResourceContent({"result": str(cached_result)}, mime_type="application/json")]
+            return [
+                ResourceContent(
+                    {"result": str(cached_result)}, mime_type="application/json"
+                )
+            ]
 
     logger.info(
         "✅ Qdrant resources registered with FastMCP (handled by QdrantUnifiedMiddleware)"

@@ -1132,9 +1132,7 @@ class TagBasedResourceMiddleware(Middleware):
             from fastmcp.tools.tool import Tool
 
             components = mcp_server._local_provider._components
-            tools_dict = {
-                v.name: v for v in components.values() if isinstance(v, Tool)
-            }
+            tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
 
         if not tools_dict:
             raise RuntimeError("Cannot access tool registry from FastMCP server")

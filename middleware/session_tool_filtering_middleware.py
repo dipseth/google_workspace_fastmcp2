@@ -144,7 +144,7 @@ def _parse_request_params(request) -> Dict[str, Any]:
     }
 
     try:
-        if not hasattr(request, 'query_params'):
+        if not hasattr(request, "query_params"):
             return result
 
         query_params = dict(request.query_params)
@@ -393,8 +393,10 @@ class SessionToolFilteringMiddleware(Middleware):
         return []
 
     def _apply_minimal_startup_for_session(
-        self, session_id: str, custom_services: Optional[List[str]] = None,
-        tool_names: Optional[List[str]] = None
+        self,
+        session_id: str,
+        custom_services: Optional[List[str]] = None,
+        tool_names: Optional[List[str]] = None,
     ) -> None:
         """
         Apply minimal startup restrictions for a new session.
@@ -485,8 +487,10 @@ class SessionToolFilteringMiddleware(Middleware):
         )
 
     def _handle_session_connection(
-        self, session_id: str, http_params: Optional[Dict[str, Any]] = None,
-        tool_names: Optional[List[str]] = None
+        self,
+        session_id: str,
+        http_params: Optional[Dict[str, Any]] = None,
+        tool_names: Optional[List[str]] = None,
     ) -> Tuple[str, bool]:
         """
         Handle a session connection - restore state for known sessions,
@@ -621,8 +625,9 @@ class SessionToolFilteringMiddleware(Middleware):
         # Apply minimal startup if enabled (uses custom_services if provided)
         if should_apply_minimal:
             self._apply_minimal_startup_for_session(
-                effective_session_id, custom_services=custom_services,
-                tool_names=tool_names
+                effective_session_id,
+                custom_services=custom_services,
+                tool_names=tool_names,
             )
         elif has_explicit_service_filter:
             # Explicit ?service= parameter always applies the service filter
@@ -637,8 +642,10 @@ class SessionToolFilteringMiddleware(Middleware):
         return effective_session_id, was_restored
 
     def _apply_service_filter_for_session(
-        self, session_id: str, services: List[str],
-        tool_names: Optional[List[str]] = None
+        self,
+        session_id: str,
+        services: List[str],
+        tool_names: Optional[List[str]] = None,
     ) -> None:
         """
         Apply a service filter to enable only specific services for a session.
@@ -721,13 +728,17 @@ class SessionToolFilteringMiddleware(Middleware):
         # Supports: ?service=drive,gmail, ?uuid=xyz123, ?minimal=false
         # Try to get request from middleware context first (FastMCP v3 pattern)
         http_params = None
-        if hasattr(context, 'fastmcp_context') and context.fastmcp_context:
+        if hasattr(context, "fastmcp_context") and context.fastmcp_context:
             ctx = context.fastmcp_context
-            logger.debug(f"🔍 fastmcp_context available, request_context: {ctx.request_context}")
-            if ctx.request_context and hasattr(ctx.request_context, 'request'):
+            logger.debug(
+                f"🔍 fastmcp_context available, request_context: {ctx.request_context}"
+            )
+            if ctx.request_context and hasattr(ctx.request_context, "request"):
                 request = ctx.request_context.request
-                if request and hasattr(request, 'query_params'):
-                    logger.info(f"🔍 Got request from fastmcp_context, query_params: {dict(request.query_params)}")
+                if request and hasattr(request, "query_params"):
+                    logger.info(
+                        f"🔍 Got request from fastmcp_context, query_params: {dict(request.query_params)}"
+                    )
                     http_params = _parse_request_params(request)
 
         # Fallback to global get_http_request() if context method failed

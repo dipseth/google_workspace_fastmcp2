@@ -324,9 +324,7 @@ async def _get_recent_photos_items(
             from fastmcp.tools.tool import Tool
 
             components = mcp_server._local_provider._components
-            tools_dict = {
-                v.name: v for v in components.values() if isinstance(v, Tool)
-            }
+            tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
 
         if not tools_dict:
             return {
@@ -485,12 +483,14 @@ Returns items modified within the last 30 days by default.""",
 
         # Validate service parameter
         if service.lower() not in SERVICE_INFO:
-            return json.dumps({
-                "error": f"Unsupported service: {service}",
-                "supported_services": list(SERVICE_INFO.keys()),
-                "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
-                "timestamp": datetime.now().isoformat(),
-            })
+            return json.dumps(
+                {
+                    "error": f"Unsupported service: {service}",
+                    "supported_services": list(SERVICE_INFO.keys()),
+                    "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
         # Get authenticated user
         user_email = await _get_authenticated_user_email(ctx)
@@ -531,12 +531,14 @@ Note: Photos service returns albums (day range affects Drive services only).""",
 
         # Validate service parameter
         if service.lower() not in SERVICE_INFO:
-            return json.dumps({
-                "error": f"Unsupported service: {service}",
-                "supported_services": list(SERVICE_INFO.keys()),
-                "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
-                "timestamp": datetime.now().isoformat(),
-            })
+            return json.dumps(
+                {
+                    "error": f"Unsupported service: {service}",
+                    "supported_services": list(SERVICE_INFO.keys()),
+                    "suggestion": "Use one of: drive, docs, sheets, slides, forms, photos",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
         # Get authenticated user
         user_email = await _get_authenticated_user_email(ctx)

@@ -182,7 +182,9 @@ def set_user_email_context_in_session(user_email: str, session_id: str = None) -
         try:
             from config.settings import settings
 
-            oauth_auth_file = Path(settings.credentials_dir) / ".oauth_authentication.json"
+            oauth_auth_file = (
+                Path(settings.credentials_dir) / ".oauth_authentication.json"
+            )
             with open(oauth_auth_file, "w") as f:
                 json.dump({"authenticated_email": user_email}, f)
             logger.debug(f"Set user email in OAuth auth file: {user_email}")
@@ -431,7 +433,9 @@ async def get_injected_service(service_key: str) -> Any:
                 f"Service '{service_key}' was fulfilled but no service instance found in cache"
             )
 
-        logger.debug(f"Retrieved injected service: {service_key} (from cache {cache_key})")
+        logger.debug(
+            f"Retrieved injected service: {service_key} (from cache {cache_key})"
+        )
         return service
 
     except RuntimeError as e:
@@ -528,7 +532,9 @@ async def _set_injected_service(service_key: str, service: Any) -> None:
             # Don't store the service object in context - it's not Pydantic-serializable
             current_requests[service_key].pop("service", None)
             await ctx.set_state("service_requests", current_requests)
-            logger.debug(f"Middleware injected service: {service_key} (cached as {cache_key})")
+            logger.debug(
+                f"Middleware injected service: {service_key} (cached as {cache_key})"
+            )
     except RuntimeError:
         logger.warning(
             f"Cannot inject service {service_key} - not in a FastMCP request context"
@@ -595,11 +601,15 @@ async def clear_all_context() -> None:
 
     # Clear service cache for this session
     with _service_cache_lock:
-        keys_to_remove = [k for k in _service_instance_cache if k.startswith(f"{session_id}:")]
+        keys_to_remove = [
+            k for k in _service_instance_cache if k.startswith(f"{session_id}:")
+        ]
         for key in keys_to_remove:
             del _service_instance_cache[key]
         if keys_to_remove:
-            logger.debug(f"Cleared {len(keys_to_remove)} cached services for session {session_id}")
+            logger.debug(
+                f"Cleared {len(keys_to_remove)} cached services for session {session_id}"
+            )
 
     logger.debug("Cleared all context variables")
 

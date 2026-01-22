@@ -1667,12 +1667,17 @@ def setup_user_resources(mcp: FastMCP) -> None:
 
             if not registered_tools:
                 await ctx.warning("Could not access tools from FastMCP server")
-                return [ResourceContent(DetailedToolsResponse(
-                    detailed_tools=[],
-                    count=0,
-                    benefit="No user_google_email parameter required - uses OAuth session automatically",
-                    timestamp=datetime.now().isoformat(),
-                ), mime_type="application/json")]
+                return [
+                    ResourceContent(
+                        DetailedToolsResponse(
+                            detailed_tools=[],
+                            count=0,
+                            benefit="No user_google_email parameter required - uses OAuth session automatically",
+                            timestamp=datetime.now().isoformat(),
+                        ),
+                        mime_type="application/json",
+                    )
+                ]
 
             # Find detailed tools (tools without user_google_email parameter)
             detailed_tools = []
@@ -1748,22 +1753,32 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 f"🔍 Detailed tool discovery: Found {len(detailed_tools)} detailed tools out of {len(registered_tools)} total"
             )
 
-            return [ResourceContent(DetailedToolsResponse(
-                detailed_tools=detailed_tools,
-                count=len(detailed_tools),
-                benefit="No user_google_email parameter required - uses OAuth session automatically",
-                timestamp=datetime.now().isoformat(),
-            ), mime_type="application/json")]
+            return [
+                ResourceContent(
+                    DetailedToolsResponse(
+                        detailed_tools=detailed_tools,
+                        count=len(detailed_tools),
+                        benefit="No user_google_email parameter required - uses OAuth session automatically",
+                        timestamp=datetime.now().isoformat(),
+                    ),
+                    mime_type="application/json",
+                )
+            ]
 
         except Exception as e:
             await ctx.error(f"Error during detailed tool discovery: {e}")
             # Fallback to empty response
-            return [ResourceContent(DetailedToolsResponse(
-                detailed_tools=[],
-                count=0,
-                benefit="No user_google_email parameter required - uses OAuth session automatically",
-                timestamp=datetime.now().isoformat(),
-            ), mime_type="application/json")]
+            return [
+                ResourceContent(
+                    DetailedToolsResponse(
+                        detailed_tools=[],
+                        count=0,
+                        benefit="No user_google_email parameter required - uses OAuth session automatically",
+                        timestamp=datetime.now().isoformat(),
+                    ),
+                    mime_type="application/json",
+                )
+            ]
 
     @mcp.resource(
         uri="workspace://content/search/{query}",
@@ -1872,10 +1887,12 @@ def setup_user_resources(mcp: FastMCP) -> None:
 
         user_email = await get_user_email_context()
         if not user_email:
-            return json.dumps({
-                "error": "No authenticated user found in current session",
-                "query": query,
-            })
+            return json.dumps(
+                {
+                    "error": "No authenticated user found in current session",
+                    "query": query,
+                }
+            )
 
         try:
             # Import and call tools directly (not using forward())
@@ -1925,36 +1942,41 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 else:
                     categorized_results["other"].append(file_entry)
 
-            return json.dumps({
-                "search_query": query,
-                "user_email": user_email,
-                "total_results": len(search_results.get("files", [])),
-                "results_by_type": categorized_results,
-                "suggested_email_content": {
-                    "references": [
-                        f"📄 {file['name']}"
-                        for file in search_results.get("files", [])[:5]
-                    ],
-                    "links": [
-                        file.get("webViewLink")
-                        for file in search_results.get("files", [])[:3]
-                    ],
-                    "attachment_suggestions": [
-                        file
-                        for file in search_results.get("files", [])
-                        if file.get("mimeType", "").startswith("application/")
-                    ][:3],
+            return json.dumps(
+                {
+                    "search_query": query,
+                    "user_email": user_email,
+                    "total_results": len(search_results.get("files", [])),
+                    "results_by_type": categorized_results,
+                    "suggested_email_content": {
+                        "references": [
+                            f"📄 {file['name']}"
+                            for file in search_results.get("files", [])[:5]
+                        ],
+                        "links": [
+                            file.get("webViewLink")
+                            for file in search_results.get("files", [])[:3]
+                        ],
+                        "attachment_suggestions": [
+                            file
+                            for file in search_results.get("files", [])
+                            if file.get("mimeType", "").startswith("application/")
+                        ][:3],
+                    },
+                    "timestamp": datetime.now().isoformat(),
                 },
-                "timestamp": datetime.now().isoformat(),
-            }, default=str)
+                default=str,
+            )
 
         except Exception as e:
             logger.error(f"Error searching workspace content: {e}")
-            return json.dumps({
-                "error": f"Failed to search workspace content: {str(e)}",
-                "search_query": query,
-                "timestamp": datetime.now().isoformat(),
-            })
+            return json.dumps(
+                {
+                    "error": f"Failed to search workspace content: {str(e)}",
+                    "search_query": query,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
     @mcp.resource(
         uri="gmail://allow-list",

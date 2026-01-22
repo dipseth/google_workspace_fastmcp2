@@ -814,7 +814,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
         # Count enabled/disabled tools (FastMCP 3.0+ uses transforms for visibility)
         total_tools = len(registry)
-        enabled_count = sum(1 for t in registry.values() if _get_tool_enabled_state(t, mcp))
+        enabled_count = sum(
+            1 for t in registry.values() if _get_tool_enabled_state(t, mcp)
+        )
         disabled_count = total_tools - enabled_count
 
         if action_normalized == "list":
