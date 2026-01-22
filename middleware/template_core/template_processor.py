@@ -400,7 +400,7 @@ class TemplateProcessor:
                 except TemplateResolutionError:
                     # If resource resolution fails, try to extract from existing context
                     state_key = f"resource_cache_{uri}"
-                    resolved_data = fastmcp_context.get_state(state_key)
+                    resolved_data = await fastmcp_context.get_state(state_key)
                     if not resolved_data:
                         # Final fallback - use empty data structure
                         if uri.endswith("/email"):

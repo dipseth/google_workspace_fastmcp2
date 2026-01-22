@@ -72,7 +72,7 @@ class ResourceHandler:
 
         # Check if resource is already resolved in context state
         state_key = f"resource_cache_{resource_uri}"
-        cached_data = fastmcp_context.get_state(state_key)
+        cached_data = await fastmcp_context.get_state(state_key)
         if cached_data:
             if self.enable_debug_logging:
                 logger.debug(f"📦 Found resource in context state: {resource_uri}")
@@ -85,7 +85,7 @@ class ResourceHandler:
         # If we resolved via fallback, cache and return
         if resource_data is not None:
             # Store in context state
-            fastmcp_context.set_state(state_key, resource_data)
+            await fastmcp_context.set_state(state_key, resource_data)
             # Cache locally
             self.cache_manager.cache_resource(resource_uri, resource_data)
             return resource_data
@@ -115,7 +115,7 @@ class ResourceHandler:
                     )
 
                 # Store in context state and cache
-                fastmcp_context.set_state(state_key, resource_data)
+                await fastmcp_context.set_state(state_key, resource_data)
                 self.cache_manager.cache_resource(resource_uri, resource_data)
 
                 return resource_data
@@ -151,7 +151,7 @@ class ResourceHandler:
             try:
                 from auth.context import get_user_email_context
 
-                user_email = get_user_email_context()
+                user_email = await get_user_email_context()
                 resource_data = {"email": user_email or ""}
                 if self.enable_debug_logging:
                     logger.debug(
@@ -165,7 +165,7 @@ class ResourceHandler:
             try:
                 from auth.context import get_user_email_context
 
-                user_email = get_user_email_context()
+                user_email = await get_user_email_context()
                 resource_data = {
                     "email": user_email or "",
                     "name": "",
@@ -181,7 +181,7 @@ class ResourceHandler:
             try:
                 from auth.context import get_user_email_context
 
-                user_email = get_user_email_context()
+                user_email = await get_user_email_context()
                 resource_data = {
                     "authenticated": bool(user_email),
                     "user_email": user_email or "",

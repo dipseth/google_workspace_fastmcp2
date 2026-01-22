@@ -169,32 +169,35 @@ This resource is handled by EnhancedTemplateMiddleware.""",
             "middleware_handler": "EnhancedTemplateMiddleware",
         },
     )
-    async def handle_all_macros(ctx: Context) -> AllMacrosResponse:
+    async def handle_all_macros(ctx: Context) -> str:
         """
         Handler for template://macros that retrieves cached results from middleware.
 
         Returns:
-            AllMacrosResponse containing all discovered macros with usage examples
+            JSON string containing all discovered macros with usage examples
         """
         # Try to get the cached result from FastMCP context state
         cache_key = "template_resource_template://macros"
-        cached_result = ctx.get_state(cache_key)
+        cached_result = await ctx.get_state(cache_key)
 
         if cached_result is None:
             # Fallback - middleware didn't cache result
             logger.warning(
                 "No cached template macros found - middleware may not have processed this request"
             )
-            return AllMacrosResponse(
+            response = AllMacrosResponse(
                 macros={},
                 total_count=0,
                 templates_dir="unknown",
                 generated_at=datetime.now().isoformat(),
             )
+        else:
+            # Return the cached result as structured response
+            logger.info("📚 Retrieved cached macros data from context state")
+            response = AllMacrosResponse.from_middleware_data(cached_result)
 
-        # Return the cached result as structured response
-        logger.info("📚 Retrieved cached macros data from context state")
-        return AllMacrosResponse.from_middleware_data(cached_result)
+        # FastMCP 3.0: Return JSON string instead of Pydantic model
+        return response.model_dump_json()
 
     @mcp.resource(
         uri="template://macros/{macro_name}",
@@ -243,35 +246,38 @@ This resource is handled by EnhancedTemplateMiddleware.""",
             ),
         ],
         ctx: Context,
-    ) -> SpecificMacroResponse:
+    ) -> str:
         """
         Handler for template://macros/{macro_name} that retrieves cached results from middleware.
 
         Returns:
-            SpecificMacroResponse containing the macro usage example or error information
+            JSON string containing the macro usage example or error information
         """
         # Try to get the cached result from FastMCP context state
         cache_key = f"template_resource_template://macros/{macro_name}"
-        cached_result = ctx.get_state(cache_key)
+        cached_result = await ctx.get_state(cache_key)
 
         if cached_result is None:
             # Fallback - middleware didn't cache result
             logger.warning(
                 f"No cached template macro found for '{macro_name}' - middleware may not have processed this request"
             )
-            return SpecificMacroResponse(
+            response = SpecificMacroResponse(
                 macro=None,
                 usage_example="",
                 found=False,
                 error=f"Macro '{macro_name}' not found - no cached data available",
                 available_macros=[],
             )
+        else:
+            # Return the cached result as structured response
+            logger.info(
+                f"📝 Retrieved cached macro data for '{macro_name}' from context state"
+            )
+            response = SpecificMacroResponse.from_middleware_data(cached_result)
 
-        # Return the cached result as structured response
-        logger.info(
-            f"📝 Retrieved cached macro data for '{macro_name}' from context state"
-        )
-        return SpecificMacroResponse.from_middleware_data(cached_result)
+        # FastMCP 3.0: Return JSON string instead of Pydantic model
+        return response.model_dump_json()
 
     logger.info(
         "✅ Registered 2 template macro resources (all handled by EnhancedTemplateMiddleware)"

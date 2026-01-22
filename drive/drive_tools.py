@@ -242,11 +242,11 @@ async def _get_drive_service_with_fallback(user_google_email: str) -> Any:
         RuntimeError: If both middleware injection and direct creation fail
     """
     # First, try middleware injection
-    service_key = request_service("drive")
+    service_key = await request_service("drive")
 
     try:
         # Try to get the injected service from middleware
-        drive_service = get_injected_service(service_key)
+        drive_service = await get_injected_service(service_key)
         logger.info(
             f"Successfully retrieved injected Drive service for {user_google_email}"
         )

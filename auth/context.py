@@ -20,19 +20,47 @@ _store_lock = threading.Lock()
 _auth_middleware: Optional[Any] = None
 _middleware_lock = threading.Lock()
 
+# In-memory cache for injected Google service instances
+# Key format: "{session_id}:{service_key}" -> service instance
+# This avoids storing non-serializable googleapiclient.discovery.Resource objects in FastMCP context
+_service_instance_cache: Dict[str, Any] = {}
+_service_cache_lock = threading.Lock()
 
-def set_session_context(session_id: str) -> None:
+
+async def set_session_context(session_id: str) -> None:
     """Set the current session ID in the FastMCP context."""
     try:
         ctx = get_context()
-        ctx.set_state("session_id", session_id)
+        await ctx.set_state("session_id", session_id)
         logger.debug(f"Set session context: {session_id}")
     except RuntimeError:
         # This is expected when called outside FastMCP request context (e.g., OAuth endpoints)
         logger.debug("Cannot set session context - not in a FastMCP request context")
 
 
-def get_session_context() -> Optional[str]:
+def get_session_context_sync() -> Optional[str]:
+    """Get the current session ID from the FastMCP context (synchronous version).
+
+    This sync version only uses the native session_id property which doesn't require async.
+    For full session context access including state, use async get_session_context().
+    """
+    try:
+        ctx = get_context()
+        # Use FastMCP's native session_id property (doesn't require await)
+        if hasattr(ctx, "session_id"):
+            native_session_id = ctx.session_id
+            if native_session_id:
+                logger.debug(
+                    f"Using native FastMCP session_id (sync): {native_session_id[:8]}..."
+                )
+                return native_session_id
+        return None
+    except RuntimeError:
+        logger.debug("Cannot get session context - not in a FastMCP request context")
+        return None
+
+
+async def get_session_context() -> Optional[str]:
     """Get the current session ID from the FastMCP context.
 
     Tries multiple sources in order:
@@ -42,7 +70,7 @@ def get_session_context() -> Optional[str]:
     try:
         ctx = get_context()
         # First try explicitly set session_id
-        session_id = ctx.get_state("session_id")
+        session_id = await ctx.get_state("session_id")
         if session_id:
             return session_id
 
@@ -61,17 +89,17 @@ def get_session_context() -> Optional[str]:
         return None
 
 
-def clear_session_context() -> None:
+async def clear_session_context() -> None:
     """Clear the session context."""
     try:
         ctx = get_context()
-        ctx.set_state("session_id", None)
+        await ctx.set_state("session_id", None)
         logger.debug("Cleared session context")
     except RuntimeError:
         logger.debug("Cannot clear session context - not in a FastMCP request context")
 
 
-def set_effective_session_id(session_id: str) -> None:
+async def set_effective_session_id(session_id: str) -> None:
     """
     Set the effective session ID for this request.
 
@@ -83,7 +111,7 @@ def set_effective_session_id(session_id: str) -> None:
     """
     try:
         ctx = get_context()
-        ctx.set_state("effective_session_id", session_id)
+        await ctx.set_state("effective_session_id", session_id)
         logger.debug(f"Set effective session ID: {session_id[:8]}...")
     except RuntimeError:
         logger.debug(
@@ -91,7 +119,7 @@ def set_effective_session_id(session_id: str) -> None:
         )
 
 
-def get_effective_session_id() -> Optional[str]:
+async def get_effective_session_id() -> Optional[str]:
     """
     Get the effective session ID for this request.
 
@@ -107,12 +135,12 @@ def get_effective_session_id() -> Optional[str]:
     try:
         ctx = get_context()
         # First check for explicitly set effective session ID (from ?uuid= etc.)
-        effective_id = ctx.get_state("effective_session_id")
+        effective_id = await ctx.get_state("effective_session_id")
         if effective_id:
             return effective_id
 
         # Fall back to regular session context
-        return get_session_context()
+        return await get_session_context()
     except RuntimeError:
         logger.debug(
             "Cannot get effective session ID - not in a FastMCP request context"
@@ -120,15 +148,46 @@ def get_effective_session_id() -> Optional[str]:
         return None
 
 
-def set_user_email_context(user_email: str) -> None:
+async def set_user_email_context(user_email: str) -> None:
     """Set the current user email in the FastMCP context."""
     try:
         ctx = get_context()
-        ctx.set_state("user_email", user_email)
+        await ctx.set_state("user_email", user_email)
         logger.debug(f"Set user email context: {user_email}")
     except RuntimeError:
         # This is expected when called outside FastMCP request context (e.g., OAuth endpoints)
         logger.debug("Cannot set user email context - not in a FastMCP request context")
+
+
+def set_user_email_context_in_session(user_email: str, session_id: str = None) -> None:
+    """
+    Set user email in session storage (sync version).
+
+    This sync version stores the user email in session data storage, making it available
+    for later retrieval via get_user_email_context_sync(). Use this when you cannot use
+    the async set_user_email_context() function.
+
+    Note: This does NOT set the FastMCP context state - it only stores in session data.
+    For async callers, use set_user_email_context() instead.
+
+    Args:
+        user_email: Email to store
+        session_id: Session ID (optional - if provided, stores in session data)
+    """
+    if session_id:
+        store_session_data(session_id, "user_email", user_email)
+        logger.debug(f"Set user email in session storage: {user_email}")
+    else:
+        # Fallback: store in OAuth auth file for persistence
+        try:
+            from config.settings import settings
+
+            oauth_auth_file = Path(settings.credentials_dir) / ".oauth_authentication.json"
+            with open(oauth_auth_file, "w") as f:
+                json.dump({"authenticated_email": user_email}, f)
+            logger.debug(f"Set user email in OAuth auth file: {user_email}")
+        except Exception as e:
+            logger.debug(f"Could not store user email in OAuth auth file: {e}")
 
 
 def get_user_email_from_oauth() -> Optional[str]:
@@ -216,7 +275,7 @@ def get_user_email_from_oauth() -> Optional[str]:
         return None
 
 
-def get_user_email_context() -> Optional[str]:
+async def get_user_email_context() -> Optional[str]:
     """
     Get the current user email from the FastMCP context or OAuth files.
 
@@ -229,7 +288,7 @@ def get_user_email_context() -> Optional[str]:
     """
     try:
         ctx = get_context()
-        email = ctx.get_state("user_email")
+        email = await ctx.get_state("user_email")
         if email:
             logger.debug(f"Retrieved user email from FastMCP context: {email}")
             return email
@@ -244,11 +303,24 @@ def get_user_email_context() -> Optional[str]:
     return email
 
 
-def clear_user_email_context() -> None:
+def get_user_email_context_sync() -> Optional[str]:
+    """
+    Get the current user email synchronously using OAuth file fallback.
+
+    This sync version only uses the OAuth file-based fallback since FastMCP context
+    state access requires async. For full context access, use async get_user_email_context().
+
+    Returns:
+        Optional[str]: User email from OAuth files, or None if not found
+    """
+    return get_user_email_from_oauth()
+
+
+async def clear_user_email_context() -> None:
     """Clear the user email context."""
     try:
         ctx = get_context()
-        ctx.set_state("user_email", None)
+        await ctx.set_state("user_email", None)
         logger.debug("Cleared user email context")
     except RuntimeError:
         logger.debug(
@@ -256,7 +328,7 @@ def clear_user_email_context() -> None:
         )
 
 
-def request_google_service(
+async def request_google_service(
     service_type: str,
     scopes: Union[str, List[str]] = None,
     version: Optional[str] = None,
@@ -282,7 +354,7 @@ def request_google_service(
         ctx = get_context()
 
         # Get current service requests or create new dict
-        current_requests = ctx.get_state("service_requests") or {}
+        current_requests = await ctx.get_state("service_requests") or {}
 
         # Generate a unique key for this service request
         # Use just the service type as the key (middleware expects "drive", not "drive_v3")
@@ -301,7 +373,7 @@ def request_google_service(
         }
 
         current_requests[service_key] = service_data
-        ctx.set_state("service_requests", current_requests)
+        await ctx.set_state("service_requests", current_requests)
 
         logger.debug(f"Requested Google service: {service_type} (key: {service_key})")
         return service_key
@@ -311,9 +383,12 @@ def request_google_service(
         raise RuntimeError("Service request requires an active FastMCP request context")
 
 
-def get_injected_service(service_key: str) -> Any:
+async def get_injected_service(service_key: str) -> Any:
     """
     Get an injected Google service by its context key.
+
+    Retrieves the service instance from the in-memory cache (since googleapiclient.discovery.Resource
+    objects are not Pydantic-serializable and can't be stored in FastMCP context).
 
     Args:
         service_key: The key returned by request_google_service()
@@ -326,7 +401,7 @@ def get_injected_service(service_key: str) -> Any:
     """
     try:
         ctx = get_context()
-        current_requests = ctx.get_state("service_requests") or {}
+        current_requests = await ctx.get_state("service_requests") or {}
 
         if service_key not in current_requests:
             raise RuntimeError(
@@ -343,13 +418,20 @@ def get_injected_service(service_key: str) -> Any:
                 f"Service '{service_key}' not yet fulfilled by middleware"
             )
 
-        service = service_data.get("service")
+        # Get session ID for cache key
+        session_id = await get_session_context() or "default"
+        cache_key = f"{session_id}:{service_key}"
+
+        # Retrieve the service from the in-memory cache
+        with _service_cache_lock:
+            service = _service_instance_cache.get(cache_key)
+
         if service is None:
             raise RuntimeError(
-                f"Service '{service_key}' was fulfilled but no service instance found"
+                f"Service '{service_key}' was fulfilled but no service instance found in cache"
             )
 
-        logger.debug(f"Retrieved injected service: {service_key}")
+        logger.debug(f"Retrieved injected service: {service_key} (from cache {cache_key})")
         return service
 
     except RuntimeError as e:
@@ -361,7 +443,7 @@ def get_injected_service(service_key: str) -> Any:
         )
 
 
-def get_google_service_simple(
+async def get_google_service_simple(
     service_type: str,
     user_email: Optional[str] = None,
     scopes: Union[str, List[str]] = None,
@@ -387,7 +469,7 @@ def get_google_service_simple(
     """
     # Use provided user email or get from context
     if not user_email:
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         if not user_email:
             raise RuntimeError(
                 "No user email provided and none found in context. "
@@ -399,44 +481,29 @@ def get_google_service_simple(
 
     try:
         ctx = get_context()
-        current_requests = ctx.get_state("service_requests") or {}
+        current_requests = await ctx.get_state("service_requests") or {}
 
         if service_key in current_requests and current_requests[service_key].get(
             "fulfilled"
         ):
-            return get_injected_service(service_key)
+            return await get_injected_service(service_key)
     except RuntimeError:
         pass
 
     # For now, fall back to direct service creation
     # In the future, this could be enhanced to work with middleware pre-injection
-    import asyncio
-
-    # Check if we're in an async context
-    try:
-        # Try to get the current event loop
-        loop = asyncio.get_running_loop()
-        # If we're in an async context, we need to handle this differently
-        # For now, raise an error suggesting the proper async usage
-        raise RuntimeError(
-            f"get_google_service_simple() called from async context. "
-            f'Use \'await get_google_service("{service_type}", "{user_email}", {scopes})\' instead.'
-        )
-    except RuntimeError as e:
-        if "no running event loop" not in str(e).lower():
-            raise e
-
-        # We're not in an async context, but get_google_service is async
-        # This shouldn't happen in normal FastMCP usage, but handle gracefully
-        raise RuntimeError(
-            f"Cannot get Google service synchronously. "
-            f'Use middleware injection or call \'await get_google_service("{service_type}", "{user_email}")\' from async context.'
-        )
+    raise RuntimeError(
+        f"Cannot get Google service synchronously. "
+        f'Use middleware injection or call \'await get_google_service("{service_type}", "{user_email}")\' from async context.'
+    )
 
 
-def _set_injected_service(service_key: str, service: Any) -> None:
+async def _set_injected_service(service_key: str, service: Any) -> None:
     """
     Internal function for middleware to set injected services.
+
+    Stores the actual service instance in an in-memory cache (since googleapiclient.discovery.Resource
+    objects are not Pydantic-serializable) and only stores metadata in FastMCP context.
 
     Args:
         service_key: The service key
@@ -444,21 +511,31 @@ def _set_injected_service(service_key: str, service: Any) -> None:
     """
     try:
         ctx = get_context()
-        current_requests = ctx.get_state("service_requests") or {}
+        current_requests = await ctx.get_state("service_requests") or {}
 
         if service_key in current_requests:
-            current_requests[service_key]["service"] = service
+            # Get session ID for cache key
+            session_id = await get_session_context() or "default"
+            cache_key = f"{session_id}:{service_key}"
+
+            # Store the actual service instance in the in-memory cache
+            with _service_cache_lock:
+                _service_instance_cache[cache_key] = service
+
+            # Only store serializable metadata in the context state
             current_requests[service_key]["fulfilled"] = True
             current_requests[service_key]["error"] = None
-            ctx.set_state("service_requests", current_requests)
-            logger.debug(f"Middleware injected service: {service_key}")
+            # Don't store the service object in context - it's not Pydantic-serializable
+            current_requests[service_key].pop("service", None)
+            await ctx.set_state("service_requests", current_requests)
+            logger.debug(f"Middleware injected service: {service_key} (cached as {cache_key})")
     except RuntimeError:
         logger.warning(
             f"Cannot inject service {service_key} - not in a FastMCP request context"
         )
 
 
-def _set_service_error(service_key: str, error: str) -> None:
+async def _set_service_error(service_key: str, error: str) -> None:
     """
     Internal function for middleware to set service errors.
 
@@ -468,12 +545,12 @@ def _set_service_error(service_key: str, error: str) -> None:
     """
     try:
         ctx = get_context()
-        current_requests = ctx.get_state("service_requests") or {}
+        current_requests = await ctx.get_state("service_requests") or {}
 
         if service_key in current_requests:
             current_requests[service_key]["error"] = error
             current_requests[service_key]["fulfilled"] = False
-            ctx.set_state("service_requests", current_requests)
+            await ctx.set_state("service_requests", current_requests)
             logger.debug(f"Middleware set error for service {service_key}: {error}")
     except RuntimeError:
         logger.warning(
@@ -481,7 +558,7 @@ def _set_service_error(service_key: str, error: str) -> None:
         )
 
 
-def _get_pending_service_requests() -> Dict[str, Dict[str, Any]]:
+async def _get_pending_service_requests() -> Dict[str, Dict[str, Any]]:
     """
     Internal function for middleware to get pending service requests.
 
@@ -490,7 +567,7 @@ def _get_pending_service_requests() -> Dict[str, Dict[str, Any]]:
     """
     try:
         ctx = get_context()
-        current_requests = ctx.get_state("service_requests") or {}
+        current_requests = await ctx.get_state("service_requests") or {}
         return {
             k: v
             for k, v in current_requests.items()
@@ -503,15 +580,27 @@ def _get_pending_service_requests() -> Dict[str, Dict[str, Any]]:
         return {}
 
 
-def clear_all_context() -> None:
-    """Clear all context variables."""
-    clear_session_context()
-    clear_user_email_context()
+async def clear_all_context() -> None:
+    """Clear all context variables and service cache for current session."""
+    # Get session ID before clearing context
+    session_id = await get_session_context() or "default"
+
+    await clear_session_context()
+    await clear_user_email_context()
     try:
         ctx = get_context()
-        ctx.set_state("service_requests", {})
+        await ctx.set_state("service_requests", {})
     except RuntimeError:
         pass
+
+    # Clear service cache for this session
+    with _service_cache_lock:
+        keys_to_remove = [k for k in _service_instance_cache if k.startswith(f"{session_id}:")]
+        for key in keys_to_remove:
+            del _service_instance_cache[key]
+        if keys_to_remove:
+            logger.debug(f"Cleared {len(keys_to_remove)} cached services for session {session_id}")
+
     logger.debug("Cleared all context variables")
 
 
@@ -627,10 +716,10 @@ def get_google_provider():
     return _google_provider_instance
 
 
-def is_service_selection_needed(session_id: str = None) -> bool:
+async def is_service_selection_needed(session_id: str = None) -> bool:
     """Check if service selection is needed for current session."""
     if not session_id:
-        session_id = get_session_context()
+        session_id = await get_session_context()
 
     if session_id:
         return get_session_data(session_id, "service_selection_needed", False)
@@ -646,7 +735,7 @@ def is_service_selection_needed(session_id: str = None) -> bool:
 # the global tool registry.
 
 
-def get_session_disabled_tools(session_id: str = None) -> set:
+async def get_session_disabled_tools(session_id: str = None) -> set:
     """
     Get the set of tools disabled for a specific session.
 
@@ -657,7 +746,7 @@ def get_session_disabled_tools(session_id: str = None) -> set:
         Set of tool names that are disabled for this session.
     """
     if not session_id:
-        session_id = get_session_context()
+        session_id = await get_session_context()
 
     if not session_id:
         return set()
@@ -669,7 +758,30 @@ def get_session_disabled_tools(session_id: str = None) -> set:
     )
 
 
-def disable_tool_for_session(
+def get_session_disabled_tools_sync(session_id: str) -> set:
+    """
+    Get the set of tools disabled for a specific session (synchronous version).
+
+    This sync version REQUIRES session_id to be provided (cannot look up context).
+    For automatic context lookup, use async get_session_disabled_tools().
+
+    Args:
+        session_id: Session identifier (required).
+
+    Returns:
+        Set of tool names that are disabled for this session.
+    """
+    if not session_id:
+        return set()
+
+    disabled = get_session_data(session_id, "session_disabled_tools", set())
+    # Ensure we always return a set (in case None was stored)
+    return (
+        disabled if isinstance(disabled, set) else set(disabled) if disabled else set()
+    )
+
+
+async def disable_tool_for_session(
     tool_name: str, session_id: str = None, persist: bool = False
 ) -> bool:
     """
@@ -687,20 +799,20 @@ def disable_tool_for_session(
         True if the tool was disabled, False if session not available.
     """
     if not session_id:
-        session_id = get_session_context()
+        session_id = await get_session_context()
 
     if not session_id:
         logger.warning("Cannot disable tool for session - no session context available")
         return False
 
-    disabled = get_session_disabled_tools(session_id)
+    disabled = await get_session_disabled_tools(session_id)
     disabled.add(tool_name)
     store_session_data(session_id, "session_disabled_tools", disabled)
     logger.debug(f"Disabled tool '{tool_name}' for session {session_id}")
 
     if persist:
         # Also store user email for cross-session restoration
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         if user_email:
             store_session_data(session_id, "user_email", user_email)
         persist_session_tool_states()
@@ -708,7 +820,34 @@ def disable_tool_for_session(
     return True
 
 
-def enable_tool_for_session(
+def disable_tool_for_session_sync(tool_name: str, session_id: str) -> bool:
+    """
+    Disable a tool for a session (synchronous version).
+
+    This sync version REQUIRES session_id to be provided (cannot look up context).
+    For automatic context lookup, use async disable_tool_for_session().
+
+    Note: This version does NOT support persist=True (no async user email lookup).
+
+    Args:
+        tool_name: Name of the tool to disable.
+        session_id: Session identifier (required).
+
+    Returns:
+        True if the tool was disabled, False if session_id not provided.
+    """
+    if not session_id:
+        logger.warning("Cannot disable tool for session - no session_id provided")
+        return False
+
+    disabled = get_session_disabled_tools_sync(session_id)
+    disabled.add(tool_name)
+    store_session_data(session_id, "session_disabled_tools", disabled)
+    logger.debug(f"Disabled tool '{tool_name}' for session {session_id}")
+    return True
+
+
+async def enable_tool_for_session(
     tool_name: str, session_id: str = None, persist: bool = False
 ) -> bool:
     """
@@ -725,20 +864,20 @@ def enable_tool_for_session(
         True if the tool was enabled, False if session not available.
     """
     if not session_id:
-        session_id = get_session_context()
+        session_id = await get_session_context()
 
     if not session_id:
         logger.warning("Cannot enable tool for session - no session context available")
         return False
 
-    disabled = get_session_disabled_tools(session_id)
+    disabled = await get_session_disabled_tools(session_id)
     disabled.discard(tool_name)
     store_session_data(session_id, "session_disabled_tools", disabled)
     logger.debug(f"Enabled tool '{tool_name}' for session {session_id}")
 
     if persist:
         # Also store user email for cross-session restoration
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         if user_email:
             store_session_data(session_id, "user_email", user_email)
         persist_session_tool_states()
@@ -746,7 +885,7 @@ def enable_tool_for_session(
     return True
 
 
-def is_tool_enabled_for_session(tool_name: str, session_id: str = None) -> bool:
+async def is_tool_enabled_for_session(tool_name: str, session_id: str = None) -> bool:
     """
     Check if a tool is enabled for the current session.
 
@@ -761,17 +900,17 @@ def is_tool_enabled_for_session(tool_name: str, session_id: str = None) -> bool:
         True if the tool is NOT in the session's disabled list.
     """
     if not session_id:
-        session_id = get_session_context()
+        session_id = await get_session_context()
 
     if not session_id:
         # No session context = treat all tools as enabled (fall back to global state)
         return True
 
-    disabled = get_session_disabled_tools(session_id)
+    disabled = await get_session_disabled_tools(session_id)
     return tool_name not in disabled
 
 
-def clear_session_disabled_tools(session_id: str = None) -> bool:
+async def clear_session_disabled_tools(session_id: str = None) -> bool:
     """
     Clear all session-specific tool disables (re-enable all tools for session).
 
@@ -782,7 +921,7 @@ def clear_session_disabled_tools(session_id: str = None) -> bool:
         True if cleared successfully, False if session not available.
     """
     if not session_id:
-        session_id = get_session_context()
+        session_id = await get_session_context()
 
     if not session_id:
         logger.warning(
@@ -795,7 +934,31 @@ def clear_session_disabled_tools(session_id: str = None) -> bool:
     return True
 
 
-def get_session_tool_state_summary(session_id: str = None) -> Dict[str, Any]:
+def clear_session_disabled_tools_sync(session_id: str) -> bool:
+    """
+    Clear all session-specific tool disables synchronously.
+
+    This sync version REQUIRES session_id to be provided (cannot look up context).
+    For automatic context lookup, use async clear_session_disabled_tools().
+
+    Args:
+        session_id: Session identifier (required).
+
+    Returns:
+        True if cleared successfully, False if session_id is empty.
+    """
+    if not session_id:
+        logger.warning(
+            "Cannot clear session disabled tools - session_id is required for sync version"
+        )
+        return False
+
+    store_session_data(session_id, "session_disabled_tools", set())
+    logger.debug(f"Cleared all session-disabled tools for session {session_id} (sync)")
+    return True
+
+
+async def get_session_tool_state_summary(session_id: str = None) -> Dict[str, Any]:
     """
     Get a summary of session-specific tool state.
 
@@ -806,7 +969,7 @@ def get_session_tool_state_summary(session_id: str = None) -> Dict[str, Any]:
         Dictionary with session tool state information.
     """
     if not session_id:
-        session_id = get_session_context()
+        session_id = await get_session_context()
 
     if not session_id:
         return {
@@ -816,7 +979,7 @@ def get_session_tool_state_summary(session_id: str = None) -> Dict[str, Any]:
             "disabled_count": 0,
         }
 
-    disabled = get_session_disabled_tools(session_id)
+    disabled = await get_session_disabled_tools(session_id)
     return {
         "session_id": session_id,
         "session_available": True,
@@ -825,7 +988,7 @@ def get_session_tool_state_summary(session_id: str = None) -> Dict[str, Any]:
     }
 
 
-def store_custom_oauth_credentials(
+async def store_custom_oauth_credentials(
     state: str,
     custom_client_id: str,
     custom_client_secret: str = None,
@@ -835,11 +998,11 @@ def store_custom_oauth_credentials(
     try:
         ctx = get_context()
         # Store in FastMCP context for cross-request persistence
-        ctx.set_state(f"custom_client_id_{state}", custom_client_id)
+        await ctx.set_state(f"custom_client_id_{state}", custom_client_id)
         if custom_client_secret:
-            ctx.set_state(f"custom_client_secret_{state}", custom_client_secret)
+            await ctx.set_state(f"custom_client_secret_{state}", custom_client_secret)
         if auth_method:
-            ctx.set_state(f"auth_method_{state}", auth_method)
+            await ctx.set_state(f"auth_method_{state}", auth_method)
 
         logger.info(
             f"🔗 Stored custom OAuth credentials in FastMCP context for state: {state}"
@@ -850,15 +1013,15 @@ def store_custom_oauth_credentials(
         )
 
 
-def retrieve_custom_oauth_credentials(
+async def retrieve_custom_oauth_credentials(
     state: str,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Retrieve custom OAuth credentials from context."""
     try:
         ctx = get_context()
-        custom_client_id = ctx.get_state(f"custom_client_id_{state}")
-        custom_client_secret = ctx.get_state(f"custom_client_secret_{state}")
-        auth_method = ctx.get_state(f"auth_method_{state}")
+        custom_client_id = await ctx.get_state(f"custom_client_id_{state}")
+        custom_client_secret = await ctx.get_state(f"custom_client_secret_{state}")
+        auth_method = await ctx.get_state(f"auth_method_{state}")
 
         if custom_client_id:
             logger.info(

@@ -584,7 +584,7 @@ class TagBasedResourceMiddleware(Middleware):
         )
 
         cache_key = f"service_lists_response_{service}"
-        context.fastmcp_context.set_state(cache_key, response_model)
+        await context.fastmcp_context.set_state(cache_key, response_model)
         logger.debug(
             f"📦 Stored ServiceListsResponse in context state with key: {cache_key}"
         )
@@ -631,7 +631,7 @@ class TagBasedResourceMiddleware(Middleware):
             return
 
         # Get user email from context (with OAuth file fallback)
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         if not user_email:
             logger.error("❌ User email not found in context or OAuth files")
             logger.error(
@@ -697,14 +697,14 @@ class TagBasedResourceMiddleware(Middleware):
                 return
 
         # Store in FastMCP context state for resource handler (matches resource handler expectations)
-        context.fastmcp_context.set_state(cache_key, cached_response)
+        await context.fastmcp_context.set_state(cache_key, cached_response)
         logger.debug(
             f"📦 Stored ServiceListResponse in FastMCP context state with key: {cache_key}"
         )
 
         # ALSO cache the raw result for specific item extraction
         raw_cache_key = f"service_list_raw_{service}_{list_type}_{user_email}"
-        context.fastmcp_context.set_state(raw_cache_key, serializable_result)
+        await context.fastmcp_context.set_state(raw_cache_key, serializable_result)
         logger.debug(
             f"📦 Cached raw list data for item extraction with key: {raw_cache_key}"
         )
@@ -751,7 +751,7 @@ class TagBasedResourceMiddleware(Middleware):
             return
 
         # Get user email from context (with OAuth file fallback)
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         if not user_email:
             logger.error("❌ User email not found in context or OAuth files")
             logger.error(
@@ -861,7 +861,7 @@ class TagBasedResourceMiddleware(Middleware):
         context_cache_key = (
             f"service_item_details_{service}_{list_type}_{item_id}_{user_email}"
         )
-        context.fastmcp_context.set_state(context_cache_key, response_model)
+        await context.fastmcp_context.set_state(context_cache_key, response_model)
         logger.debug(
             f"📦 Stored ServiceItemDetailsResponse (via get tool) with key: {context_cache_key}"
         )
@@ -879,7 +879,7 @@ class TagBasedResourceMiddleware(Middleware):
         raw_cache_key = f"service_list_raw_{service}_{list_type}_{user_email}"
 
         # Try to get cached raw list data
-        cached_list_data = context.fastmcp_context.get_state(raw_cache_key)
+        cached_list_data = await context.fastmcp_context.get_state(raw_cache_key)
 
         if not cached_list_data:
             # No cached data, fetch fresh list data
@@ -902,7 +902,7 @@ class TagBasedResourceMiddleware(Middleware):
                 cached_list_data = self._convert_result_to_serializable(result)
 
                 # Cache the fresh data
-                context.fastmcp_context.set_state(raw_cache_key, cached_list_data)
+                await context.fastmcp_context.set_state(raw_cache_key, cached_list_data)
                 logger.debug(f"📦 Cached fresh list data with key: {raw_cache_key}")
 
             except Exception as e:
@@ -941,7 +941,7 @@ class TagBasedResourceMiddleware(Middleware):
         )
 
         cache_key = f"service_item_details_{service}_{list_type}_{item_id}_{user_email}"
-        context.fastmcp_context.set_state(cache_key, response_model)
+        await context.fastmcp_context.set_state(cache_key, response_model)
         logger.debug(
             f"📦 Stored ServiceItemDetailsResponse (via list extraction) with key: {cache_key}"
         )
@@ -1043,12 +1043,27 @@ class TagBasedResourceMiddleware(Middleware):
         """
         try:
             if hasattr(context, "fastmcp_context") and context.fastmcp_context:
-                # Access the tool registry directly via _tool_manager
+                # Access the tool registry (supports FastMCP 2.x and 3.0.0b1+)
                 mcp_server = context.fastmcp_context.fastmcp
+                tools_dict = {}
+
+                # FastMCP 2.x path
                 if hasattr(mcp_server, "_tool_manager") and hasattr(
                     mcp_server._tool_manager, "_tools"
                 ):
                     tools_dict = mcp_server._tool_manager._tools
+                # FastMCP 3.0.0b1+ path - tools in _local_provider._components
+                elif hasattr(mcp_server, "_local_provider") and hasattr(
+                    mcp_server._local_provider, "_components"
+                ):
+                    from fastmcp.tools.tool import Tool
+
+                    components = mcp_server._local_provider._components
+                    tools_dict = {
+                        v.name: v for v in components.values() if isinstance(v, Tool)
+                    }
+
+                if tools_dict:
                     tool_names = set(tools_dict.keys())
 
                     if self.enable_debug_logging:
@@ -1101,14 +1116,28 @@ class TagBasedResourceMiddleware(Middleware):
         if self.enable_debug_logging:
             logger.debug(f"🔧 Calling tool {tool_name} with parameters: {parameters}")
 
-        # Get the tool from the registry
+        # Get the tool from the registry (supports FastMCP 2.x and 3.0.0b1+)
         mcp_server = context.fastmcp_context.fastmcp
-        if not hasattr(mcp_server, "_tool_manager") or not hasattr(
+        tools_dict = {}
+
+        # FastMCP 2.x path
+        if hasattr(mcp_server, "_tool_manager") and hasattr(
             mcp_server._tool_manager, "_tools"
         ):
-            raise RuntimeError("Cannot access tool registry from FastMCP server")
+            tools_dict = mcp_server._tool_manager._tools
+        # FastMCP 3.0.0b1+ path - tools in _local_provider._components
+        elif hasattr(mcp_server, "_local_provider") and hasattr(
+            mcp_server._local_provider, "_components"
+        ):
+            from fastmcp.tools.tool import Tool
 
-        tools_dict = mcp_server._tool_manager._tools
+            components = mcp_server._local_provider._components
+            tools_dict = {
+                v.name: v for v in components.values() if isinstance(v, Tool)
+            }
+
+        if not tools_dict:
+            raise RuntimeError("Cannot access tool registry from FastMCP server")
 
         if tool_name not in tools_dict:
             raise RuntimeError(f"Tool '{tool_name}' not found in registry")
@@ -1190,7 +1219,7 @@ class TagBasedResourceMiddleware(Middleware):
         # Store error response in context state with a unique key
         # Use timestamp to ensure uniqueness for multiple errors
         error_key = f"service_error_response_{datetime.now().timestamp()}"
-        context.fastmcp_context.set_state(error_key, error_response)
+        await context.fastmcp_context.set_state(error_key, error_response)
         logger.debug(
             f"📦 Stored ServiceErrorResponse in context state with key: {error_key}"
         )

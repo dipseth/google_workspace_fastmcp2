@@ -258,7 +258,7 @@ class AuthMiddleware(Middleware):
             if session_id:
                 store_session_data(session_id, "user_email", user_email)
             # Set context immediately
-            set_user_email_context(user_email)
+            await set_user_email_context(user_email)
             # Auto-inject into tool arguments if missing
             await self._auto_inject_email_parameter(context, user_email)
         else:
@@ -275,7 +275,7 @@ class AuthMiddleware(Middleware):
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
                 # Set context immediately
-                set_user_email_context(user_email)
+                await set_user_email_context(user_email)
                 # Auto-inject into tool arguments if missing
                 await self._auto_inject_email_parameter(context, user_email)
             else:
@@ -291,7 +291,7 @@ class AuthMiddleware(Middleware):
                     f"✅ Retrieved user email from session storage for tool {tool_name}: {user_email}"
                 )
                 # Also set it in context for immediate use
-                set_user_email_context(user_email)
+                await set_user_email_context(user_email)
                 # Auto-inject into tool arguments
                 await self._auto_inject_email_parameter(context, user_email)
             else:
@@ -312,7 +312,7 @@ class AuthMiddleware(Middleware):
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
                 # Set context immediately
-                set_user_email_context(user_email)
+                await set_user_email_context(user_email)
                 # Auto-inject into tool arguments if missing
                 await self._auto_inject_email_parameter(context, user_email)
             else:
@@ -341,7 +341,7 @@ class AuthMiddleware(Middleware):
 
         # Set user email context if found
         if user_email:
-            set_user_email_context(user_email)
+            await set_user_email_context(user_email)
             logger.debug(
                 f"🔍 DEBUG: Set user email context for tool {tool_name}: {user_email}"
             )
@@ -414,7 +414,7 @@ class AuthMiddleware(Middleware):
             if session_id:
                 store_session_data(session_id, "user_email", user_email)
             # Set context immediately
-            set_user_email_context(user_email)
+            await set_user_email_context(user_email)
         else:
             logger.debug(
                 f"No JWT token authentication found for resource {resource_uri}"
@@ -431,7 +431,7 @@ class AuthMiddleware(Middleware):
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
                 # Set context immediately
-                set_user_email_context(user_email)
+                await set_user_email_context(user_email)
             else:
                 logger.debug(
                     f"No GoogleProvider authentication found for resource {resource_uri}"
@@ -445,7 +445,7 @@ class AuthMiddleware(Middleware):
                     f"✅ Retrieved user email from session storage for resource {resource_uri}: {user_email}"
                 )
                 # Also set it in context for immediate use
-                set_user_email_context(user_email)
+                await set_user_email_context(user_email)
             else:
                 logger.debug(
                     f"⚠️ No user email in session storage for session {session_id}"
@@ -462,7 +462,7 @@ class AuthMiddleware(Middleware):
                 if session_id:
                     store_session_data(session_id, "user_email", user_email)
                 # Set context immediately
-                set_user_email_context(user_email)
+                await set_user_email_context(user_email)
             else:
                 logger.debug(
                     f"No OAuth authentication file found for resource {resource_uri}"
@@ -470,7 +470,7 @@ class AuthMiddleware(Middleware):
 
         # Set user email context if found
         if user_email:
-            set_user_email_context(user_email)
+            await set_user_email_context(user_email)
             logger.debug(
                 f"🔍 DEBUG: Set user email context for resource {resource_uri}: {user_email}"
             )
@@ -534,7 +534,7 @@ class AuthMiddleware(Middleware):
             return
 
         # Get pending service requests
-        pending_requests = _get_pending_service_requests()
+        pending_requests = await _get_pending_service_requests()
 
         if not pending_requests:
             logger.debug(f"No pending service requests for tool: {tool_name}")
@@ -564,7 +564,7 @@ class AuthMiddleware(Middleware):
                 )
 
                 # Inject the service into context
-                _set_injected_service(service_key, service)
+                await _set_injected_service(service_key, service)
 
                 logger.debug(
                     f"✅ Successfully injected {service_type} service "
@@ -576,12 +576,12 @@ class AuthMiddleware(Middleware):
                     f"Failed to create {service_data['service_type']} service: {str(e)}"
                 )
                 logger.error(f"❌ Service injection error for {tool_name}: {error_msg}")
-                _set_service_error(service_key, error_msg)
+                await _set_service_error(service_key, error_msg)
 
             except Exception as e:
                 error_msg = f"Unexpected error creating {service_data['service_type']} service: {str(e)}"
                 logger.error(f"❌ Service injection error for {tool_name}: {error_msg}")
-                _set_service_error(service_key, error_msg)
+                await _set_service_error(service_key, error_msg)
 
     def enable_service_injection(self, enabled: bool = True):
         """Enable or disable automatic service injection."""
@@ -978,7 +978,7 @@ class AuthMiddleware(Middleware):
 
             # Method 2: Check FastMCP context state for user info
             # This might be set by GoogleProvider after authentication
-            user_email = ctx.get_state("authenticated_user_email")
+            user_email = await ctx.get_state("authenticated_user_email")
             if user_email:
                 logger.debug(
                     f"📧 Found user email in GoogleProvider context state: {user_email}"
@@ -1145,9 +1145,9 @@ class AuthMiddleware(Middleware):
     def _set_service_selection_needed(self, needed: bool):
         """Set flag indicating service selection is needed."""
         try:
-            from .context import get_session_context, store_session_data
+            from .context import get_session_context_sync, store_session_data
 
-            session_id = get_session_context()
+            session_id = get_session_context_sync()
             if session_id:
                 store_session_data(session_id, "service_selection_needed", needed)
                 logger.debug(

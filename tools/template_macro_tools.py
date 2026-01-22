@@ -43,7 +43,7 @@ class MacroCreationResponse(BaseModel):
     )
 
 
-def get_template_middleware_from_context():
+async def get_template_middleware_from_context():
     """
     Extract the EnhancedTemplateMiddleware instance from FastMCP context.
 
@@ -53,7 +53,7 @@ def get_template_middleware_from_context():
     try:
         # Use the same pattern as module_wrapper_mcp.py
         ctx = get_context()
-        return ctx.get_state("template_middleware_instance")
+        return await ctx.get_state("template_middleware_instance")
     except Exception as e:
         logger.error(f"❌ Failed to get template middleware from context: {e}")
         return None
@@ -142,7 +142,7 @@ async def create_template_macro(
         await ctx.info(f"Creating template macro '{macro_name}'...")
 
         # Get the template middleware from context
-        template_middleware = get_template_middleware_from_context()
+        template_middleware = await get_template_middleware_from_context()
         if not template_middleware:
             error_msg = "Template middleware not available - cannot create macros"
             await ctx.error(error_msg)

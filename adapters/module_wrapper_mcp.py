@@ -173,7 +173,7 @@ class ModuleWrapperMiddleware(Middleware):
             # Make module wrapper functionality available through FastMCP context
             if context.fastmcp_context:
                 # Store a reference to this middleware's functionality
-                context.fastmcp_context.set_state("module_wrapper_instance", self)
+                await context.fastmcp_context.set_state("module_wrapper_instance", self)
 
         try:
             result = await call_next(context)
@@ -316,11 +316,11 @@ class ModuleWrapperMiddleware(Middleware):
 def setup_module_wrapper_tools(mcp):
     """Setup MCP tools for ModuleWrapper using FastMCP context pattern."""
 
-    def get_module_wrapper() -> Optional[ModuleWrapperMiddleware]:
+    async def get_module_wrapper() -> Optional[ModuleWrapperMiddleware]:
         """Get the ModuleWrapper middleware from FastMCP context."""
         try:
             ctx = get_context()
-            return ctx.get_state("module_wrapper_instance")
+            return await ctx.get_state("module_wrapper_instance")
         except Exception as e:
             logger.error(f"Failed to get module wrapper from context: {e}")
             return None
@@ -350,7 +350,7 @@ def setup_module_wrapper_tools(mcp):
         """
         try:
             # Get middleware from FastMCP context
-            middleware = get_module_wrapper()
+            middleware = await get_module_wrapper()
             if not middleware:
                 return "❌ Error: ModuleWrapper middleware not available"
 
@@ -406,7 +406,7 @@ def setup_module_wrapper_tools(mcp):
 
         try:
             # Get middleware from FastMCP context
-            middleware = get_module_wrapper()
+            middleware = await get_module_wrapper()
             if not middleware:
                 return json.dumps(
                     {
@@ -481,7 +481,7 @@ def setup_module_wrapper_tools(mcp):
         """
         try:
             # Get middleware from FastMCP context
-            middleware = get_module_wrapper()
+            middleware = await get_module_wrapper()
             if not middleware:
                 return json.dumps(
                     {"error": "ModuleWrapper middleware not available"}, indent=2
@@ -538,7 +538,7 @@ def setup_module_wrapper_tools(mcp):
         """
         try:
             # Get middleware from FastMCP context
-            middleware = get_module_wrapper()
+            middleware = await get_module_wrapper()
             if not middleware:
                 return ModuleComponentsResponse(
                     components=[],
@@ -632,7 +632,7 @@ def setup_module_wrapper_tools(mcp):
         """
         try:
             # Get middleware from FastMCP context
-            middleware = get_module_wrapper()
+            middleware = await get_module_wrapper()
             if not middleware:
                 return WrappedModulesResponse(
                     modules=[], count=0, error="ModuleWrapper middleware not available"

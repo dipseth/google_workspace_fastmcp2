@@ -31,11 +31,14 @@ except ImportError:
 from auth.context import (
     clear_minimal_startup_applied,
     clear_session_disabled_tools,
+    clear_session_disabled_tools_sync,
     disable_tool_for_session,
+    disable_tool_for_session_sync,
     get_effective_session_id,
     get_session_context,
     get_session_disabled_tools,
     get_user_email_context,
+    get_user_email_context_sync,
     is_known_session,
     is_tool_enabled_for_session,
     mark_minimal_startup_applied,
@@ -127,6 +130,66 @@ def get_tools_for_services(all_tools: List[str], services: List[str]) -> Set[str
     return matched_tools
 
 
+def _parse_request_params(request) -> Dict[str, Any]:
+    """
+    Parse connection parameters directly from a request object.
+
+    This is used when we have direct access to the request (e.g., from middleware context).
+    """
+    result = {
+        "services": None,
+        "uuid": None,
+        "minimal_override": None,
+        "raw_params": {},
+    }
+
+    try:
+        if not hasattr(request, 'query_params'):
+            return result
+
+        query_params = dict(request.query_params)
+        result["raw_params"] = query_params
+
+        # Parse service parameter: ?service=drive,gmail,chat
+        if "service" in query_params:
+            service_str = query_params["service"]
+            services = [s.strip().lower() for s in service_str.split(",") if s.strip()]
+            if services:
+                result["services"] = services
+                logger.info(f"🔗 Request param: services={services}")
+        elif "services" in query_params:
+            service_str = query_params["services"]
+            services = [s.strip().lower() for s in service_str.split(",") if s.strip()]
+            if services:
+                result["services"] = services
+                logger.info(f"🔗 Request param: services={services}")
+
+        # Parse UUID parameter
+        if "uuid" in query_params:
+            uuid_value = query_params["uuid"].strip()
+            if uuid_value:
+                result["uuid"] = uuid_value
+                logger.info(f"🔗 Request param: uuid={uuid_value[:8]}...")
+        elif "session_id" in query_params:
+            uuid_value = query_params["session_id"].strip()
+            if uuid_value:
+                result["uuid"] = uuid_value
+
+        # Parse minimal override
+        if "minimal" in query_params:
+            minimal_value = query_params["minimal"].strip().lower()
+            if minimal_value in ("true", "1", "yes"):
+                result["minimal_override"] = True
+            elif minimal_value in ("false", "0", "no"):
+                result["minimal_override"] = False
+
+        return result
+
+    except Exception as e:
+        logger.debug(f"Error parsing request params: {e}")
+        return result
+
+
 def parse_http_connection_params() -> Dict[str, Any]:
     """
     Parse HTTP connection parameters from the URL query string.
@@ -153,15 +216,19 @@ def parse_http_connection_params() -> Dict[str, Any]:
     }
 
     if not HTTP_REQUEST_AVAILABLE:
+        logger.debug("🔍 HTTP_REQUEST_AVAILABLE is False, skipping HTTP param parsing")
         return result
 
     try:
         request = get_http_request()
+        logger.debug(f"🔍 get_http_request() returned: {type(request)}")
         if request is None:
+            logger.debug("🔍 Request is None, skipping HTTP param parsing")
             return result
 
         # Get query parameters from the request
         query_params = dict(request.query_params)
+        logger.info(f"🔍 Parsed query_params: {query_params}")
         result["raw_params"] = query_params
 
         # Parse service parameter: ?service=drive,gmail,chat
@@ -212,11 +279,12 @@ def parse_http_connection_params() -> Dict[str, Any]:
 
         return result
 
-    except RuntimeError:
+    except RuntimeError as e:
         # Expected when not in HTTP context (e.g., STDIO transport)
+        logger.debug(f"🔍 RuntimeError in parse_http_connection_params: {e}")
         return result
     except Exception as e:
-        logger.debug(f"Could not parse HTTP connection params: {e}")
+        logger.warning(f"🔍 Unexpected error in parse_http_connection_params: {e}")
         return result
 
 
@@ -325,7 +393,8 @@ class SessionToolFilteringMiddleware(Middleware):
         return []
 
     def _apply_minimal_startup_for_session(
-        self, session_id: str, custom_services: Optional[List[str]] = None
+        self, session_id: str, custom_services: Optional[List[str]] = None,
+        tool_names: Optional[List[str]] = None
     ) -> None:
         """
         Apply minimal startup restrictions for a new session.
@@ -338,6 +407,8 @@ class SessionToolFilteringMiddleware(Middleware):
             session_id: The session ID to apply restrictions to.
             custom_services: Optional list of services from HTTP ?service= parameter.
                            If provided, overrides default_enabled_services.
+            tool_names: Optional list of tool names (from on_list_tools).
+                       If provided, used instead of callback.
         """
         if not self.minimal_startup:
             return
@@ -358,8 +429,8 @@ class SessionToolFilteringMiddleware(Middleware):
                 )
             return
 
-        # Get all tool names
-        all_tools = self._get_all_tool_names()
+        # Get all tool names - prefer passed parameter, fall back to callback
+        all_tools = tool_names if tool_names else self._get_all_tool_names()
         if not all_tools:
             logger.warning(
                 "SessionToolFilteringMiddleware: No tools available for minimal startup"
@@ -390,7 +461,7 @@ class SessionToolFilteringMiddleware(Middleware):
         disabled_count = 0
         for tool_name in all_tools:
             if tool_name not in keep_enabled:
-                disable_tool_for_session(tool_name, session_id)
+                disable_tool_for_session_sync(tool_name, session_id)
                 disabled_count += 1
 
         enabled_count = len(all_tools) - disabled_count
@@ -414,7 +485,8 @@ class SessionToolFilteringMiddleware(Middleware):
         )
 
     def _handle_session_connection(
-        self, session_id: str, http_params: Optional[Dict[str, Any]] = None
+        self, session_id: str, http_params: Optional[Dict[str, Any]] = None,
+        tool_names: Optional[List[str]] = None
     ) -> Tuple[str, bool]:
         """
         Handle a session connection - restore state for known sessions,
@@ -432,6 +504,8 @@ class SessionToolFilteringMiddleware(Middleware):
         Args:
             session_id: The session ID that just connected.
             http_params: Optional HTTP connection parameters from URL query string.
+            tool_names: Optional list of tool names (from on_list_tools).
+                       If provided, used instead of callback for service filtering.
 
         Returns:
             Tuple of (effective_session_id, was_restored)
@@ -501,7 +575,7 @@ class SessionToolFilteringMiddleware(Middleware):
 
             # Session ID not known - try to restore by user email
             # This handles STDIO transport reconnections where session ID changes but user is same
-            user_email = get_user_email_context()
+            user_email = get_user_email_context_sync()
             if user_email:
                 restored_by_email = restore_session_tool_state_by_email(
                     effective_session_id, user_email
@@ -535,7 +609,7 @@ class SessionToolFilteringMiddleware(Middleware):
             # Remove from processed sessions so it can be reprocessed
             self._processed_sessions.discard(effective_session_id)
             # Clear the session's disabled tools so we start fresh
-            clear_session_disabled_tools(effective_session_id)
+            clear_session_disabled_tools_sync(effective_session_id)
             # Clear the minimal startup flag so it can be reapplied with new services
             clear_minimal_startup_applied(effective_session_id)
             if self.enable_debug:
@@ -547,7 +621,8 @@ class SessionToolFilteringMiddleware(Middleware):
         # Apply minimal startup if enabled (uses custom_services if provided)
         if should_apply_minimal:
             self._apply_minimal_startup_for_session(
-                effective_session_id, custom_services=custom_services
+                effective_session_id, custom_services=custom_services,
+                tool_names=tool_names
             )
         elif has_explicit_service_filter:
             # Explicit ?service= parameter always applies the service filter
@@ -556,13 +631,14 @@ class SessionToolFilteringMiddleware(Middleware):
                 f"services={custom_services}"
             )
             self._apply_service_filter_for_session(
-                effective_session_id, custom_services
+                effective_session_id, custom_services, tool_names=tool_names
             )
 
         return effective_session_id, was_restored
 
     def _apply_service_filter_for_session(
-        self, session_id: str, services: List[str]
+        self, session_id: str, services: List[str],
+        tool_names: Optional[List[str]] = None
     ) -> None:
         """
         Apply a service filter to enable only specific services for a session.
@@ -573,8 +649,11 @@ class SessionToolFilteringMiddleware(Middleware):
         Args:
             session_id: The session ID to apply the filter to.
             services: List of service names to enable.
+            tool_names: Optional list of tool names (from on_list_tools).
+                       If provided, used instead of callback.
         """
-        all_tools = self._get_all_tool_names()
+        # Get all tool names - prefer passed parameter, fall back to callback
+        all_tools = tool_names if tool_names else self._get_all_tool_names()
         if not all_tools:
             logger.warning(
                 "SessionToolFilteringMiddleware: No tools available for service filter"
@@ -591,7 +670,7 @@ class SessionToolFilteringMiddleware(Middleware):
         disabled_count = 0
         for tool_name in all_tools:
             if tool_name not in keep_enabled:
-                disable_tool_for_session(tool_name, session_id)
+                disable_tool_for_session_sync(tool_name, session_id)
                 disabled_count += 1
 
         enabled_count = len(all_tools) - disabled_count
@@ -628,7 +707,7 @@ class SessionToolFilteringMiddleware(Middleware):
         all_tools = await call_next(context)
 
         # Get current session ID
-        session_id = get_session_context()
+        session_id = await get_session_context()
 
         if not session_id:
             # No session context - return all tools (global state only)
@@ -640,19 +719,38 @@ class SessionToolFilteringMiddleware(Middleware):
 
         # Parse HTTP connection parameters (for HTTP/SSE transport)
         # Supports: ?service=drive,gmail, ?uuid=xyz123, ?minimal=false
-        http_params = parse_http_connection_params()
+        # Try to get request from middleware context first (FastMCP v3 pattern)
+        http_params = None
+        if hasattr(context, 'fastmcp_context') and context.fastmcp_context:
+            ctx = context.fastmcp_context
+            logger.debug(f"🔍 fastmcp_context available, request_context: {ctx.request_context}")
+            if ctx.request_context and hasattr(ctx.request_context, 'request'):
+                request = ctx.request_context.request
+                if request and hasattr(request, 'query_params'):
+                    logger.info(f"🔍 Got request from fastmcp_context, query_params: {dict(request.query_params)}")
+                    http_params = _parse_request_params(request)
+
+        # Fallback to global get_http_request() if context method failed
+        if http_params is None:
+            http_params = parse_http_connection_params()
+        logger.info(f"🔍 on_list_tools: http_params={http_params}")
+
+        # Extract tool names from the tools list (FastMCP v3 compatible)
+        # This avoids relying on internal _tool_manager which changed in v3
+        tool_names = [getattr(tool, "name", None) for tool in all_tools]
+        tool_names = [name for name in tool_names if name]  # Filter out None values
 
         # Handle session connection (restore or apply minimal startup)
         # This is idempotent - won't re-apply if already processed
         # Returns the effective session ID (may be different if ?uuid= was provided)
         effective_session_id, was_restored = self._handle_session_connection(
-            session_id, http_params
+            session_id, http_params, tool_names=tool_names
         )
 
         # Store the effective session ID in context for use by on_call_tool
         # This ensures consistency between list_tools and call_tool operations
         if effective_session_id != session_id:
-            set_effective_session_id(effective_session_id)
+            await set_effective_session_id(effective_session_id)
             if self.enable_debug:
                 logger.debug(
                     f"Stored effective session ID {effective_session_id[:8]}... "
@@ -663,7 +761,7 @@ class SessionToolFilteringMiddleware(Middleware):
         session_id = effective_session_id
 
         # Get session-specific disabled tools (may have just been set by minimal startup)
-        session_disabled = get_session_disabled_tools(session_id)
+        session_disabled = await get_session_disabled_tools(session_id)
 
         if not session_disabled:
             # No session-specific disables - return all tools
@@ -749,9 +847,9 @@ class SessionToolFilteringMiddleware(Middleware):
 
         # Check session state using EFFECTIVE session ID
         # This ensures consistency with on_list_tools when ?uuid= is used
-        session_id = get_effective_session_id()
+        session_id = await get_effective_session_id()
 
-        if session_id and not is_tool_enabled_for_session(tool_name, session_id):
+        if session_id and not await is_tool_enabled_for_session(tool_name, session_id):
             logger.warning(
                 f"SessionToolFilteringMiddleware: Blocked execution of session-disabled tool "
                 f"'{tool_name}' for session {session_id[:8]}..."
@@ -804,17 +902,25 @@ def setup_session_tool_filtering_middleware(
 
     # Create callback to get all tool names from the MCP server
     def get_all_tools() -> List[str]:
-        """Get all registered tool names from the MCP server."""
+        """Get all registered tool names from the MCP server (FastMCP 2.x and 3.0.0b1+)."""
         try:
-            # Access the tool manager to get all tool names
+            # FastMCP 2.x path
             if hasattr(mcp, "_tool_manager") and mcp._tool_manager:
-                return list(mcp._tool_manager._tools.keys())
-            elif hasattr(mcp, "tools"):
-                # Alternative access pattern
+                if hasattr(mcp._tool_manager, "_tools"):
+                    return list(mcp._tool_manager._tools.keys())
+            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
+            if hasattr(mcp, "_local_provider") and hasattr(
+                mcp._local_provider, "_components"
+            ):
+                from fastmcp.tools.tool import Tool
+
+                components = mcp._local_provider._components
+                return [v.name for v in components.values() if isinstance(v, Tool)]
+            # Alternative access pattern
+            if hasattr(mcp, "tools"):
                 return list(mcp.tools.keys())
-            else:
-                logger.warning("Could not access tool manager to get tool names")
-                return []
+            logger.warning("Could not access tool manager to get tool names")
+            return []
         except Exception as e:
             logger.error(f"Error getting tool names: {e}")
             return []

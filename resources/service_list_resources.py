@@ -175,7 +175,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
             ),
         ],
         ctx: Context,
-    ) -> ServiceListsResponse:
+    ) -> str:
         """
         Handler for service list types that retrieves cached results from middleware.
 
@@ -183,18 +183,18 @@ This resource is handled by TagBasedResourceMiddleware.""",
         in FastMCP context state. This handler retrieves and returns that result.
 
         Returns:
-            ServiceListsResponse containing available list types with metadata
+            JSON string containing available list types with metadata
         """
         # Try to get the cached result from FastMCP context state
         cache_key = f"service_lists_response_{service}"
-        cached_result = ctx.get_state(cache_key)
+        cached_result = await ctx.get_state(cache_key)
 
         if cached_result is None:
             # Fallback - middleware didn't cache result (shouldn't happen in normal operation)
             logger.warning(
                 f"No cached ServiceListsResponse found for {service} - middleware may not have processed this request"
             )
-            return ServiceListsResponse.from_middleware_data(
+            response = ServiceListsResponse.from_middleware_data(
                 service=service,
                 service_metadata={
                     "display_name": f"{service.title()} Service",
@@ -203,12 +203,20 @@ This resource is handled by TagBasedResourceMiddleware.""",
                 },
                 list_types={},
             )
+            # FastMCP 3.0: Return JSON string instead of Pydantic model
+            return response.model_dump_json()
 
-        # Return the cached ServiceListsResponse
+        # Return the cached ServiceListsResponse as JSON
         logger.info(
             f"📦 Retrieved cached ServiceListsResponse for {service} from FastMCP context state"
         )
-        return cached_result
+        # FastMCP 3.0: Handle both Pydantic models and dicts from cache
+        if hasattr(cached_result, "model_dump_json"):
+            return cached_result.model_dump_json()
+        elif isinstance(cached_result, dict):
+            import json
+            return json.dumps(cached_result)
+        return str(cached_result)
 
     @mcp.resource(
         uri="service://{service}/{list_type}",
@@ -278,7 +286,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
             ),
         ],
         ctx: Context,
-    ) -> ServiceListResponse:
+    ) -> str:
         """
         Handler for service list items that retrieves cached results from middleware.
 
@@ -286,19 +294,19 @@ This resource is handled by TagBasedResourceMiddleware.""",
         in FastMCP context state. This handler retrieves and returns that result.
 
         Returns:
-            ServiceListResponse containing the cached tool result with metadata
+            JSON string containing the cached tool result with metadata
         """
         # Try to get the cached result from FastMCP context state
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         cache_key = f"service_list_response_{service}_{list_type}_{user_email}"
-        cached_result = ctx.get_state(cache_key)
+        cached_result = await ctx.get_state(cache_key)
 
         if cached_result is None:
             # Fallback - middleware didn't cache result (shouldn't happen in normal operation)
             logger.warning(
                 f"No cached result found for {service}/{list_type} - middleware may not have processed this request"
             )
-            return ServiceListResponse.from_middleware_data(
+            response = ServiceListResponse.from_middleware_data(
                 result={
                     "message": "No cached result found - middleware may not have processed this request",
                     "middleware_status": "CACHE_MISS",
@@ -309,12 +317,20 @@ This resource is handled by TagBasedResourceMiddleware.""",
                 tool_called="CACHE_FALLBACK",
                 user_email=user_email or "unknown@example.com",
             )
+            # FastMCP 3.0: Return JSON string instead of Pydantic model
+            return response.model_dump_json()
 
-        # Return the cached ServiceListResponse
+        # Return the cached ServiceListResponse as JSON
         logger.info(
             f"📦 Retrieved cached result for {service}/{list_type} from FastMCP context state"
         )
-        return cached_result
+        # FastMCP 3.0: Handle both Pydantic models and dicts from cache
+        if hasattr(cached_result, "model_dump_json"):
+            return cached_result.model_dump_json()
+        elif isinstance(cached_result, dict):
+            import json
+            return json.dumps(cached_result)
+        return str(cached_result)
 
     @mcp.resource(
         uri="service://{service}/{list_type}/{item_id}",
@@ -407,7 +423,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
             ),
         ],
         ctx: Context,
-    ) -> ServiceItemDetailsResponse:
+    ) -> str:
         """
         Handler for service item details that retrieves cached results from middleware.
 
@@ -415,19 +431,19 @@ This resource is handled by TagBasedResourceMiddleware.""",
         in FastMCP context state. This handler retrieves and returns that result.
 
         Returns:
-            ServiceItemDetailsResponse containing the specific item details
+            JSON string containing the specific item details
         """
         # Try to get the cached result from FastMCP context state
-        user_email = get_user_email_context()
+        user_email = await get_user_email_context()
         cache_key = f"service_item_details_{service}_{list_type}_{item_id}_{user_email}"
-        cached_result = ctx.get_state(cache_key)
+        cached_result = await ctx.get_state(cache_key)
 
         if cached_result is None:
             # Fallback - middleware didn't cache result (shouldn't happen in normal operation)
             logger.warning(
                 f"No cached ServiceItemDetailsResponse found for {service}/{list_type}/{item_id} - middleware may not have processed this request"
             )
-            return ServiceItemDetailsResponse.from_middleware_data(
+            response = ServiceItemDetailsResponse.from_middleware_data(
                 service=service,
                 list_type=list_type,
                 item_id=item_id,
@@ -439,12 +455,20 @@ This resource is handled by TagBasedResourceMiddleware.""",
                     "middleware_status": "CACHE_MISS",
                 },
             )
+            # FastMCP 3.0: Return JSON string instead of Pydantic model
+            return response.model_dump_json()
 
-        # Return the cached ServiceItemDetailsResponse
+        # Return the cached ServiceItemDetailsResponse as JSON
         logger.info(
             f"📦 Retrieved cached ServiceItemDetailsResponse for {service}/{list_type}/{item_id} from FastMCP context state"
         )
-        return cached_result
+        # FastMCP 3.0: Handle both Pydantic models and dicts from cache
+        if hasattr(cached_result, "model_dump_json"):
+            return cached_result.model_dump_json()
+        elif isinstance(cached_result, dict):
+            import json
+            return json.dumps(cached_result)
+        return str(cached_result)
 
     logger.info(
         "✅ Registered 3 enhanced service resources (all handled by TagBasedResourceMiddleware)"

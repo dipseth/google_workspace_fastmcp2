@@ -131,8 +131,8 @@ async def _get_sheets_service_with_fallback(user_google_email: str):
     """
     try:
         # Try to get service from middleware injection
-        service_key = request_service("sheets")
-        service = get_injected_service(service_key)
+        service_key = await request_service("sheets")
+        service = await get_injected_service(service_key)
         if service:
             logger.debug("Using middleware-injected Sheets service")
             return service
@@ -215,11 +215,11 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
 
         try:
             # Get Drive service (spreadsheets are stored in Drive)
-            drive_service_key = request_service("drive")
+            drive_service_key = await request_service("drive")
 
             try:
                 # Try to get the injected service from middleware
-                drive_service = get_injected_service(drive_service_key)
+                drive_service = await get_injected_service(drive_service_key)
                 logger.info(
                     f"Successfully retrieved injected Drive service for {user_google_email}"
                 )

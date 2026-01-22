@@ -185,7 +185,7 @@ class MacroManager:
                         "template://macros/{macro_name} - Get specific macro usage",
                     ],
                 }
-                fastmcp_context.set_state(
+                await fastmcp_context.set_state(
                     f"template_resource_{resource_uri}", error_data
                 )
                 return True
@@ -193,7 +193,9 @@ class MacroManager:
         except Exception as e:
             logger.error(f"❌ Error handling template resource {resource_uri}: {e}")
             error_data = {"error": str(e), "timestamp": datetime.now().isoformat()}
-            fastmcp_context.set_state(f"template_resource_{resource_uri}", error_data)
+            await fastmcp_context.set_state(
+                f"template_resource_{resource_uri}", error_data
+            )
             return True
 
     async def _handle_all_macros(self, fastmcp_context) -> None:
@@ -214,7 +216,9 @@ class MacroManager:
         }
 
         # Store in context state for resource handler
-        fastmcp_context.set_state("template_resource_template://macros", response_data)
+        await fastmcp_context.set_state(
+            "template_resource_template://macros", response_data
+        )
         logger.info(f"📚 Stored all macros data: {len(self._macro_registry)} macros")
 
     async def _handle_specific_macro(self, macro_name: str, fastmcp_context) -> None:
@@ -244,7 +248,7 @@ class MacroManager:
 
         # Store in context state for resource handler
         cache_key = f"template_resource_template://macros/{macro_name}"
-        fastmcp_context.set_state(cache_key, response_data)
+        await fastmcp_context.set_state(cache_key, response_data)
         logger.info(
             f"📝 Stored macro data for '{macro_name}': found={response_data.get('found', False)}"
         )

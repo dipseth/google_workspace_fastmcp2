@@ -1133,7 +1133,7 @@ async def handle_oauth_callback(
             )
             # Fallback to basic session context
             try:
-                session_id = get_session_context()
+                session_id = await get_session_context()
                 if session_id:
                     fallback_client_id = get_session_data(
                         session_id, f"custom_client_id_{state}"
@@ -1353,7 +1353,7 @@ async def handle_oauth_callback(
         # Conditional storage based on auth_method
         if auth_method == "pkce_memory":
             # Store in session memory only
-            session_id = get_session_context()
+            session_id = await get_session_context()
             if session_id:
                 store_session_data(session_id, "credentials", credentials.to_json())
                 logger.info(f"Stored credentials in session memory for {user_email}")

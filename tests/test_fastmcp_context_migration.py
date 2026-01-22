@@ -46,39 +46,42 @@ def mock_context():
     return context
 
 
-def test_session_context_functions(mock_context):
+@pytest.mark.asyncio
+async def test_session_context_functions(mock_context):
     """Test session context functions with FastMCP Context."""
     with patch("auth.context.get_context", return_value=mock_context):
         # Test setting session context
-        set_session_context("test-session-123")
+        await set_session_context("test-session-123")
         assert mock_context._state["session_id"] == "test-session-123"
 
         # Test getting session context
-        session_id = get_session_context()
+        session_id = await get_session_context()
         assert session_id == "test-session-123"
 
         # Test clearing session context
-        clear_session_context()
+        await clear_session_context()
         assert mock_context._state["session_id"] is None
 
 
-def test_user_email_context_functions(mock_context):
+@pytest.mark.asyncio
+async def test_user_email_context_functions(mock_context):
     """Test user email context functions with FastMCP Context."""
     with patch("auth.context.get_context", return_value=mock_context):
         # Test setting user email context
-        set_user_email_context("test@example.com")
+        await set_user_email_context("test@example.com")
         assert mock_context._state["user_email"] == "test@example.com"
 
         # Test getting user email context
-        email = get_user_email_context()
+        email = await get_user_email_context()
         assert email == "test@example.com"
 
         # Test clearing user email context
-        clear_user_email_context()
+        await clear_user_email_context()
         assert mock_context._state["user_email"] is None
 
 
-def test_service_injection_functions(mock_context):
+@pytest.mark.asyncio
+async def test_service_injection_functions(mock_context):
     """Test service injection functions with FastMCP Context."""
     with patch("auth.context.get_context", return_value=mock_context):
         # Test requesting a service
@@ -93,39 +96,40 @@ def test_service_injection_functions(mock_context):
         assert "drive" in mock_context._state["service_requests"]
 
         # Test getting pending service requests
-        pending = _get_pending_service_requests()
+        pending = await _get_pending_service_requests()
         assert "drive" in pending
         assert pending["drive"]["requested"] is True
         assert pending["drive"]["fulfilled"] is False
 
         # Test injecting a service
         mock_service = Mock()
-        _set_injected_service("drive", mock_service)
+        await _set_injected_service("drive", mock_service)
         assert mock_context._state["service_requests"]["drive"]["fulfilled"] is True
         assert (
             mock_context._state["service_requests"]["drive"]["service"] == mock_service
         )
 
         # Test getting injected service
-        service = get_injected_service("drive")
+        service = await get_injected_service("drive")
         assert service == mock_service
 
         # Test setting service error
-        _set_service_error("drive", "Test error")
+        await _set_service_error("drive", "Test error")
         assert mock_context._state["service_requests"]["drive"]["error"] == "Test error"
         assert mock_context._state["service_requests"]["drive"]["fulfilled"] is False
 
 
-def test_clear_all_context(mock_context):
+@pytest.mark.asyncio
+async def test_clear_all_context(mock_context):
     """Test clearing all context data."""
     with patch("auth.context.get_context", return_value=mock_context):
         # Set some context data
-        set_session_context("test-session")
-        set_user_email_context("test@example.com")
+        await set_session_context("test-session")
+        await set_user_email_context("test@example.com")
         mock_context._state["service_requests"] = {"test": "data"}
 
         # Clear all context
-        clear_all_context()
+        await clear_all_context()
 
         # Verify all context is cleared
         assert mock_context._state["session_id"] is None
@@ -196,32 +200,33 @@ def test_session_management():
         clear_session(session_id)
 
 
-def test_context_outside_request():
+@pytest.mark.asyncio
+async def test_context_outside_request():
     """Test that functions handle being called outside a FastMCP request context."""
     with patch(
         "auth.context.get_context",
         side_effect=RuntimeError("not in a FastMCP request context"),
     ):
         # These should handle the error gracefully
-        result = get_session_context()
+        result = await get_session_context()
         assert result is None
 
-        result = get_user_email_context()
+        result = await get_user_email_context()
         assert result is None
 
         # These should not raise but log warnings
-        set_session_context("test")
-        set_user_email_context("test@example.com")
-        clear_session_context()
-        clear_user_email_context()
+        await set_session_context("test")
+        await set_user_email_context("test@example.com")
+        await clear_session_context()
+        await clear_user_email_context()
 
         # Service requests should raise RuntimeError with a clear message
         with pytest.raises(RuntimeError) as exc_info:
-            request_google_service("drive")
+            await request_google_service("drive")
         assert "requires an active FastMCP request context" in str(exc_info.value)
 
         # Getting pending requests should return empty dict
-        pending = _get_pending_service_requests()
+        pending = await _get_pending_service_requests()
         assert pending == {}
 
 
@@ -253,8 +258,8 @@ async def test_integration_with_fastmcp():
         # Now the context functions should work within this request
         with patch("auth.context.get_context", return_value=ctx):
             # These should now work
-            session = get_session_context()
-            email = get_user_email_context()
+            session = await get_session_context()
+            email = await get_user_email_context()
 
             return f"Got session: {session}, email: {email}"
 

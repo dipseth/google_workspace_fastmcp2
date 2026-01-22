@@ -181,11 +181,11 @@ async def _get_chat_service_with_fallback(user_google_email: UserGoogleEmail):
         Authenticated Google Chat service instance or None if unavailable
     """
     # First, try middleware injection
-    service_key = request_service("chat")
+    service_key = await request_service("chat")
 
     try:
         # Try to get the injected service from middleware
-        chat_service = get_injected_service(service_key)
+        chat_service = await get_injected_service(service_key)
         logger.info(
             f"Successfully retrieved injected Chat service for {user_google_email}"
         )

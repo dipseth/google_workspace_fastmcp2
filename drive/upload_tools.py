@@ -185,7 +185,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             )
             from auth.context import get_user_email_context
 
-            context_email = get_user_email_context()
+            context_email = await get_user_email_context()
             logger.info(
                 f"🔧 TOOL DEBUG: get_user_email_context() returned: {context_email}"
             )
@@ -313,7 +313,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             # Get current session ID for reconnection support
             from auth.context import get_session_context
 
-            current_session_id = get_session_context()
+            current_session_id = await get_session_context()
 
             response = StartAuthResponse(
                 status="success",
@@ -393,7 +393,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         # Get current session ID for reconnection support
         from auth.context import get_session_context
 
-        current_session_id = get_session_context()
+        current_session_id = await get_session_context()
 
         # Validate that user_google_email is provided
         if not user_google_email:
@@ -507,7 +507,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
         # Get user email from middleware context if not provided
         if not user_google_email:
-            user_google_email = get_user_email_context()
+            user_google_email = await get_user_email_context()
             if not user_google_email:
                 return UploadFileResponse(
                     success=False,

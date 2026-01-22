@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 
 from fastmcp import Context, FastMCP
+from mcp.types import ToolListChangedNotification
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
 
@@ -25,7 +26,9 @@ from auth.context import (
     disable_tool_for_session,
     enable_tool_for_session,
     get_session_context,
+    get_session_context_sync,
     get_session_disabled_tools,
+    get_session_disabled_tools_sync,
 )
 from auth.middleware import CredentialStorageMode
 from config.enhanced_logging import setup_logger
@@ -440,9 +443,9 @@ def _get_tool_registry(mcp: FastMCP) -> Dict[str, Any]:
     """
     Internal helper to access the FastMCP tool registry.
 
-    Follows the same pattern as TagBasedResourceMiddleware._get_available_tools
-    and resources/extraction_utilities.get_tools_for_service: use the internal
-    FastMCP tool manager registry.
+    Supports both FastMCP 2.x and 3.0.0b1+ internal structures:
+    - FastMCP 2.x: mcp._tool_manager._tools
+    - FastMCP 3.0.0b1+: mcp._local_provider._components (filtered to tools)
 
     Args:
         mcp: FastMCP server instance
@@ -450,27 +453,77 @@ def _get_tool_registry(mcp: FastMCP) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary mapping tool names to tool instances
     """
-    if not hasattr(mcp, "_tool_manager") or not hasattr(mcp._tool_manager, "_tools"):
-        logger.error("❌ Cannot access FastMCP tool manager; tool registry unavailable")
-        return {}
-    return mcp._tool_manager._tools
+    # FastMCP 2.x path
+    if hasattr(mcp, "_tool_manager") and hasattr(mcp._tool_manager, "_tools"):
+        return mcp._tool_manager._tools
+
+    # FastMCP 3.0.0b1+ path - tools are in _local_provider._components
+    if hasattr(mcp, "_local_provider") and hasattr(mcp._local_provider, "_components"):
+        from fastmcp.tools.tool import Tool
+
+        components = mcp._local_provider._components
+        # Filter to only Tool instances and rekey by tool name
+        return {v.name: v for v in components.values() if isinstance(v, Tool)}
+
+    logger.error("❌ Cannot access FastMCP tool manager; tool registry unavailable")
+    return {}
 
 
-def _get_tool_enabled_state(tool_instance: Any) -> bool:
+def _get_globally_disabled_tools(mcp: FastMCP) -> set:
+    """
+    Get the set of globally disabled tool names from FastMCP transforms.
+
+    In FastMCP 3.0+, visibility is managed through Visibility transforms
+    stored in mcp._transforms. This function extracts disabled tool names.
+
+    Args:
+        mcp: FastMCP server instance
+
+    Returns:
+        set: Set of tool names that are globally disabled
+    """
+    disabled_names = set()
+    try:
+        if hasattr(mcp, "_transforms"):
+            for transform in mcp._transforms:
+                # Check if this is a disable Visibility transform
+                transform_repr = repr(transform)
+                if "Visibility(disable" in transform_repr:
+                    if hasattr(transform, "names") and transform.names:
+                        disabled_names.update(transform.names)
+    except Exception as e:
+        logger.debug(f"Error checking global disabled tools: {e}")
+    return disabled_names
+
+
+def _get_tool_enabled_state(tool_instance: Any, mcp: FastMCP = None) -> bool:
     """
     Best-effort check of a tool's enabled/disabled state.
 
-    Tries common FastMCP attributes; defaults to True if unknown.
+    In FastMCP 3.0+, individual tools don't have an 'enabled' attribute.
+    Instead, visibility is managed through server-level transforms.
+    If mcp is provided, checks the global disabled set.
 
     Args:
         tool_instance: Tool instance to check
+        mcp: Optional FastMCP server instance for checking global state
 
     Returns:
         bool: True if enabled or state unknown, False if explicitly disabled
     """
     try:
+        # FastMCP 2.x: Check instance attribute
         if hasattr(tool_instance, "enabled"):
             return bool(getattr(tool_instance, "enabled"))
+
+        # FastMCP 3.0+: Check global transforms if mcp provided
+        if mcp is not None:
+            tool_name = getattr(tool_instance, "name", None)
+            if tool_name:
+                disabled_tools = _get_globally_disabled_tools(mcp)
+                if tool_name in disabled_tools:
+                    return False
+
         # Some implementations may expose state via meta/annotations
         if hasattr(tool_instance, "meta") and isinstance(tool_instance.meta, dict):
             if "enabled" in tool_instance.meta:
@@ -683,11 +736,11 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "check_drive_auth",
         }
 
-        # Helper to get current session state
+        # Helper to get current session state (uses sync versions to avoid async in sync helper)
         def _get_session_state() -> SessionToolState:
-            session_id = get_session_context()
+            session_id = get_session_context_sync()
             if session_id:
-                disabled = get_session_disabled_tools(session_id)
+                disabled = get_session_disabled_tools_sync(session_id)
                 return SessionToolState(
                     sessionId=(
                         session_id[:8] + "..." if len(session_id) > 8 else session_id
@@ -707,17 +760,17 @@ def setup_server_tools(mcp: FastMCP) -> None:
         # This allows clients to update their tool list without notifications
         def _get_enabled_tool_names(reg: Dict[str, Any]) -> List[str]:
             """Get list of tool names currently enabled for this session."""
-            session_id = get_session_context()
+            session_id = get_session_context_sync()
             session_disabled = (
-                get_session_disabled_tools(session_id) if session_id else set()
+                get_session_disabled_tools_sync(session_id) if session_id else set()
             )
             enabled_names = []
             for name, tool in sorted(reg.items()):
                 # Skip internal tools
                 if name.startswith("_"):
                     continue
-                # Check global enabled state
-                if not _get_tool_enabled_state(tool):
+                # Check global enabled state (FastMCP 3.0+ uses transforms)
+                if not _get_tool_enabled_state(tool, mcp):
                     continue
                 # Check session-disabled state
                 if name in session_disabled:
@@ -759,9 +812,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 error="Tool registry not available",
             )
 
-        # Count enabled/disabled tools
+        # Count enabled/disabled tools (FastMCP 3.0+ uses transforms for visibility)
         total_tools = len(registry)
-        enabled_count = sum(1 for t in registry.values() if _get_tool_enabled_state(t))
+        enabled_count = sum(1 for t in registry.values() if _get_tool_enabled_state(t, mcp))
         disabled_count = total_tools - enabled_count
 
         if action_normalized == "list":
@@ -772,7 +825,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
             for name, tool in sorted(registry.items()):
                 if not include_internal and name.startswith("_"):
                     continue
-                enabled = _get_tool_enabled_state(tool)
+                enabled = _get_tool_enabled_state(tool, mcp)
                 is_protected = name in protected_tools_set
                 tool_list.append(
                     ToolInfo(
@@ -866,7 +919,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
         if action_normalized == "disable":
             # Session-scoped disable
             if scope_normalized == "session":
-                session_id = get_session_context()
+                session_id = await get_session_context()
                 if not session_id:
                     return ManageToolsResponse(
                         success=False,
@@ -894,7 +947,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         )
                         continue
                     # Disable for session only (persist=True for cross-client visibility)
-                    if disable_tool_for_session(name, session_id, persist=True):
+                    if await disable_tool_for_session(name, session_id, persist=True):
                         affected.append(name)
                     else:
                         skipped.append(name)
@@ -903,7 +956,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 session_state = _get_session_state()
                 # Notify MCP client of tool list change
                 if affected:
-                    await ctx.send_tool_list_changed()
+                    await ctx.send_notification(ToolListChangedNotification())
                 return ManageToolsResponse(
                     success=len(affected) > 0,
                     action=action,
@@ -921,10 +974,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     errors=errors if errors else None,
                 )
 
-            # Global scope disable (original behavior)
+            # Global scope disable (FastMCP 3.0+ API)
             for name in target_names:
-                target = registry.get(name)
-                if not target:
+                if name not in registry:
                     skipped.append(name)
                     errors.append(f"Tool '{name}' not found in registry")
                     continue
@@ -933,21 +985,16 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     errors.append(f"Tool '{name}' is protected and cannot be disabled")
                     continue
                 try:
-                    if hasattr(target, "disable") and callable(target.disable):
-                        target.disable()
-                        affected.append(name)
-                    else:
-                        skipped.append(name)
-                        errors.append(
-                            f"Tool '{name}' does not support dynamic disable()"
-                        )
+                    # FastMCP 3.0: Use server-level disable with names parameter
+                    mcp.disable(names={name})
+                    affected.append(name)
                 except Exception as e:
                     logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
                     errors.append(f"Failed to disable tool '{name}': {e}")
 
             # Notify MCP client of tool list change
             if affected:
-                await ctx.send_tool_list_changed()
+                await ctx.send_notification(ToolListChangedNotification())
             return ManageToolsResponse(
                 success=len(affected) > 0,
                 action=action,
@@ -969,7 +1016,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
             # Session-scoped disable_all_except
             if scope_normalized == "session":
-                session_id = get_session_context()
+                session_id = await get_session_context()
                 if not session_id:
                     return ManageToolsResponse(
                         success=False,
@@ -992,7 +1039,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         skipped.append(name)
                         continue
                     # Disable for session only (persist=True for cross-client visibility)
-                    if disable_tool_for_session(name, session_id, persist=True):
+                    if await disable_tool_for_session(name, session_id, persist=True):
                         affected.append(name)
                     else:
                         errors.append(f"Failed to disable tool '{name}' for session")
@@ -1000,7 +1047,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 session_state = _get_session_state()
                 # Notify MCP client of tool list change
                 if affected:
-                    await ctx.send_tool_list_changed()
+                    await ctx.send_notification(ToolListChangedNotification())
                 return ManageToolsResponse(
                     success=True,
                     action=action,
@@ -1017,19 +1064,17 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     errors=errors if errors else None,
                 )
 
-            # Global scope (original behavior)
-            for name, target in registry.items():
+            # Global scope (FastMCP 3.0+ API)
+            for name in registry.keys():
                 if not include_internal and name.startswith("_"):
                     skipped.append(name)
                     continue
                 if name in keep_set:
                     skipped.append(name)
                     continue
-                if not hasattr(target, "disable") or not callable(target.disable):
-                    skipped.append(name)
-                    continue
                 try:
-                    target.disable()
+                    # FastMCP 3.0: Use server-level disable with names parameter
+                    mcp.disable(names={name})
                     affected.append(name)
                 except Exception as e:
                     logger.error(f"Error disabling tool {name}: {e}", exc_info=True)
@@ -1037,7 +1082,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
             # Notify MCP client of tool list change
             if affected:
-                await ctx.send_tool_list_changed()
+                await ctx.send_notification(ToolListChangedNotification())
             return ManageToolsResponse(
                 success=True,
                 action=action,
@@ -1056,7 +1101,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
         if action_normalized == "enable":
             # Session-scoped enable
             if scope_normalized == "session":
-                session_id = get_session_context()
+                session_id = await get_session_context()
                 if not session_id:
                     return ManageToolsResponse(
                         success=False,
@@ -1078,7 +1123,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         errors.append(f"Tool '{name}' not found in registry")
                         continue
                     # Enable for session (persist=True for cross-client visibility)
-                    if enable_tool_for_session(name, session_id, persist=True):
+                    if await enable_tool_for_session(name, session_id, persist=True):
                         affected.append(name)
                     else:
                         skipped.append(name)
@@ -1087,7 +1132,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 session_state = _get_session_state()
                 # Notify MCP client of tool list change
                 if affected:
-                    await ctx.send_tool_list_changed()
+                    await ctx.send_notification(ToolListChangedNotification())
                 return ManageToolsResponse(
                     success=len(affected) > 0,
                     action=action,
@@ -1105,29 +1150,23 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     errors=errors if errors else None,
                 )
 
-            # Global scope (original behavior)
+            # Global scope (FastMCP 3.0+ API)
             for name in target_names:
-                target = registry.get(name)
-                if not target:
+                if name not in registry:
                     skipped.append(name)
                     errors.append(f"Tool '{name}' not found in registry")
                     continue
                 try:
-                    if hasattr(target, "enable") and callable(target.enable):
-                        target.enable()
-                        affected.append(name)
-                    else:
-                        skipped.append(name)
-                        errors.append(
-                            f"Tool '{name}' does not support dynamic enable()"
-                        )
+                    # FastMCP 3.0: Use server-level enable with names parameter
+                    mcp.enable(names={name})
+                    affected.append(name)
                 except Exception as e:
                     logger.error(f"Error enabling tool {name}: {e}", exc_info=True)
                     errors.append(f"Failed to enable tool '{name}': {e}")
 
             # Notify MCP client of tool list change
             if affected:
-                await ctx.send_tool_list_changed()
+                await ctx.send_notification(ToolListChangedNotification())
             return ManageToolsResponse(
                 success=len(affected) > 0,
                 action=action,
@@ -1147,7 +1186,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
         if action_normalized == "enable_all":
             # Session-scoped enable_all (clears session disabled list)
             if scope_normalized == "session":
-                session_id = get_session_context()
+                session_id = await get_session_context()
                 if not session_id:
                     return ManageToolsResponse(
                         success=False,
@@ -1163,15 +1202,15 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     )
 
                 # Get currently disabled tools for this session before clearing
-                session_disabled_before = get_session_disabled_tools(session_id)
+                session_disabled_before = await get_session_disabled_tools(session_id)
                 affected = list(session_disabled_before)
 
                 # Clear all session disables
-                if clear_session_disabled_tools(session_id):
+                if await clear_session_disabled_tools(session_id):
                     session_state = _get_session_state()
                     # Notify MCP client of tool list change
                     if affected:
-                        await ctx.send_tool_list_changed()
+                        await ctx.send_notification(ToolListChangedNotification())
                     return ManageToolsResponse(
                         success=True,
                         action=action,
@@ -1199,16 +1238,14 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         error="Could not clear session state",
                     )
 
-            # Global scope (original behavior)
-            for name, target in registry.items():
+            # Global scope (FastMCP 3.0+ API)
+            for name in registry.keys():
                 if not include_internal and name.startswith("_"):
                     skipped.append(name)
                     continue
-                if not hasattr(target, "enable") or not callable(target.enable):
-                    skipped.append(name)
-                    continue
                 try:
-                    target.enable()
+                    # FastMCP 3.0: Use server-level enable with names parameter
+                    mcp.enable(names={name})
                     affected.append(name)
                 except Exception as e:
                     logger.error(f"Error enabling tool {name}: {e}", exc_info=True)
@@ -1216,7 +1253,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
             # Notify MCP client of tool list change
             if affected:
-                await ctx.send_tool_list_changed()
+                await ctx.send_notification(ToolListChangedNotification())
             return ManageToolsResponse(
                 success=True,
                 action=action,
@@ -1509,18 +1546,13 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 skipped_tools: List[str] = list(protected_in_targets)
                 errors: List[str] = []
 
-                # Execute action on safe targets
+                # Execute action on safe targets (FastMCP 3.0+ API)
                 if action == "disable":
                     for name in safe_targets:
-                        target = registry[name]
                         try:
-                            if hasattr(target, "disable") and callable(target.disable):
-                                target.disable()
-                                affected_tools.append(name)
-                            else:
-                                errors.append(
-                                    f"'{name}' doesn't support disable() in this FastMCP version"
-                                )
+                            # FastMCP 3.0: Use server-level disable with names parameter
+                            mcp.disable(names={name})
+                            affected_tools.append(name)
                         except Exception as e:
                             logger.error(
                                 f"Error disabling tool {name}: {e}", exc_info=True
@@ -1529,15 +1561,10 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
                 elif action == "enable":
                     for name in safe_targets:
-                        target = registry[name]
                         try:
-                            if hasattr(target, "enable") and callable(target.enable):
-                                target.enable()
-                                affected_tools.append(name)
-                            else:
-                                errors.append(
-                                    f"'{name}' doesn't support enable() in this FastMCP version"
-                                )
+                            # FastMCP 3.0: Use server-level enable with names parameter
+                            mcp.enable(names={name})
+                            affected_tools.append(name)
                         except Exception as e:
                             logger.error(
                                 f"Error enabling tool {name}: {e}", exc_info=True
