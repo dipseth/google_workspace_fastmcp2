@@ -569,10 +569,17 @@ def _build_card_with_smart_builder(
     buttons = card_params.get("buttons")
     fields = card_params.get("fields")  # Form fields
     submit_action = card_params.get("submit_action")  # Form submit action
+    # Grid params - these get passed through to SmartCardBuilder
+    grid = card_params.get("grid")
+    images = card_params.get("images")
+    image_titles = card_params.get("image_titles")
+    column_count = card_params.get("column_count", 2)
 
     logger.info(f"🔨 SmartCardBuilder parsing description: {card_description[:80]}...")
     if fields:
         logger.info(f"📝 Form card mode: {len(fields)} field(s)")
+    if grid or images:
+        logger.info(f"🔲 Grid params provided: {len(images) if images else 'direct grid'}")
 
     # Build card using SmartCardBuilder - pass all params
     card_dict = builder.build_card_from_description(
@@ -584,6 +591,10 @@ def _build_card_with_smart_builder(
         buttons=buttons,  # Pass buttons too
         fields=fields,  # Form fields
         submit_action=submit_action,  # Form submit action
+        grid=grid,  # Direct grid structure
+        images=images,  # Image URLs for grid
+        image_titles=image_titles,  # Titles for grid images
+        column_count=column_count,  # Grid columns
     )
 
     if not card_dict:

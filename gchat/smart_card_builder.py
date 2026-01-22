@@ -191,6 +191,13 @@ class SmartCardBuilder:
             r"\b(image\s+(on\s+)?(the\s+)?left|left\s+(side\s+)?image|with\s+image\s+on\s+left|image\s+on\s+left)\b",
             re.I,
         ),
+        # Grid layout detection for image galleries
+        "grid": re.compile(
+            r"\b(grid\s+(?:of\s+)?(?:images?|photos?)?|image\s+grid|photo\s+grid|"
+            r"gallery|thumbnails?|(?:\d+)\s*x\s*(?:\d+)\s+(?:images?|photos?)|"
+            r"multiple\s+images?|images?\s+in\s+(?:a\s+)?grid)\b",
+            re.I,
+        ),
     }
 
     # Patterns for content type inference
@@ -1061,9 +1068,20 @@ class SmartCardBuilder:
             "buttons": [],
             "fields": [],
             "submit_action": None,
+            "grid_images": [],
+            "layout_type": None,
         }
 
-        # Check for form intent first - if detected, extract form fields
+        # Check for grid intent first - if detected, extract image URLs
+        if self.LAYOUT_PATTERNS["grid"].search(description):
+            image_urls = self._extract_image_urls(description)
+            if image_urls:
+                result["grid_images"] = image_urls
+                result["layout_type"] = "grid"
+                logger.info(f"🔲 Grid layout detected with {len(image_urls)} image(s)")
+                return result
+
+        # Check for form intent - if detected, extract form fields
         form_fields, submit_action = self._extract_form_fields(description)
         if form_fields:
             result["fields"] = form_fields
@@ -1310,6 +1328,41 @@ class SmartCardBuilder:
 
         return items
 
+    def _extract_image_urls(self, description: str) -> List[str]:
+        """
+        Extract image URLs from description text.
+
+        Handles patterns like:
+        - "https://example.com/image.jpg"
+        - "https://example.com/image.png"
+        - URLs ending in common image extensions
+        - Common image hosting services (picsum.photos, imgur, etc.)
+        """
+        image_urls = []
+
+        # Pattern for URLs with explicit image extensions
+        extension_pattern = re.compile(
+            r"(https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp))", re.I
+        )
+        image_urls.extend(extension_pattern.findall(description))
+
+        # Pattern for known image hosting services
+        image_host_pattern = re.compile(
+            r"(https?://(?:picsum\.photos|i\.imgur\.com|images\.unsplash\.com)[^\s]*)",
+            re.I,
+        )
+        image_urls.extend(image_host_pattern.findall(description))
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_urls = []
+        for url in image_urls:
+            if url not in seen:
+                seen.add(url)
+                unique_urls.append(url)
+
+        return unique_urls
+
     def _extract_buttons(self, description: str) -> List[Dict[str, str]]:
         """
         Extract button definitions from description.
@@ -1478,6 +1531,10 @@ class SmartCardBuilder:
         buttons: List[Dict[str, Any]] = None,
         fields: List[Dict[str, Any]] = None,
         submit_action: Dict[str, Any] = None,
+        grid: Dict[str, Any] = None,
+        images: List[str] = None,
+        image_titles: List[str] = None,
+        column_count: int = 2,
     ) -> Dict[str, Any]:
         """
         Build a complete card by parsing natural language description.
@@ -1499,12 +1556,33 @@ class SmartCardBuilder:
                     [{type: "TextInput"/"SelectionInput"/"DateTimePicker", name, label, ...}]
             submit_action: Optional submit action for form cards
                     {function: "functionName", parameters: {...}}
+            grid: Optional direct grid widget structure {columnCount, items: [{image, title}, ...]}
+            images: Optional list of image URLs to build into a grid
+            image_titles: Optional list of titles for images (used with images param)
+            column_count: Number of columns for grid (default 2, used with images param)
 
         Returns:
             Rendered card JSON in Google Chat API format
         """
         if not self._initialized:
             self.initialize()
+
+        # =====================================================================
+        # GRID CARDS: Handle grid/images params using build_grid_from_images
+        # Uses Grid component loaded via Qdrant search
+        # =====================================================================
+        if grid or images:
+            logger.info(f"🔲 Grid card mode detected")
+            return self._build_grid_card(
+                title=title,
+                subtitle=subtitle,
+                text=text,
+                grid=grid,
+                images=images,
+                image_titles=image_titles,
+                column_count=column_count,
+                buttons=buttons,
+            )
 
         # =====================================================================
         # FEEDBACK LOOP: Check for proven patterns from similar successful cards
@@ -1589,6 +1667,21 @@ class SmartCardBuilder:
                 text=text,
                 fields=parsed["fields"],
                 submit_action=parsed.get("submit_action"),
+            )
+
+        # If grid images were extracted from description, build grid card
+        # This uses the Grid component loaded via Qdrant search
+        if parsed.get("grid_images"):
+            logger.info(
+                f"🔲 Grid layout detected via NLP, building grid with {len(parsed['grid_images'])} images"
+            )
+            return self._build_grid_card(
+                title=title,
+                subtitle=subtitle,
+                text=text,
+                images=parsed["grid_images"],
+                column_count=2,  # Default, could be extracted from description
+                buttons=buttons,
             )
 
         # If we have sections from NLP parsing, build multi-section card
@@ -1763,6 +1856,121 @@ class SmartCardBuilder:
         card["sections"] = rendered_sections
         card["_card_id"] = card_id  # Internal: for tracking
 
+        return card
+
+    def _build_grid_card(
+        self,
+        title: str = None,
+        subtitle: str = None,
+        text: str = None,
+        grid: Dict[str, Any] = None,
+        images: List[str] = None,
+        image_titles: List[str] = None,
+        column_count: int = 2,
+        buttons: List[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Build a grid card using the Grid component loaded via Qdrant.
+
+        Uses self.build_grid_from_images() which uses the Grid component
+        that was loaded during initialization via Qdrant search.
+
+        Args:
+            title: Optional card header title
+            subtitle: Optional card header subtitle
+            text: Optional text to display above the grid
+            grid: Direct grid widget structure {columnCount, items: [{image, title}, ...]}
+            images: List of image URLs to build into a grid
+            image_titles: Optional list of titles for each image
+            column_count: Number of columns (default 2)
+            buttons: Optional list of button dicts
+
+        Returns:
+            Rendered card JSON in Google Chat API format
+        """
+        card = {}
+        card_id = str(uuid.uuid4())
+
+        # Build header if title/subtitle provided
+        if title or subtitle:
+            header = {}
+            if title:
+                header["title"] = title
+            if subtitle:
+                header["subtitle"] = subtitle
+            card["header"] = header
+
+        # Build widgets list
+        widgets = []
+
+        # Add text paragraph if text provided
+        if text:
+            widgets.append({"textParagraph": {"text": text}})
+
+        # Build grid widget
+        if grid:
+            # Direct grid structure provided - use as-is
+            grid_widget = {"grid": grid}
+            logger.info(f"✅ Using direct grid structure with {len(grid.get('items', []))} items")
+        elif images:
+            # Build grid from image URLs using build_grid_from_images
+            # This uses the Grid component loaded via Qdrant
+            grid_widget = self.build_grid_from_images(
+                image_urls=images,
+                titles=image_titles,
+                column_count=column_count,
+            )
+            logger.info(f"✅ Built grid from {len(images)} images, {column_count} columns")
+        else:
+            grid_widget = None
+
+        if grid_widget:
+            widgets.append(grid_widget)
+
+        # Add buttons if provided
+        if buttons:
+            button_list = []
+            for btn in buttons:
+                button = {
+                    "text": btn.get("text", "Button"),
+                    "onClick": {
+                        "openLink": {"url": btn.get("onclick_action") or btn.get("url", "#")}
+                    }
+                }
+                button_list.append(button)  # No wrapper - API expects button directly
+            if button_list:
+                widgets.append({"buttonList": {"buttons": button_list}})
+
+        # Add feedback section
+        if ENABLE_FEEDBACK_BUTTONS:
+            feedback_section = self._create_feedback_section(card_id)
+            card["sections"] = [{"widgets": widgets}, feedback_section]
+
+            # Store pattern for feedback collection
+            try:
+                self._store_card_pattern(
+                    card_id=card_id,
+                    description=f"grid card: {title or 'untitled'}",
+                    component_paths=[
+                        "card_framework.v2.widgets.grid.Grid",
+                        "card_framework.v2.widgets.grid.GridItem",
+                    ],
+                    instance_params={
+                        "title": title,
+                        "subtitle": subtitle,
+                        "layout_type": "grid",
+                        "column_count": column_count,
+                        "image_count": len(images) if images else 0,
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"Could not store grid card pattern: {e}")
+        else:
+            card["sections"] = [{"widgets": widgets}]
+
+        card["_card_id"] = card_id
+
+        logger.info(f"✅ Built grid card with {len(widgets)} widgets")
         return card
 
     def _build_form_card(

@@ -331,18 +331,21 @@ class TestCalendarTools:
             content = str(result)
 
         # Try to extract event ID if creation was successful
-        if "successfully created" in content.lower() and "event id:" in content.lower():
-            # Extract event ID for reuse in other tests
-            import re
+        # Response is JSON with eventId field
+        import json
 
-            match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
-            if match:
-                TestCalendarTools._created_event_id = match.group(1)
-                # Track for automatic cleanup
-                cleanup_tracker.track_calendar_event(match.group(1))
-                print(
-                    f"DEBUG: Captured event ID for reuse and cleanup: {TestCalendarTools._created_event_id}"
-                )
+        try:
+            if content.startswith("{"):
+                response_dict = json.loads(content)
+                if response_dict.get("success") and response_dict.get("eventId"):
+                    event_id = response_dict["eventId"]
+                    TestCalendarTools._created_event_id = event_id
+                    cleanup_tracker.track_calendar_event(event_id)
+                    print(
+                        f"DEBUG: Captured event ID for reuse and cleanup: {event_id}"
+                    )
+        except (json.JSONDecodeError, KeyError):
+            pass
 
         # Check for valid responses (auth errors OR successful creation)
         valid_responses = [
@@ -391,13 +394,16 @@ class TestCalendarTools:
         else:
             content = str(result)
 
-        # Track created event for cleanup
-        if "successfully created" in content.lower() and "event id:" in content.lower():
-            import re
+        # Track created event for cleanup - response is JSON with eventId
+        import json
 
-            match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
-            if match:
-                cleanup_tracker.track_calendar_event(match.group(1))
+        try:
+            if content.startswith("{"):
+                response_dict = json.loads(content)
+                if response_dict.get("success") and response_dict.get("eventId"):
+                    cleanup_tracker.track_calendar_event(response_dict["eventId"])
+        except (json.JSONDecodeError, KeyError):
+            pass
 
         valid_responses = [
             "event",
@@ -446,13 +452,16 @@ class TestCalendarTools:
         else:
             content = str(result)
 
-        # Track created event for cleanup
-        if "successfully created" in content.lower() and "event id:" in content.lower():
-            import re
+        # Track created event for cleanup - response is JSON with eventId
+        import json
 
-            match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
-            if match:
-                cleanup_tracker.track_calendar_event(match.group(1))
+        try:
+            if content.startswith("{"):
+                response_dict = json.loads(content)
+                if response_dict.get("success") and response_dict.get("eventId"):
+                    cleanup_tracker.track_calendar_event(response_dict["eventId"])
+        except (json.JSONDecodeError, KeyError):
+            pass
 
         valid_responses = [
             "event",
@@ -503,13 +512,16 @@ class TestCalendarTools:
         else:
             content = str(result)
 
-        # Track created event for cleanup
-        if "successfully created" in content.lower() and "event id:" in content.lower():
-            import re
+        # Track created event for cleanup - response is JSON with eventId
+        import json
 
-            match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
-            if match:
-                cleanup_tracker.track_calendar_event(match.group(1))
+        try:
+            if content.startswith("{"):
+                response_dict = json.loads(content)
+                if response_dict.get("success") and response_dict.get("eventId"):
+                    cleanup_tracker.track_calendar_event(response_dict["eventId"])
+        except (json.JSONDecodeError, KeyError):
+            pass
 
         valid_responses = [
             "event",
@@ -954,13 +966,16 @@ class TestCalendarTools:
             # Fallback to string representation
             content = str(result)
 
-        # Track created event for cleanup
-        if "successfully created" in content.lower() and "event id:" in content.lower():
-            import re
+        # Track created event for cleanup - response is JSON with eventId
+        import json as json_module
 
-            match = re.search(r"event id:\s*([^\s,]+)", content, re.IGNORECASE)
-            if match:
-                cleanup_tracker.track_calendar_event(match.group(1))
+        try:
+            if content.startswith("{"):
+                response_dict = json_module.loads(content)
+                if response_dict.get("success") and response_dict.get("eventId"):
+                    cleanup_tracker.track_calendar_event(response_dict["eventId"])
+        except (json_module.JSONDecodeError, KeyError):
+            pass
 
         # Should work exactly like before (single event response)
         valid_responses = [

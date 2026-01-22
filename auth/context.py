@@ -998,6 +998,77 @@ async def get_session_tool_state_summary(session_id: str = None) -> Dict[str, An
     }
 
 
+async def get_session_enabled_services(
+    session_id: str = None, all_tools: list = None
+) -> set:
+    """
+    Get the set of services that have at least one enabled tool for this session.
+
+    This determines which Google Workspace services are actually usable
+    based on which tools are enabled (not disabled) for the session.
+
+    Args:
+        session_id: Session identifier. If None, attempts to get from context.
+        all_tools: List of all tool names. If None, returns empty set.
+
+    Returns:
+        Set of service names (e.g., {'gmail', 'drive', 'calendar'})
+    """
+    from middleware.qdrant_core.query_parser import extract_service_from_tool
+
+    if not session_id:
+        session_id = await get_session_context()
+
+    if not session_id or not all_tools:
+        return set()
+
+    disabled_tools = await get_session_disabled_tools(session_id)
+    enabled_services = set()
+
+    for tool_name in all_tools:
+        if tool_name not in disabled_tools:
+            service = extract_service_from_tool(tool_name)
+            if service and service != "unknown":
+                enabled_services.add(service)
+
+    return enabled_services
+
+
+def get_session_enabled_services_sync(
+    session_id: str, all_tools: list, disabled_tools: set = None
+) -> set:
+    """
+    Get enabled services synchronously (requires session_id and disabled_tools).
+
+    This sync version requires all data to be provided upfront.
+
+    Args:
+        session_id: Session identifier (required).
+        all_tools: List of all tool names.
+        disabled_tools: Set of disabled tool names. If None, fetches from session.
+
+    Returns:
+        Set of service names with at least one enabled tool.
+    """
+    from middleware.qdrant_core.query_parser import extract_service_from_tool
+
+    if not session_id or not all_tools:
+        return set()
+
+    if disabled_tools is None:
+        disabled_tools = get_session_disabled_tools_sync(session_id)
+
+    enabled_services = set()
+
+    for tool_name in all_tools:
+        if tool_name not in disabled_tools:
+            service = extract_service_from_tool(tool_name)
+            if service and service != "unknown":
+                enabled_services.add(service)
+
+    return enabled_services
+
+
 async def store_custom_oauth_credentials(
     state: str,
     custom_client_id: str,

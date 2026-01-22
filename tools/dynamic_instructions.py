@@ -12,33 +12,55 @@ The instructions are updated on server startup/connection after Qdrant middlewar
 initializes, providing users with contextual, data-driven guidance.
 """
 
+import asyncio
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from auth.scope_registry import ScopeRegistry
 from config.enhanced_logging import setup_logger
 from config.settings import settings
+from middleware.qdrant_core.client import get_or_create_client_manager
 
 logger = setup_logger()
 
 
-def _build_services_section() -> str:
+def _build_services_section(enabled_services: Optional[set] = None) -> str:
     """
     Build the Available Services section using ScopeRegistry metadata.
+
+    Args:
+        enabled_services: Optional set of enabled service names. If provided,
+                         only shows those services. If None, shows all services.
 
     Returns:
         Formatted markdown string with service information
     """
-    lines = ["## Available Services"]
+    # Determine header based on whether we're filtering
+    if enabled_services is not None:
+        lines = ["## 🔓 Enabled Services"]
+    else:
+        lines = ["## Available Services"]
 
     # Get all services from the registry
-    for service_name in ScopeRegistry.get_all_services():
+    all_services = ScopeRegistry.get_all_services()
+
+    for service_name in all_services:
+        # Skip if we have an enabled filter and this service isn't in it
+        if enabled_services is not None and service_name.lower() not in {
+            s.lower() for s in enabled_services
+        }:
+            continue
+
         metadata = ScopeRegistry.get_service_metadata(service_name)
         if metadata:
             # Format: - **📁 Google Drive**: Cloud storage and file synchronization service
             lines.append(
                 f"- **{metadata.icon} {metadata.name}**: {metadata.description}"
             )
+
+    # If filtering resulted in empty list, show a message
+    if enabled_services is not None and len(lines) == 1:
+        lines.append("- *No services currently enabled. Use `manage_tools` to enable services.*")
 
     return "\n".join(lines)
 
@@ -65,8 +87,34 @@ def _build_base_instructions() -> str:
 Use `manage_tools` to list, enable, or disable tools at runtime."""
 
 
-# Build base instructions using registry data
+# Build base instructions using registry data (static, all services)
 BASE_INSTRUCTIONS = _build_base_instructions()
+
+
+def _build_session_aware_base_instructions(enabled_services: Optional[set] = None) -> str:
+    """
+    Build base instructions with session-aware service filtering.
+
+    Args:
+        enabled_services: Set of enabled service names for this session.
+                         If None, shows all services.
+
+    Returns:
+        Complete base instructions string with filtered services
+    """
+    services_section = _build_services_section(enabled_services)
+
+    return f"""Google Workspace MCP Server - Comprehensive access to Google services.
+
+## Authentication
+1. Call `start_google_auth` with your email to begin OAuth flow
+2. Complete authentication in browser
+3. Call `check_drive_auth` to verify credentials
+
+{services_section}
+
+## Tool Management
+Use `manage_tools` to list, enable, or disable tools at runtime."""
 
 
 class DynamicInstructionsBuilder:
@@ -97,13 +145,20 @@ class DynamicInstructionsBuilder:
     def is_qdrant_available(self) -> bool:
         """Check if Qdrant middleware is available and initialized."""
         if not self.qdrant_middleware:
+            logger.debug("📊 Qdrant middleware not set")
             return False
         try:
-            return (
-                hasattr(self.qdrant_middleware, "client_manager")
-                and self.qdrant_middleware.client_manager.is_available
-            )
-        except Exception:
+            has_client_manager = hasattr(self.qdrant_middleware, "client_manager")
+            if not has_client_manager:
+                logger.debug("📊 Qdrant middleware has no client_manager")
+                return False
+
+            is_available = self.qdrant_middleware.client_manager.is_available
+            if not is_available:
+                logger.debug("📊 Qdrant client_manager.is_available = False")
+            return is_available
+        except Exception as e:
+            logger.debug(f"📊 Qdrant availability check failed: {e}")
             return False
 
     async def get_tool_analytics(self) -> Optional[Dict]:
@@ -165,6 +220,105 @@ class DynamicInstructionsBuilder:
         except Exception as e:
             logger.warning(f"📊 Failed to get service analytics: {e}")
             return None
+
+    async def get_collection_summary(self) -> List[Dict[str, Any]]:
+        """
+        Fetch summary info for all relevant Qdrant collections.
+
+        Uses the singleton client_manager from qdrant_core which handles
+        initialization automatically based on settings.
+
+        Returns:
+            List of dicts with collection name, point count, status, and purpose
+        """
+        collections_info = []
+
+        # Define collections to report on with their purposes
+        collections_to_check = [
+            (settings.tool_collection, "Tool responses & analytics"),
+            (settings.card_collection, "Card templates & feedback patterns"),
+        ]
+
+        try:
+            # Get the singleton client manager (initializes from settings if needed)
+            client_manager = get_or_create_client_manager()
+
+            # Ensure client is initialized
+            if not client_manager.is_initialized:
+                await client_manager.initialize()
+
+            if not client_manager.client:
+                logger.debug("📊 Qdrant client not available after initialization")
+                return []
+
+            for collection_name, purpose in collections_to_check:
+                try:
+                    # Get collection info from Qdrant
+                    collection_info = await asyncio.to_thread(
+                        client_manager.client.get_collection, collection_name
+                    )
+
+                    collections_info.append({
+                        "name": collection_name,
+                        "points_count": getattr(collection_info, "points_count", 0) or 0,
+                        "vectors_count": getattr(collection_info, "vectors_count", 0) or 0,
+                        "status": str(getattr(collection_info, "status", "unknown")),
+                        "purpose": purpose,
+                    })
+                except Exception as e:
+                    # Collection might not exist yet
+                    logger.debug(f"📊 Collection {collection_name} not available: {e}")
+                    collections_info.append({
+                        "name": collection_name,
+                        "points_count": 0,
+                        "vectors_count": 0,
+                        "status": "not_found",
+                        "purpose": purpose,
+                    })
+
+            return collections_info
+
+        except Exception as e:
+            logger.warning(f"📊 Failed to get collection summary: {e}")
+            return []
+
+    def _format_collection_summary(self, collections: List[Dict[str, Any]]) -> str:
+        """
+        Format Qdrant collection summary for instructions.
+
+        Args:
+            collections: List of collection info dicts
+
+        Returns:
+            Formatted markdown string with collection summary
+        """
+        if not collections:
+            return ""
+
+        lines = ["## 🗄️ Qdrant Collections"]
+
+        for col in collections:
+            name = col["name"]
+            points = col["points_count"]
+            status = col["status"]
+            purpose = col["purpose"]
+
+            # Status indicator
+            if status == "Green" or status == "green":
+                status_icon = "🟢"
+            elif status == "Yellow" or status == "yellow":
+                status_icon = "🟡"
+            elif status == "not_found":
+                status_icon = "⚪"
+            else:
+                status_icon = "🔴"
+
+            # Format point count with commas
+            points_str = f"{points:,}" if points > 0 else "empty"
+
+            lines.append(f"- {status_icon} **{name}**: {points_str} points — {purpose}")
+
+        return "\n".join(lines)
 
     def _format_popular_tools(self, analytics: Dict, top_n: int = 5) -> str:
         """
@@ -298,18 +452,25 @@ class DynamicInstructionsBuilder:
         else:
             return "\n## 🗄️ Vector Database\nQdrant: Offline (analytics unavailable)"
 
-    async def build_dynamic_instructions(self, force_refresh: bool = False) -> str:
+    async def build_dynamic_instructions(
+        self,
+        force_refresh: bool = False,
+        enabled_services: Optional[set] = None,
+    ) -> str:
         """
         Build complete dynamic instructions incorporating Qdrant data.
 
         Args:
             force_refresh: If True, bypass cache and rebuild instructions
+            enabled_services: Optional set of enabled service names for session-aware
+                            instructions. If provided, the "Available Services" section
+                            will only show these services.
 
         Returns:
             Complete instructions string with dynamic content
         """
-        # Check cache validity
-        if not force_refresh and self._cached_instructions:
+        # Check cache validity (only use cache if no session-specific filtering)
+        if not force_refresh and enabled_services is None and self._cached_instructions:
             if self._cache_timestamp:
                 age = (
                     datetime.now(timezone.utc) - self._cache_timestamp
@@ -320,13 +481,30 @@ class DynamicInstructionsBuilder:
 
         logger.info("📋 Building dynamic instructions from Qdrant data...")
 
-        # Start with base instructions
-        sections = [BASE_INSTRUCTIONS]
+        # Start with base instructions (session-aware if enabled_services provided)
+        if enabled_services is not None:
+            base = _build_session_aware_base_instructions(enabled_services)
+            logger.info(f"📋 Building session-aware instructions with {len(enabled_services)} enabled services")
+        else:
+            base = BASE_INSTRUCTIONS
+        sections = [base]
 
-        # Add Qdrant status
-        sections.append(self._format_qdrant_status())
+        # Try to get collection summary using singleton client (handles its own init)
+        try:
+            collections = await self.get_collection_summary()
+            if collections:
+                collection_summary = self._format_collection_summary(collections)
+                if collection_summary:
+                    sections.append(collection_summary)
+                    logger.info(f"📋 Added collection summary for {len(collections)} collections")
+            else:
+                # No collections found - show offline status
+                sections.append(self._format_qdrant_status())
+        except Exception as e:
+            logger.warning(f"📋 Failed to get collection summary: {e}")
+            sections.append(self._format_qdrant_status())
 
-        # Try to add dynamic content from Qdrant
+        # Try to add additional dynamic content (analytics) if middleware available
         if self.is_qdrant_available:
             try:
                 # Get tool analytics
@@ -351,8 +529,7 @@ class DynamicInstructionsBuilder:
                         sections.append(service_health)
 
             except Exception as e:
-                logger.warning(f"📋 Error building dynamic sections: {e}")
-                # Continue with base instructions
+                logger.warning(f"📋 Error building analytics sections: {e}")
 
         # Add timestamp
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -361,9 +538,10 @@ class DynamicInstructionsBuilder:
         # Join all sections
         instructions = "\n".join(sections)
 
-        # Cache the result
-        self._cached_instructions = instructions
-        self._cache_timestamp = datetime.now(timezone.utc)
+        # Only cache non-session-specific instructions
+        if enabled_services is None:
+            self._cached_instructions = instructions
+            self._cache_timestamp = datetime.now(timezone.utc)
 
         logger.info(f"📋 Dynamic instructions built ({len(instructions)} chars)")
         return instructions
@@ -460,4 +638,48 @@ async def refresh_instructions(mcp: Any) -> bool:
 
     except Exception as e:
         logger.error(f"❌ Failed to refresh MCP instructions: {e}")
+        return False
+
+
+async def refresh_instructions_for_session(
+    mcp: Any,
+    session_id: str,
+    all_tools: List[str],
+) -> bool:
+    """
+    Refresh MCP instructions with session-aware service filtering.
+
+    Call this after tools are enabled/disabled to update the Available Services
+    section to reflect only the services that have enabled tools.
+
+    Args:
+        mcp: FastMCP server instance
+        session_id: Current session ID
+        all_tools: List of all available tool names
+
+    Returns:
+        bool: True if refresh was successful
+    """
+    try:
+        from auth.context import get_session_enabled_services
+
+        # Get enabled services for this session
+        enabled_services = await get_session_enabled_services(session_id, all_tools)
+
+        if _builder:
+            dynamic_instructions = await _builder.build_dynamic_instructions(
+                force_refresh=True,
+                enabled_services=enabled_services,
+            )
+            mcp.instructions = dynamic_instructions
+            logger.info(
+                f"🔄 MCP instructions refreshed for session with {len(enabled_services)} enabled services"
+            )
+            return True
+        else:
+            logger.warning("🔄 No instructions builder available for session refresh")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ Failed to refresh session instructions: {e}")
         return False

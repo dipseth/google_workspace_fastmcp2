@@ -321,6 +321,7 @@ class SessionToolFilteringMiddleware(Middleware):
         minimal_startup: bool = False,
         get_all_tools_callback: Optional[Callable[[], List[str]]] = None,
         default_enabled_services: Optional[List[str]] = None,
+        mcp_instance: Optional[Any] = None,
     ):
         """
         Initialize the session tool filtering middleware.
@@ -339,6 +340,7 @@ class SessionToolFilteringMiddleware(Middleware):
             default_enabled_services: List of service names (from ScopeRegistry)
                                      whose tools should be enabled by default
                                      for new sessions in minimal startup mode.
+            mcp_instance: Optional FastMCP server instance for updating instructions.
         """
         self.protected_tools = protected_tools or {
             "manage_tools",
@@ -351,6 +353,7 @@ class SessionToolFilteringMiddleware(Middleware):
         self.minimal_startup = minimal_startup
         self.get_all_tools_callback = get_all_tools_callback
         self.default_enabled_services = default_enabled_services or []
+        self.mcp_instance = mcp_instance
 
         # Track sessions we've already processed for minimal startup
         self._processed_sessions: Set[str] = set()
@@ -385,6 +388,45 @@ class SessionToolFilteringMiddleware(Middleware):
             logger.debug(
                 "SessionToolFilteringMiddleware: Tool list callback registered"
             )
+
+    async def _refresh_instructions_for_session(
+        self, session_id: str, tool_names: List[str]
+    ) -> None:
+        """
+        Refresh MCP instructions to reflect session-enabled services only.
+
+        This updates the instructions to show only the services that have
+        at least one enabled tool for this session, providing accurate
+        guidance to the client about available functionality.
+
+        Args:
+            session_id: The session ID to refresh instructions for.
+            tool_names: List of all tool names (for computing enabled services).
+        """
+        if not self.mcp_instance:
+            if self.enable_debug:
+                logger.debug(
+                    "Cannot refresh instructions - no MCP instance available"
+                )
+            return
+
+        try:
+            from tools.dynamic_instructions import refresh_instructions_for_session
+
+            success = await refresh_instructions_for_session(
+                self.mcp_instance, session_id, tool_names
+            )
+            if success:
+                logger.info(
+                    f"📋 Instructions refreshed for session {session_id[:8]}... "
+                    f"with session-enabled services only"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ Failed to refresh instructions for session {session_id[:8]}..."
+                )
+        except Exception as e:
+            logger.warning(f"⚠️ Error refreshing instructions: {e}")
 
     def _get_all_tool_names(self) -> List[str]:
         """Get all registered tool names using the callback."""
@@ -607,20 +649,26 @@ class SessionToolFilteringMiddleware(Middleware):
                     f"🔗 Minimal startup DISABLED via ?minimal=false for session {effective_session_id[:8]}..."
                 )
 
-        # If explicit ?service= is provided, clear any existing session state so we start fresh
+        # If explicit ?service= is provided, apply filter ONLY for NEW sessions
+        # Once a session is processed, don't clear/reapply - this preserves manual tool enables
         # This must happen AFTER effective_session_id is finalized (e.g., after UUID processing)
-        if has_explicit_service_filter:
-            # Remove from processed sessions so it can be reprocessed
-            self._processed_sessions.discard(effective_session_id)
-            # Clear the session's disabled tools so we start fresh
-            clear_session_disabled_tools_sync(effective_session_id)
-            # Clear the minimal startup flag so it can be reapplied with new services
-            clear_minimal_startup_applied(effective_session_id)
+        session_already_processed = effective_session_id in self._processed_sessions
+
+        if has_explicit_service_filter and not session_already_processed:
+            # First time seeing this session with a service filter - apply it
             if self.enable_debug:
                 logger.debug(
-                    f"Cleared session state for {effective_session_id[:8]}... "
-                    f"due to explicit ?service= parameter"
+                    f"Applying service filter for NEW session {effective_session_id[:8]}... "
+                    f"(services={custom_services})"
                 )
+        elif has_explicit_service_filter and session_already_processed:
+            # Session already processed - preserve existing tool state, don't reapply filter
+            if self.enable_debug:
+                logger.debug(
+                    f"Session {effective_session_id[:8]}... already processed, "
+                    f"preserving tool state (not reapplying ?service= filter)"
+                )
+            return effective_session_id, True  # Treat as restored to skip reapplication
 
         # Apply minimal startup if enabled (uses custom_services if provided)
         if should_apply_minimal:
@@ -770,6 +818,13 @@ class SessionToolFilteringMiddleware(Middleware):
 
         # Use the effective session ID for filtering
         session_id = effective_session_id
+
+        # Refresh instructions to reflect session-enabled services
+        # This ensures the instructions shown to the client match the available tools
+        # Only refresh if we have an MCP instance and service filter was applied
+        has_service_filter = http_params.get("services") is not None
+        if has_service_filter or (self.minimal_startup and not was_restored):
+            await self._refresh_instructions_for_session(session_id, tool_names)
 
         # Get session-specific disabled tools (may have just been set by minimal startup)
         session_disabled = await get_session_disabled_tools(session_id)
@@ -942,6 +997,7 @@ def setup_session_tool_filtering_middleware(
         minimal_startup=minimal_startup,
         get_all_tools_callback=get_all_tools,
         default_enabled_services=default_enabled_services,
+        mcp_instance=mcp,
     )
 
     mcp.add_middleware(middleware)

@@ -58,6 +58,54 @@ WARM_START_PATTERNS = [
         "feedback": "positive",
         "source": "test_smart_card_builder_comprehensive::test_button_list_json_format",
     },
+    # Pattern 3: Grid of images - photo gallery style
+    # Used for displaying multiple images in a grid layout
+    {
+        "card_description": "A grid of images showing a photo gallery with multiple pictures",
+        "component_paths": [
+            "card_framework.v2.widgets.grid.Grid",
+            "card_framework.v2.widgets.grid.GridItem",
+            "card_framework.v2.widgets.grid.ImageComponent",
+        ],
+        "instance_params": {
+            "layout_type": "grid",
+            "column_count": 2,
+            "grid_images": True,  # Signal to use build_grid_from_images
+        },
+        "feedback": "positive",
+        "source": "warmstart::grid_image_gallery",
+    },
+    # Pattern 4: Image grid with titles
+    {
+        "card_description": "Display images in a 2 column grid with titles under each image",
+        "component_paths": [
+            "card_framework.v2.widgets.grid.Grid",
+            "card_framework.v2.widgets.grid.GridItem",
+            "card_framework.v2.widgets.grid.ImageComponent",
+        ],
+        "instance_params": {
+            "layout_type": "grid",
+            "column_count": 2,
+            "grid_images": True,
+        },
+        "feedback": "positive",
+        "source": "warmstart::grid_with_titles",
+    },
+    # Pattern 5: Thumbnail gallery
+    {
+        "card_description": "Show thumbnails in a gallery format",
+        "component_paths": [
+            "card_framework.v2.widgets.grid.Grid",
+            "card_framework.v2.widgets.grid.GridItem",
+        ],
+        "instance_params": {
+            "layout_type": "grid",
+            "column_count": 3,
+            "grid_images": True,
+        },
+        "feedback": "positive",
+        "source": "warmstart::thumbnail_gallery",
+    },
 ]
 
 

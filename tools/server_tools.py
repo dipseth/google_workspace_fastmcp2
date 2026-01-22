@@ -30,6 +30,7 @@ from auth.context import (
     get_session_disabled_tools,
     get_session_disabled_tools_sync,
 )
+from tools.dynamic_instructions import refresh_instructions_for_session
 from auth.middleware import CredentialStorageMode
 from config.enhanced_logging import setup_logger
 from config.settings import settings
@@ -778,6 +779,20 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 enabled_names.append(name)
             return enabled_names
 
+        # Helper to send notification and refresh instructions
+        async def _notify_and_refresh_instructions(
+            ctx: Context, session_id: str, all_tool_names: List[str]
+        ) -> None:
+            """Send ToolListChangedNotification and refresh session-aware instructions."""
+            # Send immediate notification to client
+            await ctx.send_notification(ToolListChangedNotification())
+
+            # Refresh instructions to reflect enabled services
+            try:
+                await refresh_instructions_for_session(mcp, session_id, all_tool_names)
+            except Exception as e:
+                logger.warning(f"Failed to refresh instructions after tool change: {e}")
+
         if action_normalized not in valid_actions:
             return ManageToolsResponse(
                 success=False,
@@ -956,9 +971,11 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         errors.append(f"Failed to disable tool '{name}' for session")
 
                 session_state = _get_session_state()
-                # Notify MCP client of tool list change
+                # Notify MCP client and refresh session-aware instructions
                 if affected:
-                    await ctx.send_notification(ToolListChangedNotification())
+                    await _notify_and_refresh_instructions(
+                        ctx, session_id, list(registry.keys())
+                    )
                 return ManageToolsResponse(
                     success=len(affected) > 0,
                     action=action,
@@ -1047,9 +1064,11 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         errors.append(f"Failed to disable tool '{name}' for session")
 
                 session_state = _get_session_state()
-                # Notify MCP client of tool list change
+                # Notify MCP client and refresh session-aware instructions
                 if affected:
-                    await ctx.send_notification(ToolListChangedNotification())
+                    await _notify_and_refresh_instructions(
+                        ctx, session_id, list(registry.keys())
+                    )
                 return ManageToolsResponse(
                     success=True,
                     action=action,
@@ -1132,9 +1151,11 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         errors.append(f"Failed to enable tool '{name}' for session")
 
                 session_state = _get_session_state()
-                # Notify MCP client of tool list change
+                # Notify MCP client and refresh session-aware instructions
                 if affected:
-                    await ctx.send_notification(ToolListChangedNotification())
+                    await _notify_and_refresh_instructions(
+                        ctx, session_id, list(registry.keys())
+                    )
                 return ManageToolsResponse(
                     success=len(affected) > 0,
                     action=action,
@@ -1210,9 +1231,11 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 # Clear all session disables
                 if await clear_session_disabled_tools(session_id):
                     session_state = _get_session_state()
-                    # Notify MCP client of tool list change
+                    # Notify MCP client and refresh session-aware instructions
                     if affected:
-                        await ctx.send_notification(ToolListChangedNotification())
+                        await _notify_and_refresh_instructions(
+                            ctx, session_id, list(registry.keys())
+                        )
                     return ManageToolsResponse(
                         success=True,
                         action=action,

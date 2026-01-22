@@ -4,12 +4,19 @@ A focused MCP server for uploading files to Google Drive with OAuth authenticati
 """
 
 import os
+from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
 
 # Setup enhanced logging early - no defensive coding needed!
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
+
+# Get version from package metadata (syncs with pyproject.toml)
+try:
+    __version__ = version("google-workspace-unlimited")
+except PackageNotFoundError:
+    __version__ = "0.0.0-dev"  # Fallback for development without install
 
 # Now import the rest of the modules
 from fastmcp import FastMCP
@@ -129,7 +136,7 @@ logger.info("  No transaction ID conflicts")
 # Create FastMCP instance without GoogleProvider (using legacy OAuth system)
 mcp = FastMCP(
     name=settings.server_name,
-    version="1.0.0",
+    version=__version__,
     instructions="""Google Workspace MCP Server - Comprehensive access to Google services.
 
 ## Authentication

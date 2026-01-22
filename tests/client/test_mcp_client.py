@@ -908,7 +908,7 @@ class TestGmailLabelColors:
             yield client_obj
 
     @pytest.mark.asyncio
-    async def test_manage_gmail_label_available(self, client):
+    async def test_manage_gmail_label_available(self, client, cleanup_tracker):
         """Check if manage_gmail_label tool is available."""
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
@@ -918,11 +918,11 @@ class TestGmailLabelColors:
 
         if has_label_tool:
             # Test the color functionality
-            await self._test_create_label_with_colors_no_auth(client)
+            await self._test_create_label_with_colors_no_auth(client, cleanup_tracker)
             await self._test_update_label_with_colors_no_auth(client)
-            await self._test_invalid_color_validation(client)
+            await self._test_invalid_color_validation(client, cleanup_tracker)
 
-    async def _test_create_label_with_colors_no_auth(self, client):
+    async def _test_create_label_with_colors_no_auth(self, client, cleanup_tracker):
         """Test creating a label with colors.
 
         NOTE: Test name retained for backwards compatibility, but the test
@@ -933,6 +933,7 @@ class TestGmailLabelColors:
         # Test creating a red label with white text
         # Use a unique name to avoid conflicts with existing labels
         import uuid
+        import json
 
         unique_label_name = f"Test Label {uuid.uuid4().hex[:8]}"
         result = await client.call_tool(
@@ -950,6 +951,10 @@ class TestGmailLabelColors:
         assert result is not None
         assert result.content and len(result.content) > 0
         content = result.content[0].text
+
+        # Track created label for cleanup
+        self._extract_and_track_label_id(content, cleanup_tracker)
+
         # Accept auth errors, success, or conflict (label already exists)
         assert (
             "authentication" in content.lower()
@@ -1010,7 +1015,28 @@ class TestGmailLabelColors:
         ):
             assert "invalid" not in content.lower()
 
-    async def _test_invalid_color_validation(self, client):
+    def _extract_and_track_label_id(self, content: str, cleanup_tracker) -> None:
+        """Helper to extract label ID from response and track for cleanup."""
+        import json
+        import re
+
+        try:
+            if content.startswith("{"):
+                response_dict = json.loads(content)
+                if response_dict.get("success"):
+                    # Extract label ID from results
+                    results = response_dict.get("results", [])
+                    for result_str in results:
+                        if "ID:" in result_str:
+                            # Create response format: "ID: Label_176"
+                            # Delete response format: "(ID: Label_168)"
+                            match = re.search(r"ID:\s*(Label_\d+)", result_str)
+                            if match:
+                                cleanup_tracker.track_gmail_label(match.group(1))
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    async def _test_invalid_color_validation(self, client, cleanup_tracker):
         """Test color validation with invalid colors.
 
         NOTE: The server now auto-corrects invalid colors to the nearest
@@ -1038,6 +1064,9 @@ class TestGmailLabelColors:
         assert result.content and len(result.content) > 0
         content = result.content[0].text
 
+        # Track created label for cleanup
+        self._extract_and_track_label_id(content, cleanup_tracker)
+
         # Server may either reject invalid colors or auto-correct them
         # Accept either "invalid" error OR "adjusted" success message
         assert (
@@ -1063,6 +1092,9 @@ class TestGmailLabelColors:
         assert result.content and len(result.content) > 0
         content = result.content[0].text
 
+        # Track created label for cleanup
+        self._extract_and_track_label_id(content, cleanup_tracker)
+
         # Server may either reject invalid colors or auto-correct them
         assert (
             "invalid background color" in content.lower()
@@ -1071,7 +1103,7 @@ class TestGmailLabelColors:
         )  # Operation succeeded with correction
 
     @pytest.mark.asyncio
-    async def test_manage_gmail_label_color_params_optional(self, client):
+    async def test_manage_gmail_label_color_params_optional(self, client, cleanup_tracker):
         """Test that color parameters are optional."""
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
@@ -1096,6 +1128,9 @@ class TestGmailLabelColors:
             assert result is not None
             assert result.content and len(result.content) > 0
             content = result.content[0].text
+
+            # Track created label for cleanup
+            self._extract_and_track_label_id(content, cleanup_tracker)
 
             # Should not get color validation errors
             assert "invalid" not in content.lower()
