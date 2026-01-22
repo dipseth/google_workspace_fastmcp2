@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "google-workspace-unlimited"
-version = "1.4.0"
+version = "1.4.1"
 description = "Comprehensive MCP server for Google Workspace integration - 72+ tools across Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos with OAuth 2.1 + PKCE authentication"
 readme = "README.md"
 license = "Apache-2.0"
@@ -77,7 +77,7 @@ classifiers = [
 ]
 dependencies = [
     # Core MCP Framework
-    "fastmcp[tasks]==3.0.0b1",
+    "fastmcp[tasks]>=3.0.0b1",
     # Google APIs
     "google-api-python-client>=2.168.0",
     "google-auth-httplib2>=0.2.0",
