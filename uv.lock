@@ -694,7 +694,7 @@ wheels = [
 
 [[package]]
 name = "google-workspace-unlimited"
-version = "1.4.0"
+version = "1.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -742,7 +742,7 @@ requires-dist = [
     { name = "colorama", specifier = ">=0.4.6" },
     { name = "fastapi", specifier = ">=0.128.0" },
     { name = "fastembed", specifier = ">=0.7.2" },
-    { name = "fastmcp", extras = ["tasks"], specifier = "==3.0.0b1" },
+    { name = "fastmcp", extras = ["tasks"], specifier = ">=3.0.0b1" },
     { name = "google-api-python-client", specifier = ">=2.168.0" },
     { name = "google-auth-httplib2", specifier = ">=0.2.0" },
     { name = "google-auth-oauthlib", specifier = ">=1.2.2" },

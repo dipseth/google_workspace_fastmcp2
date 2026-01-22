@@ -867,7 +867,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             ),
         ],
         ctx: Context,
-    ) -> CredentialStatusResponse:
+    ) -> str:
         """Get detailed credential status for a specific user's OAuth tokens.
 
         Performs comprehensive credential validation including token expiry checking,
@@ -926,7 +926,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                     authenticated=False,
                     timestamp=datetime.now().isoformat(),
                     error="No stored credentials found for this user",
-                )
+                ).model_dump_json()
 
             status_info = CredentialStatusResponse(
                 email=email,
@@ -960,7 +960,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                         time_remaining.total_seconds() < 3600
                     )  # < 1 hour
 
-            return status_info
+            return status_info.model_dump_json()
 
         except Exception as e:
             logger.error(f"Error checking credentials for {email}: {e}")
@@ -970,7 +970,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 authenticated=False,
                 error=str(e),
                 timestamp=datetime.now().isoformat(),
-            )
+            ).model_dump_json()
 
     @mcp.resource(
         uri="template://user_email",

@@ -7,6 +7,7 @@ This package provides comprehensive Gmail integration tools including:
 - Label management
 - Filter management
 - Allow list management for security
+- UI-enabled tools with rich HTML visualization
 
 The package is organized into logical modules:
 - utils: Utility functions and helpers
@@ -16,6 +17,7 @@ The package is organized into logical modules:
 - labels: Gmail label management tools
 - filters: Gmail filter management tools
 - allowlist: Allow list management for elicitation security
+- ui_tools: MCP Apps (SEP-1865) compliant UI tools
 """
 
 from .allowlist import *
@@ -24,6 +26,7 @@ from .filters import *
 from .labels import *
 from .messages import *
 from .service import *
+from .ui_tools import *
 from .utils import *
 
 __version__ = "1.0.0"
@@ -66,4 +69,6 @@ __all__ = [
     "add_to_gmail_allow_list",
     "remove_from_gmail_allow_list",
     "view_gmail_allow_list",
+    # UI Tools (MCP Apps pattern)
+    "setup_gmail_ui_tools",
 ]

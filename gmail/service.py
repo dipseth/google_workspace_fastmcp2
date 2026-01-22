@@ -124,7 +124,7 @@ def setup_gmail_tools(mcp: FastMCP) -> None:
 
     # Import all Gmail tool modules and call their setup functions
     try:
-        from . import allowlist, compose, filters, labels, messages
+        from . import allowlist, compose, filters, labels, messages, ui_tools
 
         # Call each module's setup function to register their tools
         messages.setup_message_tools(mcp)
@@ -132,6 +132,7 @@ def setup_gmail_tools(mcp: FastMCP) -> None:
         labels.setup_label_tools(mcp)
         filters.setup_filter_tools(mcp)
         allowlist.setup_allowlist_tools(mcp)
+        ui_tools.setup_gmail_ui_tools(mcp)
 
         # Log successful setup
         logger.info("✅ Gmail tools setup completed successfully")
@@ -150,6 +151,9 @@ def setup_gmail_tools(mcp: FastMCP) -> None:
         )
         logger.info(
             "  ✅ Allow list tools: add_to_gmail_allow_list, remove_from_gmail_allow_list, view_gmail_allow_list"
+        )
+        logger.info(
+            "  🖼️  UI tools: search_gmail_ui (MCP Apps pattern)"
         )
 
     except ImportError as e:
