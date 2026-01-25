@@ -5,15 +5,23 @@ This module implements a feedback-driven learning system that:
 1. Stores successful card patterns as "instance_pattern" points in Qdrant
 2. Uses hybrid queries (prefetch + RRF fusion) to find proven patterns
 3. Links feedback to existing component classes via parent_path
+4. Supports dual feedback: content (values) and form (structure)
 
-Architecture:
-- Single collection: card_framework_components_colbert
-- Two named vectors per point:
-  - colbert: Component path embedding (existing)
-  - description_colbert: Card description embedding (new, for instance_patterns)
+Architecture (v7):
+- Single collection: mcp_gchat_cards_v7
+- Three named vectors per point:
+  - components: Component identity (Name + Type + Path + Docstring)
+  - inputs: Parameter values (defaults, enums, instance_params)
+  - relationships: Graph connections (parent-child, NL descriptions)
 - Point types:
-  - "class", "function", "variable": Original module elements
-  - "instance_pattern": NEW - successful usage patterns with feedback
+  - "class", "function", "variable": Module components
+  - "instance_pattern": Successful usage patterns with feedback
+
+Feedback Types:
+- content_feedback: Affects `inputs` vector searches (parameter values, defaults)
+  Example: "The price format was correct" or "Wrong date format used"
+- form_feedback: Affects `relationships` vector searches (card structure, nesting)
+  Example: "Good layout with buttons below text" or "Image should be above title"
 """
 
 import json
@@ -30,6 +38,11 @@ logger = setup_logger()
 # Get collection name from settings (configurable via CARD_COLLECTION env var)
 COLLECTION_NAME = settings.card_collection
 COLBERT_DIM = 128  # ColBERT embedding dimension
+RELATIONSHIPS_DIM = 384  # MiniLM embedding dimension for relationships
+
+# Feedback types
+FEEDBACK_CONTENT = "content"  # Affects inputs vector (values)
+FEEDBACK_FORM = "form"  # Affects relationships vector (structure)
 
 
 class FeedbackLoop:
@@ -37,14 +50,15 @@ class FeedbackLoop:
     Manages the feedback loop for SmartCardBuilder.
 
     Responsibilities:
-    - Initialize description_colbert vector in collection (one-time)
+    - Initialize inputs vector in collection (one-time)
     - Store instance_pattern points when cards get feedback
     - Query with hybrid prefetch + RRF to boost proven patterns
     """
 
     def __init__(self):
         self._client = None
-        self._embedder = None
+        self._embedder = None  # ColBERT for components/inputs
+        self._relationship_embedder = None  # MiniLM for relationships
         self._initialized = False
         self._description_vector_ready = False
 
@@ -73,6 +87,20 @@ class FeedbackLoop:
                 logger.warning(f"Failed to load ColBERT embedder: {e}")
         return self._embedder
 
+    def _get_relationship_embedder(self):
+        """Get MiniLM embedder singleton for relationship vectors."""
+        if self._relationship_embedder is None:
+            try:
+                from fastembed import TextEmbedding
+
+                self._relationship_embedder = TextEmbedding(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
+                logger.info("✅ MiniLM embedder loaded for relationships")
+            except Exception as e:
+                logger.warning(f"Failed to load MiniLM embedder: {e}")
+        return self._relationship_embedder
+
     def _embed_description(self, description: str) -> List[List[float]]:
         """
         Embed a card description using ColBERT.
@@ -93,6 +121,53 @@ class FeedbackLoop:
             logger.warning(f"Failed to embed description: {e}")
             return []
 
+    def _embed_relationships(self, parent_paths: List[str], structure_description: str = "") -> List[float]:
+        """
+        Embed relationship/structure information using MiniLM.
+
+        Creates a text representation of the card structure from parent_paths
+        and optional structure description, then embeds with MiniLM (384d).
+
+        Args:
+            parent_paths: List of component paths used (e.g., ["card_framework.v2.widgets.DecoratedText"])
+            structure_description: Optional natural language description of structure
+
+        Returns:
+            Single 384d vector for relationships
+        """
+        embedder = self._get_relationship_embedder()
+        if not embedder:
+            return [0.0] * RELATIONSHIPS_DIM
+
+        try:
+            # Build structure text from parent_paths
+            # Extract component names and build hierarchy description
+            components = []
+            for path in parent_paths:
+                # Extract class name from full path
+                class_name = path.split(".")[-1]
+                components.append(class_name)
+
+            # Create NL description of structure
+            if components:
+                structure_text = f"Card structure with: {', '.join(components)}"
+                if len(components) > 1:
+                    structure_text += f". Components: {' contains '.join(components)}"
+            else:
+                structure_text = "Empty card structure"
+
+            # Append custom structure description if provided
+            if structure_description:
+                structure_text = f"{structure_text}. {structure_description}"
+
+            # Embed with MiniLM (single vector)
+            vectors_raw = list(embedder.embed([structure_text]))[0]
+            return vectors_raw.tolist()
+
+        except Exception as e:
+            logger.warning(f"Failed to embed relationships: {e}")
+            return [0.0] * RELATIONSHIPS_DIM
+
     def _check_collection_exists(self) -> bool:
         """Check if the collection exists in Qdrant."""
         client = self._get_client()
@@ -108,7 +183,7 @@ class FeedbackLoop:
 
     def _create_collection_with_vectors(self) -> bool:
         """
-        Create the collection with both named vectors (colbert + description_colbert).
+        Create the collection with both named vectors (colbert + inputs).
 
         This enables the collection to store both component embeddings and
         card description embeddings for the feedback loop.
@@ -127,28 +202,36 @@ class FeedbackLoop:
             )
 
             logger.info(f"📦 Creating collection: {COLLECTION_NAME}")
-            logger.info(f"   Named vectors: colbert, description_colbert")
+            logger.info(f"   Named vectors: components, inputs, relationships")
             logger.info(
-                f"   Dimension: {COLBERT_DIM}, Distance: COSINE, Comparator: MAX_SIM"
+                f"   ColBERT ({COLBERT_DIM}d): components, inputs"
+            )
+            logger.info(
+                f"   MiniLM ({RELATIONSHIPS_DIM}d): relationships"
             )
 
-            # Create collection with both named vectors
+            # Create collection with v7 named vectors (all three)
             client.create_collection(
                 collection_name=COLLECTION_NAME,
                 vectors_config={
-                    "colbert": VectorParams(
+                    "components": VectorParams(
                         size=COLBERT_DIM,
                         distance=Distance.COSINE,
                         multivector_config=MultiVectorConfig(
                             comparator=MultiVectorComparator.MAX_SIM
                         ),
                     ),
-                    "description_colbert": VectorParams(
+                    "inputs": VectorParams(
                         size=COLBERT_DIM,
                         distance=Distance.COSINE,
                         multivector_config=MultiVectorConfig(
                             comparator=MultiVectorComparator.MAX_SIM
                         ),
+                    ),
+                    "relationships": VectorParams(
+                        size=RELATIONSHIPS_DIM,
+                        distance=Distance.COSINE,
+                        # Single vector (not multi-vector) for MiniLM
                     ),
                 },
             )
@@ -169,7 +252,22 @@ class FeedbackLoop:
                 field_name="feedback",
                 field_schema=PayloadSchemaType.KEYWORD,
             )
-            logger.info(f"   ✅ Created index on 'feedback' field")
+            logger.info(f"   ✅ Created index on 'feedback' field (legacy)")
+
+            # New dual feedback indexes
+            client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name="content_feedback",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+            logger.info(f"   ✅ Created index on 'content_feedback' field")
+
+            client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name="form_feedback",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+            logger.info(f"   ✅ Created index on 'form_feedback' field")
 
             client.create_payload_index(
                 collection_name=COLLECTION_NAME,
@@ -191,7 +289,7 @@ class FeedbackLoop:
         Migrate module components from a source collection to the new collection.
 
         This copies all non-instance_pattern points (classes, functions, etc.)
-        and adds placeholder description_colbert vectors.
+        and adds placeholder inputs vectors.
 
         Args:
             source_collection: Name of the source collection with indexed module
@@ -262,22 +360,25 @@ class FeedbackLoop:
                 # Convert points for new collection
                 new_points = []
                 for point in results:
-                    # Get existing colbert vectors
-                    colbert_vectors = point.vector
-                    if isinstance(colbert_vectors, dict):
-                        colbert_vectors = colbert_vectors.get("colbert", [])
+                    # Get existing component vectors
+                    component_vectors = point.vector
+                    if isinstance(component_vectors, dict):
+                        component_vectors = component_vectors.get("components", [])
 
-                    if not colbert_vectors:
+                    if not component_vectors:
                         continue
 
-                    # Create placeholder for description_colbert (single zero vector)
-                    placeholder_vector = [[0.0] * COLBERT_DIM]
+                    # Create placeholder for inputs (single zero vector)
+                    placeholder_inputs = [[0.0] * COLBERT_DIM]
+                    # Create placeholder for relationships (single zero vector)
+                    placeholder_relationships = [0.0] * RELATIONSHIPS_DIM
 
                     new_point = PointStruct(
                         id=point.id,
                         vector={
-                            "colbert": colbert_vectors,
-                            "description_colbert": placeholder_vector,
+                            "components": component_vectors,
+                            "inputs": placeholder_inputs,
+                            "relationships": placeholder_relationships,
                         },
                         payload=point.payload,
                     )
@@ -308,7 +409,8 @@ class FeedbackLoop:
         Warm-start the collection with known-good card patterns.
 
         These patterns provide immediate value by boosting queries that match
-        proven card structures from the test suite.
+        proven card structures from the test suite. Includes both content
+        and form feedback.
 
         Returns:
             Number of patterns successfully stored
@@ -326,7 +428,9 @@ class FeedbackLoop:
                     "top_label": "Label",
                     "wrap_text": True,
                 },
-                "feedback": "positive",
+                "content_feedback": "positive",
+                "form_feedback": "positive",
+                "structure_description": "Simple text display with label",
                 "source": "warmstart::decorated_text",
             },
             # Pattern 2: Card with action buttons
@@ -345,7 +449,9 @@ class FeedbackLoop:
                         {"text": "Button 2", "url": "https://example.com/2"},
                     ],
                 },
-                "feedback": "positive",
+                "content_feedback": "positive",
+                "form_feedback": "positive",
+                "structure_description": "Text with button list below for actions",
                 "source": "warmstart::button_list",
             },
             # Pattern 3: Product card with price
@@ -360,7 +466,9 @@ class FeedbackLoop:
                     "top_label": "Price",
                     "buttons": [{"text": "Buy Now", "url": "https://example.com/buy"}],
                 },
-                "feedback": "positive",
+                "content_feedback": "positive",
+                "form_feedback": "positive",
+                "structure_description": "Price display with purchase button",
                 "source": "warmstart::product_card",
             },
             # Pattern 4: Status card with icon
@@ -374,7 +482,9 @@ class FeedbackLoop:
                     "top_label": "Status",
                     "start_icon": {"known_icon": "CONFIRMATION_NUMBER_ICON"},
                 },
-                "feedback": "positive",
+                "content_feedback": "positive",
+                "form_feedback": "positive",
+                "structure_description": "Status indicator with icon",
                 "source": "warmstart::status_card",
             },
         ]
@@ -390,7 +500,9 @@ class FeedbackLoop:
                     card_description=pattern["card_description"],
                     component_paths=pattern["component_paths"],
                     instance_params=pattern["instance_params"],
-                    feedback=pattern["feedback"],
+                    content_feedback=pattern["content_feedback"],
+                    form_feedback=pattern["form_feedback"],
+                    structure_description=pattern.get("structure_description"),
                     user_email="warmstart@system.local",
                     card_id=f"warmstart-{pattern['source'].split('::')[1]}",
                 )
@@ -446,22 +558,32 @@ class FeedbackLoop:
             collection_info = client.get_collection(COLLECTION_NAME)
             vectors_config = collection_info.config.params.vectors
 
-            # Check if description_colbert exists
+            # Check if all required vectors exist
             if isinstance(vectors_config, dict):
-                if "description_colbert" in vectors_config:
-                    logger.debug("✅ description_colbert vector exists in collection")
+                has_inputs = "inputs" in vectors_config
+                has_relationships = "relationships" in vectors_config
+
+                if has_inputs and has_relationships:
+                    logger.debug("✅ inputs and relationships vectors exist in collection")
+                    self._description_vector_ready = True
+                    return True
+                elif has_inputs:
+                    # Legacy v7 without relationships - still usable
+                    logger.warning(
+                        "⚠️ relationships vector not found, form feedback will be limited"
+                    )
                     self._description_vector_ready = True
                     return True
 
             # Vector not found - collection may need migration
             logger.error(
-                f"❌ description_colbert vector not found in {COLLECTION_NAME}. "
+                f"❌ inputs vector not found in {COLLECTION_NAME}. "
                 f"Run: uv run python scripts/migrate_colbert_collection_for_feedback.py"
             )
             return False
 
         except Exception as e:
-            logger.error(f"❌ Failed to verify description_colbert vector: {e}")
+            logger.error(f"❌ Failed to verify inputs vector: {e}")
             return False
 
     def store_instance_pattern(
@@ -469,9 +591,12 @@ class FeedbackLoop:
         card_description: str,
         component_paths: List[str],
         instance_params: Dict[str, Any],
-        feedback: Optional[str] = None,  # "positive", "negative", or None (pending)
+        feedback: Optional[str] = None,  # Legacy: "positive", "negative", or None (pending)
+        content_feedback: Optional[str] = None,  # "positive", "negative", or None
+        form_feedback: Optional[str] = None,  # "positive", "negative", or None
         user_email: Optional[str] = None,
         card_id: Optional[str] = None,
+        structure_description: Optional[str] = None,  # Optional NL description of structure
     ) -> Optional[str]:
         """
         Store a card usage pattern as an instance_pattern point.
@@ -480,45 +605,59 @@ class FeedbackLoop:
             card_description: Original card description text
             component_paths: List of component paths used (e.g., ["card_framework.v2.widgets.decorated_text.DecoratedText"])
             instance_params: Parameters used to instantiate components
-            feedback: "positive", "negative", or None
+            feedback: Legacy combined feedback (for backwards compatibility)
+            content_feedback: Feedback on values/params ("positive", "negative", or None)
+            form_feedback: Feedback on structure/layout ("positive", "negative", or None)
             user_email: User who created the card
             card_id: ID of the card (for linking feedback buttons)
+            structure_description: Optional NL description of card structure for better embedding
 
         Returns:
             Point ID if stored successfully, None on error
         """
         # Ensure the vector exists
         if not self.ensure_description_vector_exists():
-            logger.warning("Cannot store pattern: description_colbert vector not ready")
+            logger.warning("Cannot store pattern: inputs vector not ready")
             return None
 
         client = self._get_client()
         if not client:
             return None
 
-        # Embed the description
+        # Embed the description for inputs vector (content)
         description_vectors = self._embed_description(card_description)
         if not description_vectors:
             logger.warning("Cannot store pattern: failed to embed description")
             return None
 
-        # Get ColBERT vectors from the first component path (to inherit component identity)
-        # For now, we'll use the description vectors for both (simplified)
-        # In a more advanced version, we'd look up the parent class's colbert vectors
-        colbert_vectors = description_vectors  # Simplified: use same vectors
+        # Get ColBERT vectors for component identity
+        # For now, we'll use the description vectors (simplified)
+        colbert_vectors = description_vectors
+
+        # Embed relationships/structure using MiniLM
+        relationship_vector = self._embed_relationships(
+            component_paths,
+            structure_description or ""
+        )
 
         # Generate point ID
         point_id = str(uuid.uuid4())
 
+        # Handle backwards compatibility: if legacy feedback is provided, apply to both
+        if feedback and not content_feedback and not form_feedback:
+            content_feedback = feedback
+            form_feedback = feedback
+
         try:
             from qdrant_client.models import PointStruct
 
-            # Create the point
+            # Create the point with all three v7 vectors
             point = PointStruct(
                 id=point_id,
                 vector={
-                    "colbert": colbert_vectors,
-                    "description_colbert": description_vectors,
+                    "components": colbert_vectors,
+                    "inputs": description_vectors,
+                    "relationships": relationship_vector,
                 },
                 payload={
                     "name": f"instance_pattern_{point_id[:8]}",
@@ -526,9 +665,14 @@ class FeedbackLoop:
                     "parent_paths": component_paths,  # Links to existing class points
                     "instance_params": instance_params,
                     "card_description": card_description,
-                    "feedback": feedback,
+                    # Dual feedback fields
+                    "content_feedback": content_feedback,  # Affects inputs searches
+                    "form_feedback": form_feedback,  # Affects relationships searches
+                    # Legacy field for backwards compatibility
+                    "feedback": feedback or content_feedback,
                     "user_email": user_email,
                     "card_id": card_id,
+                    "structure_description": structure_description,
                     "timestamp": datetime.now().isoformat(),
                 },
             )
@@ -540,7 +684,8 @@ class FeedbackLoop:
             )
 
             logger.info(
-                f"✅ Stored instance_pattern: {point_id[:8]}... (feedback={feedback})"
+                f"✅ Stored instance_pattern: {point_id[:8]}... "
+                f"(content={content_feedback}, form={form_feedback})"
             )
             return point_id
 
@@ -548,19 +693,40 @@ class FeedbackLoop:
             logger.error(f"❌ Failed to store instance_pattern: {e}")
             return None
 
-    def update_feedback(self, card_id: str, feedback: str) -> bool:
+    def update_feedback(
+        self,
+        card_id: str,
+        feedback: Optional[str] = None,  # Legacy combined feedback
+        content_feedback: Optional[str] = None,  # "positive" or "negative" for values
+        form_feedback: Optional[str] = None,  # "positive" or "negative" for structure
+    ) -> bool:
         """
         Update the feedback for an existing instance_pattern point by card_id.
 
+        Supports both legacy single-feedback and new dual-feedback modes:
+        - Legacy: Pass `feedback` to update both content and form
+        - Dual: Pass `content_feedback` and/or `form_feedback` separately
+
         Args:
             card_id: The card_id stored in the pattern's payload
-            feedback: "positive" or "negative"
+            feedback: Legacy combined feedback ("positive" or "negative")
+            content_feedback: Feedback on values/params (affects inputs searches)
+            form_feedback: Feedback on structure/layout (affects relationships searches)
 
         Returns:
             True if updated successfully
         """
         client = self._get_client()
         if not client:
+            return False
+
+        # Handle backwards compatibility
+        if feedback and not content_feedback and not form_feedback:
+            content_feedback = feedback
+            form_feedback = feedback
+
+        if not content_feedback and not form_feedback:
+            logger.warning("No feedback provided to update")
             return False
 
         try:
@@ -589,25 +755,59 @@ class FeedbackLoop:
                 logger.warning(f"⚠️ No pattern found with card_id: {card_id[:8]}...")
                 return False
 
-            point_id = results[0].id
+            point = results[0]
+            point_id = point.id
+            existing_payload = point.payload or {}
 
-            # Update the feedback
+            # Build update payload
+            update_payload = {
+                "feedback_timestamp": datetime.now().isoformat(),
+            }
+
+            # Update content feedback if provided
+            if content_feedback:
+                update_payload["content_feedback"] = content_feedback
+                # Update legacy field for backwards compatibility
+                update_payload["feedback"] = content_feedback
+
+            # Update form feedback if provided
+            if form_feedback:
+                update_payload["form_feedback"] = form_feedback
+
+            # Apply the update
             client.set_payload(
                 collection_name=COLLECTION_NAME,
-                payload={
-                    "feedback": feedback,
-                    "feedback_timestamp": datetime.now().isoformat(),
-                },
+                payload=update_payload,
                 points=[point_id],
             )
 
             logger.info(
-                f"✅ Updated feedback for card {card_id[:8]}... (point {str(point_id)[:8]}...): {feedback}"
+                f"✅ Updated feedback for card {card_id[:8]}... "
+                f"(content={content_feedback}, form={form_feedback})"
             )
 
-            # Check for promotion if positive feedback
-            if feedback == "positive":
-                self._check_and_promote(results[0])
+            # Check for promotion if both feedbacks are positive
+            both_positive = (
+                (content_feedback == "positive" or existing_payload.get("content_feedback") == "positive") and
+                (form_feedback == "positive" or existing_payload.get("form_feedback") == "positive")
+            )
+            if both_positive:
+                # Refresh point payload for promotion check
+                results, _ = client.scroll(
+                    collection_name=COLLECTION_NAME,
+                    scroll_filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="card_id",
+                                match=models.MatchValue(value=card_id),
+                            ),
+                        ]
+                    ),
+                    limit=1,
+                    with_payload=True,
+                )
+                if results:
+                    self._check_and_promote(results[0])
 
             return True
 
@@ -661,11 +861,332 @@ class FeedbackLoop:
             logger.debug(
                 f"Pattern {str(point_id)[:8]}... has {current_count} positive feedbacks"
             )
+
+            # Propagate positive feedback to enrich original components
+            if payload.get("content_feedback") == "positive":
+                self._propagate_positive_feedback_to_components(point)
+
             return False
 
         except Exception as e:
             logger.warning(f"Failed to check promotion: {e}")
             return False
+
+    def _propagate_positive_feedback_to_components(self, instance_pattern_point) -> int:
+        """
+        Enrich original component points with successful input values.
+
+        When an instance_pattern receives positive content_feedback, propagate
+        the successful values back to the original component points. This allows
+        the system to learn over time - components' `inputs` vectors grow to
+        include real-world successful values, not just module defaults.
+
+        Args:
+            instance_pattern_point: The instance_pattern point with positive feedback
+
+        Returns:
+            Number of components enriched
+        """
+        payload = instance_pattern_point.payload
+        parent_paths = payload.get("parent_paths", [])
+        instance_params = payload.get("instance_params", {})
+        card_description = payload.get("card_description", "")
+
+        if not parent_paths or not instance_params:
+            logger.debug("No parent_paths or instance_params to propagate")
+            return 0
+
+        enriched_count = 0
+        client = self._get_client()
+        if not client:
+            return 0
+
+        for path in parent_paths:
+            # Extract component name from path
+            component_name = path.split(".")[-1] if "." in path else path
+
+            # Find the original component point
+            component_point = self._find_component_by_path(path)
+            if not component_point:
+                logger.debug(f"Could not find component point for {path}")
+                continue
+
+            # Get the params used for this component
+            # instance_params might be keyed by component name or full path
+            component_params = instance_params.get(component_name, {})
+            if not component_params:
+                component_params = instance_params.get(path, {})
+            if not component_params:
+                # Try to find params that look like they belong to this component
+                for key, val in instance_params.items():
+                    if component_name.lower() in key.lower():
+                        component_params = val if isinstance(val, dict) else {key: val}
+                        break
+
+            if not component_params:
+                continue
+
+            # Update the component's inputs vector and metadata
+            success = self._update_component_with_example(
+                component_point,
+                component_params,
+                card_description,
+            )
+            if success:
+                enriched_count += 1
+
+        if enriched_count > 0:
+            logger.info(
+                f"✅ Propagated positive feedback to {enriched_count} component(s)"
+            )
+
+        return enriched_count
+
+    def _find_component_by_path(self, path: str):
+        """
+        Find a component point by its full path.
+
+        Args:
+            path: Full component path (e.g., "card_framework.v2.widgets.DecoratedText")
+
+        Returns:
+            Qdrant point or None
+        """
+        client = self._get_client()
+        if not client:
+            return None
+
+        try:
+            from qdrant_client import models
+
+            # Search by full_path in payload
+            results, _ = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="full_path",
+                            match=models.MatchValue(value=path),
+                        ),
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="class"),
+                        ),
+                    ]
+                ),
+                limit=1,
+                with_payload=True,
+                with_vectors=True,
+            )
+
+            if results:
+                return results[0]
+
+            # Fallback: try searching by name
+            component_name = path.split(".")[-1] if "." in path else path
+            results, _ = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="name",
+                            match=models.MatchValue(value=component_name),
+                        ),
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="class"),
+                        ),
+                    ]
+                ),
+                limit=1,
+                with_payload=True,
+                with_vectors=True,
+            )
+
+            return results[0] if results else None
+
+        except Exception as e:
+            logger.debug(f"Error finding component {path}: {e}")
+            return None
+
+    def _update_component_with_example(
+        self,
+        component_point,
+        example_params: Dict[str, Any],
+        description: str,
+    ) -> bool:
+        """
+        Update a component point with example parameters from positive feedback.
+
+        This method:
+        1. Adds example_params to the component's metadata
+        2. Updates the component's `inputs` vector to include the new values
+
+        Args:
+            component_point: The original component's Qdrant point
+            example_params: Parameters that were used successfully
+            description: The card description (for context)
+
+        Returns:
+            True if updated successfully
+        """
+        client = self._get_client()
+        if not client:
+            return False
+
+        point_id = component_point.id
+        payload = component_point.payload or {}
+        component_name = payload.get("name", "unknown")
+
+        try:
+            # 1. Update metadata with example_params
+            existing_examples = payload.get("example_params", [])
+            if not isinstance(existing_examples, list):
+                existing_examples = []
+
+            # Add new example (avoid duplicates by checking param keys)
+            example_entry = {
+                "params": example_params,
+                "description": description[:100],
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            # Check for duplicate (same param keys and values)
+            is_duplicate = any(
+                ex.get("params") == example_params for ex in existing_examples
+            )
+
+            if not is_duplicate:
+                existing_examples.append(example_entry)
+                # Keep only last 10 examples to avoid unbounded growth
+                existing_examples = existing_examples[-10:]
+
+                # 2. Update the inputs vector with new values
+                # Build text from example params for embedding
+                params_text = self._format_params_for_embedding(example_params)
+                if params_text:
+                    new_inputs_vector = self._embed_description(params_text)
+
+                    if new_inputs_vector:
+                        # Get existing inputs vector
+                        existing_vectors = component_point.vector or {}
+                        existing_inputs = existing_vectors.get("inputs", [])
+
+                        # Merge vectors: average the embeddings
+                        # This gradually shifts the vector toward successful values
+                        merged_inputs = self._merge_input_vectors(
+                            existing_inputs, new_inputs_vector
+                        )
+
+                        # Update both payload and vector
+                        from qdrant_client.models import PointVectors
+
+                        client.set_payload(
+                            collection_name=COLLECTION_NAME,
+                            payload={
+                                "example_params": existing_examples,
+                                "last_enriched": datetime.now().isoformat(),
+                                "enrichment_count": payload.get("enrichment_count", 0) + 1,
+                            },
+                            points=[point_id],
+                        )
+
+                        # Update the inputs vector
+                        client.update_vectors(
+                            collection_name=COLLECTION_NAME,
+                            points=[
+                                PointVectors(
+                                    id=point_id,
+                                    vector={"inputs": merged_inputs},
+                                )
+                            ],
+                        )
+
+                        logger.debug(
+                            f"✅ Enriched {component_name} with example params "
+                            f"(total examples: {len(existing_examples)})"
+                        )
+                        return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Failed to update component {component_name}: {e}")
+            return False
+
+    def _format_params_for_embedding(self, params: Dict[str, Any]) -> str:
+        """
+        Format parameters as text for ColBERT embedding.
+
+        Args:
+            params: Dictionary of parameter names to values
+
+        Returns:
+            Text representation suitable for embedding
+        """
+        parts = []
+        for key, value in params.items():
+            if value is not None:
+                # Handle different value types
+                if isinstance(value, str):
+                    parts.append(f"{key}={value}")
+                elif isinstance(value, (int, float, bool)):
+                    parts.append(f"{key}={value}")
+                elif isinstance(value, dict):
+                    # Nested dict - flatten key parts
+                    for k, v in value.items():
+                        if v is not None:
+                            parts.append(f"{key}.{k}={v}")
+                elif isinstance(value, list):
+                    parts.append(f"{key}=[{len(value)} items]")
+
+        return ", ".join(parts) if parts else ""
+
+    def _merge_input_vectors(
+        self,
+        existing: List[float],
+        new: List[float],
+        learning_rate: float = 0.3,
+    ) -> List[float]:
+        """
+        Merge existing inputs vector with new example vector.
+
+        Uses exponential moving average to gradually incorporate new values
+        while preserving learned patterns from previous examples.
+
+        Args:
+            existing: Current inputs vector
+            new: New vector from positive feedback
+            learning_rate: How much weight to give new vector (0.0-1.0)
+                          Higher = faster learning, more volatile
+                          Lower = slower learning, more stable
+
+        Returns:
+            Merged vector
+        """
+        if not existing or len(existing) == 0:
+            return new
+
+        if not new or len(new) == 0:
+            return existing
+
+        # Handle ColBERT multi-vector format (list of lists)
+        if isinstance(existing[0], list) and isinstance(new[0], list):
+            # Multi-vector: merge each sub-vector
+            merged = []
+            for i in range(min(len(existing), len(new))):
+                merged_sub = [
+                    (1 - learning_rate) * e + learning_rate * n
+                    for e, n in zip(existing[i], new[i])
+                ]
+                merged.append(merged_sub)
+            return merged
+        else:
+            # Single vector: simple weighted average
+            return [
+                (1 - learning_rate) * e + learning_rate * n
+                for e, n in zip(existing, new)
+            ]
 
     def _promote_to_template(
         self, point_id: str, payload: Dict[str, Any], count: int
@@ -817,29 +1338,34 @@ class FeedbackLoop:
         self,
         component_query: str,
         description: str,
+        component_paths: Optional[List[str]] = None,
         limit: int = 10,
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        use_negative_feedback: bool = True,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Hybrid query: Find components + boost with proven patterns.
+        Hybrid query: Find components + boost with proven patterns (content + form).
 
         Uses prefetch + RRF fusion to:
-        1. Find component classes by path (normal ColBERT search)
-        2. Find successful patterns by description similarity
-        3. Fuse results with RRF
+        1. Find component classes by path (normal ColBERT search on 'components')
+        2. Find successful patterns by description (positive content_feedback on 'inputs')
+        3. Find successful patterns by structure (positive form_feedback on 'relationships')
+        4. Fuse results with RRF, then demote components associated with negatives
 
         Args:
             component_query: Query for component search (e.g., "v2.widgets.decorated_text.DecoratedText class")
-            description: Card description for pattern matching
+            description: Card description for content pattern matching
+            component_paths: Optional list of component paths for structure pattern matching
             limit: Max results
+            use_negative_feedback: Whether to incorporate negative patterns (default True)
 
         Returns:
-            Tuple of (class_results, pattern_results)
+            Tuple of (class_results, content_pattern_results, form_pattern_results)
         """
         client = self._get_client()
         embedder = self._get_embedder()
 
         if not client or not embedder:
-            return [], []
+            return [], [], []
 
         try:
             from qdrant_client import models
@@ -848,35 +1374,63 @@ class FeedbackLoop:
             component_vectors_raw = list(embedder.query_embed(component_query))[0]
             component_vectors = [vec.tolist() for vec in component_vectors_raw]
 
-            # Embed description
+            # Embed description for content (inputs) search
             description_vectors = self._embed_description(description)
 
             if not description_vectors:
                 # Fallback to simple component search
-                return self._simple_component_search(component_vectors, limit), []
+                return self._simple_component_search(component_vectors, limit), [], []
 
-            # Hybrid query with prefetch + RRF using proper Qdrant models
-            results = client.query_points(
-                collection_name=COLLECTION_NAME,
-                prefetch=[
-                    # Prefetch 1: Component classes by path
-                    models.Prefetch(
-                        query=component_vectors,
-                        using="colbert",
-                        filter=models.Filter(
-                            must=[
-                                models.FieldCondition(
-                                    key="type",
-                                    match=models.MatchValue(value="class"),
-                                )
-                            ]
-                        ),
-                        limit=limit * 2,
+            # Build prefetch list
+            prefetch_list = [
+                # Prefetch 1: Component classes by path (v7 components vector)
+                models.Prefetch(
+                    query=component_vectors,
+                    using="components",
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="type",
+                                match=models.MatchValue(value="class"),
+                            )
+                        ]
                     ),
-                    # Prefetch 2: Successful patterns by description
+                    limit=limit * 2,
+                ),
+                # Prefetch 2: Successful patterns by content (positive content_feedback)
+                models.Prefetch(
+                    query=description_vectors,
+                    using="inputs",
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="type",
+                                match=models.MatchValue(value="instance_pattern"),
+                            ),
+                            models.FieldCondition(
+                                key="content_feedback",
+                                match=models.MatchValue(value="positive"),
+                            ),
+                        ]
+                    ),
+                    limit=limit,
+                ),
+            ]
+
+            # Prefetch 3: Patterns by form/structure (positive form_feedback)
+            # Only add if we have component paths to build relationship embedding
+            relationship_vector = None
+            if component_paths:
+                relationship_vector = self._embed_relationships(component_paths)
+            else:
+                # Try to infer structure from description
+                relationship_vector = self._embed_relationships([], description)
+
+            if relationship_vector and relationship_vector != [0.0] * RELATIONSHIPS_DIM:
+                prefetch_list.append(
                     models.Prefetch(
-                        query=description_vectors,
-                        using="description_colbert",
+                        query=relationship_vector,
+                        using="relationships",
                         filter=models.Filter(
                             must=[
                                 models.FieldCondition(
@@ -884,22 +1438,28 @@ class FeedbackLoop:
                                     match=models.MatchValue(value="instance_pattern"),
                                 ),
                                 models.FieldCondition(
-                                    key="feedback",
+                                    key="form_feedback",
                                     match=models.MatchValue(value="positive"),
                                 ),
                             ]
                         ),
                         limit=limit,
-                    ),
-                ],
+                    )
+                )
+
+            # Hybrid query with prefetch + RRF using proper Qdrant models
+            results = client.query_points(
+                collection_name=COLLECTION_NAME,
+                prefetch=prefetch_list,
                 query=models.FusionQuery(fusion=models.Fusion.RRF),
-                limit=limit,
+                limit=limit * 3,  # Fetch more to allow for separation and demotion
                 with_payload=True,
             )
 
-            # Separate results by type
+            # Separate results by type and feedback source
             class_results = []
-            pattern_results = []
+            content_pattern_results = []
+            form_pattern_results = []
 
             for point in results.points:
                 result = {
@@ -909,16 +1469,50 @@ class FeedbackLoop:
                 }
 
                 if point.payload.get("type") == "instance_pattern":
-                    pattern_results.append(result)
+                    # Categorize by which feedback is positive
+                    content_fb = point.payload.get("content_feedback")
+                    form_fb = point.payload.get("form_feedback")
+
+                    if content_fb == "positive":
+                        content_pattern_results.append(result)
+                    if form_fb == "positive":
+                        form_pattern_results.append(result)
+                    # If neither is explicitly positive, add to content by default
+                    if content_fb != "positive" and form_fb != "positive":
+                        # Check legacy feedback field
+                        if point.payload.get("feedback") == "positive":
+                            content_pattern_results.append(result)
                 else:
                     class_results.append(result)
 
-            logger.info(
-                f"🔍 Hybrid query: {len(class_results)} classes, "
-                f"{len(pattern_results)} patterns (feedback-boosted)"
-            )
+            # Apply negative feedback demotion if enabled (for both content and form)
+            if use_negative_feedback:
+                class_results, negative_content_count = self._apply_negative_demotion(
+                    class_results, description_vectors, limit, feedback_type="content"
+                )
+                # Also apply form-based demotion if we have relationship vector
+                negative_form_count = 0
+                if relationship_vector and relationship_vector != [0.0] * RELATIONSHIPS_DIM:
+                    class_results, negative_form_count = self._apply_negative_demotion_form(
+                        class_results, relationship_vector, limit
+                    )
 
-            return class_results, pattern_results
+                logger.info(
+                    f"🔍 Hybrid query: {len(class_results)} classes, "
+                    f"{len(content_pattern_results)} content patterns (+), "
+                    f"{len(form_pattern_results)} form patterns (+), "
+                    f"{negative_content_count} content negatives, "
+                    f"{negative_form_count} form negatives applied"
+                )
+            else:
+                class_results = class_results[:limit]
+                logger.info(
+                    f"🔍 Hybrid query: {len(class_results)} classes, "
+                    f"{len(content_pattern_results)} content patterns, "
+                    f"{len(form_pattern_results)} form patterns"
+                )
+
+            return class_results, content_pattern_results, form_pattern_results
 
         except Exception as e:
             logger.error(f"❌ Hybrid query failed: {e}")
@@ -928,7 +1522,183 @@ class FeedbackLoop:
                     self._embed_description(component_query) or [], limit
                 ),
                 [],
+                [],
             )
+
+    def _apply_negative_demotion(
+        self,
+        class_results: List[Dict[str, Any]],
+        description_vectors: List[List[float]],
+        limit: int,
+        demotion_factor: float = 0.5,
+        feedback_type: str = "content",
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Demote class results associated with negative content feedback patterns.
+
+        This finds negative patterns similar to the description, extracts their
+        parent_paths (component classes used), and demotes those classes in
+        the results.
+
+        Args:
+            class_results: Initial class results from RRF fusion
+            description_vectors: Embedded description vectors
+            limit: Final result limit
+            demotion_factor: Score multiplier for demoted results (0.5 = 50% penalty)
+            feedback_type: "content" to filter by content_feedback field
+
+        Returns:
+            Tuple of (demoted_results, negative_pattern_count)
+        """
+        client = self._get_client()
+        if not client or not description_vectors:
+            return class_results[:limit], 0
+
+        try:
+            from qdrant_client import models
+
+            # Determine feedback field based on type
+            feedback_field = "content_feedback" if feedback_type == "content" else "feedback"
+
+            # Find negative patterns similar to this description
+            negative_results = client.query_points(
+                collection_name=COLLECTION_NAME,
+                query=description_vectors,
+                using="inputs",
+                query_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="instance_pattern"),
+                        ),
+                        models.FieldCondition(
+                            key=feedback_field,
+                            match=models.MatchValue(value="negative"),
+                        ),
+                    ]
+                ),
+                limit=10,
+                with_payload=True,
+                score_threshold=0.3,
+            )
+
+            if not negative_results.points:
+                return class_results[:limit], 0
+
+            # Extract parent_paths from negative patterns - these are components to avoid
+            negative_paths = set()
+            for point in negative_results.points:
+                parent_paths = point.payload.get("parent_paths", [])
+                negative_paths.update(parent_paths)
+
+            if not negative_paths:
+                return class_results[:limit], len(negative_results.points)
+
+            logger.debug(
+                f"🚫 Found {len(negative_paths)} component paths from "
+                f"{len(negative_results.points)} negative content patterns"
+            )
+
+            # Demote classes that match negative patterns
+            for result in class_results:
+                full_path = result.get("full_path", "")
+                if any(neg_path in full_path for neg_path in negative_paths):
+                    result["score"] *= demotion_factor
+                    result["_demoted_by_negative_content"] = True
+                    logger.debug(f"📉 Demoted (content): {full_path}")
+
+            # Re-sort by adjusted score and limit
+            class_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            return class_results[:limit], len(negative_results.points)
+
+        except Exception as e:
+            logger.error(f"Negative content demotion failed: {e}")
+            return class_results[:limit], 0
+
+    def _apply_negative_demotion_form(
+        self,
+        class_results: List[Dict[str, Any]],
+        relationship_vector: List[float],
+        limit: int,
+        demotion_factor: float = 0.5,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Demote class results associated with negative form/structure feedback.
+
+        This finds negative patterns with similar structure (relationships vector),
+        extracts their parent_paths, and demotes those classes.
+
+        Args:
+            class_results: Class results (potentially already demoted by content)
+            relationship_vector: 384d MiniLM embedding of structure
+            limit: Final result limit
+            demotion_factor: Score multiplier for demoted results (0.5 = 50% penalty)
+
+        Returns:
+            Tuple of (demoted_results, negative_pattern_count)
+        """
+        client = self._get_client()
+        if not client or not relationship_vector:
+            return class_results[:limit], 0
+
+        try:
+            from qdrant_client import models
+
+            # Find negative patterns with similar structure
+            negative_results = client.query_points(
+                collection_name=COLLECTION_NAME,
+                query=relationship_vector,
+                using="relationships",
+                query_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="instance_pattern"),
+                        ),
+                        models.FieldCondition(
+                            key="form_feedback",
+                            match=models.MatchValue(value="negative"),
+                        ),
+                    ]
+                ),
+                limit=10,
+                with_payload=True,
+                score_threshold=0.3,
+            )
+
+            if not negative_results.points:
+                return class_results[:limit], 0
+
+            # Extract parent_paths from negative patterns - these structures to avoid
+            negative_paths = set()
+            for point in negative_results.points:
+                parent_paths = point.payload.get("parent_paths", [])
+                negative_paths.update(parent_paths)
+
+            if not negative_paths:
+                return class_results[:limit], len(negative_results.points)
+
+            logger.debug(
+                f"🚫 Found {len(negative_paths)} component paths from "
+                f"{len(negative_results.points)} negative form patterns"
+            )
+
+            # Demote classes that match negative patterns
+            for result in class_results:
+                full_path = result.get("full_path", "")
+                if any(neg_path in full_path for neg_path in negative_paths):
+                    # Apply additional demotion (compounds with content demotion)
+                    result["score"] *= demotion_factor
+                    result["_demoted_by_negative_form"] = True
+                    logger.debug(f"📉 Demoted (form): {full_path}")
+
+            # Re-sort by adjusted score and limit
+            class_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            return class_results[:limit], len(negative_results.points)
+
+        except Exception as e:
+            logger.error(f"Negative form demotion failed: {e}")
+            return class_results[:limit], 0
 
     def _simple_component_search(
         self, vectors: List[List[float]], limit: int
@@ -944,7 +1714,7 @@ class FeedbackLoop:
             results = client.query_points(
                 collection_name=COLLECTION_NAME,
                 query=vectors,
-                using="colbert",
+                using="components",  # v7 identity vector
                 query_filter=models.Filter(
                     must=[
                         models.FieldCondition(
@@ -962,21 +1732,396 @@ class FeedbackLoop:
             logger.error(f"Simple search failed: {e}")
             return []
 
+    def _find_feedback_pattern_ids(
+        self,
+        description: str,
+        limit: int = 10,
+        min_score: float = 0.3,
+        feedback_type: str = "content",
+    ) -> Tuple[List[str], List[str]]:
+        """
+        Find positive and negative pattern point IDs to use as examples.
+
+        Uses scroll to get ALL patterns with feedback, then lets the recommend
+        API handle similarity ranking. No payload-based filtering for scoring -
+        we just need to identify which points have positive vs negative feedback.
+
+        Args:
+            description: Card description (unused - keeping for API compatibility)
+            limit: Max patterns per feedback type to use as examples
+            min_score: Unused - keeping for API compatibility
+            feedback_type: "content" or "form" - determines which feedback field to use
+
+        Returns:
+            Tuple of (positive_ids, negative_ids) - point IDs to use as examples
+        """
+        client = self._get_client()
+        if not client:
+            return [], []
+
+        # Determine which feedback field to check
+        feedback_field = "content_feedback" if feedback_type == "content" else "form_feedback"
+
+        positive_ids = []
+        negative_ids = []
+
+        try:
+            from qdrant_client import models
+
+            # Scroll to get positive feedback point IDs
+            # This just identifies WHICH points have positive feedback
+            # The recommend API will handle the actual similarity ranking
+            positive_results, _ = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="instance_pattern"),
+                        ),
+                        models.FieldCondition(
+                            key=feedback_field,
+                            match=models.MatchValue(value="positive"),
+                        ),
+                    ]
+                ),
+                limit=limit,
+                with_payload=False,  # We only need IDs
+            )
+            positive_ids = [str(p.id) for p in positive_results]
+
+            # Scroll to get negative feedback point IDs
+            negative_results, _ = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="instance_pattern"),
+                        ),
+                        models.FieldCondition(
+                            key=feedback_field,
+                            match=models.MatchValue(value="negative"),
+                        ),
+                    ]
+                ),
+                limit=limit,
+                with_payload=False,  # We only need IDs
+            )
+            negative_ids = [str(p.id) for p in negative_results]
+
+            logger.info(
+                f"🔍 {feedback_type.title()} feedback examples: "
+                f"{len(positive_ids)} positive, {len(negative_ids)} negative"
+            )
+
+            return positive_ids, negative_ids
+
+        except Exception as e:
+            logger.error(f"Failed to find {feedback_type} feedback pattern IDs: {e}")
+            return [], []
+
+    def recommend_components_with_feedback(
+        self,
+        description: str,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Use Qdrant's recommend API with positive/negative examples.
+
+        This leverages user feedback to boost results similar to
+        positively-rated patterns and demote those similar to
+        negatively-rated patterns.
+
+        Args:
+            description: Card description for matching
+            limit: Max results to return
+
+        Returns:
+            List of recommended component results
+        """
+        client = self._get_client()
+        if not client:
+            return []
+
+        # Find positive and negative pattern IDs
+        positive_ids, negative_ids = self._find_feedback_pattern_ids(description)
+
+        # If no feedback patterns found, fall back to regular search
+        if not positive_ids and not negative_ids:
+            logger.info("📝 No feedback patterns found, using standard search")
+            description_vectors = self._embed_description(description)
+            return self._simple_component_search(description_vectors, limit)
+
+        try:
+            from qdrant_client import models
+
+            # Use recommend API with positive and negative examples
+            # This natively supports the "like this, not like that" pattern
+            results = client.recommend(
+                collection_name=COLLECTION_NAME,
+                positive=positive_ids if positive_ids else None,
+                negative=negative_ids if negative_ids else None,
+                using="inputs",
+                query_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="class"),
+                        )
+                    ]
+                ),
+                limit=limit,
+                with_payload=True,
+                strategy=models.RecommendStrategy.AVERAGE_VECTOR,
+            )
+
+            logger.info(
+                f"✅ Recommend with feedback: {len(results)} results "
+                f"(+{len(positive_ids)}/-{len(negative_ids)} examples)"
+            )
+
+            return [
+                {"id": p.id, "score": p.score, **p.payload}
+                for p in results
+            ]
+
+        except Exception as e:
+            logger.error(f"Recommend with feedback failed: {e}")
+            # Fallback to simple search
+            description_vectors = self._embed_description(description)
+            return self._simple_component_search(description_vectors, limit)
+
+    def query_patterns_with_recommend(
+        self,
+        description: str,
+        component_paths: Optional[List[str]] = None,
+        limit: int = 10,
+        strategy: str = "best_score",
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Query for patterns using Qdrant's recommend API with point IDs as examples.
+
+        This is the preferred method for feedback-aware searches. Instead of filtering
+        by feedback payload fields, it uses actual point IDs as positive/negative
+        examples, letting Qdrant natively handle similarity math.
+
+        Uses two separate recommend queries:
+        1. Content query: Uses `inputs` vector with content feedback point IDs
+        2. Form query: Uses `relationships` vector with form feedback point IDs
+
+        Args:
+            description: Card description for matching
+            component_paths: Optional component paths for relationship embedding
+            limit: Max results per query
+            strategy: "best_score" (default, more diverse) or "average_vector" (faster)
+
+        Returns:
+            Tuple of (content_pattern_results, form_pattern_results)
+        """
+        client = self._get_client()
+        if not client:
+            return [], []
+
+        try:
+            from qdrant_client import models
+
+            # Determine strategy
+            recommend_strategy = (
+                models.RecommendStrategy.BEST_SCORE
+                if strategy == "best_score"
+                else models.RecommendStrategy.AVERAGE_VECTOR
+            )
+
+            content_results = []
+            form_results = []
+
+            # =========================================================
+            # CONTENT FEEDBACK: Query using inputs vector
+            # =========================================================
+            content_pos_ids, content_neg_ids = self._find_feedback_pattern_ids(
+                description, feedback_type="content"
+            )
+
+            if content_pos_ids or content_neg_ids:
+                logger.info(
+                    f"🔍 Content recommend: +{len(content_pos_ids)} / -{len(content_neg_ids)} examples"
+                )
+
+                # Build recommend input - can use point IDs directly
+                recommend_input = models.RecommendInput(
+                    positive=content_pos_ids if content_pos_ids else None,
+                    negative=content_neg_ids if content_neg_ids else None,
+                    strategy=recommend_strategy,
+                )
+
+                # Query for instance_patterns similar to positive, dissimilar to negative
+                content_query_results = client.query_points(
+                    collection_name=COLLECTION_NAME,
+                    query=models.RecommendQuery(recommend=recommend_input),
+                    using="inputs",
+                    query_filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="type",
+                                match=models.MatchValue(value="instance_pattern"),
+                            )
+                        ]
+                    ),
+                    limit=limit,
+                    with_payload=True,
+                )
+
+                content_results = [
+                    {"id": p.id, "score": p.score, **(p.payload or {})}
+                    for p in content_query_results.points
+                ]
+                logger.info(f"✅ Content recommend returned {len(content_results)} patterns")
+
+            # =========================================================
+            # FORM FEEDBACK: Query using relationships vector
+            # =========================================================
+            form_pos_ids, form_neg_ids = self._find_feedback_pattern_ids(
+                description, feedback_type="form"
+            )
+
+            if form_pos_ids or form_neg_ids:
+                logger.info(
+                    f"🔍 Form recommend: +{len(form_pos_ids)} / -{len(form_neg_ids)} examples"
+                )
+
+                recommend_input = models.RecommendInput(
+                    positive=form_pos_ids if form_pos_ids else None,
+                    negative=form_neg_ids if form_neg_ids else None,
+                    strategy=recommend_strategy,
+                )
+
+                form_query_results = client.query_points(
+                    collection_name=COLLECTION_NAME,
+                    query=models.RecommendQuery(recommend=recommend_input),
+                    using="relationships",
+                    query_filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="type",
+                                match=models.MatchValue(value="instance_pattern"),
+                            )
+                        ]
+                    ),
+                    limit=limit,
+                    with_payload=True,
+                )
+
+                form_results = [
+                    {"id": p.id, "score": p.score, **(p.payload or {})}
+                    for p in form_query_results.points
+                ]
+                logger.info(f"✅ Form recommend returned {len(form_results)} patterns")
+
+            # If no feedback examples found, fall back to vector search
+            if not content_results and not form_results:
+                logger.info("📝 No feedback examples found, falling back to vector search")
+                return self._fallback_vector_search(description, component_paths, limit)
+
+            return content_results, form_results
+
+        except Exception as e:
+            logger.error(f"❌ Recommend query failed: {e}, falling back to vector search")
+            return self._fallback_vector_search(description, component_paths, limit)
+
+    def _fallback_vector_search(
+        self,
+        description: str,
+        component_paths: Optional[List[str]] = None,
+        limit: int = 10,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Fallback to standard vector search when recommend API can't be used.
+
+        Returns:
+            Tuple of (content_results, form_results) from vector similarity search
+        """
+        client = self._get_client()
+        if not client:
+            return [], []
+
+        try:
+            from qdrant_client import models
+
+            content_results = []
+            form_results = []
+
+            # Search inputs vector with description embedding
+            description_vectors = self._embed_description(description)
+            if description_vectors:
+                content_query = client.query_points(
+                    collection_name=COLLECTION_NAME,
+                    query=description_vectors,
+                    using="inputs",
+                    query_filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="type",
+                                match=models.MatchValue(value="instance_pattern"),
+                            )
+                        ]
+                    ),
+                    limit=limit,
+                    with_payload=True,
+                )
+                content_results = [
+                    {"id": p.id, "score": p.score, **(p.payload or {})}
+                    for p in content_query.points
+                ]
+
+            # Search relationships vector
+            relationship_vector = self._embed_relationships(component_paths or [], description)
+            if relationship_vector and relationship_vector != [0.0] * RELATIONSHIPS_DIM:
+                form_query = client.query_points(
+                    collection_name=COLLECTION_NAME,
+                    query=relationship_vector,
+                    using="relationships",
+                    query_filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="type",
+                                match=models.MatchValue(value="instance_pattern"),
+                            )
+                        ]
+                    ),
+                    limit=limit,
+                    with_payload=True,
+                )
+                form_results = [
+                    {"id": p.id, "score": p.score, **(p.payload or {})}
+                    for p in form_query.points
+                ]
+
+            return content_results, form_results
+
+        except Exception as e:
+            logger.error(f"Fallback vector search failed: {e}")
+            return [], []
+
     def get_proven_params_for_description(
         self,
         description: str,
         min_score: float = 0.5,
+        check_negative: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
         Find proven instance_params for a similar description.
 
         This is a convenience method that:
         1. Searches for similar positive patterns
-        2. Returns the instance_params from the best match
+        2. Checks for similar negative patterns (optional)
+        3. Only returns params if positive score > negative score
+        4. Returns the instance_params from the best match
 
         Args:
             description: Card description to match
             min_score: Minimum similarity score
+            check_negative: If True, check negative patterns and skip if they score higher
 
         Returns:
             instance_params dict if found, None otherwise
@@ -992,10 +2137,11 @@ class FeedbackLoop:
         try:
             from qdrant_client import models
 
-            results = client.query_points(
+            # Query for positive patterns
+            positive_results = client.query_points(
                 collection_name=COLLECTION_NAME,
                 query=description_vectors,
-                using="description_colbert",
+                using="inputs",
                 query_filter=models.Filter(
                     must=[
                         models.FieldCondition(
@@ -1013,19 +2159,213 @@ class FeedbackLoop:
                 score_threshold=min_score,
             )
 
-            if results.points:
-                best = results.points[0]
-                logger.info(
-                    f"✅ Found proven pattern (score={best.score:.3f}): "
-                    f"{best.payload.get('card_description', '')[:50]}..."
-                )
-                return best.payload.get("instance_params")
+            if not positive_results.points:
+                return None
 
-            return None
+            best_positive = positive_results.points[0]
+            positive_score = best_positive.score
+
+            # Check for negative patterns if enabled
+            if check_negative:
+                negative_results = client.query_points(
+                    collection_name=COLLECTION_NAME,
+                    query=description_vectors,
+                    using="inputs",
+                    query_filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="type",
+                                match=models.MatchValue(value="instance_pattern"),
+                            ),
+                            models.FieldCondition(
+                                key="feedback",
+                                match=models.MatchValue(value="negative"),
+                            ),
+                        ]
+                    ),
+                    limit=1,
+                    with_payload=True,
+                    score_threshold=min_score,
+                )
+
+                if negative_results.points:
+                    best_negative = negative_results.points[0]
+                    negative_score = best_negative.score
+
+                    # If negative pattern is more similar, skip proven params
+                    if negative_score >= positive_score:
+                        logger.warning(
+                            f"⚠️ Negative pattern ({negative_score:.3f}) >= "
+                            f"positive ({positive_score:.3f}), skipping proven params"
+                        )
+                        return None
+
+                    logger.info(
+                        f"✅ Positive ({positive_score:.3f}) beats "
+                        f"negative ({negative_score:.3f})"
+                    )
+
+            logger.info(
+                f"✅ Found proven pattern (score={positive_score:.3f}): "
+                f"{best_positive.payload.get('card_description', '')[:50]}..."
+            )
+            return best_positive.payload.get("instance_params")
 
         except Exception as e:
             logger.error(f"Pattern lookup failed: {e}")
             return None
+
+    def get_feedback_stats(self, description: str = None) -> Dict[str, Any]:
+        """
+        Get statistics about feedback patterns, optionally filtered by description similarity.
+
+        Returns counts and samples for both content and form feedback types.
+
+        Args:
+            description: Optional description to find relevant patterns
+
+        Returns:
+            Dict with content_feedback and form_feedback stats
+        """
+        client = self._get_client()
+        if not client:
+            return {
+                "content": {"positive_count": 0, "negative_count": 0},
+                "form": {"positive_count": 0, "negative_count": 0},
+                "error": "No client"
+            }
+
+        try:
+            from qdrant_client import models
+
+            stats = {
+                "content": {
+                    "positive_count": 0,
+                    "negative_count": 0,
+                    "positive_samples": [],
+                    "negative_samples": [],
+                },
+                "form": {
+                    "positive_count": 0,
+                    "negative_count": 0,
+                    "positive_samples": [],
+                    "negative_samples": [],
+                },
+                # Legacy totals for backwards compatibility
+                "positive_count": 0,
+                "negative_count": 0,
+            }
+
+            # Count patterns by feedback type for both content and form
+            for feedback_category in ["content", "form"]:
+                feedback_field = f"{feedback_category}_feedback"
+                for feedback_value in ["positive", "negative"]:
+                    count_result = client.count(
+                        collection_name=COLLECTION_NAME,
+                        count_filter=models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="type",
+                                    match=models.MatchValue(value="instance_pattern"),
+                                ),
+                                models.FieldCondition(
+                                    key=feedback_field,
+                                    match=models.MatchValue(value=feedback_value),
+                                ),
+                            ]
+                        ),
+                    )
+                    stats[feedback_category][f"{feedback_value}_count"] = count_result.count
+
+            # Calculate legacy totals (max of content/form for each)
+            stats["positive_count"] = max(
+                stats["content"]["positive_count"],
+                stats["form"]["positive_count"]
+            )
+            stats["negative_count"] = max(
+                stats["content"]["negative_count"],
+                stats["form"]["negative_count"]
+            )
+
+            # If description provided, find similar patterns for both content and form
+            if description:
+                # Content samples (using inputs vector)
+                description_vectors = self._embed_description(description)
+                if description_vectors:
+                    for feedback_value in ["positive", "negative"]:
+                        results = client.query_points(
+                            collection_name=COLLECTION_NAME,
+                            query=description_vectors,
+                            using="inputs",
+                            query_filter=models.Filter(
+                                must=[
+                                    models.FieldCondition(
+                                        key="type",
+                                        match=models.MatchValue(value="instance_pattern"),
+                                    ),
+                                    models.FieldCondition(
+                                        key="content_feedback",
+                                        match=models.MatchValue(value=feedback_value),
+                                    ),
+                                ]
+                            ),
+                            limit=3,
+                            with_payload=True,
+                        )
+                        stats["content"][f"{feedback_value}_samples"] = [
+                            {
+                                "score": p.score,
+                                "description": p.payload.get("card_description", "")[:100],
+                            }
+                            for p in results.points
+                        ]
+
+                # Form samples (using relationships vector)
+                relationship_vector = self._embed_relationships([], description)
+                if relationship_vector and relationship_vector != [0.0] * RELATIONSHIPS_DIM:
+                    for feedback_value in ["positive", "negative"]:
+                        results = client.query_points(
+                            collection_name=COLLECTION_NAME,
+                            query=relationship_vector,
+                            using="relationships",
+                            query_filter=models.Filter(
+                                must=[
+                                    models.FieldCondition(
+                                        key="type",
+                                        match=models.MatchValue(value="instance_pattern"),
+                                    ),
+                                    models.FieldCondition(
+                                        key="form_feedback",
+                                        match=models.MatchValue(value=feedback_value),
+                                    ),
+                                ]
+                            ),
+                            limit=3,
+                            with_payload=True,
+                        )
+                        stats["form"][f"{feedback_value}_samples"] = [
+                            {
+                                "score": p.score,
+                                "description": p.payload.get("card_description", "")[:100],
+                                "structure": p.payload.get("structure_description", ""),
+                            }
+                            for p in results.points
+                        ]
+
+            logger.info(
+                f"📊 Feedback stats: "
+                f"content(+{stats['content']['positive_count']}/-{stats['content']['negative_count']}), "
+                f"form(+{stats['form']['positive_count']}/-{stats['form']['negative_count']})"
+            )
+            return stats
+
+        except Exception as e:
+            logger.error(f"Failed to get feedback stats: {e}")
+            return {
+                "content": {"positive_count": 0, "negative_count": 0},
+                "form": {"positive_count": 0, "negative_count": 0},
+                "error": str(e)
+            }
 
 
 # Singleton instance

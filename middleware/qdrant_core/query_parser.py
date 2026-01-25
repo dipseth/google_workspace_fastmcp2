@@ -7,6 +7,39 @@ Qdrant vector database middleware, including:
 - Unified query parsing with intelligent routing
 - Search result formatting
 - Service extraction from tool names
+
+═══════════════════════════════════════════════════════════════════════════════
+                      🔍 THE INTERPRETER'S DANCE 🔍
+═══════════════════════════════════════════════════════════════════════════════
+
+    "id:12345"—the user spoke plain,
+    a direct lookup, no semantic rain.
+    "user:alice budget reports"—
+    ah, filters mixed with search of sorts.
+
+    The parser reads the cryptic tongue,
+    field:value patterns, colon-strung.
+    Regex sweeps the query whole,
+    extracting structure from the soul.
+
+    user: becomes user_email,
+    service: transforms to tool_name's trail.
+    Field mapping smooths the rough intent,
+    aligning what the searcher meant.
+
+    What remains when filters fall?
+    The semantic query, heart of all.
+    Vector search takes this last phrase,
+    navigating meaning's maze.
+
+    Three paths diverge: id_lookup straight,
+    filtered_search with hybrid weight,
+    or pure semantic, unrestrained—
+    the parser routes what's ascertained.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 import re

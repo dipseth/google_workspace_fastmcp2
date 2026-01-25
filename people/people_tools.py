@@ -3,6 +3,44 @@ People API tools for FastMCP2.
 
 Currently includes:
 - list_people_contact_labels: list Google People contact groups / labels.
+
+═══════════════════════════════════════════════════════════════════════════════
+                      👥 THE CONNECTIVE TISSUE 👥
+═══════════════════════════════════════════════════════════════════════════════
+
+    Between the system and the soul
+    lies metadata's quiet role.
+    A contact group, a label's name—
+    "Family," "Work," they're not the same.
+
+    The People API knows the links,
+    who connects to whom, and thinks
+    in resourceNames, membership lists,
+    the social graph that still persists.
+
+    _parse_label_emails takes the string,
+    commas and lists, disentangling.
+    "alice@mail.com, bob@mail.com"
+    becomes a list that feels like home.
+
+    _ensure_contact_group creates
+    what doesn't exist, anticipates
+    the need for labels yet unborn,
+    new groups assembled, freshly worn.
+
+    This module's small but holds the key:
+    identity and company.
+    For what's an inbox without names?
+    Just addresses playing games.
+
+    The People tools remind us all:
+    behind each ID stands a call,
+    a human waiting to be known,
+    not just an email, carved in stone.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 import asyncio

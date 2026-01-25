@@ -19,6 +19,44 @@ Tools Provided:
 - search_tool_history: Legacy search tool for backward compatibility
 - get_tool_analytics: Analytics and usage reporting tool
 - get_response_details: Legacy tool for fetching response details by ID
+
+═══════════════════════════════════════════════════════════════════════════════
+                      🧠 THE SEMANTIC MEMORY PALACE 🧠
+═══════════════════════════════════════════════════════════════════════════════
+
+    Not just storage, but understanding—
+    vectors encode what words are handing.
+    "Budget reports from last quarter"
+    finds meaning, not just character order.
+
+    Each tool response becomes a point,
+    embedded where semantics anoint.
+    Similarity scores float between
+    zero and one, the space between.
+
+    fetch() retrieves by point ID,
+    the exact document, nothing hid.
+    search() roams the vector field,
+    returning what the queries yield.
+
+    Legacy tools remain for those
+    who learned the old API's prose.
+    search_tool_history still speaks,
+    backward compatibility it seeks.
+
+    Analytics count what tools were called,
+    which services stood, which nearly stalled.
+    The memory palace keeps its logs,
+    navigating semantic fogs.
+
+    Managers separate concerns with grace:
+    client, search, each in its place.
+    The tools are clean, the edges clear—
+    query the past, the answers appear.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 import json

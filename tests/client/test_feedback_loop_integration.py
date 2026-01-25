@@ -275,7 +275,7 @@ class TestFeedbackCollectionConfiguration:
         fl.ensure_description_vector_exists()
 
         # Run a hybrid query
-        class_results, pattern_results = fl.query_with_feedback(
+        class_results, content_patterns, form_patterns = fl.query_with_feedback(
             component_query="card widget",
             description="product card with price",
             limit=5,
@@ -283,11 +283,12 @@ class TestFeedbackCollectionConfiguration:
 
         print(f"\nHybrid query results:")
         print(f"  - Class results: {len(class_results)}")
-        print(f"  - Pattern results: {len(pattern_results)}")
+        print(f"  - Content patterns: {len(content_patterns)}")
+        print(f"  - Form patterns: {len(form_patterns)}")
 
         # Should have either component or pattern results
         # (depends on collection contents)
-        total_results = len(class_results) + len(pattern_results)
+        total_results = len(class_results) + len(content_patterns) + len(form_patterns)
         print(f"  - Total results: {total_results}")
 
         # If collection has data, we should get some results

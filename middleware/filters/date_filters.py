@@ -3,6 +3,39 @@ Date and time formatting filters for Jinja2 templates.
 
 Provides custom filters for formatting dates, timestamps, and handling various
 date string formats in template processing.
+
+═══════════════════════════════════════════════════════════════════════════════
+                        ⏳ THE TIMEKEEPER'S VERSE ⏳
+═══════════════════════════════════════════════════════════════════════════════
+
+    Time arrives in many skins:
+    ISO strings where the Z begins,
+    datetime objects, epoch ticks,
+    callables that the future picks.
+
+    The filter doesn't judge the source,
+    it gently guides the temporal course.
+    fromisoformat replaces Z,
+    strftime speaks what humans say.
+
+    January twenty-fourth at noon,
+    not "2026-01-24" too soon.
+    %B %d gives the month its name,
+    %I:%M %p—the hour's fame.
+
+    When parsing fails, no crash, no cry—
+    return the input, let it fly.
+    Graceful degradation's art:
+    give what you can, don't fall apart.
+
+    Even now() can pass this way,
+    a callable awaiting its day.
+    Call it, format it, let it be—
+    time transformed, for all to see.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 from datetime import datetime

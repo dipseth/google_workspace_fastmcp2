@@ -78,7 +78,7 @@ def test_query_with_feedback():
     feedback_loop = get_feedback_loop()
 
     # Query for similar description
-    class_results, pattern_results = feedback_loop.query_with_feedback(
+    class_results, content_patterns, form_patterns = feedback_loop.query_with_feedback(
         component_query="v2.widgets.decorated_text.DecoratedText class",
         description="Show a product with price and buy button",
         limit=5,
@@ -88,10 +88,18 @@ def test_query_with_feedback():
     for r in class_results[:3]:
         print(f"      - {r.get('name')} (score: {r.get('score', 0):.3f})")
 
-    print(f"   Pattern results: {len(pattern_results)}")
-    for r in pattern_results[:3]:
+    print(f"   Content patterns: {len(content_patterns)}")
+    for r in content_patterns[:3]:
         print(f"      - {r.get('name')} (score: {r.get('score', 0):.3f})")
-        print(f"        feedback: {r.get('feedback')}")
+        print(f"        content_feedback: {r.get('content_feedback')}")
+
+    print(f"   Form patterns: {len(form_patterns)}")
+    for r in form_patterns[:3]:
+        print(f"      - {r.get('name')} (score: {r.get('score', 0):.3f})")
+        print(f"        form_feedback: {r.get('form_feedback')}")
+
+    # Combine for backwards-compatible check
+    pattern_results = content_patterns + form_patterns
 
     # Success if we got any results
     result = len(class_results) > 0 or len(pattern_results) > 0

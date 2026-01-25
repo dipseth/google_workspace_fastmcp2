@@ -35,6 +35,39 @@ Google Chat uses its own markdown syntax, NOT HTML or standard Markdown!
 
 For more details: https://developers.google.com/chat/format-messages
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+═══════════════════════════════════════════════════════════════════════════════
+                      💬 THE DIALECT OF SPACES 💬
+═══════════════════════════════════════════════════════════════════════════════
+
+    Every kingdom speaks its tongue—
+    Chat refuses what HTML has sung.
+    <b> tags render raw and bare,
+    *asterisks* show bold with care.
+
+    The LLM arrives with assumptions deep:
+    "Markdown works everywhere," it thinks in sleep.
+    But Chat has customs all its own,
+    a dialect carved in Google's stone.
+
+    <url|Click Here> is how links flow,
+    not href attributes in a row.
+    _Underscores_ lean the text italic,
+    ~tildes~ strike through, analytic.
+
+    This docstring screams in warning red
+    so future callers aren't misled.
+    Cards and messages, spaces wide—
+    learn the format, or be denied.
+
+    The adapter pattern helps translate,
+    but knowing the rules seals your fate.
+    Speak Chat's language, earn your place,
+    or watch your formatting fall from grace.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 import asyncio

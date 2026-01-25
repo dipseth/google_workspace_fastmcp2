@@ -7,6 +7,39 @@ This module bridges the gap between:
 
 The bridge ensures both flows work seamlessly together and credentials can be
 shared between authentication methods when needed.
+
+═══════════════════════════════════════════════════════════════════════════════
+                      🌉 THE BRIDGE OF TWO RIVERS 🌉
+═══════════════════════════════════════════════════════════════════════════════
+
+    Two rivers flow toward the sea:
+    one lives in memory, swift and free,
+    the other carved in disk and file,
+    persisting through the session's while.
+
+    GoogleProvider holds the primary soul,
+    JWT tokens in RAM's patrol.
+    But secondary accounts must also speak—
+    file-based flows for those we seek.
+
+    The bridge stands firm between two lands,
+    translating what each side demands.
+    is_primary_account? Memory knows.
+    is_secondary_account? The file shows.
+
+    Neither flow should block the other,
+    each authentication like a brother.
+    When credentials must be shared,
+    the bridge ensures both flows are paired.
+
+    Set the primary, add the rest,
+    the DualAuthBridge handles best
+    the messy truth that auth is dual:
+    no single method fits each tool.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 from config.enhanced_logging import setup_logger

@@ -70,17 +70,14 @@ class TemplateComponent:
         logger.debug(f"TemplateComponent initialized: {self.name}")
 
     def _get_module_wrapper(self):
-        """Get or create ModuleWrapper instance."""
+        """Get ModuleWrapper instance (uses singleton)."""
         if self._module_wrapper is None:
             try:
-                from adapters.module_wrapper import ModuleWrapper
+                from gchat.card_framework_wrapper import get_card_framework_wrapper
 
-                self._module_wrapper = ModuleWrapper(
-                    module_or_name="card_framework",
-                    auto_initialize=False,
-                )
+                self._module_wrapper = get_card_framework_wrapper()
             except Exception as e:
-                logger.warning(f"Could not create ModuleWrapper: {e}")
+                logger.warning(f"Could not get ModuleWrapper singleton: {e}")
         return self._module_wrapper
 
     def _load_component_class(self, path: str) -> Optional[Any]:

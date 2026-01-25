@@ -119,9 +119,6 @@ _card_framework_wrapper = None
 _qdrant_client = None
 _card_templates_collection = "card_templates"
 
-# Field conversion cache for performance optimization
-_camel_to_snake_cache = {}
-
 
 async def _get_chat_service_with_fallback(user_google_email: str):
     """
@@ -235,14 +232,22 @@ def _get_qdrant_client():
 
 
 def _reset_card_framework_wrapper():
-    """Reset the card framework wrapper to force reinitialization."""
+    """Reset the card framework wrapper singleton to force reinitialization."""
     global _card_framework_wrapper
+    from gchat.card_framework_wrapper import reset_wrapper
+
     _card_framework_wrapper = None
-    logger.info("🔄 Card framework wrapper reset")
+    reset_wrapper()
+    logger.info("🔄 Card framework wrapper singleton reset")
 
 
 def _initialize_card_framework_wrapper(force_reset: bool = False):
-    """Initialize the ModuleWrapper for the card_framework module with comprehensive debugging."""
+    """
+    Initialize the ModuleWrapper for the card_framework module.
+
+    Uses the singleton from gchat.card_framework_wrapper for consistent
+    configuration across all gchat modules.
+    """
     global _card_framework_wrapper
 
     if not CARD_FRAMEWORK_AVAILABLE:
@@ -250,133 +255,41 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
         return None
 
     if force_reset:
-        logger.info("🔄 Force reset requested - clearing existing wrapper")
+        logger.info("🔄 Force reset requested - clearing singleton")
         _reset_card_framework_wrapper()
 
     if _card_framework_wrapper is None:
         try:
-            import card_framework
+            from gchat.card_framework_wrapper import get_card_framework_wrapper
 
-            logger.info(
-                "🔍 COMPREHENSIVE DEBUG: Initializing ModuleWrapper for card_framework..."
-            )
-            logger.info(f"📦 Card Framework module location: {card_framework.__file__}")
+            _card_framework_wrapper = get_card_framework_wrapper(force_reinitialize=force_reset)
 
-            # Import settings to pass Qdrant configuration
-            from config.settings import settings
-
-            logger.info("🌐 QDRANT CONFIG DEBUG:")
-            logger.info(f"  - URL: {settings.qdrant_url}")
-            logger.info(f"  - Host: {settings.qdrant_host}")
-            logger.info(f"  - Port: {settings.qdrant_port}")
-            logger.info(f"  - API Key: {'***' if settings.qdrant_api_key else 'None'}")
-
-            # Create wrapper with optimized settings - use FastEmbed-compatible collection
-            logger.info("🔧 Creating ModuleWrapper with comprehensive settings...")
-            _card_framework_wrapper = ModuleWrapper(
-                module_or_name="card_framework.v2",
-                qdrant_url=settings.qdrant_url,  # Pass cloud URL from settings
-                qdrant_api_key=settings.qdrant_api_key,  # Pass API key from settings
-                collection_name="card_framework_components_fastembed",
-                index_nested=True,  # Index methods within classes
-                index_private=False,  # Skip private components
-                max_depth=2,  # Limit recursion depth for better performance
-                skip_standard_library=True,  # Skip standard library modules
-                include_modules=[
-                    "card_framework",
-                    "gchat",
-                ],  # Only include relevant modules
-                exclude_modules=[
-                    "numpy",
-                    "pandas",
-                    "matplotlib",
-                    "scipy",
-                ],  # Exclude irrelevant modules
-                force_reindex=False,  # Don't force reindex if collection has data
-                clear_collection=False,  # Set to True to clear duplicates on restart
-            )
-
-            logger.info("✅ ModuleWrapper created successfully!")
-            logger.info(
-                f"🌐 Connected to Qdrant: {settings.qdrant_url or f'{settings.qdrant_host}:{settings.qdrant_port}'}"
-            )
-
-            # CRITICAL: Validate component indexing immediately after creation
+            # Validate component count
             component_count = (
                 len(_card_framework_wrapper.components)
                 if _card_framework_wrapper.components
                 else 0
             )
-            logger.info("📊 COMPONENT CACHE VALIDATION:")
-            logger.info(f"  - Total components indexed: {component_count}")
 
             if component_count == 0:
                 logger.error("❌ CRITICAL: ModuleWrapper has ZERO components indexed!")
-                logger.error("❌ This will cause all component searches to fail.")
-                logger.error(
-                    "❌ Possible causes: Qdrant connection issues, indexing failures, empty module"
-                )
-
-                # Try to get more diagnostic info
-                try:
-                    if hasattr(_card_framework_wrapper, "collection_name"):
-                        logger.error(
-                            f"❌ Collection name: {_card_framework_wrapper.collection_name}"
-                        )
-                    if hasattr(_card_framework_wrapper, "qdrant_client"):
-                        logger.error(
-                            f"❌ Qdrant client available: {_card_framework_wrapper.qdrant_client is not None}"
-                        )
-                except Exception as diag_error:
-                    logger.error(f"❌ Diagnostic error: {diag_error}")
             else:
-                logger.info(
-                    f"✅ Component indexing successful - {component_count} components available"
-                )
-
-                # Log sample of indexed components for verification
-                sample_components = list(_card_framework_wrapper.components.keys())[:10]
-                logger.info(f"📋 Sample indexed components: {sample_components}")
-
-                # Count components by type for additional validation
-                try:
-                    class_count = sum(
-                        1
-                        for comp_data in _card_framework_wrapper.components.values()
-                        if hasattr(comp_data, "obj") and inspect.isclass(comp_data.obj)
-                    )
-                    function_count = sum(
-                        1
-                        for comp_data in _card_framework_wrapper.components.values()
-                        if hasattr(comp_data, "obj")
-                        and inspect.isfunction(comp_data.obj)
-                    )
-                    logger.info(
-                        f"📊 Component breakdown: {class_count} classes, {function_count} functions"
-                    )
-                except Exception as count_error:
-                    logger.warning(f"⚠️ Error counting component types: {count_error}")
+                logger.info(f"✅ Singleton wrapper ready: {component_count} components")
 
             # Initialize Qdrant client for template storage
             qdrant_client = _get_qdrant_client()
             if qdrant_client:
-                logger.info("✅ Qdrant client initialized for template storage")
-            else:
-                logger.warning(
-                    "⚠️ Qdrant client initialization failed - template features disabled"
-                )
-
-            logger.info("✅ ModuleWrapper initialization complete")
+                logger.debug("✅ Qdrant client initialized for template storage")
 
         except ImportError as import_error:
             logger.error(f"❌ Could not import card_framework module: {import_error}")
             return None
         except Exception as e:
-            logger.error(f"❌ Failed to initialize ModuleWrapper: {e}", exc_info=True)
+            logger.error(f"❌ Failed to get ModuleWrapper singleton: {e}", exc_info=True)
             return None
     else:
-        logger.info(
-            f"♻️ Using existing ModuleWrapper with {len(_card_framework_wrapper.components) if _card_framework_wrapper.components else 0} components"
+        logger.debug(
+            f"♻️ Using existing singleton with {len(_card_framework_wrapper.components) if _card_framework_wrapper.components else 0} components"
         )
 
     return _card_framework_wrapper
@@ -574,14 +487,18 @@ def _build_card_with_smart_builder(
     images = card_params.get("images")
     image_titles = card_params.get("image_titles")
     column_count = card_params.get("column_count", 2)
+    # Explicit sections - pass through directly (bypass NLP parsing)
+    sections = card_params.get("sections")
 
     logger.info(f"🔨 SmartCardBuilder parsing description: {card_description[:80]}...")
     if fields:
         logger.info(f"📝 Form card mode: {len(fields)} field(s)")
     if grid or images:
         logger.info(f"🔲 Grid params provided: {len(images) if images else 'direct grid'}")
+    if sections:
+        logger.info(f"📋 Explicit sections provided: {len(sections)} section(s)")
 
-    # Build card using SmartCardBuilder - pass all params
+    # Build card using SmartCardBuilder - pass all params including sections
     card_dict = builder.build_card_from_description(
         description=card_description,
         title=title,
@@ -595,6 +512,7 @@ def _build_card_with_smart_builder(
         images=images,  # Image URLs for grid
         image_titles=image_titles,  # Titles for grid images
         column_count=column_count,  # Grid columns
+        sections=sections,  # Explicit sections (pass-through mode)
     )
 
     if not card_dict:
@@ -761,40 +679,6 @@ def _build_card_structure_from_params(
     return card_dict
 
 
-def _convert_field_names_to_snake_case(obj: Any) -> Any:
-    """Convert camelCase field names to snake_case recursively for webhook API."""
-    if isinstance(obj, dict):
-        converted = {}
-        for key, value in obj.items():
-            # Convert camelCase to snake_case
-            snake_key = _camel_to_snake(key)
-            if snake_key != key:
-                logger.info(f"WEBHOOK CONVERSION: {key} -> {snake_key}")
-            converted[snake_key] = _convert_field_names_to_snake_case(value)
-        return converted
-    elif isinstance(obj, list):
-        return [_convert_field_names_to_snake_case(item) for item in obj]
-    else:
-        return obj
-
-
-def _camel_to_snake(camel_str: str) -> str:
-    """Convert camelCase string to snake_case with caching for performance."""
-    global _camel_to_snake_cache
-
-    if camel_str in _camel_to_snake_cache:
-        return _camel_to_snake_cache[camel_str]
-
-    import re
-
-    # Insert underscores before capital letters
-    snake_str = re.sub("([a-z0-9])([A-Z])", r"\1_\2", camel_str)
-    result = snake_str.lower()
-
-    _camel_to_snake_cache[camel_str] = result
-    return result
-
-
 def _strip_internal_fields(obj: Any) -> Any:
     """
     Recursively strip internal fields (starting with _) from dictionaries.
@@ -853,66 +737,56 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
     async def send_dynamic_card(
         user_google_email: Annotated[
             str,
-            Field(
-                description="The user's Google email address for authentication and API access"
-            ),
+            Field(description="Google email for authentication"),
         ],
         space_id: Annotated[
             str,
-            Field(
-                description="The Google Chat space ID (e.g., 'spaces/AAAA1234') to send the card to"
-            ),
+            Field(description="Chat space ID (e.g., 'spaces/AAAA1234')"),
         ],
         card_description: Annotated[
             str,
             Field(
-                description='Natural language description of the card. Use pattern: \'First section titled "NAME" showing CONTENT. Second section titled "NAME" showing CONTENT.\' URLs become clickable buttons automatically.'
+                description=(
+                    "Describe the card naturally. "
+                    "Sections, grids, forms, buttons—just say what you want. "
+                    "URLs become buttons. Prices get styled. Icons appear where they fit."
+                )
             ),
         ],
         card_params: Annotated[
             Optional[Dict[str, Any]],
             Field(
                 default=None,
-                description="Optional dict of explicit parameters (title, subtitle, text, buttons) that override NLP-extracted values",
+                description="Explicit overrides: title, subtitle, text, buttons, images. These take priority.",
             ),
         ] = None,
         thread_key: Annotated[
             Optional[str],
-            Field(
-                default=None,
-                description="Optional thread key for replying to existing message threads",
-            ),
+            Field(default=None, description="Thread key for replies"),
         ] = None,
         webhook_url: Annotated[
             Optional[str],
-            Field(
-                default=None,
-                description="Webhook URL for direct delivery (bypasses API auth). If not provided, uses MCP_CHAT_WEBHOOK from settings.",
-            ),
+            Field(default=None, description="Webhook URL (optional, uses default if not set)"),
         ] = None,
         use_colbert: Annotated[
             bool,
-            Field(
-                default=True,
-                description="Use ColBERT multi-vector embeddings for semantic search. Provides more accurate matching.",
-            ),
+            Field(default=True, description="Enable semantic matching (recommended)"),
         ] = True,
     ) -> SendDynamicCardResponse:
         """
-        Send any type of card to Google Chat using natural language description.
+        Send a card to Google Chat. Describe what you want; the system builds it.
 
-        RECOMMENDED PATTERN for multi-section cards:
-            First section titled "NAME" showing CONTENT.
-            Second section titled "NAME" showing CONTENT.
+        The description flows through inference:
+        - Structure emerges from your words
+        - URLs transform into buttons
+        - Keywords summon icons
+        - Layouts adapt to content
 
-        AUTOMATIC FEATURES:
-        - URLs become clickable "Open" buttons
-        - "warning/stale" keywords get warning icons
-        - "@username" and "commit HASH" get appropriate icons
-        - "X and Y" splits into separate widgets
-
-        Returns:
-            SendDynamicCardResponse with delivery status and component info
+        Examples that work:
+            "Product card showing $49.99 with Buy button"
+            "First section titled 'Status' showing warning: server down"
+            "Grid of 4 images from these URLs..."
+            "Form with name field and email field"
         """
         try:
             logger.info(f"🔍 Finding card component for: {card_description}")
@@ -1115,15 +989,11 @@ def setup_unified_card_tool(mcp: FastMCP) -> None:
                         "🧵 THREADING FIX: Updated webhook URL with thread parameters"
                     )
 
-                # CRITICAL FIX: Recursively convert ALL field names to snake_case for webhook API
-                # The Google Chat webhook API requires snake_case field names throughout the entire payload
-                logger.info(
-                    "🔧 Converting ALL camelCase fields to snake_case for webhook API compatibility"
-                )
-                webhook_message_body = _convert_field_names_to_snake_case(message_body)
-
                 # Strip internal fields (like _card_id) that shouldn't be sent to the API
-                webhook_message_body = _strip_internal_fields(webhook_message_body)
+                # NOTE: Do NOT convert field names - Google Chat webhook API expects camelCase
+                # for widget fields (onClick, imageUri, etc.). SmartCardBuilder already
+                # produces correctly formatted cards.
+                webhook_message_body = _strip_internal_fields(message_body)
 
                 # CRITICAL FIX: Add thread to message body for webhook threading
                 if thread_key:

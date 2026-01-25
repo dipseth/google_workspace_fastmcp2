@@ -5,7 +5,7 @@ Provides rich card-based messaging capabilities for Google Chat with graceful fa
 
 import json
 
-from typing_extensions import Any, Dict, List, Optional, Union
+from typing_extensions import Any, Dict, List, Optional, Tuple, Union
 
 from config.enhanced_logging import setup_logger
 
@@ -331,171 +331,280 @@ class GoogleChatCardManager:
                 logger.error(f"Failed to create fallback section: {fallback_error}")
                 return None
 
-    def _create_widget_from_config(self, widget_config: Dict[str, Any]):
-        """Create a widget from configuration dictionary."""
+    # =========================================================================
+    # WIDGET TYPE REGISTRY - Maps keys to normalized types and nested keys
+    # This enables recursive self-discovery of widget types at any depth
+    # =========================================================================
+    WIDGET_TYPE_REGISTRY = {
+        # camelCase keys (from Google Chat API / JSON)
+        "buttonList": {"normalized": "button_list", "nested_key": "buttonList"},
+        "selectionInput": {"normalized": "selection_input", "nested_key": "selectionInput"},
+        "textParagraph": {"normalized": "text_paragraph", "nested_key": "textParagraph"},
+        "decoratedText": {"normalized": "decorated_text", "nested_key": "decoratedText"},
+        "image": {"normalized": "image", "nested_key": "image"},
+        "columns": {"normalized": "columns", "nested_key": "columns"},
+        "divider": {"normalized": "divider", "nested_key": "divider"},
+        "grid": {"normalized": "grid", "nested_key": "grid"},
+        "textInput": {"normalized": "text_input", "nested_key": "textInput"},
+        "dateTimePicker": {"normalized": "date_time_picker", "nested_key": "dateTimePicker"},
+        # snake_case keys (from Python code)
+        "button_list": {"normalized": "button_list", "nested_key": "buttonList"},
+        "selection_input": {"normalized": "selection_input", "nested_key": "selectionInput"},
+        "text_paragraph": {"normalized": "text_paragraph", "nested_key": "textParagraph"},
+        "decorated_text": {"normalized": "decorated_text", "nested_key": "decoratedText"},
+        "text_input": {"normalized": "text_input", "nested_key": "textInput"},
+        "date_time_picker": {"normalized": "date_time_picker", "nested_key": "dateTimePicker"},
+    }
+
+    def _discover_widget_type(
+        self,
+        config: Dict[str, Any],
+        path: str = "root",
+        depth: int = 0,
+        max_depth: int = 5,
+    ) -> Tuple[Optional[str], Dict[str, Any], str]:
+        """
+        Recursively discover widget type from a config dict at any nesting level.
+
+        This is the core self-discovery function that:
+        1. Checks for explicit 'type' field
+        2. Scans keys for known widget types
+        3. Recursively searches nested dicts if not found at current level
+
+        Args:
+            config: Configuration dictionary to search
+            path: Current path for debugging (e.g., "root.widgets[0]")
+            depth: Current recursion depth
+            max_depth: Maximum recursion depth to prevent infinite loops
+
+        Returns:
+            Tuple of (normalized_type, unwrapped_config, discovery_path)
+            - normalized_type: The snake_case widget type (e.g., "button_list")
+            - unwrapped_config: The innermost config dict for this widget
+            - discovery_path: Path where the type was discovered
+        """
+        if depth > max_depth:
+            logger.warning(f"Max depth {max_depth} reached at {path}, stopping discovery")
+            return None, config, path
+
+        # 1. Check for explicit 'type' field
+        if "type" in config:
+            type_value = config["type"]
+            if type_value in self.WIDGET_TYPE_REGISTRY:
+                normalized = self.WIDGET_TYPE_REGISTRY[type_value]["normalized"]
+                logger.debug(f"🔍 [{path}] Found type field: {type_value} → {normalized}")
+                return normalized, config, path
+
+        # 2. Scan keys for known widget types
+        for key in config.keys():
+            if key in self.WIDGET_TYPE_REGISTRY:
+                registry_entry = self.WIDGET_TYPE_REGISTRY[key]
+                normalized = registry_entry["normalized"]
+                nested_key = registry_entry["nested_key"]
+
+                # Unwrap nested config if present
+                if nested_key in config and isinstance(config[nested_key], dict):
+                    unwrapped = config[nested_key]
+                    logger.debug(f"🔍 [{path}] Found key '{key}' with nested config → {normalized}")
+                    return normalized, unwrapped, f"{path}.{nested_key}"
+                else:
+                    logger.debug(f"🔍 [{path}] Found key '{key}' → {normalized}")
+                    return normalized, config, path
+
+        # 3. Recursively search nested dicts (for deeply nested structures)
+        for key, value in config.items():
+            if isinstance(value, dict) and key not in ("onClick", "on_click", "openLink", "open_link"):
+                nested_path = f"{path}.{key}"
+                result_type, result_config, result_path = self._discover_widget_type(
+                    value, nested_path, depth + 1, max_depth
+                )
+                if result_type:
+                    logger.debug(f"🔍 [{path}] Found nested widget at {result_path}")
+                    return result_type, result_config, result_path
+
+        # 4. Not found at any level
+        logger.debug(f"🔍 [{path}] No widget type discovered (keys: {list(config.keys())})")
+        return None, config, path
+
+    def _extract_nested_value(
+        self,
+        config: Dict[str, Any],
+        *keys: str,
+        default: Any = None,
+    ) -> Any:
+        """
+        Recursively extract a value from nested dict, trying multiple key variations.
+
+        Args:
+            config: Dict to search
+            *keys: Key names to try (e.g., "image_url", "imageUrl")
+            default: Default value if not found
+
+        Returns:
+            The found value or default
+        """
+        for key in keys:
+            if key in config:
+                return config[key]
+            # Try nested one level (for unwrapped configs)
+            for nested_key in config:
+                if isinstance(config[nested_key], dict) and key in config[nested_key]:
+                    return config[nested_key][key]
+        return default
+
+    def _create_widget_from_config(
+        self,
+        widget_config: Dict[str, Any],
+        path: str = "root",
+        depth: int = 0,
+    ) -> Optional[Any]:
+        """
+        Create a widget from configuration dictionary using recursive self-discovery.
+
+        This method:
+        1. Discovers widget type at any nesting level
+        2. Unwraps nested configs automatically
+        3. Recursively processes nested widgets (columns, grids, etc.)
+        4. Tracks discovery path for debugging
+
+        Args:
+            widget_config: Configuration dictionary (any nesting level)
+            path: Current path for debugging
+            depth: Current recursion depth
+
+        Returns:
+            Instantiated widget or None if creation fails
+        """
         try:
-            # Log the incoming widget config for debugging
-            logger.debug(
-                f"Creating widget from config: {json.dumps(widget_config, indent=2)}"
+            logger.debug(f"📦 [{path}] Creating widget (depth={depth})")
+
+            # STEP 1: Discover widget type using recursive self-discovery
+            widget_type, unwrapped_config, discovery_path = self._discover_widget_type(
+                widget_config, path, depth
             )
 
-            # Extract widget type, handling both camelCase and snake_case
-            widget_type = None
+            if not widget_type:
+                logger.warning(f"⚠️ [{path}] Could not discover widget type")
+                logger.debug(f"Config keys: {list(widget_config.keys())}")
+                return TextParagraph(text=f"Unknown widget at {path}")
 
-            # Check for type field first
-            if "type" in widget_config:
-                widget_type = widget_config.get("type")
-                logger.debug(f"Found widget type in 'type' field: {widget_type}")
+            logger.debug(f"✅ [{discovery_path}] Discovered: {widget_type}")
 
-            # Check for direct widget keys if type is not found
-            elif "buttonList" in widget_config:
-                widget_type = "buttonList"
-                logger.debug("Found buttonList widget type from direct key")
-            elif "selectionInput" in widget_config:
-                widget_type = "selectionInput"
-                logger.debug("Found selectionInput widget type from direct key")
-            elif "textParagraph" in widget_config:
-                widget_type = "textParagraph"
-                logger.debug("Found textParagraph widget type from direct key")
-            elif "decoratedText" in widget_config:
-                widget_type = "decoratedText"
-                logger.debug("Found decoratedText widget type from direct key")
-            elif "image" in widget_config:
-                widget_type = "image"
-                logger.debug("Found image widget type from direct key")
-
-            logger.debug(f"Detected widget type: {widget_type}")
-
-            # Convert camelCase to snake_case for consistent handling
-            if widget_type:
-                # Convert camelCase to snake_case
-                if widget_type == "buttonList":
-                    widget_type = "button_list"
-                elif widget_type == "selectionInput":
-                    widget_type = "selection_input"
-                elif widget_type == "textParagraph":
-                    widget_type = "text_paragraph"
-                elif widget_type == "decoratedText":
-                    widget_type = "decorated_text"
-                logger.debug(f"Normalized widget type to: {widget_type}")
+            # STEP 2: Create widget based on discovered type
+            # Each handler uses unwrapped_config which is already at the right level
 
             if widget_type == "text_paragraph":
-                # Handle both direct and nested formats
-                text = widget_config.get("text", "")
-                if "textParagraph" in widget_config and isinstance(
-                    widget_config["textParagraph"], dict
-                ):
-                    text = widget_config["textParagraph"].get("text", text)
+                text = self._extract_nested_value(unwrapped_config, "text", default="")
                 return TextParagraph(text=text)
 
             elif widget_type == "decorated_text":
-                # Handle both direct and nested formats
-                decorated_text_config = widget_config
-                if "decoratedText" in widget_config and isinstance(
-                    widget_config["decoratedText"], dict
-                ):
-                    decorated_text_config = widget_config["decoratedText"]
-
                 icon = None
-                if decorated_text_config.get("start_icon"):
-                    icon_name = decorated_text_config["start_icon"]
-                    if hasattr(Icon.KnownIcon, icon_name):
-                        icon = Icon(known_icon=getattr(Icon.KnownIcon, icon_name))
+                icon_name = self._extract_nested_value(
+                    unwrapped_config, "start_icon", "startIcon"
+                )
+                if icon_name and hasattr(Icon.KnownIcon, icon_name):
+                    icon = Icon(known_icon=getattr(Icon.KnownIcon, icon_name))
 
                 on_click = None
-                if decorated_text_config.get("clickable") and decorated_text_config.get(
-                    "url"
-                ):
+                if unwrapped_config.get("clickable") and unwrapped_config.get("url"):
                     on_click = OnClick(
-                        open_link=OpenLink(url=decorated_text_config["url"])
+                        open_link=OpenLink(url=unwrapped_config["url"])
                     )
 
                 return DecoratedText(
                     start_icon=icon,
-                    text=decorated_text_config.get("text", ""),
-                    top_label=decorated_text_config.get("top_label"),
-                    bottom_label=decorated_text_config.get("bottom_label"),
-                    wrap_text=True,
+                    text=self._extract_nested_value(unwrapped_config, "text", default=""),
+                    top_label=self._extract_nested_value(unwrapped_config, "top_label", "topLabel"),
+                    bottom_label=self._extract_nested_value(unwrapped_config, "bottom_label", "bottomLabel"),
+                    wrap_text=self._extract_nested_value(unwrapped_config, "wrap_text", "wrapText", default=True),
                     on_click=on_click,
                 )
 
             elif widget_type == "button_list":
-                # Handle both direct and nested formats
-                button_list_config = widget_config
-                if "buttonList" in widget_config and isinstance(
-                    widget_config["buttonList"], dict
-                ):
-                    button_list_config = widget_config["buttonList"]
-
                 buttons = []
-                for button_config in button_list_config.get("buttons", []):
+                buttons_config = self._extract_nested_value(
+                    unwrapped_config, "buttons", default=[]
+                )
+
+                for idx, button_config in enumerate(buttons_config):
+                    # Recursive URL extraction from nested structures
+                    url = self._extract_nested_value(button_config, "url")
+                    if not url:
+                        # Try onClick.openLink.url path
+                        on_click_data = self._extract_nested_value(
+                            button_config, "onClick", "on_click", default={}
+                        )
+                        if isinstance(on_click_data, dict):
+                            open_link_data = self._extract_nested_value(
+                                on_click_data, "openLink", "open_link", default={}
+                            )
+                            if isinstance(open_link_data, dict):
+                                url = open_link_data.get("url")
+
+                    if not url:
+                        url = "https://example.com"
+                        logger.warning(f"⚠️ [{path}.buttons[{idx}]] No URL found, using fallback")
+
                     button = Button(
                         text=button_config.get("text", "Button"),
-                        on_click=OnClick(
-                            open_link=OpenLink(
-                                url=button_config.get("url", "https://example.com")
-                            )
-                        ),
+                        on_click=OnClick(open_link=OpenLink(url=url)),
                     )
                     buttons.append(button)
+
                 return ButtonList(buttons=buttons)
 
             elif widget_type == "selection_input":
-                # Handle selectionInput widget
-                selection_input_config = widget_config
-                if "selectionInput" in widget_config and isinstance(
-                    widget_config["selectionInput"], dict
-                ):
-                    selection_input_config = widget_config["selectionInput"]
-
                 return SelectionInput(
-                    name=selection_input_config.get("name", "selection"),
-                    label=selection_input_config.get("label", "Select an option"),
-                    items=selection_input_config.get("items", []),
+                    name=self._extract_nested_value(unwrapped_config, "name", default="selection"),
+                    label=self._extract_nested_value(unwrapped_config, "label", default="Select an option"),
+                    items=self._extract_nested_value(unwrapped_config, "items", default=[]),
                 )
 
             elif widget_type == "image":
-                # Handle both direct and nested formats
-                image_config = widget_config
-                if "image" in widget_config and isinstance(
-                    widget_config["image"], dict
-                ):
-                    image_config = widget_config["image"]
-
                 on_click = None
-                if image_config.get("clickable") and image_config.get("url"):
-                    on_click = OnClick(open_link=OpenLink(url=image_config["url"]))
+                if unwrapped_config.get("clickable") and unwrapped_config.get("url"):
+                    on_click = OnClick(open_link=OpenLink(url=unwrapped_config["url"]))
 
                 return Image(
-                    image_url=image_config.get(
-                        "image_url", image_config.get("imageUrl", "")
+                    image_url=self._extract_nested_value(
+                        unwrapped_config, "image_url", "imageUrl", default=""
                     ),
-                    alt_text=image_config.get(
-                        "alt_text", image_config.get("altText", "Image")
+                    alt_text=self._extract_nested_value(
+                        unwrapped_config, "alt_text", "altText", default="Image"
                     ),
                     on_click=on_click,
                 )
 
             elif widget_type == "columns":
+                # RECURSIVE: Process nested column widgets
                 column_items = []
-                for column_config in widget_config.get("columns", []):
+                columns_config = self._extract_nested_value(
+                    unwrapped_config, "columns", "column_items", default=[]
+                )
+
+                for col_idx, column_config in enumerate(columns_config):
                     column_widgets = []
-                    for col_widget_config in column_config.get("widgets", []):
-                        col_widget = self._create_widget_from_config(col_widget_config)
+                    widgets_config = self._extract_nested_value(
+                        column_config, "widgets", default=[]
+                    )
+
+                    for widget_idx, col_widget_config in enumerate(widgets_config):
+                        # RECURSE with updated path
+                        nested_path = f"{path}.columns[{col_idx}].widgets[{widget_idx}]"
+                        col_widget = self._create_widget_from_config(
+                            col_widget_config, nested_path, depth + 1
+                        )
                         if col_widget:
                             column_widgets.append(col_widget)
 
                     alignment = column_config.get("alignment", "START")
-                    if alignment == "START":
-                        h_align = Column.HorizontalAlignment.START
-                    elif alignment == "CENTER":
-                        h_align = Column.HorizontalAlignment.CENTER
-                    else:
-                        h_align = Column.HorizontalAlignment.END
+                    h_align = {
+                        "START": Column.HorizontalAlignment.START,
+                        "CENTER": Column.HorizontalAlignment.CENTER,
+                        "END": Column.HorizontalAlignment.END,
+                    }.get(alignment, Column.HorizontalAlignment.START)
 
-                    column = Column(
-                        horizontal_alignment=h_align, widgets=column_widgets
-                    )
+                    column = Column(horizontal_alignment=h_align, widgets=column_widgets)
                     column_items.append(column)
 
                 return Columns(column_items=column_items)
@@ -503,28 +612,22 @@ class GoogleChatCardManager:
             elif widget_type == "divider":
                 return Divider()
 
+            elif widget_type == "grid":
+                # RECURSIVE: Process grid items
+                logger.debug(f"🔲 [{path}] Processing grid widget")
+                # Grid handling would go here - similar recursive pattern
+                return TextParagraph(text="[Grid widget - not yet implemented]")
+
             else:
-                logger.warning(f"Unknown widget type: {widget_type}")
-                # Log the full widget config for debugging
-                logger.debug(
-                    f"Unknown widget config: {json.dumps(widget_config, indent=2)}"
-                )
-                # Create a text paragraph with debug info instead of returning None
-                debug_text = f"Unknown widget type: {widget_type}"
-                return TextParagraph(text=debug_text)
+                logger.warning(f"⚠️ [{path}] Unhandled widget type: {widget_type}")
+                return TextParagraph(text=f"Unhandled: {widget_type}")
 
         except Exception as e:
-            logger.error(f"Error creating widget from config: {e}")
-            logger.debug(
-                f"Widget config that caused error: {json.dumps(widget_config, indent=2)}"
-            )
+            logger.error(f"❌ [{path}] Error creating widget: {e}")
+            logger.debug(f"Config: {json.dumps(widget_config, indent=2)}")
             try:
-                # Create a fallback text widget with error information
-                error_text = f"Error creating widget: {str(e)}"
-                logger.info("Creating fallback widget with error information")
-                return TextParagraph(text=error_text)
-            except Exception as fallback_error:
-                logger.error(f"Failed to create fallback widget: {fallback_error}")
+                return TextParagraph(text=f"Error at {path}: {str(e)}")
+            except Exception:
                 return None
 
     def _create_rich_card_fallback(

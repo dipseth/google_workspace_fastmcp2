@@ -5,6 +5,39 @@ This middleware automatically enriches tool responses with full user names and e
 by calling Google People API when user IDs are detected in responses.
 
 Works across all services: Chat, Gmail, Drive, Calendar, etc.
+
+═══════════════════════════════════════════════════════════════════════════════
+                      👤 THE HUMANIZER'S REFRAIN 👤
+═══════════════════════════════════════════════════════════════════════════════
+
+    A string of digits, cold and bare—
+    "user/12345" tells nothing there.
+    But behind each ID hides a soul,
+    a name, a face, a human whole.
+
+    The middleware intercepts the stream,
+    sees the shadow, not the dream.
+    Calls the People API with care,
+    "Who is this? Make them aware."
+
+    Two-tier cache: memory first,
+    Qdrant second for the worst.
+    Fast for those we've lately seen,
+    persistent for the in-between.
+
+    External users get their grace,
+    privacy respected, given space.
+    Not every ID yields a name—
+    but we ask kindly, all the same.
+
+    From Chat to Calendar to Drive,
+    this middleware keeps context alive.
+    No more "someone modified your doc"—
+    now you know just who to talk.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 import asyncio

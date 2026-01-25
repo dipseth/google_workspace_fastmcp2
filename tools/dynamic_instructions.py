@@ -10,6 +10,34 @@ using data from Qdrant vector database collections. Instructions are enhanced wi
 
 The instructions are updated on server startup/connection after Qdrant middleware
 initializes, providing users with contextual, data-driven guidance.
+
+═══════════════════════════════════════════════════════════════════════════════
+                     📋 THE LIVING DOCUMENTATION 📋
+═══════════════════════════════════════════════════════════════════════════════
+
+    Static docs grow stale, forgotten files
+    collecting dust across the miles.
+    But instructions that can learn and grow
+    reflect the truth of what they know.
+
+    Query the vectors, count the calls,
+    find patterns hidden in the halls.
+    "Gmail was used a hundred times"—
+    let that wisdom shape the rhymes.
+
+    Not just a list of what we offer,
+    but proof of what the users proffer.
+    Active services earn their glow,
+    error rates let caution show.
+
+    Cache for five, then ask again:
+    what tools are popular? which domain?
+    The README writes itself each day
+    from the footprints left along the way.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 import asyncio

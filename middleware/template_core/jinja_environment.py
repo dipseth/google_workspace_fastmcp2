@@ -3,6 +3,34 @@ Jinja2 environment setup and configuration for template middleware.
 
 Manages Jinja2 environment creation, filter registration, template loading,
 and macro management for the template processing system.
+
+═══════════════════════════════════════════════════════════════════════════════
+                    🌿 THE CONTEXT PRESERVATION HYMN 🌿
+═══════════════════════════════════════════════════════════════════════════════
+
+    When macros travel far from home,
+    imported into templates unknown,
+    they forget the globals they once knew—
+    now() becomes undefined, true.
+
+    So we override get_template's way,
+    enhance make_module, let globals stay.
+    Inject the namespace, key by key,
+    setattr whispers what ought to be.
+
+    The parent doesn't know it's helped
+    the child remember where it dwelt.
+    A module born from {{ from ... import }}
+    now carries context, freely brought.
+
+    Not a hack but architecture's grace:
+    put every function in its place.
+    The Environment, context-preserving,
+    gives macros the tools they're deserving.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 from datetime import datetime, timezone

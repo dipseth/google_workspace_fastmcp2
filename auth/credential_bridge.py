@@ -2,6 +2,39 @@
 
 This module provides an abstraction layer for credential storage that supports
 both new FastMCP 2.12.0 format and legacy credential formats during migration.
+
+═══════════════════════════════════════════════════════════════════════════════
+                    🗝️ THE KEEPER OF OLD KEYS 🗝️
+═══════════════════════════════════════════════════════════════════════════════
+
+    Formats change, as formats do,
+    LEGACY, FASTMCP, UNIFIED too.
+    But credentials written long ago
+    must still unlock the doors we know.
+
+    The bridge reads both the old and new,
+    detects what shape the secrets grew.
+    Migration date? Source format? Version?
+    Metadata tracks each conversion.
+
+    StoredCredential holds the soul:
+    user_email, the human whole,
+    credentials dict with token's might,
+    metadata whispering of its plight.
+
+    When FastMCP 2.12 arrived,
+    the old format had to be revived—
+    not thrown away but gently led
+    to unified storage instead.
+
+    No credential left behind,
+    no user locked out, undefined.
+    The bridge maintains the sacred trust:
+    what you stored, you can adjust.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 from config.enhanced_logging import setup_logger

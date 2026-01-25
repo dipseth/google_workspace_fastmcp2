@@ -1,6 +1,39 @@
 """
 Namespace Converter Utility
 Provides dot notation support for dictionary objects in Jinja2 templates.
+
+═══════════════════════════════════════════════════════════════════════════════
+                       🔮 THE SHAPE SHIFTER'S GIFT 🔮
+═══════════════════════════════════════════════════════════════════════════════
+
+    data["user"]["name"] feels
+    like reaching through a maze of doors,
+    bracket after bracket peels
+    away the joy the template stores.
+
+    But data.user.name—ah, see
+    how dots connect like stepping stones,
+    a path through fields more naturally,
+    SimpleNamespace quietly atones.
+
+    Recursive descent, the spell,
+    each dict becomes a namespace new.
+    Lists within? Transform them well,
+    item by item, through and through.
+
+    The template author writes in peace:
+    {{ message.sender.email }}
+    no KeyError to release,
+    no brackets marching stale by stale.
+
+    A simple class, a simple call,
+    __call__ makes it middleware-fit.
+    The converter answers all:
+    dot notation, bit by bit.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 import types

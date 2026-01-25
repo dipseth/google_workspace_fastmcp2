@@ -6,11 +6,14 @@ searchable using Qdrant vector database. It allows for semantic search of module
 components (classes, functions, variables) and retrieval by path.
 """
 
+import dataclasses
 import hashlib
 import importlib
 import inspect
 import logging
 import sys
+from collections import defaultdict
+from typing import Set, Tuple, get_args, get_origin, get_type_hints
 
 from config.enhanced_logging import setup_logger
 
@@ -21,6 +24,43 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from typing_extensions import Any, Dict, List, Optional, Union
+
+# =========================================================================
+# RELATIONSHIP EXTRACTION CONFIGURATION
+# =========================================================================
+
+# Default relationship extraction depth
+# Higher values capture deeper nesting but increase index size.
+# Depth 5 is suitable for most dataclass hierarchies.
+DEFAULT_RELATIONSHIP_DEPTH = 5
+
+# Primitive types to skip during relationship extraction (not component types)
+PRIMITIVE_TYPES = {str, int, float, bool, bytes, type(None)}
+
+# Built-in module prefixes to skip during relationship extraction
+BUILTIN_PREFIXES = {"builtins", "typing", "collections", "abc"}
+
+
+def _get_relationship_collection() -> str:
+    """Get relationship collection name from settings (lazy load to avoid circular imports)."""
+    try:
+        from config.settings import settings
+        return settings.relationship_collection
+    except ImportError:
+        return "mcp_component_relationships"  # Fallback
+
+
+def _get_nl_relationship_patterns() -> Dict[tuple, str]:
+    """Get NL relationship patterns from SmartCardBuilder (lazy load to avoid circular imports)."""
+    try:
+        from gchat.smart_card_builder import SmartCardBuilder
+        return SmartCardBuilder.NL_RELATIONSHIP_PATTERNS
+    except ImportError:
+        # Fallback patterns if SmartCardBuilder not available
+        return {
+            ("Image", "OnClick"): "clickable image, image with click action",
+            ("Button", "OnClick"): "button click action, button that opens link",
+        }
 
 from config.enhanced_logging import setup_logger
 
@@ -178,7 +218,14 @@ def _get_qdrant_imports():
     if _qdrant_client is None:
         logger.info("🔗 Loading Qdrant client (first use)...")
         from qdrant_client import QdrantClient, models
-        from qdrant_client.models import Distance, PointStruct, VectorParams
+        from qdrant_client.models import (
+            Distance,
+            FieldCondition,
+            Filter,
+            MatchValue,
+            PointStruct,
+            VectorParams,
+        )
 
         _qdrant_client = QdrantClient
         _qdrant_models = {
@@ -186,6 +233,9 @@ def _get_qdrant_imports():
             "Distance": Distance,
             "VectorParams": VectorParams,
             "PointStruct": PointStruct,
+            "Filter": Filter,
+            "FieldCondition": FieldCondition,
+            "MatchValue": MatchValue,
         }
         logger.info("✅ Qdrant client loaded")
     return _qdrant_client, _qdrant_models
@@ -404,6 +454,12 @@ class ModuleWrapper:
         self.colbert_embedder = None
         self.colbert_embedding_dim = 128  # Default for colbert-ir/colbertv2.0
         self._colbert_initialized = False
+
+        # v7 schema: single collection with three named vectors
+        # (colbert, description_colbert, relationships)
+        self.use_v7_schema = collection_name.endswith("_v7") or collection_name.endswith("v7")
+        self.relationships_embedder = None
+        self.relationships_embedding_dim = 384  # Default for MiniLM
 
         # Initialize state
         self.module = self._resolve_module(module_or_name)
@@ -2582,6 +2638,877 @@ class ModuleWrapper:
                 pass
 
         return None
+
+    # =========================================================================
+    # RELATIONSHIP EXTRACTION METHODS
+    # =========================================================================
+
+    def _is_dataclass_type(self, cls: type) -> bool:
+        """Check if a class is a dataclass."""
+        return dataclasses.is_dataclass(cls) and isinstance(cls, type)
+
+    def _unwrap_optional(self, field_type: type) -> Tuple[type, bool]:
+        """
+        Unwrap Optional[X] to get X and whether it was optional.
+
+        Returns:
+            Tuple of (unwrapped_type, is_optional)
+        """
+        origin = get_origin(field_type)
+
+        # Handle Optional[X] which is Union[X, None]
+        if origin is Union:
+            args = get_args(field_type)
+            non_none_args = [t for t in args if t is not type(None)]
+            if len(non_none_args) == 1:
+                return non_none_args[0], True
+            # Multiple non-None types - keep as Union
+            return field_type, False
+
+        return field_type, False
+
+    def _is_component_type(self, field_type: type) -> bool:
+        """Check if a type represents a component (not primitive)."""
+        if field_type in PRIMITIVE_TYPES:
+            return False
+
+        if not inspect.isclass(field_type):
+            return False
+
+        module = getattr(field_type, "__module__", "")
+        if any(module.startswith(prefix) for prefix in BUILTIN_PREFIXES):
+            return False
+
+        return True
+
+    def _to_camel_case(self, snake_str: str) -> str:
+        """Convert snake_case to camelCase."""
+        components = snake_str.split("_")
+        return components[0] + "".join(x.title() for x in components[1:])
+
+    def _generate_nl_description(self, parent: str, child: str) -> str:
+        """
+        Generate natural language description for a relationship.
+
+        Uses NL_RELATIONSHIP_PATTERNS from SmartCardBuilder (Manifesto pattern).
+        """
+        patterns = _get_nl_relationship_patterns()
+        key = (parent, child)
+        if key in patterns:
+            return patterns[key]
+
+        # Generate generic description
+        return f"{parent.lower()} with {child.lower()}, {parent.lower()} containing {child.lower()}"
+
+    def _extract_relationships_from_class(
+        self,
+        cls: type,
+        visited: Optional[Set[str]] = None,
+        depth: int = 0,
+        max_depth: int = 5,
+        path_prefix: str = "",
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract field relationships from a class using type hints.
+
+        Args:
+            cls: The class to analyze
+            visited: Set of visited class names to prevent cycles
+            depth: Current recursion depth
+            max_depth: Maximum recursion depth
+            path_prefix: Prefix for nested paths (e.g., "decoratedText.button")
+
+        Returns:
+            List of relationship dictionaries
+        """
+        if visited is None:
+            visited = set()
+
+        class_name = cls.__name__
+        if class_name in visited or depth > max_depth:
+            return []
+
+        visited.add(class_name)
+        relationships = []
+
+        try:
+            # Get type hints - this extracts field type annotations
+            hints = get_type_hints(cls)
+        except Exception as e:
+            logger.debug(f"Could not get type hints for {class_name}: {e}")
+            return []
+
+        for field_name, field_type in hints.items():
+            # Skip private fields
+            if field_name.startswith("_"):
+                continue
+
+            # Unwrap Optional[X]
+            unwrapped_type, is_optional = self._unwrap_optional(field_type)
+
+            # Check if this is a component reference
+            if self._is_component_type(unwrapped_type):
+                child_name = unwrapped_type.__name__
+                child_module = getattr(unwrapped_type, "__module__", "")
+
+                # Build the relationship path
+                if path_prefix:
+                    rel_path = f"{path_prefix}.{field_name}"
+                else:
+                    rel_path = f"{class_name.lower()}.{field_name}"
+
+                # Convert to camelCase for JSON path
+                json_field = self._to_camel_case(field_name)
+                if path_prefix:
+                    json_path = f"{path_prefix}.{json_field}"
+                else:
+                    json_path = f"{class_name[0].lower()}{class_name[1:]}.{json_field}"
+
+                relationship = {
+                    "parent_class": class_name,
+                    "parent_module": cls.__module__,
+                    "parent_path": f"{cls.__module__}.{class_name}",
+                    "child_class": child_name,
+                    "child_module": child_module,
+                    "child_path": f"{child_module}.{child_name}",
+                    "field_name": field_name,
+                    "is_optional": is_optional,
+                    "depth": depth + 1,
+                    "relationship_path": rel_path,
+                    "json_path": json_path,
+                    "nl_description": self._generate_nl_description(class_name, child_name),
+                }
+                relationships.append(relationship)
+
+                # Recursively extract from child class
+                if self._is_dataclass_type(unwrapped_type):
+                    child_relationships = self._extract_relationships_from_class(
+                        unwrapped_type,
+                        visited=visited.copy(),  # Copy to allow multiple paths
+                        depth=depth + 1,
+                        max_depth=max_depth,
+                        path_prefix=json_path,
+                    )
+                    # Add parent context to child relationships
+                    for child_rel in child_relationships:
+                        child_rel["root_parent"] = class_name
+                        child_rel["intermediate_path"] = rel_path
+                    relationships.extend(child_relationships)
+
+        return relationships
+
+    def extract_relationships(self, max_depth: int = 5) -> List[Dict[str, Any]]:
+        """
+        Extract all component relationships from indexed components.
+
+        This leverages the existing component discovery flow and extracts
+        parent→child relationships from dataclass type hints.
+
+        Args:
+            max_depth: Maximum nesting depth to traverse (default: 5).
+                       Higher values capture deeper nested structures but
+                       increase index size. Adjust based on your module's
+                       hierarchy depth and target API constraints.
+
+        Returns:
+            List of relationship dictionaries with keys:
+                - parent_class: Name of the parent class
+                - child_class: Name of the child class
+                - field_name: Field name in parent that references child
+                - relationship_type: 'direct', 'list', or 'optional'
+                - path: Dot-notation path (e.g., "parent.field.child")
+        """
+        all_relationships = []
+        processed_classes = set()
+
+        logger.info(f"🔗 Extracting relationships from {len(self.components)} components...")
+
+        for full_path, component in self.components.items():
+            # Only process classes (not functions/variables)
+            if component.component_type != "class":
+                continue
+
+            # Skip if already processed
+            if component.name in processed_classes:
+                continue
+
+            # Get the actual class object
+            cls = component.obj
+            if cls is None or not inspect.isclass(cls):
+                continue
+
+            # Only process dataclasses
+            if not self._is_dataclass_type(cls):
+                continue
+
+            processed_classes.add(component.name)
+
+            # Extract relationships
+            relationships = self._extract_relationships_from_class(cls, max_depth=max_depth)
+            all_relationships.extend(relationships)
+
+        logger.info(f"✅ Extracted {len(all_relationships)} relationships")
+        return all_relationships
+
+    def extract_relationships_by_child(
+        self, child_class: str, max_depth: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract relationships filtered by child class name.
+
+        Args:
+            child_class: Name of the child class to filter by (e.g., "OnClick")
+            max_depth: Maximum nesting depth to traverse (default: 5)
+
+        Returns:
+            List of relationships where the child matches
+        """
+        all_rels = self.extract_relationships(max_depth=max_depth)
+        filtered = [r for r in all_rels if r["child_class"] == child_class]
+        logger.info(f"🔍 Found {len(filtered)} {child_class} relationships")
+        return filtered
+
+    def extract_relationships_by_parent(self, max_depth: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Extract relationships grouped by parent component name.
+
+        This is the preferred format for enriching component points with
+        their relationship metadata.
+
+        Args:
+            max_depth: Maximum nesting depth to traverse
+
+        Returns:
+            Dict mapping parent_class name to list of its child relationships
+        """
+        all_rels = self.extract_relationships(max_depth=max_depth)
+
+        # Group by parent class
+        by_parent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for rel in all_rels:
+            parent = rel["parent_class"]
+            # Store simplified relationship info for payload
+            by_parent[parent].append({
+                "child_class": rel["child_class"],
+                "field_name": rel["field_name"],
+                "json_path": rel["json_path"],
+                "depth": rel["depth"],
+                "is_optional": rel["is_optional"],
+                "nl_description": rel["nl_description"],
+                "root_parent": rel.get("root_parent"),
+            })
+
+        logger.info(f"🔗 Grouped relationships for {len(by_parent)} parent components")
+        return dict(by_parent)
+
+    def enrich_components_with_relationships(
+        self,
+        max_depth: int = 5,
+        collection_name: Optional[str] = None,
+    ) -> int:
+        """
+        Enrich existing component points with relationship metadata in payload.
+
+        This updates existing component points in the SAME collection with their
+        child relationships, avoiding the need for a separate collection.
+
+        The relationships are added to the payload under a 'relationships' key,
+        enabling filtering and full-text search on relationship data.
+
+        This method is module-agnostic - it extracts relationships from any module's
+        dataclasses without domain-specific knowledge.
+
+        Args:
+            max_depth: Maximum nesting depth to traverse (default: 5).
+                       Adjust based on your module's hierarchy depth.
+            collection_name: Collection to update (uses self.collection_name if None)
+
+        Returns:
+            Number of components enriched
+        """
+        if collection_name is None:
+            collection_name = self.collection_name
+
+        if not self.client:
+            logger.warning("⚠️ No Qdrant client - cannot enrich components")
+            return 0
+
+        # Get relationships grouped by parent class
+        by_parent = self.extract_relationships_by_parent(max_depth=max_depth)
+
+        if not by_parent:
+            logger.info("📭 No relationships to add")
+            return 0
+
+        try:
+            # First, scroll through the collection to find all class-type points
+            # and build a map from class name to point IDs
+            logger.info(f"📡 Scanning collection {collection_name} for class components...")
+            class_name_to_ids: Dict[str, List[str]] = defaultdict(list)
+
+            offset = None
+            total_scanned = 0
+            while True:
+                scroll_result = self.client.scroll(
+                    collection_name=collection_name,
+                    limit=100,
+                    offset=offset,
+                    with_payload=True,
+                )
+                points, next_offset = scroll_result
+
+                if not points:
+                    break
+
+                for point in points:
+                    payload = point.payload or {}
+                    if payload.get("type") == "class":
+                        name = payload.get("name")
+                        if name:
+                            class_name_to_ids[name].append(str(point.id))
+                    total_scanned += 1
+
+                if next_offset is None:
+                    break
+                offset = next_offset
+
+            logger.info(f"✅ Scanned {total_scanned} points, found {len(class_name_to_ids)} unique class names")
+
+            enriched_count = 0
+
+            for parent_class, relationships in by_parent.items():
+                # Look up the point IDs for this class name
+                point_ids = class_name_to_ids.get(parent_class, [])
+
+                if not point_ids:
+                    logger.debug(f"⏭️ No indexed point found for class {parent_class}")
+                    continue
+
+                # Combined NL descriptions for semantic search
+                nl_descriptions = ", ".join(r["nl_description"] for r in relationships)
+
+                # Build the module-agnostic relationships payload
+                relationships_payload = {
+                    "children": relationships,
+                    "child_classes": list(set(r["child_class"] for r in relationships)),
+                    "max_depth": max(r["depth"] for r in relationships) if relationships else 0,
+                    "nl_descriptions": nl_descriptions,
+                }
+
+                # Update payload for all points with this class name
+                for point_id in point_ids:
+                    try:
+                        self.client.set_payload(
+                            collection_name=collection_name,
+                            payload={"relationships": relationships_payload},
+                            points=[point_id],
+                        )
+                        logger.debug(f"✅ Enriched {parent_class} (id: {point_id[:8]}...) with {len(relationships)} relationships")
+                        enriched_count += 1
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to enrich {parent_class} ({point_id}): {e}")
+
+            logger.info(f"✅ Enriched {enriched_count} components with relationship metadata in {collection_name}")
+            return enriched_count
+
+        except Exception as e:
+            logger.error(f"❌ Failed to enrich components: {e}", exc_info=True)
+            return 0
+
+    def find_relationship_in_collection(
+        self,
+        query: str,
+        limit: int = 5,
+        collection_name: Optional[str] = None,
+        child_class_filter: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for components by their relationship descriptions using semantic search.
+
+        This searches the main collection using the existing vector and filters
+        to only return components that have relationship metadata. Results are
+        then filtered/ranked based on relationship NL descriptions.
+
+        Module-agnostic - works with any module's dataclass relationships.
+
+        Args:
+            query: Natural language query (e.g., "clickable image", "text with icon")
+            limit: Maximum results
+            collection_name: Collection to search (uses self.collection_name if None)
+            child_class_filter: Optional filter to only return components with this child class
+
+        Returns:
+            List of matching components with their relationship info
+        """
+        if collection_name is None:
+            collection_name = self.collection_name
+
+        if not self.client:
+            logger.warning("⚠️ No Qdrant client - cannot search")
+            return []
+
+        try:
+            # Determine which vector to use based on collection config
+            try:
+                collection_info = self.client.get_collection(collection_name)
+                vectors_config = collection_info.config.params.vectors
+                # If named vectors, use 'colbert' if available
+                if isinstance(vectors_config, dict):
+                    if "colbert" in vectors_config:
+                        using = "colbert"
+                    else:
+                        using = list(vectors_config.keys())[0]
+                else:
+                    using = None
+            except Exception:
+                using = None
+
+            # Generate embedding using the appropriate embedder
+            if using == "colbert" and self.colbert_embedder:
+                # Use ColBERT multi-vector embedding
+                query_embedding_result = list(self.colbert_embedder.query_embed([query]))
+                if not query_embedding_result:
+                    logger.error(f"Failed to generate ColBERT query embedding for: {query}")
+                    return []
+                query_vector = query_embedding_result[0]
+                if hasattr(query_vector, "tolist"):
+                    query_vector = query_vector.tolist()
+            else:
+                # Use standard dense embedding
+                embedding_list = list(self.embedder.embed([query]))
+                if not embedding_list:
+                    logger.error(f"Failed to generate embedding for query: {query}")
+                    return []
+                query_embedding = embedding_list[0]
+                if hasattr(query_embedding, "tolist"):
+                    query_vector = query_embedding.tolist()
+                else:
+                    query_vector = list(query_embedding)
+
+            # Search with broader limit, then filter for components with relationships
+            search_kwargs = {
+                "collection_name": collection_name,
+                "query": query_vector,
+                "limit": limit * 3,  # Get more results, filter later
+            }
+            if using:
+                search_kwargs["using"] = using
+
+            search_results = self.client.query_points(**search_kwargs)
+
+            # Extract results (module-agnostic structure)
+            results = []
+            points = getattr(search_results, "points", [])
+            for point in points:
+                score = getattr(point, "score", 0)
+                payload = getattr(point, "payload", {})
+                relationships = payload.get("relationships", {})
+
+                # Skip if no relationship data
+                if not relationships:
+                    continue
+
+                # Apply child_class_filter if specified
+                child_classes = relationships.get("child_classes", [])
+                if child_class_filter and child_class_filter not in child_classes:
+                    continue
+
+                results.append({
+                    "score": score,
+                    "name": payload.get("name"),
+                    "full_path": payload.get("full_path"),
+                    "type": payload.get("type"),
+                    "child_classes": child_classes,
+                    "children": relationships.get("children", []),
+                    "max_depth": relationships.get("max_depth", 0),
+                    "nl_descriptions": relationships.get("nl_descriptions", ""),
+                })
+
+                if len(results) >= limit:
+                    break
+
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ Failed to search relationships: {e}", exc_info=True)
+            return []
+
+    def search_by_relationship(
+        self,
+        query: str,
+        limit: int = 5,
+        child_class_filter: Optional[str] = None,
+        collection_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for components using the v7 relationships vector.
+
+        This uses the dense 'relationships' named vector (384d MiniLM) for
+        semantic search on relationship NL descriptions. Much faster than
+        ColBERT for relationship queries.
+
+        Requires a v7-style collection with the 'relationships' named vector.
+
+        Args:
+            query: Natural language query (e.g., "clickable image", "button with icon")
+            limit: Maximum results
+            child_class_filter: Optional filter to only return components with this child class
+            collection_name: Collection to search (uses self.collection_name if None)
+
+        Returns:
+            List of matching components with their relationship info
+        """
+        if collection_name is None:
+            collection_name = self.collection_name
+
+        if not self.client:
+            logger.warning("⚠️ No Qdrant client - cannot search")
+            return []
+
+        try:
+            # Initialize relationships embedder if needed
+            if self.relationships_embedder is None:
+                TextEmbedding = _get_fastembed()
+                self.relationships_embedder = TextEmbedding(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
+                logger.info("✅ Relationships embedder initialized (MiniLM, 384d)")
+
+            # Generate embedding for query
+            embedding_list = list(self.relationships_embedder.embed([query]))
+            if not embedding_list:
+                logger.error(f"Failed to generate embedding for query: {query}")
+                return []
+
+            query_embedding = embedding_list[0]
+            if hasattr(query_embedding, "tolist"):
+                query_vector = query_embedding.tolist()
+            else:
+                query_vector = list(query_embedding)
+
+            # Search using the relationships named vector
+            search_results = self.client.query_points(
+                collection_name=collection_name,
+                query=query_vector,
+                using="relationships",
+                limit=limit * 2 if child_class_filter else limit,
+                with_payload=True,
+            )
+
+            # Extract results
+            results = []
+            points = getattr(search_results, "points", [])
+            for point in points:
+                score = getattr(point, "score", 0)
+                payload = getattr(point, "payload", {})
+                relationships = payload.get("relationships", {})
+
+                # Apply child_class_filter if specified
+                child_classes = relationships.get("child_classes", [])
+                if child_class_filter and child_class_filter not in child_classes:
+                    continue
+
+                results.append({
+                    "score": score,
+                    "name": payload.get("name"),
+                    "full_path": payload.get("full_path"),
+                    "type": payload.get("type"),
+                    "child_classes": child_classes,
+                    "children": relationships.get("children", []),
+                    "max_depth": relationships.get("max_depth", 0),
+                    "nl_descriptions": relationships.get("nl_descriptions", ""),
+                })
+
+                if len(results) >= limit:
+                    break
+
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ Failed to search by relationship: {e}", exc_info=True)
+            return []
+
+    def get_relationship_tree(self, child_class: str) -> Dict[str, Any]:
+        """
+        Build a tree visualization of relationships for a specific child type.
+
+        Args:
+            child_class: The child class to trace paths for
+
+        Returns:
+            Dictionary with tree structure and stats
+        """
+        relationships = self.extract_relationships_by_child(child_class)
+
+        # Group by depth
+        by_depth = defaultdict(list)
+        for rel in relationships:
+            by_depth[rel["depth"]].append(rel)
+
+        # Build tree structure
+        tree = {
+            "child_class": child_class,
+            "total_paths": len(relationships),
+            "max_depth": max(by_depth.keys()) if by_depth else 0,
+            "by_depth": {},
+            "unique_parents": set(),
+        }
+
+        for depth, rels in sorted(by_depth.items()):
+            tree["by_depth"][depth] = []
+            for rel in rels:
+                tree["unique_parents"].add(rel["parent_class"])
+                tree["by_depth"][depth].append({
+                    "parent": rel["parent_class"],
+                    "field": rel["field_name"],
+                    "json_path": rel["json_path"],
+                    "is_optional": rel["is_optional"],
+                    "nl_description": rel["nl_description"],
+                    "root_parent": rel.get("root_parent"),
+                })
+
+        tree["unique_parents"] = list(tree["unique_parents"])
+        return tree
+
+    def print_relationship_tree(self, child_class: str) -> str:
+        """
+        Print a formatted ASCII tree of relationships.
+
+        Args:
+            child_class: The child class to trace paths for
+
+        Returns:
+            Formatted string representation of the tree
+        """
+        tree = self.get_relationship_tree(child_class)
+        lines = []
+
+        lines.append(f"╔══════════════════════════════════════════════════════════════════╗")
+        lines.append(f"║  RELATIONSHIP TREE: {child_class:^43} ║")
+        lines.append(f"╠══════════════════════════════════════════════════════════════════╣")
+        lines.append(f"║  Total paths: {tree['total_paths']:<51} ║")
+        lines.append(f"║  Max depth: {tree['max_depth']:<53} ║")
+        lines.append(f"║  Unique parents: {', '.join(tree['unique_parents'][:5]):<48} ║")
+        lines.append(f"╚══════════════════════════════════════════════════════════════════╝")
+        lines.append("")
+
+        for depth, rels in sorted(tree["by_depth"].items()):
+            lines.append(f"┌─ Depth {depth} {'─' * 56}")
+            for i, rel in enumerate(rels):
+                is_last = i == len(rels) - 1
+                prefix = "└──" if is_last else "├──"
+                optional_str = "(optional)" if rel["is_optional"] else "(required)"
+
+                lines.append(f"│  {prefix} {rel['parent']}.{rel['field']} → {child_class} {optional_str}")
+                lines.append(f"│      JSON: {rel['json_path']}")
+                lines.append(f"│      NL: \"{rel['nl_description']}\"")
+                if rel.get("root_parent"):
+                    lines.append(f"│      Root: {rel['root_parent']}")
+            lines.append("│")
+
+        return "\n".join(lines)
+
+    def store_relationships_in_qdrant(
+        self,
+        relationships: Optional[List[Dict[str, Any]]] = None,
+        collection_name: Optional[str] = None,
+    ) -> int:
+        """
+        Store component relationships in a dedicated Qdrant collection.
+
+        DEPRECATED: Prefer `enrich_components_with_relationships()` which adds
+        relationship metadata and vectors directly to existing component points
+        in the main collection, avoiding the need for a separate collection.
+
+        This creates a separate collection optimized for relationship queries.
+
+        Args:
+            relationships: List of relationship dicts (if None, extracts fresh)
+            collection_name: Collection name for relationships (uses settings default if None)
+
+        Returns:
+            Number of relationships stored
+        """
+        # Use settings default if collection_name not provided
+        if collection_name is None:
+            collection_name = _get_relationship_collection()
+
+        if not self.client:
+            logger.warning("⚠️ No Qdrant client - cannot store relationships")
+            return 0
+
+        if relationships is None:
+            relationships = self.extract_relationships()
+
+        if not relationships:
+            logger.info("📭 No relationships to store")
+            return 0
+
+        try:
+            _, qdrant_models = _get_qdrant_imports()
+
+            # Ensure collection exists with proper config
+            try:
+                self.client.get_collection(collection_name)
+                logger.info(f"📊 Using existing relationship collection: {collection_name}")
+            except Exception:
+                # Create collection with vector config matching our embedder
+                logger.info(f"🔨 Creating relationship collection: {collection_name}")
+                self.client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=qdrant_models["VectorParams"](
+                        size=self.embedding_dim,
+                        distance=qdrant_models["Distance"].COSINE,
+                    ),
+                )
+
+            # Generate points
+            points = []
+            seen_ids = set()
+
+            for rel in relationships:
+                # Generate deterministic ID
+                id_string = f"{rel['parent_class']}:{rel['field_name']}:{rel['child_class']}:{rel['json_path']}"
+                hash_bytes = hashlib.sha256(id_string.encode()).digest()
+                hash_hex = hash_bytes.hex()
+                point_id = f"{hash_hex[:8]}-{hash_hex[8:12]}-{hash_hex[12:16]}-{hash_hex[16:20]}-{hash_hex[20:32]}"
+
+                if point_id in seen_ids:
+                    continue
+                seen_ids.add(point_id)
+
+                # Generate embedding from NL description
+                embedding_list = list(self.embedder.embed([rel["nl_description"]]))
+                if not embedding_list:
+                    continue
+
+                embedding = embedding_list[0]
+                if hasattr(embedding, "tolist"):
+                    vector_list = embedding.tolist()
+                else:
+                    vector_list = list(embedding)
+
+                # Create point
+                point = qdrant_models["PointStruct"](
+                    id=point_id,
+                    vector=vector_list,
+                    payload={
+                        "parent_class": rel["parent_class"],
+                        "parent_module": rel["parent_module"],
+                        "parent_path": rel["parent_path"],
+                        "child_class": rel["child_class"],
+                        "child_module": rel["child_module"],
+                        "child_path": rel["child_path"],
+                        "field_name": rel["field_name"],
+                        "relationship_path": rel["relationship_path"],
+                        "json_path": rel["json_path"],
+                        "depth": rel["depth"],
+                        "is_optional": rel["is_optional"],
+                        "nl_description": rel["nl_description"],
+                        "root_parent": rel.get("root_parent"),
+                        "intermediate_path": rel.get("intermediate_path"),
+                        "indexed_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+                points.append(point)
+
+            # Store in batches
+            batch_size = 50
+            stored = 0
+            for i in range(0, len(points), batch_size):
+                batch = points[i : i + batch_size]
+                self.client.upsert(collection_name=collection_name, points=batch)
+                stored += len(batch)
+
+            logger.info(f"✅ Stored {stored} relationships in {collection_name}")
+            return stored
+
+        except Exception as e:
+            logger.error(f"❌ Failed to store relationships: {e}", exc_info=True)
+            return 0
+
+    def find_relationship(
+        self,
+        query: str,
+        limit: int = 5,
+        score_threshold: float = 0.3,
+        collection_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Semantic search for component relationships in a dedicated collection.
+
+        DEPRECATED: Prefer `find_relationship_in_collection()` which searches
+        the main collection using the enriched relationship metadata and
+        named vectors. This method uses a separate collection.
+
+        Allows natural language queries to find parent→child paths
+        based on the NL descriptions from the relationship patterns.
+
+        Args:
+            query: Natural language query describing the relationship
+            limit: Maximum results
+            score_threshold: Minimum similarity score
+            collection_name: Collection to search (uses settings default if None)
+
+        Returns:
+            List of matching relationships with scores
+        """
+        # Use settings default if collection_name not provided
+        if collection_name is None:
+            collection_name = _get_relationship_collection()
+
+        if not self.client:
+            logger.warning("⚠️ No Qdrant client - cannot search relationships")
+            return []
+
+        try:
+            # Generate embedding for query
+            embedding_list = list(self.embedder.embed([query]))
+            if not embedding_list:
+                logger.error(f"Failed to generate embedding for query: {query}")
+                return []
+
+            query_embedding = embedding_list[0]
+            if hasattr(query_embedding, "tolist"):
+                query_vector = query_embedding.tolist()
+            else:
+                query_vector = list(query_embedding)
+
+            # Search in Qdrant
+            search_results = self.client.query_points(
+                collection_name=collection_name,
+                query=query_vector,
+                limit=limit,
+                score_threshold=score_threshold,
+            )
+
+            # Extract results
+            results = []
+            points = getattr(search_results, "points", [])
+            for point in points:
+                score = getattr(point, "score", 0)
+                payload = getattr(point, "payload", {})
+
+                results.append({
+                    "score": score,
+                    "parent_class": payload.get("parent_class"),
+                    "child_class": payload.get("child_class"),
+                    "field_name": payload.get("field_name"),
+                    "json_path": payload.get("json_path"),
+                    "depth": payload.get("depth"),
+                    "is_optional": payload.get("is_optional"),
+                    "nl_description": payload.get("nl_description"),
+                    "root_parent": payload.get("root_parent"),
+                    "parent_path": payload.get("parent_path"),
+                    "child_path": payload.get("child_path"),
+                })
+
+            logger.info(f"🔍 Found {len(results)} relationship matches for '{query}'")
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ Relationship search failed: {e}", exc_info=True)
+            return []
 
     def force_reindex_components(self):
         """

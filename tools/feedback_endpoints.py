@@ -35,6 +35,9 @@ def setup_feedback_endpoints(mcp: FastMCP):
         Query params:
             card_id: Unique ID of the card
             feedback: "positive" or "negative"
+            feedback_type: "content" or "form" (optional, defaults to updating both)
+                - content: Rates values/inputs (affects inputs vector searches)
+                - form: Rates layout/structure (affects relationships vector searches)
 
         Returns HTML page confirming feedback was received.
         """
@@ -45,9 +48,10 @@ def setup_feedback_endpoints(mcp: FastMCP):
             query_params = dict(request.query_params)
             card_id = query_params.get("card_id", "")
             feedback = query_params.get("feedback", "")
+            feedback_type = query_params.get("feedback_type", "")  # "content" or "form"
 
             logger.info(
-                f"📝 Feedback received: card_id={card_id[:8]}..., feedback={feedback}"
+                f"📝 Feedback received: card_id={card_id[:8]}..., feedback={feedback}, type={feedback_type or 'both'}"
             )
 
             if not card_id or not feedback:
@@ -72,17 +76,35 @@ def setup_feedback_endpoints(mcp: FastMCP):
             from gchat.feedback_loop import get_feedback_loop
 
             feedback_loop = get_feedback_loop()
-            success = feedback_loop.update_feedback(card_id, feedback)
+
+            # Handle dual feedback types
+            if feedback_type == "content":
+                # Only update content feedback (affects inputs vector)
+                success = feedback_loop.update_feedback(
+                    card_id, content_feedback=feedback
+                )
+                feedback_label = "content"
+            elif feedback_type == "form":
+                # Only update form feedback (affects relationships vector)
+                success = feedback_loop.update_feedback(
+                    card_id, form_feedback=feedback
+                )
+                feedback_label = "layout"
+            else:
+                # Legacy: update both (backwards compatibility)
+                success = feedback_loop.update_feedback(card_id, feedback=feedback)
+                feedback_label = "card"
 
             if success:
-                logger.info(f"✅ Feedback updated: {card_id[:8]}... -> {feedback}")
+                logger.info(f"✅ Feedback updated: {card_id[:8]}... -> {feedback} ({feedback_label})")
                 emoji = "👍" if feedback == "positive" else "👎"
                 return HTMLResponse(
                     status_code=200,
                     content=_render_feedback_page(
                         success=True,
-                        message=f"Thanks for your feedback! {emoji}",
+                        message=f"Thanks for your {feedback_label} feedback! {emoji}",
                         feedback=feedback,
+                        feedback_type=feedback_type,
                     ),
                 )
             else:
@@ -95,6 +117,7 @@ def setup_feedback_endpoints(mcp: FastMCP):
                         success=True,
                         message="Thanks for your feedback! (Card pattern not found in database)",
                         feedback=feedback,
+                        feedback_type=feedback_type,
                     ),
                 )
 
@@ -209,7 +232,9 @@ def setup_feedback_endpoints(mcp: FastMCP):
     logger.info("   • /card-feedback/stats - View feedback statistics")
 
 
-def _render_feedback_page(success: bool, message: str, feedback: str = None) -> str:
+def _render_feedback_page(
+    success: bool, message: str, feedback: str = None, feedback_type: str = None
+) -> str:
     """Render a simple HTML page for feedback response."""
     bg_color = "#1a1a2e" if success else "#2e1a1a"
     text_color = "#e0e0e0"
@@ -224,6 +249,13 @@ def _render_feedback_page(success: bool, message: str, feedback: str = None) -> 
         emoji = "👍"
     elif feedback == "negative":
         emoji = "👎"
+
+    # Add feedback type indicator
+    type_label = ""
+    if feedback_type == "content":
+        type_label = "Content feedback recorded"
+    elif feedback_type == "form":
+        type_label = "Layout feedback recorded"
 
     return f"""
 <!DOCTYPE html>
@@ -262,6 +294,12 @@ def _render_feedback_page(success: bool, message: str, feedback: str = None) -> 
             line-height: 1.6;
             color: {accent_color};
         }}
+        .type-label {{
+            font-size: 12px;
+            color: #a0a0a0;
+            margin-top: 10px;
+            font-style: italic;
+        }}
         .subtitle {{
             font-size: 14px;
             color: #888;
@@ -273,6 +311,7 @@ def _render_feedback_page(success: bool, message: str, feedback: str = None) -> 
     <div class="container">
         <div class="emoji">{emoji if emoji else ("✅" if success else "❌")}</div>
         <div class="message">{message}</div>
+        {f'<div class="type-label">{type_label}</div>' if type_label else ''}
         <div class="subtitle">You can close this window.</div>
     </div>
 </body>

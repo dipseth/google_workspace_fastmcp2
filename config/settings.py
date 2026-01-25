@@ -158,10 +158,21 @@ class Settings(BaseSettings):
     )
 
     # Google Chat Card Collection Configuration
+    # v7 collection has three named vectors:
+    #   - components: Identity (Name + Type + Path + Docstring)
+    #   - inputs: Values (defaults, enums, instance_params)
+    #   - relationships: Graph (parent-child connections)
     card_collection: str = Field(
-        default="card_framework_components_colbert_v2",
+        default="mcp_gchat_cards_v7",
         description="Qdrant collection for Google Chat card components, templates, and feedback patterns",
         json_schema_extra={"env": "CARD_COLLECTION"},
+    )
+
+    # Component Relationship Collection Configuration
+    relationship_collection: str = Field(
+        default="mcp_component_relationships",
+        description="Qdrant collection for card component relationships (parent→child paths)",
+        json_schema_extra={"env": "RELATIONSHIP_COLLECTION"},
     )
 
     # Google Chat Default Webhook URL

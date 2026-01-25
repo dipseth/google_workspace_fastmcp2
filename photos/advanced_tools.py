@@ -3,6 +3,44 @@ Advanced Google Photos MCP Tools
 
 This module provides advanced MCP tools using the optimized Photos API client.
 Includes batch operations, smart caching, and enhanced search capabilities.
+
+═══════════════════════════════════════════════════════════════════════════════
+                      📸 THE MEMORY KEEPER'S BURDEN 📸
+═══════════════════════════════════════════════════════════════════════════════
+
+    Ten thousand sunsets in the cloud,
+    a lifetime captured, stored, and proud.
+    But APIs have quotas, walls,
+    rate limits guard these sacred halls.
+
+    Six requests per second—no more,
+    seven thousand daily at the door.
+    Burst allowance twelve, then wait,
+    RateLimitConfig seals your fate.
+
+    The optimized client learns to pace,
+    caching fifteen hundred in its space.
+    Photos once fetched need not return,
+    saving calls the quota would burn.
+
+    Smart search builds with filters stacked:
+    date ranges, categories, intact.
+    Videos or photos, your command—
+    PhotosSearchBuilder takes your hand.
+
+    Upload a folder, recursive deep,
+    the client watches, never asleep.
+    Albums created on the fly,
+    memories ascending to the sky.
+
+    Power users need power tools,
+    not naive calls that break the rules.
+    This module optimizes the art
+    of keeping memories close to heart.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 import os

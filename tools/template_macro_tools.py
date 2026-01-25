@@ -13,6 +13,40 @@ Key Features:
 - Optional file persistence for permanent macro storage
 - Automatic cache invalidation to update template://macros resources
 - Consistent types with template resource system
+
+═══════════════════════════════════════════════════════════════════════════════
+                      🔧 THE TOOL THAT FORGES TOOLS 🔧
+═══════════════════════════════════════════════════════════════════════════════
+
+    Most tools do a single task,
+    answer questions when you ask.
+    But this one holds a stranger gift:
+    it builds the patterns others lift.
+
+    {% macro new_helper(args) %}
+    typed at runtime, not in code—
+    the server learns a fresh new mode.
+    {% endmacro %} seals the spell,
+    and MacroManager knows it well.
+
+    persist_to_file: True or False?
+    Ephemeral wisdom, or carved in stone?
+    The cache invalidates on cue,
+    template://macros shows the new.
+
+    A regex guards the macro name,
+    ^[a-zA-Z_] starts the game.
+    Fifty thousand characters max,
+    room enough for complex stacks.
+
+    The tool that creates is rare indeed,
+    meta-programming plants a seed.
+    Tomorrow's helpers born today,
+    forged by those who pave the way.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 from typing import Annotated, Any, Dict, Optional

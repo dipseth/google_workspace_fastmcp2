@@ -168,24 +168,28 @@ def query_with_feedback_comparison(test_queries):
         # Also show hybrid query results
         print("\n📊 Hybrid Query Results (component + pattern search):")
         # query_with_feedback takes (component_query, description)
-        class_results, pattern_results = feedback_loop.query_with_feedback(
+        class_results, content_patterns, form_patterns = feedback_loop.query_with_feedback(
             component_query="card widget",  # Generic component search
             description=query,
             limit=5,
         )
 
+        # Combine patterns for display
+        pattern_results = content_patterns + form_patterns
+
         if pattern_results:
             print("   Pattern matches (feedback-boosted):")
             for i, result in enumerate(pattern_results[:3], 1):
                 name = result.get("name", "unknown")
-                point_type = result.get("type", "unknown")
-                feedback = result.get("feedback", "-")
+                content_fb = result.get("content_feedback", "-")
+                form_fb = result.get("form_feedback", "-")
                 score = result.get("score", 0)
 
-                feedback_emoji = "👍" if feedback == "positive" else ""
+                feedback_emoji = "👍" if content_fb == "positive" or form_fb == "positive" else ""
                 print(
                     f"      {i}. 📝 {name[:40]}... - score: {score:.3f} {feedback_emoji}"
                 )
+                print(f"          content: {content_fb}, form: {form_fb}")
         else:
             print("   No pattern matches")
 

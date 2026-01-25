@@ -3,6 +3,34 @@ PKCE (Proof Key for Code Exchange) utilities for OAuth 2.1 flows.
 
 This module provides utilities for generating and validating PKCE parameters
 as defined in RFC 7636, enhancing security for OAuth flows.
+
+═══════════════════════════════════════════════════════════════════════════════
+                         🔐 THE VERIFIER'S OATH 🔐
+═══════════════════════════════════════════════════════════════════════════════
+
+    A secret born from entropy's well,
+    128 characters no one can tell.
+    SHA256 transforms the phrase
+    into a challenge through the haze.
+
+    The verifier waits, patient, still—
+    while challenge travels, testing will.
+    When token comes back to the door,
+    it proves you are who you were before.
+
+    No interceptor along the wire
+    can steal what they did not acquire.
+    The secret never leaves your hand,
+    only its shadow crossed the land.
+
+    Consume and forget, the session dies.
+    One proof, one use—that's how trust flies.
+    In the space between request and grant,
+    PKCE guards what hackers can't.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 import base64

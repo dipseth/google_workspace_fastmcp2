@@ -4,6 +4,39 @@ Lazy Import Utilities for Qdrant Middleware
 This module provides lazy loading functionality for heavy dependencies
 to avoid import errors and delays during server startup. Dependencies
 are loaded only when first needed.
+
+═══════════════════════════════════════════════════════════════════════════════
+                      💤 THE SLUMBER BEFORE NEED 💤
+═══════════════════════════════════════════════════════════════════════════════
+
+    NumPy sleeps in potential space,
+    Qdrant waits without a trace.
+    FastEmbed dreams in cold repose—
+    none shall wake until need shows.
+
+    Why summon giants at the door
+    when half the time you need them not?
+    The server starts in seconds four,
+    not minutes tangled, overfraught.
+
+    _qdrant_client equals None,
+    a global whisper, patient, done.
+    First call breaks the seal of rest,
+    "Loading Qdrant..." begins the quest.
+
+    And if the import falls apart?
+    Return False, not crash the cart.
+    Graceful absence beats the scream
+    of tracebacks shattering the dream.
+
+    reset_imports() clears the slate,
+    tests begin with virgin state.
+    The lazy load, a simple art:
+    wake only what must play its part.
+
+                                        — Field Notes, Jan 2026
+
+═══════════════════════════════════════════════════════════════════════════════
 """
 
 from typing import Dict
