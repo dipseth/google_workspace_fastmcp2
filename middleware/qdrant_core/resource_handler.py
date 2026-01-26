@@ -14,6 +14,7 @@ Supported URI patterns:
 """
 
 import asyncio
+import base64
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -355,8 +356,21 @@ class QdrantResourceHandler:
                 data = payload.get("data", "{}")
                 if payload.get("compressed", False) and payload.get("compressed_data"):
                     try:
+                        compressed_data = payload["compressed_data"]
+                        # Handle string data that was serialized for JSON storage
+                        if isinstance(compressed_data, str):
+                            # Check for base64: prefix from sanitize_for_json
+                            if compressed_data.startswith("base64:"):
+                                compressed_data = base64.b64decode(compressed_data[7:])
+                            else:
+                                # Try raw base64 decode first
+                                try:
+                                    compressed_data = base64.b64decode(compressed_data)
+                                except Exception:
+                                    # Fallback to encoding as UTF-8 bytes
+                                    compressed_data = compressed_data.encode("utf-8")
                         decompressed = self.client_manager._decompress_data(
-                            payload["compressed_data"]
+                            compressed_data
                         )
                         if decompressed is not None:
                             data = decompressed

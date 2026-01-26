@@ -461,13 +461,17 @@ class QdrantSearchManager:
                     compressed_data = payload["compressed_data"]
                     # Ensure compressed_data is bytes (handle string encoding if necessary)
                     if isinstance(compressed_data, str):
-                        # If it's a string, it might be base64 encoded or need to be encoded as bytes
-                        try:
-                            # Try base64 decode first (common for binary data stored as string)
-                            compressed_data = base64.b64decode(compressed_data)
-                        except:
-                            # Fallback to encoding as UTF-8 bytes
-                            compressed_data = compressed_data.encode("utf-8")
+                        # Check for base64: prefix from sanitize_for_json
+                        if compressed_data.startswith("base64:"):
+                            compressed_data = base64.b64decode(compressed_data[7:])
+                        else:
+                            # If it's a string, it might be base64 encoded or need to be encoded as bytes
+                            try:
+                                # Try base64 decode first (common for binary data stored as string)
+                                compressed_data = base64.b64decode(compressed_data)
+                            except Exception:
+                                # Fallback to encoding as UTF-8 bytes
+                                compressed_data = compressed_data.encode("utf-8")
 
                     # Use safe decompression with intelligent detection
                     decompressed_data = self._safe_decompress_data(compressed_data)
@@ -950,13 +954,17 @@ class QdrantSearchManager:
                 if compressed_data:
                     # Ensure compressed_data is bytes (handle string encoding if necessary)
                     if isinstance(compressed_data, str):
-                        # If it's a string, it might be base64 encoded or need to be encoded as bytes
-                        try:
-                            # Try base64 decode first (common for binary data stored as string)
-                            compressed_data = base64.b64decode(compressed_data)
-                        except:
-                            # Fallback to encoding as UTF-8 bytes
-                            compressed_data = compressed_data.encode("utf-8")
+                        # Check for base64: prefix from sanitize_for_json
+                        if compressed_data.startswith("base64:"):
+                            compressed_data = base64.b64decode(compressed_data[7:])
+                        else:
+                            # If it's a string, it might be base64 encoded or need to be encoded as bytes
+                            try:
+                                # Try base64 decode first (common for binary data stored as string)
+                                compressed_data = base64.b64decode(compressed_data)
+                            except Exception:
+                                # Fallback to encoding as UTF-8 bytes
+                                compressed_data = compressed_data.encode("utf-8")
 
                     # Use safe decompression with intelligent detection
                     decompressed_data = self._safe_decompress_data(compressed_data)
