@@ -694,17 +694,17 @@ Chain structured tools together using their consistent response format for compl
 
     def _render_fallback_showcase(self, context: Dict) -> str:
         """Fallback rendering for tool showcase."""
-        return f"""# 🛠️ Tool Showcase: {context['tool_name']}
-*Request ID: {context['request_id']}*
+        return f"""# 🛠️ Tool Showcase: {context["tool_name"]}
+*Request ID: {context["request_id"]}*
 
-**Category:** {context['tool_info']['category']}
-**Description:** {context['tool_info']['description']}
+**Category:** {context["tool_info"]["category"]}
+**Description:** {context["tool_info"]["description"]}
 
 **Original Response:**
-{context['original_response']}
+{context["original_response"]}
 
 **Structured Response:**
-{json.dumps(context['structured_response'], indent=2)}
+{json.dumps(context["structured_response"], indent=2)}
 
 *Fallback template - install Jinja2 for better formatting*"""
 
@@ -727,17 +727,17 @@ Chain structured tools together using their consistent response format for compl
         """Fallback rendering for interactive demo."""
         tool = context["featured_tool"]
         return f"""# 🎮 Interactive Demo
-*Request ID: {context['request_id']}*
+*Request ID: {context["request_id"]}*
 
-**Featured Tool:** {tool['category']} → {tool['name']}
-**Description:** {tool['description']}
+**Featured Tool:** {tool["category"]} → {tool["name"]}
+**Description:** {tool["description"]}
 
 **Try This:**
 ```xml
 <mcp_tool_call>
-  <tool>{tool['name']}_structured</tool>
+  <tool>{tool["name"]}_structured</tool>
   <params>
-    {json.dumps(tool['example_params'], indent=4)}
+    {json.dumps(tool["example_params"], indent=4)}
   </params>
 </mcp_tool_call>
 ```
@@ -748,9 +748,9 @@ Chain structured tools together using their consistent response format for compl
         """Fallback rendering for benefits overview."""
         stats = context["coverage_stats"]
         return f"""# ✨ Structured Response Benefits
-*Request ID: {context['request_id']}*
+*Request ID: {context["request_id"]}*
 
-**Coverage:** {stats['structured_tools']} structured tools ({stats['coverage_percentage']}% coverage)
+**Coverage:** {stats["structured_tools"]} structured tools ({stats["coverage_percentage"]}% coverage)
 
 **Key Benefits:**
 - Consistent JSON schema across all tools

@@ -683,7 +683,7 @@ def markdown_to_html(markdown_content: str) -> str:
 
     def save_code_block(match):
         code_blocks.append(match.group(0))
-        return f"<!--CODE_BLOCK_{len(code_blocks)-1}-->"
+        return f"<!--CODE_BLOCK_{len(code_blocks) - 1}-->"
 
     html = re.sub(r"```[\s\S]*?```", save_code_block, html)
     html = re.sub(r"`[^`]+`", save_code_block, html)
@@ -1255,7 +1255,7 @@ async def create_doc(
             # Convert newlines to paragraphs
             paragraphs = plain_text.split("\n\n")
             html_content = "".join(
-                f'<p>{p.replace(chr(10), "<br>")}</p>' for p in paragraphs if p.strip()
+                f"<p>{p.replace(chr(10), '<br>')}</p>" for p in paragraphs if p.strip()
             )
             content_bytes = html_content.encode("utf-8")
             upload_mime_type = "text/html"

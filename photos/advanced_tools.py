@@ -912,7 +912,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
                     f"- Total files: {total_count}\n"
                     f"- Successful: {successful_count}\n"
                     f"- Failed: {failed_count}\n"
-                    f"- Success rate: {(successful_count/total_count*100):.1f}%\n"
+                    f"- Success rate: {(successful_count / total_count * 100):.1f}%\n"
                     f"- Upload time: {elapsed_time:.2f}s\n"
                 )
 
@@ -944,7 +944,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
 
                 text_output += (
                     f"\n**⚡ Performance:**\n"
-                    f"- Average time per photo: {elapsed_time/max(total_count, 1):.2f}s\n"
+                    f"- Average time per photo: {elapsed_time / max(total_count, 1):.2f}s\n"
                     f"- Cache utilization: {cache_stats['cache_size']} items\n"
                     f"- Burst tokens remaining: {cache_stats['burst_tokens']}"
                 )
@@ -1120,9 +1120,9 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
                 f"- Total photos found: {total_count}\n"
                 f"- Successfully uploaded: {successful_count}\n"
                 f"- Failed uploads: {failed_count}\n"
-                f"- Success rate: {(successful_count/total_count*100):.1f}%\n"
+                f"- Success rate: {(successful_count / total_count * 100):.1f}%\n"
                 f"- Total upload time: {elapsed_time:.2f}s\n"
-                f"- Average per photo: {elapsed_time/max(total_count, 1):.2f}s\n"
+                f"- Average per photo: {elapsed_time / max(total_count, 1):.2f}s\n"
             )
 
             if results.get("album_id"):

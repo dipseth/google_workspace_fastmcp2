@@ -695,7 +695,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
             # Format response
             header = (
                 f'File: "{file_name}" (ID: {file_id}, Type: {mime_type})\n'
-                f'Link: {file_metadata.get("webViewLink", "#")}\n\n--- CONTENT ---\n'
+                f"Link: {file_metadata.get('webViewLink', '#')}\n\n--- CONTENT ---\n"
             )
             return header + body_text
 

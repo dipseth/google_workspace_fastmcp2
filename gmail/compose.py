@@ -533,10 +533,10 @@ async def _handle_elicitation_fallback(
             message=f"""📝 **EMAIL SAVED AS DRAFT** (not sent)
 
 ✅ **Action:** Saved to Gmail Drafts folder
-📧 **Draft ID:** {draft_result['draft_id']}
-📬 **Recipients:** {draft_result['recipient_count']} (not notified)
+📧 **Draft ID:** {draft_result["draft_id"]}
+📬 **Recipients:** {draft_result["recipient_count"]} (not notified)
 
-⚠️ **Why draft:** Recipients not on allow list: {', '.join(recipients_not_allowed)}
+⚠️ **Why draft:** Recipients not on allow list: {", ".join(recipients_not_allowed)}
 📱 **Cause:** Your MCP client doesn't support elicitation
 
 🔧 **Next steps:**
@@ -562,7 +562,7 @@ async def _handle_elicitation_fallback(
 
 ❌ **Action:** Send operation blocked for security
 📧 **Subject:** {subject}
-📬 **Recipients:** {to if isinstance(to, str) else ', '.join(to)} ({len(recipients_not_allowed)} not verified)
+📬 **Recipients:** {to if isinstance(to, str) else ", ".join(to)} ({len(recipients_not_allowed)} not verified)
 
 🚨 **Issue:** Recipients not on your allow list
 📱 **Cause:** MCP client doesn't support interactive confirmation
@@ -947,8 +947,8 @@ async def send_gmail_message(
                         message=f"""📝 **EMAIL SAVED AS DRAFT** (not sent)
 
 ✅ **Action:** User chose to save as draft
-📧 **Draft ID:** {draft_result['draft_id']}
-📬 **Recipients:** {draft_result['recipient_count']} (not notified)
+📧 **Draft ID:** {draft_result["draft_id"]}
+📬 **Recipients:** {draft_result["recipient_count"]} (not notified)
 
 ℹ️ **User choice:** Save as draft via elicitation prompt
 🔧 **Next step:** Review draft in Gmail and send manually""",
@@ -1478,17 +1478,23 @@ async def reply_to_gmail_message(
             to_recipients=(
                 final_to
                 if isinstance(final_to, list)
-                else [final_to] if final_to else []
+                else [final_to]
+                if final_to
+                else []
             ),
             cc_recipients=(
                 final_cc
                 if isinstance(final_cc, list)
-                else [final_cc] if final_cc else []
+                else [final_cc]
+                if final_cc
+                else []
             ),
             bcc_recipients=(
                 final_bcc
                 if isinstance(final_bcc, list)
-                else [final_bcc] if final_bcc else []
+                else [final_bcc]
+                if final_bcc
+                else []
             ),
             userEmail=user_google_email or "",
             error=None,
@@ -1715,17 +1721,23 @@ async def draft_gmail_reply(
             to_recipients=(
                 final_to
                 if isinstance(final_to, list)
-                else [final_to] if final_to else []
+                else [final_to]
+                if final_to
+                else []
             ),
             cc_recipients=(
                 final_cc
                 if isinstance(final_cc, list)
-                else [final_cc] if final_cc else []
+                else [final_cc]
+                if final_cc
+                else []
             ),
             bcc_recipients=(
                 final_bcc
                 if isinstance(final_bcc, list)
-                else [final_bcc] if final_bcc else []
+                else [final_bcc]
+                if final_bcc
+                else []
             ),
             userEmail=user_google_email or "",
             error=None,
@@ -1873,17 +1885,23 @@ async def forward_gmail_message(
                         to_recipients=(
                             resolved_to
                             if isinstance(resolved_to, list)
-                            else [resolved_to] if resolved_to else []
+                            else [resolved_to]
+                            if resolved_to
+                            else []
                         ),
                         cc_recipients=(
                             resolved_cc
                             if isinstance(resolved_cc, list)
-                            else [resolved_cc] if resolved_cc else []
+                            else [resolved_cc]
+                            if resolved_cc
+                            else []
                         ),
                         bcc_recipients=(
                             resolved_bcc
                             if isinstance(resolved_bcc, list)
-                            else [resolved_bcc] if resolved_bcc else []
+                            else [resolved_bcc]
+                            if resolved_bcc
+                            else []
                         ),
                         html_preserved=False,
                         userEmail=user_google_email or "",
@@ -1936,7 +1954,7 @@ async def forward_gmail_message(
 📄 **Forward Details:**
    • Original Message ID: {message_id}
    • Content Type: {content_type}
-   • HTML Preservation: {'Yes' if content_type in ['html', 'mixed'] else 'No'}{body_preview}
+   • HTML Preservation: {"Yes" if content_type in ["html", "mixed"] else "No"}{body_preview}
 
 🔒 **Security Notice:** This recipient is not on your allow list.
 
@@ -2032,17 +2050,23 @@ async def forward_gmail_message(
                             to_recipients=(
                                 resolved_to
                                 if isinstance(resolved_to, list)
-                                else [resolved_to] if resolved_to else []
+                                else [resolved_to]
+                                if resolved_to
+                                else []
                             ),
                             cc_recipients=(
                                 resolved_cc
                                 if isinstance(resolved_cc, list)
-                                else [resolved_cc] if resolved_cc else []
+                                else [resolved_cc]
+                                if resolved_cc
+                                else []
                             ),
                             bcc_recipients=(
                                 resolved_bcc
                                 if isinstance(resolved_bcc, list)
-                                else [resolved_bcc] if resolved_bcc else []
+                                else [resolved_bcc]
+                                if resolved_bcc
+                                else []
                             ),
                             html_preserved=False,
                             userEmail=user_google_email or "",
@@ -2348,17 +2372,23 @@ async def forward_gmail_message(
             to_recipients=(
                 final_to
                 if isinstance(final_to, list)
-                else [final_to] if final_to else []
+                else [final_to]
+                if final_to
+                else []
             ),
             cc_recipients=(
                 final_cc
                 if isinstance(final_cc, list)
-                else [final_cc] if final_cc else []
+                else [final_cc]
+                if final_cc
+                else []
             ),
             bcc_recipients=(
                 final_bcc
                 if isinstance(final_bcc, list)
-                else [final_bcc] if final_bcc else []
+                else [final_bcc]
+                if final_bcc
+                else []
             ),
             html_preserved=html_preserved,
             userEmail=user_google_email or "",
@@ -2582,17 +2612,23 @@ async def draft_gmail_forward(
             to_recipients=(
                 resolved_to
                 if isinstance(resolved_to, list)
-                else [resolved_to] if resolved_to else []
+                else [resolved_to]
+                if resolved_to
+                else []
             ),
             cc_recipients=(
                 resolved_cc
                 if isinstance(resolved_cc, list)
-                else [resolved_cc] if resolved_cc else []
+                else [resolved_cc]
+                if resolved_cc
+                else []
             ),
             bcc_recipients=(
                 resolved_bcc
                 if isinstance(resolved_bcc, list)
-                else [resolved_bcc] if resolved_bcc else []
+                else [resolved_bcc]
+                if resolved_bcc
+                else []
             ),
             html_preserved=html_preserved,
             userEmail=user_google_email or "",

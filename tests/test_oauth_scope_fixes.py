@@ -143,9 +143,9 @@ class TestScopeRegistry:
         required_services = ["base", "drive", "gmail", "calendar"]
 
         for service in required_services:
-            assert (
-                service in ScopeRegistry.GOOGLE_API_SCOPES
-            ), f"Missing service: {service}"
+            assert service in ScopeRegistry.GOOGLE_API_SCOPES, (
+                f"Missing service: {service}"
+            )
             assert len(ScopeRegistry.GOOGLE_API_SCOPES[service]) > 0
 
     def test_get_oauth_scopes_returns_valid_scopes(self):

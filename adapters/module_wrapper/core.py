@@ -98,7 +98,8 @@ def get_qdrant_config_from_env() -> Dict[str, Union[str, int, bool, None]]:
         config = {
             "host": settings.qdrant_host,
             "port": settings.qdrant_port,
-            "use_https": settings.qdrant_url and settings.qdrant_url.startswith("https://"),
+            "use_https": settings.qdrant_url
+            and settings.qdrant_url.startswith("https://"),
             "api_key": settings.qdrant_api_key,
             "url": settings.qdrant_url,
             "prefer_grpc": settings.qdrant_prefer_grpc,
@@ -129,6 +130,7 @@ def get_qdrant_config_from_env() -> Dict[str, Union[str, int, bool, None]]:
 # =============================================================================
 # MODULE COMPONENT
 # =============================================================================
+
 
 class ModuleComponent:
     """
@@ -204,6 +206,7 @@ class ModuleComponent:
 # MODULE WRAPPER BASE
 # =============================================================================
 
+
 class ModuleWrapperBase:
     """
     Base class for module wrapping with essential module introspection.
@@ -277,13 +280,19 @@ class ModuleWrapperBase:
             self.qdrant_use_https = url_config["use_https"]
             self.qdrant_url = qdrant_url
         else:
-            self.qdrant_host = qdrant_host if qdrant_host is not None else env_config["host"]
-            self.qdrant_port = qdrant_port if qdrant_port is not None else env_config["port"]
+            self.qdrant_host = (
+                qdrant_host if qdrant_host is not None else env_config["host"]
+            )
+            self.qdrant_port = (
+                qdrant_port if qdrant_port is not None else env_config["port"]
+            )
             self.qdrant_use_https = env_config.get("use_https", False)
             self.qdrant_url = env_config.get("url")
 
         self.qdrant_prefer_grpc = env_config.get("prefer_grpc", True)
-        self.qdrant_api_key = qdrant_api_key if qdrant_api_key is not None else env_config.get("api_key")
+        self.qdrant_api_key = (
+            qdrant_api_key if qdrant_api_key is not None else env_config.get("api_key")
+        )
 
         # Store configuration
         self.collection_name = collection_name
@@ -300,13 +309,17 @@ class ModuleWrapperBase:
         # ColBERT configuration
         self.enable_colbert = enable_colbert
         self.colbert_model_name = colbert_model
-        self.colbert_collection_name = colbert_collection_name or f"{collection_name}_colbert"
+        self.colbert_collection_name = (
+            colbert_collection_name or f"{collection_name}_colbert"
+        )
         self.colbert_embedder = None
         self.colbert_embedding_dim = 128
         self._colbert_initialized = False
 
         # v7 schema detection
-        self.use_v7_schema = collection_name.endswith("_v7") or collection_name.endswith("v7")
+        self.use_v7_schema = collection_name.endswith(
+            "_v7"
+        ) or collection_name.endswith("v7")
         self.relationships_embedder = None
         self.relationships_embedding_dim = 384
 
@@ -340,6 +353,7 @@ class ModuleWrapperBase:
     def module_name(self) -> str:
         """Get the base module name without version suffix."""
         import re
+
         base_name = re.sub(r"\.v\d+$", "", self._module_name)
         return base_name
 
@@ -373,7 +387,9 @@ class ModuleWrapperBase:
     def reverse_symbol_mapping(self) -> Dict[str, str]:
         """Get reverse symbol mapping: symbol → component."""
         if self._reverse_symbol_mapping is None:
-            self._reverse_symbol_mapping = {v: k for k, v in self.symbol_mapping.items()}
+            self._reverse_symbol_mapping = {
+                v: k for k, v in self.symbol_mapping.items()
+            }
         return self._reverse_symbol_mapping
 
     def generate_component_symbols(
@@ -398,7 +414,8 @@ class ModuleWrapperBase:
         prefix = (module_prefix or self.module_name) if use_prefix else None
 
         component_names = [
-            comp.name for comp in self.components.values()
+            comp.name
+            for comp in self.components.values()
             if comp.component_type == "class"
         ]
 
@@ -424,12 +441,21 @@ class ModuleWrapperBase:
             relationships = self.extract_relationships_by_parent(max_depth=3)
 
             for parent_name, children in relationships.items():
-                unique_children = set(c.get("child_class", "") for c in children if c.get("child_class"))
+                unique_children = set(
+                    c.get("child_class", "") for c in children if c.get("child_class")
+                )
                 max_depth = max((c.get("depth", 1) for c in children), default=1)
 
                 score = len(unique_children) * 10 + max_depth
 
-                if parent_name in {"Section", "Card", "ButtonList", "Grid", "Columns", "ChipList"}:
+                if parent_name in {
+                    "Section",
+                    "Card",
+                    "ButtonList",
+                    "Grid",
+                    "Columns",
+                    "ChipList",
+                }:
                     score += 100
 
                 priority_scores[parent_name] = score
@@ -518,6 +544,7 @@ class ModuleWrapperBase:
     def get_structure_validator(self):
         """Get a StructureValidator for this module."""
         from adapters.module_wrapper.structure_validator import StructureValidator
+
         return StructureValidator(self)
 
     def validate_structure(self, structure: str):
@@ -528,6 +555,7 @@ class ModuleWrapperBase:
     def get_dsl_parser(self):
         """Get a DSL parser configured for this module."""
         from adapters.module_wrapper.dsl_parser import DSLParser
+
         return DSLParser(wrapper=self)
 
     def parse_dsl(self, dsl_string: str):

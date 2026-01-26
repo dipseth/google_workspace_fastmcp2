@@ -9,16 +9,17 @@ This script:
 4. Re-embeds the relationships vector with DSL notation
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from qdrant_client.models import FieldCondition, Filter, MatchValue, PointStruct
+
 from config.qdrant_client import get_qdrant_client
+from config.settings import settings
 from gchat.card_framework_wrapper import get_card_framework_wrapper
 from gchat.feedback_loop import FeedbackLoop
-from qdrant_client.models import Filter, FieldCondition, MatchValue, PointStruct
-from config.settings import settings
 
 COLLECTION_NAME = settings.card_collection
 BATCH_SIZE = 50
@@ -31,14 +32,18 @@ def migrate_instance_patterns():
     print("=" * 60)
 
     client = get_qdrant_client()
-    wrapper = get_card_framework_wrapper()  # Get ModuleWrapper for canonical DSL generation
+    wrapper = (
+        get_card_framework_wrapper()
+    )  # Get ModuleWrapper for canonical DSL generation
     fl = FeedbackLoop()
 
     # Count patterns
     count_result = client.count(
         collection_name=COLLECTION_NAME,
         count_filter=Filter(
-            must=[FieldCondition(key="type", match=MatchValue(value="instance_pattern"))]
+            must=[
+                FieldCondition(key="type", match=MatchValue(value="instance_pattern"))
+            ]
         ),
     )
     total = count_result.count
@@ -57,7 +62,11 @@ def migrate_instance_patterns():
         results = client.scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=Filter(
-                must=[FieldCondition(key="type", match=MatchValue(value="instance_pattern"))]
+                must=[
+                    FieldCondition(
+                        key="type", match=MatchValue(value="instance_pattern")
+                    )
+                ]
             ),
             limit=BATCH_SIZE,
             offset=offset,
@@ -130,7 +139,9 @@ def migrate_instance_patterns():
             print(f"  ✅ Upserted {len(updated_points)} points")
 
         # Progress
-        print(f"\nProgress: {migrated + errors}/{total} processed ({migrated} migrated, {errors} errors)")
+        print(
+            f"\nProgress: {migrated + errors}/{total} processed ({migrated} migrated, {errors} errors)"
+        )
 
         if next_offset is None:
             break

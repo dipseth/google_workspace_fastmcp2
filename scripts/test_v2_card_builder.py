@@ -25,12 +25,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def build_test_card():
     """Build a test card using the v2 builder."""
-    from gchat.card_tools import _build_card_with_smart_builder
     from card_framework.v2 import Message
+
+    from gchat.card_tools import _build_card_with_smart_builder
 
     # Build card with DSL + Content DSL
     card = _build_card_with_smart_builder(
-        '''§[δ×4, Ƀ[ᵬ×3]] V2 Test Card
+        """§[δ×4, Ƀ[ᵬ×3]] V2 Test Card
 
 δ 'Line 1: Green' success
 δ 'Line 2: Yellow Bold' warning bold
@@ -39,8 +40,8 @@ def build_test_card():
 
 ᵬ Button A https://example.com/a
 ᵬ Button B https://example.com/b
-ᵬ Button C https://example.com/c''',
-        {'title': 'V2 Test Card'}
+ᵬ Button C https://example.com/c""",
+        {"title": "V2 Test Card"},
     )
 
     return card
@@ -49,7 +50,9 @@ def build_test_card():
 def strip_internal_fields(obj):
     """Remove internal fields (starting with _) from card structure."""
     if isinstance(obj, dict):
-        return {k: strip_internal_fields(v) for k, v in obj.items() if not k.startswith('_')}
+        return {
+            k: strip_internal_fields(v) for k, v in obj.items() if not k.startswith("_")
+        }
     elif isinstance(obj, list):
         return [strip_internal_fields(i) for i in obj]
     return obj
@@ -64,17 +67,17 @@ def prepare_webhook_payload(card):
     message_body = message_obj.render()
 
     # Fix field name for webhook (expects camelCase: cardsV2)
-    if 'cards_v_2' in message_body:
-        message_body['cardsV2'] = message_body.pop('cards_v_2')
-    if 'cards_v2' in message_body:
-        message_body['cardsV2'] = message_body.pop('cards_v2')
+    if "cards_v_2" in message_body:
+        message_body["cardsV2"] = message_body.pop("cards_v_2")
+    if "cards_v2" in message_body:
+        message_body["cardsV2"] = message_body.pop("cards_v2")
 
     return message_body
 
 
-def save_to_file(payload, filepath='/tmp/v2_card_test.json'):
+def save_to_file(payload, filepath="/tmp/v2_card_test.json"):
     """Save payload to JSON file."""
-    with open(filepath, 'w') as f:
+    with open(filepath, "w") as f:
         json.dump(payload, f, indent=2)
     return filepath
 
@@ -82,9 +85,14 @@ def save_to_file(payload, filepath='/tmp/v2_card_test.json'):
 def send_with_curl(filepath, webhook_url):
     """Send the card using curl."""
     cmd = [
-        'curl', '-X', 'POST', webhook_url,
-        '-H', 'Content-Type: application/json',
-        '-d', f'@{filepath}'
+        "curl",
+        "-X",
+        "POST",
+        webhook_url,
+        "-H",
+        "Content-Type: application/json",
+        "-d",
+        f"@{filepath}",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     return result
@@ -112,18 +120,18 @@ def main():
 
     # Show card structure
     print("\n4. Card structure:")
-    cards = payload.get('cards_v2', [])
+    cards = payload.get("cards_v2", [])
     if cards:
-        inner_card = cards[0].get('card', {})
+        inner_card = cards[0].get("card", {})
         print(f"   Header: {inner_card.get('header', {}).get('title', 'N/A')}")
-        sections = inner_card.get('sections', [])
+        sections = inner_card.get("sections", [])
         print(f"   Sections: {len(sections)}")
         for i, section in enumerate(sections):
-            widgets = section.get('widgets', [])
+            widgets = section.get("widgets", [])
             print(f"     Section {i}: {len(widgets)} widgets")
 
     # Check for webhook URL in environment
-    webhook_url = os.environ.get('TEST_CHAT_WEBHOOK')
+    webhook_url = os.environ.get("TEST_CHAT_WEBHOOK")
 
     if webhook_url:
         print("\n5. Sending via curl...")
@@ -140,7 +148,9 @@ def main():
             print(f"   ❌ Error: {result.stderr}")
     else:
         print("\n5. To send the card, run:")
-        print(f"   curl -X POST 'YOUR_WEBHOOK_URL' -H 'Content-Type: application/json' -d @{filepath}")
+        print(
+            f"   curl -X POST 'YOUR_WEBHOOK_URL' -H 'Content-Type: application/json' -d @{filepath}"
+        )
         print("\n   Or set TEST_CHAT_WEBHOOK environment variable and re-run.")
 
     print("\n" + "=" * 60)
@@ -148,5 +158,5 @@ def main():
     print("=" * 60)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

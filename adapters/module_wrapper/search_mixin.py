@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # SEARCH MIXIN
 # =============================================================================
 
+
 class SearchMixin:
     """
     Mixin providing search functionality.
@@ -120,7 +121,9 @@ class SearchMixin:
             # Try direct lookup first
             direct_results = self._direct_component_lookup(query)
             if direct_results:
-                logger.info(f"Found {len(direct_results)} direct matches for '{query}' (async)")
+                logger.info(
+                    f"Found {len(direct_results)} direct matches for '{query}' (async)"
+                )
                 return direct_results
 
             # Generate embedding for the query
@@ -156,7 +159,9 @@ class SearchMixin:
                 try:
                     points = list(search_results)
                 except Exception as e:
-                    logger.warning(f"Could not extract points from async search results: {e}")
+                    logger.warning(
+                        f"Could not extract points from async search results: {e}"
+                    )
                     return []
 
             return self._process_search_results(points)
@@ -182,7 +187,7 @@ class SearchMixin:
         if not self._initialized:
             raise RuntimeError("ModuleWrapper not initialized")
 
-        if not self.enable_colbert or not getattr(self, '_colbert_initialized', False):
+        if not self.enable_colbert or not getattr(self, "_colbert_initialized", False):
             logger.warning("ColBERT not enabled, falling back to standard search")
             return self.search(query, limit, score_threshold)
 
@@ -225,17 +230,21 @@ class SearchMixin:
                     score = float(getattr(result, "score", 0.0))
                     payload = getattr(result, "payload", {})
 
-                    component_path = payload.get("full_path") or payload.get("name", "unknown")
+                    component_path = payload.get("full_path") or payload.get(
+                        "name", "unknown"
+                    )
 
-                    results.append({
-                        "name": payload.get("name"),
-                        "path": component_path,
-                        "type": payload.get("type"),
-                        "score": score,
-                        "docstring": payload.get("docstring", ""),
-                        "component": self._get_component_from_path(component_path),
-                        "embedding_type": "colbert",
-                    })
+                    results.append(
+                        {
+                            "name": payload.get("name"),
+                            "path": component_path,
+                            "type": payload.get("type"),
+                            "score": score,
+                            "docstring": payload.get("docstring", ""),
+                            "component": self._get_component_from_path(component_path),
+                            "embedding_type": "colbert",
+                        }
+                    )
 
                     logger.info(f"  - {payload.get('name')} (score: {score:.4f})")
 
@@ -267,14 +276,16 @@ class SearchMixin:
             if component.name == component_name:
                 logger.info(f"Direct match found: {path}")
                 if component.obj is not None:
-                    results.append({
-                        "score": 1.0,
-                        "name": component.name,
-                        "path": path,
-                        "type": component.component_type,
-                        "docstring": component.docstring,
-                        "component": component.obj,
-                    })
+                    results.append(
+                        {
+                            "score": 1.0,
+                            "name": component.name,
+                            "path": path,
+                            "type": component.component_type,
+                            "docstring": component.docstring,
+                            "component": component.obj,
+                        }
+                    )
 
         # If no exact matches, try case-insensitive match
         if not results:
@@ -282,14 +293,16 @@ class SearchMixin:
                 if component.name.lower() == component_name.lower():
                     logger.info(f"Case-insensitive match found: {path}")
                     if component.obj is not None:
-                        results.append({
-                            "score": 0.9,
-                            "name": component.name,
-                            "path": path,
-                            "type": component.component_type,
-                            "docstring": component.docstring,
-                            "component": component.obj,
-                        })
+                        results.append(
+                            {
+                                "score": 0.9,
+                                "name": component.name,
+                                "path": path,
+                                "type": component.component_type,
+                                "docstring": component.docstring,
+                                "component": component.obj,
+                            }
+                        )
 
         # Check for components in widgets module
         if not results and hasattr(self.module, "widgets"):
@@ -297,14 +310,16 @@ class SearchMixin:
             component = self.components.get(widgets_path)
             if component and component.obj is not None:
                 logger.info(f"Found component in widgets module: {widgets_path}")
-                results.append({
-                    "score": 1.0,
-                    "name": component.name,
-                    "path": widgets_path,
-                    "type": component.component_type,
-                    "docstring": component.docstring,
-                    "component": component.obj,
-                })
+                results.append(
+                    {
+                        "score": 1.0,
+                        "name": component.name,
+                        "path": widgets_path,
+                        "type": component.component_type,
+                        "docstring": component.docstring,
+                        "component": component.obj,
+                    }
+                )
 
         return results
 
@@ -383,16 +398,18 @@ class SearchMixin:
             if component_obj is None and full_path:
                 component_obj = self.get_component_by_path(full_path)
 
-            results.append({
-                "score": score,
-                "name": name,
-                "path": path,
-                "full_path": full_path,
-                "module_path": module_path if isinstance(payload, dict) else None,
-                "type": type_info,
-                "docstring": docstring,
-                "component": component_obj,
-            })
+            results.append(
+                {
+                    "score": score,
+                    "name": name,
+                    "path": path,
+                    "full_path": full_path,
+                    "module_path": module_path if isinstance(payload, dict) else None,
+                    "type": type_info,
+                    "docstring": docstring,
+                    "component": component_obj,
+                }
+            )
 
         return results
 
@@ -437,7 +454,7 @@ class SearchMixin:
             ):
                 subparts = self._module_name.split(".")[1:]
                 if parts[: len(subparts)] == subparts:
-                    parts = parts[len(subparts):]
+                    parts = parts[len(subparts) :]
 
             # Start with the module
             obj = self.module
@@ -447,7 +464,9 @@ class SearchMixin:
                 try:
                     obj = getattr(obj, part)
                 except AttributeError:
-                    module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip(".")
+                    module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip(
+                        "."
+                    )
                     try:
                         obj = importlib.import_module(module_candidate)
                     except (ImportError, ModuleNotFoundError):
@@ -519,7 +538,8 @@ class SearchMixin:
         """
         if component_type:
             return [
-                path for path, comp in self.components.items()
+                path
+                for path, comp in self.components.items()
                 if comp.component_type == component_type
             ]
         return list(self.components.keys())
@@ -573,14 +593,18 @@ class SearchMixin:
                         valid_params[param_name] = params[param_name]
 
                 component = card_class(**valid_params)
-                logger.info(f"Successfully created card component: {type(component).__name__}")
+                logger.info(
+                    f"Successfully created card component: {type(component).__name__}"
+                )
                 return component
 
             except (ValueError, TypeError) as e:
                 logger.warning(f"Error getting signature for {card_class}: {e}")
                 try:
                     component = card_class(**params)
-                    logger.info(f"Created card component with direct instantiation: {type(component).__name__}")
+                    logger.info(
+                        f"Created card component with direct instantiation: {type(component).__name__}"
+                    )
                     return component
                 except Exception as e2:
                     logger.warning(f"Direct instantiation failed: {e2}")

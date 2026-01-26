@@ -35,9 +35,9 @@ class TestTemplateMacroTools:
             template_resources = [
                 uri for uri in resource_uris if uri.startswith("template://")
             ]
-            assert (
-                len(template_resources) > 0
-            ), "Should have template:// resources available"
+            assert len(template_resources) > 0, (
+                "Should have template:// resources available"
+            )
 
         except Exception as e:
             # Resource listing might not be available in all clients
@@ -83,9 +83,9 @@ class TestTemplateMacroTools:
         # Either should succeed or give a clear error
         # Note: JSON responses may contain "success": true/false
         has_json_result = '"success"' in content
-        assert (
-            has_success or has_error or has_json_result
-        ), "Should indicate success or failure clearly"
+        assert has_success or has_error or has_json_result, (
+            "Should indicate success or failure clearly"
+        )
 
         if has_success:
             # Verify macro info is returned (may be in JSON format or text)
@@ -115,9 +115,9 @@ class TestTemplateMacroTools:
         # Should fail with validation error
         content = result["content"]
         error_patterns = ["error", "invalid", "failed", "❌"]
-        assert any(
-            pattern in content.lower() for pattern in error_patterns
-        ), "Should reject invalid macro names"
+        assert any(pattern in content.lower() for pattern in error_patterns), (
+            "Should reject invalid macro names"
+        )
 
     @pytest.mark.asyncio
     async def test_create_template_macro_with_resource_access(self, client):
@@ -240,9 +240,9 @@ class TestTemplateMacroIntegration:
             error_patterns = ["error", "invalid", "failed", "❌"]
             has_error = any(pattern in content.lower() for pattern in error_patterns)
 
-            assert (
-                has_error
-            ), f"Case '{case['name']}' should be rejected: {case['description']}"
+            assert has_error, (
+                f"Case '{case['name']}' should be rejected: {case['description']}"
+            )
 
     @pytest.mark.asyncio
     async def test_macro_name_validation(self, client):
@@ -324,6 +324,6 @@ class TestTemplateMacroIntegration:
             has_structure = any(
                 element in content.lower() for element in expected_elements
             )
-            assert (
-                has_structure
-            ), "Successful creation should return structured response with macro info"
+            assert has_structure, (
+                "Successful creation should return structured response with macro info"
+            )

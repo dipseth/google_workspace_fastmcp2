@@ -43,11 +43,11 @@ Usage:
     jinja = parser.content_to_jinja(content)  # "{{ 'Hello World' | success_text | bold }}"
 """
 
-import re
 import logging
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple, Set, Union, TYPE_CHECKING
+import re
 from collections import Counter
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper
@@ -59,9 +59,11 @@ logger = logging.getLogger(__name__)
 # DATA CLASSES
 # =============================================================================
 
+
 @dataclass
 class DSLToken:
     """A single token from DSL tokenization."""
+
     type: str  # 'symbol', 'multiplier', 'open', 'close', 'component_name'
     value: str
     position: int
@@ -70,6 +72,7 @@ class DSLToken:
 @dataclass
 class DSLNode:
     """A node in the parsed DSL tree."""
+
     symbol: str
     component_name: str
     multiplier: int = 1
@@ -128,6 +131,7 @@ class DSLNode:
 @dataclass
 class DSLParseResult:
     """Result of parsing a DSL string."""
+
     dsl: str
     is_valid: bool
     root_nodes: List[DSLNode] = field(default_factory=list)
@@ -155,6 +159,7 @@ class DSLParseResult:
 @dataclass
 class QdrantQuery:
     """A Qdrant query specification."""
+
     collection: str
     vector_name: str  # 'components', 'inputs', 'relationships'
     query_text: str
@@ -176,12 +181,16 @@ class QdrantQuery:
 # CONTENT DSL DATA CLASSES
 # =============================================================================
 
+
 @dataclass
 class StyleModifier:
     """A style modifier parsed from Content DSL."""
+
     name: str  # Original modifier name (e.g., "yellow", "bold", "success")
     jinja_filter: str  # Jinja filter name (e.g., "color", "bold", "success_text")
-    jinja_args: Optional[str] = None  # Arguments for filter (e.g., "'yellow'" for color)
+    jinja_args: Optional[str] = (
+        None  # Arguments for filter (e.g., "'yellow'" for color)
+    )
 
     def to_jinja(self) -> str:
         """Convert to Jinja filter syntax."""
@@ -193,6 +202,7 @@ class StyleModifier:
 @dataclass
 class ContentLine:
     """A single line of Content DSL."""
+
     symbol: str  # Component symbol (δ, ᵬ, etc.)
     component_name: str  # Resolved component name
     content: str  # The text content
@@ -228,6 +238,7 @@ class ContentLine:
 @dataclass
 class ContentBlock:
     """A block of content lines for a single component."""
+
     primary: ContentLine
     continuations: List[ContentLine] = field(default_factory=list)
 
@@ -274,6 +285,7 @@ class ContentBlock:
 @dataclass
 class ContentDSLResult:
     """Result of parsing Content DSL."""
+
     raw: str
     blocks: List[ContentBlock] = field(default_factory=list)
     issues: List[str] = field(default_factory=list)
@@ -311,7 +323,6 @@ STYLE_MODIFIERS: Dict[str, Tuple[str, Optional[str]]] = {
     "grey": ("color", "'gray'"),
     "white": ("color", "'white'"),
     "black": ("color", "'black'"),
-
     # Semantic colors
     "success": ("success_text", None),
     "error": ("error_text", None),
@@ -319,7 +330,6 @@ STYLE_MODIFIERS: Dict[str, Tuple[str, Optional[str]]] = {
     "info": ("info_text", None),
     "danger": ("error_text", None),
     "ok": ("success_text", None),
-
     # Text formatting
     "bold": ("bold", None),
     "italic": ("italic", None),
@@ -329,11 +339,9 @@ STYLE_MODIFIERS: Dict[str, Tuple[str, Optional[str]]] = {
     "code": ("monospace", None),
     "mono": ("monospace", None),
     "monospace": ("monospace", None),
-
     # Size modifiers
     "small": ("small", None),
     "large": ("large", None),
-
     # Special formatting
     "price": ("price", "'USD'"),
     "price_usd": ("price", "'USD'"),
@@ -349,6 +357,7 @@ STYLE_MODIFIERS: Dict[str, Tuple[str, Optional[str]]] = {
 # =============================================================================
 # DSL PARSER
 # =============================================================================
+
 
 class DSLParser:
     """
@@ -469,8 +478,12 @@ class DSLParser:
                 j = i + 1
                 while j < len(s) and s[j].isdigit():
                     j += 1
-                multiplier_value = s[i + 1:j]
-                tokens.append(DSLToken(type="multiplier", value=f"×{multiplier_value}", position=i))
+                multiplier_value = s[i + 1 : j]
+                tokens.append(
+                    DSLToken(
+                        type="multiplier", value=f"×{multiplier_value}", position=i
+                    )
+                )
                 i = j
                 continue
 
@@ -494,7 +507,9 @@ class DSLParser:
                     tokens.append(DSLToken(type="symbol", value=sym, position=i))
                 else:
                     # Keep as component name (might be unknown)
-                    tokens.append(DSLToken(type="component_name", value=word, position=i))
+                    tokens.append(
+                        DSLToken(type="component_name", value=word, position=i)
+                    )
                 i = j
                 continue
 
@@ -566,7 +581,9 @@ class DSLParser:
             self._collect_paths(node, result.component_paths)
             counts = node.get_component_counts()
             for name, count in counts.items():
-                result.component_counts[name] = result.component_counts.get(name, 0) + count
+                result.component_counts[name] = (
+                    result.component_counts.get(name, 0) + count
+                )
 
         # Collect resolved symbols
         for node in root_nodes:
@@ -624,7 +641,9 @@ class DSLParser:
                     component_name = self._reverse_mapping.get(symbol, symbol)
                 else:
                     component_name = token.value
-                    symbol = self._symbol_mapping.get(component_name, component_name[0] if component_name else "?")
+                    symbol = self._symbol_mapping.get(
+                        component_name, component_name[0] if component_name else "?"
+                    )
 
                 node = DSLNode(
                     symbol=symbol,
@@ -664,7 +683,10 @@ class DSLParser:
     ):
         """Validate a single node and its children."""
         # Check if symbol is known
-        if node.symbol not in self._all_symbols and node.component_name not in self._symbol_mapping:
+        if (
+            node.symbol not in self._all_symbols
+            and node.component_name not in self._symbol_mapping
+        ):
             result.issues.append(f"Unknown symbol/component: {node.symbol}")
             # Don't mark invalid - might still work
 
@@ -677,8 +699,12 @@ class DSLParser:
                 # Check for wrapper requirements
                 wrapper_needed = self._get_required_wrapper(node.component_name)
                 if wrapper_needed:
-                    result.issues.append(f"{node.component_name} should be wrapped in {wrapper_needed}")
-                    wrapper_sym = self._symbol_mapping.get(wrapper_needed, wrapper_needed)
+                    result.issues.append(
+                        f"{node.component_name} should be wrapped in {wrapper_needed}"
+                    )
+                    wrapper_sym = self._symbol_mapping.get(
+                        wrapper_needed, wrapper_needed
+                    )
                     result.suggestions.append(
                         f"Use {wrapper_sym}[{node.symbol}] instead of {node.symbol}"
                     )
@@ -739,13 +765,15 @@ class DSLParser:
         if search_strategy in ("auto", "relationships"):
             # Query 1: Search by DSL notation in relationships vector
             # This finds instance_patterns with matching structure
-            queries.append(QdrantQuery(
-                collection=collection_name,
-                vector_name="relationships",
-                query_text=result.dsl,  # Use original DSL notation
-                filters={"type": "instance_pattern"},
-                limit=10,
-            ))
+            queries.append(
+                QdrantQuery(
+                    collection=collection_name,
+                    vector_name="relationships",
+                    query_text=result.dsl,  # Use original DSL notation
+                    filters={"type": "instance_pattern"},
+                    limit=10,
+                )
+            )
 
         if search_strategy in ("auto", "components"):
             # Query 2: Search by component identity
@@ -753,24 +781,30 @@ class DSLParser:
             root_name = result.root_nodes[0].component_name
             component_names = list(result.component_counts.keys())
 
-            queries.append(QdrantQuery(
-                collection=collection_name,
-                vector_name="components",
-                query_text=f"{root_name} containing {' '.join(component_names[:5])}",
-                filters={"type": "class"},
-                limit=10,
-            ))
+            queries.append(
+                QdrantQuery(
+                    collection=collection_name,
+                    vector_name="components",
+                    query_text=f"{root_name} containing {' '.join(component_names[:5])}",
+                    filters={"type": "class"},
+                    limit=10,
+                )
+            )
 
         if search_strategy in ("auto", "inputs"):
             # Query 3: Build an expanded text query for inputs vector
             # This matches patterns by their content structure
-            expanded = result.root_nodes[0].to_expanded_notation() if result.root_nodes else ""
-            queries.append(QdrantQuery(
-                collection=collection_name,
-                vector_name="inputs",
-                query_text=expanded,
-                limit=10,
-            ))
+            expanded = (
+                result.root_nodes[0].to_expanded_notation() if result.root_nodes else ""
+            )
+            queries.append(
+                QdrantQuery(
+                    collection=collection_name,
+                    vector_name="inputs",
+                    query_text=expanded,
+                    limit=10,
+                )
+            )
 
         return queries
 
@@ -799,26 +833,19 @@ class DSLParser:
             # Match any of the component names
             component_names = list(result.component_counts.keys())
             if component_names:
-                must_conditions.append({
-                    "key": "name",
-                    "match": {"any": component_names}
-                })
+                must_conditions.append(
+                    {"key": "name", "match": {"any": component_names}}
+                )
 
         # Filter by symbol if root is known
         if result.root_nodes:
             root_symbol = result.root_nodes[0].symbol
-            must_conditions.append({
-                "key": "symbol",
-                "match": {"value": root_symbol}
-            })
+            must_conditions.append({"key": "symbol", "match": {"value": root_symbol}})
 
         # Merge additional filters
         if additional_filters:
             for key, value in additional_filters.items():
-                must_conditions.append({
-                    "key": key,
-                    "match": {"value": value}
-                })
+                must_conditions.append({"key": key, "match": {"value": value}})
 
         return {"must": must_conditions} if must_conditions else {}
 
@@ -965,7 +992,9 @@ class DSLParser:
 
         for line_num, line in enumerate(lines, 1):
             # Check for continuation (indented line)
-            is_continuation = line.startswith(("  ", "\t")) and current_block is not None
+            is_continuation = (
+                line.startswith(("  ", "\t")) and current_block is not None
+            )
 
             if is_continuation:
                 # Parse continuation line (content only, no symbol)
@@ -988,7 +1017,9 @@ class DSLParser:
                 if parsed:
                     current_block = ContentBlock(primary=parsed)
                 elif line.strip():  # Non-empty but unparseable
-                    result.issues.append(f"Line {line_num}: Could not parse '{line.strip()}'")
+                    result.issues.append(
+                        f"Line {line_num}: Could not parse '{line.strip()}'"
+                    )
                     current_block = None
                 else:
                     current_block = None
@@ -999,7 +1030,9 @@ class DSLParser:
 
         return result
 
-    def _parse_content_line(self, line: str, line_num: int = 0) -> Optional[ContentLine]:
+    def _parse_content_line(
+        self, line: str, line_num: int = 0
+    ) -> Optional[ContentLine]:
         """
         Parse a single Content DSL line.
 
@@ -1064,7 +1097,7 @@ class DSLParser:
             end_pos = text.find(quote_char, 1)
             if end_pos > 0:
                 content = text[1:end_pos]
-                remaining = text[end_pos + 1:].strip()
+                remaining = text[end_pos + 1 :].strip()
                 return content, remaining
             else:
                 # Unclosed quote - take everything
@@ -1103,7 +1136,9 @@ class DSLParser:
 
         return False
 
-    def _parse_modifiers_and_url(self, text: str) -> Tuple[List[StyleModifier], Optional[str]]:
+    def _parse_modifiers_and_url(
+        self, text: str
+    ) -> Tuple[List[StyleModifier], Optional[str]]:
         """
         Parse style modifiers and URL from remaining text.
 
@@ -1128,11 +1163,13 @@ class DSLParser:
             word_lower = word.lower()
             if word_lower in STYLE_MODIFIERS:
                 filter_name, filter_args = STYLE_MODIFIERS[word_lower]
-                modifiers.append(StyleModifier(
-                    name=word_lower,
-                    jinja_filter=filter_name,
-                    jinja_args=filter_args,
-                ))
+                modifiers.append(
+                    StyleModifier(
+                        name=word_lower,
+                        jinja_filter=filter_name,
+                        jinja_args=filter_args,
+                    )
+                )
 
         return modifiers, url
 
@@ -1186,6 +1223,7 @@ class DSLParser:
 # =============================================================================
 # STANDALONE FUNCTIONS
 # =============================================================================
+
 
 def parse_dsl_to_qdrant_query(
     dsl_string: str,
@@ -1245,7 +1283,7 @@ def extract_dsl_from_description(
 
     if dsl:
         # Get remaining content after DSL
-        remaining = description[len(dsl):].strip()
+        remaining = description[len(dsl) :].strip()
         return dsl, remaining
 
     return None, description
@@ -1282,6 +1320,7 @@ def validate_dsl_structure(
 # =============================================================================
 # CONTENT DSL STANDALONE FUNCTIONS
 # =============================================================================
+
 
 def parse_content_dsl(
     text: str,
@@ -1358,6 +1397,7 @@ def add_style_modifier(
 # =============================================================================
 # INTEGRATION WITH MODULE WRAPPER
 # =============================================================================
+
 
 def create_parser_from_wrapper(wrapper: "ModuleWrapper") -> DSLParser:
     """

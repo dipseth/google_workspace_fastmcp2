@@ -54,14 +54,15 @@ RELATIONSHIPS_DIM = 384  # MiniLM dense vector
 
 def create_v7_collection(force_recreate: bool = False):
     """Create the v7 collection with three named vectors and optimized HNSW configs."""
-    from config.qdrant_client import get_qdrant_client
     from qdrant_client.models import (
         Distance,
-        VectorParams,
-        MultiVectorConfig,
-        MultiVectorComparator,
         HnswConfigDiff,
+        MultiVectorComparator,
+        MultiVectorConfig,
+        VectorParams,
     )
+
+    from config.qdrant_client import get_qdrant_client
 
     client = get_qdrant_client()
     if not client:
@@ -235,8 +236,8 @@ def extract_input_values(component) -> str:
     For functions: parameter defaults
     For variables: the actual value representation
     """
-    import inspect
     import dataclasses
+    import inspect
 
     parts = []
     obj = component.obj
@@ -282,7 +283,9 @@ def extract_input_values(component) -> str:
     return ", ".join(parts)
 
 
-def build_compact_relationship_text(component_name: str, relationships: List[Dict], component_type: str = "class") -> str:
+def build_compact_relationship_text(
+    component_name: str, relationships: List[Dict], component_type: str = "class"
+) -> str:
     """
     Build compact, structured relationship text for embedding.
 
@@ -395,11 +398,16 @@ def build_compact_structure_text(
     if wrapper is None:
         try:
             from gchat.card_framework_wrapper import get_card_framework_wrapper
+
             wrapper = get_card_framework_wrapper()
         except Exception:
             # Fallback if wrapper unavailable
             if not component_paths:
-                return f"§[] | {structure_description[:100]}" if structure_description else "§[]"
+                return (
+                    f"§[] | {structure_description[:100]}"
+                    if structure_description
+                    else "§[]"
+                )
             names = [p.split(".")[-1] if "." in p else p for p in component_paths]
             return f"§[...] | {' '.join(names)}"
 
@@ -409,12 +417,14 @@ def build_compact_structure_text(
 
 def index_components_v7():
     """Index card_framework components into v7 with deterministic symbol-wrapped embeddings."""
+    import hashlib
+
+    from fastembed import LateInteractionTextEmbedding, TextEmbedding
+    from qdrant_client.models import PointStruct
+
     from adapters.module_wrapper import ModuleWrapper
     from adapters.structure_validator import StructureValidator
-    from fastembed import TextEmbedding, LateInteractionTextEmbedding
     from config.qdrant_client import get_qdrant_client
-    from qdrant_client.models import PointStruct
-    import hashlib
 
     print("\n" + "=" * 60)
     print("INDEXING COMPONENTS INTO V7 (WITH SYMBOL-ENRICHED EMBEDDINGS)")
@@ -442,7 +452,9 @@ def index_components_v7():
     structure_validator = StructureValidator(wrapper)
     # Pre-cache relationships (symbols already cached via wrapper.symbol_mapping)
     _ = structure_validator.relationships
-    print(f"  Validator ready with {len(structure_validator.relationships)} parent relationships")
+    print(
+        f"  Validator ready with {len(structure_validator.relationships)} parent relationships"
+    )
 
     # Initialize embedders
     print("\nInitializing embedders...")
@@ -488,26 +500,41 @@ def index_components_v7():
         # Use symbol-enriched format for better embedding efficiency
         # Format: "Ƀ ButtonList | contains ᵬ Button | Ƀ[ᵬ]"
         # This embeds symbols alongside relationships so semantic search works with DSL
-        rels = relationships_by_parent.get(component.name, []) if component.component_type == "class" else []
-        if component.component_type == "class" and component.name in structure_validator.symbols:
+        rels = (
+            relationships_by_parent.get(component.name, [])
+            if component.component_type == "class"
+            else []
+        )
+        if (
+            component.component_type == "class"
+            and component.name in structure_validator.symbols
+        ):
             # Use symbol-enriched relationship text
-            relationship_text = structure_validator.get_enriched_relationship_text(component.name)
+            relationship_text = structure_validator.get_enriched_relationship_text(
+                component.name
+            )
         else:
             # Fall back to compact format for non-class components
             relationship_text = build_compact_relationship_text(
-                component.name,
-                rels,
-                component.component_type
+                component.name, rels, component.component_type
             )
         # Extract child_classes for payload (still useful for filtering)
         child_classes = list(set(r["child_class"] for r in rels)) if rels else []
 
         # Generate embeddings
         comp_emb = list(colbert_embedder.embed([component_text]))[0]
-        comp_vec = comp_emb.tolist() if hasattr(comp_emb, "tolist") else [list(v) for v in comp_emb]
+        comp_vec = (
+            comp_emb.tolist()
+            if hasattr(comp_emb, "tolist")
+            else [list(v) for v in comp_emb]
+        )
 
         inputs_emb = list(colbert_embedder.embed([inputs_text]))[0]
-        inputs_vec = inputs_emb.tolist() if hasattr(inputs_emb, "tolist") else [list(v) for v in inputs_emb]
+        inputs_vec = (
+            inputs_emb.tolist()
+            if hasattr(inputs_emb, "tolist")
+            else [list(v) for v in inputs_emb]
+        )
 
         rel_emb = list(relationships_embedder.embed([relationship_text]))[0]
         rel_vec = rel_emb.tolist() if hasattr(rel_emb, "tolist") else list(rel_emb)
@@ -520,14 +547,20 @@ def index_components_v7():
         # Build payload
         payload = component.to_dict()
         payload["indexed_at"] = "v7_symbol_wrapped"  # Deterministic symbol wrapping
-        payload["inputs_text"] = inputs_text  # Store for debugging (includes symbol wrapping)
+        payload["inputs_text"] = (
+            inputs_text  # Store for debugging (includes symbol wrapping)
+        )
         payload["relationship_text"] = relationship_text  # Store symbol-enriched format
 
         # Store symbol in payload for DSL lookups and reverse mapping
         if component_symbol:
             payload["symbol"] = component_symbol
-            payload["symbol_dsl"] = f"{component_symbol}={component.name}"  # e.g., "ᵬ=Button"
-            payload["embedding_format"] = "symbol_wrapped"  # Indicates "{sym} {text} {sym}" format
+            payload["symbol_dsl"] = (
+                f"{component_symbol}={component.name}"  # e.g., "ᵬ=Button"
+            )
+            payload["embedding_format"] = (
+                "symbol_wrapped"  # Indicates "{sym} {text} {sym}" format
+            )
 
         if rels:
             payload["relationships"] = {
@@ -535,7 +568,8 @@ def index_components_v7():
                 "child_classes": child_classes,
                 "max_depth": max(r["depth"] for r in rels),
                 "compact_text": relationship_text,  # Symbol-enriched representation
-                "symbol_enriched": component.component_type == "class" and component.name in structure_validator.symbols,
+                "symbol_enriched": component.component_type == "class"
+                and component.name in structure_validator.symbols,
             }
 
         # Create point with three vectors
@@ -631,10 +665,12 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
     - inputs: Actual parameter values used (instance_params)
     - relationships: Which components were instantiated together
     """
-    from fastembed import TextEmbedding, LateInteractionTextEmbedding
-    from config.qdrant_client import get_qdrant_client
-    from qdrant_client.models import PointStruct
     import hashlib
+
+    from fastembed import LateInteractionTextEmbedding, TextEmbedding
+    from qdrant_client.models import PointStruct
+
+    from config.qdrant_client import get_qdrant_client
 
     print("\n" + "=" * 60)
     print("INDEXING INSTANCE PATTERNS INTO V7")
@@ -649,7 +685,9 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
         with_payload=True,
     )[0]
 
-    instance_patterns = [p for p in v6_all if p.payload.get("type") == "instance_pattern"]
+    instance_patterns = [
+        p for p in v6_all if p.payload.get("type") == "instance_pattern"
+    ]
     print(f"\nFound {len(instance_patterns)} instance_patterns in v6")
 
     if not instance_patterns:
@@ -671,7 +709,11 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
         payload = dict(p.payload)
 
         name = payload.get("name", "")
-        card_desc = payload.get("card_description", "")[:300] if payload.get("card_description") else ""
+        card_desc = (
+            payload.get("card_description", "")[:300]
+            if payload.get("card_description")
+            else ""
+        )
         parent_paths = payload.get("parent_paths", []) or []
         instance_params = payload.get("instance_params", {}) or {}
 
@@ -699,10 +741,18 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
 
         # Generate embeddings
         comp_emb = list(colbert_embedder.embed([component_text]))[0]
-        comp_vec = comp_emb.tolist() if hasattr(comp_emb, "tolist") else [list(v) for v in comp_emb]
+        comp_vec = (
+            comp_emb.tolist()
+            if hasattr(comp_emb, "tolist")
+            else [list(v) for v in comp_emb]
+        )
 
         inputs_emb = list(colbert_embedder.embed([inputs_text]))[0]
-        inputs_vec = inputs_emb.tolist() if hasattr(inputs_emb, "tolist") else [list(v) for v in inputs_emb]
+        inputs_vec = (
+            inputs_emb.tolist()
+            if hasattr(inputs_emb, "tolist")
+            else [list(v) for v in inputs_emb]
+        )
 
         rel_emb = list(relationships_embedder.embed([relationship_text]))[0]
         rel_vec = rel_emb.tolist() if hasattr(rel_emb, "tolist") else list(rel_emb)
@@ -715,7 +765,9 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
         # Update payload
         payload["indexed_at"] = "v7_dsl_enriched"
         payload["inputs_text"] = inputs_text
-        payload["relationship_text"] = relationship_text  # DSL notation for semantic search
+        payload["relationship_text"] = (
+            relationship_text  # DSL notation for semantic search
+        )
 
         # Create point with three vectors (same structure as components)
         point = PointStruct(
@@ -747,8 +799,9 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
 
 def test_v7_search():
     """Test searching with all three vectors."""
+    from fastembed import LateInteractionTextEmbedding, TextEmbedding
+
     from config.qdrant_client import get_qdrant_client
-    from fastembed import TextEmbedding, LateInteractionTextEmbedding
 
     print("\n" + "=" * 60)
     print("TESTING V7 SEARCH (ALL VECTORS)")
@@ -764,7 +817,11 @@ def test_v7_search():
         emb = list(colbert.embed([query]))[0]
         vec = emb.tolist() if hasattr(emb, "tolist") else [list(v) for v in emb]
         results = client.query_points(
-            collection_name=V7_COLLECTION_NAME, query=vec, using="components", limit=2, with_payload=["name", "component_type"]
+            collection_name=V7_COLLECTION_NAME,
+            query=vec,
+            using="components",
+            limit=2,
+            with_payload=["name", "component_type"],
         )
         print(f"  '{query}' → {[p.payload.get('name') for p in results.points]}")
 
@@ -774,7 +831,11 @@ def test_v7_search():
         emb = list(colbert.embed([query]))[0]
         vec = emb.tolist() if hasattr(emb, "tolist") else [list(v) for v in emb]
         results = client.query_points(
-            collection_name=V7_COLLECTION_NAME, query=vec, using="inputs", limit=2, with_payload=["name", "inputs_text"]
+            collection_name=V7_COLLECTION_NAME,
+            query=vec,
+            using="inputs",
+            limit=2,
+            with_payload=["name", "inputs_text"],
         )
         print(f"  '{query}' →")
         for p in results.points:
@@ -787,7 +848,11 @@ def test_v7_search():
         emb = list(minilm.embed([query]))[0]
         vec = emb.tolist() if hasattr(emb, "tolist") else list(emb)
         results = client.query_points(
-            collection_name=V7_COLLECTION_NAME, query=vec, using="relationships", limit=2, with_payload=["name", "relationships"]
+            collection_name=V7_COLLECTION_NAME,
+            query=vec,
+            using="relationships",
+            limit=2,
+            with_payload=["name", "relationships"],
         )
         print(f"  '{query}' →")
         for p in results.points:
@@ -801,7 +866,11 @@ def test_v7_search():
         emb = list(minilm.embed([query]))[0]
         vec = emb.tolist() if hasattr(emb, "tolist") else list(emb)
         results = client.query_points(
-            collection_name=V7_COLLECTION_NAME, query=vec, using="relationships", limit=2, with_payload=["name", "symbol", "relationships"]
+            collection_name=V7_COLLECTION_NAME,
+            query=vec,
+            using="relationships",
+            limit=2,
+            with_payload=["name", "symbol", "relationships"],
         )
         print(f"  '{query}' →")
         for p in results.points:

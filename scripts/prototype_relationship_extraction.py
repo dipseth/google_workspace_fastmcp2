@@ -15,7 +15,18 @@ import inspect
 import os
 import sys
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, get_args, get_origin, get_type_hints
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,6 +56,7 @@ RELATIONSHIP_COLLECTION = "mcp_component_relationships"
 # =========================================================================
 # RELATIONSHIP EXTRACTION - Reusable functions
 # =========================================================================
+
 
 def is_dataclass_type(cls: type) -> bool:
     """Check if a class is a dataclass."""
@@ -101,9 +113,18 @@ def generate_nl_description(parent: str, child: str) -> str:
     """
     # NL_RELATIONSHIP_PATTERNS - Could be moved to top-level config
     patterns = {
-        ("Image", "OnClick"): "clickable image, image with click action, image that opens a link",
-        ("DecoratedText", "OnClick"): "clickable text, text with click action, clickable decorated text",
-        ("DecoratedText", "Button"): "text with button, decorated text with action button",
+        (
+            "Image",
+            "OnClick",
+        ): "clickable image, image with click action, image that opens a link",
+        (
+            "DecoratedText",
+            "OnClick",
+        ): "clickable text, text with click action, clickable decorated text",
+        (
+            "DecoratedText",
+            "Button",
+        ): "text with button, decorated text with action button",
         ("DecoratedText", "Icon"): "text with icon, decorated text with icon",
         ("Button", "OnClick"): "button click action, button that opens link",
         ("Button", "Icon"): "button with icon, icon button",
@@ -223,6 +244,7 @@ def extract_relationships_from_class(
 # MODULEWRAPPER INTEGRATION
 # =========================================================================
 
+
 def get_module_wrapper():
     """
     Get ModuleWrapper instance consistent with SmartCardBuilder.
@@ -286,7 +308,10 @@ def extract_relationships_from_wrapper(wrapper) -> List[Dict[str, Any]]:
 # QDRANT POINT GENERATION
 # =========================================================================
 
-def generate_qdrant_points(relationships: List[Dict], dedupe: bool = True) -> List[Dict]:
+
+def generate_qdrant_points(
+    relationships: List[Dict], dedupe: bool = True
+) -> List[Dict]:
     """
     Generate Qdrant point structures from relationships.
 
@@ -336,7 +361,7 @@ def generate_qdrant_points(relationships: List[Dict], dedupe: bool = True) -> Li
                 # Context for nested relationships
                 "root_parent": rel.get("root_parent"),
                 "intermediate_path": rel.get("intermediate_path"),
-            }
+            },
         }
         points.append(point)
 
@@ -351,6 +376,7 @@ def filter_by_child_class(relationships: List[Dict], child_class: str) -> List[D
 # =========================================================================
 # MAIN
 # =========================================================================
+
 
 def main():
     import json
@@ -380,6 +406,7 @@ def main():
         # Fallback: direct import
         print("  Using direct import fallback...")
         import importlib
+
         module = importlib.import_module("card_framework.v2")
         all_relationships = []
         for name in dir(module):
@@ -421,7 +448,7 @@ def main():
             optional = "(optional)" if p["is_optional"] else "(required)"
             print(f"  {p['parent_class']}.{p['field_name']} → OnClick {optional}")
             print(f"    JSON path: {p['json_path']}")
-            print(f"    NL: \"{p['nl_description']}\"")
+            print(f'    NL: "{p["nl_description"]}"')
             if p.get("root_parent"):
                 print(f"    Root: {p['root_parent']} via {p.get('intermediate_path')}")
             print()
@@ -433,7 +460,7 @@ def main():
     print()
 
     for i, point in enumerate(points[:3]):
-        print(f"Point {i+1}:")
+        print(f"Point {i + 1}:")
         print(json.dumps(point, indent=2, default=str))
         print()
 

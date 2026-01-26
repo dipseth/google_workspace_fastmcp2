@@ -131,9 +131,9 @@ class TestGmailForwardFunctionality:
             "failed",
             "auth",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match expected pattern: {content}"
+        )
 
         # Check for the specific validation error that was causing the middleware failure
         if (
@@ -166,12 +166,12 @@ class TestGmailForwardFunctionality:
             "html_body": f"<p><strong>Test forward</strong> message ({timestamp})</p>",
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("📧 GMAIL FORWARD TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"📤 Forwarding to: {ALLOWED_EMAILS[0]}")
         print(json.dumps(test_params, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send forward
         result = await client.call_tool("forward_gmail_message", test_params)
@@ -211,9 +211,9 @@ class TestGmailForwardFunctionality:
             "not found",
             "invalid",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match expected pattern: {content}"
+        )
 
         # CRITICAL: Check response for success or acceptable errors
         if "sent successfully" in content.lower():
@@ -249,12 +249,12 @@ class TestGmailForwardFunctionality:
             "html_body": f"<p><strong>Test draft forward</strong> message ({timestamp})</p>",
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("📝 GMAIL DRAFT FORWARD TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"📤 Draft forward to: {ALLOWED_EMAILS[0]}")
         print(json.dumps(test_params, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Create draft forward
         result = await client.call_tool("draft_gmail_forward", test_params)
@@ -294,9 +294,9 @@ class TestGmailForwardFunctionality:
             "not found",
             "invalid",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match expected pattern: {content}"
+        )
 
         # Check response for success or acceptable errors
         if "saved" in content.lower() or "created" in content.lower():
@@ -330,12 +330,12 @@ class TestGmailForwardFunctionality:
             # Missing 'message_id'
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🚫 PARAMETER VALIDATION TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print("Testing missing 'message_id' parameter...")
         print(json.dumps(incomplete_params, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Test parameter validation - should throw an exception
         try:
@@ -362,9 +362,9 @@ class TestGmailForwardFunctionality:
             has_validation_error = any(
                 keyword in error_msg.lower() for keyword in validation_keywords
             )
-            assert (
-                has_validation_error
-            ), f"Should show parameter validation error. Got: {error_msg}"
+            assert has_validation_error, (
+                f"Should show parameter validation error. Got: {error_msg}"
+            )
 
             print("✅ SUCCESS: Parameter validation working correctly")
             logger.info(f"Parameter validation test result: {error_msg}")
@@ -395,11 +395,11 @@ class TestGmailForwardFunctionality:
                     f"<p><strong>Test {content_type}</strong> HTML content ({timestamp})</p>"
                 )
 
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"📝 CONTENT TYPE TEST: {content_type.upper()}")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
             print(json.dumps(test_params, indent=2))
-            print(f"{'='*60}\n")
+            print(f"{'=' * 60}\n")
 
             # Test content type
             result = await client.call_tool("forward_gmail_message", test_params)
@@ -442,9 +442,9 @@ class TestGmailForwardFunctionality:
                 "invalid",
                 "auth",
             ]
-            assert any(
-                keyword in content.lower() for keyword in valid_responses
-            ), f"Content type {content_type} response didn't match expected pattern: {content}"
+            assert any(keyword in content.lower() for keyword in valid_responses), (
+                f"Content type {content_type} response didn't match expected pattern: {content}"
+            )
 
             # Log result for each content type
             if "sent successfully" in content.lower():
@@ -474,13 +474,13 @@ class TestGmailForwardFunctionality:
             "page_size": 1,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🔍 CRITICAL GMAIL SEARCH TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print("🚨 This is where the middleware parameter transformation bug occurs!")
         print("🚨 The page_size parameter gets transformed to max_results")
         print(json.dumps(search_params, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         try:
             result = await client.call_tool("search_gmail_messages", search_params)
@@ -495,7 +495,9 @@ class TestGmailForwardFunctionality:
                 content = (
                     content_items[0].text
                     if hasattr(content_items[0], "text")
-                    else str(content_items[0]) if content_items else ""
+                    else str(content_items[0])
+                    if content_items
+                    else ""
                 )
             elif hasattr(result, "__iter__") and not isinstance(result, str):
                 content = result[0].text if result else ""
@@ -604,9 +606,9 @@ class TestGmailForwardFunctionality:
     @pytest.mark.asyncio
     async def test_parameter_transformation_debugging(self, client):
         """Specific test to debug the parameter transformation issue."""
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print("🔧 PARAMETER TRANSFORMATION DEBUGGING SESSION")
-        print(f"{'='*80}")
+        print(f"{'=' * 80}")
 
         # Test 1: Direct search with page_size
         print("🧪 Test 1: Direct search_gmail_messages with page_size parameter")
@@ -638,9 +640,9 @@ class TestGmailForwardFunctionality:
             else:
                 print("ℹ️  Different error - not the parameter transformation bug")
 
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print("🔧 END PARAMETER TRANSFORMATION DEBUGGING")
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
 
 
 if __name__ == "__main__":

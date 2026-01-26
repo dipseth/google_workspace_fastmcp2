@@ -61,9 +61,9 @@ class TestColBERTComponentRetrieval:
         result = await client.call_tool("send_dynamic_card", test_payload)
         content = _extract_content(result)
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("ColBERT Search Results Test")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Response: {content[:500]}...")
 
         # Parse the JSON response
@@ -130,9 +130,9 @@ class TestColBERTComponentRetrieval:
         colbert_content = _extract_content(colbert_result)
         standard_content = _extract_content(standard_result)
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("ColBERT vs Standard Search Comparison")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         try:
             colbert_data = json.loads(colbert_content)
@@ -202,9 +202,9 @@ class TestNLPParsingWithColBERT:
         result = await client.call_tool("send_dynamic_card", test_payload)
         content = _extract_content(result)
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("NLP Parameter Extraction in ColBERT Mode")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Description: {description}")
 
         try:
@@ -255,9 +255,9 @@ class TestNLPParsingWithColBERT:
         result = await client.call_tool("send_dynamic_card", test_payload)
         content = _extract_content(result)
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("NLP Extraction Baseline (Standard Mode)")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         try:
             data = json.loads(content)
@@ -305,9 +305,9 @@ class TestComponentPathLookup:
         result = await client.call_tool("send_dynamic_card", test_payload)
         content = _extract_content(result)
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("Component Object Retrieval Test")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         try:
             data = json.loads(content)
@@ -361,9 +361,9 @@ class TestEndToEndColBERTCardGeneration:
         result = await client.call_tool("send_dynamic_card", test_payload)
         content = _extract_content(result)
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("Complex Card Generation (ColBERT Mode)")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         try:
             data = json.loads(content)
@@ -413,9 +413,9 @@ class TestEndToEndColBERTCardGeneration:
             except json.JSONDecodeError:
                 results[mode_name] = {"raw": content}
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("Simple Text Card: ColBERT vs Standard")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         for mode, data in results.items():
             print(f"\n{mode} Mode:")

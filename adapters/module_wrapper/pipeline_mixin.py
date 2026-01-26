@@ -35,6 +35,7 @@ RELATIONSHIPS_DIM = 384  # MiniLM dense vector
 # HELPER FUNCTIONS
 # =============================================================================
 
+
 def extract_input_values(component) -> str:
     """
     Extract input values text for the 'inputs' vector.
@@ -84,9 +85,7 @@ def extract_input_values(component) -> str:
 
 
 def build_compact_relationship_text(
-    component_name: str,
-    relationships: List[Dict],
-    component_type: str = "class"
+    component_name: str, relationships: List[Dict], component_type: str = "class"
 ) -> str:
     """
     Build compact, structured relationship text for embedding.
@@ -196,6 +195,7 @@ def format_instance_params(params: dict) -> str:
 # PIPELINE MIXIN
 # =============================================================================
 
+
 class PipelineMixin:
     """
     Mixin providing v7 ingestion pipeline functionality.
@@ -247,12 +247,12 @@ class PipelineMixin:
         """
         from qdrant_client.models import (
             Distance,
-            VectorParams,
-            MultiVectorConfig,
-            MultiVectorComparator,
             HnswConfigDiff,
             KeywordIndexParams,
             KeywordIndexType,
+            MultiVectorComparator,
+            MultiVectorConfig,
+            VectorParams,
         )
 
         if not self.client:
@@ -267,7 +267,9 @@ class PipelineMixin:
 
         if target_name in collection_names:
             info = self.client.get_collection(target_name)
-            logger.info(f"Collection {target_name} exists with {info.points_count} points")
+            logger.info(
+                f"Collection {target_name} exists with {info.points_count} points"
+            )
 
             if force_recreate:
                 logger.warning(f"Force recreate enabled - deleting {target_name}...")
@@ -308,7 +310,14 @@ class PipelineMixin:
 
         # Create payload indexes
         logger.info("Creating payload indexes...")
-        for field_name in ["name", "type", "module_path", "full_path", "symbol", "symbol_dsl"]:
+        for field_name in [
+            "name",
+            "type",
+            "module_path",
+            "full_path",
+            "symbol",
+            "symbol_dsl",
+        ]:
             self.client.create_payload_index(
                 collection_name=target_name,
                 field_name=field_name,
@@ -323,13 +332,19 @@ class PipelineMixin:
         """Ensure ColBERT and relationships embedders are initialized."""
         if self._colbert_embedder is None:
             from fastembed import LateInteractionTextEmbedding
+
             logger.info("Initializing ColBERT embedder for pipeline...")
-            self._colbert_embedder = LateInteractionTextEmbedding("colbert-ir/colbertv2.0")
+            self._colbert_embedder = LateInteractionTextEmbedding(
+                "colbert-ir/colbertv2.0"
+            )
 
         if self._relationships_embedder is None:
             from fastembed import TextEmbedding
+
             logger.info("Initializing MiniLM embedder for relationships...")
-            self._relationships_embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+            self._relationships_embedder = TextEmbedding(
+                "sentence-transformers/all-MiniLM-L6-v2"
+            )
 
     def run_ingestion_pipeline(
         self,
@@ -364,7 +379,12 @@ class PipelineMixin:
         # Step 1: Create collection
         target_name = collection_name or self.get_v7_collection_name()
         if not self.create_v7_collection(target_name, force_recreate):
-            return {"components": 0, "instance_patterns": 0, "total": 0, "error": "Failed to create collection"}
+            return {
+                "components": 0,
+                "instance_patterns": 0,
+                "total": 0,
+                "error": "Failed to create collection",
+            }
 
         # Step 2: Initialize embedders
         self._ensure_pipeline_embedders()
@@ -372,7 +392,9 @@ class PipelineMixin:
         # Step 3: Get relationships
         logger.info("Extracting relationships...")
         relationships_by_parent = self.extract_relationships_by_parent(max_depth=5)
-        logger.info(f"Found relationships for {len(relationships_by_parent)} parent classes")
+        logger.info(
+            f"Found relationships for {len(relationships_by_parent)} parent classes"
+        )
 
         # Step 4: Get structure validator for symbol-enriched text
         try:
@@ -396,32 +418,60 @@ class PipelineMixin:
                     component_text += f"\nDocumentation: {component.docstring[:500]}"
 
                 component_symbol = self.get_symbol_for_component(component.name)
-                component_text = self.get_symbol_wrapped_text(component.name, component_text)
+                component_text = self.get_symbol_wrapped_text(
+                    component.name, component_text
+                )
 
                 # Build inputs text
                 inputs_text = extract_input_values(component)
                 inputs_text = self.get_symbol_wrapped_text(component.name, inputs_text)
 
                 # Build relationships text
-                rels = relationships_by_parent.get(component.name, []) if component.component_type == "class" else []
-                if structure_validator and component.component_type == "class" and component.name in getattr(structure_validator, 'symbols', {}):
-                    relationship_text = structure_validator.get_enriched_relationship_text(component.name)
+                rels = (
+                    relationships_by_parent.get(component.name, [])
+                    if component.component_type == "class"
+                    else []
+                )
+                if (
+                    structure_validator
+                    and component.component_type == "class"
+                    and component.name in getattr(structure_validator, "symbols", {})
+                ):
+                    relationship_text = (
+                        structure_validator.get_enriched_relationship_text(
+                            component.name
+                        )
+                    )
                 else:
                     relationship_text = build_compact_relationship_text(
                         component.name, rels, component.component_type
                     )
 
-                child_classes = list(set(r["child_class"] for r in rels)) if rels else []
+                child_classes = (
+                    list(set(r["child_class"] for r in rels)) if rels else []
+                )
 
                 # Generate embeddings
                 comp_emb = list(self._colbert_embedder.embed([component_text]))[0]
-                comp_vec = comp_emb.tolist() if hasattr(comp_emb, "tolist") else [list(v) for v in comp_emb]
+                comp_vec = (
+                    comp_emb.tolist()
+                    if hasattr(comp_emb, "tolist")
+                    else [list(v) for v in comp_emb]
+                )
 
                 inputs_emb = list(self._colbert_embedder.embed([inputs_text]))[0]
-                inputs_vec = inputs_emb.tolist() if hasattr(inputs_emb, "tolist") else [list(v) for v in inputs_emb]
+                inputs_vec = (
+                    inputs_emb.tolist()
+                    if hasattr(inputs_emb, "tolist")
+                    else [list(v) for v in inputs_emb]
+                )
 
-                rel_emb = list(self._relationships_embedder.embed([relationship_text]))[0]
-                rel_vec = rel_emb.tolist() if hasattr(rel_emb, "tolist") else list(rel_emb)
+                rel_emb = list(self._relationships_embedder.embed([relationship_text]))[
+                    0
+                ]
+                rel_vec = (
+                    rel_emb.tolist() if hasattr(rel_emb, "tolist") else list(rel_emb)
+                )
 
                 # Generate deterministic ID
                 id_string = f"{target_name}:{path}"
@@ -529,7 +579,9 @@ class PipelineMixin:
                 with_payload=True,
             )[0]
 
-            instance_patterns = [p for p in all_points if p.payload.get("type") == "instance_pattern"]
+            instance_patterns = [
+                p for p in all_points if p.payload.get("type") == "instance_pattern"
+            ]
             logger.info(f"Found {len(instance_patterns)} instance_patterns")
 
             if not instance_patterns:
@@ -541,7 +593,11 @@ class PipelineMixin:
                     payload = dict(p.payload)
 
                     name = payload.get("name", "")
-                    card_desc = payload.get("card_description", "")[:300] if payload.get("card_description") else ""
+                    card_desc = (
+                        payload.get("card_description", "")[:300]
+                        if payload.get("card_description")
+                        else ""
+                    )
                     parent_paths = payload.get("parent_paths", []) or []
                     instance_params = payload.get("instance_params", {}) or {}
 
@@ -558,19 +614,35 @@ class PipelineMixin:
 
                     # Relationships text with DSL
                     if parent_paths:
-                        relationship_text = self.build_dsl_from_paths(parent_paths, card_desc)
+                        relationship_text = self.build_dsl_from_paths(
+                            parent_paths, card_desc
+                        )
                     else:
                         relationship_text = f"{name} instance pattern"
 
                     # Generate embeddings
                     comp_emb = list(self._colbert_embedder.embed([component_text]))[0]
-                    comp_vec = comp_emb.tolist() if hasattr(comp_emb, "tolist") else [list(v) for v in comp_emb]
+                    comp_vec = (
+                        comp_emb.tolist()
+                        if hasattr(comp_emb, "tolist")
+                        else [list(v) for v in comp_emb]
+                    )
 
                     inputs_emb = list(self._colbert_embedder.embed([inputs_text]))[0]
-                    inputs_vec = inputs_emb.tolist() if hasattr(inputs_emb, "tolist") else [list(v) for v in inputs_emb]
+                    inputs_vec = (
+                        inputs_emb.tolist()
+                        if hasattr(inputs_emb, "tolist")
+                        else [list(v) for v in inputs_emb]
+                    )
 
-                    rel_emb = list(self._relationships_embedder.embed([relationship_text]))[0]
-                    rel_vec = rel_emb.tolist() if hasattr(rel_emb, "tolist") else list(rel_emb)
+                    rel_emb = list(
+                        self._relationships_embedder.embed([relationship_text])
+                    )[0]
+                    rel_vec = (
+                        rel_emb.tolist()
+                        if hasattr(rel_emb, "tolist")
+                        else list(rel_emb)
+                    )
 
                     # Generate deterministic ID
                     id_string = f"{target_collection}:instance_pattern:{p.id}"
@@ -593,7 +665,9 @@ class PipelineMixin:
                     points.append(point)
 
                     if len(points) >= batch_size:
-                        self.client.upsert(collection_name=target_collection, points=points)
+                        self.client.upsert(
+                            collection_name=target_collection, points=points
+                        )
                         logger.info(f"Indexed {i + 1} instance_patterns...")
                         points = []
 

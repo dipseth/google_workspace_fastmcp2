@@ -440,7 +440,9 @@ class QdrantClientManager:
                         if field not in existing_indexes:
                             try:
                                 # Use KeywordIndexParams for more robust index creation
-                                keyword_index = qdrant_models["KeywordIndexParams"](
+                                keyword_index = qdrant_models[
+                                    "KeywordIndexParams"
+                                ](
                                     type=qdrant_models["KeywordIndexType"].KEYWORD,
                                     on_disk=False,  # Keep frequently accessed fields in memory
                                 )

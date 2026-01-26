@@ -422,7 +422,7 @@ class EnhancedSamplingContext:
             macros = self.available_macros[macro_category]
             context_parts.append(
                 f"""
-Available {macro_category} macros: {', '.join(macros)}
+Available {macro_category} macros: {", ".join(macros)}
 Consider suggesting specific macro usage with user's actual data.
 """
             )
@@ -1701,7 +1701,7 @@ Please suggest a step-by-step workflow that:
 2. Takes into account my current workspace setup
 3. References specific tools by name with working examples
 4. Considers my Gmail labels and Drive organization
-5. {'Includes patterns from my previous successful workflows' if include_history else 'Focuses on current capabilities'}
+5. {"Includes patterns from my previous successful workflows" if include_history else "Focuses on current capabilities"}
 
 Provide actionable steps with specific tool recommendations.
 """

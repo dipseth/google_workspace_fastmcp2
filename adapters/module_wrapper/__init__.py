@@ -41,119 +41,108 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 from adapters.module_wrapper.core import (
-    ModuleComponent,
-    ModuleWrapperBase,
-    parse_qdrant_url,
-    get_qdrant_config_from_env,
+    BUILTIN_PREFIXES,
     DEFAULT_RELATIONSHIP_DEPTH,
     PRIMITIVE_TYPES,
-    BUILTIN_PREFIXES,
-)
-
-# =============================================================================
-# MIXINS
-# =============================================================================
-
-from adapters.module_wrapper.qdrant_mixin import (
-    QdrantMixin,
-    _get_qdrant_imports,
-    _get_numpy,
-)
-
-from adapters.module_wrapper.embedding_mixin import (
-    EmbeddingMixin,
-    _get_fastembed,
-    _get_colbert_embed,
-)
-
-from adapters.module_wrapper.indexing_mixin import (
-    IndexingMixin,
-    STD_LIB_PREFIXES,
-    THIRD_PARTY_PREFIXES,
-)
-
-from adapters.module_wrapper.search_mixin import SearchMixin
-
-from adapters.module_wrapper.relationships_mixin import RelationshipsMixin
-
-from adapters.module_wrapper.symbols_mixin import SymbolsMixin
-
-from adapters.module_wrapper.pipeline_mixin import PipelineMixin
-
-# =============================================================================
-# SYMBOL GENERATION
-# =============================================================================
-
-from adapters.module_wrapper.symbol_generator import (
-    SymbolGenerator,
-    StyleRule,
-    StylingRegistry,
-    LETTER_SYMBOLS,
-    FALLBACK_SYMBOLS,
-    MODULE_PREFIX_SYMBOLS,
-    DEFAULT_STYLE_RULES,
-    create_generator_for_module,
-    create_default_styling_registry,
-    extract_component_names_from_wrapper,
-)
-
-# =============================================================================
-# STRUCTURE VALIDATION
-# =============================================================================
-
-from adapters.module_wrapper.structure_validator import (
-    StructureValidator,
-    ValidationResult,
-    ComponentSlot,
-    INPUT_PATTERNS,
-    WIDGET_TYPES,
-    NEEDS_WRAPPER,
-    create_validator,
+    ModuleComponent,
+    ModuleWrapperBase,
+    get_qdrant_config_from_env,
+    parse_qdrant_url,
 )
 
 # =============================================================================
 # DSL PARSING
 # =============================================================================
-
 from adapters.module_wrapper.dsl_parser import (
-    # Structure DSL
-    DSLParser,
-    DSLToken,
-    DSLNode,
-    DSLParseResult,
-    QdrantQuery,
-    parse_dsl_to_qdrant_query,
-    extract_dsl_from_description,
-    validate_dsl_structure,
-    create_parser_from_wrapper,
-    # Content DSL
-    StyleModifier,
-    ContentLine,
+    STYLE_MODIFIERS,
     ContentBlock,
     ContentDSLResult,
-    STYLE_MODIFIERS,
-    parse_content_dsl,
-    content_dsl_to_jinja,
-    get_style_modifiers,
+    ContentLine,
+    DSLNode,
+    # Structure DSL
+    DSLParser,
+    DSLParseResult,
+    DSLToken,
+    QdrantQuery,
+    # Content DSL
+    StyleModifier,
     add_style_modifier,
+    content_dsl_to_jinja,
+    create_parser_from_wrapper,
+    extract_dsl_from_description,
+    get_style_modifiers,
+    parse_content_dsl,
+    parse_dsl_to_qdrant_query,
+    validate_dsl_structure,
 )
+from adapters.module_wrapper.embedding_mixin import (
+    EmbeddingMixin,
+    _get_colbert_embed,
+    _get_fastembed,
+)
+from adapters.module_wrapper.indexing_mixin import (
+    STD_LIB_PREFIXES,
+    THIRD_PARTY_PREFIXES,
+    IndexingMixin,
+)
+from adapters.module_wrapper.pipeline_mixin import PipelineMixin
+
+# =============================================================================
+# MIXINS
+# =============================================================================
+from adapters.module_wrapper.qdrant_mixin import (
+    QdrantMixin,
+    _get_numpy,
+    _get_qdrant_imports,
+)
+from adapters.module_wrapper.relationships_mixin import RelationshipsMixin
+from adapters.module_wrapper.search_mixin import SearchMixin
+
+# =============================================================================
+# STRUCTURE VALIDATION
+# =============================================================================
+from adapters.module_wrapper.structure_validator import (
+    INPUT_PATTERNS,
+    NEEDS_WRAPPER,
+    WIDGET_TYPES,
+    ComponentSlot,
+    StructureValidator,
+    ValidationResult,
+    create_validator,
+)
+
+# =============================================================================
+# SYMBOL GENERATION
+# =============================================================================
+from adapters.module_wrapper.symbol_generator import (
+    DEFAULT_STYLE_RULES,
+    FALLBACK_SYMBOLS,
+    LETTER_SYMBOLS,
+    MODULE_PREFIX_SYMBOLS,
+    StyleRule,
+    StylingRegistry,
+    SymbolGenerator,
+    create_default_styling_registry,
+    create_generator_for_module,
+    extract_component_names_from_wrapper,
+)
+from adapters.module_wrapper.symbols_mixin import SymbolsMixin
 
 # =============================================================================
 # TEXT INDEXING
 # =============================================================================
-
 from adapters.module_wrapper.text_indexing import (
     create_component_text_indices,
+    create_module_field_index,
     search_by_text,
     search_components_by_relationship,
-    create_module_field_index,
     search_within_module,
 )
-
 
 # =============================================================================
 # FULL MODULE WRAPPER - COMPOSED FROM MIXINS
 # =============================================================================
+
 
 class ModuleWrapper(
     QdrantMixin,
@@ -299,7 +288,6 @@ class ModuleWrapper(
 __all__ = [
     # Main class
     "ModuleWrapper",
-
     # Core
     "ModuleComponent",
     "ModuleWrapperBase",
@@ -308,7 +296,6 @@ __all__ = [
     "DEFAULT_RELATIONSHIP_DEPTH",
     "PRIMITIVE_TYPES",
     "BUILTIN_PREFIXES",
-
     # Mixins
     "QdrantMixin",
     "EmbeddingMixin",
@@ -317,13 +304,11 @@ __all__ = [
     "RelationshipsMixin",
     "SymbolsMixin",
     "PipelineMixin",
-
     # Lazy imports
     "_get_qdrant_imports",
     "_get_numpy",
     "_get_fastembed",
     "_get_colbert_embed",
-
     # Symbol generation
     "SymbolGenerator",
     "StyleRule",
@@ -335,7 +320,6 @@ __all__ = [
     "create_generator_for_module",
     "create_default_styling_registry",
     "extract_component_names_from_wrapper",
-
     # Structure validation
     "StructureValidator",
     "ValidationResult",
@@ -344,7 +328,6 @@ __all__ = [
     "WIDGET_TYPES",
     "NEEDS_WRAPPER",
     "create_validator",
-
     # Structure DSL parsing
     "DSLParser",
     "DSLToken",
@@ -355,7 +338,6 @@ __all__ = [
     "extract_dsl_from_description",
     "validate_dsl_structure",
     "create_parser_from_wrapper",
-
     # Content DSL parsing
     "StyleModifier",
     "ContentLine",
@@ -366,7 +348,6 @@ __all__ = [
     "content_dsl_to_jinja",
     "get_style_modifiers",
     "add_style_modifier",
-
     # Text indexing
     "create_component_text_indices",
     "search_by_text",

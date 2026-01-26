@@ -125,7 +125,7 @@ def _format_album(album: Dict) -> str:
     media_count = album.get("mediaItemsCount", "Unknown")
     cover_photo_url = album.get("coverPhotoBaseUrl", "")
 
-    return f"📁 \"{title}\" | Items: {media_count} | ID: {album.get('id', 'Unknown')}"
+    return f'📁 "{title}" | Items: {media_count} | ID: {album.get("id", "Unknown")}'
 
 
 def setup_photos_tools(mcp: FastMCP) -> None:

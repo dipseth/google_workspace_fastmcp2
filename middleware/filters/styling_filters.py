@@ -22,15 +22,16 @@ Output Targets:
 The default target is 'gchat' for Google Chat card compatibility.
 """
 
-from typing import Optional, Union, List, Iterator, Dict, Any
 from enum import Enum
 from itertools import cycle
+from typing import Any, Dict, Iterator, List, Optional, Union
 
 
 class OutputTarget(Enum):
     """Supported output formats for styling filters."""
-    GCHAT = "gchat"      # Google Chat HTML subset
-    HTML = "html"        # Full HTML with CSS
+
+    GCHAT = "gchat"  # Google Chat HTML subset
+    HTML = "html"  # Full HTML with CSS
     MARKDOWN = "markdown"  # Markdown (limited styling)
 
 
@@ -42,46 +43,40 @@ class OutputTarget(Enum):
 
 SEMANTIC_COLORS = {
     # Status colors
-    "success": "#34a853",   # Google Green
-    "error": "#ea4335",     # Google Red
-    "warning": "#fbbc05",   # Google Yellow
-    "info": "#4285f4",      # Google Blue
-
+    "success": "#34a853",  # Google Green
+    "error": "#ea4335",  # Google Red
+    "warning": "#fbbc05",  # Google Yellow
+    "info": "#4285f4",  # Google Blue
     # Neutral colors
-    "muted": "#9aa0a6",     # Gray 500
-    "subtle": "#bdc1c6",    # Gray 400
-    "dark": "#3c4043",      # Gray 800
-
+    "muted": "#9aa0a6",  # Gray 500
+    "subtle": "#bdc1c6",  # Gray 400
+    "dark": "#3c4043",  # Gray 800
     # Accent colors
-    "primary": "#1a73e8",   # Bright Blue
-    "secondary": "#5f6368", # Gray 700
-    "accent": "#8430ce",    # Purple
-
+    "primary": "#1a73e8",  # Bright Blue
+    "secondary": "#5f6368",  # Gray 700
+    "accent": "#8430ce",  # Purple
     # Semantic aliases (common use cases)
     "positive": "#34a853",  # = success
     "negative": "#ea4335",  # = error
-    "neutral": "#5f6368",   # = secondary
-    "highlight": "#fbbc05", # = warning
-
+    "neutral": "#5f6368",  # = secondary
+    "highlight": "#fbbc05",  # = warning
     # Price-specific
-    "sale": "#34a853",      # Green for sale prices
+    "sale": "#34a853",  # Green for sale prices
     "original": "#9aa0a6",  # Muted for original prices
-
     # Status-specific
     "active": "#34a853",
     "inactive": "#9aa0a6",
     "pending": "#fbbc05",
     "cancelled": "#ea4335",
-
     # Common color name aliases (for NL descriptions like "green header")
-    "green": "#34a853",     # = success/Google Green
-    "red": "#ea4335",       # = error/Google Red
-    "blue": "#4285f4",      # = info/Google Blue
-    "yellow": "#fbbc05",    # = warning/Google Yellow
-    "orange": "#ff6d01",    # Google Orange
-    "purple": "#8430ce",    # = accent
-    "gray": "#5f6368",      # = secondary
-    "grey": "#5f6368",      # = secondary (British spelling)
+    "green": "#34a853",  # = success/Google Green
+    "red": "#ea4335",  # = error/Google Red
+    "blue": "#4285f4",  # = info/Google Blue
+    "yellow": "#fbbc05",  # = warning/Google Yellow
+    "orange": "#ff6d01",  # Google Orange
+    "purple": "#8430ce",  # = accent
+    "gray": "#5f6368",  # = secondary
+    "grey": "#5f6368",  # = secondary (British spelling)
 }
 
 # Background colors for badges (lighter versions)
@@ -111,6 +106,7 @@ STATUS_ICONS = {
 # CORE STYLING FILTERS
 # =============================================================================
 
+
 def color_filter(
     text: str,
     color_name: str,
@@ -138,12 +134,12 @@ def color_filter(
     hex_color = SEMANTIC_COLORS.get(color_name, color_name)
 
     # Ensure hex format
-    if not hex_color.startswith('#'):
+    if not hex_color.startswith("#"):
         hex_color = f"#{hex_color}"
 
     if target == "markdown":
         # Markdown doesn't support color, use bold for emphasis
-        return f"**{text}**" if bold or color_name in ('success', 'error') else text
+        return f"**{text}**" if bold or color_name in ("success", "error") else text
 
     elif target == "html":
         # Full HTML with inline styles
@@ -156,7 +152,7 @@ def color_filter(
         # Google Chat supports <font color=""> and <b>
         result = f'<font color="{hex_color}">{text}</font>'
         if bold:
-            result = f'<b>{result}</b>'
+            result = f"<b>{result}</b>"
         return result
 
 
@@ -185,7 +181,7 @@ def price_filter(
     """
     # Convert to float
     try:
-        current_val = float(str(current).replace(',', '').replace(currency, ''))
+        current_val = float(str(current).replace(",", "").replace(currency, ""))
     except (ValueError, TypeError):
         return str(current)
 
@@ -193,7 +189,7 @@ def price_filter(
 
     if original is not None:
         try:
-            original_val = float(str(original).replace(',', '').replace(currency, ''))
+            original_val = float(str(original).replace(",", "").replace(currency, ""))
         except (ValueError, TypeError):
             original_val = None
 
@@ -205,14 +201,14 @@ def price_filter(
             elif target == "html":
                 return (
                     f'<span style="color:{SEMANTIC_COLORS["sale"]};font-weight:bold">'
-                    f'{current_str}</span> '
+                    f"{current_str}</span> "
                     f'<span style="color:{SEMANTIC_COLORS["original"]};text-decoration:line-through">'
-                    f'{original_str}</span>'
+                    f"{original_str}</span>"
                 )
             else:  # gchat
                 return (
                     f'<font color="{SEMANTIC_COLORS["sale"]}"><b>{current_str}</b></font> '
-                    f'<s>{original_str}</s>'
+                    f"<s>{original_str}</s>"
                 )
 
     return current_str
@@ -357,6 +353,7 @@ def link_filter(
 # COMPOSITE FILTERS (Common Patterns)
 # =============================================================================
 
+
 def success_text_filter(text: str, target: str = "gchat") -> str:
     """Shorthand for green success text."""
     return color_filter(text, "success", target)
@@ -385,6 +382,7 @@ def highlight_filter(text: str, target: str = "gchat") -> str:
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+
 
 def get_color(name: str) -> str:
     """
@@ -417,20 +415,17 @@ STYLING_FILTERS = {
     "price": price_filter,
     "badge": badge_filter,
     "status_icon": status_icon_filter,
-
     # Text formatting
     "bold": bold_filter,
     "italic": italic_filter,
     "strike": strike_filter,
     "link": link_filter,
-
     # Shortcuts
     "success_text": success_text_filter,
     "error_text": error_text_filter,
     "warning_text": warning_text_filter,
     "muted_text": muted_text_filter,
     "highlight": highlight_filter,
-
     # Color cycling (added after class definitions below)
     # "alternating_colors": alternating_color_filter,  # Added dynamically
 }
@@ -486,7 +481,9 @@ class ColorCycler:
         return cls(colors)
 
     @classmethod
-    def from_base_colors(cls, base_colors: List[str], total_needed: int = 10) -> "ColorCycler":
+    def from_base_colors(
+        cls, base_colors: List[str], total_needed: int = 10
+    ) -> "ColorCycler":
         """
         Create a cycler that alternates base colors to fill total_needed.
 
@@ -739,6 +736,7 @@ class ComponentStyler:
 # JINJA2 INTEGRATION HELPERS
 # =============================================================================
 
+
 def create_styler_for_template(
     base_colors: Optional[List[str]] = None,
     scheme: Optional[str] = None,
@@ -791,31 +789,26 @@ __all__ = [
     "price_filter",
     "badge_filter",
     "status_icon_filter",
-
     # Text formatting
     "bold_filter",
     "italic_filter",
     "strike_filter",
     "link_filter",
-
     # Shortcuts
     "success_text_filter",
     "error_text_filter",
     "warning_text_filter",
     "muted_text_filter",
     "highlight_filter",
-
     # Utilities
     "get_color",
     "get_all_colors",
-
     # Constants
     "SEMANTIC_COLORS",
     "BADGE_BACKGROUNDS",
     "STATUS_ICONS",
     "STYLING_FILTERS",
     "OutputTarget",
-
     # Color cycling/alternating
     "COLOR_SCHEMES",
     "ColorCycler",

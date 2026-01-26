@@ -139,9 +139,9 @@ class TestMCPServer:
         ]
 
         for expected_uri in expected_resources:
-            assert (
-                expected_uri in resource_uris
-            ), f"Resource {expected_uri} not found. Available: {resource_uris}"
+            assert expected_uri in resource_uris, (
+                f"Resource {expected_uri} not found. Available: {resource_uris}"
+            )
 
     @pytest.mark.asyncio
     async def test_read_tools_list_resource(self, client):
@@ -175,9 +175,9 @@ class TestMCPServer:
             "auth_tools",
         ]
         for category in expected_categories:
-            assert (
-                category in tools_data["tools_by_category"]
-            ), f"Expected category {category} not found"
+            assert category in tools_data["tools_by_category"], (
+                f"Expected category {category} not found"
+            )
 
     @pytest.mark.asyncio
     async def test_read_detailed_tools_resource(self, client):
@@ -453,9 +453,9 @@ class TestDocsTools:
 
         # If any docs tools are available, they should all be available
         if docs_tools_available:
-            assert (
-                len(docs_tools_available) == 4
-            ), f"Expected all 4 docs tools, found: {docs_tools_available}"
+            assert len(docs_tools_available) == 4, (
+                f"Expected all 4 docs tools, found: {docs_tools_available}"
+            )
 
             # Test each tool without authentication (should fail gracefully)
             await self._test_search_docs_no_auth(client)
@@ -635,9 +635,9 @@ class TestFormsTools:
 
         # If any forms tools are available, they should all be available
         if forms_tools_available:
-            assert (
-                len(forms_tools_available) == 8
-            ), f"Expected all 8 forms tools, found: {forms_tools_available}"
+            assert len(forms_tools_available) == 8, (
+                f"Expected all 8 forms tools, found: {forms_tools_available}"
+            )
 
             # Test each tool without authentication (should fail gracefully)
             await self._test_create_form_no_auth(client)
@@ -932,8 +932,8 @@ class TestGmailLabelColors:
 
         # Test creating a red label with white text
         # Use a unique name to avoid conflicts with existing labels
-        import uuid
         import json
+        import uuid
 
         unique_label_name = f"Test Label {uuid.uuid4().hex[:8]}"
         result = await client.call_tool(
@@ -1103,7 +1103,9 @@ class TestGmailLabelColors:
         )  # Operation succeeded with correction
 
     @pytest.mark.asyncio
-    async def test_manage_gmail_label_color_params_optional(self, client, cleanup_tracker):
+    async def test_manage_gmail_label_color_params_optional(
+        self, client, cleanup_tracker
+    ):
         """Test that color parameters are optional."""
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]

@@ -374,9 +374,9 @@ async def session_cleanup():
     if total == 0:
         return  # Nothing to clean up
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("🧹 TEST SESSION CLEANUP")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"   Tracked resources: {summary}")
 
     try:
@@ -400,7 +400,7 @@ async def session_cleanup():
         print(f"\n❌ Cleanup failed: {e}")
         print("   Run scripts/cleanup_test_resources.py for manual cleanup")
 
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 @pytest_asyncio.fixture(scope="function")

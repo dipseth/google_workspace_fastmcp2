@@ -71,13 +71,13 @@ FEEDBACK_ICONS = ["STAR", "BOOKMARK", "DESCRIPTION", "EMAIL"]
 # Validated URL images (tested and confirmed working in Google Chat)
 POSITIVE_IMAGE_URLS = [
     "https://www.gstatic.com/images/icons/material/system/2x/check_circle_black_24dp.png",  # Checkmark
-    "https://ui-avatars.com/api/?name=Y&background=4caf50&color=fff&size=24&bold=true",     # Green Y
-    "https://placehold.co/24x24/4caf50/4caf50.png",                                          # Green square
+    "https://ui-avatars.com/api/?name=Y&background=4caf50&color=fff&size=24&bold=true",  # Green Y
+    "https://placehold.co/24x24/4caf50/4caf50.png",  # Green square
 ]
 NEGATIVE_IMAGE_URLS = [
-    "https://www.gstatic.com/images/icons/material/system/2x/cancel_black_24dp.png",        # X mark
-    "https://ui-avatars.com/api/?name=N&background=f44336&color=fff&size=24&bold=true",     # Red N
-    "https://placehold.co/24x24/f44336/f44336.png",                                          # Red square
+    "https://www.gstatic.com/images/icons/material/system/2x/cancel_black_24dp.png",  # X mark
+    "https://ui-avatars.com/api/?name=N&background=f44336&color=fff&size=24&bold=true",  # Red N
+    "https://placehold.co/24x24/f44336/f44336.png",  # Red square
 ]
 
 
@@ -91,33 +91,33 @@ NEGATIVE_IMAGE_URLS = [
 # - LAYOUT_WRAPPERS: How to arrange the assembled widgets
 
 TEXT_COMPONENTS = [
-    "text_paragraph",       # Simple text block
-    "decorated_text",       # Text with optional icon, top/bottom labels
+    "text_paragraph",  # Simple text block
+    "decorated_text",  # Text with optional icon, top/bottom labels
     "decorated_text_icon",  # DecoratedText with startIcon
-    "selection_label",      # SelectionInput used for its label display
-    "chip_text",           # Chip used for text display
+    "selection_label",  # SelectionInput used for its label display
+    "chip_text",  # Chip used for text display
 ]
 
 CLICKABLE_COMPONENTS = [
-    "button_list",          # Standard button row (2 buttons: pos + neg)
-    "chip_list",           # Clickable chips (2 chips: pos + neg)
-    "icon_buttons",        # Buttons with random knownIcon (pos/neg themed)
-    "icon_buttons_alt",    # Buttons with STAR/BOOKMARK knownIcon
-    "url_image_buttons",   # Buttons with URL images (check/X, Y/N, colors)
+    "button_list",  # Standard button row (2 buttons: pos + neg)
+    "chip_list",  # Clickable chips (2 chips: pos + neg)
+    "icon_buttons",  # Buttons with random knownIcon (pos/neg themed)
+    "icon_buttons_alt",  # Buttons with STAR/BOOKMARK knownIcon
+    "url_image_buttons",  # Buttons with URL images (check/X, Y/N, colors)
 ]
 
 # Components that can do both text AND click in one widget
 DUAL_COMPONENTS = [
     "decorated_text_with_button",  # Text + inline button
-    "chip_dual",                   # Chip with text and onClick
-    "columns_inline",             # Text left, buttons right in one widget
+    "chip_dual",  # Chip with text and onClick
+    "columns_inline",  # Text left, buttons right in one widget
 ]
 
 LAYOUT_WRAPPERS = [
-    "sequential",           # Widgets one after another
-    "with_divider",        # Divider between content and form feedback
-    "columns_layout",      # Side-by-side columns
-    "compact",             # Minimal spacing
+    "sequential",  # Widgets one after another
+    "with_divider",  # Divider between content and form feedback
+    "columns_layout",  # Side-by-side columns
+    "compact",  # Minimal spacing
 ]
 
 
@@ -187,6 +187,7 @@ class SmartCardBuilderV2:
         if self._wrapper is None:
             try:
                 from gchat.card_framework_wrapper import get_card_framework_wrapper
+
                 self._wrapper = get_card_framework_wrapper()
             except Exception as e:
                 logger.warning(f"Could not get ModuleWrapper: {e}")
@@ -197,6 +198,7 @@ class SmartCardBuilderV2:
         if self._qdrant_client is None:
             try:
                 from config.qdrant_client import get_qdrant_client
+
                 self._qdrant_client = get_qdrant_client()
             except Exception as e:
                 logger.warning(f"Could not get Qdrant client: {e}")
@@ -206,6 +208,7 @@ class SmartCardBuilderV2:
         """Get the DSL parser from card_framework_wrapper."""
         try:
             from gchat.card_framework_wrapper import get_dsl_parser
+
             return get_dsl_parser()
         except Exception as e:
             logger.warning(f"Could not get DSL parser: {e}")
@@ -226,6 +229,7 @@ class SmartCardBuilderV2:
 
         try:
             from gchat.card_framework_wrapper import extract_dsl_from_description
+
             return extract_dsl_from_description(description)
         except Exception as e:
             logger.debug(f"DSL extraction failed: {e}")
@@ -252,7 +256,7 @@ class SmartCardBuilderV2:
             # Extract content after Structure DSL
             structure_dsl = self._extract_structure_dsl(description)
             if structure_dsl:
-                content_text = description[len(structure_dsl):].strip()
+                content_text = description[len(structure_dsl) :].strip()
             else:
                 content_text = description.strip()
 
@@ -261,7 +265,7 @@ class SmartCardBuilderV2:
 
             # Find Content DSL lines (starting with symbols)
             symbols = set(parser.reverse_symbols.keys())
-            lines = content_text.split('\n')
+            lines = content_text.split("\n")
 
             content_dsl_lines = []
             for line in lines:
@@ -277,7 +281,7 @@ class SmartCardBuilderV2:
                 return None
 
             # Parse Content DSL
-            content_dsl_text = '\n'.join(content_dsl_lines)
+            content_dsl_text = "\n".join(content_dsl_lines)
             result = parser.parse_content_dsl(content_dsl_text)
 
             if not result.is_valid or not result.blocks:
@@ -299,20 +303,23 @@ class SmartCardBuilderV2:
                 parsed["blocks"].append(block_info)
 
                 if block.primary.component_name == "Button":
-                    parsed["buttons"].append({
-                        "text": block.full_content,
-                        "url": block.primary.url,
-                    })
+                    parsed["buttons"].append(
+                        {
+                            "text": block.full_content,
+                            "url": block.primary.url,
+                        }
+                    )
                 else:
                     styled = self._apply_styles(
-                        block.full_content,
-                        [m.name for m in block.primary.modifiers]
+                        block.full_content, [m.name for m in block.primary.modifiers]
                     )
-                    parsed["texts"].append({
-                        "content": block.full_content,
-                        "styled": styled,
-                        "component": block.primary.component_name,
-                    })
+                    parsed["texts"].append(
+                        {
+                            "content": block.full_content,
+                            "styled": styled,
+                            "component": block.primary.component_name,
+                        }
+                    )
 
             return parsed
 
@@ -431,9 +438,18 @@ class SmartCardBuilderV2:
                             widget_text = f"Item {text_index + 1}"
                             text_index += 1
 
-                        sections.append({
-                            "widgets": [{"decoratedText": {"text": widget_text, "wrapText": True}}]
-                        })
+                        sections.append(
+                            {
+                                "widgets": [
+                                    {
+                                        "decoratedText": {
+                                            "text": widget_text,
+                                            "wrapText": True,
+                                        }
+                                    }
+                                ]
+                            }
+                        )
 
             if not sections:
                 return None
@@ -477,7 +493,9 @@ class SmartCardBuilderV2:
                         widget_text = f"Item {text_index + 1}"
                         text_index += 1
 
-                    widgets.append({"decoratedText": {"text": widget_text, "wrapText": True}})
+                    widgets.append(
+                        {"decoratedText": {"text": widget_text, "wrapText": True}}
+                    )
 
                 elif child_name == "TextParagraph":
                     if text_index < len(content_texts):
@@ -512,9 +530,10 @@ class SmartCardBuilderV2:
         parent_multiplier: int,
     ) -> Optional[Dict]:
         """Build a buttonList widget."""
-        expected = sum(
-            c.get("multiplier", 1) for c in children if c.get("name") == "Button"
-        ) or parent_multiplier
+        expected = (
+            sum(c.get("multiplier", 1) for c in children if c.get("name") == "Button")
+            or parent_multiplier
+        )
 
         btn_list = []
         if buttons:
@@ -526,22 +545,30 @@ class SmartCardBuilderV2:
                     btn_list.append(btn_obj)
         else:
             for i in range(expected):
-                btn_list.append({"text": f"Button {i+1}"})
+                btn_list.append({"text": f"Button {i + 1}"})
 
         return {"buttonList": {"buttons": btn_list}} if btn_list else None
 
     def _build_grid(self, children: List[Dict], multiplier: int) -> Optional[Dict]:
         """Build a grid widget."""
-        expected = sum(
-            c.get("multiplier", 1) for c in children if c.get("name") == "GridItem"
-        ) or multiplier
+        expected = (
+            sum(c.get("multiplier", 1) for c in children if c.get("name") == "GridItem")
+            or multiplier
+        )
 
         items = [
-            {"title": f"Item {i+1}", "image": {"imageUri": f"https://picsum.photos/200/200?{i}"}}
+            {
+                "title": f"Item {i + 1}",
+                "image": {"imageUri": f"https://picsum.photos/200/200?{i}"},
+            }
             for i in range(expected)
         ]
 
-        return {"grid": {"columnCount": min(3, len(items)), "items": items}} if items else None
+        return (
+            {"grid": {"columnCount": min(3, len(items)), "items": items}}
+            if items
+            else None
+        )
 
     # =========================================================================
     # MODULAR FEEDBACK SECTION
@@ -558,7 +585,11 @@ class SmartCardBuilderV2:
     def _clean_card_metadata(self, obj: Any) -> Any:
         """Remove underscore-prefixed keys (Google Chat rejects them)."""
         if isinstance(obj, dict):
-            return {k: self._clean_card_metadata(v) for k, v in obj.items() if not k.startswith('_')}
+            return {
+                k: self._clean_card_metadata(v)
+                for k, v in obj.items()
+                if not k.startswith("_")
+            }
         elif isinstance(obj, list):
             return [self._clean_card_metadata(item) for item in obj]
         return obj
@@ -570,12 +601,14 @@ class SmartCardBuilderV2:
         Falls back to placeholder only if base_url is not configured.
         """
         # Use the server's base_url (e.g., https://localhost:8002)
-        base_url = getattr(_settings, 'base_url', '')
+        base_url = getattr(_settings, "base_url", "")
         if base_url:
             return f"{base_url}/card-feedback"
         return "https://feedback.example.com"
 
-    def _make_callback_url(self, card_id: str, feedback_val: str, feedback_type: str) -> str:
+    def _make_callback_url(
+        self, card_id: str, feedback_val: str, feedback_type: str
+    ) -> str:
         """Create feedback callback URL."""
         base_url = self._get_feedback_base_url()
         return f"{base_url}?card_id={card_id}&feedback={feedback_val}&feedback_type={feedback_type}"
@@ -631,7 +664,9 @@ class SmartCardBuilderV2:
             )
 
             if point_id:
-                logger.debug(f"📦 Stored content pattern: {card_id[:8]}... -> {point_id[:8]}...")
+                logger.debug(
+                    f"📦 Stored content pattern: {card_id[:8]}... -> {point_id[:8]}..."
+                )
 
         except Exception as e:
             # Don't fail card generation if pattern storage fails
@@ -699,7 +734,9 @@ class SmartCardBuilderV2:
             )
 
             if point_id:
-                logger.debug(f"📦 Stored feedback_ui pattern: {card_id[:8]}... -> {point_id[:8]}...")
+                logger.debug(
+                    f"📦 Stored feedback_ui pattern: {card_id[:8]}... -> {point_id[:8]}..."
+                )
 
         except Exception as e:
             logger.warning(f"⚠️ Failed to store feedback_ui pattern: {e}")
@@ -720,12 +757,22 @@ class SmartCardBuilderV2:
                 for key, value in obj.items():
                     # Identify widget types
                     if key in (
-                        "textParagraph", "decoratedText", "buttonList", "chipList",
-                        "image", "grid", "columns", "divider", "textInput",
-                        "selectionInput", "dateTimePicker"
+                        "textParagraph",
+                        "decoratedText",
+                        "buttonList",
+                        "chipList",
+                        "image",
+                        "grid",
+                        "columns",
+                        "divider",
+                        "textInput",
+                        "selectionInput",
+                        "dateTimePicker",
                     ):
                         # Convert to PascalCase component name
-                        component_name = "".join(word.capitalize() for word in key.split("_"))
+                        component_name = "".join(
+                            word.capitalize() for word in key.split("_")
+                        )
                         if key == "textParagraph":
                             component_name = "TextParagraph"
                         elif key == "decoratedText":
@@ -774,7 +821,9 @@ class SmartCardBuilderV2:
             }
         }
 
-    def _text_decorated_labeled(self, text: str, label: str = "Feedback", **kwargs) -> Dict:
+    def _text_decorated_labeled(
+        self, text: str, label: str = "Feedback", **kwargs
+    ) -> Dict:
         """Decorated text with top label."""
         return {
             "decoratedText": {
@@ -786,11 +835,7 @@ class SmartCardBuilderV2:
 
     def _text_chip(self, text: str, **kwargs) -> Dict:
         """Chip used for text display (non-clickable)."""
-        return {
-            "chipList": {
-                "chips": [{"label": text, "disabled": True}]
-            }
-        }
+        return {"chipList": {"chips": [{"label": text, "disabled": True}]}}
 
     # -------------------------------------------------------------------------
     # CLICKABLE COMPONENT BUILDERS
@@ -804,8 +849,26 @@ class SmartCardBuilderV2:
         return {
             "buttonList": {
                 "buttons": [
-                    {"text": pos_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}},
-                    {"text": neg_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}},
+                    {
+                        "text": pos_label,
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "positive", feedback_type
+                                )
+                            }
+                        },
+                    },
+                    {
+                        "text": neg_label,
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "negative", feedback_type
+                                )
+                            }
+                        },
+                    },
                 ]
             }
         }
@@ -817,8 +880,26 @@ class SmartCardBuilderV2:
         return {
             "chipList": {
                 "chips": [
-                    {"label": pos_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}},
-                    {"label": neg_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}},
+                    {
+                        "label": pos_label,
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "positive", feedback_type
+                                )
+                            }
+                        },
+                    },
+                    {
+                        "label": neg_label,
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "negative", feedback_type
+                                )
+                            }
+                        },
+                    },
                 ]
             }
         }
@@ -833,18 +914,32 @@ class SmartCardBuilderV2:
                     {
                         "text": pos_label,
                         "icon": {"knownIcon": random.choice(POSITIVE_ICONS)},
-                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "positive", feedback_type
+                                )
+                            }
+                        },
                     },
                     {
                         "text": neg_label,
                         "icon": {"knownIcon": random.choice(NEGATIVE_ICONS)},
-                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "negative", feedback_type
+                                )
+                            }
+                        },
                     },
                 ]
             }
         }
 
-    def _click_icon_buttons_alt(self, card_id: str, feedback_type: str, **kwargs) -> Dict:
+    def _click_icon_buttons_alt(
+        self, card_id: str, feedback_type: str, **kwargs
+    ) -> Dict:
         """Alternative button list with STAR/BOOKMARK icons."""
         pos_label = random.choice(POSITIVE_LABELS)
         neg_label = random.choice(NEGATIVE_LABELS)
@@ -854,18 +949,32 @@ class SmartCardBuilderV2:
                     {
                         "text": pos_label,
                         "icon": {"knownIcon": "STAR"},
-                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "positive", feedback_type
+                                )
+                            }
+                        },
                     },
                     {
                         "text": neg_label,
                         "icon": {"knownIcon": "BOOKMARK"},
-                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "negative", feedback_type
+                                )
+                            }
+                        },
                     },
                 ]
             }
         }
 
-    def _click_url_image_buttons(self, card_id: str, feedback_type: str, **kwargs) -> Dict:
+    def _click_url_image_buttons(
+        self, card_id: str, feedback_type: str, **kwargs
+    ) -> Dict:
         """Button list with URL-based images (check/cancel, Y/N, or colored squares)."""
         pos_label = random.choice(POSITIVE_LABELS)
         neg_label = random.choice(NEGATIVE_LABELS)
@@ -875,12 +984,24 @@ class SmartCardBuilderV2:
                     {
                         "text": pos_label,
                         "icon": {"iconUrl": random.choice(POSITIVE_IMAGE_URLS)},
-                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "positive", feedback_type
+                                )
+                            }
+                        },
                     },
                     {
                         "text": neg_label,
                         "icon": {"iconUrl": random.choice(NEGATIVE_IMAGE_URLS)},
-                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "negative", feedback_type
+                                )
+                            }
+                        },
                     },
                 ]
             }
@@ -890,7 +1011,9 @@ class SmartCardBuilderV2:
     # DUAL COMPONENT BUILDERS (text + click in one widget)
     # -------------------------------------------------------------------------
 
-    def _dual_decorated_with_button(self, text: str, card_id: str, feedback_type: str, **kwargs) -> List[Dict]:
+    def _dual_decorated_with_button(
+        self, text: str, card_id: str, feedback_type: str, **kwargs
+    ) -> List[Dict]:
         """Decorated text with inline button + separate negative button."""
         pos_label = random.choice(POSITIVE_LABELS)
         neg_label = random.choice(NEGATIVE_LABELS)
@@ -902,71 +1025,133 @@ class SmartCardBuilderV2:
                     "text": text,
                     "button": {
                         "text": pos_label,
-                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}
+                        "onClick": {
+                            "openLink": {
+                                "url": self._make_callback_url(
+                                    card_id, "positive", feedback_type
+                                )
+                            }
+                        },
                     },
                     "wrapText": True,
                 }
             },
             {
                 "buttonList": {
-                    "buttons": [{
-                        "text": neg_label,
-                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}
-                    }]
+                    "buttons": [
+                        {
+                            "text": neg_label,
+                            "onClick": {
+                                "openLink": {
+                                    "url": self._make_callback_url(
+                                        card_id, "negative", feedback_type
+                                    )
+                                }
+                            },
+                        }
+                    ]
                 }
-            }
+            },
         ]
 
-    def _dual_columns_inline(self, text: str, card_id: str, feedback_type: str, **kwargs) -> List[Dict]:
+    def _dual_columns_inline(
+        self, text: str, card_id: str, feedback_type: str, **kwargs
+    ) -> List[Dict]:
         """Columns with text left, buttons right (all in one widget)."""
         pos_label = random.choice(POSITIVE_LABELS)
         neg_label = random.choice(NEGATIVE_LABELS)
         # Returns a list with single widget (columns has both buttons)
-        return [{
-            "columns": {
-                "columnItems": [
-                    {
-                        "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
-                        "horizontalAlignment": "START",
-                        "verticalAlignment": "CENTER",
-                        "widgets": [{"decoratedText": {"text": text, "wrapText": True}}]
-                    },
-                    {
-                        "horizontalSizeStyle": "FILL_MINIMUM_SPACE",
-                        "horizontalAlignment": "END",
-                        "verticalAlignment": "CENTER",
-                        "widgets": [{
-                            "buttonList": {
-                                "buttons": [
-                                    {"text": pos_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}},
-                                    {"text": neg_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}},
-                                ]
-                            }
-                        }]
-                    }
-                ]
+        return [
+            {
+                "columns": {
+                    "columnItems": [
+                        {
+                            "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
+                            "horizontalAlignment": "START",
+                            "verticalAlignment": "CENTER",
+                            "widgets": [
+                                {"decoratedText": {"text": text, "wrapText": True}}
+                            ],
+                        },
+                        {
+                            "horizontalSizeStyle": "FILL_MINIMUM_SPACE",
+                            "horizontalAlignment": "END",
+                            "verticalAlignment": "CENTER",
+                            "widgets": [
+                                {
+                                    "buttonList": {
+                                        "buttons": [
+                                            {
+                                                "text": pos_label,
+                                                "onClick": {
+                                                    "openLink": {
+                                                        "url": self._make_callback_url(
+                                                            card_id,
+                                                            "positive",
+                                                            feedback_type,
+                                                        )
+                                                    }
+                                                },
+                                            },
+                                            {
+                                                "text": neg_label,
+                                                "onClick": {
+                                                    "openLink": {
+                                                        "url": self._make_callback_url(
+                                                            card_id,
+                                                            "negative",
+                                                            feedback_type,
+                                                        )
+                                                    }
+                                                },
+                                            },
+                                        ]
+                                    }
+                                }
+                            ],
+                        },
+                    ]
+                }
             }
-        }]
+        ]
 
     # -------------------------------------------------------------------------
     # LAYOUT WRAPPERS
     # -------------------------------------------------------------------------
 
-    def _layout_sequential(self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool) -> List[Dict]:
+    def _layout_sequential(
+        self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
+    ) -> List[Dict]:
         """Sequential layout: content then form (or reversed)."""
-        return content_widgets + form_widgets if content_first else form_widgets + content_widgets
+        return (
+            content_widgets + form_widgets
+            if content_first
+            else form_widgets + content_widgets
+        )
 
-    def _layout_with_divider(self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool) -> List[Dict]:
+    def _layout_with_divider(
+        self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
+    ) -> List[Dict]:
         """Layout with divider between content and form."""
         if content_first:
             return content_widgets + [{"divider": {}}] + form_widgets
         return form_widgets + [{"divider": {}}] + content_widgets
 
-    def _layout_compact(self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool) -> List[Dict]:
+    def _layout_compact(
+        self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
+    ) -> List[Dict]:
         """Compact layout: all text first, then all buttons."""
         # Extract text and button widgets
-        texts = [w for w in content_widgets + form_widgets if not any(k in w for k in ['buttonList', 'chipList', 'grid'])]
-        buttons = [w for w in content_widgets + form_widgets if any(k in w for k in ['buttonList', 'chipList', 'grid'])]
+        texts = [
+            w
+            for w in content_widgets + form_widgets
+            if not any(k in w for k in ["buttonList", "chipList", "grid"])
+        ]
+        buttons = [
+            w
+            for w in content_widgets + form_widgets
+            if any(k in w for k in ["buttonList", "chipList", "grid"])
+        ]
         return texts + buttons if content_first else buttons + texts
 
     # -------------------------------------------------------------------------
@@ -1032,7 +1217,9 @@ class SmartCardBuilderV2:
         if use_dual_content:
             dual_type = random.choice(list(dual_builders.keys()))
             # Dual builders now return lists
-            content_widgets = dual_builders[dual_type](content_prompt, card_id, "content")
+            content_widgets = dual_builders[dual_type](
+                content_prompt, card_id, "content"
+            )
             content_text_type = f"dual:{dual_type}"
             content_click_type = f"dual:{dual_type}"
         else:
@@ -1056,7 +1243,9 @@ class SmartCardBuilderV2:
             ]
 
         # Apply layout
-        widgets = layout_builders[layout_type](content_widgets, form_widgets, content_first)
+        widgets = layout_builders[layout_type](
+            content_widgets, form_widgets, content_first
+        )
 
         # Build metadata for training
         assembly_metadata = {
@@ -1129,9 +1318,18 @@ class SmartCardBuilderV2:
 
                 # Build text widgets
                 for text_info in content_dsl["texts"]:
-                    sections.append({
-                        "widgets": [{"decoratedText": {"text": text_info["styled"], "wrapText": True}}]
-                    })
+                    sections.append(
+                        {
+                            "widgets": [
+                                {
+                                    "decoratedText": {
+                                        "text": text_info["styled"],
+                                        "wrapText": True,
+                                    }
+                                }
+                            ]
+                        }
+                    )
 
                 # Build buttons
                 if content_dsl.get("buttons"):
@@ -1141,7 +1339,9 @@ class SmartCardBuilderV2:
                         if btn.get("url"):
                             btn_obj["onClick"] = {"openLink": {"url": btn["url"]}}
                         btn_list.append(btn_obj)
-                    sections.append({"widgets": [{"buttonList": {"buttons": btn_list}}]})
+                    sections.append(
+                        {"widgets": [{"buttonList": {"buttons": btn_list}}]}
+                    )
 
                 if sections:
                     card = {"sections": sections}
@@ -1154,9 +1354,7 @@ class SmartCardBuilderV2:
         if not card:
             logger.info("📝 Building simple card from description")
             card = {
-                "sections": [
-                    {"widgets": [{"textParagraph": {"text": description}}]}
-                ]
+                "sections": [{"widgets": [{"textParagraph": {"text": description}}]}]
             }
             if title:
                 card["header"] = {"title": title}
@@ -1198,10 +1396,9 @@ class SmartCardBuilderV2:
         # Clean metadata before returning (Google Chat rejects underscore-prefixed keys)
         return self._clean_card_metadata(card)
 
-
-# =============================================================================
-# COMPATIBILITY METHODS
-# =============================================================================
+    # =============================================================================
+    # COMPATIBILITY METHODS
+    # =============================================================================
 
     def build_card_from_description(
         self,
@@ -1275,7 +1472,9 @@ class SmartCardBuilderV2:
                 for i, img_url in enumerate(images):
                     item = {
                         "image": {"imageUri": img_url},
-                        "title": image_titles[i] if image_titles and i < len(image_titles) else f"Item {i+1}"
+                        "title": image_titles[i]
+                        if image_titles and i < len(image_titles)
+                        else f"Item {i + 1}",
                     }
                     grid_items.append(item)
             elif grid and grid.get("items"):
@@ -1284,14 +1483,28 @@ class SmartCardBuilderV2:
             if grid_items:
                 grid_widget = {
                     "grid": {
-                        "columnCount": grid.get("columnCount", column_count) if grid else column_count,
-                        "items": grid_items
+                        "columnCount": grid.get("columnCount", column_count)
+                        if grid
+                        else column_count,
+                        "items": grid_items,
                     }
                 }
                 sections_list = [{"widgets": [grid_widget]}]
                 if buttons:
-                    btn_list = [{"text": b.get("text", "Button"), **({"onClick": {"openLink": {"url": b["url"]}}} if b.get("url") else {})} for b in buttons]
-                    sections_list.append({"widgets": [{"buttonList": {"buttons": btn_list}}]})
+                    btn_list = [
+                        {
+                            "text": b.get("text", "Button"),
+                            **(
+                                {"onClick": {"openLink": {"url": b["url"]}}}
+                                if b.get("url")
+                                else {}
+                            ),
+                        }
+                        for b in buttons
+                    ]
+                    sections_list.append(
+                        {"widgets": [{"buttonList": {"buttons": btn_list}}]}
+                    )
 
                 card = {"sections": sections_list}
                 if title:
@@ -1355,11 +1568,13 @@ def build_card(
     description: str,
     title: Optional[str] = None,
     subtitle: Optional[str] = None,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """Build a card using SmartCardBuilderV2."""
     builder = get_smart_card_builder()
-    return builder.build(description=description, title=title, subtitle=subtitle, **kwargs)
+    return builder.build(
+        description=description, title=title, subtitle=subtitle, **kwargs
+    )
 
 
 # Backwards compatibility alias

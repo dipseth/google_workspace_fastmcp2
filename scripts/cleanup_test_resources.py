@@ -381,9 +381,9 @@ async def run_cleanup(
 ) -> dict:
     """Run the cleanup process."""
     results = {}
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("🧹 TEST RESOURCE CLEANUP")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"   Email: {email}")
     print(
         f"   Mode: {'EXECUTE (will delete)' if execute else 'DRY RUN (preview only)'}"
@@ -460,9 +460,9 @@ async def run_cleanup(
 
             # Execute deletion if requested
             if execute:
-                print(f"\n{'='*60}")
+                print(f"\n{'=' * 60}")
                 print("🗑️  DELETING RESOURCES")
-                print(f"{'='*60}")
+                print(f"{'=' * 60}")
 
                 if calendar and results.get("calendar") and results["calendar"].items:
                     event_ids = [item["id"] for item in results["calendar"].items]
@@ -506,26 +506,26 @@ async def run_cleanup(
                     results["drive"].errors.extend(errors)
                     print(f"   Drive files deleted: {deleted}/{len(file_ids)}")
             else:
-                print(f"\n{'='*60}")
+                print(f"\n{'=' * 60}")
                 print("ℹ️  DRY RUN COMPLETE - No resources were deleted")
                 print("   Run with --execute to actually delete resources")
-                print(f"{'='*60}")
+                print(f"{'=' * 60}")
 
     except Exception as e:
         print(f"\n❌ Cleanup failed: {e}")
         raise
 
     # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("📊 SUMMARY")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     total_found = sum(r.found for r in results.values() if hasattr(r, "found"))
     total_deleted = sum(r.deleted for r in results.values() if hasattr(r, "deleted"))
     total_errors = sum(len(r.errors) for r in results.values() if hasattr(r, "errors"))
     print(f"   Total found: {total_found}")
     print(f"   Total deleted: {total_deleted}")
     print(f"   Total errors: {total_errors}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     return results
 

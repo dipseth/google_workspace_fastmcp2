@@ -109,9 +109,9 @@ class TestModuleWrapperTools:
             "unexpected error",
             "module not found",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_search_module(self, client):
@@ -141,9 +141,9 @@ class TestModuleWrapperTools:
             "unexpected error",
             "module not wrapped",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_get_module_component(self, client):
@@ -174,9 +174,9 @@ class TestModuleWrapperTools:
             "unexpected error",
             "component not found",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_list_module_components(self, client):
@@ -206,9 +206,9 @@ class TestModuleWrapperTools:
             "unexpected error",
             "module not wrapped",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.skip(reason="get_module_info tool is not implemented")
@@ -257,12 +257,12 @@ class TestModuleWrapperTools:
                 data = json.loads(content)
                 assert "results" in data, "JSON response should contain 'results' field"
                 assert "count" in data, "JSON response should contain 'count' field"
-                assert (
-                    data["count"] == 0
-                ), "Results count should be 0 for unwrapped module"
-                assert (
-                    len(data["results"]) == 0
-                ), "Results list should be empty for unwrapped module"
+                assert data["count"] == 0, (
+                    "Results count should be 0 for unwrapped module"
+                )
+                assert len(data["results"]) == 0, (
+                    "Results list should be empty for unwrapped module"
+                )
             except json.JSONDecodeError:
                 pytest.fail("Response should be valid JSON")
         else:
@@ -393,9 +393,9 @@ class TestModuleWrapperIntegration:
 
         # Verify that components can be listed
         valid_responses = ["components", "found", "functions", "classes", "variables"]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
 
 @pytest.mark.integration
@@ -571,9 +571,9 @@ class TestUnifiedCardTool:
             "error",
             "not available",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
         # If successful, should be JSON
         if "❌" not in content and "error" not in content.lower():
@@ -581,15 +581,15 @@ class TestUnifiedCardTool:
                 data = json.loads(content)
                 assert "results" in data, "JSON response should contain 'results' field"
                 if "results" in data and len(data["results"]) > 0:
-                    assert (
-                        "name" in data["results"][0]
-                    ), "Each result should have a 'name' field"
-                    assert (
-                        "path" in data["results"][0]
-                    ), "Each result should have a 'path' field"
-                    assert (
-                        "type" in data["results"][0]
-                    ), "Each result should have a 'type' field"
+                    assert "name" in data["results"][0], (
+                        "Each result should have a 'name' field"
+                    )
+                    assert "path" in data["results"][0], (
+                        "Each result should have a 'path' field"
+                    )
+                    assert "type" in data["results"][0], (
+                        "Each result should have a 'type' field"
+                    )
             except json.JSONDecodeError:
                 pytest.fail("Response should be valid JSON")
 
@@ -639,9 +639,9 @@ class TestUnifiedCardTool:
             "not found",
             "not available",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_card_framework_wrapper(self, client):
@@ -666,9 +666,9 @@ class TestUnifiedCardTool:
             "could not import",
             "failed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_save_and_get_card_template(self, client):
@@ -753,9 +753,9 @@ class TestUnifiedCardTool:
             if "❌" not in get_content and "error" not in get_content.lower():
                 try:
                     data = json.loads(get_content)
-                    assert (
-                        "template" in data or "card" in data
-                    ), "JSON response should contain template data"
+                    assert "template" in data or "card" in data, (
+                        "JSON response should contain template data"
+                    )
                 except json.JSONDecodeError:
                     pytest.fail("Response should be valid JSON")
 
@@ -799,24 +799,24 @@ class TestUnifiedCardTool:
             "error",
             "not available",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
         # If successful, should be JSON
         if "❌" not in content and "error" not in content.lower():
             try:
                 data = json.loads(content)
-                assert (
-                    "templates" in data
-                ), "JSON response should contain 'templates' field"
+                assert "templates" in data, (
+                    "JSON response should contain 'templates' field"
+                )
                 if "templates" in data and len(data["templates"]) > 0:
-                    assert (
-                        "name" in data["templates"][0]
-                    ), "Each template should have a 'name' field"
-                    assert (
-                        "description" in data["templates"][0]
-                    ), "Each template should have a 'description' field"
+                    assert "name" in data["templates"][0], (
+                        "Each template should have a 'name' field"
+                    )
+                    assert "description" in data["templates"][0], (
+                        "Each template should have a 'description' field"
+                    )
             except json.JSONDecodeError:
                 pytest.fail("Response should be valid JSON")
 
@@ -901,9 +901,9 @@ class TestUnifiedCardTool:
             "error",
             "failed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_send_dynamic_card_with_hybrid_approach(self, client):
@@ -973,9 +973,9 @@ class TestUnifiedCardTool:
             "error",
             "failed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_delete_card_template(self, client):
@@ -1028,9 +1028,9 @@ class TestUnifiedCardTool:
             "failed",
             "not found",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
         # Verify template is deleted by trying to get it
         get_result = await client.call_tool(
@@ -1038,9 +1038,9 @@ class TestUnifiedCardTool:
         )
 
         get_content = get_result[0].text
-        assert (
-            "not found" in get_content.lower() or "error" in get_content.lower()
-        ), "Template should be deleted"
+        assert "not found" in get_content.lower() or "error" in get_content.lower(), (
+            "Template should be deleted"
+        )
 
 
 if __name__ == "__main__":

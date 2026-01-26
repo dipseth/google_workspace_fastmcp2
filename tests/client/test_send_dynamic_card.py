@@ -156,21 +156,21 @@ class TestSendDynamicCard:
             "error",
             "failed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
             pytest.fail(f"Card formatting error (4xx status): {content}")
@@ -183,9 +183,9 @@ class TestSendDynamicCard:
         else:
             # If successful without explicit status, should contain "sent successfully"
             if "❌" not in content and "error" not in content.lower():
-                assert (
-                    "sent successfully" in content.lower()
-                ), "Card should be sent successfully"
+                assert "sent successfully" in content.lower(), (
+                    "Card should be sent successfully"
+                )
 
     @pytest.mark.asyncio
     async def test_send_interactive_card(self, client):
@@ -284,21 +284,21 @@ class TestSendDynamicCard:
             "error",
             "failed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
             pytest.fail(f"Card formatting error (4xx status): {content}")
@@ -311,9 +311,9 @@ class TestSendDynamicCard:
         else:
             # If successful without explicit status, should contain "sent successfully"
             if "❌" not in content and "error" not in content.lower():
-                assert (
-                    "sent successfully" in content.lower()
-                ), "Card should be sent successfully"
+                assert "sent successfully" in content.lower(), (
+                    "Card should be sent successfully"
+                )
 
     @pytest.mark.asyncio
     async def test_send_card_with_image(self, client):
@@ -394,21 +394,21 @@ class TestSendDynamicCard:
             "error",
             "failed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
             pytest.fail(f"Card formatting error (4xx status): {content}")
@@ -421,9 +421,9 @@ class TestSendDynamicCard:
         else:
             # If successful without explicit status, should contain "sent successfully"
             if "❌" not in content and "error" not in content.lower():
-                assert (
-                    "sent successfully" in content.lower()
-                ), "Card should be sent successfully"
+                assert "sent successfully" in content.lower(), (
+                    "Card should be sent successfully"
+                )
 
     @pytest.mark.asyncio
     async def test_send_form_card(self, client):
@@ -550,21 +550,21 @@ class TestSendDynamicCard:
             "error",
             "failed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
             pytest.fail(f"Card formatting error (4xx status): {content}")
@@ -577,9 +577,9 @@ class TestSendDynamicCard:
         else:
             # If successful without explicit status, should contain "sent successfully"
             if "❌" not in content and "error" not in content.lower():
-                assert (
-                    "sent successfully" in content.lower()
-                ), "Card should be sent successfully"
+                assert "sent successfully" in content.lower(), (
+                    "Card should be sent successfully"
+                )
 
     @pytest.mark.asyncio
     async def test_send_card_with_natural_language_description(self, client):
@@ -640,21 +640,21 @@ class TestSendDynamicCard:
             "error",
             "failed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
             pytest.fail(f"Card formatting error (4xx status): {content}")
@@ -667,9 +667,9 @@ class TestSendDynamicCard:
         else:
             # If successful without explicit status, should contain "sent successfully"
             if "❌" not in content and "error" not in content.lower():
-                assert (
-                    "sent successfully" in content.lower()
-                ), "Card should be sent successfully"
+                assert "sent successfully" in content.lower(), (
+                    "Card should be sent successfully"
+                )
 
     @pytest.mark.asyncio
     async def test_send_card_with_complex_layout(self, client):
@@ -814,21 +814,21 @@ class TestSendDynamicCard:
             "error",
             "failed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
             pytest.fail(f"Card formatting error (4xx status): {content}")
@@ -841,9 +841,9 @@ class TestSendDynamicCard:
         else:
             # If successful without explicit status, should contain "sent successfully"
             if "❌" not in content and "error" not in content.lower():
-                assert (
-                    "sent successfully" in content.lower()
-                ), "Card should be sent successfully"
+                assert "sent successfully" in content.lower(), (
+                    "Card should be sent successfully"
+                )
 
     @pytest.mark.asyncio
     async def test_send_minimal_card(self, client):
@@ -867,14 +867,14 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🧪 MINIMAL CARD TEST - BASIC DEBUGGING")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"📧 Test Email: {TEST_EMAIL}")
         print(f"🔗 Webhook URL: {TEST_WEBHOOK_URL}")
         print("📋 Minimal Payload:")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the minimal card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -906,22 +906,22 @@ class TestSendDynamicCard:
 
         # Basic validation - just check we got some response
         assert content is not None, "Response content should not be None"
-        assert (
-            len(content.strip()) > 0
-        ), f"Response should not be empty, got: '{content}'"
+        assert len(content.strip()) > 0, (
+            f"Response should not be empty, got: '{content}'"
+        )
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
             print("✅ SUCCESS: Card sent successfully")
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
             print("⚠️  RATE LIMITED: Card formatting correct but rate limited")
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
@@ -967,11 +967,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🖼️ BUTTON + IMAGE TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the button + image card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1008,22 +1008,22 @@ class TestSendDynamicCard:
 
         # Check response
         assert content is not None
-        assert (
-            len(content.strip()) > 0
-        ), f"Response should not be blank, got: '{content}'"
+        assert len(content.strip()) > 0, (
+            f"Response should not be blank, got: '{content}'"
+        )
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
             print("✅ SUCCESS: Button + image card sent successfully")
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
             print("⚠️  RATE LIMITED: Card formatting correct but rate limited")
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
@@ -1066,11 +1066,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🔘 BASIC BUTTON TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the basic button card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1108,15 +1108,15 @@ class TestSendDynamicCard:
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
             print("✅ SUCCESS: Basic button card sent successfully")
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
             print("⚠️  RATE LIMITED: Card formatting correct but rate limited")
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
@@ -1168,11 +1168,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🎨 SIMPLIFIED ADVANCED BUTTON TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the advanced button card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1210,15 +1210,15 @@ class TestSendDynamicCard:
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
             # Success case - should contain "sent successfully"
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
             print("✅ SUCCESS: Advanced button card sent successfully")
         elif "status: 429" in content:
             # Rate limiting is acceptable (indicates correct formatting)
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
             print("⚠️  RATE LIMITED: Card formatting correct but rate limited")
         elif "status: 400" in content or "status: 4" in content:
             # 4xx errors should fail the test
@@ -1281,11 +1281,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🎨 ALL BUTTON TYPES TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the all button types card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1322,14 +1322,14 @@ class TestSendDynamicCard:
 
         # CRITICAL: Ensure we got a 200 response code
         if "status: 200" in content:
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
             print("✅ SUCCESS: All button types card sent successfully")
         elif "status: 429" in content:
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
             print("⚠️  RATE LIMITED: Card formatting correct but rate limited")
         elif "status: 400" in content or "status: 4" in content:
             pytest.fail(f"Card formatting error (4xx status): {content}")
@@ -1360,11 +1360,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🚫 EMPTY CARD ERROR BOUNDARY TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the empty card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1444,11 +1444,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("⚠️  MALFORMED BUTTONS ERROR BOUNDARY TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the malformed buttons card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1526,11 +1526,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("📄 LARGE CONTENT HANDLING TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Content length: {len(large_text)} characters")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the large content card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1633,11 +1633,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🎯 GRID WIDGET LAYOUT TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the grid widget card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1759,11 +1759,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🏷️  CHIP LIST WIDGETS TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the chipList widget card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1877,11 +1877,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("📁 COLLAPSIBLE SECTIONS TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the collapsible sections card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -1998,11 +1998,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🖼️  ADVANCED IMAGE STYLING TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the advanced image styling card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -2197,11 +2197,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🚀 COMPREHENSIVE MIXED WIDGETS TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the comprehensive mixed widgets card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -2359,11 +2359,11 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🎨 DECORATED TEXT SHOWCASE TEST")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the decoratedText showcase card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -2441,15 +2441,15 @@ class TestSendDynamicCard:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🔧 COMPONENT RESOLUTION TEST - DecoratedText")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(
             "🎯 This test verifies that ModuleWrapper properly resolves DecoratedText"
         )
         print("🎯 components instead of falling back to simple textParagraph widgets")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the component resolution test card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -2534,9 +2534,9 @@ async def test_debug_single_card():
     if not TEST_WEBHOOK_URL:
         pytest.skip("No webhook URL available for testing card sending")
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("🔍 SINGLE CARD DEBUG SESSION - MAXIMUM VERBOSITY")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     # Create client (use shared framework connection logic to handle untrusted local certs)
     from .base_test_config import create_test_client
@@ -2609,7 +2609,7 @@ async def test_debug_single_card():
             else:
                 print("❓ UNKNOWN: Unrecognized response pattern")
 
-            print(f"\n{'='*80}")
+            print(f"\n{'=' * 80}")
 
             # Basic assertion
             assert content is not None
@@ -2647,12 +2647,12 @@ class TestNLPFormCards:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("NLP-ONLY FORM CARD TEST (Text Input + Submit Button)")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print("Testing full NLP pipeline without card_params")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the NLP-only form card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -2698,14 +2698,14 @@ class TestNLPFormCards:
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
             print("SUCCESS: NLP-only form card sent successfully")
         elif "status: 429" in content:
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
             print("RATE LIMITED: Card formatting correct but rate limited")
         elif "status: 400" in content or "status: 4" in content:
             pytest.fail(f"NLP-only form card formatting error (4xx status): {content}")
@@ -2751,12 +2751,12 @@ class TestNLPFormCards:
             "webhook_url": TEST_WEBHOOK_URL,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("HYBRID NLP + CARD_PARAMS TEST (Explicit textInput)")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print("Testing with explicit card_params containing textInput")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Send the hybrid form card
         result = await client.call_tool("send_dynamic_card", test_payload)
@@ -2802,14 +2802,14 @@ class TestNLPFormCards:
 
         # CRITICAL: Ensure we got a 200 response code (test should fail if not 200)
         if "status: 200" in content:
-            assert (
-                "sent successfully" in content.lower()
-            ), "Card should be sent successfully with status 200"
+            assert "sent successfully" in content.lower(), (
+                "Card should be sent successfully with status 200"
+            )
             print("SUCCESS: Hybrid form card sent successfully")
         elif "status: 429" in content:
-            assert (
-                "rate limited" in content.lower()
-            ), "Status 429 should indicate rate limiting"
+            assert "rate limited" in content.lower(), (
+                "Status 429 should indicate rate limiting"
+            )
             print("RATE LIMITED: Card formatting correct but rate limited")
         elif "status: 400" in content or "status: 4" in content:
             pytest.fail(f"Hybrid form card formatting error (4xx status): {content}")

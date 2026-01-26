@@ -53,15 +53,15 @@ def print_tool_result(tool_name: str, result: Any, extra_info: Optional[Dict] = 
         content = str(result)
 
     # Print formatted output
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"🛠️  TOOL EXECUTION: {tool_name}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     # Print any extra information
     if extra_info:
         for key, value in extra_info.items():
             print(f"📌 {key}: {value}")
-        print(f"{'-'*70}")
+        print(f"{'-' * 70}")
 
     # Print the result (truncate if too long)
     if len(content) > 1000:
@@ -71,7 +71,7 @@ def print_tool_result(tool_name: str, result: Any, extra_info: Optional[Dict] = 
         print("📄 Result:")
         print(content)
 
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
     return content
 
@@ -479,9 +479,9 @@ class TestPhotosTools:
                 ):
                     pytest.skip(f"Skipping due to scope/permission issue: {content}")
                 else:
-                    assert (
-                        is_success or is_error
-                    ), f"Unexpected response format: {content}"
+                    assert is_success or is_error, (
+                        f"Unexpected response format: {content}"
+                    )
             else:
                 pytest.skip("No album ID available to test list_album_photos")
 
@@ -561,9 +561,9 @@ class TestPhotosTools:
                 ):
                     pytest.skip(f"Skipping due to scope/permission issue: {content}")
                 else:
-                    assert (
-                        is_success or is_error
-                    ), f"Unexpected response format: {content}"
+                    assert is_success or is_error, (
+                        f"Unexpected response format: {content}"
+                    )
             else:
                 pytest.skip("No media item ID found to test get_photo_details")
 
@@ -644,13 +644,13 @@ class TestPhotosTools:
                     print(f"   - Summary: {data['text_summary']}")
 
                 # Assert basic structure is valid
-                assert (
-                    "media_items" in data or "error" in data
-                ), "Response should have media_items or error"
+                assert "media_items" in data or "error" in data, (
+                    "Response should have media_items or error"
+                )
                 if "media_items" in data:
-                    assert isinstance(
-                        data["media_items"], list
-                    ), "media_items should be a list"
+                    assert isinstance(data["media_items"], list), (
+                        "media_items should be a list"
+                    )
             else:
                 # Fallback to string-based validation for non-structured responses
                 success_indicators = ["smart search", "results", "found", "photos"]
@@ -758,13 +758,13 @@ class TestPhotosTools:
                         print(f"   - Summary: {data['text_summary']}")
 
                     # Assert basic structure is valid
-                    assert (
-                        "successful_items" in data or "error" in data
-                    ), "Response should have successful_items or error"
+                    assert "successful_items" in data or "error" in data, (
+                        "Response should have successful_items or error"
+                    )
                     if "successful_items" in data:
-                        assert isinstance(
-                            data["successful_items"], list
-                        ), "successful_items should be a list"
+                        assert isinstance(data["successful_items"], list), (
+                            "successful_items should be a list"
+                        )
                 else:
                     # Fallback to string-based validation
                     success_indicators = [
@@ -777,9 +777,9 @@ class TestPhotosTools:
                     is_success = any(
                         indicator in content.lower() for indicator in success_indicators
                     )
-                    assert (
-                        is_success or "error" in content.lower()
-                    ), f"Unexpected response format: {content}"
+                    assert is_success or "error" in content.lower(), (
+                        f"Unexpected response format: {content}"
+                    )
             else:
                 pytest.skip("No media item IDs found to test photos_batch_details")
 
@@ -993,9 +993,9 @@ class TestPhotosTools:
                 ):
                     pytest.skip(f"Skipping due to scope/permission issue: {content}")
                 else:
-                    assert (
-                        is_success or is_error
-                    ), f"Unexpected response format: {content}"
+                    assert is_success or is_error, (
+                        f"Unexpected response format: {content}"
+                    )
 
             else:
                 pytest.skip(
@@ -1158,9 +1158,9 @@ class TestPhotosTools:
 async def test_debug_single_photo_tool():
     """DEBUG TOOL: Test a single Photos tool with maximum debugging output."""
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("🔍 SINGLE PHOTOS TOOL DEBUG SESSION - MAXIMUM VERBOSITY")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     # Create client
     client = await create_test_client(PHOTO_TEST_EMAIL)
@@ -1172,7 +1172,7 @@ async def test_debug_single_photo_tool():
         print(f"📧 Test Email: {PHOTO_TEST_EMAIL}")
         print("📋 Test Payload:")
         print(json.dumps(test_payload, indent=2))
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
 
         try:
             # Get list of available tools first
@@ -1200,22 +1200,22 @@ async def test_debug_single_photo_tool():
                 else:
                     content = str(result)
 
-                print(f"\n{'='*60}")
+                print(f"\n{'=' * 60}")
                 print("🔧 DEBUG: photos_performance_stats")
-                print(f"{'='*60}")
+                print(f"{'=' * 60}")
                 print(f"Response type: {type(result)}")
                 print(f"Content length: {len(content)} chars")
-                print(f"{'='*60}")
+                print(f"{'=' * 60}")
                 print("Full Response:")
-                print(f"{'-'*60}")
+                print(f"{'-' * 60}")
                 print(content)
-                print(f"{'='*60}\n")
+                print(f"{'=' * 60}\n")
 
                 # Basic validation
                 assert content is not None, "Response content should not be None"
-                assert (
-                    len(content.strip()) > 0
-                ), f"Response should not be empty, got: '{content}'"
+                assert len(content.strip()) > 0, (
+                    f"Response should not be empty, got: '{content}'"
+                )
 
                 logger.info(f"Debug Photos tool result: {content}")
             else:

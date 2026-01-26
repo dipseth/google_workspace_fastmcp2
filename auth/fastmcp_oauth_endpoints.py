@@ -322,18 +322,18 @@ def _generate_service_selection_html(
                     <div class="auth-method-section">
                         <div class="auth-method-title">🔒 Choose Authentication Method</div>
                         <div class="auth-method-options">
-                            <div class="auth-method-option {'selected' if use_pkce else ''}" onclick="selectAuthMethod('pkce', this)">
+                            <div class="auth-method-option {"selected" if use_pkce else ""}" onclick="selectAuthMethod('pkce', this)">
                                 <label>
-                                    <input type="radio" name="auth_method" value="pkce" {'checked' if use_pkce else ''}>
+                                    <input type="radio" name="auth_method" value="pkce" {"checked" if use_pkce else ""}>
                                     <div class="auth-method-name">🔐 PKCE Flow (Recommended)</div>
                                     <div class="auth-method-description">Enhanced OAuth 2.1 security with Proof Key for Code Exchange</div>
                                     <div class="auth-method-pros">✅ Best security • Persists across restarts • Code verifier protection</div>
                                     <div class="auth-method-cons">⚠️ Requires client secret for Web apps • Encrypted file storage</div>
                                 </label>
                             </div>
-                            <div class="auth-method-option {'selected' if not use_pkce else ''}" onclick="selectAuthMethod('credentials', this)">
+                            <div class="auth-method-option {"selected" if not use_pkce else ""}" onclick="selectAuthMethod('credentials', this)">
                                 <label>
-                                    <input type="radio" name="auth_method" value="credentials" {'checked' if not use_pkce else ''}>
+                                    <input type="radio" name="auth_method" value="credentials" {"checked" if not use_pkce else ""}>
                                     <div class="auth-method-name">📁 Legacy OAuth 2.0</div>
                                     <div class="auth-method-description">Traditional OAuth flow with encrypted credential storage</div>
                                     <div class="auth-method-pros">✅ Multi-account support • Persists across restarts • Encrypted storage</div>
@@ -414,10 +414,10 @@ def _generate_service_selection_html(
                                value="{service_key}" {checked}>
                         <div class="service-info">
                             <div class="service-name">
-                                {service_info['name']}
-                                {'<span class="required-badge">Required</span>' if required else ''}
+                                {service_info["name"]}
+                                {'<span class="required-badge">Required</span>' if required else ""}
                             </div>
-                            <div class="service-description">{service_info['description']}</div>
+                            <div class="service-description">{service_info["description"]}</div>
                         </div>
                     </div>
                 """
@@ -1778,7 +1778,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             <h3>Callback Parameters:</h3>
                             <p><strong>Authorization Code:</strong></p>
                             <div class="code">{auth_code}</div>
-                            {'<p><strong>State:</strong> ' + state + '</p>' if state else ''}
+                            {"<p><strong>State:</strong> " + state + "</p>" if state else ""}
                         </div>
                         
                         <p><em>You can now close this window or use the authorization code for token exchange.</em></p>

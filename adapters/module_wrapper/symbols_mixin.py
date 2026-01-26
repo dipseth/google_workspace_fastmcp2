@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 # SYMBOLS MIXIN
 # =============================================================================
 
+
 class SymbolsMixin:
     """
     Mixin providing advanced symbol functionality.
@@ -50,7 +51,8 @@ class SymbolsMixin:
         prefix = module_prefix or self.module_name
 
         component_names = [
-            comp.name for comp in self.components.values()
+            comp.name
+            for comp in self.components.values()
             if comp.component_type == "class"
         ]
 
@@ -208,7 +210,7 @@ class SymbolsMixin:
                     j = i + 1
                     while j < len(s) and s[j].isdigit():
                         j += 1
-                    tokens.append(f"×{s[i+1:j]}")
+                    tokens.append(f"×{s[i + 1 : j]}")
                     i = j
                     continue
                 if char in reverse_symbols:
@@ -270,11 +272,13 @@ class SymbolsMixin:
         def flatten_components(nodes: List[dict], result: List[dict]) -> None:
             """Flatten nested structure to component list."""
             for node in nodes:
-                result.append({
-                    "symbol": node["symbol"],
-                    "name": node["name"],
-                    "count": node["count"],
-                })
+                result.append(
+                    {
+                        "symbol": node["symbol"],
+                        "name": node["name"],
+                        "count": node["count"],
+                    }
+                )
                 flatten_components(node.get("children", []), result)
 
         # Parse
@@ -333,7 +337,8 @@ class SymbolsMixin:
                 "parsed": parsed,
                 "instances": [],
                 "component_classes": {},
-                "error": parsed.get("error") or parsed.get("issues", ["Invalid structure"]),
+                "error": parsed.get("error")
+                or parsed.get("issues", ["Invalid structure"]),
             }
 
         content = content or {}
@@ -358,13 +363,15 @@ class SymbolsMixin:
                 elif comp_content and not isinstance(comp_content, list):
                     instance_content = comp_content
 
-                instances.append({
-                    "name": comp_name,
-                    "symbol": symbol,
-                    "index": i,
-                    "class": comp_class,
-                    "content": instance_content,
-                })
+                instances.append(
+                    {
+                        "name": comp_name,
+                        "symbol": symbol,
+                        "index": i,
+                        "class": comp_class,
+                        "content": instance_content,
+                    }
+                )
 
         return {
             "parsed": parsed,
@@ -433,7 +440,11 @@ class SymbolsMixin:
                 dsl_parts.append(symbol)
                 name_parts.append(comp)
 
-        dsl_notation = f"{root_symbol}[{', '.join(dsl_parts)}]" if dsl_parts else f"{root_symbol}[]"
+        dsl_notation = (
+            f"{root_symbol}[{', '.join(dsl_parts)}]"
+            if dsl_parts
+            else f"{root_symbol}[]"
+        )
         names_text = " ".join(name_parts) if name_parts else root_name
 
         combined = f"{dsl_notation} | {names_text}"
@@ -541,10 +552,15 @@ class SymbolsMixin:
                                 skipped += 1
                                 continue
 
-                            comp_names = [p.split(".")[-1] if "." in p else p for p in parent_paths]
+                            comp_names = [
+                                p.split(".")[-1] if "." in p else p
+                                for p in parent_paths
+                            ]
                             root_name = comp_names[0] if comp_names else None
                             symbol = symbols.get(root_name) if root_name else None
-                            component_symbols = [symbols.get(n) for n in comp_names if symbols.get(n)]
+                            component_symbols = [
+                                symbols.get(n) for n in comp_names if symbols.get(n)
+                            ]
 
                             if not symbol:
                                 skipped += 1
@@ -589,7 +605,9 @@ class SymbolsMixin:
                     break
                 offset = next_offset
 
-            logger.info(f"Symbol backfill complete: {updated} updated, {skipped} skipped, {errors} errors")
+            logger.info(
+                f"Symbol backfill complete: {updated} updated, {skipped} skipped, {errors} errors"
+            )
             return {"updated": updated, "skipped": skipped, "errors": errors}
 
         except Exception as e:
@@ -615,7 +633,9 @@ class SymbolsMixin:
                 table.add_column("Component", style="green")
                 table.add_column("Can Contain", style="yellow")
 
-                for comp, sym in sorted(self.symbol_mapping.items(), key=lambda x: x[0])[:30]:
+                for comp, sym in sorted(
+                    self.symbol_mapping.items(), key=lambda x: x[0]
+                )[:30]:
                     children = self.relationships.get(comp, [])
                     child_syms = [self.symbol_mapping.get(c, c) for c in children[:4]]
                     child_str = ", ".join(child_syms) if child_syms else "-"
@@ -640,11 +660,16 @@ class SymbolsMixin:
                 print(f"  {sym} = {comp} → [{child_str}]")
 
             meta = self.dsl_metadata
-            print(f"\nSymbols: {meta['symbol_count']}, Containers: {len(meta['containers'])}")
+            print(
+                f"\nSymbols: {meta['symbol_count']}, Containers: {len(meta['containers'])}"
+            )
 
     def get_styling_registry(self):
         """Get the styling registry for formatting rules."""
-        from adapters.module_wrapper.symbol_generator import create_default_styling_registry
+        from adapters.module_wrapper.symbol_generator import (
+            create_default_styling_registry,
+        )
+
         return create_default_styling_registry()
 
 

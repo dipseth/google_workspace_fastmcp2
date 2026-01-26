@@ -177,7 +177,7 @@ def format_question_details(question: Dict[str, Any]) -> str:
     if details:
         parts.extend(details)
 
-    return f"- \"{q_text}\" ({', '.join(parts)})"
+    return f'- "{q_text}" ({", ".join(parts)})'
 
 
 def format_response_answers(

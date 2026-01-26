@@ -30,11 +30,11 @@ from auth.context import (
     get_session_disabled_tools,
     get_session_disabled_tools_sync,
 )
-from tools.dynamic_instructions import refresh_instructions_for_session
 from auth.middleware import CredentialStorageMode
 from config.enhanced_logging import setup_logger
 from config.settings import settings
 from tools.common_types import UserGoogleEmail
+from tools.dynamic_instructions import refresh_instructions_for_session
 from tools.server_types import (
     CredentialInfo,
     HealthCheckResponse,

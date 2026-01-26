@@ -186,9 +186,10 @@ class TemplateProcessor:
                 logger.debug(f"🎭 Resolving Jinja2 template: {param_path}")
 
             # IMPORTANT: Process resource URIs FIRST before mixed template processing
-            processed_template_text, resource_context = (
-                await self._preprocess_resource_uris(template_text, fastmcp_context)
-            )
+            (
+                processed_template_text,
+                resource_context,
+            ) = await self._preprocess_resource_uris(template_text, fastmcp_context)
 
             # Then pre-process any remaining v2 syntax to Jinja2-compatible syntax
             processed_template_text = await self._preprocess_mixed_template(

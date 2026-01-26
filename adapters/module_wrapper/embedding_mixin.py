@@ -28,6 +28,7 @@ def _get_fastembed():
     if _fastembed is None:
         logger.info("Loading FastEmbed (first use)...")
         from fastembed import TextEmbedding
+
         _fastembed = TextEmbedding
         logger.info("FastEmbed loaded")
     return _fastembed
@@ -39,6 +40,7 @@ def _get_colbert_embed():
     if _colbert_embed is None:
         logger.info("Loading ColBERT LateInteractionTextEmbedding (first use)...")
         from fastembed import LateInteractionTextEmbedding
+
         _colbert_embed = LateInteractionTextEmbedding
         logger.info("ColBERT LateInteractionTextEmbedding loaded")
     return _colbert_embed
@@ -47,6 +49,7 @@ def _get_colbert_embed():
 # =============================================================================
 # EMBEDDING MIXIN
 # =============================================================================
+
 
 class EmbeddingMixin:
     """
@@ -168,7 +171,9 @@ class EmbeddingMixin:
                     logger.warning(
                         f"Embedding model load failed (attempt {attempt + 1}/{max_retries + 1}): {e}"
                     )
-                    logger.info("Attempting to clear corrupted cache and re-download model...")
+                    logger.info(
+                        "Attempting to clear corrupted cache and re-download model..."
+                    )
 
                     # Clear the cache and retry
                     if self._clear_fastembed_cache(self.embedding_model_name):
@@ -222,11 +227,15 @@ class EmbeddingMixin:
     def embedding_metadata(self) -> Dict[str, Any]:
         """Get metadata about the embedding configuration."""
         return {
-            "embedding_model": getattr(self, 'embedding_model_name', None),
+            "embedding_model": getattr(self, "embedding_model_name", None),
             "embedding_dim": self.embedding_dim,
-            "colbert_enabled": getattr(self, 'enable_colbert', False),
-            "colbert_model": getattr(self, 'colbert_model_name', None) if getattr(self, 'enable_colbert', False) else None,
-            "colbert_dim": self.colbert_embedding_dim if getattr(self, '_colbert_initialized', False) else None,
+            "colbert_enabled": getattr(self, "enable_colbert", False),
+            "colbert_model": getattr(self, "colbert_model_name", None)
+            if getattr(self, "enable_colbert", False)
+            else None,
+            "colbert_dim": self.colbert_embedding_dim
+            if getattr(self, "_colbert_initialized", False)
+            else None,
         }
 
 

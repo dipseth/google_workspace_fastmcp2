@@ -68,4 +68,6 @@ class TestSheetsValueRendering:
             results["middleware_supported"]
             or results["middleware_injection"].get("param_required_at_client")
             or results["middleware_injection"].get("success")
-        ), "Middleware injection should work or be rejected with a parameter-required error"
+        ), (
+            "Middleware injection should work or be rejected with a parameter-required error"
+        )

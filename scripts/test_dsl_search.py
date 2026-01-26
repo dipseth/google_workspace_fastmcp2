@@ -24,8 +24,8 @@ FINDINGS:
 4. NEVER hardcode DSL symbol mappings - use StructureValidator
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -51,13 +51,11 @@ def test_dsl_searches():
         ("§", "Section symbol"),
         ("δ", "DecoratedText symbol"),
         ("ℊ", "Grid symbol"),
-
         # DSL structure patterns
         ("Ƀ[ᵬ]", "ButtonList containing Button"),
         ("Ƀ[ᵬ×2]", "ButtonList with 2 Buttons"),
         ("§[δ]", "Section with DecoratedText"),
         ("§[δ, Ƀ[ᵬ]]", "Section with DecoratedText and ButtonList"),
-
         # Mixed queries (DSL + natural language)
         ("ᵬ Button", "Button with symbol"),
         ("Ƀ ButtonList contains Button", "ButtonList description"),
@@ -96,7 +94,9 @@ def test_dsl_searches():
         print(f"\n🔍 Query: '{query}'")
         results = wrapper.search(query, limit=2)
         for i, r in enumerate(results, 1):
-            print(f"   {i}. {r.get('name', r.get('path', '?'))} (score: {r.get('score', 0):.3f})")
+            print(
+                f"   {i}. {r.get('name', r.get('path', '?'))} (score: {r.get('score', 0):.3f})"
+            )
 
     # Direct Qdrant query to verify relationship_text content
     print("\n" + "-" * 60)
@@ -105,7 +105,7 @@ def test_dsl_searches():
 
     if wrapper.client:
         # Get a few points and show their relationship_text
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         # Get Button specifically
         try:
@@ -123,11 +123,19 @@ def test_dsl_searches():
                 payload = p.payload
                 print(f"\n✓ Button point found (id: {p.id})")
                 print(f"  name: {payload.get('name')}")
-                print(f"  relationship_text: {payload.get('relationship_text', 'EMPTY')}")
+                print(
+                    f"  relationship_text: {payload.get('relationship_text', 'EMPTY')}"
+                )
                 relationships = payload.get("relationships", {})
-                print(f"  relationships.compact_text: {relationships.get('compact_text', 'EMPTY')}")
-                print(f"  relationships.symbol_enriched: {relationships.get('symbol_enriched')}")
-                print(f"  relationships.child_classes: {relationships.get('child_classes', [])}")
+                print(
+                    f"  relationships.compact_text: {relationships.get('compact_text', 'EMPTY')}"
+                )
+                print(
+                    f"  relationships.symbol_enriched: {relationships.get('symbol_enriched')}"
+                )
+                print(
+                    f"  relationships.child_classes: {relationships.get('child_classes', [])}"
+                )
         except Exception as e:
             print(f"❌ Error querying Button: {e}")
 
@@ -136,7 +144,9 @@ def test_dsl_searches():
             results = wrapper.client.scroll(
                 collection_name=collection,
                 scroll_filter=Filter(
-                    must=[FieldCondition(key="name", match=MatchValue(value="ButtonList"))]
+                    must=[
+                        FieldCondition(key="name", match=MatchValue(value="ButtonList"))
+                    ]
                 ),
                 limit=1,
                 with_payload=True,
@@ -147,11 +157,19 @@ def test_dsl_searches():
                 payload = p.payload
                 print(f"\n✓ ButtonList point found (id: {p.id})")
                 print(f"  name: {payload.get('name')}")
-                print(f"  relationship_text: {payload.get('relationship_text', 'EMPTY')}")
+                print(
+                    f"  relationship_text: {payload.get('relationship_text', 'EMPTY')}"
+                )
                 relationships = payload.get("relationships", {})
-                print(f"  relationships.compact_text: {relationships.get('compact_text', 'EMPTY')}")
-                print(f"  relationships.symbol_enriched: {relationships.get('symbol_enriched')}")
-                print(f"  relationships.child_classes: {relationships.get('child_classes', [])}")
+                print(
+                    f"  relationships.compact_text: {relationships.get('compact_text', 'EMPTY')}"
+                )
+                print(
+                    f"  relationships.symbol_enriched: {relationships.get('symbol_enriched')}"
+                )
+                print(
+                    f"  relationships.child_classes: {relationships.get('child_classes', [])}"
+                )
         except Exception as e:
             print(f"❌ Error querying ButtonList: {e}")
 

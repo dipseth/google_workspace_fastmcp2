@@ -88,6 +88,7 @@ def get_template_middleware_from_registry():
     """
     try:
         from middleware.template_middleware import get_template_middleware_instance
+
         return get_template_middleware_instance()
     except Exception as e:
         logger.error(f"❌ Failed to get template middleware from registry: {e}")

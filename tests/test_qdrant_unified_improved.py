@@ -241,7 +241,8 @@ def test_reindexing_capabilities():
     try:
         # Create middleware instance
         middleware = QdrantUnifiedMiddleware(
-            collection_name="test_collection", enabled=False  # Disable for testing
+            collection_name="test_collection",
+            enabled=False,  # Disable for testing
         )
 
         # Check that reindexing methods exist
@@ -396,7 +397,8 @@ async def test_tool_setup():
 
         # Create mock middleware
         middleware = QdrantUnifiedMiddleware(
-            collection_name="test_collection", enabled=False  # Disable for testing
+            collection_name="test_collection",
+            enabled=False,  # Disable for testing
         )
 
         mock_mcp = MockMCP()

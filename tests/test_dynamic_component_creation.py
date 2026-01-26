@@ -61,13 +61,14 @@ Usage:
 
 import json
 import os
-import pytest
 from typing import Any, Dict, List, Optional, Type
+
+import pytest
+from qdrant_client import models
 
 from adapters.module_wrapper import ModuleWrapper
 from config.qdrant_client import get_qdrant_client
 from config.settings import settings
-from qdrant_client import models
 
 
 @pytest.fixture(scope="module")
@@ -114,15 +115,12 @@ class ComponentRegistry:
         "Button": "card_framework.v2.widgets.button.Button",
         "DecoratedText": "card_framework.v2.widgets.DecoratedText",
         "TextParagraph": "card_framework.v2.widgets.TextParagraph",
-
         # Action components
         "OnClick": "card_framework.v2.widgets.on_click.OnClick",
         "OpenLink": "card_framework.v2.widgets.on_click.OpenLink",
         "Action": "card_framework.v2.widgets.on_click.Action",
-
         # Icon components
         "Icon": "card_framework.v2.widgets.icon.Icon",
-
         # Card structure
         "Card": "card_framework.v2.card.Card",
         "CardHeader": "card_framework.v2.card.CardHeader",
@@ -170,8 +168,12 @@ def get_component_relationships(client, component_name: str) -> Dict[str, Any]:
         collection_name=settings.card_collection,
         scroll_filter=models.Filter(
             must=[
-                models.FieldCondition(key='type', match=models.MatchValue(value='class')),
-                models.FieldCondition(key='name', match=models.MatchValue(value=component_name)),
+                models.FieldCondition(
+                    key="type", match=models.MatchValue(value="class")
+                ),
+                models.FieldCondition(
+                    key="name", match=models.MatchValue(value=component_name)
+                ),
             ]
         ),
         limit=1,
@@ -179,7 +181,7 @@ def get_component_relationships(client, component_name: str) -> Dict[str, Any]:
     )
 
     if results:
-        return results[0].payload.get('relationships', {})
+        return results[0].payload.get("relationships", {})
     return {}
 
 
@@ -223,11 +225,15 @@ class TestComponentLoading:
         assert SelectionItem is not None, "SelectionItem should be loadable"
 
         # SelectionType is a nested enum - access via SelectionInput
-        assert hasattr(SelectionInput, "SelectionType"), "SelectionInput should have SelectionType enum"
+        assert hasattr(SelectionInput, "SelectionType"), (
+            "SelectionInput should have SelectionType enum"
+        )
         SelectionType = SelectionInput.SelectionType
 
         # Available types: SWITCH, CHECK_BOX, RADIO_BUTTON, DROPDOWN
-        assert hasattr(SelectionType, "CHECK_BOX"), "SelectionType should have CHECK_BOX"
+        assert hasattr(SelectionType, "CHECK_BOX"), (
+            "SelectionType should have CHECK_BOX"
+        )
         assert hasattr(SelectionType, "DROPDOWN"), "SelectionType should have DROPDOWN"
         print(f"\n✅ SelectionType enum values: {[m.name for m in SelectionType]}")
 
@@ -256,11 +262,11 @@ class TestComponentRendering:
         items = [
             GridItem(
                 title="Item 1",
-                image=ImageComponent(image_uri="https://example.com/1.png")
+                image=ImageComponent(image_uri="https://example.com/1.png"),
             ),
             GridItem(
                 title="Item 2",
-                image=ImageComponent(image_uri="https://example.com/2.png")
+                image=ImageComponent(image_uri="https://example.com/2.png"),
             ),
         ]
 
@@ -283,13 +289,21 @@ class TestComponentRendering:
         OpenLink = registry.get("OpenLink")
 
         items = [
-            GridItem(title="Item 1", image=ImageComponent(image_uri="https://example.com/1.png")),
-            GridItem(title="Item 2", image=ImageComponent(image_uri="https://example.com/2.png")),
+            GridItem(
+                title="Item 1",
+                image=ImageComponent(image_uri="https://example.com/1.png"),
+            ),
+            GridItem(
+                title="Item 2",
+                image=ImageComponent(image_uri="https://example.com/2.png"),
+            ),
         ]
 
         # Grid-level onClick (NOT per-item - API doesn't support that)
         on_click = OnClick(open_link=OpenLink(url="https://developers.google.com/chat"))
-        grid = Grid(title="Clickable Grid", column_count=2, items=items, on_click=on_click)
+        grid = Grid(
+            title="Clickable Grid", column_count=2, items=items, on_click=on_click
+        )
 
         rendered = grid.render()
         assert "onClick" in rendered["grid"] or "on_click" in rendered["grid"]
@@ -310,11 +324,11 @@ class TestComponentRendering:
         chips = [
             Chip(
                 label="Chip 1",
-                on_click=OnClick(open_link=OpenLink(url="https://google.com"))
+                on_click=OnClick(open_link=OpenLink(url="https://google.com")),
             ),
             Chip(
                 label="Chip 2",
-                on_click=OnClick(open_link=OpenLink(url="https://github.com"))
+                on_click=OnClick(open_link=OpenLink(url="https://github.com")),
             ),
         ]
 
@@ -360,7 +374,7 @@ class TestComponentRendering:
             name="test_selection",
             label="Select an option",
             type=SelectionType.CHECK_BOX,
-            items=items
+            items=items,
         )
 
         rendered = selection.render()
@@ -405,7 +419,9 @@ class TestRelationshipQueries:
         children = rels["child_classes"]
 
         # SelectionInput should have SelectionType
-        assert "SelectionType" in children, "SelectionInput should have SelectionType relationship"
+        assert "SelectionType" in children, (
+            "SelectionInput should have SelectionType relationship"
+        )
 
         print(f"\n✅ SelectionInput relationships: {children}")
 
@@ -429,8 +445,14 @@ class TestDynamicCardBuilding:
 
         # Build grid
         grid_items = [
-            GridItem(title="Item 1", image=ImageComponent(image_uri="https://example.com/1.png")),
-            GridItem(title="Item 2", image=ImageComponent(image_uri="https://example.com/2.png")),
+            GridItem(
+                title="Item 1",
+                image=ImageComponent(image_uri="https://example.com/1.png"),
+            ),
+            GridItem(
+                title="Item 2",
+                image=ImageComponent(image_uri="https://example.com/2.png"),
+            ),
         ]
         grid = Grid(title="My Grid", column_count=2, items=grid_items)
 
@@ -461,9 +483,15 @@ class TestDynamicCardBuilding:
                 "title": "A fine collection",
                 "columnCount": 2,
                 "items": [
-                    {"title": "Item 1", "image": {"imageUri": "https://example.com/1.png"}},
-                    {"title": "Item 2", "image": {"imageUri": "https://example.com/2.png"}},
-                ]
+                    {
+                        "title": "Item 1",
+                        "image": {"imageUri": "https://example.com/1.png"},
+                    },
+                    {
+                        "title": "Item 2",
+                        "image": {"imageUri": "https://example.com/2.png"},
+                    },
+                ],
             }
         }
 
@@ -475,7 +503,7 @@ class TestDynamicCardBuilding:
         rebuilt_items = [
             GridItem(
                 title=item["title"],
-                image=ImageComponent(image_uri=item["image"]["imageUri"])
+                image=ImageComponent(image_uri=item["image"]["imageUri"]),
             )
             for item in target_json["grid"]["items"]
         ]
@@ -483,7 +511,7 @@ class TestDynamicCardBuilding:
         rebuilt_grid = Grid(
             title=target_json["grid"]["title"],
             column_count=target_json["grid"]["columnCount"],
-            items=rebuilt_items
+            items=rebuilt_items,
         )
 
         rendered = rebuilt_grid.render()

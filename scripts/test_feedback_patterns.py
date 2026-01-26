@@ -6,18 +6,18 @@ Run: python scripts/test_feedback_patterns.py
 """
 
 import json
-import sys
 import os
+import sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gchat.smart_card_builder import (
-    SmartCardBuilderV2,
-    TEXT_COMPONENTS,
     CLICKABLE_COMPONENTS,
     DUAL_COMPONENTS,
     LAYOUT_WRAPPERS,
+    TEXT_COMPONENTS,
+    SmartCardBuilderV2,
 )
 
 
@@ -54,7 +54,9 @@ def main():
     # Two feedbacks × layouts × orders
     total = per_feedback * per_feedback * len(LAYOUT_WRAPPERS) * 2
     print(f"\n📊 Theoretical combinations: {total:,}")
-    print(f"   ({per_feedback} content × {per_feedback} form × {len(LAYOUT_WRAPPERS)} layouts × 2 orders)")
+    print(
+        f"   ({per_feedback} content × {per_feedback} form × {len(LAYOUT_WRAPPERS)} layouts × 2 orders)"
+    )
 
     # Generate cards to show random selection
     print("\n" + "-" * 70)
@@ -69,8 +71,8 @@ def main():
 
     for i in range(15):
         card = builder.build(
-            description=f"Test card #{i+1} with some content",
-            title=f"Sample Card #{i+1}",
+            description=f"Test card #{i + 1} with some content",
+            title=f"Sample Card #{i + 1}",
         )
 
         sections = card.get("sections", [])
@@ -110,7 +112,9 @@ def main():
 
                 order_str = "C→F" if assembly.get("content_first") else "F→C"
                 layout = assembly.get("layout", "?")[:6]
-                print(f"Card {i+1:2d}: [{order_str}] {layout:8s} → {' → '.join(widget_types)}")
+                print(
+                    f"Card {i + 1:2d}: [{order_str}] {layout:8s} → {' → '.join(widget_types)}"
+                )
 
     print()
     print("-" * 70)
@@ -142,7 +146,14 @@ def main():
         print(f"  {k}: {v}x")
 
     # Unique combinations seen
-    unique = len(content_text_seen) * len(content_click_seen) * len(form_text_seen) * len(form_click_seen) * len(layout_seen) * len(orders_seen)
+    unique = (
+        len(content_text_seen)
+        * len(content_click_seen)
+        * len(form_text_seen)
+        * len(form_click_seen)
+        * len(layout_seen)
+        * len(orders_seen)
+    )
     print(f"\n📊 Unique combinations observed: ~{unique}")
     print(f"   (from {total:,} possible)")
 

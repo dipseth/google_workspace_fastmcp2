@@ -9,13 +9,14 @@ Generates random card configurations that satisfy minimum requirements:
 Uses ModuleWrapper's component hierarchy to ensure valid card structures.
 """
 
+import asyncio
 import random
 import uuid
-import httpx
-import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+import httpx
 
 from config.enhanced_logging import setup_logger
 
@@ -65,8 +66,8 @@ SAMPLE_TEXT_CONTENT = [
 from gchat.smart_card_builder import (
     CONTENT_FEEDBACK_PROMPTS,
     FORM_FEEDBACK_PROMPTS,
-    POSITIVE_LABELS,
     NEGATIVE_LABELS,
+    POSITIVE_LABELS,
 )
 
 # Random card titles for feedback testing
@@ -90,7 +91,11 @@ CONTENT_THEMES = [
     },
     {
         "title": "Order Status",
-        "items": ["Order #12345 confirmed", "Shipping in progress", "Estimated delivery: Tomorrow"],
+        "items": [
+            "Order #12345 confirmed",
+            "Shipping in progress",
+            "Estimated delivery: Tomorrow",
+        ],
         "icon": "SHOPPING_BAG",
     },
     {
@@ -129,18 +134,19 @@ SAMPLE_BUTTON_LABELS = [
 # Sample images (reliable placeholder URLs from picsum.photos)
 # Using specific image IDs for consistent, working images
 SAMPLE_IMAGES = [
-    "https://picsum.photos/id/1/200/200",   # Laptop on desk
+    "https://picsum.photos/id/1/200/200",  # Laptop on desk
     "https://picsum.photos/id/20/200/200",  # Cup of coffee
     "https://picsum.photos/id/42/200/200",  # Camera
     "https://picsum.photos/id/60/200/200",  # Office desk
-    "https://picsum.photos/id/180/200/200", # Workspace
-    "https://picsum.photos/id/237/200/200", # Dog
+    "https://picsum.photos/id/180/200/200",  # Workspace
+    "https://picsum.photos/id/237/200/200",  # Dog
 ]
 
 
 @dataclass
 class SmokeTestConfig:
     """Configuration for smoke test generation."""
+
     min_text_components: int = 2
     min_clickable_components: int = 4
     max_extra_components: int = 2
@@ -153,6 +159,7 @@ class SmokeTestConfig:
 @dataclass
 class SmokeTestResult:
     """Result of a smoke test execution."""
+
     test_id: str
     card_json: Dict[str, Any]
     component_count: int
@@ -180,6 +187,7 @@ class SmokeTestGenerator:
         """Get SmartCardBuilder singleton."""
         if self._builder is None:
             from gchat.smart_card_builder import SmartCardBuilder
+
             self._builder = SmartCardBuilder()
         return self._builder
 
@@ -187,6 +195,7 @@ class SmokeTestGenerator:
         """Get ModuleWrapper singleton."""
         if self._wrapper is None:
             from gchat.card_framework_wrapper import get_card_framework_wrapper
+
             self._wrapper = get_card_framework_wrapper()
         return self._wrapper
 
@@ -240,7 +249,9 @@ class SmokeTestGenerator:
             }
             if with_icon:
                 widget["decoratedText"]["startIcon"] = {
-                    "knownIcon": random.choice(["STAR", "BOOKMARK", "DESCRIPTION", "EMAIL"])
+                    "knownIcon": random.choice(
+                        ["STAR", "BOOKMARK", "DESCRIPTION", "EMAIL"]
+                    )
                 }
             return widget
         elif component_type == "TextParagraph":
@@ -271,9 +282,7 @@ class SmokeTestGenerator:
         if webhook_url:
             # Add webhook callback URL with test metadata
             callback_url = f"{webhook_url}?test_id={test_id}&button_index={button_index}&action={label.lower().replace(' ', '_')}"
-            button["onClick"] = {
-                "openLink": {"url": callback_url}
-            }
+            button["onClick"] = {"openLink": {"url": callback_url}}
 
         return button
 
@@ -282,11 +291,7 @@ class SmokeTestGenerator:
         buttons: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Wrap buttons in a buttonList widget."""
-        return {
-            "buttonList": {
-                "buttons": buttons
-            }
-        }
+        return {"buttonList": {"buttons": buttons}}
 
     def _build_divider(self) -> Dict[str, Any]:
         """Build a divider widget."""
@@ -326,15 +331,16 @@ class SmokeTestGenerator:
 
         # 1. Add title text (counts as text component #1)
         title_text = f"<b>Smoke Test #{config.test_id}</b>"
-        widgets.append(self._build_text_widget("DecoratedText", title_text, with_icon=True))
+        widgets.append(
+            self._build_text_widget("DecoratedText", title_text, with_icon=True)
+        )
         text_count += 1
 
         # 2. Add subtitle text (counts as text component #2)
         subtitle_text = self._random_text_content(iteration)
-        widgets.append(self._build_text_widget(
-            random.choice(TEXT_COMPONENTS),
-            subtitle_text
-        ))
+        widgets.append(
+            self._build_text_widget(random.choice(TEXT_COMPONENTS), subtitle_text)
+        )
         text_count += 1
 
         # 3. Optionally add divider
@@ -343,10 +349,11 @@ class SmokeTestGenerator:
 
         # 4. Optionally add image
         if config.include_image:
-            widgets.append(self._build_image(
-                self._random_image_url(),
-                f"Test image for {config.test_id}"
-            ))
+            widgets.append(
+                self._build_image(
+                    self._random_image_url(), f"Test image for {config.test_id}"
+                )
+            )
 
         # 5. Add 4 clickable buttons
         buttons = []
@@ -366,18 +373,18 @@ class SmokeTestGenerator:
 
         # 6. Build the card structure
         card = {
-            "cardsV2": [{
-                "cardId": f"smoke-test-{config.test_id}",
-                "card": {
-                    "header": {
-                        "title": "Smoke Test Card",
-                        "subtitle": f"ID: {config.test_id} | Iteration: {iteration}",
+            "cardsV2": [
+                {
+                    "cardId": f"smoke-test-{config.test_id}",
+                    "card": {
+                        "header": {
+                            "title": "Smoke Test Card",
+                            "subtitle": f"ID: {config.test_id} | Iteration: {iteration}",
+                        },
+                        "sections": [{"widgets": widgets}],
                     },
-                    "sections": [{
-                        "widgets": widgets
-                    }]
                 }
-            }]
+            ]
         }
 
         # Store metadata for validation
@@ -385,7 +392,9 @@ class SmokeTestGenerator:
             "test_id": config.test_id,
             "text_count": text_count,
             "clickable_count": clickable_count,
-            "total_components": text_count + clickable_count + (1 if config.include_image else 0),
+            "total_components": text_count
+            + clickable_count
+            + (1 if config.include_image else 0),
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -412,16 +421,24 @@ class SmokeTestGenerator:
 
         # Title (always)
         title_text = f"<b>Smoke Test: {variant.title()}</b>"
-        widgets.append(self._build_text_widget("DecoratedText", title_text, with_icon=True))
+        widgets.append(
+            self._build_text_widget("DecoratedText", title_text, with_icon=True)
+        )
         text_count += 1
 
         if variant == "standard":
             # Standard: subtitle + 4 buttons
-            widgets.append(self._build_text_widget("TextParagraph", self._random_text_content(iteration)))
+            widgets.append(
+                self._build_text_widget(
+                    "TextParagraph", self._random_text_content(iteration)
+                )
+            )
             text_count += 1
 
             buttons = [
-                self._build_button_widget(self._random_button_label(i), config.webhook_url, i, config.test_id)
+                self._build_button_widget(
+                    self._random_button_label(i), config.webhook_url, i, config.test_id
+                )
                 for i in range(4)
             ]
             widgets.append(self._build_button_list(buttons))
@@ -429,19 +446,30 @@ class SmokeTestGenerator:
 
         elif variant == "split_buttons":
             # Split: subtitle + 2 rows of 2 buttons each
-            widgets.append(self._build_text_widget("DecoratedText", self._random_text_content(iteration)))
+            widgets.append(
+                self._build_text_widget(
+                    "DecoratedText", self._random_text_content(iteration)
+                )
+            )
             text_count += 1
 
             # First row
             buttons1 = [
-                self._build_button_widget(self._random_button_label(i), config.webhook_url, i, config.test_id)
+                self._build_button_widget(
+                    self._random_button_label(i), config.webhook_url, i, config.test_id
+                )
                 for i in range(2)
             ]
             widgets.append(self._build_button_list(buttons1))
 
             # Second row
             buttons2 = [
-                self._build_button_widget(self._random_button_label(i+2), config.webhook_url, i+2, config.test_id)
+                self._build_button_widget(
+                    self._random_button_label(i + 2),
+                    config.webhook_url,
+                    i + 2,
+                    config.test_id,
+                )
                 for i in range(2)
             ]
             widgets.append(self._build_button_list(buttons2))
@@ -449,74 +477,96 @@ class SmokeTestGenerator:
 
         elif variant == "with_form":
             # Form: subtitle + 2 SelectionInputs (no free-form text) + 4 submit buttons
-            widgets.append(self._build_text_widget("TextParagraph", "Please make your selections below:"))
+            widgets.append(
+                self._build_text_widget(
+                    "TextParagraph", "Please make your selections below:"
+                )
+            )
             text_count += 1
 
             # Dropdown selection
-            widgets.append({
-                "selectionInput": {
-                    "name": "category_select",
-                    "label": "Select a category",
-                    "type": "DROPDOWN",
-                    "items": [
-                        {"text": "Category A", "value": "cat_a", "selected": True},
-                        {"text": "Category B", "value": "cat_b"},
-                        {"text": "Category C", "value": "cat_c"},
-                    ]
+            widgets.append(
+                {
+                    "selectionInput": {
+                        "name": "category_select",
+                        "label": "Select a category",
+                        "type": "DROPDOWN",
+                        "items": [
+                            {"text": "Category A", "value": "cat_a", "selected": True},
+                            {"text": "Category B", "value": "cat_b"},
+                            {"text": "Category C", "value": "cat_c"},
+                        ],
+                    }
                 }
-            })
+            )
 
             # Radio button selection
-            widgets.append({
-                "selectionInput": {
-                    "name": "priority_select",
-                    "label": "Select priority",
-                    "type": "RADIO_BUTTON",
-                    "items": [
-                        {"text": "High", "value": "high"},
-                        {"text": "Medium", "value": "medium", "selected": True},
-                        {"text": "Low", "value": "low"},
-                    ]
+            widgets.append(
+                {
+                    "selectionInput": {
+                        "name": "priority_select",
+                        "label": "Select priority",
+                        "type": "RADIO_BUTTON",
+                        "items": [
+                            {"text": "High", "value": "high"},
+                            {"text": "Medium", "value": "medium", "selected": True},
+                            {"text": "Low", "value": "low"},
+                        ],
+                    }
                 }
-            })
+            )
 
             # Submit buttons
             buttons = [
-                self._build_button_widget("Submit", config.webhook_url, 0, config.test_id),
-                self._build_button_widget("Cancel", config.webhook_url, 1, config.test_id),
-                self._build_button_widget("Reset", config.webhook_url, 2, config.test_id),
-                self._build_button_widget("Help", config.webhook_url, 3, config.test_id),
+                self._build_button_widget(
+                    "Submit", config.webhook_url, 0, config.test_id
+                ),
+                self._build_button_widget(
+                    "Cancel", config.webhook_url, 1, config.test_id
+                ),
+                self._build_button_widget(
+                    "Reset", config.webhook_url, 2, config.test_id
+                ),
+                self._build_button_widget(
+                    "Help", config.webhook_url, 3, config.test_id
+                ),
             ]
             widgets.append(self._build_button_list(buttons))
             clickable_count = 4
 
         elif variant == "with_grid":
             # Grid: subtitle + 2x2 grid with clickable items
-            widgets.append(self._build_text_widget("DecoratedText", "Select an item from the grid:"))
+            widgets.append(
+                self._build_text_widget(
+                    "DecoratedText", "Select an item from the grid:"
+                )
+            )
             text_count += 1
 
             # Grid with clickable items
             grid_items = []
             for i in range(4):
                 item = {
-                    "title": f"Item {i+1}",
-                    "subtitle": f"Click to test #{i+1}",
+                    "title": f"Item {i + 1}",
+                    "subtitle": f"Click to test #{i + 1}",
                     "image": {
                         "imageUri": self._random_image_url(),
-                        "altText": f"Grid item {i+1}",
+                        "altText": f"Grid item {i + 1}",
                     },
                 }
                 if config.webhook_url:
                     item["id"] = f"grid_item_{i}"
                 grid_items.append(item)
 
-            widgets.append({
-                "grid": {
-                    "title": "Test Grid",
-                    "columnCount": 2,
-                    "items": grid_items,
+            widgets.append(
+                {
+                    "grid": {
+                        "title": "Test Grid",
+                        "columnCount": 2,
+                        "items": grid_items,
+                    }
                 }
-            })
+            )
             clickable_count = 4  # Grid items are clickable
 
         else:
@@ -525,18 +575,18 @@ class SmokeTestGenerator:
 
         # Build card
         card = {
-            "cardsV2": [{
-                "cardId": f"smoke-test-{variant}-{config.test_id}",
-                "card": {
-                    "header": {
-                        "title": f"Smoke Test: {variant.title()}",
-                        "subtitle": f"ID: {config.test_id}",
+            "cardsV2": [
+                {
+                    "cardId": f"smoke-test-{variant}-{config.test_id}",
+                    "card": {
+                        "header": {
+                            "title": f"Smoke Test: {variant.title()}",
+                            "subtitle": f"ID: {config.test_id}",
+                        },
+                        "sections": [{"widgets": widgets}],
                     },
-                    "sections": [{
-                        "widgets": widgets
-                    }]
                 }
-            }]
+            ]
         }
 
         card["_smoke_test_meta"] = {
@@ -592,22 +642,26 @@ class SmokeTestGenerator:
 
         if include_content_section:
             # Title with icon (text component #1)
-            content_widgets.append({
-                "decoratedText": {
-                    "startIcon": {"knownIcon": theme["icon"]},
-                    "text": f"<b>{theme['title']}</b>",
-                    "wrapText": True,
+            content_widgets.append(
+                {
+                    "decoratedText": {
+                        "startIcon": {"knownIcon": theme["icon"]},
+                        "text": f"<b>{theme['title']}</b>",
+                        "wrapText": True,
+                    }
                 }
-            })
+            )
             text_count += 1
 
             # Content items as text paragraph (text component #2)
             items_html = "<br>".join(f"• {item}" for item in theme["items"])
-            content_widgets.append({
-                "textParagraph": {
-                    "text": items_html,
+            content_widgets.append(
+                {
+                    "textParagraph": {
+                        "text": items_html,
+                    }
                 }
-            })
+            )
             text_count += 1
 
         # Build feedback section widgets
@@ -629,16 +683,20 @@ class SmokeTestGenerator:
             neg_label_1 = neg_label_2 = "👎 Bad"
 
         # Content feedback prompt
-        feedback_widgets.append({
-            "decoratedText": {
-                "text": f"<i>{content_prompt}</i>",
-                "wrapText": True,
+        feedback_widgets.append(
+            {
+                "decoratedText": {
+                    "text": f"<i>{content_prompt}</i>",
+                    "wrapText": True,
+                }
             }
-        })
+        )
 
         # Content feedback buttons (clickable #1, #2)
         content_buttons = []
-        for i, (label, feedback_val) in enumerate([(pos_label_1, "positive"), (neg_label_1, "negative")]):
+        for i, (label, feedback_val) in enumerate(
+            [(pos_label_1, "positive"), (neg_label_1, "negative")]
+        ):
             btn = {"text": label}
             if config.webhook_url:
                 btn["onClick"] = {
@@ -652,21 +710,25 @@ class SmokeTestGenerator:
         feedback_widgets.append({"buttonList": {"buttons": content_buttons}})
 
         # Form feedback prompt
-        feedback_widgets.append({
-            "decoratedText": {
-                "text": f"<i>{form_prompt}</i>",
-                "wrapText": True,
+        feedback_widgets.append(
+            {
+                "decoratedText": {
+                    "text": f"<i>{form_prompt}</i>",
+                    "wrapText": True,
+                }
             }
-        })
+        )
 
         # Form feedback buttons (clickable #3, #4)
         form_buttons = []
-        for i, (label, feedback_val) in enumerate([(pos_label_2, "positive"), (neg_label_2, "negative")]):
+        for i, (label, feedback_val) in enumerate(
+            [(pos_label_2, "positive"), (neg_label_2, "negative")]
+        ):
             btn = {"text": label}
             if config.webhook_url:
                 btn["onClick"] = {
                     "openLink": {
-                        "url": f"{config.webhook_url}?card_id={config.test_id}&feedback={feedback_val}&feedback_type=form&btn={i+2}"
+                        "url": f"{config.webhook_url}?card_id={config.test_id}&feedback={feedback_val}&feedback_type=form&btn={i + 2}"
                     }
                 }
             form_buttons.append(btn)
@@ -678,23 +740,27 @@ class SmokeTestGenerator:
         sections = []
         if include_content_section and content_widgets:
             sections.append({"widgets": content_widgets})
-        sections.append({
-            "header": "Feedback",
-            "widgets": feedback_widgets,
-        })
+        sections.append(
+            {
+                "header": "Feedback",
+                "widgets": feedback_widgets,
+            }
+        )
 
         # Build card
         card = {
-            "cardsV2": [{
-                "cardId": f"feedback-{config.test_id}",
-                "card": {
-                    "header": {
-                        "title": random.choice(FEEDBACK_CARD_TITLES),
-                        "subtitle": f"Test ID: {config.test_id}",
+            "cardsV2": [
+                {
+                    "cardId": f"feedback-{config.test_id}",
+                    "card": {
+                        "header": {
+                            "title": random.choice(FEEDBACK_CARD_TITLES),
+                            "subtitle": f"Test ID: {config.test_id}",
+                        },
+                        "sections": sections,
                     },
-                    "sections": sections,
                 }
-            }]
+            ]
         }
 
         card["_smoke_test_meta"] = {
@@ -794,14 +860,22 @@ class SmokeTestGenerator:
 
                         if response.status_code == 200:
                             result.success = True
-                            result.webhook_responses.append({
-                                "status": response.status_code,
-                                "body": response.json() if response.text else None,
-                            })
-                            logger.info(f"✅ Smoke test {variant}/{config.test_id}: SUCCESS")
+                            result.webhook_responses.append(
+                                {
+                                    "status": response.status_code,
+                                    "body": response.json() if response.text else None,
+                                }
+                            )
+                            logger.info(
+                                f"✅ Smoke test {variant}/{config.test_id}: SUCCESS"
+                            )
                         else:
-                            result.error = f"HTTP {response.status_code}: {response.text}"
-                            logger.error(f"❌ Smoke test {variant}/{config.test_id}: {result.error}")
+                            result.error = (
+                                f"HTTP {response.status_code}: {response.text}"
+                            )
+                            logger.error(
+                                f"❌ Smoke test {variant}/{config.test_id}: {result.error}"
+                            )
 
                     except Exception as e:
                         result.error = str(e)
@@ -864,7 +938,9 @@ class SmokeTestGenerator:
             errors.append(f"Need at least 2 text components, found {text_count}")
 
         if clickable_count < 4:
-            errors.append(f"Need at least 4 clickable components, found {clickable_count}")
+            errors.append(
+                f"Need at least 4 clickable components, found {clickable_count}"
+            )
 
         return len(errors) == 0, errors
 
@@ -872,6 +948,7 @@ class SmokeTestGenerator:
 # =============================================================================
 # CONVENIENCE FUNCTIONS
 # =============================================================================
+
 
 def generate_smoke_test_card(
     webhook_url: Optional[str] = None,
@@ -922,7 +999,9 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python smoke_test_generator.py <webhook_url> [num_iterations]")
         print("\nExample:")
-        print("  python smoke_test_generator.py 'https://chat.googleapis.com/v1/spaces/...' 3")
+        print(
+            "  python smoke_test_generator.py 'https://chat.googleapis.com/v1/spaces/...' 3"
+        )
         sys.exit(1)
 
     webhook_url = sys.argv[1]
@@ -943,6 +1022,8 @@ if __name__ == "__main__":
 
     for r in results:
         status = "✅" if r.success else "❌"
-        print(f"  {status} {r.test_id}: text={r.text_count}, clickable={r.clickable_count}")
+        print(
+            f"  {status} {r.test_id}: text={r.text_count}, clickable={r.clickable_count}"
+        )
         if r.error:
             print(f"      Error: {r.error[:80]}")

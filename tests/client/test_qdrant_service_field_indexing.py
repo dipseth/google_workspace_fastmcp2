@@ -61,9 +61,9 @@ class TestQdrantServiceFieldIndexing:
         # Since we can't directly access the local variable, we verify the behavior
         # by checking that initialization doesn't fail and service would be indexed
         assert config.collection_name == "test_service_index_new"
-        assert (
-            "service" in expected_fields
-        ), "service field should be in filterable_fields"
+        assert "service" in expected_fields, (
+            "service field should be in filterable_fields"
+        )
 
     @pytest.mark.asyncio
     async def test_service_field_in_existing_collection_backfill(self, client):
@@ -101,9 +101,9 @@ class TestQdrantServiceFieldIndexing:
             "type",
         ]
 
-        assert (
-            "service" in backfill_fields
-        ), "service field should be in backfill filterable_fields"
+        assert "service" in backfill_fields, (
+            "service field should be in backfill filterable_fields"
+        )
 
     @pytest.mark.asyncio
     async def test_service_field_uses_keyword_index_params(self, client):
@@ -124,9 +124,9 @@ class TestQdrantServiceFieldIndexing:
 
         # Verify the index params have correct properties
         assert keyword_index.type == qdrant_models["KeywordIndexType"].KEYWORD
-        assert (
-            keyword_index.on_disk == False
-        ), "service field should be kept in memory (on_disk=False)"
+        assert keyword_index.on_disk == False, (
+            "service field should be kept in memory (on_disk=False)"
+        )
 
     @pytest.mark.asyncio
     async def test_search_with_service_filter_works(self, client):
@@ -137,9 +137,9 @@ class TestQdrantServiceFieldIndexing:
         for query in test_queries:
             try:
                 result = await client.call_tool("search", {"query": query})
-                assert (
-                    result is not None
-                ), f"Search with service filter '{query}' should return a result"
+                assert result is not None, (
+                    f"Search with service filter '{query}' should return a result"
+                )
 
                 content = (
                     result.content[0].text
@@ -155,9 +155,9 @@ class TestQdrantServiceFieldIndexing:
                 # Try to parse as JSON
                 try:
                     data = json.loads(content)
-                    assert (
-                        "results" in data or "error" in data
-                    ), f"Response should have 'results' or 'error' field for query: {query}"
+                    assert "results" in data or "error" in data, (
+                        f"Response should have 'results' or 'error' field for query: {query}"
+                    )
                 except json.JSONDecodeError:
                     # If not JSON, should be a valid response message
                     assert len(content) > 0, "Should have some response content"
@@ -208,9 +208,9 @@ class TestQdrantServiceFieldIndexing:
 
             # Verify search_manager can be used for searches
             assert search_manager is not None, "Search manager should be initialized"
-            assert hasattr(
-                search_manager, "search"
-            ), "Search manager should have search method"
+            assert hasattr(search_manager, "search"), (
+                "Search manager should have search method"
+            )
 
         except Exception as e:
             pytest.fail(f"Service filter runtime fallback check failed: {e}")
@@ -299,9 +299,9 @@ class TestQdrantServiceFilterIntegration:
             try:
                 result = await client.call_tool("search", {"query": scenario["query"]})
 
-                assert (
-                    result is not None
-                ), f"Search should return result for {scenario['description']}"
+                assert result is not None, (
+                    f"Search should return result for {scenario['description']}"
+                )
 
                 content = (
                     result.content[0].text
@@ -310,15 +310,15 @@ class TestQdrantServiceFilterIntegration:
                 )
 
                 # Should not fail with index errors
-                assert (
-                    "no index" not in content.lower()
-                ), f"Should not have index error for {scenario['description']}"
+                assert "no index" not in content.lower(), (
+                    f"Should not have index error for {scenario['description']}"
+                )
 
             except Exception as e:
                 error_msg = str(e).lower()
-                assert (
-                    "index" not in error_msg or "no index" not in error_msg
-                ), f"Should not have index errors for {scenario['description']}: {e}"
+                assert "index" not in error_msg or "no index" not in error_msg, (
+                    f"Should not have index errors for {scenario['description']}: {e}"
+                )
 
     @pytest.mark.asyncio
     async def test_service_filter_combined_with_other_filters(self, client):
@@ -372,9 +372,9 @@ class TestQdrantServiceIndexPerformance:
 
             assert result is not None
             # With proper indexing, should be reasonably fast (< 5 seconds)
-            assert (
-                response_time < 5.0
-            ), f"Service filter search took {response_time:.2f}s, should be < 5s with proper indexing"
+            assert response_time < 5.0, (
+                f"Service filter search took {response_time:.2f}s, should be < 5s with proper indexing"
+            )
 
         except Exception as e:
             # Even if Qdrant is not available, test structure is valid

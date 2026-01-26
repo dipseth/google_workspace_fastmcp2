@@ -35,7 +35,6 @@ class TestQdrantInitializationFlow:
                 "middleware.qdrant_middleware.QdrantResourceHandler"
             ) as mock_resource_handler_class,
         ):
-
             # Create mock instances
             mock_client_manager = AsyncMock()
             mock_client_manager.is_initialized = False
@@ -128,7 +127,6 @@ class TestQdrantInitializationFlow:
                     new_callable=AsyncMock,
                 ),
             ):
-
                 # Set client as not initialized to trigger initialization
                 mock_middleware._mock_client_manager.is_initialized = False
 
@@ -155,7 +153,6 @@ class TestQdrantInitializationFlow:
             ) as mock_init_full,
             patch("asyncio.create_task") as mock_create_task,
         ):
-
             # Set up for triggering initialization
             mock_middleware._early_init_started = False
 

@@ -23,9 +23,9 @@ Usage:
     # => {"Button": "g:ᵬ", "Grid": "g:ℊ"}
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +70,30 @@ LETTER_SYMBOLS: Dict[str, List[str]] = {
 
 # Fallback symbols for when all letter symbols are exhausted
 FALLBACK_SYMBOLS = [
-    "†", "‡", "•", "◦", "◆", "◇", "★", "☆", "♠", "♣", "♥", "♦",
-    "►", "◄", "▲", "▼", "●", "○", "■", "□", "▪", "▫", "◙", "◘",
+    "†",
+    "‡",
+    "•",
+    "◦",
+    "◆",
+    "◇",
+    "★",
+    "☆",
+    "♠",
+    "♣",
+    "♥",
+    "♦",
+    "►",
+    "◄",
+    "▲",
+    "▼",
+    "●",
+    "○",
+    "■",
+    "□",
+    "▪",
+    "▫",
+    "◙",
+    "◘",
 ]
 
 # Module prefix symbols - use for multi-module disambiguation
@@ -94,9 +116,11 @@ MODULE_PREFIX_SYMBOLS: Dict[str, str] = {
 # STYLING REGISTRY
 # =============================================================================
 
+
 @dataclass
 class StyleRule:
     """A styling rule that can be applied to card content."""
+
     name: str  # e.g., "success_color"
     description: str  # e.g., "Green color for success states"
     html_template: str  # e.g., '<font color="#34a853">{text}</font>'
@@ -161,6 +185,7 @@ class StylingRegistry:
     These are application-level formatting rules (colors, text styles) that
     the card builder can apply based on semantic triggers.
     """
+
     rules: List[StyleRule] = field(default_factory=list)
     _trigger_index: Dict[str, StyleRule] = field(default_factory=dict)
 
@@ -213,6 +238,7 @@ class StylingRegistry:
 # SYMBOL GENERATOR
 # =============================================================================
 
+
 class SymbolGenerator:
     """
     Generates unique Unicode symbols for module components.
@@ -259,8 +285,7 @@ class SymbolGenerator:
 
         # Use short prefix from mapping or first letter
         short = MODULE_PREFIX_SYMBOLS.get(
-            self.module_prefix.lower(),
-            self.module_prefix[0].lower()
+            self.module_prefix.lower(), self.module_prefix[0].lower()
         )
         return f"{short}:"
 
@@ -359,8 +384,7 @@ class SymbolGenerator:
                 return base + length_bonus
 
             sorted_names = sorted(
-                component_names,
-                key=lambda n: (-effective_priority(n), n)
+                component_names, key=lambda n: (-effective_priority(n), n)
             )
         else:
             sorted_names = sorted(component_names)
@@ -437,6 +461,7 @@ class SymbolGenerator:
 # FACTORY FUNCTIONS
 # =============================================================================
 
+
 def create_generator_for_module(
     module_name: str,
     component_names: List[str],
@@ -475,6 +500,7 @@ def create_default_styling_registry() -> StylingRegistry:
 # =============================================================================
 # INTEGRATION HELPERS
 # =============================================================================
+
 
 def extract_component_names_from_wrapper(wrapper: "ModuleWrapper") -> List[str]:
     """

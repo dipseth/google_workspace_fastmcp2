@@ -90,9 +90,9 @@ class TestServiceListResourceFixes:
             # Should be auth error, not parameter error
             error_msg = data["error"].lower()
             assert "typeerror" not in error_msg, f"Got TypeError: {data['error']}"
-            assert (
-                "parameter" not in error_msg or "auth" in error_msg
-            ), f"Should be auth error: {data['error']}"
+            assert "parameter" not in error_msg or "auth" in error_msg, (
+                f"Should be auth error: {data['error']}"
+            )
         else:
             # Success - should have proper structure
             assert "service" in data
@@ -119,9 +119,9 @@ class TestServiceListResourceFixes:
         if "error" in data:
             error_msg = data["error"].lower()
             assert "typeerror" not in error_msg, f"Got TypeError: {data['error']}"
-            assert (
-                "parameter" not in error_msg or "auth" in error_msg
-            ), f"Should be auth error: {data['error']}"
+            assert "parameter" not in error_msg or "auth" in error_msg, (
+                f"Should be auth error: {data['error']}"
+            )
         else:
             # Success - should have proper structure
             assert "service" in data
@@ -149,9 +149,9 @@ class TestServiceListResourceFixes:
             for item in data["items"]:
                 if isinstance(item, dict):
                     # Should not have example flag
-                    assert not item.get(
-                        "is_example", False
-                    ), "Should not return example data"
+                    assert not item.get("is_example", False), (
+                        "Should not return example data"
+                    )
                     # Should not have example IDs from config
                     if "id" in item:
                         assert item["id"] not in [
@@ -163,12 +163,12 @@ class TestServiceListResourceFixes:
         if "error" in data:
             error_msg = data["error"].lower()
             # Should be auth error, not "no default IDs" or similar
-            assert (
-                "example" not in error_msg
-            ), f"Should not return example data error: {data['error']}"
-            assert (
-                "id" not in error_msg or "auth" in error_msg
-            ), f"Should be auth error: {data['error']}"
+            assert "example" not in error_msg, (
+                f"Should not return example data error: {data['error']}"
+            )
+            assert "id" not in error_msg or "auth" in error_msg, (
+                f"Should be auth error: {data['error']}"
+            )
         else:
             # Success - should have proper structure
             assert "service" in data
@@ -195,9 +195,9 @@ class TestServiceListResourceFixes:
         if "error" in data:
             error_msg = data["error"].lower()
             assert "typeerror" not in error_msg, f"Got TypeError: {data['error']}"
-            assert (
-                "parameter" not in error_msg or "auth" in error_msg
-            ), f"Should be auth error: {data['error']}"
+            assert "parameter" not in error_msg or "auth" in error_msg, (
+                f"Should be auth error: {data['error']}"
+            )
         else:
             # Success - should have proper structure
             assert "service" in data
@@ -218,9 +218,9 @@ class TestServiceListResourceFixes:
         assert filters_config is not None, "Gmail filters config should exist"
         # Filters should not require an ID field (if has_detail_view exists)
         if "has_detail_view" in filters_config:
-            assert not filters_config.get(
-                "has_detail_view", True
-            ), "Filters should not require ID"
+            assert not filters_config.get("has_detail_view", True), (
+                "Filters should not require ID"
+            )
 
         # Test Gmail labels configuration
         labels_config = list_types.get("labels")
@@ -324,15 +324,15 @@ class TestServiceListResourceErrorHandling:
                 error_msg = data["error"]
 
                 # Should not be internal errors
-                assert (
-                    "TypeError" not in error_msg
-                ), f"Should not expose TypeError: {error_msg}"
-                assert (
-                    "AttributeError" not in error_msg
-                ), f"Should not expose AttributeError: {error_msg}"
-                assert (
-                    "traceback" not in error_msg.lower()
-                ), f"Should not expose traceback: {error_msg}"
+                assert "TypeError" not in error_msg, (
+                    f"Should not expose TypeError: {error_msg}"
+                )
+                assert "AttributeError" not in error_msg, (
+                    f"Should not expose AttributeError: {error_msg}"
+                )
+                assert "traceback" not in error_msg.lower(), (
+                    f"Should not expose traceback: {error_msg}"
+                )
 
                 # Should be user-friendly
                 assert len(error_msg) > 10, f"Error message too short: {error_msg}"
@@ -340,9 +340,9 @@ class TestServiceListResourceErrorHandling:
                 # Should have helpful suggestions if auth error
                 if "auth" in error_msg.lower() or "email" in error_msg.lower():
                     assert "suggestions" in data, "Auth errors should have suggestions"
-                    assert (
-                        len(data["suggestions"]) > 0
-                    ), "Should have at least one suggestion"
+                    assert len(data["suggestions"]) > 0, (
+                        "Should have at least one suggestion"
+                    )
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ A focused MCP server for uploading files to Google Drive with OAuth authenticati
 """
 
 import os
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 # Setup enhanced logging early - no defensive coding needed!
@@ -33,8 +33,8 @@ from drive.file_management_tools import setup_file_management_tools
 from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
 from forms.forms_tools import setup_forms_tools
 from gcalendar.calendar_tools import setup_calendar_tools
-from gchat.chat_tools import setup_chat_tools
 from gchat.card_tools import setup_card_tools
+from gchat.chat_tools import setup_chat_tools
 from gmail.gmail_tools import setup_gmail_tools
 from middleware.qdrant_middleware import (
     QdrantUnifiedMiddleware,

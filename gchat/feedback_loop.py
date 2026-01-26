@@ -125,7 +125,9 @@ class FeedbackLoop:
             logger.warning(f"Failed to embed description: {e}")
             return []
 
-    def _embed_relationships(self, parent_paths: List[str], structure_description: str = "") -> List[float]:
+    def _embed_relationships(
+        self, parent_paths: List[str], structure_description: str = ""
+    ) -> List[float]:
         """
         Embed relationship/structure information using MiniLM.
 
@@ -149,7 +151,9 @@ class FeedbackLoop:
 
         try:
             # Build compact structure text
-            structure_text = self._build_compact_structure_text(parent_paths, structure_description)
+            structure_text = self._build_compact_structure_text(
+                parent_paths, structure_description
+            )
 
             # Embed with MiniLM (single vector)
             vectors_raw = list(embedder.embed([structure_text]))[0]
@@ -159,7 +163,9 @@ class FeedbackLoop:
             logger.warning(f"Failed to embed relationships: {e}")
             return [0.0] * RELATIONSHIPS_DIM
 
-    def _build_compact_structure_text(self, component_paths: List[str], structure_description: str = "") -> str:
+    def _build_compact_structure_text(
+        self, component_paths: List[str], structure_description: str = ""
+    ) -> str:
         """
         Build compact structure text for instance patterns WITH DSL NOTATION.
 
@@ -182,13 +188,18 @@ class FeedbackLoop:
         """
         try:
             from gchat.card_framework_wrapper import get_card_framework_wrapper
+
             wrapper = get_card_framework_wrapper()
             return wrapper.build_dsl_from_paths(component_paths, structure_description)
         except Exception as e:
             logger.warning(f"Failed to use ModuleWrapper for DSL: {e}, using fallback")
             # Fallback to basic format if wrapper unavailable
             if not component_paths:
-                return f"§[] | {structure_description[:100]}" if structure_description else "§[]"
+                return (
+                    f"§[] | {structure_description[:100]}"
+                    if structure_description
+                    else "§[]"
+                )
             names = [p.split(".")[-1] if "." in p else p for p in component_paths]
             return f"§[...] | {' '.join(names)}"
 
@@ -202,6 +213,7 @@ class FeedbackLoop:
         if not hasattr(self, "_dsl_symbols_cache") or self._dsl_symbols_cache is None:
             try:
                 from gchat.card_framework_wrapper import get_card_framework_wrapper
+
                 wrapper = get_card_framework_wrapper()
                 validator = wrapper.get_structure_validator()
                 # symbols maps name → symbol
@@ -249,12 +261,8 @@ class FeedbackLoop:
 
             logger.info(f"📦 Creating collection: {COLLECTION_NAME}")
             logger.info(f"   Named vectors: components, inputs, relationships")
-            logger.info(
-                f"   ColBERT ({COLBERT_DIM}d): components, inputs"
-            )
-            logger.info(
-                f"   MiniLM ({RELATIONSHIPS_DIM}d): relationships"
-            )
+            logger.info(f"   ColBERT ({COLBERT_DIM}d): components, inputs")
+            logger.info(f"   MiniLM ({RELATIONSHIPS_DIM}d): relationships")
 
             # Create collection with v7 named vectors (all three)
             client.create_collection(
@@ -610,7 +618,9 @@ class FeedbackLoop:
                 has_relationships = "relationships" in vectors_config
 
                 if has_inputs and has_relationships:
-                    logger.debug("✅ inputs and relationships vectors exist in collection")
+                    logger.debug(
+                        "✅ inputs and relationships vectors exist in collection"
+                    )
                     self._description_vector_ready = True
                     return True
                 elif has_inputs:
@@ -637,12 +647,16 @@ class FeedbackLoop:
         card_description: str,
         component_paths: List[str],
         instance_params: Dict[str, Any],
-        feedback: Optional[str] = None,  # Legacy: "positive", "negative", or None (pending)
+        feedback: Optional[
+            str
+        ] = None,  # Legacy: "positive", "negative", or None (pending)
         content_feedback: Optional[str] = None,  # "positive", "negative", or None
         form_feedback: Optional[str] = None,  # "positive", "negative", or None
         user_email: Optional[str] = None,
         card_id: Optional[str] = None,
-        structure_description: Optional[str] = None,  # Optional NL description of structure
+        structure_description: Optional[
+            str
+        ] = None,  # Optional NL description of structure
         pattern_type: str = "content",  # "content" (main card) or "feedback_ui" (feedback section)
     ) -> Optional[str]:
         """
@@ -684,14 +698,12 @@ class FeedbackLoop:
 
         # Build DSL notation for searchability and embedding
         dsl_relationship_text = self._build_compact_structure_text(
-            component_paths,
-            structure_description or ""
+            component_paths, structure_description or ""
         )
 
         # Embed relationships/structure using MiniLM
         relationship_vector = self._embed_relationships(
-            component_paths,
-            structure_description or ""
+            component_paths, structure_description or ""
         )
 
         # Generate point ID
@@ -819,7 +831,7 @@ class FeedbackLoop:
                             key="form_feedback",
                             match=models.MatchValue(value="positive"),
                         ),
-                    ]
+                    ],
                 ),
                 limit=to_delete + 100,  # Get extra in case we need more
                 with_payload=["timestamp", "card_id"],
@@ -828,7 +840,9 @@ class FeedbackLoop:
             # Sort by timestamp (oldest first) and take what we need
             sorted_results = sorted(
                 results,
-                key=lambda p: p.payload.get("timestamp", "2000-01-01") if p.payload else "2000-01-01"
+                key=lambda p: p.payload.get("timestamp", "2000-01-01")
+                if p.payload
+                else "2000-01-01",
             )
             patterns_to_delete = [p.id for p in sorted_results[:to_delete]]
 
@@ -853,14 +867,16 @@ class FeedbackLoop:
                                 key="form_feedback",
                                 match=models.MatchValue(value="positive"),
                             ),
-                        ]
+                        ],
                     ),
                     limit=remaining + 50,
                     with_payload=["timestamp", "card_id"],
                 )
                 sorted_results = sorted(
                     results,
-                    key=lambda p: p.payload.get("timestamp", "2000-01-01") if p.payload else "2000-01-01"
+                    key=lambda p: p.payload.get("timestamp", "2000-01-01")
+                    if p.payload
+                    else "2000-01-01",
                 )
                 patterns_to_delete.extend([p.id for p in sorted_results[:remaining]])
 
@@ -869,7 +885,7 @@ class FeedbackLoop:
             batch_size = 100
             if patterns_to_delete:
                 for i in range(0, len(patterns_to_delete), batch_size):
-                    batch = patterns_to_delete[i:i + batch_size]
+                    batch = patterns_to_delete[i : i + batch_size]
                     client.delete(
                         collection_name=COLLECTION_NAME,
                         points_selector=models.PointIdsList(points=batch),
@@ -978,8 +994,11 @@ class FeedbackLoop:
 
             # Check for promotion if both feedbacks are positive
             both_positive = (
-                (content_feedback == "positive" or existing_payload.get("content_feedback") == "positive") and
-                (form_feedback == "positive" or existing_payload.get("form_feedback") == "positive")
+                content_feedback == "positive"
+                or existing_payload.get("content_feedback") == "positive"
+            ) and (
+                form_feedback == "positive"
+                or existing_payload.get("form_feedback") == "positive"
             )
             if both_positive:
                 # Refresh point payload for promotion check
@@ -1276,7 +1295,8 @@ class FeedbackLoop:
                             payload={
                                 "example_params": existing_examples,
                                 "last_enriched": datetime.now().isoformat(),
-                                "enrichment_count": payload.get("enrichment_count", 0) + 1,
+                                "enrichment_count": payload.get("enrichment_count", 0)
+                                + 1,
                             },
                             points=[point_id],
                         )
@@ -1682,9 +1702,14 @@ class FeedbackLoop:
                 )
                 # Also apply form-based demotion if we have relationship vector
                 negative_form_count = 0
-                if relationship_vector and relationship_vector != [0.0] * RELATIONSHIPS_DIM:
-                    class_results, negative_form_count = self._apply_negative_demotion_form(
-                        class_results, relationship_vector, limit
+                if (
+                    relationship_vector
+                    and relationship_vector != [0.0] * RELATIONSHIPS_DIM
+                ):
+                    class_results, negative_form_count = (
+                        self._apply_negative_demotion_form(
+                            class_results, relationship_vector, limit
+                        )
                     )
 
                 logger.info(
@@ -1748,7 +1773,9 @@ class FeedbackLoop:
             from qdrant_client import models
 
             # Determine feedback field based on type
-            feedback_field = "content_feedback" if feedback_type == "content" else "feedback"
+            feedback_field = (
+                "content_feedback" if feedback_type == "content" else "feedback"
+            )
 
             # Find negative patterns similar to this description
             negative_results = client.query_points(
@@ -1950,7 +1977,9 @@ class FeedbackLoop:
             return [], []
 
         # Determine which feedback field to check
-        feedback_field = "content_feedback" if feedback_type == "content" else "form_feedback"
+        feedback_field = (
+            "content_feedback" if feedback_type == "content" else "form_feedback"
+        )
 
         positive_ids = []
         negative_ids = []
@@ -2071,10 +2100,7 @@ class FeedbackLoop:
                 f"(+{len(positive_ids)}/-{len(negative_ids)} examples)"
             )
 
-            return [
-                {"id": p.id, "score": p.score, **p.payload}
-                for p in results
-            ]
+            return [{"id": p.id, "score": p.score, **p.payload} for p in results]
 
         except Exception as e:
             logger.error(f"Recommend with feedback failed: {e}")
@@ -2166,7 +2192,9 @@ class FeedbackLoop:
                     {"id": p.id, "score": p.score, **(p.payload or {})}
                     for p in content_query_results.points
                 ]
-                logger.info(f"✅ Content recommend returned {len(content_results)} patterns")
+                logger.info(
+                    f"✅ Content recommend returned {len(content_results)} patterns"
+                )
 
             # =========================================================
             # FORM FEEDBACK: Query using relationships vector
@@ -2210,13 +2238,17 @@ class FeedbackLoop:
 
             # If no feedback examples found, fall back to vector search
             if not content_results and not form_results:
-                logger.info("📝 No feedback examples found, falling back to vector search")
+                logger.info(
+                    "📝 No feedback examples found, falling back to vector search"
+                )
                 return self._fallback_vector_search(description, component_paths, limit)
 
             return content_results, form_results
 
         except Exception as e:
-            logger.error(f"❌ Recommend query failed: {e}, falling back to vector search")
+            logger.error(
+                f"❌ Recommend query failed: {e}, falling back to vector search"
+            )
             return self._fallback_vector_search(description, component_paths, limit)
 
     def _fallback_vector_search(
@@ -2265,7 +2297,9 @@ class FeedbackLoop:
                 ]
 
             # Search relationships vector
-            relationship_vector = self._embed_relationships(component_paths or [], description)
+            relationship_vector = self._embed_relationships(
+                component_paths or [], description
+            )
             if relationship_vector and relationship_vector != [0.0] * RELATIONSHIPS_DIM:
                 form_query = client.query_points(
                     collection_name=COLLECTION_NAME,
@@ -2422,7 +2456,7 @@ class FeedbackLoop:
             return {
                 "content": {"positive_count": 0, "negative_count": 0},
                 "form": {"positive_count": 0, "negative_count": 0},
-                "error": "No client"
+                "error": "No client",
             }
 
         try:
@@ -2465,16 +2499,16 @@ class FeedbackLoop:
                             ]
                         ),
                     )
-                    stats[feedback_category][f"{feedback_value}_count"] = count_result.count
+                    stats[feedback_category][f"{feedback_value}_count"] = (
+                        count_result.count
+                    )
 
             # Calculate legacy totals (max of content/form for each)
             stats["positive_count"] = max(
-                stats["content"]["positive_count"],
-                stats["form"]["positive_count"]
+                stats["content"]["positive_count"], stats["form"]["positive_count"]
             )
             stats["negative_count"] = max(
-                stats["content"]["negative_count"],
-                stats["form"]["negative_count"]
+                stats["content"]["negative_count"], stats["form"]["negative_count"]
             )
 
             # If description provided, find similar patterns for both content and form
@@ -2491,7 +2525,9 @@ class FeedbackLoop:
                                 must=[
                                     models.FieldCondition(
                                         key="type",
-                                        match=models.MatchValue(value="instance_pattern"),
+                                        match=models.MatchValue(
+                                            value="instance_pattern"
+                                        ),
                                     ),
                                     models.FieldCondition(
                                         key="content_feedback",
@@ -2505,14 +2541,19 @@ class FeedbackLoop:
                         stats["content"][f"{feedback_value}_samples"] = [
                             {
                                 "score": p.score,
-                                "description": p.payload.get("card_description", "")[:100],
+                                "description": p.payload.get("card_description", "")[
+                                    :100
+                                ],
                             }
                             for p in results.points
                         ]
 
                 # Form samples (using relationships vector)
                 relationship_vector = self._embed_relationships([], description)
-                if relationship_vector and relationship_vector != [0.0] * RELATIONSHIPS_DIM:
+                if (
+                    relationship_vector
+                    and relationship_vector != [0.0] * RELATIONSHIPS_DIM
+                ):
                     for feedback_value in ["positive", "negative"]:
                         results = client.query_points(
                             collection_name=COLLECTION_NAME,
@@ -2522,7 +2563,9 @@ class FeedbackLoop:
                                 must=[
                                     models.FieldCondition(
                                         key="type",
-                                        match=models.MatchValue(value="instance_pattern"),
+                                        match=models.MatchValue(
+                                            value="instance_pattern"
+                                        ),
                                     ),
                                     models.FieldCondition(
                                         key="form_feedback",
@@ -2536,7 +2579,9 @@ class FeedbackLoop:
                         stats["form"][f"{feedback_value}_samples"] = [
                             {
                                 "score": p.score,
-                                "description": p.payload.get("card_description", "")[:100],
+                                "description": p.payload.get("card_description", "")[
+                                    :100
+                                ],
                                 "structure": p.payload.get("structure_description", ""),
                             }
                             for p in results.points
@@ -2554,7 +2599,7 @@ class FeedbackLoop:
             return {
                 "content": {"positive_count": 0, "negative_count": 0},
                 "form": {"positive_count": 0, "negative_count": 0},
-                "error": str(e)
+                "error": str(e),
             }
 
 

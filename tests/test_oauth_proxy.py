@@ -73,15 +73,15 @@ def test_oauth_proxy_registration():
         print(f"   Temp Client Secret: {'*' * 10} (present)")
 
         # Verify temporary credentials are different from real ones
-        assert (
-            temp_client_id != real_client_id
-        ), "❌ ERROR: Temporary client ID is same as real!"
-        assert (
-            temp_client_secret != real_client_secret
-        ), "❌ ERROR: Temporary secret is same as real!"
-        assert temp_client_id.startswith(
-            "mcp_"
-        ), "❌ ERROR: Temp client ID should start with 'mcp_'"
+        assert temp_client_id != real_client_id, (
+            "❌ ERROR: Temporary client ID is same as real!"
+        )
+        assert temp_client_secret != real_client_secret, (
+            "❌ ERROR: Temporary secret is same as real!"
+        )
+        assert temp_client_id.startswith("mcp_"), (
+            "❌ ERROR: Temp client ID should start with 'mcp_'"
+        )
 
         print("   ✅ Verified: Temporary credentials are different from real ones")
         print("   ✅ Verified: Real credentials are NOT exposed to MCP client")
@@ -100,12 +100,12 @@ def test_oauth_proxy_registration():
             print(f"   Mapped Real ID: {mapped_real_id[:20]}...")
 
             # Verify mapping is correct
-            assert (
-                mapped_real_id == real_client_id
-            ), "❌ ERROR: Mapped ID doesn't match real ID"
-            assert (
-                mapped_real_secret == real_client_secret
-            ), "❌ ERROR: Mapped secret doesn't match"
+            assert mapped_real_id == real_client_id, (
+                "❌ ERROR: Mapped ID doesn't match real ID"
+            )
+            assert mapped_real_secret == real_client_secret, (
+                "❌ ERROR: Mapped secret doesn't match"
+            )
             print("   ✅ Verified: Mapping returns correct real credentials")
         else:
             print("   ❌ Failed to map temporary credentials")
@@ -133,9 +133,9 @@ def test_oauth_proxy_registration():
 
         proxy_client = oauth_proxy.get_proxy_client(temp_client_id)
         assert proxy_client is not None, "❌ ERROR: Should retrieve proxy client"
-        assert (
-            proxy_client.temp_client_id == temp_client_id
-        ), "❌ ERROR: Wrong client retrieved"
+        assert proxy_client.temp_client_id == temp_client_id, (
+            "❌ ERROR: Wrong client retrieved"
+        )
         print("   ✅ Successfully retrieved proxy client info")
 
         # Test deletion with valid token
@@ -276,9 +276,9 @@ async def test_oauth_proxy_server_integration():
             async with session.get(
                 f"{base_url}/.well-known/oauth-protected-resource"
             ) as resp:
-                assert (
-                    resp.status == 200
-                ), f"Failed to access protected resource endpoint: {resp.status}"
+                assert resp.status == 200, (
+                    f"Failed to access protected resource endpoint: {resp.status}"
+                )
                 data = await resp.json()
                 assert "authorization_servers" in data
                 assert "scopes_supported" in data
@@ -289,9 +289,9 @@ async def test_oauth_proxy_server_integration():
             async with session.get(
                 f"{base_url}/.well-known/oauth-authorization-server"
             ) as resp:
-                assert (
-                    resp.status == 200
-                ), f"Failed to access auth server endpoint: {resp.status}"
+                assert resp.status == 200, (
+                    f"Failed to access auth server endpoint: {resp.status}"
+                )
                 data = await resp.json()
                 assert data.get("issuer") == "https://accounts.google.com"
                 assert data.get("token_endpoint") == f"{base_url}/oauth/token"
@@ -306,9 +306,9 @@ async def test_oauth_proxy_server_integration():
             async with session.get(
                 f"{base_url}/.well-known/openid-configuration/mcp"
             ) as resp:
-                assert (
-                    resp.status == 200
-                ), f"Failed to access MCP OpenID config: {resp.status}"
+                assert resp.status == 200, (
+                    f"Failed to access MCP OpenID config: {resp.status}"
+                )
                 data = await resp.json()
                 assert data.get("token_endpoint") == f"{base_url}/oauth/token"
                 print("   ✅ MCP OpenID configuration accessible")
@@ -339,9 +339,9 @@ async def test_oauth_proxy_server_integration():
 
                 assert temp_client_id, "No client_id returned"
                 assert temp_client_secret, "No client_secret returned"
-                assert temp_client_id.startswith(
-                    "mcp_"
-                ), f"Client ID should be proxy ID: {temp_client_id}"
+                assert temp_client_id.startswith("mcp_"), (
+                    f"Client ID should be proxy ID: {temp_client_id}"
+                )
 
                 print("   ✅ Client registered with proxy credentials")
                 print(f"   ✅ Temp Client ID: {temp_client_id}")
@@ -366,12 +366,12 @@ async def test_oauth_proxy_server_integration():
             real_client_secret = oauth_config.get("client_secret")
 
             # Verify temp credentials are different from real
-            assert (
-                temp_client_id != real_client_id
-            ), "❌ SECURITY BREACH: Temp ID matches real!"
-            assert (
-                temp_client_secret != real_client_secret
-            ), "❌ SECURITY BREACH: Temp secret matches real!"
+            assert temp_client_id != real_client_id, (
+                "❌ SECURITY BREACH: Temp ID matches real!"
+            )
+            assert temp_client_secret != real_client_secret, (
+                "❌ SECURITY BREACH: Temp secret matches real!"
+            )
             print("   ✅ Temporary credentials are different from real")
             print("   ✅ Real Google credentials are NOT exposed")
 
@@ -445,9 +445,9 @@ def test_oauth_proxy_lifecycle():
         print("   ✅ OAuth Proxy singleton exists")
 
         # Check proxy is ready
-        assert hasattr(
-            oauth_proxy, "_proxy_clients"
-        ), "Proxy should have client registry"
+        assert hasattr(oauth_proxy, "_proxy_clients"), (
+            "Proxy should have client registry"
+        )
         print("   ✅ OAuth Proxy has client registry")
 
         # Get initial stats
@@ -458,9 +458,9 @@ def test_oauth_proxy_lifecycle():
         print("\n2. Checking OAuth endpoint setup in server.py:")
 
         # Verify endpoints are set up
-        assert hasattr(
-            server.mcp, "custom_route"
-        ), "FastMCP should support custom routes"
+        assert hasattr(server.mcp, "custom_route"), (
+            "FastMCP should support custom routes"
+        )
         print("   ✅ FastMCP custom routes available")
 
         # The actual route registration happens when setup_oauth_endpoints_fastmcp is called

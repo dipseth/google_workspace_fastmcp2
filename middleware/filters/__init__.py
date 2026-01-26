@@ -33,27 +33,25 @@ from .date_filters import format_date_filter, strftime_filter
 from .drive_filters import format_drive_image_url_filter
 from .json_filters import json_pretty_filter
 from .styling_filters import (
+    COLOR_SCHEMES,
+    SEMANTIC_COLORS,
     # Filter registry
     STYLING_FILTERS,
-    SEMANTIC_COLORS,
-    COLOR_SCHEMES,
-
-    # Core filters
-    color_filter,
-    price_filter,
-    badge_filter,
-    status_icon_filter,
-    bold_filter,
-    italic_filter,
-    strike_filter,
-    link_filter,
-    get_color,
-
     # Color cycling/component styling
     ColorCycler,
     ComponentStyler,
-    create_styler_for_template,
     alternating_color_filter,
+    badge_filter,
+    bold_filter,
+    # Core filters
+    color_filter,
+    create_styler_for_template,
+    get_color,
+    italic_filter,
+    link_filter,
+    price_filter,
+    status_icon_filter,
+    strike_filter,
 )
 
 
@@ -79,17 +77,13 @@ def register_all_filters(jinja_env):
             "safe_get": safe_get_filter,
             "map_list": map_list_filter,
             "map_attr": map_attribute_filter,
-
             # Date filters
             "format_date": format_date_filter,
             "strftime": strftime_filter,
-
             # JSON filters
             "json_pretty": json_pretty_filter,
-
             # Drive filters
             "format_drive_image_url": format_drive_image_url_filter,
-
             # Styling filters (Jinja2/Nunjucks compatible)
             **STYLING_FILTERS,
         }
@@ -99,23 +93,18 @@ def register_all_filters(jinja_env):
 __all__ = [
     # Registration
     "register_all_filters",
-
     # Date filters
     "format_date_filter",
     "strftime_filter",
-
     # Data filters
     "extract_filter",
     "safe_get_filter",
     "map_list_filter",
     "map_attribute_filter",
-
     # JSON filters
     "json_pretty_filter",
-
     # Drive filters
     "format_drive_image_url_filter",
-
     # Styling filters (Jinja2/Nunjucks compatible)
     "STYLING_FILTERS",
     "SEMANTIC_COLORS",
@@ -129,7 +118,6 @@ __all__ = [
     "strike_filter",
     "link_filter",
     "get_color",
-
     # Color cycling/component styling
     "ColorCycler",
     "ComponentStyler",

@@ -24,10 +24,10 @@ Usage:
     text = validator.get_enriched_relationship_text("Section")
 """
 
-import re
 import logging
-from typing import Dict, List, Optional, Tuple, Set, Any, TYPE_CHECKING
+import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper
@@ -38,16 +38,20 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ValidationResult:
     """Result of structure validation."""
+
     is_valid: bool
     structure: str
     issues: List[str] = field(default_factory=list)
     suggestions: List[str] = field(default_factory=list)
-    resolved_components: Dict[str, str] = field(default_factory=dict)  # symbol → component name
+    resolved_components: Dict[str, str] = field(
+        default_factory=dict
+    )  # symbol → component name
 
 
 @dataclass
 class ComponentSlot:
     """A slot in a structure that can accept inputs."""
+
     component_name: str
     symbol: str
     field_name: Optional[str] = None
@@ -66,31 +70,26 @@ INPUT_PATTERNS = {
     "title": ["DecoratedText", "CardHeader"],
     "subtitle": ["DecoratedText", "CardHeader"],
     "description": ["TextParagraph", "DecoratedText"],
-
     # Media → Image or Icon
     "image": ["Image"],
     "image_url": ["Image"],
     "icon": ["Icon"],
     "icon_name": ["Icon"],
-
     # Interactive → Button
     "button": ["Button", "ButtonList"],
     "button_text": ["Button"],
     "buttons": ["ButtonList"],
     "action": ["Button", "OnClick"],
     "url": ["OpenLink", "Button"],
-
     # Selection → SelectionInput
     "select": ["SelectionInput"],
     "options": ["SelectionInput"],
     "dropdown": ["SelectionInput"],
     "checkbox": ["SelectionInput"],
-
     # Grid → Grid/GridItem
     "grid": ["Grid"],
     "items": ["Grid", "GridItem"],
     "columns": ["Columns"],
-
     # Date/Time
     "date": ["DateTimePicker"],
     "time": ["DateTimePicker"],
@@ -99,17 +98,25 @@ INPUT_PATTERNS = {
 
 # Components that can be direct children of Section (Widget subtypes)
 WIDGET_TYPES = {
-    "DecoratedText", "TextParagraph", "Image", "ButtonList", "Grid",
-    "SelectionInput", "DateTimePicker", "Divider", "TextInput",
-    "Columns", "ChipList",
+    "DecoratedText",
+    "TextParagraph",
+    "Image",
+    "ButtonList",
+    "Grid",
+    "SelectionInput",
+    "DateTimePicker",
+    "Divider",
+    "TextInput",
+    "Columns",
+    "ChipList",
 }
 
 # Components that need a wrapper
 NEEDS_WRAPPER = {
     "Button": "ButtonList",  # Button needs to be in ButtonList
-    "Chip": "ChipList",      # Chip needs to be in ChipList
-    "GridItem": "Grid",      # GridItem needs to be in Grid
-    "Column": "Columns",     # Column needs to be in Columns
+    "Chip": "ChipList",  # Chip needs to be in ChipList
+    "GridItem": "Grid",  # GridItem needs to be in Grid
+    "Column": "Columns",  # Column needs to be in Columns
 }
 
 
@@ -143,16 +150,21 @@ class StructureValidator:
         if self._symbols is None:
             try:
                 # Use shared symbols from structure_dsl for consistency
-                from gchat.structure_dsl import ensure_initialized, COMPONENT_TO_SYMBOL
+                from gchat.structure_dsl import COMPONENT_TO_SYMBOL, ensure_initialized
+
                 ensure_initialized()
                 if COMPONENT_TO_SYMBOL:
                     self._symbols = COMPONENT_TO_SYMBOL.copy()
                 else:
                     # Fallback to ModuleWrapper-generated symbols
-                    self._symbols = self.wrapper.generate_component_symbols(use_prefix=False)
+                    self._symbols = self.wrapper.generate_component_symbols(
+                        use_prefix=False
+                    )
             except ImportError:
                 # structure_dsl not available, use ModuleWrapper symbols
-                self._symbols = self.wrapper.generate_component_symbols(use_prefix=False)
+                self._symbols = self.wrapper.generate_component_symbols(
+                    use_prefix=False
+                )
         return self._symbols
 
     @property
@@ -170,7 +182,13 @@ class StructureValidator:
             # Flatten to just child class names
             self._relationships = {}
             for parent, children in raw_rels.items():
-                child_names = list(set(c.get("child_class", "") for c in children if c.get("child_class")))
+                child_names = list(
+                    set(
+                        c.get("child_class", "")
+                        for c in children
+                        if c.get("child_class")
+                    )
+                )
                 if child_names:
                     self._relationships[parent] = child_names
         return self._relationships
@@ -273,13 +291,13 @@ class StructureValidator:
         level = 0
 
         for char in s:
-            if char == '[':
+            if char == "[":
                 level += 1
                 current += char
-            elif char == ']':
+            elif char == "]":
                 level -= 1
                 current += char
-            elif char == ',' and level == 0:
+            elif char == "," and level == 0:
                 parts.append(current.strip())
                 current = ""
             else:
@@ -351,9 +369,7 @@ class StructureValidator:
                     pass  # Valid - Widget types can go in Section/Column
                 elif name in NEEDS_WRAPPER:
                     wrapper = NEEDS_WRAPPER[name]
-                    result.issues.append(
-                        f"{name} should be wrapped in {wrapper}"
-                    )
+                    result.issues.append(f"{name} should be wrapped in {wrapper}")
                     result.suggestions.append(
                         f"Use {self.symbols.get(wrapper, wrapper)}[{symbol}] instead of {symbol}"
                     )
@@ -438,11 +454,15 @@ class StructureValidator:
             # Check if this component has sub-components
             if child == "ButtonList" and "buttons" in inputs:
                 # Count buttons
-                btn_count = len(inputs["buttons"]) if isinstance(inputs["buttons"], list) else 1
+                btn_count = (
+                    len(inputs["buttons"]) if isinstance(inputs["buttons"], list) else 1
+                )
                 btn_sym = self.symbols.get("Button", "ᵬ")
                 child_syms.append(f"{sym}[{btn_sym}×{btn_count}]")
             elif child == "Grid" and "items" in inputs:
-                item_count = len(inputs["items"]) if isinstance(inputs["items"], list) else 1
+                item_count = (
+                    len(inputs["items"]) if isinstance(inputs["items"], list) else 1
+                )
                 item_sym = self.symbols.get("GridItem", "ǵ")
                 child_syms.append(f"{sym}[{item_sym}×{item_count}]")
             else:
@@ -545,7 +565,9 @@ class StructureValidator:
         enriched = {}
 
         for component_name in self.relationships.keys():
-            enriched[component_name] = self.get_enriched_relationship_text(component_name)
+            enriched[component_name] = self.get_enriched_relationship_text(
+                component_name
+            )
 
         return enriched
 
@@ -584,7 +606,7 @@ class StructureValidator:
                     structure = structure.replace(placeholder, str(value))
 
         # Remove any remaining unresolved placeholders (default to 1)
-        structure = re.sub(r'\{[^}]+\}', '1', structure)
+        structure = re.sub(r"\{[^}]+\}", "1", structure)
 
         return structure, inputs
 
@@ -592,6 +614,7 @@ class StructureValidator:
 # =============================================================================
 # FACTORY FUNCTION
 # =============================================================================
+
 
 def create_validator(wrapper: "ModuleWrapper") -> StructureValidator:
     """

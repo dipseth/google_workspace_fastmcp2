@@ -405,9 +405,7 @@ class SessionToolFilteringMiddleware(Middleware):
         """
         if not self.mcp_instance:
             if self.enable_debug:
-                logger.debug(
-                    "Cannot refresh instructions - no MCP instance available"
-                )
+                logger.debug("Cannot refresh instructions - no MCP instance available")
             return
 
         try:
@@ -494,8 +492,7 @@ class SessionToolFilteringMiddleware(Middleware):
             service_tools = get_tools_for_services(all_tools, enabled_services)
             if self.enable_debug:
                 logger.debug(
-                    f"Tools for services {enabled_services}: "
-                    f"{sorted(service_tools)}"
+                    f"Tools for services {enabled_services}: {sorted(service_tools)}"
                 )
 
         # Combine protected tools with enabled service tools

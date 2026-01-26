@@ -434,7 +434,6 @@ class EnhancedTemplateMiddleware(Middleware):
             and isinstance(prompt_result.content.text, str)
             and context.fastmcp_context
         ):
-
             try:
                 original_text = prompt_result.content.text
 
@@ -450,12 +449,13 @@ class EnhancedTemplateMiddleware(Middleware):
                         )
 
                     # Apply template resolution using modular template processor
-                    resolved_text, error = (
-                        await self.template_processor.resolve_string_templates(
-                            original_text,
-                            context.fastmcp_context,
-                            f"prompt.{prompt_name}",
-                        )
+                    (
+                        resolved_text,
+                        error,
+                    ) = await self.template_processor.resolve_string_templates(
+                        original_text,
+                        context.fastmcp_context,
+                        f"prompt.{prompt_name}",
                     )
 
                     if error:
@@ -602,12 +602,13 @@ class EnhancedTemplateMiddleware(Middleware):
                 logger.info(f"📄 Loaded template file: {selected['relative_path']}")
 
             # Use modular template processor for rendering
-            rendered_content, error = (
-                await self.template_processor.resolve_string_templates(
-                    template_content,
-                    context.fastmcp_context,
-                    f"template_file_{selected['name']}",
-                )
+            (
+                rendered_content,
+                error,
+            ) = await self.template_processor.resolve_string_templates(
+                template_content,
+                context.fastmcp_context,
+                f"template_file_{selected['name']}",
             )
 
             if error:

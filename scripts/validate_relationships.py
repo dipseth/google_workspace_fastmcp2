@@ -26,13 +26,26 @@ import os
 import random
 import sys
 import time
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
+
 import requests
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, get_args, get_origin, get_type_hints
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from config.enhanced_logging import setup_logger
@@ -42,12 +55,12 @@ from middleware.filters.styling_filters import (
     COLOR_SCHEMES,
     SEMANTIC_COLORS,
     STYLING_FILTERS,
-    ComponentStyler,
     ColorCycler,
-    color_filter,
-    price_filter,
+    ComponentStyler,
     badge_filter,
     bold_filter,
+    color_filter,
+    price_filter,
     strike_filter,
 )
 
@@ -61,6 +74,7 @@ logger = setup_logger()
 # JINJA TEMPLATING SETUP
 # =========================================================================
 
+
 def get_jinja_environment():
     """Get configured Jinja environment with all styling filters."""
     jinja_mgr = JinjaEnvironmentManager()
@@ -71,6 +85,7 @@ def get_jinja_environment():
 
 # Global Jinja environment (lazy-loaded)
 _JINJA_ENV = None
+
 
 def jinja_env():
     """Get or create the global Jinja environment."""
@@ -109,9 +124,9 @@ CARD_THEMES = {
         "name": "System Status",
         "templates": {
             "title": '{{ title | color("#1a73e8") | bold }}',
-            "success": '{{ text | success_text }}',
-            "warning": '{{ text | warning_text }}',
-            "error": '{{ text | error_text }}',
+            "success": "{{ text | success_text }}",
+            "warning": "{{ text | warning_text }}",
+            "error": "{{ text | error_text }}",
             "metric": '{{ label | muted_text }}: {{ value | color("#34a853") | bold }}',
         },
         "sample_data": {
@@ -120,16 +135,16 @@ CARD_THEMES = {
                 {"text": "API: Online", "type": "success"},
                 {"text": "Database: Connected", "type": "success"},
                 {"text": "Cache: High Latency", "type": "warning"},
-            ]
-        }
+            ],
+        },
     },
     "pricing": {
         "name": "Product Pricing",
         "templates": {
-            "title": '{{ title | bold }}',
-            "price": '{{ amount | price(currency) }}',
+            "title": "{{ title | bold }}",
+            "price": "{{ amount | price(currency) }}",
             "sale_price": '{{ "SALE" | badge("#ea4335") }} {{ amount | price(currency) }}',
-            "original": 'Was: {{ amount | price(currency) | strike }}',
+            "original": "Was: {{ amount | price(currency) | strike }}",
             "savings": '{{ text | color("#34a853") | bold }}',
         },
         "sample_data": {
@@ -137,12 +152,12 @@ CARD_THEMES = {
             "currency": "USD",
             "original_price": 149.99,
             "sale_price": 99.99,
-        }
+        },
     },
     "build": {
         "name": "Build Status",
         "templates": {
-            "title": '{{ name | bold }} #{{ number }}',
+            "title": "{{ name | bold }} #{{ number }}",
             "passed": '{{ "PASSED" | success_text }}',
             "failed": '{{ "FAILED" | error_text }}',
             "duration": '{{ "Duration" | muted_text }}: {{ time }}',
@@ -156,13 +171,13 @@ CARD_THEMES = {
             "passed": random.randint(90, 150),
             "total": 150,
             "percent": round(random.uniform(85, 99), 1),
-        }
+        },
     },
     "alert": {
         "name": "Alert Notification",
         "templates": {
-            "title": '{{ severity | badge(color) }} {{ title }}',
-            "message": '{{ message }}',
+            "title": "{{ severity | badge(color) }} {{ title }}",
+            "message": "{{ message }}",
             "timestamp": '{{ "Time" | muted_text }}: {{ time }}',
             "source": '{{ "Source" | muted_text }}: {{ source | color("#1a73e8") }}',
         },
@@ -173,7 +188,7 @@ CARD_THEMES = {
             "message": "Memory usage exceeded 85% threshold",
             "time": "2 minutes ago",
             "source": "monitoring-service",
-        }
+        },
     },
     "metrics": {
         "name": "Dashboard Metrics",
@@ -181,8 +196,8 @@ CARD_THEMES = {
             "title": '{{ title | color("#1a73e8") | bold }}',
             "metric_up": '{{ label }}: {{ value | color("#34a853") | bold }} {{ "↑" | color("#34a853") }}',
             "metric_down": '{{ label }}: {{ value | color("#ea4335") | bold }} {{ "↓" | color("#ea4335") }}',
-            "metric_neutral": '{{ label }}: {{ value | bold }}',
-            "percentage": '{{ label }}: {{ value | color(color) }}%',
+            "metric_neutral": "{{ label }}: {{ value | bold }}",
+            "percentage": "{{ label }}: {{ value | color(color) }}%",
         },
         "sample_data": {
             "title": "Performance Metrics",
@@ -190,8 +205,8 @@ CARD_THEMES = {
                 {"label": "Requests/sec", "value": "2,450", "trend": "up"},
                 {"label": "Latency", "value": "45ms", "trend": "down"},
                 {"label": "Error Rate", "value": "0.02%", "trend": "neutral"},
-            ]
-        }
+            ],
+        },
     },
 }
 
@@ -221,17 +236,19 @@ def get_random_styled_title() -> str:
     colors = ["#1a73e8", "#34a853", "#8430ce", "#00acc1"]
     title = random.choice(titles)
     color = random.choice(colors)
-    return render_jinja_template('{{ title | color(color) | bold }}', title=title, color=color)
+    return render_jinja_template(
+        "{{ title | color(color) | bold }}", title=title, color=color
+    )
 
 
 def get_random_styled_text() -> str:
     """Generate random styled sample text using Jinja templates."""
     templates = [
-        '{{ text | success_text }}',
+        "{{ text | success_text }}",
         '{{ text | color("#1a73e8") }}',
-        '{{ text | muted_text }}',
-        '{{ text | warning_text }}',
-        '{{ text | bold }}',
+        "{{ text | muted_text }}",
+        "{{ text | warning_text }}",
+        "{{ text | bold }}",
     ]
     texts = ["Active", "Connected", "Running", "Healthy", "Online", "Ready"]
     template = random.choice(templates)
@@ -250,9 +267,12 @@ def get_random_price_text() -> str:
     if random.random() > 0.5:
         return render_jinja_template(
             '{{ "SALE" | badge("#ea4335") }} {{ price | price(currency) }}',
-            price=price, currency=currency
+            price=price,
+            currency=currency,
         )
-    return render_jinja_template('{{ price | price(currency) }}', price=price, currency=currency)
+    return render_jinja_template(
+        "{{ price | price(currency) }}", price=price, currency=currency
+    )
 
 
 def get_random_status_text() -> str:
@@ -262,25 +282,39 @@ def get_random_status_text() -> str:
         ("Offline", "error_text"),
         ("Degraded", "warning_text"),
         ("Maintenance", "muted_text"),
-        ("Starting", "color(\"#1a73e8\")"),
+        ("Starting", 'color("#1a73e8")'),
     ]
     status, filter_name = random.choice(statuses)
-    return render_jinja_template(f'{{{{ status | {filter_name} }}}}', status=status)
+    return render_jinja_template(f"{{{{ status | {filter_name} }}}}", status=status)
 
 
 def get_random_metric_text() -> str:
     """Generate random metric text with values."""
     metrics = [
-        ("CPU", f"{random.randint(10, 95)}%", "#34a853" if random.random() > 0.3 else "#ea4335"),
-        ("Memory", f"{random.randint(20, 90)}%", "#34a853" if random.random() > 0.3 else "#fbbc05"),
+        (
+            "CPU",
+            f"{random.randint(10, 95)}%",
+            "#34a853" if random.random() > 0.3 else "#ea4335",
+        ),
+        (
+            "Memory",
+            f"{random.randint(20, 90)}%",
+            "#34a853" if random.random() > 0.3 else "#fbbc05",
+        ),
         ("Disk", f"{random.randint(30, 85)}%", "#34a853"),
         ("Requests", f"{random.randint(100, 5000)}/s", "#1a73e8"),
-        ("Latency", f"{random.randint(5, 200)}ms", "#34a853" if random.random() > 0.5 else "#fbbc05"),
+        (
+            "Latency",
+            f"{random.randint(5, 200)}ms",
+            "#34a853" if random.random() > 0.5 else "#fbbc05",
+        ),
     ]
     label, value, color = random.choice(metrics)
     return render_jinja_template(
-        '{{ label | muted_text }}: {{ value | color(color) | bold }}',
-        label=label, value=value, color=color
+        "{{ label | muted_text }}: {{ value | color(color) | bold }}",
+        label=label,
+        value=value,
+        color=color,
     )
 
 
@@ -312,15 +346,26 @@ def get_styled_minimal_values() -> Dict[str, Any]:
         "int": 1,
         "float": 1.0,
         "bool": True,
-        "image_url": random.choice(VALID_IMAGE_URLS) if 'VALID_IMAGE_URLS' in dir() else "https://example.com/image.png",
+        "image_url": random.choice(VALID_IMAGE_URLS)
+        if "VALID_IMAGE_URLS" in dir()
+        else "https://example.com/image.png",
         "url": "https://example.com",
-        "text": render_jinja_template('{{ text | color(color) }}', text="Sample text", color=cycler.next()),
-        "title": render_jinja_template('{{ title | color(color) | bold }}', title="Sample title", color=cycler.next()),
+        "text": render_jinja_template(
+            "{{ text | color(color) }}", text="Sample text", color=cycler.next()
+        ),
+        "title": render_jinja_template(
+            "{{ title | color(color) | bold }}",
+            title="Sample title",
+            color=cycler.next(),
+        ),
         "alt_text": "Alt text",
         "name": "test_name",
-        "label": render_jinja_template('{{ label | color(color) }}', label="Label", color=cycler.next()),
+        "label": render_jinja_template(
+            "{{ label | color(color) }}", label="Label", color=cycler.next()
+        ),
         "action_method_name": "test_action",
     }
+
 
 # Test webhook from environment
 TEST_WEBHOOK = os.getenv("TEST_CHAT_WEBHOOK")
@@ -341,7 +386,10 @@ VALID_IMAGE_URLS = [
 # WEBHOOK VALIDATION (Real API testing)
 # =========================================================================
 
-def send_card_to_webhook(card_json: Dict[str, Any], webhook_url: str = None) -> Tuple[bool, str]:
+
+def send_card_to_webhook(
+    card_json: Dict[str, Any], webhook_url: str = None
+) -> Tuple[bool, str]:
     """
     Send a card to Google Chat webhook to validate it works with the real API.
 
@@ -355,26 +403,27 @@ def send_card_to_webhook(card_json: Dict[str, Any], webhook_url: str = None) -> 
     if "cards_v2" not in card_json:
         card_id = f"test-{int(time.time())}-{random.randint(1000, 9999)}"
         payload = {
-            "cards_v2": [{
-                "cardId": card_id,
-                "card": card_json if "card" not in card_json else card_json["card"]
-            }]
+            "cards_v2": [
+                {
+                    "cardId": card_id,
+                    "card": card_json if "card" not in card_json else card_json["card"],
+                }
+            ]
         }
     else:
         payload = card_json
 
     try:
         response = requests.post(
-            url,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=10
+            url, json=payload, headers={"Content-Type": "application/json"}, timeout=10
         )
 
         if response.status_code == 200:
             return True, ""
         else:
-            error_detail = response.text[:500] if response.text else f"HTTP {response.status_code}"
+            error_detail = (
+                response.text[:500] if response.text else f"HTTP {response.status_code}"
+            )
             return False, error_detail
 
     except requests.RequestException as e:
@@ -390,8 +439,8 @@ def convert_to_camel_case(data: Any) -> Any:
         result = {}
         for key, value in data.items():
             # Convert snake_case to camelCase
-            parts = key.split('_')
-            camel_key = parts[0] + ''.join(word.capitalize() for word in parts[1:])
+            parts = key.split("_")
+            camel_key = parts[0] + "".join(word.capitalize() for word in parts[1:])
             result[camel_key] = convert_to_camel_case(value)
         return result
     elif isinstance(data, list):
@@ -403,6 +452,7 @@ def convert_to_camel_case(data: Any) -> Any:
 # =========================================================================
 # RELATIONSHIP EXTRACTION (from prototype)
 # =========================================================================
+
 
 def is_dataclass_type(cls: type) -> bool:
     """Check if a class is a dataclass."""
@@ -471,18 +521,18 @@ def get_minimal_value(field_name: str, field_type: type) -> Any:
             return value
 
     # Fall back to type-based defaults
-    if field_type == str:
+    if field_type is str:
         return "test"
-    elif field_type == int:
+    elif field_type is int:
         return 1
-    elif field_type == float:
+    elif field_type is float:
         return 1.0
-    elif field_type == bool:
+    elif field_type is bool:
         return True
     elif is_dataclass_type(field_type):
         # Recursively create minimal instance
         return create_minimal_instance(field_type)
-    elif hasattr(field_type, '__members__'):  # Enum
+    elif hasattr(field_type, "__members__"):  # Enum
         # Return first enum member
         members = list(field_type.__members__.values())
         return members[0] if members else None
@@ -514,6 +564,7 @@ def create_minimal_instance(cls: type) -> Any:
 # RELATIONSHIP VALIDATION
 # =========================================================================
 
+
 class RelationshipValidator:
     """Validates component relationships by attempting to render them."""
 
@@ -527,6 +578,7 @@ class RelationshipValidator:
         """Lazy load the card_framework module."""
         if self._module is None:
             import importlib
+
             self._module = importlib.import_module("card_framework.v2")
         return self._module
 
@@ -535,6 +587,7 @@ class RelationshipValidator:
         if self._wrapper is None:
             try:
                 from adapters.module_wrapper import ModuleWrapper
+
                 self._wrapper = ModuleWrapper(
                     module_or_name="card_framework",
                     auto_initialize=True,
@@ -577,6 +630,7 @@ class RelationshipValidator:
         # Get from widgets submodule
         try:
             from card_framework.v2 import widgets
+
             for name in dir(widgets):
                 obj = getattr(widgets, name)
                 if is_dataclass_type(obj):
@@ -586,7 +640,9 @@ class RelationshipValidator:
 
         return classes
 
-    def _extract_relationships(self, cls: type, visited: Set[str] = None, depth: int = 0) -> List[Dict]:
+    def _extract_relationships(
+        self, cls: type, visited: Set[str] = None, depth: int = 0
+    ) -> List[Dict]:
         """Extract relationships from a class's type hints."""
         if visited is None:
             visited = set()
@@ -611,15 +667,17 @@ class RelationshipValidator:
 
             if is_component_type(unwrapped):
                 child_name = unwrapped.__name__
-                relationships.append({
-                    "parent_class": class_name,
-                    "parent_type": cls,
-                    "child_class": child_name,
-                    "child_type": unwrapped,
-                    "field_name": field_name,
-                    "is_optional": is_optional,
-                    "depth": depth + 1,
-                })
+                relationships.append(
+                    {
+                        "parent_class": class_name,
+                        "parent_type": cls,
+                        "child_class": child_name,
+                        "child_type": unwrapped,
+                        "field_name": field_name,
+                        "is_optional": is_optional,
+                        "depth": depth + 1,
+                    }
+                )
 
                 # Recurse into child
                 if is_dataclass_type(unwrapped):
@@ -680,9 +738,9 @@ class RelationshipValidator:
             parent_instance = parent_cls(**parent_kwargs)
 
             # Try to render
-            if hasattr(parent_instance, 'render'):
+            if hasattr(parent_instance, "render"):
                 rendered = parent_instance.render()
-            elif hasattr(parent_instance, 'to_dict'):
+            elif hasattr(parent_instance, "to_dict"):
                 rendered = parent_instance.to_dict()
             else:
                 rendered = dataclasses.asdict(parent_instance)
@@ -697,12 +755,16 @@ class RelationshipValidator:
             )
 
             if self.verbose:
-                logger.info(f"  ✅ {rel['parent_class']}.{field_name} -> {rel['child_class']}")
+                logger.info(
+                    f"  ✅ {rel['parent_class']}.{field_name} -> {rel['child_class']}"
+                )
 
         except Exception as e:
             result["error"] = str(e)
             if self.verbose:
-                logger.warning(f"  ❌ {rel['parent_class']}.{field_name} -> {rel['child_class']}: {e}")
+                logger.warning(
+                    f"  ❌ {rel['parent_class']}.{field_name} -> {rel['child_class']}: {e}"
+                )
 
         return result
 
@@ -753,7 +815,9 @@ class RelationshipValidator:
             "total": len(self.results),
             "successful": len(successful),
             "failed": len(failed),
-            "success_rate": len(successful) / len(self.results) * 100 if self.results else 0,
+            "success_rate": len(successful) / len(self.results) * 100
+            if self.results
+            else 0,
             "failed_relationships": [
                 {"parent": r["parent"], "child": r["child"], "error": r["error"]}
                 for r in failed
@@ -767,6 +831,7 @@ class RelationshipValidator:
 # FEEDBACK LOOP INTEGRATION
 # =========================================================================
 
+
 def store_validated_patterns(results: List[Dict], dry_run: bool = False) -> int:
     """Store validated relationships as positive form_feedback patterns."""
     if dry_run:
@@ -776,6 +841,7 @@ def store_validated_patterns(results: List[Dict], dry_run: bool = False) -> int:
 
     try:
         from gchat.feedback_loop import get_feedback_loop
+
         feedback_loop = get_feedback_loop()
 
         # Ensure collection is ready
@@ -816,7 +882,9 @@ def store_validated_patterns(results: List[Dict], dry_run: bool = False) -> int:
 
                 if point_id:
                     stored += 1
-                    logger.debug(f"Stored: {result['parent']}.{result['field']} -> {result['child']}")
+                    logger.debug(
+                        f"Stored: {result['parent']}.{result['field']} -> {result['child']}"
+                    )
 
             except Exception as e:
                 logger.warning(f"Failed to store pattern: {e}")
@@ -832,7 +900,12 @@ def store_validated_patterns(results: List[Dict], dry_run: bool = False) -> int:
 # COMPLEX NESTING VALIDATION
 # =========================================================================
 
-def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = False, use_styled_content: bool = True) -> List[Dict]:
+
+def validate_complex_nestings(
+    validator: RelationshipValidator,
+    verbose: bool = False,
+    use_styled_content: bool = True,
+) -> List[Dict]:
     """
     Validate complex multi-level nesting scenarios.
 
@@ -858,7 +931,9 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
     styler = ComponentStyler(scheme=scheme_name, target="gchat")
     logger.info(f"Using color scheme: {scheme_name}")
 
-    def styled_text(text: str, component_type: str = "default", bold: bool = False) -> str:
+    def styled_text(
+        text: str, component_type: str = "default", bold: bool = False
+    ) -> str:
         """Apply random styling to text if enabled."""
         if use_styled_content:
             return styler.auto_style(component_type, text, bold=bold)
@@ -874,38 +949,59 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
     complex_scenarios = []
 
     try:
+        from card_framework.v2 import Card, CardHeader, Section
         from card_framework.v2.widgets import (
-            Image, OnClick, OpenLink, Grid, GridItem,
-            DecoratedText, Button, Icon, ButtonList,
-            TextInput, SelectionInput, SelectionItem,
-            DateTimePicker, Columns, Column, ChipList, Chip,
+            Button,
+            ButtonList,
+            Chip,
+            ChipList,
+            Column,
+            Columns,
+            DateTimePicker,
+            DecoratedText,
+            Grid,
+            GridItem,
+            Icon,
+            Image,
+            OnClick,
+            OpenLink,
+            SelectionInput,
+            SelectionItem,
+            TextInput,
             TextParagraph,
         )
-        from card_framework.v2 import Section, Card, CardHeader
 
         # Scenario 1: Clickable Image
         try:
             onclick = OnClick(open_link=OpenLink(url="https://example.com"))
-            image = Image(image_url="https://example.com/img.png", on_click=onclick, alt_text="Test")
+            image = Image(
+                image_url="https://example.com/img.png",
+                on_click=onclick,
+                alt_text="Test",
+            )
             rendered = image.render()
 
-            complex_scenarios.append({
-                "scenario": "Clickable Image",
-                "components": ["Image", "OnClick", "OpenLink"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Image with clickable link action",
-                "color_scheme": scheme_name,
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Clickable Image",
+                    "components": ["Image", "OnClick", "OpenLink"],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Image with clickable link action",
+                    "color_scheme": scheme_name,
+                }
+            )
             if verbose:
                 logger.info("  ✅ Clickable Image")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "Clickable Image",
-                "components": ["Image", "OnClick", "OpenLink"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Clickable Image",
+                    "components": ["Image", "OnClick", "OpenLink"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ Clickable Image: {e}")
 
@@ -918,23 +1014,27 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             button = Button(text=button_text, icon=icon, on_click=onclick)
             rendered = button.render()
 
-            complex_scenarios.append({
-                "scenario": "Button with Icon",
-                "components": ["Button", "Icon", "OnClick", "OpenLink"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Button with icon and click action",
-                "color_scheme": scheme_name,
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Button with Icon",
+                    "components": ["Button", "Icon", "OnClick", "OpenLink"],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Button with icon and click action",
+                    "color_scheme": scheme_name,
+                }
+            )
             if verbose:
                 logger.info("  ✅ Button with Icon")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "Button with Icon",
-                "components": ["Button", "Icon", "OnClick", "OpenLink"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Button with Icon",
+                    "components": ["Button", "Icon", "OnClick", "OpenLink"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ Button with Icon: {e}")
 
@@ -948,23 +1048,27 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             text = DecoratedText(text=content_text, start_icon=icon, button=button)
             rendered = text.render()
 
-            complex_scenarios.append({
-                "scenario": "DecoratedText with Icon and Button",
-                "components": ["DecoratedText", "Icon", "Button"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Decorated text with leading icon and action button",
-                "color_scheme": scheme_name,
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "DecoratedText with Icon and Button",
+                    "components": ["DecoratedText", "Icon", "Button"],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Decorated text with leading icon and action button",
+                    "color_scheme": scheme_name,
+                }
+            )
             if verbose:
                 logger.info("  ✅ DecoratedText with Icon and Button")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "DecoratedText with Icon and Button",
-                "components": ["DecoratedText", "Icon", "Button"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "DecoratedText with Icon and Button",
+                    "components": ["DecoratedText", "Icon", "Button"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ DecoratedText with Icon and Button: {e}")
 
@@ -979,22 +1083,26 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             grid = Grid(title=grid_title, items=[item1, item2], on_click=onclick)
             rendered = grid.render()
 
-            complex_scenarios.append({
-                "scenario": "Grid with Clickable Items",
-                "components": ["Grid", "GridItem", "OnClick", "OpenLink"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Grid layout with clickable grid items",
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Grid with Clickable Items",
+                    "components": ["Grid", "GridItem", "OnClick", "OpenLink"],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Grid layout with clickable grid items",
+                }
+            )
             if verbose:
                 logger.info("  ✅ Grid with Clickable Items")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "Grid with Clickable Items",
-                "components": ["Grid", "GridItem", "OnClick", "OpenLink"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Grid with Clickable Items",
+                    "components": ["Grid", "GridItem", "OnClick", "OpenLink"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ Grid with Clickable Items: {e}")
 
@@ -1007,23 +1115,27 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             section = Section(header=section_header, widgets=[text, image])
             rendered = section.render()
 
-            complex_scenarios.append({
-                "scenario": "Section with Mixed Widgets",
-                "components": ["Section", "DecoratedText", "Image"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Section containing text and image widgets",
-                "color_scheme": scheme_name,
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Section with Mixed Widgets",
+                    "components": ["Section", "DecoratedText", "Image"],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Section containing text and image widgets",
+                    "color_scheme": scheme_name,
+                }
+            )
             if verbose:
                 logger.info("  ✅ Section with Mixed Widgets")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "Section with Mixed Widgets",
-                "components": ["Section", "DecoratedText", "Image"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Section with Mixed Widgets",
+                    "components": ["Section", "DecoratedText", "Image"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ Section with Mixed Widgets: {e}")
 
@@ -1036,23 +1148,27 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             button_list = ButtonList(buttons=[btn1, btn2])
             rendered = button_list.render()
 
-            complex_scenarios.append({
-                "scenario": "ButtonList with Styled Buttons",
-                "components": ["ButtonList", "Button"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Button list with multiple styled buttons",
-                "color_scheme": scheme_name,
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "ButtonList with Styled Buttons",
+                    "components": ["ButtonList", "Button"],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Button list with multiple styled buttons",
+                    "color_scheme": scheme_name,
+                }
+            )
             if verbose:
                 logger.info("  ✅ ButtonList with Styled Buttons")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "ButtonList with Styled Buttons",
-                "components": ["ButtonList", "Button"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "ButtonList with Styled Buttons",
+                    "components": ["ButtonList", "Button"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ ButtonList with Styled Buttons: {e}")
 
@@ -1065,35 +1181,45 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             section1 = Section(
                 header='<font color="#00FFFF">⚡ POWER SYSTEMS</font>',
                 widgets=[
-                    DecoratedText(text='✓ <font color="#00FF00">Main Reactor: ONLINE</font>'),
-                    DecoratedText(text='⚠ <font color="#FFFF00">Snack Storage: LOW</font>'),
-                ]
+                    DecoratedText(
+                        text='✓ <font color="#00FF00">Main Reactor: ONLINE</font>'
+                    ),
+                    DecoratedText(
+                        text='⚠ <font color="#FFFF00">Snack Storage: LOW</font>'
+                    ),
+                ],
             )
             section2 = Section(
                 header='<font color="#FF0000">🚨 ALERT LEVEL</font>',
                 widgets=[
-                    DecoratedText(text='Current: <font color="#00FF00">GREEN - ALL CLEAR</font>'),
-                ]
+                    DecoratedText(
+                        text='Current: <font color="#00FF00">GREEN - ALL CLEAR</font>'
+                    ),
+                ],
             )
             card = Card(sections=[section1, section2])
             rendered = card.render()
 
-            complex_scenarios.append({
-                "scenario": "Teen Titans Power Systems (Multi-Section HTML)",
-                "components": ["Card", "Section", "DecoratedText"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Multi-section card with HTML-styled headers and status text",
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Teen Titans Power Systems (Multi-Section HTML)",
+                    "components": ["Card", "Section", "DecoratedText"],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Multi-section card with HTML-styled headers and status text",
+                }
+            )
             if verbose:
                 logger.info("  ✅ Teen Titans Power Systems (Multi-Section HTML)")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "Teen Titans Power Systems (Multi-Section HTML)",
-                "components": ["Card", "Section", "DecoratedText"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Teen Titans Power Systems (Multi-Section HTML)",
+                    "components": ["Card", "Section", "DecoratedText"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ Teen Titans Power Systems: {e}")
 
@@ -1105,35 +1231,71 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                     DecoratedText(text="API Server", bottom_label="Online"),
                     DecoratedText(text="Database", bottom_label="Connected"),
                     DecoratedText(text="Cache", bottom_label="High Latency 250ms"),
-                ]
+                ],
             )
             action_section = Section(
                 widgets=[
-                    ButtonList(buttons=[
-                        Button(text="View Details", on_click=OnClick(open_link=OpenLink(url="https://example.com/dashboard"))),
-                        Button(text="Refresh", on_click=OnClick(open_link=OpenLink(url="https://example.com/refresh"))),
-                    ])
+                    ButtonList(
+                        buttons=[
+                            Button(
+                                text="View Details",
+                                on_click=OnClick(
+                                    open_link=OpenLink(
+                                        url="https://example.com/dashboard"
+                                    )
+                                ),
+                            ),
+                            Button(
+                                text="Refresh",
+                                on_click=OnClick(
+                                    open_link=OpenLink(
+                                        url="https://example.com/refresh"
+                                    )
+                                ),
+                            ),
+                        ]
+                    )
                 ]
             )
             card = Card(sections=[status_section, action_section])
             rendered = card.render()
 
-            complex_scenarios.append({
-                "scenario": "System Health Dashboard",
-                "components": ["Card", "Section", "DecoratedText", "ButtonList", "Button", "OnClick", "OpenLink"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Dashboard with status rows and action buttons",
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "System Health Dashboard",
+                    "components": [
+                        "Card",
+                        "Section",
+                        "DecoratedText",
+                        "ButtonList",
+                        "Button",
+                        "OnClick",
+                        "OpenLink",
+                    ],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Dashboard with status rows and action buttons",
+                }
+            )
             if verbose:
                 logger.info("  ✅ System Health Dashboard")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "System Health Dashboard",
-                "components": ["Card", "Section", "DecoratedText", "ButtonList", "Button", "OnClick", "OpenLink"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "System Health Dashboard",
+                    "components": [
+                        "Card",
+                        "Section",
+                        "DecoratedText",
+                        "ButtonList",
+                        "Button",
+                        "OnClick",
+                        "OpenLink",
+                    ],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ System Health Dashboard: {e}")
 
@@ -1142,39 +1304,83 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             header = CardHeader(title="New Release", subtitle="MacBook Pro M4")
             product_section = Section(
                 widgets=[
-                    Image(image_url="https://picsum.photos/400/200", alt_text="Product image"),
+                    Image(
+                        image_url="https://picsum.photos/400/200",
+                        alt_text="Product image",
+                    ),
                     DecoratedText(text="$2,499", top_label="Price"),
                     DecoratedText(text="The most powerful laptop ever built"),
                 ]
             )
             button_section = Section(
                 widgets=[
-                    ButtonList(buttons=[
-                        Button(text="Buy Now", on_click=OnClick(open_link=OpenLink(url="https://apple.com/buy"))),
-                        Button(text="Learn More", on_click=OnClick(open_link=OpenLink(url="https://apple.com/macbook"))),
-                        Button(text="Compare", on_click=OnClick(open_link=OpenLink(url="https://apple.com/compare"))),
-                    ])
+                    ButtonList(
+                        buttons=[
+                            Button(
+                                text="Buy Now",
+                                on_click=OnClick(
+                                    open_link=OpenLink(url="https://apple.com/buy")
+                                ),
+                            ),
+                            Button(
+                                text="Learn More",
+                                on_click=OnClick(
+                                    open_link=OpenLink(url="https://apple.com/macbook")
+                                ),
+                            ),
+                            Button(
+                                text="Compare",
+                                on_click=OnClick(
+                                    open_link=OpenLink(url="https://apple.com/compare")
+                                ),
+                            ),
+                        ]
+                    )
                 ]
             )
             card = Card(header=header, sections=[product_section, button_section])
             rendered = card.render()
 
-            complex_scenarios.append({
-                "scenario": "Product Showcase Card",
-                "components": ["Card", "CardHeader", "Section", "Image", "DecoratedText", "ButtonList", "Button", "OnClick", "OpenLink"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Product card with header, image, price, description and multiple action buttons",
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Product Showcase Card",
+                    "components": [
+                        "Card",
+                        "CardHeader",
+                        "Section",
+                        "Image",
+                        "DecoratedText",
+                        "ButtonList",
+                        "Button",
+                        "OnClick",
+                        "OpenLink",
+                    ],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Product card with header, image, price, description and multiple action buttons",
+                }
+            )
             if verbose:
                 logger.info("  ✅ Product Showcase Card")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "Product Showcase Card",
-                "components": ["Card", "CardHeader", "Section", "Image", "DecoratedText", "ButtonList", "Button", "OnClick", "OpenLink"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Product Showcase Card",
+                    "components": [
+                        "Card",
+                        "CardHeader",
+                        "Section",
+                        "Image",
+                        "DecoratedText",
+                        "ButtonList",
+                        "Button",
+                        "OnClick",
+                        "OpenLink",
+                    ],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ Product Showcase Card: {e}")
 
@@ -1184,7 +1390,11 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                 header="Bug Report Form",
                 widgets=[
                     TextInput(name="bug_title", label="Bug Title"),
-                    TextInput(name="description", label="Description", type=TextInput.Type.MULTIPLE_LINE),
+                    TextInput(
+                        name="description",
+                        label="Description",
+                        type=TextInput.Type.MULTIPLE_LINE,
+                    ),
                     SelectionInput(
                         name="severity",
                         label="Severity",
@@ -1193,30 +1403,48 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                             SelectionItem(text="Low", value="low"),
                             SelectionItem(text="Medium", value="medium"),
                             SelectionItem(text="High", value="high"),
-                        ]
+                        ],
                     ),
                     DateTimePicker(name="found_date", label="Date Found"),
-                ]
+                ],
             )
             card = Card(sections=[form_section])
             rendered = card.render()
 
-            complex_scenarios.append({
-                "scenario": "Form Card (Bug Report)",
-                "components": ["Card", "Section", "TextInput", "SelectionInput", "SelectionItem", "DateTimePicker"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Form card with text inputs, dropdown selection, and date picker",
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Form Card (Bug Report)",
+                    "components": [
+                        "Card",
+                        "Section",
+                        "TextInput",
+                        "SelectionInput",
+                        "SelectionItem",
+                        "DateTimePicker",
+                    ],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Form card with text inputs, dropdown selection, and date picker",
+                }
+            )
             if verbose:
                 logger.info("  ✅ Form Card (Bug Report)")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "Form Card (Bug Report)",
-                "components": ["Card", "Section", "TextInput", "SelectionInput", "SelectionItem", "DateTimePicker"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "Form Card (Bug Report)",
+                    "components": [
+                        "Card",
+                        "Section",
+                        "TextInput",
+                        "SelectionInput",
+                        "SelectionItem",
+                        "DateTimePicker",
+                    ],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ Form Card (Bug Report): {e}")
 
@@ -1227,21 +1455,45 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                     header="Experiment 1: Original 27 Questions",
                     widgets=[
                         DecoratedText(text="Avg Confidence: 0.77 | High (≥0.9): 4%"),
-                        ButtonList(buttons=[Button(text="View Langfuse Run", on_click=OnClick(open_link=OpenLink(url="https://langfuse.example.com/run1")))])
-                    ]
+                        ButtonList(
+                            buttons=[
+                                Button(
+                                    text="View Langfuse Run",
+                                    on_click=OnClick(
+                                        open_link=OpenLink(
+                                            url="https://langfuse.example.com/run1"
+                                        )
+                                    ),
+                                )
+                            ]
+                        ),
+                    ],
                 ),
                 Section(
                     header="Experiment 2: Gotcha Questions",
                     widgets=[
                         DecoratedText(text="Avg Confidence: 0.92 | High (≥0.9): 65%"),
-                        ButtonList(buttons=[Button(text="View Langfuse Run", on_click=OnClick(open_link=OpenLink(url="https://langfuse.example.com/run2")))])
-                    ]
+                        ButtonList(
+                            buttons=[
+                                Button(
+                                    text="View Langfuse Run",
+                                    on_click=OnClick(
+                                        open_link=OpenLink(
+                                            url="https://langfuse.example.com/run2"
+                                        )
+                                    ),
+                                )
+                            ]
+                        ),
+                    ],
                 ),
                 Section(
                     header="🔍 Key Finding: 11 RAG Mismatches",
                     widgets=[
-                        DecoratedText(text="RAG retrieved section headers instead of precise policy rules"),
-                    ]
+                        DecoratedText(
+                            text="RAG retrieved section headers instead of precise policy rules"
+                        ),
+                    ],
                 ),
                 Section(
                     header="💡 Recommendations",
@@ -1249,59 +1501,100 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                         DecoratedText(text="1. Chunk boundary tuning"),
                         DecoratedText(text="2. Metadata boosting"),
                         DecoratedText(text="3. Cross-encoder re-ranking"),
-                    ]
+                    ],
                 ),
             ]
             card = Card(
-                header=CardHeader(title="📊 RAG Evaluation Summary", subtitle="Jan 23, 2026"),
-                sections=sections
+                header=CardHeader(
+                    title="📊 RAG Evaluation Summary", subtitle="Jan 23, 2026"
+                ),
+                sections=sections,
             )
             rendered = card.render()
 
-            complex_scenarios.append({
-                "scenario": "RAG Evaluation Summary (Multi-Section Report)",
-                "components": ["Card", "CardHeader", "Section", "DecoratedText", "ButtonList", "Button", "OnClick", "OpenLink"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Multi-section report card with metrics, findings, and action buttons",
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "RAG Evaluation Summary (Multi-Section Report)",
+                    "components": [
+                        "Card",
+                        "CardHeader",
+                        "Section",
+                        "DecoratedText",
+                        "ButtonList",
+                        "Button",
+                        "OnClick",
+                        "OpenLink",
+                    ],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Multi-section report card with metrics, findings, and action buttons",
+                }
+            )
             if verbose:
                 logger.info("  ✅ RAG Evaluation Summary (Multi-Section Report)")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "RAG Evaluation Summary (Multi-Section Report)",
-                "components": ["Card", "CardHeader", "Section", "DecoratedText", "ButtonList", "Button", "OnClick", "OpenLink"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "RAG Evaluation Summary (Multi-Section Report)",
+                    "components": [
+                        "Card",
+                        "CardHeader",
+                        "Section",
+                        "DecoratedText",
+                        "ButtonList",
+                        "Button",
+                        "OnClick",
+                        "OpenLink",
+                    ],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ RAG Evaluation Summary: {e}")
 
         # Scenario 12: ChipList with clickable chips
         try:
-            chip_list = ChipList(chips=[
-                Chip(label="Python", on_click=OnClick(open_link=OpenLink(url="https://python.org"))),
-                Chip(label="JavaScript", on_click=OnClick(open_link=OpenLink(url="https://js.org"))),
-                Chip(label="Rust", on_click=OnClick(open_link=OpenLink(url="https://rust-lang.org"))),
-            ])
+            chip_list = ChipList(
+                chips=[
+                    Chip(
+                        label="Python",
+                        on_click=OnClick(open_link=OpenLink(url="https://python.org")),
+                    ),
+                    Chip(
+                        label="JavaScript",
+                        on_click=OnClick(open_link=OpenLink(url="https://js.org")),
+                    ),
+                    Chip(
+                        label="Rust",
+                        on_click=OnClick(
+                            open_link=OpenLink(url="https://rust-lang.org")
+                        ),
+                    ),
+                ]
+            )
             rendered = chip_list.render()
 
-            complex_scenarios.append({
-                "scenario": "ChipList with Clickable Chips",
-                "components": ["ChipList", "Chip", "OnClick", "OpenLink"],
-                "success": True,
-                "rendered_json": rendered,
-                "structure_description": "Chip list with clickable tag-style chips",
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "ChipList with Clickable Chips",
+                    "components": ["ChipList", "Chip", "OnClick", "OpenLink"],
+                    "success": True,
+                    "rendered_json": rendered,
+                    "structure_description": "Chip list with clickable tag-style chips",
+                }
+            )
             if verbose:
                 logger.info("  ✅ ChipList with Clickable Chips")
         except Exception as e:
-            complex_scenarios.append({
-                "scenario": "ChipList with Clickable Chips",
-                "components": ["ChipList", "Chip", "OnClick", "OpenLink"],
-                "success": False,
-                "error": str(e),
-            })
+            complex_scenarios.append(
+                {
+                    "scenario": "ChipList with Clickable Chips",
+                    "components": ["ChipList", "Chip", "OnClick", "OpenLink"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
             if verbose:
                 logger.warning(f"  ❌ ChipList with Clickable Chips: {e}")
 
@@ -1320,6 +1613,7 @@ def store_complex_patterns(scenarios: List[Dict], dry_run: bool = False) -> int:
 
     try:
         from gchat.feedback_loop import get_feedback_loop
+
         feedback_loop = get_feedback_loop()
 
         stored = 0
@@ -1328,7 +1622,9 @@ def store_complex_patterns(scenarios: List[Dict], dry_run: bool = False) -> int:
                 continue
 
             component_paths = [
-                f"card_framework.v2.widgets.{comp}" if comp != "Section" else f"card_framework.v2.{comp}"
+                f"card_framework.v2.widgets.{comp}"
+                if comp != "Section"
+                else f"card_framework.v2.{comp}"
                 for comp in scenario["components"]
             ]
 
@@ -1363,6 +1659,7 @@ def store_complex_patterns(scenarios: List[Dict], dry_run: bool = False) -> int:
 # =========================================================================
 # RANDOM COMBINATION GENERATOR
 # =========================================================================
+
 
 class RandomCardGenerator:
     """
@@ -1431,16 +1728,31 @@ class RandomCardGenerator:
             "total_children": len(self._all_children),
             "used_children": len(self._used_children),
             "unused_children": list(unused_children),
-            "parent_coverage": len(self._used_parents) / len(self._all_parents) * 100 if self._all_parents else 0,
-            "child_coverage": len(self._used_children) / len(self._all_children) * 100 if self._all_children else 0,
+            "parent_coverage": len(self._used_parents) / len(self._all_parents) * 100
+            if self._all_parents
+            else 0,
+            "child_coverage": len(self._used_children) / len(self._all_children) * 100
+            if self._all_children
+            else 0,
         }
 
     def get_uncovered_widget(self) -> Optional[str]:
         """Get a widget type that hasn't been used yet, prioritizing coverage."""
         # Widgets that can go in sections
-        section_widgets = ["Image", "DecoratedText", "TextParagraph", "ButtonList",
-                         "Grid", "ChipList", "SelectionInput", "TextInput",
-                         "DateTimePicker", "Divider", "Columns", "OverflowMenu"]
+        section_widgets = [
+            "Image",
+            "DecoratedText",
+            "TextParagraph",
+            "ButtonList",
+            "Grid",
+            "ChipList",
+            "SelectionInput",
+            "TextInput",
+            "DateTimePicker",
+            "Divider",
+            "Columns",
+            "OverflowMenu",
+        ]
 
         # Find unused ones first
         for widget in section_widgets:
@@ -1453,13 +1765,27 @@ class RandomCardGenerator:
     def _load_components(self):
         """Load all components and their relationships from card_framework."""
         try:
+            from card_framework.v2 import Card, CardHeader, Section
             from card_framework.v2.widgets import (
-                Image, OnClick, OpenLink, Grid, GridItem, ImageComponent,
-                DecoratedText, Button, Icon, ButtonList, TextInput,
-                SelectionInput, SelectionItem, DateTimePicker, ChipList, Chip,
-                TextParagraph, Divider,
+                Button,
+                ButtonList,
+                Chip,
+                ChipList,
+                DateTimePicker,
+                DecoratedText,
+                Divider,
+                Grid,
+                GridItem,
+                Icon,
+                Image,
+                ImageComponent,
+                OnClick,
+                OpenLink,
+                SelectionInput,
+                SelectionItem,
+                TextInput,
+                TextParagraph,
             )
-            from card_framework.v2 import Section, Card, CardHeader
 
             self._components = {
                 # =====================================================
@@ -1476,7 +1802,6 @@ class RandomCardGenerator:
                 "SelectionInput": SelectionInput,
                 "DateTimePicker": DateTimePicker,
                 "Divider": Divider,
-
                 # =====================================================
                 # BUILDING BLOCKS (children of widgets)
                 # =====================================================
@@ -1488,7 +1813,6 @@ class RandomCardGenerator:
                 "OnClick": OnClick,
                 "OpenLink": OpenLink,
                 "Icon": Icon,
-
                 # =====================================================
                 # STRUCTURE
                 # =====================================================
@@ -1499,7 +1823,8 @@ class RandomCardGenerator:
 
             # Try to load advanced components (may not exist in all versions)
             try:
-                from card_framework.v2.widgets import Columns, Column
+                from card_framework.v2.widgets import Column, Columns
+
                 self._components["Columns"] = Columns
                 self._components["Column"] = Column
                 logger.info("  ✅ Loaded Columns/Column widgets")
@@ -1508,6 +1833,7 @@ class RandomCardGenerator:
 
             try:
                 from card_framework.v2.widgets import OverflowMenu, OverflowMenuItem
+
                 self._components["OverflowMenu"] = OverflowMenu
                 self._components["OverflowMenuItem"] = OverflowMenuItem
                 logger.info("  ✅ Loaded OverflowMenu widgets")
@@ -1516,6 +1842,7 @@ class RandomCardGenerator:
 
             try:
                 from card_framework.v2.widgets import SwitchControl
+
                 self._components["SwitchControl"] = SwitchControl
                 logger.info("  ✅ Loaded SwitchControl widget")
             except ImportError:
@@ -1523,6 +1850,7 @@ class RandomCardGenerator:
 
             try:
                 from card_framework.v2.card import CardFixedFooter
+
                 self._components["CardFixedFooter"] = CardFixedFooter
                 logger.info("  ✅ Loaded CardFixedFooter (Footer)")
             except ImportError:
@@ -1542,7 +1870,9 @@ class RandomCardGenerator:
                 )
 
             logger.info(f"  📦 Loaded {len(self._components)} components")
-            logger.info(f"  🔗 Loaded {len(self._relationships)} relationship mappings from Qdrant")
+            logger.info(
+                f"  🔗 Loaded {len(self._relationships)} relationship mappings from Qdrant"
+            )
 
         except ImportError as e:
             logger.error(f"Could not import components: {e}")
@@ -1555,9 +1885,10 @@ class RandomCardGenerator:
         ensuring we test combinations that match our indexed schema.
         """
         try:
+            from qdrant_client import models
+
             from config.qdrant_client import get_qdrant_client
             from config.settings import settings
-            from qdrant_client import models
 
             client = get_qdrant_client()
             if not client:
@@ -1569,21 +1900,20 @@ class RandomCardGenerator:
                 scroll_filter=models.Filter(
                     must=[
                         models.FieldCondition(
-                            key='type',
-                            match=models.MatchValue(value='class')
+                            key="type", match=models.MatchValue(value="class")
                         ),
                     ]
                 ),
                 limit=500,
-                with_payload=['name', 'relationships'],
+                with_payload=["name", "relationships"],
             )
 
             # Build relationship map from Qdrant data
             relationships = {}
             for point in results:
-                name = point.payload.get('name', '')
-                rels = point.payload.get('relationships', {})
-                children = rels.get('child_classes', [])
+                name = point.payload.get("name", "")
+                rels = point.payload.get("relationships", {})
+                children = rels.get("child_classes", [])
 
                 if name and children:
                     # Deduplicate - some components appear multiple times
@@ -1600,7 +1930,9 @@ class RandomCardGenerator:
                     self._all_children.add(child)
 
             logger.info(f"  ✅ Loaded {len(relationships)} relationships from Qdrant")
-            logger.info(f"  📊 Coverage targets: {len(self._all_parents)} parents, {len(self._all_children)} children")
+            logger.info(
+                f"  📊 Coverage targets: {len(self._all_parents)} parents, {len(self._all_children)} children"
+            )
             return relationships
 
         except Exception as e:
@@ -1618,7 +1950,14 @@ class RandomCardGenerator:
     def _random_text(self, field: str = "text", styled: bool = True) -> str:
         """Generate random text content with optional Jinja styling."""
         texts = {
-            "title": ["Dashboard", "Report", "Summary", "Overview", "Status", "Metrics"],
+            "title": [
+                "Dashboard",
+                "Report",
+                "Summary",
+                "Overview",
+                "Status",
+                "Metrics",
+            ],
             "subtitle": ["Generated", "Updated", "Live Data", "Real-time"],
             "text": ["Item content", "Description here", "Status: Active", "Details"],
             "label": ["Option A", "Choice B", "Selection C", "Item D"],
@@ -1644,11 +1983,12 @@ class RandomCardGenerator:
         elif field == "label":
             colors = ["#1a73e8", "#34a853", "#8430ce", "#00acc1", "#fbbc05"]
             return render_jinja_template(
-                '{{ label | color(color) }}',
-                label=base_text, color=random.choice(colors)
+                "{{ label | color(color) }}",
+                label=base_text,
+                color=random.choice(colors),
             )
         elif field == "subtitle":
-            return render_jinja_template('{{ text | muted_text }}', text=base_text)
+            return render_jinja_template("{{ text | muted_text }}", text=base_text)
 
         return base_text
 
@@ -1752,7 +2092,7 @@ class RandomCardGenerator:
         return SelectionItem(
             text=f"Option {index + 1}",
             value=f"opt_{index}",
-            bottom_text=f"Description for option {index + 1}"
+            bottom_text=f"Description for option {index + 1}",
         )
 
     def build_random_widget(self, prefer_uncovered: bool = True) -> Tuple[Any, str]:
@@ -1779,10 +2119,17 @@ class RandomCardGenerator:
         # ALL widget types matching Google Chat Card Builder
         widget_types = [
             # Basic widgets
-            "Image", "DecoratedText", "TextParagraph", "ButtonList",
-            "Grid", "ChipList", "Divider",
+            "Image",
+            "DecoratedText",
+            "TextParagraph",
+            "ButtonList",
+            "Grid",
+            "ChipList",
+            "Divider",
             # Form widgets
-            "SelectionInput", "TextInput", "DateTimePicker",
+            "SelectionInput",
+            "TextInput",
+            "DateTimePicker",
             # Layout widgets
             "Columns",
             # Advanced (inside buttons)
@@ -1810,10 +2157,7 @@ class RandomCardGenerator:
         if widget_type == "Image":
             Image = self._components["Image"]
             onclick = self._build_onclick() if random.random() > 0.3 else None
-            kwargs = {
-                "image_url": self._random_image_url(),
-                "alt_text": "Random image"
-            }
+            kwargs = {"image_url": self._random_image_url(), "alt_text": "Random image"}
             if onclick:
                 kwargs["on_click"] = onclick
                 description += " with onClick"
@@ -1863,7 +2207,7 @@ class RandomCardGenerator:
                     '{{ "Price" | muted_text }}: {{ price | price("USD") }}',
                     '{{ "SALE" | badge("#ea4335") }} {{ price | price("USD") }} (was {{ original | price("USD") | strike }})',
                     # Metric-style paragraphs
-                    '{{ metric | bold }}: {{ value | color(color) }}%',
+                    "{{ metric | bold }}: {{ value | color(color) }}%",
                     '{{ "Build" | bold }} #{{ number }}: {{ status | success_text }}',
                     # Rich text combinations
                     '{{ title | color("#1a73e8") | bold }}\n{{ description | muted_text }}',
@@ -1940,7 +2284,9 @@ class RandomCardGenerator:
             if not SelectionItem:
                 # Fallback if SelectionItem not available
                 TextParagraph = self._components["TextParagraph"]
-                return TextParagraph(text="Selection placeholder"), "Fallback TextParagraph"
+                return TextParagraph(
+                    text="Selection placeholder"
+                ), "Fallback TextParagraph"
 
             # Get SelectionType enum (nested inside SelectionInput)
             SelectionType = getattr(SelectionInput, "SelectionType", None)
@@ -1954,11 +2300,15 @@ class RandomCardGenerator:
             num_items = random.randint(2, 4)
             items = []
             for i in range(num_items):
-                items.append(SelectionItem(
-                    text=f"Option {i + 1}",
-                    value=f"opt_{i}",
-                    bottom_text=f"Description {i + 1}" if random.random() > 0.5 else None,
-                ))
+                items.append(
+                    SelectionItem(
+                        text=f"Option {i + 1}",
+                        value=f"opt_{i}",
+                        bottom_text=f"Description {i + 1}"
+                        if random.random() > 0.5
+                        else None,
+                    )
+                )
                 self._track_usage(child="SelectionItem")
 
             # SelectionInput label does NOT support HTML - use plain text only
@@ -2029,7 +2379,9 @@ class RandomCardGenerator:
             if not Columns or not Column:
                 # Fallback if Columns not available
                 TextParagraph = self._components["TextParagraph"]
-                return TextParagraph(text="Columns placeholder"), "Fallback TextParagraph"
+                return TextParagraph(
+                    text="Columns placeholder"
+                ), "Fallback TextParagraph"
 
             # Build 2 columns with random widgets
             columns = []
@@ -2040,20 +2392,25 @@ class RandomCardGenerator:
 
                 for _ in range(num_widgets):
                     # Column supports: DecoratedText, TextParagraph, Image, ButtonList
-                    widget_type_for_col = random.choice(["DecoratedText", "TextParagraph", "Image"])
+                    widget_type_for_col = random.choice(
+                        ["DecoratedText", "TextParagraph", "Image"]
+                    )
                     if widget_type_for_col == "DecoratedText":
                         DecoratedText = self._components["DecoratedText"]
-                        col_widgets.append(DecoratedText(
-                            text=self._random_text(),
-                            top_label=f"COL {col_idx + 1}"
-                        ))
+                        col_widgets.append(
+                            DecoratedText(
+                                text=self._random_text(), top_label=f"COL {col_idx + 1}"
+                            )
+                        )
                         self._track_usage(child="DecoratedText")
                     elif widget_type_for_col == "Image":
                         Image = self._components["Image"]
-                        col_widgets.append(Image(
-                            image_url=self._random_image_url(),
-                            alt_text="Column image"
-                        ))
+                        col_widgets.append(
+                            Image(
+                                image_url=self._random_image_url(),
+                                alt_text="Column image",
+                            )
+                        )
                         self._track_usage(child="Image")
                     else:
                         TextParagraph = self._components["TextParagraph"]
@@ -2078,16 +2435,20 @@ class RandomCardGenerator:
 
             if not OverflowMenu or not OverflowMenuItem:
                 # Fallback to regular button
-                return ButtonList(buttons=[self._build_button()]), "ButtonList (overflow not available)"
+                return ButtonList(
+                    buttons=[self._build_button()]
+                ), "ButtonList (overflow not available)"
 
             # Build overflow menu items
             menu_items = []
             for i in range(random.randint(2, 4)):
-                menu_items.append(OverflowMenuItem(
-                    text=f"Menu Item {i + 1}",
-                    start_icon=self._build_icon(),
-                    on_click=OnClick(open_link=OpenLink(url=self._random_url()))
-                ))
+                menu_items.append(
+                    OverflowMenuItem(
+                        text=f"Menu Item {i + 1}",
+                        start_icon=self._build_icon(),
+                        on_click=OnClick(open_link=OpenLink(url=self._random_url())),
+                    )
+                )
                 self._track_usage(child="OverflowMenuItem")
                 self._track_usage(child="OpenLink")
 
@@ -2095,10 +2456,7 @@ class RandomCardGenerator:
             overflow_menu = OverflowMenu(items=menu_items)
             self._track_usage(child="Button")
             self._track_usage(child="OnClick")
-            button = Button(
-                text="More",
-                on_click=OnClick(overflow_menu=overflow_menu)
-            )
+            button = Button(text="More", on_click=OnClick(overflow_menu=overflow_menu))
 
             description = "ButtonList with OverflowMenu"
             return ButtonList(buttons=[button]), description
@@ -2123,8 +2481,7 @@ class RandomCardGenerator:
 
         # Section header DOES support HTML styling
         section = Section(
-            header=self._random_text("title", styled=True),
-            widgets=widgets
+            header=self._random_text("title", styled=True), widgets=widgets
         )
 
         return section, f"Section with: {', '.join(descriptions)}"
@@ -2178,7 +2535,7 @@ class RandomCardGenerator:
             kwargs["header"] = CardHeader(
                 title=self._random_text("title", styled=False),
                 subtitle=self._random_text("subtitle", styled=False),
-                image_url=self._random_image_url()
+                image_url=self._random_image_url(),
             )
 
         # Random footer (30% chance)
@@ -2194,7 +2551,9 @@ class RandomCardGenerator:
         # Convert to camelCase for API
         rendered_camel = convert_to_camel_case(rendered)
 
-        description = f"Card with {num_sections} sections: " + " | ".join(all_descriptions)
+        description = f"Card with {num_sections} sections: " + " | ".join(
+            all_descriptions
+        )
         return rendered_camel, description
 
 
@@ -2230,7 +2589,9 @@ def run_random_webhook_tests(
         logger.error("No webhook URL! Set TEST_CHAT_WEBHOOK env var or pass --webhook")
         return []
 
-    generator = RandomCardGenerator(verbose=verbose, use_jinja_styling=use_jinja_styling)
+    generator = RandomCardGenerator(
+        verbose=verbose, use_jinja_styling=use_jinja_styling
+    )
     results = []
 
     for i in range(num_tests):
@@ -2241,7 +2602,9 @@ def run_random_webhook_tests(
 
             if verbose:
                 logger.info(f"  Description: {description}")
-                logger.info(f"  JSON preview: {json.dumps(card_json, indent=2)[:300]}...")
+                logger.info(
+                    f"  JSON preview: {json.dumps(card_json, indent=2)[:300]}..."
+                )
 
             # Send to webhook
             success, error = send_card_to_webhook(card_json, webhook_url)
@@ -2260,7 +2623,11 @@ def run_random_webhook_tests(
             else:
                 # Parse error to get actual message
                 try:
-                    error_json = json.loads(error) if error.startswith("{") else {"message": error}
+                    error_json = (
+                        json.loads(error)
+                        if error.startswith("{")
+                        else {"message": error}
+                    )
                     error_msg = error_json.get("error", {}).get("message", error[:300])
                 except:
                     error_msg = error[:300]
@@ -2272,12 +2639,14 @@ def run_random_webhook_tests(
 
         except Exception as e:
             logger.error(f"  ❌ BUILD ERROR: {e}")
-            results.append({
-                "test_num": i + 1,
-                "description": "Build failed",
-                "success": False,
-                "error": str(e),
-            })
+            results.append(
+                {
+                    "test_num": i + 1,
+                    "description": "Build failed",
+                    "success": False,
+                    "error": str(e),
+                }
+            )
 
     # Summary
     successful = sum(1 for r in results if r["success"])
@@ -2290,7 +2659,9 @@ def run_random_webhook_tests(
     logger.info(f"Total: {len(results)}")
     logger.info(f"Successful: {successful}")
     logger.info(f"Failed: {failed}")
-    logger.info(f"Success rate: {successful / len(results) * 100:.1f}%" if results else "N/A")
+    logger.info(
+        f"Success rate: {successful / len(results) * 100:.1f}%" if results else "N/A"
+    )
 
     if failed > 0:
         logger.info("\nFailed tests:")
@@ -2305,17 +2676,21 @@ def run_random_webhook_tests(
         logger.info("=" * 70)
         logger.info("COMPONENT COVERAGE REPORT")
         logger.info("=" * 70)
-        logger.info(f"Parents used: {coverage['used_parents']}/{coverage['total_parents']} ({coverage['parent_coverage']:.1f}%)")
-        logger.info(f"Children used: {coverage['used_children']}/{coverage['total_children']} ({coverage['child_coverage']:.1f}%)")
+        logger.info(
+            f"Parents used: {coverage['used_parents']}/{coverage['total_parents']} ({coverage['parent_coverage']:.1f}%)"
+        )
+        logger.info(
+            f"Children used: {coverage['used_children']}/{coverage['total_children']} ({coverage['child_coverage']:.1f}%)"
+        )
 
-        if coverage['unused_parents']:
+        if coverage["unused_parents"]:
             logger.info(f"\n⚠️ Unused parents ({len(coverage['unused_parents'])}):")
-            for p in sorted(coverage['unused_parents'])[:20]:
+            for p in sorted(coverage["unused_parents"])[:20]:
                 logger.info(f"  - {p}")
 
-        if coverage['unused_children']:
+        if coverage["unused_children"]:
             logger.info(f"\n⚠️ Unused children ({len(coverage['unused_children'])}):")
-            for c in sorted(coverage['unused_children'])[:20]:
+            for c in sorted(coverage["unused_children"])[:20]:
                 logger.info(f"  - {c}")
 
     return results
@@ -2324,6 +2699,7 @@ def run_random_webhook_tests(
 # =========================================================================
 # INGESTION PIPELINE INTEGRATION
 # =========================================================================
+
 
 def validate_after_ingestion(
     num_tests: int = 20,
@@ -2394,6 +2770,7 @@ def validate_after_ingestion(
     if store_patterns and successful > 0:
         try:
             from gchat.feedback_loop import get_feedback_loop
+
             feedback_loop = get_feedback_loop()
 
             for r in results:
@@ -2444,66 +2821,67 @@ def validate_after_ingestion(
 # MAIN
 # =========================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Validate component relationships and warm-start feedback patterns"
     )
     parser.add_argument(
-        "--dry-run", "-n",
+        "--dry-run",
+        "-n",
         action="store_true",
-        help="Don't actually store patterns, just validate"
+        help="Don't actually store patterns, just validate",
     )
     parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Show detailed validation output"
+        "--verbose", "-v", action="store_true", help="Show detailed validation output"
     )
     parser.add_argument(
         "--complex-only",
         action="store_true",
-        help="Only run complex nesting validation"
+        help="Only run complex nesting validation",
     )
     parser.add_argument(
         "--send-to-webhook",
         action="store_true",
-        help="Actually send cards to the test webhook for real API validation"
+        help="Actually send cards to the test webhook for real API validation",
     )
     parser.add_argument(
         "--random-combos",
         type=int,
         default=0,
         metavar="N",
-        help="Generate N random card combinations and test them (requires --send-to-webhook)"
+        help="Generate N random card combinations and test them (requires --send-to-webhook)",
     )
     parser.add_argument(
         "--webhook",
         type=str,
         default=None,
-        help="Override webhook URL (default: TEST_CHAT_WEBHOOK env var)"
+        help="Override webhook URL (default: TEST_CHAT_WEBHOOK env var)",
     )
     parser.add_argument(
         "--delay",
         type=float,
         default=1.0,
-        help="Delay between webhook requests in seconds (default: 1.0)"
+        help="Delay between webhook requests in seconds (default: 1.0)",
     )
     parser.add_argument(
-        "--styled", "-s",
+        "--styled",
+        "-s",
         action="store_true",
         default=True,
-        help="Apply random colors/styles to text content (default: enabled)"
+        help="Apply random colors/styles to text content (default: enabled)",
     )
     parser.add_argument(
         "--no-styled",
         action="store_true",
-        help="Disable random styling (plain text only)"
+        help="Disable random styling (plain text only)",
     )
     parser.add_argument(
         "--color-scheme",
         type=str,
         default=None,
         choices=list(COLOR_SCHEMES.keys()),
-        help=f"Use specific color scheme (choices: {', '.join(COLOR_SCHEMES.keys())})"
+        help=f"Use specific color scheme (choices: {', '.join(COLOR_SCHEMES.keys())})",
     )
     args = parser.parse_args()
 
@@ -2538,6 +2916,7 @@ def main():
         # Store successful random patterns
         if not args.dry_run:
             from gchat.feedback_loop import get_feedback_loop
+
             feedback_loop = get_feedback_loop()
 
             stored = 0
@@ -2581,10 +2960,10 @@ def main():
         logger.info(f"Failed: {summary['failed']}")
         logger.info(f"Success rate: {summary['success_rate']:.1f}%")
 
-        if summary['failed_relationships']:
+        if summary["failed_relationships"]:
             logger.info("")
             logger.info("Failed relationships:")
-            for fail in summary['failed_relationships'][:10]:
+            for fail in summary["failed_relationships"][:10]:
                 logger.info(f"  - {fail['parent']}.{fail['child']}: {fail['error']}")
 
         # Store patterns
@@ -2600,17 +2979,17 @@ def main():
     logger.info("")
     validator = RelationshipValidator(verbose=args.verbose)
     complex_results = validate_complex_nestings(
-        validator,
-        verbose=args.verbose,
-        use_styled_content=use_styled
+        validator, verbose=args.verbose, use_styled_content=use_styled
     )
 
     complex_success = sum(1 for r in complex_results if r.get("success"))
     complex_fail = sum(1 for r in complex_results if not r.get("success"))
 
     logger.info("")
-    logger.info(f"Complex scenarios: {len(complex_results)} total, "
-                f"{complex_success} success, {complex_fail} failed")
+    logger.info(
+        f"Complex scenarios: {len(complex_results)} total, "
+        f"{complex_success} success, {complex_fail} failed"
+    )
 
     # =====================================================================
     # WEBHOOK VALIDATION FOR COMPLEX SCENARIOS
@@ -2618,7 +2997,9 @@ def main():
     if args.send_to_webhook:
         webhook_url = args.webhook or TEST_WEBHOOK
         if not webhook_url:
-            logger.error("No webhook URL! Set TEST_CHAT_WEBHOOK env var or pass --webhook")
+            logger.error(
+                "No webhook URL! Set TEST_CHAT_WEBHOOK env var or pass --webhook"
+            )
         else:
             logger.info("")
             logger.info("=" * 70)
@@ -2648,7 +3029,9 @@ def main():
                 time.sleep(args.delay)
 
             logger.info("")
-            logger.info(f"Webhook results: {webhook_success} success, {webhook_fail} failed")
+            logger.info(
+                f"Webhook results: {webhook_success} success, {webhook_fail} failed"
+            )
 
     # Store complex patterns
     stored_complex = store_complex_patterns(complex_results, dry_run=args.dry_run)

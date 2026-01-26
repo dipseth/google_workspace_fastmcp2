@@ -25,11 +25,11 @@ Symbol Generation:
     or use the hardcoded defaults below for backward compatibility.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple
+import logging
 import re
 from collections import Counter
-import logging
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,7 @@ _initialized = False
 # =============================================================================
 # DYNAMIC SYMBOL TABLE MANAGEMENT
 # =============================================================================
+
 
 def configure_symbols_from_generator(generator: "SymbolGenerator") -> None:
     """
@@ -102,7 +103,10 @@ def configure_symbols_from_wrapper(
     Returns:
         Dict mapping component names to symbols
     """
-    from adapters.symbol_generator import SymbolGenerator, extract_component_names_from_wrapper
+    from adapters.symbol_generator import (
+        SymbolGenerator,
+        extract_component_names_from_wrapper,
+    )
 
     component_names = extract_component_names_from_wrapper(wrapper)
     generator = SymbolGenerator(module_prefix=module_prefix)
@@ -142,8 +146,8 @@ def ensure_initialized() -> bool:
     try:
         # Import here to avoid circular imports
         from gchat.card_framework_wrapper import (
-            get_card_framework_wrapper,
             configure_structure_dsl_symbols,
+            get_card_framework_wrapper,
         )
 
         # This will configure the symbol tables
@@ -159,6 +163,7 @@ def ensure_initialized() -> bool:
 # =============================================================================
 # EMBEDDING TEXT BUILDERS
 # =============================================================================
+
 
 def build_symbol_embedding_text(component_name: str) -> str:
     """
@@ -226,9 +231,11 @@ def build_component_identity_with_symbol(
 # STRUCTURE PARSING
 # =============================================================================
 
+
 @dataclass
 class ParsedNode:
     """A node in the parsed structure tree."""
+
     symbol: str
     component: str
     multiplier: int = 1
@@ -305,7 +312,7 @@ def _tokenize_structure(s: str) -> List[str]:
             j = i + 1
             while j < len(s) and s[j].isdigit():
                 j += 1
-            tokens.append(f"×{s[i+1:j]}")
+            tokens.append(f"×{s[i + 1 : j]}")
             i = j
             continue
 
@@ -365,23 +372,29 @@ def _parse_tokens(tokens: List[str], pos: int) -> Tuple[List[ParsedNode], int]:
 
         # Symbol or component name
         if token in SYMBOL_TO_COMPONENT:
-            nodes.append(ParsedNode(
-                symbol=token,
-                component=SYMBOL_TO_COMPONENT[token],
-            ))
+            nodes.append(
+                ParsedNode(
+                    symbol=token,
+                    component=SYMBOL_TO_COMPONENT[token],
+                )
+            )
         elif token in COMPONENT_TO_SYMBOL:
             # It's a full component name
             symbol = COMPONENT_TO_SYMBOL[token]
-            nodes.append(ParsedNode(
-                symbol=symbol,
-                component=token,
-            ))
+            nodes.append(
+                ParsedNode(
+                    symbol=symbol,
+                    component=token,
+                )
+            )
         else:
             # Unknown - treat as literal
-            nodes.append(ParsedNode(
-                symbol=token,
-                component=token,
-            ))
+            nodes.append(
+                ParsedNode(
+                    symbol=token,
+                    component=token,
+                )
+            )
 
         pos += 1
 
@@ -391,6 +404,7 @@ def _parse_tokens(tokens: List[str], pos: int) -> Tuple[List[ParsedNode], int]:
 # =============================================================================
 # STRUCTURE VALIDATION
 # =============================================================================
+
 
 def validate_structure(
     nodes: List[ParsedNode],
@@ -432,9 +446,11 @@ def validate_structure(
 # SKELETON BUILDING
 # =============================================================================
 
+
 @dataclass
 class SkeletonSlot:
     """A slot in the card skeleton waiting for input."""
+
     path: str  # e.g., "Section[0].DecoratedText[0].text"
     component: str  # e.g., "DecoratedText"
     field_name: str  # e.g., "text"
@@ -482,13 +498,15 @@ def build_skeleton(
                 if field_info.get("is_component", False):
                     continue
 
-                slots.append(SkeletonSlot(
-                    path=f"{instance_path}.{field_name}",
-                    component=component,
-                    field_name=field_name,
-                    field_type=field_type,
-                    required=required,
-                ))
+                slots.append(
+                    SkeletonSlot(
+                        path=f"{instance_path}.{field_name}",
+                        component=component,
+                        field_name=field_name,
+                        field_type=field_type,
+                        required=required,
+                    )
+                )
 
             # Process children
             for child in node.children:
@@ -504,6 +522,7 @@ def build_skeleton(
 # MCP TOOL INSTRUCTIONS
 # =============================================================================
 
+
 def get_structure_instructions() -> str:
     """
     Get instructions for LLMs on how to use the structure DSL.
@@ -515,11 +534,24 @@ def get_structure_instructions() -> str:
 
     # Group components by category, then look up their symbols from SSoT
     categories = {
-        "Layout": ["Card", "Section", "Header", "CardFixedFooter", "Columns", "Column", "Divider"],
+        "Layout": [
+            "Card",
+            "Section",
+            "Header",
+            "CardFixedFooter",
+            "Columns",
+            "Column",
+            "Divider",
+        ],
         "Text": ["DecoratedText", "TextParagraph", "TextInput"],
         "Buttons": ["Button", "ButtonList", "ChipList", "Chip"],
         "Media": ["Grid", "GridItem", "Image", "Icon"],
-        "Inputs": ["SelectionInput", "SelectionItem", "DateTimePicker", "SwitchControl"],
+        "Inputs": [
+            "SelectionInput",
+            "SelectionItem",
+            "DateTimePicker",
+            "SwitchControl",
+        ],
         "Actions": ["OnClick", "OpenLink", "Action"],
         "Menus": ["OverflowMenu", "OverflowMenuItem"],
     }
@@ -549,7 +581,7 @@ def get_structure_instructions() -> str:
     textinput_sym = COMPONENT_TO_SYMBOL.get("TextInput", "TextInput")
     datepicker_sym = COMPONENT_TO_SYMBOL.get("DateTimePicker", "DateTimePicker")
 
-    categories_text = '\n'.join(category_lines)
+    categories_text = "\n".join(category_lines)
 
     return f"""
 ## Card Structure Symbols
@@ -576,6 +608,7 @@ Form: `{section_sym}[{textinput_sym}×3, {datepicker_sym}, {btnlist_sym}[{btn_sy
 # =============================================================================
 # EXPANSION (Symbol → Full Structure)
 # =============================================================================
+
 
 def expand_to_full_notation(structure_str: str) -> str:
     """

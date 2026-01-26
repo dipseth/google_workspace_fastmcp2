@@ -79,6 +79,7 @@ from typing_extensions import Any, Dict, List, Optional
 
 from auth.context import get_injected_service
 from auth.service_helpers import get_service, request_service
+from config.enhanced_logging import setup_logger
 from config.settings import settings
 from resources.user_resources import get_current_user_email_simple
 from tools.common_types import UserGoogleEmail
@@ -92,8 +93,6 @@ from .chat_types import (
     SpaceInfo,
     SpaceListResponse,
 )
-
-from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
@@ -903,4 +902,6 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 error=str(e),
             )
 
-    logger.info("Basic chat tools registered (list_spaces, list_messages, send_message, search_messages)")
+    logger.info(
+        "Basic chat tools registered (list_spaces, list_messages, send_message, search_messages)"
+    )

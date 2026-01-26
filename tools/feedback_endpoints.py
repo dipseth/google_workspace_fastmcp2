@@ -86,9 +86,7 @@ def setup_feedback_endpoints(mcp: FastMCP):
                 feedback_label = "content"
             elif feedback_type == "form":
                 # Only update form feedback (affects relationships vector)
-                success = feedback_loop.update_feedback(
-                    card_id, form_feedback=feedback
-                )
+                success = feedback_loop.update_feedback(card_id, form_feedback=feedback)
                 feedback_label = "layout"
             else:
                 # Legacy: update both (backwards compatibility)
@@ -96,7 +94,9 @@ def setup_feedback_endpoints(mcp: FastMCP):
                 feedback_label = "card"
 
             if success:
-                logger.info(f"✅ Feedback updated: {card_id[:8]}... -> {feedback} ({feedback_label})")
+                logger.info(
+                    f"✅ Feedback updated: {card_id[:8]}... -> {feedback} ({feedback_label})"
+                )
                 emoji = "👍" if feedback == "positive" else "👎"
                 return HTMLResponse(
                     status_code=200,
@@ -241,7 +241,9 @@ def _render_feedback_page(
     accent_color = (
         "#4ade80"
         if feedback == "positive"
-        else "#f87171" if feedback == "negative" else "#60a5fa"
+        else "#f87171"
+        if feedback == "negative"
+        else "#60a5fa"
     )
 
     emoji = ""
@@ -311,7 +313,7 @@ def _render_feedback_page(
     <div class="container">
         <div class="emoji">{emoji if emoji else ("✅" if success else "❌")}</div>
         <div class="message">{message}</div>
-        {f'<div class="type-label">{type_label}</div>' if type_label else ''}
+        {f'<div class="type-label">{type_label}</div>' if type_label else ""}
         <div class="subtitle">You can close this window.</div>
     </div>
 </body>

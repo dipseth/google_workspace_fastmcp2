@@ -52,7 +52,7 @@ def apply_regex_replacements(
                     f"[apply_regex_replacements] Invalid regex pattern '{operation.pattern}': {regex_err}"
                 )
                 raise ValueError(
-                    f"Invalid regex pattern in operation {i+1}: {regex_err}"
+                    f"Invalid regex pattern in operation {i + 1}: {regex_err}"
                 )
 
             # Count matches before replacement
@@ -64,13 +64,13 @@ def apply_regex_replacements(
 
             total_replacements += match_count
             logger.info(
-                f"[apply_regex_replacements] Operation {i+1}: "
+                f"[apply_regex_replacements] Operation {i + 1}: "
                 f"Pattern '{operation.pattern}' -> '{operation.replacement}' "
                 f"(Made {match_count} replacements)"
             )
 
         except Exception as e:
-            logger.error(f"[apply_regex_replacements] Error in operation {i+1}: {e}")
+            logger.error(f"[apply_regex_replacements] Error in operation {i + 1}: {e}")
             raise
 
     logger.info(
@@ -113,7 +113,7 @@ def validate_regex_operations(operations: List[RegexReplace]) -> Tuple[bool, str
         except re.error as e:
             return (
                 False,
-                f"Invalid regex pattern in operation {i+1} ('{operation.pattern}'): {str(e)}",
+                f"Invalid regex pattern in operation {i + 1} ('{operation.pattern}'): {str(e)}",
             )
 
         # Validate replacement string (check for valid backreferences)
@@ -127,7 +127,7 @@ def validate_regex_operations(operations: List[RegexReplace]) -> Tuple[bool, str
         except re.error as e:
             return (
                 False,
-                f"Invalid replacement string in operation {i+1} ('{operation.replacement}'): {str(e)}",
+                f"Invalid replacement string in operation {i + 1} ('{operation.replacement}'): {str(e)}",
             )
         except Exception:
             # If we can't test it, let it through - it might be valid

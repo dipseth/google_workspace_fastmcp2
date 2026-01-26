@@ -60,7 +60,7 @@ def test_search(wrapper):
     logger.info(f"Found {len(results)} results:")
     for i, result in enumerate(results):
         logger.info(
-            f"{i+1}. {result['path']} ({result['type']}) - Score: {result['score']:.4f}"
+            f"{i + 1}. {result['path']} ({result['type']}) - Score: {result['score']:.4f}"
         )
         if result["docstring"]:
             logger.info(f"   {result['docstring'][:100]}...")

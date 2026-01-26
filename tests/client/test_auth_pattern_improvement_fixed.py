@@ -115,7 +115,8 @@ async def create_test_client(test_email: str = TEST_EMAIL):
                 try:
                     # Create httpx client with SSL bypass
                     httpx_client = httpx.AsyncClient(
-                        verify=False, timeout=30.0  # Skip SSL verification for testing
+                        verify=False,
+                        timeout=30.0,  # Skip SSL verification for testing
                     )
 
                     # Override httpx client if accessible
@@ -161,10 +162,10 @@ Troubleshooting:
 5. For HTTPS servers, ensure SSL certificates are properly configured
 
 Environment variables to check:
-- ENABLE_HTTPS={os.getenv('ENABLE_HTTPS', 'not set')}
-- SSL_CERT_FILE={os.getenv('SSL_CERT_FILE', 'not set')}
-- SSL_KEY_FILE={os.getenv('SSL_KEY_FILE', 'not set')}
-- MCP_SERVER_URL={os.getenv('MCP_SERVER_URL', 'not set')}
+- ENABLE_HTTPS={os.getenv("ENABLE_HTTPS", "not set")}
+- SSL_CERT_FILE={os.getenv("SSL_CERT_FILE", "not set")}
+- SSL_KEY_FILE={os.getenv("SSL_KEY_FILE", "not set")}
+- MCP_SERVER_URL={os.getenv("MCP_SERVER_URL", "not set")}
     """
     raise RuntimeError(diagnostic_info)
 
@@ -264,9 +265,9 @@ class TestImprovedAuthPattern:
             "user-created labels" in content.lower(),
         ]
 
-        assert any(
-            valid_responses
-        ), f"Should get valid response. Content: {content[:300]}"
+        assert any(valid_responses), (
+            f"Should get valid response. Content: {content[:300]}"
+        )
         print("✅ Explicit email parameter test passed")
 
     @pytest.mark.asyncio
@@ -301,9 +302,9 @@ class TestImprovedAuthPattern:
                 "auto-injection" in content.lower(),
             ]
 
-            assert any(
-                valid_responses
-            ), f"Should get valid response via middleware. Content: {content[:300]}"
+            assert any(valid_responses), (
+                f"Should get valid response via middleware. Content: {content[:300]}"
+            )
             print("✅ Middleware auto-injection test passed")
 
         except Exception as e:
@@ -531,9 +532,9 @@ class TestMiddlewareEnhancements:
         ]
 
         # Should either have user-friendly error or successful response
-        assert (
-            any(user_friendly_patterns) or len(content) > 50
-        ), "Should have meaningful response"
+        assert any(user_friendly_patterns) or len(content) > 50, (
+            "Should have meaningful response"
+        )
 
         print(
             f"   Response indicates: {'user-friendly error handling' if any(user_friendly_patterns[:3]) else 'successful authentication'}"

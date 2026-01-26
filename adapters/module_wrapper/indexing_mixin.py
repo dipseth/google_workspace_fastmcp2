@@ -23,30 +23,104 @@ logger = logging.getLogger(__name__)
 
 # Common standard library modules to skip
 STD_LIB_PREFIXES = [
-    "builtins", "collections", "typing", "types", "functools",
-    "itertools", "operator", "re", "os", "sys", "json", "datetime",
-    "time", "random", "math", "inspect", "ast", "copy", "abc", "enum",
-    "importlib", "pathlib", "io", "warnings", "uuid", "logging",
-    "email", "zipfile", "textwrap", "posixpath", "token", "tokenize",
-    "keyword", "linecache", "dis", "socket", "selectors", "select",
-    "ssl", "http", "urllib", "base64", "struct", "bisect", "contextlib",
-    "hashlib", "tempfile", "quopri", "binascii", "stat", "ipaddress",
-    "copyreg", "errno", "array", "codecs", "decimal", "numbers",
-    "threading", "zlib", "bz2", "lzma", "shutil", "fnmatch", "posix", "string",
+    "builtins",
+    "collections",
+    "typing",
+    "types",
+    "functools",
+    "itertools",
+    "operator",
+    "re",
+    "os",
+    "sys",
+    "json",
+    "datetime",
+    "time",
+    "random",
+    "math",
+    "inspect",
+    "ast",
+    "copy",
+    "abc",
+    "enum",
+    "importlib",
+    "pathlib",
+    "io",
+    "warnings",
+    "uuid",
+    "logging",
+    "email",
+    "zipfile",
+    "textwrap",
+    "posixpath",
+    "token",
+    "tokenize",
+    "keyword",
+    "linecache",
+    "dis",
+    "socket",
+    "selectors",
+    "select",
+    "ssl",
+    "http",
+    "urllib",
+    "base64",
+    "struct",
+    "bisect",
+    "contextlib",
+    "hashlib",
+    "tempfile",
+    "quopri",
+    "binascii",
+    "stat",
+    "ipaddress",
+    "copyreg",
+    "errno",
+    "array",
+    "codecs",
+    "decimal",
+    "numbers",
+    "threading",
+    "zlib",
+    "bz2",
+    "lzma",
+    "shutil",
+    "fnmatch",
+    "posix",
+    "string",
 ]
 
 # Common third-party libraries to skip
 THIRD_PARTY_PREFIXES = [
-    "numpy", "pandas", "matplotlib", "scipy", "sklearn", "tensorflow",
-    "torch", "keras", "django", "flask", "requests", "bs4", "selenium",
-    "sqlalchemy", "pytest", "unittest", "nose", "marshmallow",
-    "dataclasses_json", "stringcase", "qdrant_client", "sentence_transformers",
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "scipy",
+    "sklearn",
+    "tensorflow",
+    "torch",
+    "keras",
+    "django",
+    "flask",
+    "requests",
+    "bs4",
+    "selenium",
+    "sqlalchemy",
+    "pytest",
+    "unittest",
+    "nose",
+    "marshmallow",
+    "dataclasses_json",
+    "stringcase",
+    "qdrant_client",
+    "sentence_transformers",
 ]
 
 
 # =============================================================================
 # INDEXING MIXIN
 # =============================================================================
+
 
 class IndexingMixin:
     """
@@ -320,7 +394,10 @@ class IndexingMixin:
         """
         try:
             # Skip if already visited
-            if not hasattr(submodule, "__name__") or submodule.__name__ in self._visited_modules:
+            if (
+                not hasattr(submodule, "__name__")
+                or submodule.__name__ in self._visited_modules
+            ):
                 return
 
             # Mark as visited
@@ -342,7 +419,9 @@ class IndexingMixin:
                     self._current_depth -= 1
                     return
 
-            logger.info(f"Recursively indexing submodule {submodule.__name__} (depth: {current_depth}/{self.max_depth})...")
+            logger.info(
+                f"Recursively indexing submodule {submodule.__name__} (depth: {current_depth}/{self.max_depth})..."
+            )
 
             # Get all submodule components safely
             try:
@@ -375,7 +454,9 @@ class IndexingMixin:
                         try:
                             self._index_nested_components(component)
                         except Exception as e:
-                            logger.debug(f"Error indexing nested components for {sub_name}: {e}")
+                            logger.debug(
+                                f"Error indexing nested components for {sub_name}: {e}"
+                            )
 
                         # Recursively index submodules
                         if (
@@ -383,7 +464,9 @@ class IndexingMixin:
                             and hasattr(sub_obj, "__name__")
                             and sub_obj.__name__ not in self._visited_modules
                             and current_depth < self.max_depth
-                            and self._should_include_module(sub_obj.__name__, current_depth + 1)
+                            and self._should_include_module(
+                                sub_obj.__name__, current_depth + 1
+                            )
                         ):
                             self._index_submodule(sub_name, sub_obj)
                 except Exception as e:
@@ -426,7 +509,9 @@ class IndexingMixin:
                     try:
                         self._index_nested_components(component)
                     except Exception as e:
-                        logger.debug(f"Error indexing nested components for widget {name}: {e}")
+                        logger.debug(
+                            f"Error indexing nested components for widget {name}: {e}"
+                        )
         except Exception as e:
             logger.warning(f"Error indexing widgets module: {e}")
 
@@ -435,11 +520,15 @@ class IndexingMixin:
         try:
             # Check if indexing is needed
             if not getattr(self, "collection_needs_indexing", True):
-                logger.info(f"Skipping indexing for module {self.module_name} - collection already has data")
+                logger.info(
+                    f"Skipping indexing for module {self.module_name} - collection already has data"
+                )
                 self._load_components_from_collection()
                 return
 
-            logger.info(f"Indexing components in module {self.module_name} (max depth: {self.max_depth})...")
+            logger.info(
+                f"Indexing components in module {self.module_name} (max depth: {self.max_depth})..."
+            )
 
             # Reset visited modules and depth counter
             self._visited_modules = set()
@@ -487,7 +576,9 @@ class IndexingMixin:
 
             # Special handling for widgets modules
             if hasattr(self.module, "widgets"):
-                logger.info(f"Special handling for {self.module_name}.widgets module...")
+                logger.info(
+                    f"Special handling for {self.module_name}.widgets module..."
+                )
                 try:
                     widgets_module = getattr(self.module, "widgets")
                     if inspect.ismodule(widgets_module):
@@ -498,7 +589,9 @@ class IndexingMixin:
             # Store components in Qdrant
             self._store_components_in_qdrant()
 
-            logger.info(f"Indexed {len(self.components)} components in module {self.module_name}")
+            logger.info(
+                f"Indexed {len(self.components)} components in module {self.module_name}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to index module components: {e}", exc_info=True)
@@ -507,7 +600,9 @@ class IndexingMixin:
     def _load_components_from_collection(self):
         """Load components from existing Qdrant collection into memory."""
         try:
-            logger.info(f"Loading existing components from collection {self.collection_name}...")
+            logger.info(
+                f"Loading existing components from collection {self.collection_name}..."
+            )
 
             offset = None
             loaded_count = 0
@@ -564,7 +659,9 @@ class IndexingMixin:
             logger.info(f"Loaded {loaded_count} components from collection")
 
         except Exception as e:
-            logger.error(f"Failed to load components from collection: {e}", exc_info=True)
+            logger.error(
+                f"Failed to load components from collection: {e}", exc_info=True
+            )
 
     def _resolve_object_from_path(self, path: str) -> Any:
         """Resolve an object from its full path."""
@@ -581,7 +678,9 @@ class IndexingMixin:
                     obj = getattr(obj, part)
                 except AttributeError:
                     # Try importing as module
-                    module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip(".")
+                    module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip(
+                        "."
+                    )
                     try:
                         obj = importlib.import_module(module_candidate)
                     except (ImportError, ModuleNotFoundError):
@@ -651,7 +750,9 @@ class IndexingMixin:
                     embedding = embedding_list[0] if embedding_list else None
 
                     if embedding is None:
-                        logger.warning(f"Failed to generate embedding for component: {path}")
+                        logger.warning(
+                            f"Failed to generate embedding for component: {path}"
+                        )
                         continue
 
                     # Create deterministic ID
@@ -668,7 +769,9 @@ class IndexingMixin:
                     # Add version info to payload
                     payload = component.to_dict()
                     payload["indexed_at"] = index_version
-                    payload["module_version"] = getattr(self.module, "__version__", "unknown")
+                    payload["module_version"] = getattr(
+                        self.module, "__version__", "unknown"
+                    )
 
                     # Add symbol for this component
                     comp_name = component.name
@@ -689,7 +792,9 @@ class IndexingMixin:
                 self.client.upsert(collection_name=self.collection_name, points=points)
 
                 processed += len(points)
-                logger.info(f"Stored batch {batch_idx+1} ({processed}/{component_count} components)")
+                logger.info(
+                    f"Stored batch {batch_idx + 1} ({processed}/{component_count} components)"
+                )
 
             logger.info(f"Stored {processed} components in Qdrant")
 
@@ -699,8 +804,10 @@ class IndexingMixin:
 
     def _index_components_colbert(self):
         """Index components using ColBERT multi-vector embeddings."""
-        if not self.enable_colbert or not getattr(self, '_colbert_initialized', False):
-            logger.warning("ColBERT not enabled or initialized, skipping ColBERT indexing")
+        if not self.enable_colbert or not getattr(self, "_colbert_initialized", False):
+            logger.warning(
+                "ColBERT not enabled or initialized, skipping ColBERT indexing"
+            )
             return
 
         try:
@@ -711,10 +818,14 @@ class IndexingMixin:
             # Check if collection already has data
             collection_info = self.client.get_collection(self.colbert_collection_name)
             if collection_info.points_count > 0 and not self.force_reindex:
-                logger.info(f"ColBERT collection already has {collection_info.points_count} points, skipping indexing")
+                logger.info(
+                    f"ColBERT collection already has {collection_info.points_count} points, skipping indexing"
+                )
                 return
 
-            logger.info(f"Indexing {len(self.components)} components with ColBERT embeddings...")
+            logger.info(
+                f"Indexing {len(self.components)} components with ColBERT embeddings..."
+            )
 
             index_version = datetime.now(UTC).isoformat()
             batch_size = 10
@@ -728,7 +839,9 @@ class IndexingMixin:
                     embed_text = self._generate_embedding_text(component)
 
                     try:
-                        embedding_result = list(self.colbert_embedder.embed([embed_text]))
+                        embedding_result = list(
+                            self.colbert_embedder.embed([embed_text])
+                        )
                         if not embedding_result:
                             continue
 
@@ -739,7 +852,9 @@ class IndexingMixin:
                             vector_list = [list(v) for v in multi_vector]
 
                     except Exception as embed_error:
-                        logger.warning(f"ColBERT embedding failed for {path}: {embed_error}")
+                        logger.warning(
+                            f"ColBERT embedding failed for {path}: {embed_error}"
+                        )
                         continue
 
                     id_string = f"{self.colbert_collection_name}:{path}"
@@ -748,7 +863,9 @@ class IndexingMixin:
 
                     payload = component.to_dict()
                     payload["indexed_at"] = index_version
-                    payload["module_version"] = getattr(self.module, "__version__", "unknown")
+                    payload["module_version"] = getattr(
+                        self.module, "__version__", "unknown"
+                    )
                     payload["embedding_type"] = "colbert"
 
                     point = qdrant_models["PointStruct"](
@@ -759,9 +876,13 @@ class IndexingMixin:
                     points.append(point)
 
                 if points:
-                    self.client.upsert(collection_name=self.colbert_collection_name, points=points)
+                    self.client.upsert(
+                        collection_name=self.colbert_collection_name, points=points
+                    )
                     processed += len(points)
-                    logger.info(f"ColBERT batch {batch_idx+1}: stored {len(points)} components ({processed} total)")
+                    logger.info(
+                        f"ColBERT batch {batch_idx + 1}: stored {len(points)} components ({processed} total)"
+                    )
 
             logger.info(f"ColBERT indexing complete: {processed} components indexed")
 

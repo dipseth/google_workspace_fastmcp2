@@ -100,9 +100,9 @@ class TestPeopleGroupsGmailAllowListIntegration:
         recipients_not_allowed = payload.get("recipientsNotAllowed") or []
         # In the happy path with allow list group trust, there should be no
         # recipients marked as not allowed.
-        assert (
-            not recipients_not_allowed
-        ), f"Group member should not be marked as not allowed: {recipients_not_allowed}"
+        assert not recipients_not_allowed, (
+            f"Group member should not be marked as not allowed: {recipients_not_allowed}"
+        )
 
     @pytest.mark.asyncio
     async def test_group_spec_not_treated_as_literal_recipient(self, client):

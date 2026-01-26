@@ -9,7 +9,18 @@ import dataclasses
 import inspect
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, get_args, get_origin, get_type_hints
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from .core import BUILTIN_PREFIXES, PRIMITIVE_TYPES
 
@@ -20,6 +31,7 @@ def _get_nl_relationship_patterns() -> Dict[tuple, str]:
     """Get NL relationship patterns (lazy load to avoid circular imports)."""
     try:
         from gchat.smart_card_builder import SmartCardBuilder
+
         return SmartCardBuilder.NL_RELATIONSHIP_PATTERNS
     except ImportError:
         return {
@@ -31,6 +43,7 @@ def _get_nl_relationship_patterns() -> Dict[tuple, str]:
 # =============================================================================
 # RELATIONSHIPS MIXIN
 # =============================================================================
+
 
 class RelationshipsMixin:
     """
@@ -196,7 +209,9 @@ class RelationshipsMixin:
                     "depth": depth + 1,
                     "relationship_path": rel_path,
                     "json_path": json_path,
-                    "nl_description": self._generate_nl_description(class_name, child_name),
+                    "nl_description": self._generate_nl_description(
+                        class_name, child_name
+                    ),
                 }
                 relationships.append(relationship)
 
@@ -229,7 +244,9 @@ class RelationshipsMixin:
         all_relationships = []
         processed_classes = set()
 
-        logger.info(f"Extracting relationships from {len(self.components)} components...")
+        logger.info(
+            f"Extracting relationships from {len(self.components)} components..."
+        )
 
         for full_path, component in self.components.items():
             if component.component_type != "class":
@@ -246,7 +263,9 @@ class RelationshipsMixin:
                 continue
 
             processed_classes.add(component.name)
-            relationships = self._extract_relationships_from_class(cls, max_depth=max_depth)
+            relationships = self._extract_relationships_from_class(
+                cls, max_depth=max_depth
+            )
             all_relationships.extend(relationships)
 
         logger.info(f"Extracted {len(all_relationships)} relationships")
@@ -270,7 +289,9 @@ class RelationshipsMixin:
         logger.info(f"Found {len(filtered)} {child_class} relationships")
         return filtered
 
-    def extract_relationships_by_parent(self, max_depth: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+    def extract_relationships_by_parent(
+        self, max_depth: int = 5
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Extract relationships grouped by parent component name.
 
@@ -285,15 +306,17 @@ class RelationshipsMixin:
         by_parent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for rel in all_rels:
             parent = rel["parent_class"]
-            by_parent[parent].append({
-                "child_class": rel["child_class"],
-                "field_name": rel["field_name"],
-                "json_path": rel["json_path"],
-                "depth": rel["depth"],
-                "is_optional": rel["is_optional"],
-                "nl_description": rel["nl_description"],
-                "root_parent": rel.get("root_parent"),
-            })
+            by_parent[parent].append(
+                {
+                    "child_class": rel["child_class"],
+                    "field_name": rel["field_name"],
+                    "json_path": rel["json_path"],
+                    "depth": rel["depth"],
+                    "is_optional": rel["is_optional"],
+                    "nl_description": rel["nl_description"],
+                    "root_parent": rel.get("root_parent"),
+                }
+            )
 
         logger.info(f"Grouped relationships for {len(by_parent)} parent components")
         return dict(by_parent)
@@ -349,7 +372,9 @@ class RelationshipsMixin:
 
         try:
             # Scan collection for class components
-            logger.info(f"Scanning collection {collection_name} for class components...")
+            logger.info(
+                f"Scanning collection {collection_name} for class components..."
+            )
             class_name_to_ids: Dict[str, List[str]] = defaultdict(list)
 
             offset = None
@@ -378,7 +403,9 @@ class RelationshipsMixin:
                     break
                 offset = next_offset
 
-            logger.info(f"Scanned {total_scanned} points, found {len(class_name_to_ids)} unique class names")
+            logger.info(
+                f"Scanned {total_scanned} points, found {len(class_name_to_ids)} unique class names"
+            )
 
             enriched_count = 0
 
@@ -393,7 +420,9 @@ class RelationshipsMixin:
                 relationships_payload = {
                     "children": relationships,
                     "child_classes": list(set(r["child_class"] for r in relationships)),
-                    "max_depth": max(r["depth"] for r in relationships) if relationships else 0,
+                    "max_depth": max(r["depth"] for r in relationships)
+                    if relationships
+                    else 0,
                     "nl_descriptions": nl_descriptions,
                 }
 
@@ -406,9 +435,13 @@ class RelationshipsMixin:
                         )
                         enriched_count += 1
                     except Exception as e:
-                        logger.warning(f"Failed to enrich {parent_class} ({point_id}): {e}")
+                        logger.warning(
+                            f"Failed to enrich {parent_class} ({point_id}): {e}"
+                        )
 
-            logger.info(f"Enriched {enriched_count} components with relationship metadata")
+            logger.info(
+                f"Enriched {enriched_count} components with relationship metadata"
+            )
             return enriched_count
 
         except Exception as e:
@@ -428,7 +461,9 @@ class RelationshipsMixin:
         all_rels = self.extract_relationships()
 
         # Find all direct parents of this child
-        direct_parents = [r["parent_class"] for r in all_rels if r["child_class"] == child_class]
+        direct_parents = [
+            r["parent_class"] for r in all_rels if r["child_class"] == child_class
+        ]
 
         # Build tree recursively
         def build_parent_tree(class_name: str, visited: Set[str]) -> Dict[str, Any]:
@@ -437,7 +472,9 @@ class RelationshipsMixin:
 
             visited.add(class_name)
 
-            parents = [r["parent_class"] for r in all_rels if r["child_class"] == class_name]
+            parents = [
+                r["parent_class"] for r in all_rels if r["child_class"] == class_name
+            ]
 
             return {
                 "name": class_name,

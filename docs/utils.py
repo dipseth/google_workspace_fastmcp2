@@ -102,7 +102,7 @@ def extract_office_xml_text(file_bytes: bytes, mime_type: str) -> Optional[str]:
                                         member_texts.append(shared_strings[ss_idx])
                                     else:
                                         logger.warning(
-                                            f"Invalid shared string index {ss_idx} in {member}. Max index: {len(shared_strings)-1}"
+                                            f"Invalid shared string index {ss_idx} in {member}. Max index: {len(shared_strings) - 1}"
                                         )
                                 except ValueError:
                                     logger.warning(

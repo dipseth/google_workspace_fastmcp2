@@ -88,7 +88,9 @@ def _build_services_section(enabled_services: Optional[set] = None) -> str:
 
     # If filtering resulted in empty list, show a message
     if enabled_services is not None and len(lines) == 1:
-        lines.append("- *No services currently enabled. Use `manage_tools` to enable services.*")
+        lines.append(
+            "- *No services currently enabled. Use `manage_tools` to enable services.*"
+        )
 
     return "\n".join(lines)
 
@@ -119,7 +121,9 @@ Use `manage_tools` to list, enable, or disable tools at runtime."""
 BASE_INSTRUCTIONS = _build_base_instructions()
 
 
-def _build_session_aware_base_instructions(enabled_services: Optional[set] = None) -> str:
+def _build_session_aware_base_instructions(
+    enabled_services: Optional[set] = None,
+) -> str:
     """
     Build base instructions with session-aware service filtering.
 
@@ -286,23 +290,33 @@ class DynamicInstructionsBuilder:
                         client_manager.client.get_collection, collection_name
                     )
 
-                    collections_info.append({
-                        "name": collection_name,
-                        "points_count": getattr(collection_info, "points_count", 0) or 0,
-                        "vectors_count": getattr(collection_info, "vectors_count", 0) or 0,
-                        "status": str(getattr(collection_info, "status", "unknown")),
-                        "purpose": purpose,
-                    })
+                    collections_info.append(
+                        {
+                            "name": collection_name,
+                            "points_count": getattr(collection_info, "points_count", 0)
+                            or 0,
+                            "vectors_count": getattr(
+                                collection_info, "vectors_count", 0
+                            )
+                            or 0,
+                            "status": str(
+                                getattr(collection_info, "status", "unknown")
+                            ),
+                            "purpose": purpose,
+                        }
+                    )
                 except Exception as e:
                     # Collection might not exist yet
                     logger.debug(f"📊 Collection {collection_name} not available: {e}")
-                    collections_info.append({
-                        "name": collection_name,
-                        "points_count": 0,
-                        "vectors_count": 0,
-                        "status": "not_found",
-                        "purpose": purpose,
-                    })
+                    collections_info.append(
+                        {
+                            "name": collection_name,
+                            "points_count": 0,
+                            "vectors_count": 0,
+                            "status": "not_found",
+                            "purpose": purpose,
+                        }
+                    )
 
             return collections_info
 
@@ -512,7 +526,9 @@ class DynamicInstructionsBuilder:
         # Start with base instructions (session-aware if enabled_services provided)
         if enabled_services is not None:
             base = _build_session_aware_base_instructions(enabled_services)
-            logger.info(f"📋 Building session-aware instructions with {len(enabled_services)} enabled services")
+            logger.info(
+                f"📋 Building session-aware instructions with {len(enabled_services)} enabled services"
+            )
         else:
             base = BASE_INSTRUCTIONS
         sections = [base]
@@ -524,7 +540,9 @@ class DynamicInstructionsBuilder:
                 collection_summary = self._format_collection_summary(collections)
                 if collection_summary:
                     sections.append(collection_summary)
-                    logger.info(f"📋 Added collection summary for {len(collections)} collections")
+                    logger.info(
+                        f"📋 Added collection summary for {len(collections)} collections"
+                    )
             else:
                 # No collections found - show offline status
                 sections.append(self._format_qdrant_status())

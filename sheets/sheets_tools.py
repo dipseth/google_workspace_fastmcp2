@@ -1432,7 +1432,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     .execute
                 )
 
-                range_str = f"R{range_start_row+1}C{range_start_col+1}:R{range_end_row}C{range_end_col}"
+                range_str = f"R{range_start_row + 1}C{range_start_col + 1}:R{range_end_row}C{range_end_col}"
 
                 logger.info(
                     f"Successfully applied {len(requests)} formatting operations to range {range_str}"

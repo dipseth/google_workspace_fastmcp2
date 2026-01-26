@@ -34,9 +34,9 @@ class TestProfileEnrichmentMiddleware:
     @pytest.mark.asyncio
     async def test_list_messages_structure(self, client, real_chat_space_id):
         """Test that list_messages returns proper structure for enrichment."""
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print("🧪 TEST: list_messages Structure & Enrichment")
-        print(f"{'='*80}")
+        print(f"{'=' * 80}")
         print(f"📧 User Email: {TEST_EMAIL}")
         print(f"💬 Space ID: {real_chat_space_id}")
         print("📏 Page Size: 5")
@@ -92,7 +92,7 @@ class TestProfileEnrichmentMiddleware:
 
             if data["messages"]:
                 print("\n👥 Message Sender Analysis:")
-                print(f"   {'='*76}")
+                print(f"   {'=' * 76}")
 
                 for i, msg in enumerate(data["messages"], 1):
                     sender_name = msg.get("senderName", "N/A")
@@ -116,13 +116,13 @@ class TestProfileEnrichmentMiddleware:
 
                 # Overall enrichment summary
                 print("\n📈 Enrichment Summary:")
-                print(f"   {'='*76}")
+                print(f"   {'=' * 76}")
 
                 first_message = data["messages"][0]
                 assert "senderName" in first_message, "Message should have senderName"
-                assert (
-                    "senderEmail" in first_message
-                ), "Message should have senderEmail field"
+                assert "senderEmail" in first_message, (
+                    "Message should have senderEmail field"
+                )
 
                 enriched_count = sum(
                     1
@@ -134,7 +134,9 @@ class TestProfileEnrichmentMiddleware:
                 print(f"   Total Messages: {total_count}")
                 print(f"   Enriched: {enriched_count}")
                 print(f"   Still User IDs: {total_count - enriched_count}")
-                print(f"   Enrichment Rate: {(enriched_count/total_count*100):.1f}%")
+                print(
+                    f"   Enrichment Rate: {(enriched_count / total_count * 100):.1f}%"
+                )
 
                 if enriched_count > 0:
                     print(
@@ -148,7 +150,7 @@ class TestProfileEnrichmentMiddleware:
             print(f"\n❌ JSON Parse Error: {e}")
             pytest.fail(f"Response is not valid JSON: {content}")
 
-        print(f"\n{'='*80}\n")
+        print(f"\n{'=' * 80}\n")
 
     @pytest.mark.asyncio
     async def test_enrichment_with_middleware_injection(
@@ -470,7 +472,7 @@ class TestProfileEnrichmentAnalytics:
             print(f"   Messages Processed: {len(data['messages'])}")
             print(f"   Enriched: {enriched_count}")
             print(
-                f"   Avg Time per Message: {(execution_time/len(data['messages'])):.2f}ms"
+                f"   Avg Time per Message: {(execution_time / len(data['messages'])):.2f}ms"
             )
             print("   ✅ Performance metrics captured")
 
@@ -612,6 +614,6 @@ class TestProfileEnrichmentIntegration:
             # Test passes - the middleware is working correctly, just no enrichable users
         else:
             # Some users were enriched - verify the count is reasonable
-            assert (
-                len(enriched_users) >= 0
-            ), "Enriched user count should be non-negative"
+            assert len(enriched_users) >= 0, (
+                "Enriched user count should be non-negative"
+            )

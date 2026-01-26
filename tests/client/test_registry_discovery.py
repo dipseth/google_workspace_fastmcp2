@@ -56,9 +56,9 @@ class TestRegistryDiscovery:
 
         # Each service should have at least some tools registered
         for service, tools_found in discovered_services.items():
-            assert (
-                len(tools_found) > 0
-            ), f"No tools registered for {service} service in registry"
+            assert len(tools_found) > 0, (
+                f"No tools registered for {service} service in registry"
+            )
 
         print("Registry discovery found tools for all services")
         for service, tools in discovered_services.items():
@@ -80,9 +80,9 @@ class TestRegistryDiscovery:
 
         # Verify registry has loaded a substantial number of tools
         # The system should have at least 80+ tools from all services
-        assert (
-            initial_count > 80
-        ), f"Registry should have 80+ tools registered, found {initial_count}"
+        assert initial_count > 80, (
+            f"Registry should have 80+ tools registered, found {initial_count}"
+        )
 
         # Enable all tools to check metadata
         await client.call_tool("manage_tools", {"action": "enable_all"})
@@ -93,9 +93,9 @@ class TestRegistryDiscovery:
         for tool in sample_tools:
             assert tool.name, "Tool should have a name from registry"
             assert tool.description, "Tool should have a description from registry"
-            assert hasattr(
-                tool, "inputSchema"
-            ), "Tool should have input schema from registry"
+            assert hasattr(tool, "inputSchema"), (
+                "Tool should have input schema from registry"
+            )
 
     @pytest.mark.asyncio
     async def test_registry_service_grouping(self, client):
@@ -154,12 +154,12 @@ class TestRegistryDiscovery:
         # Verify we have tools grouped by service
         expected_services = ["gmail", "drive", "calendar", "docs", "sheets", "chat"]
         for service in expected_services:
-            assert (
-                service in service_groups
-            ), f"Registry should have tools registered for {service}"
-            assert (
-                len(service_groups[service]) > 0
-            ), f"Registry should have tools for {service}"
+            assert service in service_groups, (
+                f"Registry should have tools registered for {service}"
+            )
+            assert len(service_groups[service]) > 0, (
+                f"Registry should have tools for {service}"
+            )
 
         print("Registry groups tools by service:")
         for service, tools in service_groups.items():
@@ -196,15 +196,15 @@ class TestRegistryDiscovery:
                 gmail_label_tool = tool
                 break
 
-        assert (
-            gmail_label_tool is not None
-        ), "list_gmail_labels tool should be in manage_tools list"
+        assert gmail_label_tool is not None, (
+            "list_gmail_labels tool should be in manage_tools list"
+        )
 
         # Check metadata completeness from ToolInfo
         assert gmail_label_tool.get("name"), "Tool should have name"
-        assert gmail_label_tool.get(
-            "description"
-        ), "Tool should have description from registry"
+        assert gmail_label_tool.get("description"), (
+            "Tool should have description from registry"
+        )
         assert "enabled" in gmail_label_tool, "Tool should have enabled status"
 
         print("Registry provides complete metadata for tools")
@@ -227,9 +227,9 @@ class TestRegistryDiscovery:
         tool_names_2 = set(tool.name for tool in tools_2)
 
         # Tool lists should be consistent across calls
-        assert (
-            tool_names_1 == tool_names_2
-        ), "Registry should provide consistent tool list"
+        assert tool_names_1 == tool_names_2, (
+            "Registry should provide consistent tool list"
+        )
 
         print("Registry provides consistent tool discovery")
         print(f"   Total tools: {len(tools_1)}")
@@ -270,14 +270,14 @@ class TestRegistryDiscovery:
         registry_time = time.time() - start_time
 
         # Registry query should be fast (under 2 seconds)
-        assert (
-            registry_time < 2.0
-        ), f"Registry query took {registry_time:.2f}s, should be under 2s"
+        assert registry_time < 2.0, (
+            f"Registry query took {registry_time:.2f}s, should be under 2s"
+        )
 
         # Verify we got a reasonable number of tools registered
-        assert (
-            len(registered_tools) > 50
-        ), f"Expected 50+ tools registered, got {len(registered_tools)}"
+        assert len(registered_tools) > 50, (
+            f"Expected 50+ tools registered, got {len(registered_tools)}"
+        )
 
         # Also measure list_tools performance for enabled tools
         start_time = time.time()
@@ -285,9 +285,9 @@ class TestRegistryDiscovery:
         discovery_time = time.time() - start_time
 
         # Discovery should be fast (under 2 seconds)
-        assert (
-            discovery_time < 2.0
-        ), f"Tool discovery took {discovery_time:.2f}s, should be under 2s"
+        assert discovery_time < 2.0, (
+            f"Tool discovery took {discovery_time:.2f}s, should be under 2s"
+        )
 
         print("Registry tool discovery performance:")
         print(

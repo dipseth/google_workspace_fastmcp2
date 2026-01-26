@@ -27,6 +27,7 @@ def _get_numpy():
     if _numpy is None:
         try:
             import numpy as np
+
             _numpy = np
             logger.debug("NumPy loaded successfully")
         except ImportError as e:
@@ -68,6 +69,7 @@ def _get_qdrant_imports():
 # QDRANT MIXIN
 # =============================================================================
 
+
 class QdrantMixin:
     """
     Mixin providing Qdrant client and collection management.
@@ -89,6 +91,7 @@ class QdrantMixin:
         try:
             # Use centralized Qdrant client singleton
             from config.qdrant_client import get_qdrant_client
+
             self.client = get_qdrant_client()
 
             if self.client is None:
@@ -113,7 +116,9 @@ class QdrantMixin:
 
             # Handle clear_collection flag
             if self.clear_collection and self.collection_name in collection_names:
-                logger.warning(f"Clearing collection {self.collection_name} as requested...")
+                logger.warning(
+                    f"Clearing collection {self.collection_name} as requested..."
+                )
                 self.client.delete_collection(collection_name=self.collection_name)
                 collection_names.remove(self.collection_name)
                 logger.info(f"Collection {self.collection_name} cleared")
@@ -147,7 +152,9 @@ class QdrantMixin:
                     )
                     self.collection_needs_indexing = False
                 else:
-                    logger.info(f"Using existing collection: {self.collection_name} (empty)")
+                    logger.info(
+                        f"Using existing collection: {self.collection_name} (empty)"
+                    )
                     self.collection_needs_indexing = True
 
         except Exception as e:
@@ -156,7 +163,7 @@ class QdrantMixin:
 
     def _ensure_colbert_collection(self):
         """Ensure the Qdrant collection for ColBERT multi-vectors exists."""
-        if not self.enable_colbert or not getattr(self, '_colbert_initialized', False):
+        if not self.enable_colbert or not getattr(self, "_colbert_initialized", False):
             return
 
         try:
@@ -167,9 +174,13 @@ class QdrantMixin:
             collection_names = [c.name for c in collections.collections]
 
             if self.colbert_collection_name in collection_names:
-                logger.info(f"ColBERT collection '{self.colbert_collection_name}' exists")
+                logger.info(
+                    f"ColBERT collection '{self.colbert_collection_name}' exists"
+                )
                 # Check if it has data
-                collection_info = self.client.get_collection(self.colbert_collection_name)
+                collection_info = self.client.get_collection(
+                    self.colbert_collection_name
+                )
                 if collection_info.points_count > 0:
                     logger.info(
                         f"ColBERT collection has {collection_info.points_count} points"
@@ -187,7 +198,9 @@ class QdrantMixin:
                         size=self.colbert_embedding_dim,
                         distance=qdrant_models["Distance"].COSINE,
                         multivector_config=qdrant_models["models"].MultiVectorConfig(
-                            comparator=qdrant_models["models"].MultiVectorComparator.MAX_SIM
+                            comparator=qdrant_models[
+                                "models"
+                            ].MultiVectorComparator.MAX_SIM
                         ),
                     )
                 },
@@ -242,7 +255,7 @@ class QdrantMixin:
     @property
     def collection_metadata(self) -> Dict[str, Any]:
         """Get metadata about the Qdrant collection."""
-        if not getattr(self, '_initialized', False):
+        if not getattr(self, "_initialized", False):
             return {"error": "Not initialized"}
 
         try:
@@ -250,10 +263,10 @@ class QdrantMixin:
             return {
                 "collection_name": self.collection_name,
                 "points_count": collection_info.points_count,
-                "vectors_count": getattr(collection_info, 'vectors_count', None),
+                "vectors_count": getattr(collection_info, "vectors_count", None),
                 "status": str(collection_info.status),
                 "config": {
-                    "embedding_model": getattr(self, 'embedding_model_name', None),
+                    "embedding_model": getattr(self, "embedding_model_name", None),
                     "embedding_dim": self.embedding_dim,
                 },
             }

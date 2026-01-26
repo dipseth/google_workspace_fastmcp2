@@ -57,7 +57,7 @@ def test_qdrant_search():
         logger.info(f"Number of results: {len(search_results)}")
 
         for i, result in enumerate(search_results[:3]):
-            logger.info(f"Result {i+1}:")
+            logger.info(f"Result {i + 1}:")
             logger.info(f"  Score: {result.score}")
             if hasattr(result, "payload"):
                 payload = result.payload
@@ -81,7 +81,7 @@ def test_qdrant_search():
             logger.info(f"Number of points: {len(points)}")
 
             for i, result in enumerate(points[:3]):
-                logger.info(f"Result {i+1}:")
+                logger.info(f"Result {i + 1}:")
                 logger.info(f"  Score: {getattr(result, 'score', 'N/A')}")
                 payload = getattr(result, "payload", {})
                 if isinstance(payload, dict):
@@ -105,7 +105,7 @@ def test_qdrant_search():
         logger.info(f"Scrolled {len(points)} points")
 
         for i, point in enumerate(points[:3]):
-            logger.info(f"Point {i+1}:")
+            logger.info(f"Point {i + 1}:")
             logger.info(f"  ID: {point.id}")
             if hasattr(point, "payload"):
                 payload = point.payload

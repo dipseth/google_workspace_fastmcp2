@@ -206,7 +206,7 @@ class TestCardFrameworkWrapper:
         # Log the first few classes to help with debugging
         for i, class_path in enumerate(classes[:5]):
             info = card_framework_wrapper.get_component_info(class_path)
-            logger.info(f"Class {i+1}: {info['name']} ({info['full_path']})")
+            logger.info(f"Class {i + 1}: {info['name']} ({info['full_path']})")
 
     def test_card_framework_search(self, card_framework_wrapper):
         """Test searching for card components."""
@@ -276,7 +276,7 @@ class TestCardFrameworkWrapper:
             # Log the first few components to help with debugging
             for i, component_path in enumerate(components[:10]):
                 info = card_framework_wrapper.get_component_info(component_path)
-                logger.info(f"Component {i+1}: {info['name']} ({info['full_path']})")
+                logger.info(f"Component {i + 1}: {info['name']} ({info['full_path']})")
 
             # Try to get components directly by path
             card_component = None
@@ -291,7 +291,7 @@ class TestCardFrameworkWrapper:
             logger.info(f"Card search returned {len(card_results)} results")
             for i, result in enumerate(card_results):
                 logger.info(
-                    f"Card result {i+1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
+                    f"Card result {i + 1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
                 )
                 if result["component"] is not None and (
                     card_component is None or result["score"] > 0.5
@@ -305,7 +305,7 @@ class TestCardFrameworkWrapper:
             logger.info(f"Section search returned {len(section_results)} results")
             for i, result in enumerate(section_results):
                 logger.info(
-                    f"Section result {i+1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
+                    f"Section result {i + 1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
                 )
                 if result["component"] is not None and (
                     section_component is None or result["score"] > 0.5
@@ -319,7 +319,7 @@ class TestCardFrameworkWrapper:
             logger.info(f"TextParagraph search returned {len(text_results)} results")
             for i, result in enumerate(text_results):
                 logger.info(
-                    f"TextParagraph result {i+1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
+                    f"TextParagraph result {i + 1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
                 )
                 if result["component"] is not None and (
                     text_component is None or result["score"] > 0.5
@@ -333,7 +333,7 @@ class TestCardFrameworkWrapper:
             logger.info(f"Button search returned {len(button_results)} results")
             for i, result in enumerate(button_results):
                 logger.info(
-                    f"Button result {i+1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
+                    f"Button result {i + 1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
                 )
                 if result["component"] is not None and (
                     button_component is None or result["score"] > 0.5
@@ -357,7 +357,7 @@ class TestCardFrameworkWrapper:
             for i, component_path in enumerate(
                 sorted(card_framework_wrapper.components.keys())[:50]
             ):  # Limit to first 50
-                logger.info(f"  {i+1}. {component_path}")
+                logger.info(f"  {i + 1}. {component_path}")
 
             # If we couldn't find the components, skip the test
             if missing_components:
@@ -436,9 +436,9 @@ class TestCardFrameworkWrapper:
             )
 
             # Check response
-            assert (
-                response.status_code == 200
-            ), f"Failed to send card: {response.status_code} - {response.text}"
+            assert response.status_code == 200, (
+                f"Failed to send card: {response.status_code} - {response.text}"
+            )
             logger.info(f"Card sent successfully! Status: {response.status_code}")
 
             # For comparison, also create a card directly using the Google Chat API format
@@ -747,9 +747,9 @@ class TestCardFrameworkWrapper:
             )
 
             # Check response for direct card
-            assert (
-                direct_response.status_code == 200
-            ), f"Failed to send direct card: {direct_response.status_code} - {direct_response.text}"
+            assert direct_response.status_code == 200, (
+                f"Failed to send direct card: {direct_response.status_code} - {direct_response.text}"
+            )
             logger.info(
                 f"Direct card sent successfully! Status: {direct_response.status_code}"
             )
@@ -773,7 +773,7 @@ class TestCardFrameworkWrapper:
             card_component = None
             for i, result in enumerate(card_results):
                 logger.info(
-                    f"Card result {i+1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
+                    f"Card result {i + 1}: {result['name']} ({result['path']}) - Score: {result['score']:.4f}"
                 )
                 if result["component"] is not None and (
                     card_component is None or result["score"] > 0.5
@@ -874,9 +874,9 @@ class TestCardFrameworkWrapper:
             )
 
             # Check response
-            assert (
-                response.status_code == 200
-            ), f"Failed to send complex card: {response.status_code} - {response.text}"
+            assert response.status_code == 200, (
+                f"Failed to send complex card: {response.status_code} - {response.text}"
+            )
             logger.info(
                 f"Complex card sent successfully! Status: {response.status_code}"
             )

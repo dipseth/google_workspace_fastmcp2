@@ -55,17 +55,17 @@ from config.enhanced_logging import setup_logger
 # Import settings for default webhook configuration
 from config.settings import settings
 
-# NLP parser commented out - SmartCardBuilder handles all parsing and rendering
-# SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
-# from .nlp_card_parser import parse_enhanced_natural_language_description
-# Import SmartCardBuilder for component-based card creation
-from .smart_card_builder import get_smart_card_builder
-
 # Import structured response types
 from .card_types import (
     ComponentSearchInfo,
     SendDynamicCardResponse,
 )
+
+# NLP parser commented out - SmartCardBuilder handles all parsing and rendering
+# SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
+# from .nlp_card_parser import parse_enhanced_natural_language_description
+# Import SmartCardBuilder for component-based card creation
+from .smart_card_builder import get_smart_card_builder
 
 logger = setup_logger()
 logger.info("Card Framework v2 is available for rich card creation")
@@ -263,7 +263,9 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
         try:
             from gchat.card_framework_wrapper import get_card_framework_wrapper
 
-            _card_framework_wrapper = get_card_framework_wrapper(force_reinitialize=force_reset)
+            _card_framework_wrapper = get_card_framework_wrapper(
+                force_reinitialize=force_reset
+            )
 
             # Validate component count
             component_count = (
@@ -286,7 +288,9 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
             logger.error(f"❌ Could not import card_framework module: {import_error}")
             return None
         except Exception as e:
-            logger.error(f"❌ Failed to get ModuleWrapper singleton: {e}", exc_info=True)
+            logger.error(
+                f"❌ Failed to get ModuleWrapper singleton: {e}", exc_info=True
+            )
             return None
     else:
         logger.debug(
@@ -324,6 +328,7 @@ def _get_dsl_field_description() -> str:
     """
     try:
         from gchat.card_framework_wrapper import get_dsl_field_description
+
         return get_dsl_field_description()
     except Exception:
         # Fallback if wrapper not available - no hardcoded symbols
@@ -514,7 +519,9 @@ def _build_card_with_smart_builder(
     if fields:
         logger.info(f"📝 Form card mode: {len(fields)} field(s)")
     if grid or images:
-        logger.info(f"🔲 Grid params provided: {len(images) if images else 'direct grid'}")
+        logger.info(
+            f"🔲 Grid params provided: {len(images) if images else 'direct grid'}"
+        )
     if sections:
         logger.info(f"📋 Explicit sections provided: {len(sections)} section(s)")
 
@@ -787,7 +794,10 @@ def setup_card_tools(mcp: FastMCP) -> None:
         ] = None,
         webhook_url: Annotated[
             Optional[str],
-            Field(default=None, description="Webhook URL (optional, uses default if not set)"),
+            Field(
+                default=None,
+                description="Webhook URL (optional, uses default if not set)",
+            ),
         ] = None,
     ) -> SendDynamicCardResponse:
         """
@@ -911,9 +921,13 @@ def setup_card_tools(mcp: FastMCP) -> None:
                         inner_card = google_format_card.get("card", {})
                         if isinstance(inner_card, dict):
                             dsl_detected = inner_card.get("_dsl_structure")
-                            jinja_template_applied = inner_card.get("_jinja_applied", False)
+                            jinja_template_applied = inner_card.get(
+                                "_jinja_applied", False
+                            )
                             if dsl_detected:
-                                logger.info(f"🔣 DSL structure detected: {dsl_detected}")
+                                logger.info(
+                                    f"🔣 DSL structure detected: {dsl_detected}"
+                                )
                             if jinja_template_applied:
                                 logger.info("🎨 Jinja template was applied")
                 except Exception as smart_err:

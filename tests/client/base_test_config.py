@@ -215,9 +215,9 @@ Troubleshooting:
 5. For HTTPS servers, ensure SSL certificates are properly configured
 
 Environment variables to check:
-- ENABLE_HTTPS={os.getenv('ENABLE_HTTPS', 'not set')}
-- SSL_CERT_FILE={os.getenv('SSL_CERT_FILE', 'not set')}
-- SSL_KEY_FILE={os.getenv('SSL_KEY_FILE', 'not set')}
-- MCP_SERVER_URL={os.getenv('MCP_SERVER_URL', 'not set')}
+- ENABLE_HTTPS={os.getenv("ENABLE_HTTPS", "not set")}
+- SSL_CERT_FILE={os.getenv("SSL_CERT_FILE", "not set")}
+- SSL_KEY_FILE={os.getenv("SSL_KEY_FILE", "not set")}
+- MCP_SERVER_URL={os.getenv("MCP_SERVER_URL", "not set")}
     """
     raise RuntimeError(diagnostic_info)

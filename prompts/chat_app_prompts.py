@@ -98,7 +98,9 @@ def setup_chat_app_prompts(mcp: FastMCP):
         complexity_description = (
             "basic"
             if complexity_level < 0.3
-            else "intermediate" if complexity_level < 0.7 else "advanced"
+            else "intermediate"
+            if complexity_level < 0.7
+            else "advanced"
         )
 
         card_guidance = f"""
@@ -107,9 +109,9 @@ def setup_chat_app_prompts(mcp: FastMCP):
 {_CHAT_TOOL_OPTIMIZATION}
 
 ## Card Configuration (Request ID: {request_id})
-- **Card Type**: {card_type.replace('_', ' ').title()}
+- **Card Type**: {card_type.replace("_", " ").title()}
 - **Complexity Level**: {complexity_description} ({complexity_level:.2f})
-- **Interactive Elements**: {'Enabled' if use_interactive_elements else 'Disabled'}
+- **Interactive Elements**: {"Enabled" if use_interactive_elements else "Disabled"}
 
 ## Service Integrations
 Integrated Services: {services_text}
@@ -126,7 +128,7 @@ Theme: {styling_theme}
 def create_{card_type}_card():
     card = {{
         "header": {{
-            "title": "{card_type.replace('_', ' ').title()} Card",
+            "title": "{card_type.replace("_", " ").title()} Card",
             "subtitle": "Powered by FastMCP Advanced Capabilities",
             "imageUrl": "https://developers.google.com/chat/images/chat-product-icon.png"
         }},
@@ -235,7 +237,7 @@ This {complexity_description} implementation showcases FastMCP's advanced parame
 - **App Name**: {app_name}
 - **Version**: {app_version}
 - **Environment**: {environment.title()}
-- **Deployment Target**: {deployment_target.replace('_', ' ').title()}
+- **Deployment Target**: {deployment_target.replace("_", " ").title()}
 
 ## Prerequisites
 1. Google Cloud Project with billing enabled
@@ -249,7 +251,7 @@ This {complexity_description} implementation showcases FastMCP's advanced parame
 ## OAuth Scopes
 {scopes_list}
 
-## Authentication Setup ({authentication_type.replace('_', ' ').title()})
+## Authentication Setup ({authentication_type.replace("_", " ").title()})
 """
                 ),
             ),
@@ -274,7 +276,7 @@ gcloud iam service-accounts keys create service-account-key.json \\
     --iam-account=chat-bot-service@PROJECT_ID.iam.gserviceaccount.com
 ```
 
-### 3. Deploy to {deployment_target.replace('_', ' ').title()}
+### 3. Deploy to {deployment_target.replace("_", " ").title()}
 """
                 ),
             ),
@@ -284,7 +286,7 @@ gcloud iam service-accounts keys create service-account-key.json \\
                     text=f"""
 ## Platform-Specific Deployment
 
-### {deployment_target.replace('_', ' ').title()} Configuration
+### {deployment_target.replace("_", " ").title()} Configuration
 
 ```yaml
 # app.yaml or cloudbuild.yaml
@@ -301,7 +303,7 @@ automatic_scaling:
 ```
 
 ## Monitoring Setup
-{'Enabled' if enable_monitoring else 'Disabled'}
+{"Enabled" if enable_monitoring else "Disabled"}
 
 ## Security Checklist
 - [ ] Service account permissions configured
@@ -366,7 +368,9 @@ This setup guide demonstrates FastMCP's sophisticated parameter handling and mul
         automation_desc = (
             "manual"
             if automation_level < 0.3
-            else "semi-automated" if automation_level < 0.7 else "fully automated"
+            else "semi-automated"
+            if automation_level < 0.7
+            else "fully automated"
         )
 
         # Create integration settings from available parameters
@@ -386,7 +390,7 @@ This setup guide demonstrates FastMCP's sophisticated parameter handling and mul
 ## Integration Overview
 - **Primary Service**: {primary_service.title()}
 - **Secondary Services**: {secondary_list}
-- **Workflow Type**: {workflow_type.replace('_', ' ').title()}
+- **Workflow Type**: {workflow_type.replace("_", " ").title()}
 - **Automation Level**: {automation_desc} ({automation_level:.2f})
 
 ## Configuration Settings
@@ -403,14 +407,14 @@ class GoogleWorkspaceIntegrator:
     def __init__(self, primary_service="{primary_service}"):
         self.primary = self.get_service(primary_service)
         self.secondary_services = {{
-            {chr(10).join([f'            "{service.strip()}": self.get_service("{service.strip()}"),' for service in secondary_services.split(',')])}
+            {chr(10).join([f'            "{service.strip()}": self.get_service("{service.strip()}"),' for service in secondary_services.split(",")])}
         }}
         self.workflow_type = "{workflow_type}"
         self.automation_level = {automation_level}
     
     def setup_workflow(self):
         workflow_config = {{
-            "triggers": {trigger_events.split(',')},
+            "triggers": {trigger_events.split(",")},
             "actions": self.get_workflow_actions(),
             "notifications": {str(enable_notifications).lower()}
         }}
@@ -419,15 +423,15 @@ class GoogleWorkspaceIntegrator:
 
 ### Workflow Implementation
 
-#### {workflow_type.replace('_', ' ').title()} Workflow
+#### {workflow_type.replace("_", " ").title()} Workflow
 ```python
 async def handle_workflow_event(event_type, event_data):
-    if event_type in {trigger_events.split(',')}:
+    if event_type in {trigger_events.split(",")}:
         # Primary service action
         result = await process_primary_action(event_data)
         
         # Secondary service updates
-        for service in {secondary_services.split(',')}:
+        for service in {secondary_services.split(",")}:
             await sync_with_service(service, result)
         
         # Notification handling
@@ -542,10 +546,10 @@ This integration pattern showcases FastMCP's advanced typing system and complex 
 {_CHAT_TOOL_OPTIMIZATION}
 
 ## Deployment Configuration
-- **Platform**: {deployment_target.replace('_', ' ').title()}
+- **Platform**: {deployment_target.replace("_", " ").title()}
 - **Environment**: {environment.title()}
 - **Monitoring**: {monitoring_level.title()}
-- **Auto Scaling**: {'Enabled' if enable_auto_scaling else 'Disabled'}
+- **Auto Scaling**: {"Enabled" if enable_auto_scaling else "Disabled"}
 
 ## Resource Allocation
 {chr(10).join([f"- **{k.replace('_', ' ').title()}**: {v}" for k, v in performance_settings.items()])}
@@ -557,7 +561,7 @@ This integration pattern showcases FastMCP's advanced typing system and complex 
 {backup_list}
 
 ## Compliance
-{'Enabled (GDPR, SOC2, HIPAA compatible)' if compliance_requirements else 'Basic compliance only'}
+{"Enabled (GDPR, SOC2, HIPAA compatible)" if compliance_requirements else "Basic compliance only"}
 """
                 ),
             ),
@@ -567,7 +571,7 @@ This integration pattern showcases FastMCP's advanced typing system and complex 
                     text=f"""
 ## Infrastructure as Code
 
-### {deployment_target.replace('_', ' ').title()} Configuration
+### {deployment_target.replace("_", " ").title()} Configuration
 ```yaml
 # deployment.yaml
 apiVersion: apps/v1
@@ -782,8 +786,8 @@ This deployment guide demonstrates FastMCP's ability to handle complex enterpris
 {_CHAT_TOOL_OPTIMIZATION}
 
 ## Showcase Configuration
-- **Use Case**: {use_case_category.replace('_', ' ').title()}
-- **Example Type**: {example_category.replace('_', ' ').title()}
+- **Use Case**: {use_case_category.replace("_", " ").title()}
+- **Example Type**: {example_category.replace("_", " ").title()}
 - **Complexity**: {complexity_level.title()}
 - **Example Count**: {example_count_int}
 - **Target Audience**: {audience_text}
@@ -797,7 +801,7 @@ This deployment guide demonstrates FastMCP's ability to handle complex enterpris
 
 ## Example Collection
 
-### {use_case_category.replace('_', ' ').title()} Examples
+### {use_case_category.replace("_", " ").title()} Examples
 
 #### Example 1: Advanced Approval Workflow Card
 ```python

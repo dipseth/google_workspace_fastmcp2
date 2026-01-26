@@ -25,25 +25,25 @@ Usage:
 """
 
 import argparse
-import sys
+import json
 import os
 import random
-import json
+import sys
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requests
 
-from gchat.card_framework_wrapper import get_card_framework_wrapper
 from adapters.structure_validator import StructureValidator
+from gchat.card_framework_wrapper import get_card_framework_wrapper
 from middleware.filters.styling_filters import (
     COLOR_SCHEMES,
-    STYLING_FILTERS,
-    ComponentStyler,
-    ColorCycler,
-    color_filter,
     SEMANTIC_COLORS,
+    STYLING_FILTERS,
+    ColorCycler,
+    ComponentStyler,
+    color_filter,
 )
 from middleware.template_core.jinja_environment import JinjaEnvironmentManager
 
@@ -74,7 +74,10 @@ def test_dsl_parsing():
         # Basic structure
         ("§[δ×2]", "Section with 2 DecoratedText"),
         # Multiple children
-        ("§[δ×2, Ƀ[ᵬ×2]]", "Section with 2 DecoratedText and ButtonList with 2 Buttons"),
+        (
+            "§[δ×2, Ƀ[ᵬ×2]]",
+            "Section with 2 DecoratedText and ButtonList with 2 Buttons",
+        ),
         # Nested grid
         ("§[ℊ[ǵ×4]]", "Section with Grid containing 4 GridItems"),
         # Complex nested
@@ -138,19 +141,28 @@ def test_card_building():
     # Build card structure manually for verification
     card = build_card_from_dsl(dsl, "DSL Test Card", "Built from parsed DSL")
 
-    print(f"  Card sections: {len(card.get('cardsV2', [{}])[0].get('card', {}).get('sections', []))}")
+    print(
+        f"  Card sections: {len(card.get('cardsV2', [{}])[0].get('card', {}).get('sections', []))}"
+    )
 
-    widgets = card.get("cardsV2", [{}])[0].get("card", {}).get("sections", [{}])[0].get("widgets", [])
+    widgets = (
+        card.get("cardsV2", [{}])[0]
+        .get("card", {})
+        .get("sections", [{}])[0]
+        .get("widgets", [])
+    )
     print(f"  Widgets in first section: {len(widgets)}")
 
     for i, widget in enumerate(widgets):
         widget_type = list(widget.keys())[0] if widget else "empty"
-        print(f"    Widget {i+1}: {widget_type}")
+        print(f"    Widget {i + 1}: {widget_type}")
 
     return True
 
 
-def build_card_from_dsl(dsl: str, title: str = "DSL Card", subtitle: str = None) -> dict:
+def build_card_from_dsl(
+    dsl: str, title: str = "DSL Card", subtitle: str = None
+) -> dict:
     """
     Build a Google Chat card from DSL notation.
 
@@ -181,60 +193,78 @@ def build_card_from_dsl(dsl: str, title: str = "DSL Card", subtitle: str = None)
 
             for i in range(mult):
                 if name == "DecoratedText":
-                    result.append({
-                        "decoratedText": {
-                            "topLabel": f"Item {len(result) + 1}",
-                            "text": f"DecoratedText content #{i + 1}"
+                    result.append(
+                        {
+                            "decoratedText": {
+                                "topLabel": f"Item {len(result) + 1}",
+                                "text": f"DecoratedText content #{i + 1}",
+                            }
                         }
-                    })
+                    )
                 elif name == "TextParagraph":
-                    result.append({
-                        "textParagraph": {
-                            "text": f"TextParagraph content #{i + 1}"
-                        }
-                    })
+                    result.append(
+                        {"textParagraph": {"text": f"TextParagraph content #{i + 1}"}}
+                    )
                 elif name == "Grid":
                     # Build grid items from children
                     grid_items = []
                     for child in children:
                         if child.get("name") == "GridItem":
                             for j in range(child.get("multiplier", 1)):
-                                grid_items.append({
-                                    "image": {
-                                        "imageUri": f"https://picsum.photos/100/100?{len(grid_items) + 1}"
-                                    },
-                                    "title": f"Grid Item {len(grid_items) + 1}"
-                                })
-                    if grid_items:
-                        result.append({
-                            "columns": {
-                                "columnItems": [
+                                grid_items.append(
                                     {
-                                        "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
-                                        "widgets": [{"image": {"imageUrl": item["image"]["imageUri"]}}]
+                                        "image": {
+                                            "imageUri": f"https://picsum.photos/100/100?{len(grid_items) + 1}"
+                                        },
+                                        "title": f"Grid Item {len(grid_items) + 1}",
                                     }
-                                    for item in grid_items
-                                ]
+                                )
+                    if grid_items:
+                        result.append(
+                            {
+                                "columns": {
+                                    "columnItems": [
+                                        {
+                                            "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
+                                            "widgets": [
+                                                {
+                                                    "image": {
+                                                        "imageUrl": item["image"][
+                                                            "imageUri"
+                                                        ]
+                                                    }
+                                                }
+                                            ],
+                                        }
+                                        for item in grid_items
+                                    ]
+                                }
                             }
-                        })
+                        )
                 elif name == "ButtonList":
                     # Build buttons from children
                     buttons = []
                     for child in children:
                         if child.get("name") == "Button":
                             for j in range(child.get("multiplier", 1)):
-                                buttons.append({
-                                    "text": f"Button {len(buttons) + 1}",
-                                    "onClick": {"openLink": {"url": "https://google.com"}}
-                                })
+                                buttons.append(
+                                    {
+                                        "text": f"Button {len(buttons) + 1}",
+                                        "onClick": {
+                                            "openLink": {"url": "https://google.com"}
+                                        },
+                                    }
+                                )
                     if buttons:
                         result.append({"buttonList": {"buttons": buttons}})
                 elif name == "Image":
-                    result.append({
-                        "image": {
-                            "imageUrl": f"https://picsum.photos/300/200?{i + 1}"
+                    result.append(
+                        {
+                            "image": {
+                                "imageUrl": f"https://picsum.photos/300/200?{i + 1}"
+                            }
                         }
-                    })
+                    )
                 elif name == "Section":
                     # Nested section - recurse into children
                     nested_widgets = build_widgets(children)
@@ -255,19 +285,15 @@ def build_card_from_dsl(dsl: str, title: str = "DSL Card", subtitle: str = None)
             break
 
     return {
-        "cardsV2": [{
-            "cardId": "dsl-test-card",
-            "card": {
-                "header": {
-                    "title": title,
-                    "subtitle": subtitle
+        "cardsV2": [
+            {
+                "cardId": "dsl-test-card",
+                "card": {
+                    "header": {"title": title, "subtitle": subtitle},
+                    "sections": [{"header": "Section from DSL", "widgets": widgets}],
                 },
-                "sections": [{
-                    "header": "Section from DSL",
-                    "widgets": widgets
-                }]
             }
-        }]
+        ]
     }
 
 
@@ -286,7 +312,9 @@ def send_to_webhook(card: dict, webhook_url: str = None) -> bool:
         webhook_url = os.environ.get("TEST_CHAT_WEBHOOK")
 
     if not webhook_url:
-        print("  ERROR: No webhook URL provided. Set TEST_CHAT_WEBHOOK env var or pass --webhook")
+        print(
+            "  ERROR: No webhook URL provided. Set TEST_CHAT_WEBHOOK env var or pass --webhook"
+        )
         return False
 
     print(f"\n  Sending to webhook...")
@@ -294,9 +322,7 @@ def send_to_webhook(card: dict, webhook_url: str = None) -> bool:
     print(f"  {json.dumps(card, indent=2)[:500]}...")
 
     response = requests.post(
-        webhook_url,
-        json=card,
-        headers={"Content-Type": "application/json"}
+        webhook_url, json=card, headers={"Content-Type": "application/json"}
     )
 
     print(f"\n  Response status: {response.status_code}")
@@ -346,7 +372,10 @@ def test_structure_validator():
     test_structures = [
         # Valid structures
         ("§[đ]", "Section with DecoratedText"),
-        ("§[đ, ᵬ]", "Section with DecoratedText and Button (invalid - Button needs ButtonList)"),
+        (
+            "§[đ, ᵬ]",
+            "Section with DecoratedText and Button (invalid - Button needs ButtonList)",
+        ),
         ("§[đ, Ƀ[ᵬ]]", "Section with DecoratedText and ButtonList containing Button"),
         ("§[đ, Ƀ[ᵬ×2]]", "Section with 2 Buttons"),
         # Try with full names too
@@ -395,7 +424,10 @@ def test_structure_validator():
 
     templates = [
         ("§[đ, Ƀ[ᵬ×{button_count}]]", {"button_count": 3}),
-        ("§[đ×{text_count}, Ƀ[ᵬ×{button_count}]]", {"text_count": 2, "button_count": 2}),
+        (
+            "§[đ×{text_count}, Ƀ[ᵬ×{button_count}]]",
+            {"text_count": 2, "button_count": 2},
+        ),
     ]
 
     for template, inputs in templates:
@@ -443,7 +475,7 @@ def test_structure_validator():
     cycler = ColorCycler.from_scheme(scheme_name)
     for i in range(6):
         color = cycler.next()
-        styled = color_filter(f"Item {i+1}", color, target="gchat")
+        styled = color_filter(f"Item {i + 1}", color, target="gchat")
         print(f"   {styled}")
 
     # Random semantic color examples
@@ -487,15 +519,15 @@ def test_structure_validator():
 
     filter_tests = [
         # (template, context, description)
-        ('{{ text | success_text }}', {"text": "Online"}, "success_text filter"),
-        ('{{ text | error_text }}', {"text": "Offline"}, "error_text filter"),
-        ('{{ text | warning_text }}', {"text": "Degraded"}, "warning_text filter"),
-        ('{{ text | muted_text }}', {"text": "Pending"}, "muted_text filter"),
-        ('{{ text | bold }}', {"text": "Important"}, "bold filter"),
+        ("{{ text | success_text }}", {"text": "Online"}, "success_text filter"),
+        ("{{ text | error_text }}", {"text": "Offline"}, "error_text filter"),
+        ("{{ text | warning_text }}", {"text": "Degraded"}, "warning_text filter"),
+        ("{{ text | muted_text }}", {"text": "Pending"}, "muted_text filter"),
+        ("{{ text | bold }}", {"text": "Important"}, "bold filter"),
         ('{{ text | color("#1a73e8") }}', {"text": "Custom Color"}, "color filter"),
         ('{{ amount | price("USD") }}', {"amount": 99.99}, "price filter"),
         ('{{ label | badge("#ea4335") }}', {"label": "SALE"}, "badge filter"),
-        ('{{ text | strike }}', {"text": "Old Price"}, "strike filter"),
+        ("{{ text | strike }}", {"text": "Old Price"}, "strike filter"),
     ]
 
     for template_str, context, description in filter_tests:
@@ -514,31 +546,36 @@ def test_structure_validator():
         (
             '{{ "System Status" | bold }}: {{ status | success_text }}',
             {"status": "All Systems Operational"},
-            "Status header"
+            "Status header",
         ),
         # Metric display
         (
             '{{ label | muted_text }}: {{ value | color("#34a853") | bold }}',
             {"label": "CPU Usage", "value": "45%"},
-            "Metric display"
+            "Metric display",
         ),
         # Price with sale
         (
             '{{ "SALE" | badge("#ea4335") }} {{ price | price("USD") }} (was {{ original | price("USD") | strike }})',
             {"price": 79.99, "original": 129.99},
-            "Sale price"
+            "Sale price",
         ),
         # Build status
         (
             '{{ "Build" | bold }} #{{ number }}: {{ result | success_text }} | {{ "Coverage" | muted_text }}: {{ coverage }}%',
             {"number": 1847, "result": "PASSED", "coverage": 94.2},
-            "Build status"
+            "Build status",
         ),
         # Alert notification
         (
-            '{{ severity | badge(color) }} {{ title }}\n{{ message | muted_text }}',
-            {"severity": "WARNING", "color": "#fbbc05", "title": "High Memory", "message": "Usage exceeded 85%"},
-            "Alert notification"
+            "{{ severity | badge(color) }} {{ title }}\n{{ message | muted_text }}",
+            {
+                "severity": "WARNING",
+                "color": "#fbbc05",
+                "title": "High Memory",
+                "message": "Usage exceeded 85%",
+            },
+            "Alert notification",
         ),
     ]
 
@@ -547,7 +584,7 @@ def test_structure_validator():
             template = env.from_string(template_str)
             result = template.render(**context)
             print(f"\n   {description}:")
-            for line in result.split('\n'):
+            for line in result.split("\n"):
                 print(f"      {line}")
         except Exception as e:
             print(f"\n   ✗ {description}: {e}")
@@ -562,7 +599,7 @@ def test_structure_validator():
                 '{{ "API" | muted_text }}: {{ "Online" | success_text }}',
                 '{{ "Database" | muted_text }}: {{ "Connected" | success_text }}',
                 '{{ "Cache" | muted_text }}: {{ "High Latency" | warning_text }}',
-            ]
+            ],
         },
         "pricing": {
             "title": '{{ "Premium Plan" | bold }}',
@@ -570,7 +607,7 @@ def test_structure_validator():
                 '{{ 29.99 | price("USD") }}/month',
                 '{{ "BEST VALUE" | badge("#34a853") }}',
                 '{{ "Save 40%" | color("#34a853") | bold }} vs monthly',
-            ]
+            ],
         },
         "metrics": {
             "title": '{{ "Performance Dashboard" | color("#8430ce") | bold }}',
@@ -578,7 +615,7 @@ def test_structure_validator():
                 '{{ "Requests" | muted_text }}: {{ "2,450/s" | color("#34a853") }}',
                 '{{ "Latency" | muted_text }}: {{ "45ms" | color("#1a73e8") }}',
                 '{{ "Errors" | muted_text }}: {{ "0.02%" | success_text }}',
-            ]
+            ],
         },
     }
 
@@ -599,7 +636,11 @@ def test_structure_validator():
     content_types = ["status", "metric", "price", "alert"]
     for content_type in content_types:
         if content_type == "status":
-            statuses = [("Online", "success_text"), ("Offline", "error_text"), ("Degraded", "warning_text")]
+            statuses = [
+                ("Online", "success_text"),
+                ("Offline", "error_text"),
+                ("Degraded", "warning_text"),
+            ]
             status, filter_name = random.choice(statuses)
             template = f'{{{{ "{status}" | {filter_name} }}}}'
         elif content_type == "metric":
@@ -613,7 +654,9 @@ def test_structure_validator():
         elif content_type == "alert":
             severity = random.choice(["INFO", "WARNING", "ERROR"])
             colors = {"INFO": "#1a73e8", "WARNING": "#fbbc05", "ERROR": "#ea4335"}
-            template = f'{{{{ "{severity}" | badge("{colors[severity]}") }}}} Alert message'
+            template = (
+                f'{{{{ "{severity}" | badge("{colors[severity]}") }}}} Alert message'
+            )
 
         try:
             result = env.from_string(template).render()
@@ -665,7 +708,9 @@ def test_smart_card_builder_integration():
             print(f"    ✓ '{desc[:35]}...' → DSL {'found' if found else 'not found'}")
             passed += 1
         else:
-            print(f"    ✗ '{desc[:35]}...' → Expected DSL {'found' if should_find_dsl else 'not found'}")
+            print(
+                f"    ✗ '{desc[:35]}...' → Expected DSL {'found' if should_find_dsl else 'not found'}"
+            )
             failed += 1
 
     # Test 2: Structure generation from inputs
@@ -696,13 +741,15 @@ def test_smart_card_builder_integration():
         description=dsl_desc,
         title="Test DSL Card",
         text="System online",
-        buttons=[{"text": "Refresh", "url": "https://example.com"}]
+        buttons=[{"text": "Refresh", "url": "https://example.com"}],
     )
 
     if card and card.get("sections"):
         sections = card.get("sections", [])
         widgets = sections[0].get("widgets", []) if sections else []
-        print(f"    ✓ DSL card built: {len(sections)} section(s), {len(widgets)} widget(s)")
+        print(
+            f"    ✓ DSL card built: {len(sections)} section(s), {len(widgets)} widget(s)"
+        )
         if card.get("_dsl_structure"):
             print(f"    ✓ DSL structure recorded: {card.get('_dsl_structure')}")
             passed += 2
@@ -724,7 +771,7 @@ def test_smart_card_builder_integration():
         title="Product Card",
         text="Amazing product",
         buttons=[{"text": "Buy", "url": "https://example.com"}],
-        image_url="https://picsum.photos/300/200"
+        image_url="https://picsum.photos/300/200",
     )
 
     if card and card.get("sections"):
@@ -736,7 +783,9 @@ def test_smart_card_builder_integration():
             print(f"    ✓ Structure inferred: {inferred}")
             passed += 2
         else:
-            print(f"    ○ No structure inference recorded (may use different build path)")
+            print(
+                f"    ○ No structure inference recorded (may use different build path)"
+            )
             passed += 1
     else:
         print(f"    ✗ Failed to build NL card: {nl_desc}")
@@ -747,14 +796,32 @@ def test_smart_card_builder_integration():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test DSL structure validator and card generation")
-    parser.add_argument("--send-webhook", action="store_true", help="Send test card to webhook")
-    parser.add_argument("--webhook", type=str, help="Webhook URL (or set TEST_CHAT_WEBHOOK env var)")
-    parser.add_argument("--dsl", type=str, default="§[δ×2, ℊ[ǵ×4], Ƀ[ᵬ×2]]", help="DSL notation to test")
+    parser = argparse.ArgumentParser(
+        description="Test DSL structure validator and card generation"
+    )
+    parser.add_argument(
+        "--send-webhook", action="store_true", help="Send test card to webhook"
+    )
+    parser.add_argument(
+        "--webhook", type=str, help="Webhook URL (or set TEST_CHAT_WEBHOOK env var)"
+    )
+    parser.add_argument(
+        "--dsl", type=str, default="§[δ×2, ℊ[ǵ×4], Ƀ[ᵬ×2]]", help="DSL notation to test"
+    )
     parser.add_argument("--title", type=str, default="DSL Test Card", help="Card title")
-    parser.add_argument("--dsl-only", action="store_true", help="Run only DSL tests (skip other tests)")
-    parser.add_argument("--integration", action="store_true", help="Run SmartCardBuilder integration tests")
-    parser.add_argument("--all", action="store_true", help="Run all tests including full validator tests")
+    parser.add_argument(
+        "--dsl-only", action="store_true", help="Run only DSL tests (skip other tests)"
+    )
+    parser.add_argument(
+        "--integration",
+        action="store_true",
+        help="Run SmartCardBuilder integration tests",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run all tests including full validator tests",
+    )
 
     args = parser.parse_args()
 

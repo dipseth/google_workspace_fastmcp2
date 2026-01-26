@@ -16,7 +16,7 @@ Usage:
 """
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,9 @@ def create_component_text_indices(
         if "already exists" in str(e).lower():
             logger.debug("'relationships.nl_descriptions' index already exists")
         else:
-            logger.warning(f"Failed to create 'relationships.nl_descriptions' index: {e}")
+            logger.warning(
+                f"Failed to create 'relationships.nl_descriptions' index: {e}"
+            )
 
     try:
         # 4. Full path index - for exact path lookups
@@ -254,6 +256,7 @@ def search_components_by_relationship(
 # =============================================================================
 # MULTI-MODULE SUPPORT
 # =============================================================================
+
 
 def create_module_field_index(
     client,

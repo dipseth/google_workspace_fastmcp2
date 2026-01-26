@@ -272,7 +272,7 @@ class TestCardFrameworkWrapper:
         # Log the first few classes to help with debugging
         for i, class_path in enumerate(classes[:5]):
             info = card_framework_wrapper.get_component_info(class_path)
-            logger.info(f"Class {i+1}: {info['name']} ({info['full_path']})")
+            logger.info(f"Class {i + 1}: {info['name']} ({info['full_path']})")
 
     def test_card_framework_search(self, card_framework_wrapper):
         """Test searching for card components."""
@@ -393,9 +393,9 @@ class TestCardFrameworkWrapper:
             )
 
             # Check response
-            assert (
-                response.status_code == 200
-            ), f"Failed to send card: {response.status_code} - {response.text}"
+            assert response.status_code == 200, (
+                f"Failed to send card: {response.status_code} - {response.text}"
+            )
             logger.info(f"Card sent successfully! Status: {response.status_code}")
 
             # Now try to find card components in the card_framework module
@@ -406,7 +406,7 @@ class TestCardFrameworkWrapper:
             # Log the first few components to help with debugging
             for i, component_path in enumerate(components[:10]):
                 info = card_framework_wrapper.get_component_info(component_path)
-                logger.info(f"Component {i+1}: {info['name']} ({info['full_path']})")
+                logger.info(f"Component {i + 1}: {info['name']} ({info['full_path']})")
 
         except Exception as e:
             logger.error(f"Error creating or sending card: {e}", exc_info=True)

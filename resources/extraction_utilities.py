@@ -74,7 +74,6 @@ def get_tools_for_service(
             or tool_name.startswith(f"list_{service_name}")
             or tool_name.startswith(f"{service_name}_")
         ):
-
             service_tools[tool_name] = (
                 tool_instance.fn if hasattr(tool_instance, "fn") else tool_instance
             )

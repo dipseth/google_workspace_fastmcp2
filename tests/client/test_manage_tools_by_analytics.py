@@ -15,9 +15,9 @@ class TestManageToolsByAnalytics:
         """Ensure manage_tools_by_analytics tool is registered."""
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
-        assert (
-            "manage_tools_by_analytics" in tool_names
-        ), "manage_tools_by_analytics tool should be available in server"
+        assert "manage_tools_by_analytics" in tool_names, (
+            "manage_tools_by_analytics tool should be available in server"
+        )
 
     @pytest.mark.asyncio
     async def test_auth_patterns_preview_action(self, client):
@@ -38,9 +38,9 @@ class TestManageToolsByAnalytics:
         )
 
         # Explicit email path should be backward compatible
-        assert results[
-            "backward_compatible"
-        ], "manage_tools_by_analytics should work with explicit user_google_email"
+        assert results["backward_compatible"], (
+            "manage_tools_by_analytics should work with explicit user_google_email"
+        )
 
         # Middleware injection may or may not be supported; both outcomes are acceptable
         middleware_result = results["middleware_injection"]
@@ -53,9 +53,9 @@ class TestManageToolsByAnalytics:
 
         # Response should be non-empty and reasonably sized for preview
         explicit_content = results["explicit_email"]["content"]
-        assert (
-            explicit_content is not None and len(explicit_content) > 0
-        ), "Preview action should return descriptive content"
+        assert explicit_content is not None and len(explicit_content) > 0, (
+            "Preview action should return descriptive content"
+        )
 
     @pytest.mark.asyncio
     async def test_preview_handles_qdrant_states_gracefully(self, client):

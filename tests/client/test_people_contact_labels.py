@@ -36,9 +36,9 @@ class TestPeopleContactLabelTools:
         print_test_result("list_people_contact_labels explicit email", result)
 
         # Should either succeed or give a clear auth-related response
-        assert (
-            result["success"] or result["is_auth_related"]
-        ), "list_people_contact_labels should succeed or produce an auth-related error"
+        assert result["success"] or result["is_auth_related"], (
+            "list_people_contact_labels should succeed or produce an auth-related error"
+        )
 
         # If successful, validate response structure
         if result["success"]:
@@ -55,9 +55,9 @@ class TestPeopleContactLabelTools:
                 response = response_data or {}
 
             assert "labels" in response, "Response should contain 'labels' field"
-            assert (
-                "total_count" in response
-            ), "Response should contain 'total_count' field"
+            assert "total_count" in response, (
+                "Response should contain 'total_count' field"
+            )
             assert isinstance(response["labels"], list), "'labels' should be a list"
 
     @pytest.mark.asyncio
@@ -158,9 +158,9 @@ class TestPeopleContactLabelTools:
         print_test_result("manage_people_contact_labels (label_remove)", result)
 
         # Should succeed or be auth-related
-        assert (
-            result["success"] or result["is_auth_related"]
-        ), "label_remove should succeed or produce auth-related error"
+        assert result["success"] or result["is_auth_related"], (
+            "label_remove should succeed or produce auth-related error"
+        )
 
     @pytest.mark.asyncio
     async def test_manage_people_contact_labels_multiple_emails(self, client):
@@ -185,9 +185,9 @@ class TestPeopleContactLabelTools:
         print_test_result("manage_people_contact_labels (multiple emails)", result)
 
         # Should succeed or be auth-related
-        assert (
-            result["success"] or result["is_auth_related"]
-        ), "Multiple email handling should succeed or produce auth-related error"
+        assert result["success"] or result["is_auth_related"], (
+            "Multiple email handling should succeed or produce auth-related error"
+        )
 
     @pytest.mark.asyncio
     async def test_manage_people_contact_labels_invalid_action(self, client):
@@ -288,6 +288,6 @@ class TestPeopleContactLabelTools:
         if not result["success"] and result.get("is_auth_related"):
             error_text = str(result.get("error", "")).lower()
             # Should mention scopes or permissions
-            assert (
-                "scope" in error_text or "permission" in error_text
-            ), "Auth errors should clearly indicate scope/permission issues"
+            assert "scope" in error_text or "permission" in error_text, (
+                "Auth errors should clearly indicate scope/permission issues"
+            )

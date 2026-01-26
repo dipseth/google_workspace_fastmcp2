@@ -113,9 +113,9 @@ class TestSheetsTools:
             "items",
             "spreadsheets",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_spreadsheet(self, client):
@@ -157,9 +157,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_read_sheet_values(self, client, test_spreadsheet_id):
@@ -194,9 +194,9 @@ class TestSheetsTools:
             "range",
             "values",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_read_sheet_values_default_range(self, client, test_spreadsheet_id):
@@ -227,9 +227,9 @@ class TestSheetsTools:
             "range",
             "values",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_modify_sheet_values(self, client, test_spreadsheet_id):
@@ -268,9 +268,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_clear_sheet_values(self, client, test_spreadsheet_id):
@@ -302,9 +302,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_sheet(self, client, test_spreadsheet_id):
@@ -335,9 +335,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_sheets_tools_parameter_validation(self, client):
@@ -490,9 +490,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_format_sheet_range_borders(
@@ -536,9 +536,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_format_sheet_range_conditional_formatting(
@@ -582,9 +582,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_format_sheet_range_merge_cells(
@@ -620,9 +620,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_format_sheet_range_comprehensive(
@@ -686,9 +686,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_format_sheet_range_advanced_features(
@@ -738,9 +738,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_format_sheet_range_parameter_validation(self, client):
@@ -798,9 +798,9 @@ class TestSheetsTools:
             "service",
             "not yet fulfilled",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_format_sheet_range_error_handling(self, client):
@@ -906,18 +906,18 @@ class TestSheetsFormatRangeComparison:
                 format_range_tool = tool
                 break
 
-        assert (
-            format_range_tool is not None
-        ), "format_sheet_range tool should be in manage_tools list"
+        assert format_range_tool is not None, (
+            "format_sheet_range tool should be in manage_tools list"
+        )
 
         # The tool should have a description indicating it covers formatting functionality
-        assert format_range_tool.get(
-            "description"
-        ), "format_sheet_range should have a description"
+        assert format_range_tool.get("description"), (
+            "format_sheet_range should have a description"
+        )
         desc_lower = format_range_tool["description"].lower()
-        assert (
-            "format" in desc_lower or "range" in desc_lower
-        ), "format_sheet_range description should mention formatting"
+        assert "format" in desc_lower or "range" in desc_lower, (
+            "format_sheet_range description should mention formatting"
+        )
 
 
 @pytest.mark.service("sheets")

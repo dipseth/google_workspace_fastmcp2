@@ -101,7 +101,7 @@ class TestTemplateMiddlewareIntegration:
                         "🔗 Template middleware can now use these real IDs in expressions like:"
                     )
                     logger.info(
-                        f"   {{{{service://gmail/labels}}}}[\"user_labels\"][0][\"id\"] → {real_label_ids[0] if real_label_ids else 'ID'}"
+                        f'   {{{{service://gmail/labels}}}}["user_labels"][0]["id"] → {real_label_ids[0] if real_label_ids else "ID"}'
                     )
 
                     return real_label_ids
@@ -756,7 +756,7 @@ Best regards,
         all_passed = True
 
         for test_name, test_func in test_suite:
-            logger.info(f"\n{'='*20} {test_name} {'='*20}")
+            logger.info(f"\n{'=' * 20} {test_name} {'=' * 20}")
             try:
                 result = await test_func(client)
                 test_results[test_name] = result
