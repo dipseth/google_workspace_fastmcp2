@@ -81,9 +81,9 @@ class TestGmailReplyImprovements:
             result_sorted = sorted(result)
             expected_sorted = sorted(expected)
 
-            assert result_sorted == expected_sorted, (
-                f"Failed for input '{input_str}': expected {expected_sorted}, got {result_sorted}"
-            )
+            assert (
+                result_sorted == expected_sorted
+            ), f"Failed for input '{input_str}': expected {expected_sorted}, got {result_sorted}"
 
     # ============================================================================
     # B. TOOL AVAILABILITY AND PARAMETER TESTS
@@ -148,9 +148,9 @@ class TestGmailReplyImprovements:
             result["content"]
         ) or validator.is_success_response(result["content"])
 
-        assert is_valid, (
-            "Backward compatible draft reply should work or give auth error"
-        )
+        assert (
+            is_valid
+        ), "Backward compatible draft reply should work or give auth error"
 
     # ============================================================================
     # D. REPLY MODE TESTS
@@ -367,9 +367,9 @@ class TestGmailReplyImprovements:
             result["content"]
         ) or validator.is_success_response(result["content"])
 
-        assert is_valid, (
-            "Mixed content with custom recipients should work or give auth error"
-        )
+        assert (
+            is_valid
+        ), "Mixed content with custom recipients should work or give auth error"
 
     # ============================================================================
     # G. AUTHENTICATION PATTERN TESTS
@@ -393,9 +393,9 @@ class TestGmailReplyImprovements:
         )
 
         # Both patterns should work or give valid auth responses
-        assert results["backward_compatible"] or "auth" in str(results).lower(), (
-            "Explicit email should work or require auth"
-        )
+        assert (
+            results["backward_compatible"] or "auth" in str(results).lower()
+        ), "Explicit email should work or require auth"
         assert (
             results["middleware_supported"]
             or results["middleware_injection"]["param_required_at_client"]
@@ -420,9 +420,9 @@ class TestGmailReplyImprovements:
         )
 
         # Both patterns should work or give valid auth responses
-        assert results["backward_compatible"] or "auth" in str(results).lower(), (
-            "Explicit email should work or require auth"
-        )
+        assert (
+            results["backward_compatible"] or "auth" in str(results).lower()
+        ), "Explicit email should work or require auth"
         assert (
             results["middleware_supported"]
             or results["middleware_injection"]["param_required_at_client"]

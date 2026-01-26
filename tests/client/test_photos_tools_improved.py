@@ -479,9 +479,9 @@ class TestPhotosTools:
                 ):
                     pytest.skip(f"Skipping due to scope/permission issue: {content}")
                 else:
-                    assert is_success or is_error, (
-                        f"Unexpected response format: {content}"
-                    )
+                    assert (
+                        is_success or is_error
+                    ), f"Unexpected response format: {content}"
             else:
                 pytest.skip("No album ID available to test list_album_photos")
 
@@ -561,9 +561,9 @@ class TestPhotosTools:
                 ):
                     pytest.skip(f"Skipping due to scope/permission issue: {content}")
                 else:
-                    assert is_success or is_error, (
-                        f"Unexpected response format: {content}"
-                    )
+                    assert (
+                        is_success or is_error
+                    ), f"Unexpected response format: {content}"
             else:
                 pytest.skip("No media item ID found to test get_photo_details")
 
@@ -644,13 +644,13 @@ class TestPhotosTools:
                     print(f"   - Summary: {data['text_summary']}")
 
                 # Assert basic structure is valid
-                assert "media_items" in data or "error" in data, (
-                    "Response should have media_items or error"
-                )
+                assert (
+                    "media_items" in data or "error" in data
+                ), "Response should have media_items or error"
                 if "media_items" in data:
-                    assert isinstance(data["media_items"], list), (
-                        "media_items should be a list"
-                    )
+                    assert isinstance(
+                        data["media_items"], list
+                    ), "media_items should be a list"
             else:
                 # Fallback to string-based validation for non-structured responses
                 success_indicators = ["smart search", "results", "found", "photos"]
@@ -758,13 +758,13 @@ class TestPhotosTools:
                         print(f"   - Summary: {data['text_summary']}")
 
                     # Assert basic structure is valid
-                    assert "successful_items" in data or "error" in data, (
-                        "Response should have successful_items or error"
-                    )
+                    assert (
+                        "successful_items" in data or "error" in data
+                    ), "Response should have successful_items or error"
                     if "successful_items" in data:
-                        assert isinstance(data["successful_items"], list), (
-                            "successful_items should be a list"
-                        )
+                        assert isinstance(
+                            data["successful_items"], list
+                        ), "successful_items should be a list"
                 else:
                     # Fallback to string-based validation
                     success_indicators = [
@@ -777,9 +777,9 @@ class TestPhotosTools:
                     is_success = any(
                         indicator in content.lower() for indicator in success_indicators
                     )
-                    assert is_success or "error" in content.lower(), (
-                        f"Unexpected response format: {content}"
-                    )
+                    assert (
+                        is_success or "error" in content.lower()
+                    ), f"Unexpected response format: {content}"
             else:
                 pytest.skip("No media item IDs found to test photos_batch_details")
 
@@ -993,9 +993,9 @@ class TestPhotosTools:
                 ):
                     pytest.skip(f"Skipping due to scope/permission issue: {content}")
                 else:
-                    assert is_success or is_error, (
-                        f"Unexpected response format: {content}"
-                    )
+                    assert (
+                        is_success or is_error
+                    ), f"Unexpected response format: {content}"
 
             else:
                 pytest.skip(
@@ -1213,9 +1213,9 @@ async def test_debug_single_photo_tool():
 
                 # Basic validation
                 assert content is not None, "Response content should not be None"
-                assert len(content.strip()) > 0, (
-                    f"Response should not be empty, got: '{content}'"
-                )
+                assert (
+                    len(content.strip()) > 0
+                ), f"Response should not be empty, got: '{content}'"
 
                 logger.info(f"Debug Photos tool result: {content}")
             else:

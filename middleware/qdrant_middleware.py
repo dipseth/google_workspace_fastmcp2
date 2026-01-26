@@ -526,7 +526,9 @@ class QdrantUnifiedMiddleware(Middleware):
                             logger.info(
                                 "🏗️ Performing complete collection rebuild due to significant changes"
                             )
-                            result = await self.client_manager.rebuild_collection_completely()
+                            result = (
+                                await self.client_manager.rebuild_collection_completely()
+                            )
                         else:
                             logger.info("🔧 Performing standard collection reindexing")
                             result = await self.storage_manager.reindex_collection(
@@ -567,7 +569,9 @@ class QdrantUnifiedMiddleware(Middleware):
                             logger.info(
                                 "🚀 Running periodic collection optimization (preventive maintenance)"
                             )
-                            result = await self.client_manager.optimize_collection_performance()
+                            result = (
+                                await self.client_manager.optimize_collection_performance()
+                            )
 
                             if result.get("status") == "completed":
                                 logger.info("✅ Periodic optimization completed")

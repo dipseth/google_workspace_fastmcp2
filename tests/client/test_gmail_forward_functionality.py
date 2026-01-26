@@ -131,9 +131,9 @@ class TestGmailForwardFunctionality:
             "failed",
             "auth",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Response didn't match expected pattern: {content}"
 
         # Check for the specific validation error that was causing the middleware failure
         if (
@@ -211,9 +211,9 @@ class TestGmailForwardFunctionality:
             "not found",
             "invalid",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Response didn't match expected pattern: {content}"
 
         # CRITICAL: Check response for success or acceptable errors
         if "sent successfully" in content.lower():
@@ -294,9 +294,9 @@ class TestGmailForwardFunctionality:
             "not found",
             "invalid",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Response didn't match expected pattern: {content}"
 
         # Check response for success or acceptable errors
         if "saved" in content.lower() or "created" in content.lower():
@@ -362,9 +362,9 @@ class TestGmailForwardFunctionality:
             has_validation_error = any(
                 keyword in error_msg.lower() for keyword in validation_keywords
             )
-            assert has_validation_error, (
-                f"Should show parameter validation error. Got: {error_msg}"
-            )
+            assert (
+                has_validation_error
+            ), f"Should show parameter validation error. Got: {error_msg}"
 
             print("✅ SUCCESS: Parameter validation working correctly")
             logger.info(f"Parameter validation test result: {error_msg}")
@@ -442,9 +442,9 @@ class TestGmailForwardFunctionality:
                 "invalid",
                 "auth",
             ]
-            assert any(keyword in content.lower() for keyword in valid_responses), (
-                f"Content type {content_type} response didn't match expected pattern: {content}"
-            )
+            assert any(
+                keyword in content.lower() for keyword in valid_responses
+            ), f"Content type {content_type} response didn't match expected pattern: {content}"
 
             # Log result for each content type
             if "sent successfully" in content.lower():
@@ -495,9 +495,7 @@ class TestGmailForwardFunctionality:
                 content = (
                     content_items[0].text
                     if hasattr(content_items[0], "text")
-                    else str(content_items[0])
-                    if content_items
-                    else ""
+                    else str(content_items[0]) if content_items else ""
                 )
             elif hasattr(result, "__iter__") and not isinstance(result, str):
                 content = result[0].text if result else ""

@@ -71,9 +71,9 @@ class TestProblematicDataProcessing:
             print(f"📊 Sanitized message escape count: {sanitized_escape_count}")
 
             # Should have significantly fewer escape characters
-            assert sanitized_escape_count < original_escape_count / 2, (
-                f"Expected significant escape reduction: {sanitized_escape_count} < {original_escape_count / 2}"
-            )
+            assert (
+                sanitized_escape_count < original_escape_count / 2
+            ), f"Expected significant escape reduction: {sanitized_escape_count} < {original_escape_count / 2}"
 
         else:
             # If still a string, should at least have some improvement
@@ -83,9 +83,9 @@ class TestProblematicDataProcessing:
             print(f"📊 Sanitized escape count: {sanitized_escape_count}")
 
             # Should have some improvement
-            assert sanitized_escape_count <= original_escape_count, (
-                "Sanitization should not increase escape characters"
-            )
+            assert (
+                sanitized_escape_count <= original_escape_count
+            ), "Sanitization should not increase escape characters"
 
     def test_embedding_text_quality_comparison(self):
         """Test that embedding text quality improves with the sanitized data."""
@@ -126,18 +126,18 @@ class TestProblematicDataProcessing:
         )
 
         # Should have fewer escape characters
-        assert sanitized_escapes < original_escapes, (
-            f"Expected escape reduction in embedding text: {sanitized_escapes} < {original_escapes}"
-        )
+        assert (
+            sanitized_escapes < original_escapes
+        ), f"Expected escape reduction in embedding text: {sanitized_escapes} < {original_escapes}"
 
         # Should contain meaningful content
         assert "create_form" in sanitized_embed_text
         assert "Failed to create form" in sanitized_embed_text
 
         # Should not have triple-escaped quotes
-        assert '\\\\"' not in sanitized_embed_text, (
-            "Should not have triple-escaped quotes"
-        )
+        assert (
+            '\\\\"' not in sanitized_embed_text
+        ), "Should not have triple-escaped quotes"
 
     @pytest.mark.asyncio
     async def test_full_pipeline_processing_with_problematic_data(self):
@@ -261,9 +261,9 @@ class TestProblematicDataProcessing:
         )
 
         # Sanitized version should have equal or better search relevance
-        assert total_sanitized_score >= total_original_score, (
-            f"Expected search quality improvement: {total_sanitized_score} >= {total_original_score}"
-        )
+        assert (
+            total_sanitized_score >= total_original_score
+        ), f"Expected search quality improvement: {total_sanitized_score} >= {total_original_score}"
 
     def test_storage_efficiency_metrics(self):
         """Test storage efficiency improvements."""
@@ -289,9 +289,9 @@ class TestProblematicDataProcessing:
 
         # Sanitized should be more or equally efficient
         size_ratio = sanitized_size / original_size
-        assert size_ratio <= 1.1, (
-            f"Sanitized data should not be significantly larger: {size_ratio:.3f} <= 1.1"
-        )
+        assert (
+            size_ratio <= 1.1
+        ), f"Sanitized data should not be significantly larger: {size_ratio:.3f} <= 1.1"
 
         # Count escape characters as a measure of "cleanliness"
         original_escapes = original_data_str.count("\\")
@@ -304,9 +304,9 @@ class TestProblematicDataProcessing:
         )
 
         # Should have fewer escape characters (cleaner data)
-        assert sanitized_escapes <= original_escapes, (
-            "Sanitization should not increase escape characters"
-        )
+        assert (
+            sanitized_escapes <= original_escapes
+        ), "Sanitization should not increase escape characters"
 
 
 if __name__ == "__main__":

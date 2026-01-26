@@ -52,9 +52,9 @@ class TestEnhancedGmailFilters:
         ]
 
         if filter_tools_available:
-            assert len(filter_tools_available) == 4, (
-                f"Expected all 4 filter tools, found: {filter_tools_available}"
-            )
+            assert (
+                len(filter_tools_available) == 4
+            ), f"Expected all 4 filter tools, found: {filter_tools_available}"
 
             # Test each tool's availability
             await self._test_list_gmail_filters_no_auth(client)
@@ -389,9 +389,9 @@ class TestEnhancedFilterPerformance:
             has_enhanced_features = any(
                 indicator in content.lower() for indicator in enhanced_indicators
             )
-            assert has_enhanced_features, (
-                f"Response should indicate enhanced features. Content: {content}"
-            )
+            assert (
+                has_enhanced_features
+            ), f"Response should indicate enhanced features. Content: {content}"
         else:
             # Accept user-friendly error messages as valid responses
             assert (
@@ -420,9 +420,9 @@ class TestEnhancedFilterPerformance:
 
         # Check that tool description mentions retroactive application
         description = create_filter_tool.description
-        assert "retroactive" in description.lower(), (
-            "Tool should mention retroactive application capability"
-        )
+        assert (
+            "retroactive" in description.lower()
+        ), "Tool should mention retroactive application capability"
 
 
 @pytest.mark.service("gmail")

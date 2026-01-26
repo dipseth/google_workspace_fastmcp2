@@ -293,9 +293,9 @@ class TestDataSanitizationFixes:
         processing_time = time.time() - start_time
 
         # Should complete in reasonable time (< 1 second for this size)
-        assert processing_time < 1.0, (
-            f"Processing took {processing_time:.2f}s, should be < 1s"
-        )
+        assert (
+            processing_time < 1.0
+        ), f"Processing took {processing_time:.2f}s, should be < 1s"
 
         # Should maintain structure
         assert isinstance(result, dict)
@@ -442,9 +442,9 @@ class TestSanitizationIntegration:
 
         # Should not have excessive escaping in the embedded text
         # The sanitization should have cleaned up the response before embedding
-        assert embedded_text.count("\\") < 20, (
-            f"Embedded text has too much escaping: {embedded_text}"
-        )
+        assert (
+            embedded_text.count("\\") < 20
+        ), f"Embedded text has too much escaping: {embedded_text}"
 
         # Should not have triple-escaped quotes
         assert '\\\\"' not in embedded_text, "Should not have triple-escaped quotes"
@@ -570,25 +570,25 @@ class TestSearchQualityImprovement:
         )
 
         # Cleaned version should be more readable
-        assert len(cleaned_embed_text) <= len(escaped_embed_text), (
-            "Cleaned text should not be longer"
-        )
+        assert len(cleaned_embed_text) <= len(
+            escaped_embed_text
+        ), "Cleaned text should not be longer"
 
         # Cleaned version should have less escaping
         escaped_backslash_count = escaped_embed_text.count("\\")
         cleaned_backslash_count = cleaned_embed_text.count("\\")
-        assert cleaned_backslash_count < escaped_backslash_count, (
-            "Cleaned text should have fewer escape characters"
-        )
+        assert (
+            cleaned_backslash_count < escaped_backslash_count
+        ), "Cleaned text should have fewer escape characters"
 
         # Cleaned version should be more semantically meaningful
         assert "Failed to create form" in cleaned_embed_text
         assert "HttpError 400" in cleaned_embed_text
 
         # Should not have triple-escaped quotes in cleaned version
-        assert '\\\\"' not in cleaned_embed_text, (
-            "Cleaned text should not have triple-escaped quotes"
-        )
+        assert (
+            '\\\\"' not in cleaned_embed_text
+        ), "Cleaned text should not have triple-escaped quotes"
 
     def test_search_relevance_improvement_metrics(self):
         """Test that cleaned data would produce better search relevance metrics."""
@@ -626,9 +626,9 @@ class TestSearchQualityImprovement:
         cleaned_score = calculate_relevance_score(search_query, cleaned_text)
 
         # Cleaned version should have equal or better relevance
-        assert cleaned_score >= escaped_score, (
-            f"Cleaned score {cleaned_score} should be >= escaped score {escaped_score}"
-        )
+        assert (
+            cleaned_score >= escaped_score
+        ), f"Cleaned score {cleaned_score} should be >= escaped score {escaped_score}"
 
         # More specific checks
         assert "form" in str(cleaned_content).lower()
@@ -686,9 +686,9 @@ class TestSearchQualityImprovement:
             cleaned_meaningful = count_meaningful_content(cleaned_text)
 
             # Cleaned version should have equal or more meaningful content
-            assert cleaned_meaningful >= escaped_meaningful, (
-                f"Cleaned version should have more meaningful content: {cleaned_meaningful} >= {escaped_meaningful}"
-            )
+            assert (
+                cleaned_meaningful >= escaped_meaningful
+            ), f"Cleaned version should have more meaningful content: {cleaned_meaningful} >= {escaped_meaningful}"
 
 
 class TestPerformanceValidation:
@@ -715,9 +715,9 @@ class TestPerformanceValidation:
             avg_time = (end_time - start_time) / 10
 
             # Should be fast (< 10ms per operation)
-            assert avg_time < 0.01, (
-                f"Sanitization took {avg_time * 1000:.2f}ms, should be < 10ms"
-            )
+            assert (
+                avg_time < 0.01
+            ), f"Sanitization took {avg_time * 1000:.2f}ms, should be < 10ms"
 
             # Should preserve structure
             assert isinstance(result, dict)
@@ -756,9 +756,9 @@ class TestPerformanceValidation:
 
         # Should not leak significant memory
         object_growth = final_objects - initial_objects
-        assert object_growth < 1000, (
-            f"Memory leak detected: {object_growth} new objects"
-        )
+        assert (
+            object_growth < 1000
+        ), f"Memory leak detected: {object_growth} new objects"
 
     def test_compression_efficiency(self):
         """Test that sanitized data compresses more efficiently."""
@@ -788,21 +788,21 @@ class TestPerformanceValidation:
         structured_compressed = gzip.compress(structured_json.encode())
 
         # Structured data should compress better or equal
-        assert len(structured_compressed) <= len(escaped_compressed), (
-            f"Structured data should compress better: {len(structured_compressed)} <= {len(escaped_compressed)}"
-        )
+        assert len(structured_compressed) <= len(
+            escaped_compressed
+        ), f"Structured data should compress better: {len(structured_compressed)} <= {len(escaped_compressed)}"
 
         # Calculate compression ratios
         escaped_ratio = len(escaped_compressed) / len(escaped_json)
         structured_ratio = len(structured_compressed) / len(structured_json)
 
         # Both should achieve good compression (< 50% of original size for repeated data)
-        assert escaped_ratio < 0.5, (
-            f"Escaped data should compress well: {escaped_ratio}"
-        )
-        assert structured_ratio < 0.5, (
-            f"Structured data should compress well: {structured_ratio}"
-        )
+        assert (
+            escaped_ratio < 0.5
+        ), f"Escaped data should compress well: {escaped_ratio}"
+        assert (
+            structured_ratio < 0.5
+        ), f"Structured data should compress well: {structured_ratio}"
 
 
 if __name__ == "__main__":

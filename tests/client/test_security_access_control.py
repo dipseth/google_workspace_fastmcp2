@@ -60,9 +60,9 @@ class TestAccessControlLayer1:
             result = validate_google_token_with_access_control("fake_valid_token")
 
             # Should succeed for authorized user with credentials
-            assert result is not None, (
-                "Token validation should succeed for authorized user"
-            )
+            assert (
+                result is not None
+            ), "Token validation should succeed for authorized user"
             assert result.get("email") == AUTHORIZED_USER
             print(f"✅ Authorized user {AUTHORIZED_USER} token validated successfully")
 
@@ -93,9 +93,9 @@ class TestAccessControlLayer1:
 
             if require_creds:
                 # Should fail for unauthorized user without credentials when enforced
-                assert result is None, (
-                    "Token validation should fail for unauthorized user"
-                )
+                assert (
+                    result is None
+                ), "Token validation should fail for unauthorized user"
                 print(
                     f"🚫 Unauthorized user {UNAUTHORIZED_USER} correctly rejected at Layer 1"
                 )
@@ -178,9 +178,9 @@ class TestAccessControlLayer2:
             # We're verifying the validation check is in place
 
             # Verify user access check passes for authorized user
-            assert validate_user_access(AUTHORIZED_USER), (
-                f"Access validation should pass for {AUTHORIZED_USER}"
-            )
+            assert validate_user_access(
+                AUTHORIZED_USER
+            ), f"Access validation should pass for {AUTHORIZED_USER}"
             print(f"✅ OAuth callback would accept {AUTHORIZED_USER}")
 
     async def test_oauth_callback_unauthorized_user(self):
@@ -194,9 +194,9 @@ class TestAccessControlLayer2:
         access_granted = validate_user_access(UNAUTHORIZED_USER)
 
         if require_creds:
-            assert not access_granted, (
-                f"Access validation should fail for {UNAUTHORIZED_USER}"
-            )
+            assert (
+                not access_granted
+            ), f"Access validation should fail for {UNAUTHORIZED_USER}"
             print(f"🚫 OAuth callback correctly rejects {UNAUTHORIZED_USER} at Layer 2")
         else:
             # When access control is not enforced, users are allowed
@@ -268,12 +268,12 @@ class TestAccessControlIntegration:
             # Auth errors are OK (user might not have Drive credentials)
             # Access control errors are NOT OK
             error_str = str(e).lower()
-            assert "access denied" not in error_str, (
-                f"Should not get access denied for authorized user: {e}"
-            )
-            assert "not authorized" not in error_str, (
-                f"Should not get not authorized for authorized user: {e}"
-            )
+            assert (
+                "access denied" not in error_str
+            ), f"Should not get access denied for authorized user: {e}"
+            assert (
+                "not authorized" not in error_str
+            ), f"Should not get not authorized for authorized user: {e}"
             print(
                 f"✅ Got expected auth error (not access control): {type(e).__name__}"
             )
@@ -284,14 +284,14 @@ class TestAccessControlIntegration:
         access_control = AccessControl(require_existing_credentials=True)
 
         # Test with user that has credentials
-        assert access_control.is_email_allowed(AUTHORIZED_USER), (
-            "User with credentials should be allowed"
-        )
+        assert access_control.is_email_allowed(
+            AUTHORIZED_USER
+        ), "User with credentials should be allowed"
 
         # Test with user that doesn't have credentials
-        assert not access_control.is_email_allowed(UNAUTHORIZED_USER), (
-            "User without credentials should be denied"
-        )
+        assert not access_control.is_email_allowed(
+            UNAUTHORIZED_USER
+        ), "User without credentials should be denied"
 
         print("✅ MCP_REQUIRE_EXISTING_CREDENTIALS enforcement validated")
 
@@ -304,9 +304,9 @@ class TestAccessControlIntegration:
 
         assert isinstance(stored_users, list), "Should return list of users"
         assert len(stored_users) >= 1, "Should have at least one authorized user"
-        assert AUTHORIZED_USER in stored_users, (
-            f"{AUTHORIZED_USER} should be in stored users"
-        )
+        assert (
+            AUTHORIZED_USER in stored_users
+        ), f"{AUTHORIZED_USER} should be in stored users"
 
         print("✅ Security Stats:")
         print(f"   Total authorized users: {len(stored_users)}")
@@ -359,22 +359,22 @@ class TestSecurityDocumentation:
     async def test_security_implementation_complete(self):
         """Verify all security components are in place."""
         # Check Layer 1 components
-        assert Path("auth/token_validator.py").exists(), (
-            "Layer 1: Bearer token validator should exist"
-        )
-        assert Path("auth/access_control.py").exists(), (
-            "Access control module should exist"
-        )
+        assert Path(
+            "auth/token_validator.py"
+        ).exists(), "Layer 1: Bearer token validator should exist"
+        assert Path(
+            "auth/access_control.py"
+        ).exists(), "Access control module should exist"
 
         # Check Layer 2 components
-        assert Path("auth/fastmcp_oauth_endpoints.py").exists(), (
-            "Layer 2: OAuth endpoints should exist"
-        )
+        assert Path(
+            "auth/fastmcp_oauth_endpoints.py"
+        ).exists(), "Layer 2: OAuth endpoints should exist"
 
         # Check server integration
-        assert Path("server.py").exists(), (
-            "Server with security integration should exist"
-        )
+        assert Path(
+            "server.py"
+        ).exists(), "Server with security integration should exist"
 
         print("✅ All security components are in place")
         print("   Layer 1: Bearer token validation ✓")

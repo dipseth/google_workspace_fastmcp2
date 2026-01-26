@@ -295,9 +295,9 @@ class TestServiceListResourceConsistency:
                     "list_album_photos",
                     "list_messages",
                 ]:  # Detail tools
-                    assert list_type in list_type_names, (
-                        f"{list_type} not found for {service}"
-                    )
+                    assert (
+                        list_type in list_type_names
+                    ), f"{list_type} not found for {service}"
 
     @pytest.mark.asyncio
     async def test_structured_response_format(self, client):
@@ -400,9 +400,9 @@ class TestServiceListResourceBehavior:
             in str(data.get("service_metadata", {}).get("description", "")).lower()
         )
         has_error = "error" in data
-        assert has_error or is_fallback, (
-            f"Expected error or fallback response, got: {data}"
-        )
+        assert (
+            has_error or is_fallback
+        ), f"Expected error or fallback response, got: {data}"
 
         # Test invalid list type
         content = await client.read_resource("service://gmail/invalid_list")

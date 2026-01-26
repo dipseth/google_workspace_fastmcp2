@@ -108,9 +108,9 @@ class TestOAuthSessionContext:
                 # Result is a list of TextResourceContents, parse JSON from first item
                 if result and hasattr(result[0], "text"):
                     data = json.loads(result[0].text)
-                    assert "error" not in data, (
-                        f"Error reading user://current/email: {data.get('error')}"
-                    )
+                    assert (
+                        "error" not in data
+                    ), f"Error reading user://current/email: {data.get('error')}"
                     assert "email" in data, "No email field in response"
                     print(f"✅ user://current/email works: {data.get('email')}")
                 else:
@@ -125,9 +125,9 @@ class TestOAuthSessionContext:
                 # Result is a list of TextResourceContents, parse JSON from first item
                 if result and hasattr(result[0], "text"):
                     data = json.loads(result[0].text)
-                    assert "error" not in data, (
-                        f"Error reading user://current/profile: {data.get('error')}"
-                    )
+                    assert (
+                        "error" not in data
+                    ), f"Error reading user://current/profile: {data.get('error')}"
                     assert "user" in data or "email" in data, "No user data in response"
                     print("✅ user://current/profile works")
                 else:

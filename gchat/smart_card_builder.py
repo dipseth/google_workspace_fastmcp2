@@ -1472,9 +1472,11 @@ class SmartCardBuilderV2:
                 for i, img_url in enumerate(images):
                     item = {
                         "image": {"imageUri": img_url},
-                        "title": image_titles[i]
-                        if image_titles and i < len(image_titles)
-                        else f"Item {i + 1}",
+                        "title": (
+                            image_titles[i]
+                            if image_titles and i < len(image_titles)
+                            else f"Item {i + 1}"
+                        ),
                     }
                     grid_items.append(item)
             elif grid and grid.get("items"):
@@ -1483,9 +1485,11 @@ class SmartCardBuilderV2:
             if grid_items:
                 grid_widget = {
                     "grid": {
-                        "columnCount": grid.get("columnCount", column_count)
-                        if grid
-                        else column_count,
+                        "columnCount": (
+                            grid.get("columnCount", column_count)
+                            if grid
+                            else column_count
+                        ),
                         "items": grid_items,
                     }
                 }

@@ -352,9 +352,9 @@ class TestSamplingTools:
         tool_names = [tool.name for tool in tools]
 
         for tool_name in expected_tools:
-            assert tool_name in tool_names, (
-                f"Sampling tool {tool_name} should be available"
-            )
+            assert (
+                tool_name in tool_names
+            ), f"Sampling tool {tool_name} should be available"
 
         print(f"✅ All {len(expected_tools)} sampling demo tools are available")
 
@@ -412,9 +412,9 @@ class TestSamplingTools:
 
             assert result is not None, f"Should handle {style} style"
             content = result.content[0].text if result.content else str(result)
-            assert "success" in content.lower() or "email" in content.lower(), (
-                f"Should compose email with {style} style"
-            )
+            assert (
+                "success" in content.lower() or "email" in content.lower()
+            ), f"Should compose email with {style} style"
 
         print(f"✅ Tested {len(styles)} different email styles")
 
@@ -447,9 +447,9 @@ class TestSamplingTools:
 
         # Verify sampling was called
         handler = client_with_sampling._test_sampling_handler
-        assert handler.call_count > 0, (
-            "Sampling handler should provide workflow assistance"
-        )
+        assert (
+            handler.call_count > 0
+        ), "Sampling handler should provide workflow assistance"
 
         print("✅ Workflow assistant provided suggestions")
 
@@ -529,9 +529,9 @@ class TestSamplingTools:
         content = result.content[0].text if result.content else str(result)
 
         # Should contain document-related template info
-        assert "document" in content.lower() or "template" in content.lower(), (
-            "Response should contain document template information"
-        )
+        assert (
+            "document" in content.lower() or "template" in content.lower()
+        ), "Response should contain document template information"
 
         print("✅ Template demo provided document template examples")
 
@@ -563,9 +563,9 @@ class TestSamplingTools:
 
         # Verify sampling was called
         handler = client_with_sampling._test_sampling_handler
-        assert handler.call_count > 0, (
-            "Sampling handler should provide resource guidance"
-        )
+        assert (
+            handler.call_count > 0
+        ), "Sampling handler should provide resource guidance"
 
         print("✅ Resource discovery provided guidance on available resources")
 
@@ -587,9 +587,9 @@ class TestSamplingTools:
 
             assert result is not None, f"Should handle use case: {use_case}"
             content = result.content[0].text if result.content else str(result)
-            assert "resource" in content.lower() or "service://" in content.lower(), (
-                f"Should provide resource guidance for: {use_case}"
-            )
+            assert (
+                "resource" in content.lower() or "service://" in content.lower()
+            ), f"Should provide resource guidance for: {use_case}"
 
         print(f"✅ Tested {len(use_cases)} different resource discovery use cases")
 
@@ -617,9 +617,9 @@ class TestSamplingTools:
 
         last_params = handler.last_request["params"]
         assert last_params.maxTokens > 0, "Should receive max_tokens parameter"
-        assert last_params.temperature is not None, (
-            "Should receive temperature parameter"
-        )
+        assert (
+            last_params.temperature is not None
+        ), "Should receive temperature parameter"
 
         print("✅ Sampling handler received proper parameters:")
         print(f"   - max_tokens: {last_params.maxTokens}")
@@ -657,9 +657,9 @@ class TestSamplingTools:
         final_count = handler.call_count
         calls_made = final_count - initial_count
 
-        assert calls_made >= 2, (
-            f"Should have made at least 2 sampling calls, got {calls_made}"
-        )
+        assert (
+            calls_made >= 2
+        ), f"Should have made at least 2 sampling calls, got {calls_made}"
         print(f"✅ Sampling handler called {calls_made} times for 2 tool invocations")
 
     # ========================================================================
@@ -711,9 +711,9 @@ class TestSamplingTools:
                 ), "Should indicate missing parameters"
         except Exception as e:
             # Expected - tool should validate parameters
-            assert "required" in str(e).lower() or "missing" in str(e).lower(), (
-                "Error should indicate missing required parameters"
-            )
+            assert (
+                "required" in str(e).lower() or "missing" in str(e).lower()
+            ), "Error should indicate missing required parameters"
             print(f"✅ Tool properly validates required parameters: {str(e)[:100]}")
 
     # ========================================================================
@@ -797,9 +797,9 @@ class TestSamplingTools:
 
         # Verify all succeeded or handled gracefully
         successful = sum(1 for r in results if not isinstance(r, Exception))
-        assert successful >= len(tasks) // 2, (
-            f"At least half of concurrent calls should succeed, got {successful}/{len(tasks)}"
-        )
+        assert (
+            successful >= len(tasks) // 2
+        ), f"At least half of concurrent calls should succeed, got {successful}/{len(tasks)}"
 
         handler = client_with_sampling._test_sampling_handler
         print(

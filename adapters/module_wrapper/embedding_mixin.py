@@ -230,12 +230,16 @@ class EmbeddingMixin:
             "embedding_model": getattr(self, "embedding_model_name", None),
             "embedding_dim": self.embedding_dim,
             "colbert_enabled": getattr(self, "enable_colbert", False),
-            "colbert_model": getattr(self, "colbert_model_name", None)
-            if getattr(self, "enable_colbert", False)
-            else None,
-            "colbert_dim": self.colbert_embedding_dim
-            if getattr(self, "_colbert_initialized", False)
-            else None,
+            "colbert_model": (
+                getattr(self, "colbert_model_name", None)
+                if getattr(self, "enable_colbert", False)
+                else None
+            ),
+            "colbert_dim": (
+                self.colbert_embedding_dim
+                if getattr(self, "_colbert_initialized", False)
+                else None
+            ),
         }
 
 

@@ -78,9 +78,9 @@ class TestEnhancedTemplateMiddleware:
             has_simple = bool(middleware.SIMPLE_TEMPLATE_PATTERN.search(template))
             has_jinja2 = middleware._has_jinja2_syntax(template)
             assert has_simple, f"Should detect simple template: {template}"
-            assert not has_jinja2, (
-                f"Should not detect Jinja2 in simple template: {template}"
-            )
+            assert (
+                not has_jinja2
+            ), f"Should not detect Jinja2 in simple template: {template}"
 
     def test_jinja2_template_detection(self, middleware):
         """Test detection of Jinja2 templates."""

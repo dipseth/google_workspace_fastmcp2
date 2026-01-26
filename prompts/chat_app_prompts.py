@@ -98,9 +98,7 @@ def setup_chat_app_prompts(mcp: FastMCP):
         complexity_description = (
             "basic"
             if complexity_level < 0.3
-            else "intermediate"
-            if complexity_level < 0.7
-            else "advanced"
+            else "intermediate" if complexity_level < 0.7 else "advanced"
         )
 
         card_guidance = f"""
@@ -368,9 +366,7 @@ This setup guide demonstrates FastMCP's sophisticated parameter handling and mul
         automation_desc = (
             "manual"
             if automation_level < 0.3
-            else "semi-automated"
-            if automation_level < 0.7
-            else "fully automated"
+            else "semi-automated" if automation_level < 0.7 else "fully automated"
         )
 
         # Create integration settings from available parameters

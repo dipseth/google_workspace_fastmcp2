@@ -123,9 +123,9 @@ class TestGmailListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Gmail filters response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Gmail filters response didn't match expected pattern: {content}"
 
     @pytest.mark.asyncio
     async def test_view_gmail_allow_list(self, client):
@@ -162,9 +162,9 @@ class TestGmailListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Gmail allow list response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Gmail allow list response didn't match expected pattern: {content}"
 
     # NOTE: test_list_email_templates has been removed as the list_email_templates
     # tool is no longer part of the supported tool surface.
@@ -196,9 +196,9 @@ class TestGmailListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Gmail labels response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Gmail labels response didn't match expected pattern: {content}"
 
 
 @pytest.mark.service("drive")
@@ -235,9 +235,9 @@ class TestDriveListTools(BaseListToolsTest):
             "count",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Drive items response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Drive items response didn't match expected pattern: {content}"
 
 
 @pytest.mark.service("forms")
@@ -273,9 +273,9 @@ class TestFormsListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Form responses response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Form responses response didn't match expected pattern: {content}"
 
 
 @pytest.mark.service("calendar")
@@ -307,9 +307,9 @@ class TestCalendarListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Calendars response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Calendars response didn't match expected pattern: {content}"
 
     @pytest.mark.asyncio
     async def test_list_events(self, client):
@@ -341,9 +341,9 @@ class TestCalendarListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Events response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Events response didn't match expected pattern: {content}"
 
 
 @pytest.mark.service("chat")
@@ -376,9 +376,9 @@ class TestChatListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Chat spaces response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Chat spaces response didn't match expected pattern: {content}"
 
     @pytest.mark.asyncio
     @pytest.mark.slow
@@ -444,9 +444,9 @@ class TestChatListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Chat messages response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Chat messages response didn't match expected pattern: {content}"
 
     # NOTE: The following Chat App Dev tools have been removed from the server:
     # - list_available_card_types
@@ -489,9 +489,9 @@ class TestDocsListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Docs in folder response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Docs in folder response didn't match expected pattern: {content}"
 
 
 @pytest.mark.service("sheets")
@@ -523,9 +523,9 @@ class TestSheetsListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Spreadsheets response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Spreadsheets response didn't match expected pattern: {content}"
 
 
 @pytest.mark.service("photos")
@@ -557,9 +557,9 @@ class TestPhotosListTools(BaseListToolsTest):
             "items",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Photos albums response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Photos albums response didn't match expected pattern: {content}"
 
     @pytest.mark.asyncio
     async def test_list_album_photos(self, client, real_photos_album_id):
@@ -589,9 +589,9 @@ class TestPhotosListTools(BaseListToolsTest):
             "count",
             "data",
         ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Album photos response didn't match expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in valid_responses
+        ), f"Album photos response didn't match expected pattern: {content}"
 
 
 @pytest.mark.integration
@@ -672,9 +672,9 @@ class TestStructuredResponseValidation:
 
         # Error responses should still have structured format
         # Should NOT raise ValueError about structured_content
-        assert "ValueError: structured_content must be a dict or None" not in content, (
-            "Bug detected: Error responses are not being returned as structured format"
-        )
+        assert (
+            "ValueError: structured_content must be a dict or None" not in content
+        ), "Bug detected: Error responses are not being returned as structured format"
 
         # Should contain error information
         assert any(
@@ -694,9 +694,9 @@ class TestStructuredResponseValidation:
         content = result.content[0].text if result.content else str(result)
 
         # Should NOT raise ValueError about structured_content
-        assert "ValueError: structured_content must be a dict or None" not in content, (
-            "Bug detected: Responses are not being returned as structured format"
-        )
+        assert (
+            "ValueError: structured_content must be a dict or None" not in content
+        ), "Bug detected: Responses are not being returned as structured format"
 
         # Should have structured response indicators
         content_lower = content.lower()
@@ -712,9 +712,9 @@ class TestStructuredResponseValidation:
             ]
         )
 
-        assert has_structure, (
-            f"Response lacks structured format indicators: {content[:500]}..."
-        )
+        assert (
+            has_structure
+        ), f"Response lacks structured format indicators: {content[:500]}..."
 
 
 if __name__ == "__main__":

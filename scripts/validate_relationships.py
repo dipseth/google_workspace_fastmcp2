@@ -346,9 +346,11 @@ def get_styled_minimal_values() -> Dict[str, Any]:
         "int": 1,
         "float": 1.0,
         "bool": True,
-        "image_url": random.choice(VALID_IMAGE_URLS)
-        if "VALID_IMAGE_URLS" in dir()
-        else "https://example.com/image.png",
+        "image_url": (
+            random.choice(VALID_IMAGE_URLS)
+            if "VALID_IMAGE_URLS" in dir()
+            else "https://example.com/image.png"
+        ),
         "url": "https://example.com",
         "text": render_jinja_template(
             "{{ text | color(color) }}", text="Sample text", color=cycler.next()
@@ -815,9 +817,9 @@ class RelationshipValidator:
             "total": len(self.results),
             "successful": len(successful),
             "failed": len(failed),
-            "success_rate": len(successful) / len(self.results) * 100
-            if self.results
-            else 0,
+            "success_rate": (
+                len(successful) / len(self.results) * 100 if self.results else 0
+            ),
             "failed_relationships": [
                 {"parent": r["parent"], "child": r["child"], "error": r["error"]}
                 for r in failed
@@ -1622,9 +1624,11 @@ def store_complex_patterns(scenarios: List[Dict], dry_run: bool = False) -> int:
                 continue
 
             component_paths = [
-                f"card_framework.v2.widgets.{comp}"
-                if comp != "Section"
-                else f"card_framework.v2.{comp}"
+                (
+                    f"card_framework.v2.widgets.{comp}"
+                    if comp != "Section"
+                    else f"card_framework.v2.{comp}"
+                )
                 for comp in scenario["components"]
             ]
 
@@ -1728,12 +1732,16 @@ class RandomCardGenerator:
             "total_children": len(self._all_children),
             "used_children": len(self._used_children),
             "unused_children": list(unused_children),
-            "parent_coverage": len(self._used_parents) / len(self._all_parents) * 100
-            if self._all_parents
-            else 0,
-            "child_coverage": len(self._used_children) / len(self._all_children) * 100
-            if self._all_children
-            else 0,
+            "parent_coverage": (
+                len(self._used_parents) / len(self._all_parents) * 100
+                if self._all_parents
+                else 0
+            ),
+            "child_coverage": (
+                len(self._used_children) / len(self._all_children) * 100
+                if self._all_children
+                else 0
+            ),
         }
 
     def get_uncovered_widget(self) -> Optional[str]:
@@ -2284,9 +2292,10 @@ class RandomCardGenerator:
             if not SelectionItem:
                 # Fallback if SelectionItem not available
                 TextParagraph = self._components["TextParagraph"]
-                return TextParagraph(
-                    text="Selection placeholder"
-                ), "Fallback TextParagraph"
+                return (
+                    TextParagraph(text="Selection placeholder"),
+                    "Fallback TextParagraph",
+                )
 
             # Get SelectionType enum (nested inside SelectionInput)
             SelectionType = getattr(SelectionInput, "SelectionType", None)
@@ -2304,9 +2313,9 @@ class RandomCardGenerator:
                     SelectionItem(
                         text=f"Option {i + 1}",
                         value=f"opt_{i}",
-                        bottom_text=f"Description {i + 1}"
-                        if random.random() > 0.5
-                        else None,
+                        bottom_text=(
+                            f"Description {i + 1}" if random.random() > 0.5 else None
+                        ),
                     )
                 )
                 self._track_usage(child="SelectionItem")
@@ -2379,9 +2388,10 @@ class RandomCardGenerator:
             if not Columns or not Column:
                 # Fallback if Columns not available
                 TextParagraph = self._components["TextParagraph"]
-                return TextParagraph(
-                    text="Columns placeholder"
-                ), "Fallback TextParagraph"
+                return (
+                    TextParagraph(text="Columns placeholder"),
+                    "Fallback TextParagraph",
+                )
 
             # Build 2 columns with random widgets
             columns = []
@@ -2435,9 +2445,10 @@ class RandomCardGenerator:
 
             if not OverflowMenu or not OverflowMenuItem:
                 # Fallback to regular button
-                return ButtonList(
-                    buttons=[self._build_button()]
-                ), "ButtonList (overflow not available)"
+                return (
+                    ButtonList(buttons=[self._build_button()]),
+                    "ButtonList (overflow not available)",
+                )
 
             # Build overflow menu items
             menu_items = []

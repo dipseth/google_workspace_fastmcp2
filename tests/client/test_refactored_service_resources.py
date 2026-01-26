@@ -111,9 +111,9 @@ class TestRefactoredServiceResources:
             in str(data.get("service_metadata", {}).get("description", "")).lower()
         )
         has_error = "error" in data
-        assert has_error or is_fallback, (
-            f"Should have error or fallback for invalid service, got: {data}"
-        )
+        assert (
+            has_error or is_fallback
+        ), f"Should have error or fallback for invalid service, got: {data}"
         print("Proper error/fallback handling for invalid service")
 
     @pytest.mark.asyncio

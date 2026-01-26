@@ -81,9 +81,9 @@ class TestQdrantVectorSearch:
         """Test that vectors have correct 384 dimensions."""
         # Based on sentence-transformers/all-MiniLM-L6-v2 model
         assert len(SAMPLE_VECTOR_384D) <= 384, "Vector should be 384 dimensions or less"
-        assert all(isinstance(x, float) for x in SAMPLE_VECTOR_384D), (
-            "All vector components should be floats"
-        )
+        assert all(
+            isinstance(x, float) for x in SAMPLE_VECTOR_384D
+        ), "All vector components should be floats"
 
     def test_payload_structure_validation(self):
         """Test that payload contains required metadata fields."""

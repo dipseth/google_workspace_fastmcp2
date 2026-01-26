@@ -139,9 +139,9 @@ class TestMCPServer:
         ]
 
         for expected_uri in expected_resources:
-            assert expected_uri in resource_uris, (
-                f"Resource {expected_uri} not found. Available: {resource_uris}"
-            )
+            assert (
+                expected_uri in resource_uris
+            ), f"Resource {expected_uri} not found. Available: {resource_uris}"
 
     @pytest.mark.asyncio
     async def test_read_tools_list_resource(self, client):
@@ -175,9 +175,9 @@ class TestMCPServer:
             "auth_tools",
         ]
         for category in expected_categories:
-            assert category in tools_data["tools_by_category"], (
-                f"Expected category {category} not found"
-            )
+            assert (
+                category in tools_data["tools_by_category"]
+            ), f"Expected category {category} not found"
 
     @pytest.mark.asyncio
     async def test_read_detailed_tools_resource(self, client):
@@ -453,9 +453,9 @@ class TestDocsTools:
 
         # If any docs tools are available, they should all be available
         if docs_tools_available:
-            assert len(docs_tools_available) == 4, (
-                f"Expected all 4 docs tools, found: {docs_tools_available}"
-            )
+            assert (
+                len(docs_tools_available) == 4
+            ), f"Expected all 4 docs tools, found: {docs_tools_available}"
 
             # Test each tool without authentication (should fail gracefully)
             await self._test_search_docs_no_auth(client)
@@ -635,9 +635,9 @@ class TestFormsTools:
 
         # If any forms tools are available, they should all be available
         if forms_tools_available:
-            assert len(forms_tools_available) == 8, (
-                f"Expected all 8 forms tools, found: {forms_tools_available}"
-            )
+            assert (
+                len(forms_tools_available) == 8
+            ), f"Expected all 8 forms tools, found: {forms_tools_available}"
 
             # Test each tool without authentication (should fail gracefully)
             await self._test_create_form_no_auth(client)

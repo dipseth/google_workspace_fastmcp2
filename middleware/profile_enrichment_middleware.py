@@ -84,9 +84,9 @@ class ProfileEnrichmentMiddleware(Middleware):
         """
         self._enable_caching = enable_caching
         self._cache_ttl = cache_ttl_seconds
-        self._profile_cache: Dict[
-            str, Dict[str, Any]
-        ] = {}  # In-memory cache (fast tier)
+        self._profile_cache: Dict[str, Dict[str, Any]] = (
+            {}
+        )  # In-memory cache (fast tier)
         self._cache_timestamps: Dict[str, float] = {}
 
         # Optional Qdrant integration for persistent caching

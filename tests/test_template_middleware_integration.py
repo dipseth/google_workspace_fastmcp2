@@ -344,9 +344,9 @@ class TestMacroUsageDetection:
 
         for template_text, expected, description in test_cases:
             detected = processor._detect_macro_usage(template_text)
-            assert detected == expected, (
-                f"Macro detection failed for {description}: expected {expected}, got {detected}"
-            )
+            assert (
+                detected == expected
+            ), f"Macro detection failed for {description}: expected {expected}, got {detected}"
 
     @pytest.mark.asyncio
     async def test_template_metadata_tracking(self):

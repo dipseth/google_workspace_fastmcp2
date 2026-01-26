@@ -34,9 +34,9 @@ class TestTagBasedResourceMiddlewareIntegration:
         ]
 
         for expected in expected_templates:
-            assert expected in template_uris, (
-                f"Service resource template {expected} not found"
-            )
+            assert (
+                expected in template_uris
+            ), f"Service resource template {expected} not found"
             print(f"   ✅ Found template: {expected}")
 
         print(
@@ -72,9 +72,9 @@ class TestTagBasedResourceMiddlewareIntegration:
                 # Validate response structure
                 assert "service" in data, f"Missing 'service' field for {service}"
                 assert data["service"] == service, f"Wrong service name for {service}"
-                assert "service_metadata" in data, (
-                    f"Missing 'service_metadata' for {service}"
-                )
+                assert (
+                    "service_metadata" in data
+                ), f"Missing 'service_metadata' for {service}"
                 assert "list_types" in data, f"Missing 'list_types' for {service}"
 
                 # Validate service metadata
@@ -99,9 +99,9 @@ class TestTagBasedResourceMiddlewareIntegration:
 
         # At least most services should work
         successful_services = [s for s, r in results.items() if r.get("success")]
-        assert len(successful_services) >= len(supported_services) * 0.8, (
-            f"Too many service failures. Successful: {successful_services}"
-        )
+        assert (
+            len(successful_services) >= len(supported_services) * 0.8
+        ), f"Too many service failures. Successful: {successful_services}"
 
         print(
             f"   📊 {len(successful_services)}/{len(supported_services)} services working"
@@ -126,9 +126,9 @@ class TestTagBasedResourceMiddlewareIntegration:
         for service, list_type in test_cases:
             try:
                 content = await client.read_resource(f"service://{service}/{list_type}")
-                assert len(content) > 0, (
-                    f"No content returned for {service}/{list_type}"
-                )
+                assert (
+                    len(content) > 0
+                ), f"No content returned for {service}/{list_type}"
 
                 data = json.loads(content[0].text)
 
@@ -175,9 +175,9 @@ class TestTagBasedResourceMiddlewareIntegration:
 
         # All should either succeed or fail with authentication errors
         valid_results = [r for r in results.values() if r["success"]]
-        assert len(valid_results) == len(test_cases), (
-            f"Some endpoints failed unexpectedly. Results: {results}"
-        )
+        assert len(valid_results) == len(
+            test_cases
+        ), f"Some endpoints failed unexpectedly. Results: {results}"
 
         print(
             f"   📊 {len(valid_results)}/{len(test_cases)} endpoints handled correctly"
@@ -201,9 +201,9 @@ class TestTagBasedResourceMiddlewareIntegration:
                 content = await client.read_resource(
                     f"service://{service}/{list_type}/{item_id}"
                 )
-                assert len(content) > 0, (
-                    f"No content returned for {service}/{list_type}/{item_id}"
-                )
+                assert (
+                    len(content) > 0
+                ), f"No content returned for {service}/{list_type}/{item_id}"
 
                 data = json.loads(content[0].text)
 
@@ -260,9 +260,9 @@ class TestTagBasedResourceMiddlewareIntegration:
 
         # All should either succeed or fail with expected errors
         valid_results = [r for r in results.values() if r["success"]]
-        assert len(valid_results) == len(test_cases), (
-            f"Some specific item endpoints failed unexpectedly. Results: {results}"
-        )
+        assert len(valid_results) == len(
+            test_cases
+        ), f"Some specific item endpoints failed unexpectedly. Results: {results}"
 
         print(
             f"   📊 {len(valid_results)}/{len(test_cases)} specific item endpoints handled correctly"
@@ -346,18 +346,18 @@ class TestTagBasedResourceMiddlewareIntegration:
                 ]
 
                 for field in required_fields:
-                    assert field in data, (
-                        f"Missing required field '{field}' for {service}"
-                    )
+                    assert (
+                        field in data
+                    ), f"Missing required field '{field}' for {service}"
 
                 # Validate metadata structure
                 metadata = data["service_metadata"]
                 metadata_fields = ["display_name", "icon", "description"]
 
                 for field in metadata_fields:
-                    assert field in metadata, (
-                        f"Missing metadata field '{field}' for {service}"
-                    )
+                    assert (
+                        field in metadata
+                    ), f"Missing metadata field '{field}' for {service}"
 
                 # Validate list types structure
                 for list_type_name, list_type_info in data["list_types"].items():
@@ -370,9 +370,9 @@ class TestTagBasedResourceMiddlewareIntegration:
                     ]
 
                     for field in list_type_fields:
-                        assert field in list_type_info, (
-                            f"Missing list type field '{field}' for {service}/{list_type_name}"
-                        )
+                        assert (
+                            field in list_type_info
+                        ), f"Missing list type field '{field}' for {service}/{list_type_name}"
 
                 print(f"   ✅ {service}: Response format is consistent")
 
@@ -418,9 +418,9 @@ class TestTagBasedResourceMiddlewarePerformance:
             r for r in results if not isinstance(r, Exception) and r.get("success")
         ]
 
-        assert len(successful_requests) >= len(services) * 0.8, (
-            f"Too many concurrent requests failed. Successful: {len(successful_requests)}/{len(services)}"
-        )
+        assert (
+            len(successful_requests) >= len(services) * 0.8
+        ), f"Too many concurrent requests failed. Successful: {len(successful_requests)}/{len(services)}"
 
         print(
             f"   ✅ {len(successful_requests)}/{len(services)} concurrent requests succeeded"
@@ -462,9 +462,9 @@ class TestTagBasedResourceMiddlewarePerformance:
         if "error" not in first_result:
             for i, result in enumerate(results[1:], 2):
                 if "error" not in result:
-                    assert result["service"] == first_result["service"], (
-                        f"Service mismatch on request {i}"
-                    )
+                    assert (
+                        result["service"] == first_result["service"]
+                    ), f"Service mismatch on request {i}"
                     assert (
                         result["list_types_count"] == first_result["list_types_count"]
                     ), f"List types count mismatch on request {i}"

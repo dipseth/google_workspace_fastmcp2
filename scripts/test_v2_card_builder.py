@@ -25,8 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def build_test_card():
     """Build a test card using the v2 builder."""
-    from card_framework.v2 import Message
-
+    from card_framework.v2 import Message  # noqa: I001
     from gchat.card_tools import _build_card_with_smart_builder
 
     # Build card with DSL + Content DSL

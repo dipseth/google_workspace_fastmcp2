@@ -420,9 +420,9 @@ class RelationshipsMixin:
                 relationships_payload = {
                     "children": relationships,
                     "child_classes": list(set(r["child_class"] for r in relationships)),
-                    "max_depth": max(r["depth"] for r in relationships)
-                    if relationships
-                    else 0,
+                    "max_depth": (
+                        max(r["depth"] for r in relationships) if relationships else 0
+                    ),
                     "nl_descriptions": nl_descriptions,
                 }
 

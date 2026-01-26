@@ -183,9 +183,9 @@ class TestRoutingImprovements:
         call_time = time.time() - start
 
         # Routing should not add significant overhead
-        assert discovery_time < 3.0, (
-            f"Tool discovery with routing took {discovery_time:.2f}s"
-        )
+        assert (
+            discovery_time < 3.0
+        ), f"Tool discovery with routing took {discovery_time:.2f}s"
         assert call_time < 5.0, f"Routed tool call took {call_time:.2f}s"
 
         print("✅ Routing performance acceptable")
@@ -286,9 +286,9 @@ class TestRoutingServicePriority:
                     f"Calendar tool '{tool_name}' available (95% confidence expected)"
                 )
 
-        assert calendar_found > 0, (
-            "Should have Calendar tools with high confidence routing"
-        )
+        assert (
+            calendar_found > 0
+        ), "Should have Calendar tools with high confidence routing"
         print(f"Total Calendar tools found: {calendar_found}")
 
     @pytest.mark.asyncio
@@ -331,9 +331,9 @@ class TestRoutingServicePriority:
 
         # Both should work, but high confidence should be faster/more reliable
         assert high_confidence_result is not None, "High confidence routing should work"
-        assert medium_confidence_result is not None, (
-            "Medium confidence routing should work"
-        )
+        assert (
+            medium_confidence_result is not None
+        ), "Medium confidence routing should work"
 
         print("✅ Routing priority order works correctly")
         print("   High confidence (Gmail): Success")

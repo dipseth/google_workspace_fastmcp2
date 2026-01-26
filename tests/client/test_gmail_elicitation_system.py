@@ -54,9 +54,9 @@ class TestGmailElicitationSystem:
         resources = await client.list_resources()
         resource_uris = [str(resource.uri) for resource in resources]
 
-        assert "gmail://allow-list" in resource_uris, (
-            "gmail://allow-list resource not found"
-        )
+        assert (
+            "gmail://allow-list" in resource_uris
+        ), "gmail://allow-list resource not found"
 
     # ============================================================================
     # A. ALLOW LIST CONFIGURATION TESTS (Settings Layer)
@@ -175,9 +175,9 @@ class TestGmailElicitationSystem:
                 "allow_list",
             ]
             for field in expected_fields:
-                assert field in resource_data, (
-                    f"Missing field '{field}' in resource response"
-                )
+                assert (
+                    field in resource_data
+                ), f"Missing field '{field}' in resource response"
 
             # Should have authentication status
             assert "authenticated" in resource_data or "error" in resource_data
@@ -565,14 +565,14 @@ class TestGmailElicitationSystem:
 
             # Check for elicitation-related tools
             if tool.name == "send_gmail_message":
-                assert "elicitation" in tool.description.lower(), (
-                    "send_gmail_message should mention elicitation"
-                )
+                assert (
+                    "elicitation" in tool.description.lower()
+                ), "send_gmail_message should mention elicitation"
 
             # Tool should have input schema
-            assert hasattr(tool, "inputSchema"), (
-                f"Tool '{tool.name}' missing input schema"
-            )
+            assert hasattr(
+                tool, "inputSchema"
+            ), f"Tool '{tool.name}' missing input schema"
 
     @pytest.mark.asyncio
     async def test_resource_descriptions(self, client):
@@ -584,13 +584,13 @@ class TestGmailElicitationSystem:
         ]
 
         for resource in gmail_resources:
-            assert resource.description, (
-                f"Resource '{resource.uri}' missing description"
-            )
+            assert (
+                resource.description
+            ), f"Resource '{resource.uri}' missing description"
             # Gmail resources should have descriptive text
-            assert len(resource.description) > 10, (
-                f"Resource '{resource.uri}' has too short description"
-            )
+            assert (
+                len(resource.description) > 10
+            ), f"Resource '{resource.uri}' has too short description"
 
     # ============================================================================
     # G. PERFORMANCE AND RELIABILITY TESTS

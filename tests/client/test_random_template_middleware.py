@@ -36,9 +36,9 @@ class TestRandomTemplateMiddleware:
             if any(cat in name for cat in expected_prompt_categories)
         ]
 
-        assert len(available_categories) > 0, (
-            f"Should have prompts from expected categories. Found: {prompt_names}"
-        )
+        assert (
+            len(available_categories) > 0
+        ), f"Should have prompts from expected categories. Found: {prompt_names}"
 
     @pytest.mark.asyncio
     async def test_random_template_request(self, client):
@@ -48,9 +48,9 @@ class TestRandomTemplateMiddleware:
             result = await client.get_prompt("random_template")
 
             # Should get a result (either from middleware or normal prompt handling)
-            assert result is not None, (
-                "Should get a result from random template request"
-            )
+            assert (
+                result is not None
+            ), "Should get a result from random template request"
 
             # Check if we got messages
             if result.messages:
@@ -91,9 +91,9 @@ class TestRandomTemplateMiddleware:
                 has_indicators = any(
                     indicator in content for indicator in template_indicators
                 )
-                assert has_indicators, (
-                    f"Content should contain template indicators. Content: {content[:200]}"
-                )
+                assert (
+                    has_indicators
+                ), f"Content should contain template indicators. Content: {content[:200]}"
 
                 print("✅ Random template middleware working correctly!")
                 return True
@@ -197,9 +197,9 @@ class TestRandomTemplateMiddleware:
                 print(f"🎭 Jinja2 indicators found: {indicators_found}")
 
                 # Should have at least some processed template content
-                assert len(indicators_found) >= 2, (
-                    f"Should contain Jinja2 processed content. Found: {indicators_found}"
-                )
+                assert (
+                    len(indicators_found) >= 2
+                ), f"Should contain Jinja2 processed content. Found: {indicators_found}"
 
                 print("✅ Template Jinja2 processing working!")
                 return True

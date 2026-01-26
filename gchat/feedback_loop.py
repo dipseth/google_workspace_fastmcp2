@@ -840,9 +840,11 @@ class FeedbackLoop:
             # Sort by timestamp (oldest first) and take what we need
             sorted_results = sorted(
                 results,
-                key=lambda p: p.payload.get("timestamp", "2000-01-01")
-                if p.payload
-                else "2000-01-01",
+                key=lambda p: (
+                    p.payload.get("timestamp", "2000-01-01")
+                    if p.payload
+                    else "2000-01-01"
+                ),
             )
             patterns_to_delete = [p.id for p in sorted_results[:to_delete]]
 
@@ -874,9 +876,11 @@ class FeedbackLoop:
                 )
                 sorted_results = sorted(
                     results,
-                    key=lambda p: p.payload.get("timestamp", "2000-01-01")
-                    if p.payload
-                    else "2000-01-01",
+                    key=lambda p: (
+                        p.payload.get("timestamp", "2000-01-01")
+                        if p.payload
+                        else "2000-01-01"
+                    ),
                 )
                 patterns_to_delete.extend([p.id for p in sorted_results[:remaining]])
 
@@ -2499,9 +2503,9 @@ class FeedbackLoop:
                             ]
                         ),
                     )
-                    stats[feedback_category][f"{feedback_value}_count"] = (
-                        count_result.count
-                    )
+                    stats[feedback_category][
+                        f"{feedback_value}_count"
+                    ] = count_result.count
 
             # Calculate legacy totals (max of content/form for each)
             stats["positive_count"] = max(

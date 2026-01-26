@@ -31,27 +31,27 @@ class TestMetadataIntegration:
         for tool in sample_tools:
             # Each tool should have MCP-compliant metadata
             assert hasattr(tool, "name"), "Tool missing 'name' field"
-            assert hasattr(tool, "description"), (
-                f"Tool {tool.name} missing 'description'"
-            )
-            assert hasattr(tool, "inputSchema"), (
-                f"Tool {tool.name} missing 'inputSchema'"
-            )
+            assert hasattr(
+                tool, "description"
+            ), f"Tool {tool.name} missing 'description'"
+            assert hasattr(
+                tool, "inputSchema"
+            ), f"Tool {tool.name} missing 'inputSchema'"
 
             # Input schema should be properly structured
             if hasattr(tool.inputSchema, "__dict__"):
                 schema = tool.inputSchema.__dict__
                 # Should have type field
                 if "type" in schema:
-                    assert schema["type"] == "object", (
-                        f"Tool {tool.name} schema type should be 'object'"
-                    )
+                    assert (
+                        schema["type"] == "object"
+                    ), f"Tool {tool.name} schema type should be 'object'"
 
                 # Should have properties for parameters
                 if "properties" in schema:
-                    assert isinstance(schema["properties"], dict), (
-                        f"Tool {tool.name} properties should be dict"
-                    )
+                    assert isinstance(
+                        schema["properties"], dict
+                    ), f"Tool {tool.name} properties should be dict"
 
             print(f"✅ Tool '{tool.name}' has proper MCP metadata structure")
 
@@ -78,9 +78,9 @@ class TestMetadataIntegration:
                 # Check metadata structure
                 assert hasattr(resource, "uri"), "Resource should have URI"
                 assert hasattr(resource, "name"), "Resource should have name"
-                assert hasattr(resource, "description"), (
-                    "Resource should have description"
-                )
+                assert hasattr(
+                    resource, "description"
+                ), "Resource should have description"
 
                 print(f"✅ Resource '{expected}' has proper metadata")
 
@@ -130,9 +130,9 @@ class TestMetadataIntegration:
                     schema_props = tool.inputSchema.properties
                     for param_name, expected_type in expected_params.items():
                         # Verify parameter exists and has correct type
-                        assert param_name in str(schema_props), (
-                            f"Tool {tool_name} should have parameter {param_name}"
-                        )
+                        assert param_name in str(
+                            schema_props
+                        ), f"Tool {tool_name} should have parameter {param_name}"
 
                 print(f"✅ Tool '{tool_name}' has correct parameter types")
 

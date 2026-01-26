@@ -265,9 +265,9 @@ class TestImprovedAuthPattern:
             "user-created labels" in content.lower(),
         ]
 
-        assert any(valid_responses), (
-            f"Should get valid response. Content: {content[:300]}"
-        )
+        assert any(
+            valid_responses
+        ), f"Should get valid response. Content: {content[:300]}"
         print("✅ Explicit email parameter test passed")
 
     @pytest.mark.asyncio
@@ -302,9 +302,9 @@ class TestImprovedAuthPattern:
                 "auto-injection" in content.lower(),
             ]
 
-            assert any(valid_responses), (
-                f"Should get valid response via middleware. Content: {content[:300]}"
-            )
+            assert any(
+                valid_responses
+            ), f"Should get valid response via middleware. Content: {content[:300]}"
             print("✅ Middleware auto-injection test passed")
 
         except Exception as e:
@@ -532,9 +532,9 @@ class TestMiddlewareEnhancements:
         ]
 
         # Should either have user-friendly error or successful response
-        assert any(user_friendly_patterns) or len(content) > 50, (
-            "Should have meaningful response"
-        )
+        assert (
+            any(user_friendly_patterns) or len(content) > 50
+        ), "Should have meaningful response"
 
         print(
             f"   Response indicates: {'user-friendly error handling' if any(user_friendly_patterns[:3]) else 'successful authentication'}"

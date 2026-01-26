@@ -558,9 +558,9 @@ class TestTagBasedResourceMiddleware:
                 # Either list_tool or get_tool should be present
                 has_list_tool = list_type_info.get("list_tool") is not None
                 has_get_tool = list_type_info.get("get_tool") is not None
-                assert has_list_tool or has_get_tool, (
-                    f"No tools for {service_name}/{list_type_name}"
-                )
+                assert (
+                    has_list_tool or has_get_tool
+                ), f"No tools for {service_name}/{list_type_name}"
 
                 if "id_field" in list_type_info:
                     assert isinstance(list_type_info["id_field"], str)
