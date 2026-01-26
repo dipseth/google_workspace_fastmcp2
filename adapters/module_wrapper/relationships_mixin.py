@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 def _get_nl_relationship_patterns() -> Dict[tuple, str]:
     """Get NL relationship patterns (lazy load to avoid circular imports)."""
     try:
-        from gchat.smart_card_builder_v2 import SmartCardBuilder
+        from gchat.smart_card_builder import SmartCardBuilder
         return SmartCardBuilder.NL_RELATIONSHIP_PATTERNS
     except ImportError:
         return {

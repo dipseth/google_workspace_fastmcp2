@@ -160,7 +160,7 @@ def test_dsl_searches():
     print("Testing DSL card_params parsing")
     print("-" * 60)
 
-    from gchat.smart_card_builder_v2 import get_smart_card_builder
+    from gchat.smart_card_builder import get_smart_card_builder
 
     builder = get_smart_card_builder()
 

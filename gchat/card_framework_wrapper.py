@@ -87,7 +87,7 @@ def get_card_framework_wrapper(
     This wrapper is shared across:
         - SmartCardBuilder
         - TemplateComponent
-        - unified_card_tool
+        - card_tools
         - CardBuilderV2
         - Any other gchat modules needing card_framework access
 

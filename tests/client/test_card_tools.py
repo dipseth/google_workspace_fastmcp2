@@ -1,7 +1,7 @@
 """
-Tests for the Unified Card Tool with ModuleWrapper Integration.
+Tests for the Card Tools with ModuleWrapper Integration.
 
-This module tests the functionality of the unified_card_tool.py module,
+This module tests the functionality of the card_tools.py module,
 which provides a dynamic card creation and sending capability using
 the ModuleWrapper adapter.
 """

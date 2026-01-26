@@ -181,7 +181,7 @@ class TestNLPParsingWithColBERT:
         """
         BUG TEST: Verify NLP parsing extracts parameters even when ColBERT is enabled.
 
-        Current bug: ColBERT mode skips NLP parsing entirely (line 2220-2223 in unified_card_tool.py)
+        Current bug: ColBERT mode skips NLP parsing entirely (see card_tools.py)
         Expected: NLP should extract header, button text, URLs even in ColBERT mode
         """
         if not TEST_WEBHOOK_URL:
@@ -227,7 +227,7 @@ class TestNLPParsingWithColBERT:
                 pytest.fail(
                     "BUG: ColBERT mode skipped NLP parsing. "
                     "Card params should have been extracted from description but weren't. "
-                    "See unified_card_tool.py lines 2220-2223"
+                    "See card_tools.py for details"
                 )
             else:
                 print("\n NLP extraction appears to be working")

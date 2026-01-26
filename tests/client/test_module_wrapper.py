@@ -531,8 +531,8 @@ class TestUnifiedCardTool:
     """Test the enhanced unified card tool with ModuleWrapper and Qdrant integration."""
 
     @pytest.mark.asyncio
-    async def test_unified_card_tool_available(self, client):
-        """Test that the unified card tool is available."""
+    async def test_card_tools_available(self, client):
+        """Test that the card tools are available."""
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
 

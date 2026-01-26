@@ -59,10 +59,10 @@ from config.settings import settings
 # SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
 # from .nlp_card_parser import parse_enhanced_natural_language_description
 # Import SmartCardBuilder for component-based card creation
-from .smart_card_builder_v2 import get_smart_card_builder
+from .smart_card_builder import get_smart_card_builder
 
 # Import structured response types
-from .unified_card_types import (
+from .card_types import (
     ComponentSearchInfo,
     SendDynamicCardResponse,
 )
@@ -718,14 +718,14 @@ def _strip_internal_fields(obj: Any) -> Any:
         return obj
 
 
-def setup_unified_card_tool(mcp: FastMCP) -> None:
+def setup_card_tools(mcp: FastMCP) -> None:
     """
-    Setup the unified card tool for MCP.
+    Setup the card tools for MCP.
 
     Args:
         mcp: The FastMCP server instance
     """
-    logger.info("Setting up unified card tool")
+    logger.info("Setting up card tools")
 
     # Initialize card framework wrapper
     _initialize_card_framework_wrapper()

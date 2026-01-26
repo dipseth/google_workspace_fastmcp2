@@ -40,6 +40,10 @@ COLLECTION_NAME = settings.card_collection
 COLBERT_DIM = 128  # ColBERT embedding dimension
 RELATIONSHIPS_DIM = 384  # MiniLM embedding dimension for relationships
 
+# Max instance patterns to keep (configurable via MAX_INSTANCE_PATTERNS env var)
+# Oldest patterns are deleted when limit is exceeded
+MAX_INSTANCE_PATTERNS = int(os.getenv("MAX_INSTANCE_PATTERNS", "500"))
+
 # Feedback types
 FEEDBACK_CONTENT = "content"  # Affects inputs vector (values)
 FEEDBACK_FORM = "form"  # Affects relationships vector (structure)
@@ -639,6 +643,7 @@ class FeedbackLoop:
         user_email: Optional[str] = None,
         card_id: Optional[str] = None,
         structure_description: Optional[str] = None,  # Optional NL description of structure
+        pattern_type: str = "content",  # "content" (main card) or "feedback_ui" (feedback section)
     ) -> Optional[str]:
         """
         Store a card usage pattern as an instance_pattern point.
@@ -653,6 +658,7 @@ class FeedbackLoop:
             user_email: User who created the card
             card_id: ID of the card (for linking feedback buttons)
             structure_description: Optional NL description of card structure for better embedding
+            pattern_type: Type of pattern - "content" for main card, "feedback_ui" for feedback section
 
         Returns:
             Point ID if stored successfully, None on error
@@ -710,6 +716,7 @@ class FeedbackLoop:
                 payload={
                     "name": f"instance_pattern_{point_id[:8]}",
                     "type": "instance_pattern",
+                    "pattern_type": pattern_type,  # "content" or "feedback_ui" for filtering
                     "parent_paths": component_paths,  # Links to existing class points
                     "instance_params": instance_params,
                     "card_description": card_description,
@@ -734,14 +741,147 @@ class FeedbackLoop:
             )
 
             logger.info(
-                f"✅ Stored instance_pattern: {point_id[:8]}... "
+                f"✅ Stored instance_pattern [{pattern_type}]: {point_id[:8]}... "
                 f"(content={content_feedback}, form={form_feedback})"
             )
+
+            # Cleanup old patterns if we exceed the limit
+            self._cleanup_old_instance_patterns()
+
             return point_id
 
         except Exception as e:
             logger.error(f"❌ Failed to store instance_pattern: {e}")
             return None
+
+    def _cleanup_old_instance_patterns(self) -> int:
+        """
+        Remove oldest instance_pattern points when count exceeds MAX_INSTANCE_PATTERNS.
+
+        Keeps the most recent patterns (by timestamp), deletes oldest ones.
+        Patterns with positive feedback are preserved longer (deleted last).
+
+        Returns:
+            Number of patterns deleted
+        """
+        client = self._get_client()
+        if not client:
+            return 0
+
+        try:
+            from qdrant_client import models
+
+            # Count current instance_patterns
+            count_result = client.count(
+                collection_name=COLLECTION_NAME,
+                count_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="instance_pattern"),
+                        )
+                    ]
+                ),
+            )
+            current_count = count_result.count
+
+            if current_count <= MAX_INSTANCE_PATTERNS:
+                return 0  # Under limit, no cleanup needed
+
+            # Calculate how many to delete
+            to_delete = current_count - MAX_INSTANCE_PATTERNS
+
+            logger.info(
+                f"🧹 Cleaning up instance_patterns: {current_count} > {MAX_INSTANCE_PATTERNS} limit, "
+                f"deleting {to_delete} oldest"
+            )
+
+            # Scroll through instance_patterns sorted by timestamp (oldest first)
+            # We prioritize keeping patterns with positive feedback
+            patterns_to_delete = []
+
+            # First pass: get patterns without positive feedback (delete these first)
+            results, _ = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="instance_pattern"),
+                        )
+                    ],
+                    must_not=[
+                        models.FieldCondition(
+                            key="content_feedback",
+                            match=models.MatchValue(value="positive"),
+                        ),
+                        models.FieldCondition(
+                            key="form_feedback",
+                            match=models.MatchValue(value="positive"),
+                        ),
+                    ]
+                ),
+                limit=to_delete + 100,  # Get extra in case we need more
+                with_payload=["timestamp", "card_id"],
+            )
+
+            # Sort by timestamp (oldest first) and take what we need
+            sorted_results = sorted(
+                results,
+                key=lambda p: p.payload.get("timestamp", "2000-01-01") if p.payload else "2000-01-01"
+            )
+            patterns_to_delete = [p.id for p in sorted_results[:to_delete]]
+
+            # If we still need more, get patterns with positive feedback (oldest first)
+            if len(patterns_to_delete) < to_delete:
+                remaining = to_delete - len(patterns_to_delete)
+                results, _ = client.scroll(
+                    collection_name=COLLECTION_NAME,
+                    scroll_filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="type",
+                                match=models.MatchValue(value="instance_pattern"),
+                            )
+                        ],
+                        should=[
+                            models.FieldCondition(
+                                key="content_feedback",
+                                match=models.MatchValue(value="positive"),
+                            ),
+                            models.FieldCondition(
+                                key="form_feedback",
+                                match=models.MatchValue(value="positive"),
+                            ),
+                        ]
+                    ),
+                    limit=remaining + 50,
+                    with_payload=["timestamp", "card_id"],
+                )
+                sorted_results = sorted(
+                    results,
+                    key=lambda p: p.payload.get("timestamp", "2000-01-01") if p.payload else "2000-01-01"
+                )
+                patterns_to_delete.extend([p.id for p in sorted_results[:remaining]])
+
+            # Delete the patterns in batches (Qdrant has limits on batch size)
+            deleted_count = 0
+            batch_size = 100
+            if patterns_to_delete:
+                for i in range(0, len(patterns_to_delete), batch_size):
+                    batch = patterns_to_delete[i:i + batch_size]
+                    client.delete(
+                        collection_name=COLLECTION_NAME,
+                        points_selector=models.PointIdsList(points=batch),
+                    )
+                    deleted_count += len(batch)
+                logger.info(f"🧹 Deleted {deleted_count} old instance_patterns")
+
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"❌ Failed to cleanup instance_patterns: {e}")
+            return 0
 
     def update_feedback(
         self,

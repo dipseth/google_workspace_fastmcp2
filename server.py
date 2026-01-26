@@ -34,7 +34,7 @@ from drive.upload_tools import setup_drive_tools, setup_oauth_callback_handler
 from forms.forms_tools import setup_forms_tools
 from gcalendar.calendar_tools import setup_calendar_tools
 from gchat.chat_tools import setup_chat_tools
-from gchat.unified_card_tool import setup_unified_card_tool
+from gchat.card_tools import setup_card_tools
 from gmail.gmail_tools import setup_gmail_tools
 from middleware.qdrant_middleware import (
     QdrantUnifiedMiddleware,
@@ -354,8 +354,8 @@ setup_calendar_tools(mcp)
 # Register Google Chat tools
 setup_chat_tools(mcp)
 
-# Register Unified Card Tool with ModuleWrapper integration
-setup_unified_card_tool(mcp)
+# Register Card Tools with ModuleWrapper integration
+setup_card_tools(mcp)
 
 # Initialize ColBERT wrapper on startup if COLBERT_EMBEDDING_DEV=true
 if settings.colbert_embedding_dev:
@@ -363,7 +363,7 @@ if settings.colbert_embedding_dev:
         "🤖 COLBERT_EMBEDDING_DEV=true - Initializing ColBERT wrapper on startup..."
     )
     try:
-        from gchat.unified_card_tool import _initialize_colbert_wrapper
+        from gchat.card_tools import _initialize_colbert_wrapper
 
         _initialize_colbert_wrapper()
         logger.info(
@@ -384,11 +384,11 @@ else:
 # Use the working card types instead: send_simple_card, send_interactive_card, send_form_card
 # setup_smart_card_tool(mcp)
 
-# Register ModuleWrapper middleware with custom collection name to match unified_card_tool.py
+# Register ModuleWrapper middleware with custom collection name to match card_tools.py
 # TEMPORARILY DISABLED: Testing MCP SDK 1.21.1 compatibility
 # logger.info("🔄 Initializing ModuleWrapper middleware...")
 # middleware = setup_module_wrapper_middleware(mcp, modules_to_wrap=["card_framework.v2"], tool_pushdown=False)
-# # Override the collection name to match what unified_card_tool.py expects
+# # Override the collection name to match what card_tools.py expects
 # if "card_framework.v2" in middleware.wrappers:
 #     wrapper = middleware.wrappers["card_framework.v2"]
 #     wrapper.collection_name = "card_framework_components_fastembed"

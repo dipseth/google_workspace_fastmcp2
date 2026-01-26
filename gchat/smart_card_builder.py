@@ -60,6 +60,66 @@ FORM_FEEDBACK_PROMPTS = [
 POSITIVE_LABELS = ["👍 Good", "👍 Yes", "👍 Correct", "✅ Looks good", "👍 Accurate"]
 NEGATIVE_LABELS = ["👎 Bad", "👎 No", "👎 Wrong", "❌ Needs work", "👎 Not quite"]
 
+# Icons for feedback (knownIcon values)
+# POSITIVE_ICONS/NEGATIVE_ICONS: Verified working in buttons
+POSITIVE_ICONS = ["STAR", "CONFIRMATION_NUMBER", "TICKET"]
+NEGATIVE_ICONS = ["BOOKMARK", "DESCRIPTION", "EMAIL"]
+# FEEDBACK_ICONS: Verified working in BOTH buttons AND decoratedText.startIcon
+# (PERSON and CONFIRMATION_NUMBER removed - they fail in decoratedText startIcon context)
+FEEDBACK_ICONS = ["STAR", "BOOKMARK", "DESCRIPTION", "EMAIL"]
+
+# Validated URL images (tested and confirmed working in Google Chat)
+POSITIVE_IMAGE_URLS = [
+    "https://www.gstatic.com/images/icons/material/system/2x/check_circle_black_24dp.png",  # Checkmark
+    "https://ui-avatars.com/api/?name=Y&background=4caf50&color=fff&size=24&bold=true",     # Green Y
+    "https://placehold.co/24x24/4caf50/4caf50.png",                                          # Green square
+]
+NEGATIVE_IMAGE_URLS = [
+    "https://www.gstatic.com/images/icons/material/system/2x/cancel_black_24dp.png",        # X mark
+    "https://ui-avatars.com/api/?name=N&background=f44336&color=fff&size=24&bold=true",     # Red N
+    "https://placehold.co/24x24/f44336/f44336.png",                                          # Red square
+]
+
+
+# =============================================================================
+# MODULAR FEEDBACK COMPONENT REGISTRY
+# =============================================================================
+# Components are categorized by capability:
+# - TEXT_COMPONENTS: Can display feedback prompt text
+# - CLICKABLE_COMPONENTS: Can carry onClick callback URL
+# - DUAL_COMPONENTS: Can do both (text + click in same widget)
+# - LAYOUT_WRAPPERS: How to arrange the assembled widgets
+
+TEXT_COMPONENTS = [
+    "text_paragraph",       # Simple text block
+    "decorated_text",       # Text with optional icon, top/bottom labels
+    "decorated_text_icon",  # DecoratedText with startIcon
+    "selection_label",      # SelectionInput used for its label display
+    "chip_text",           # Chip used for text display
+]
+
+CLICKABLE_COMPONENTS = [
+    "button_list",          # Standard button row (2 buttons: pos + neg)
+    "chip_list",           # Clickable chips (2 chips: pos + neg)
+    "icon_buttons",        # Buttons with random knownIcon (pos/neg themed)
+    "icon_buttons_alt",    # Buttons with STAR/BOOKMARK knownIcon
+    "url_image_buttons",   # Buttons with URL images (check/X, Y/N, colors)
+]
+
+# Components that can do both text AND click in one widget
+DUAL_COMPONENTS = [
+    "decorated_text_with_button",  # Text + inline button
+    "chip_dual",                   # Chip with text and onClick
+    "columns_inline",             # Text left, buttons right in one widget
+]
+
+LAYOUT_WRAPPERS = [
+    "sequential",           # Widgets one after another
+    "with_divider",        # Divider between content and form feedback
+    "columns_layout",      # Side-by-side columns
+    "compact",             # Minimal spacing
+]
+
 
 # =============================================================================
 # COMPONENT PATHS REGISTRY
@@ -87,12 +147,17 @@ COMPONENT_PATHS = {
     "ImageComponent": "card_framework.v2.widgets.grid.ImageComponent",
 }
 
+# Patterns that indicate a card ALREADY has feedback buttons
+# (more specific to avoid false positives from titles like "Feedback Report")
 FEEDBACK_DETECTION_PATTERNS = [
-    "feedback",
-    "👍",
-    "👎",
     "feedback_type=content",
     "feedback_type=form",
+    "feedback=positive",
+    "feedback=negative",
+    "👍 Good",
+    "👍 Yes",
+    "👎 Bad",
+    "👎 No",
 ]
 
 
@@ -479,66 +544,536 @@ class SmartCardBuilderV2:
         return {"grid": {"columnCount": min(3, len(items)), "items": items}} if items else None
 
     # =========================================================================
-    # FEEDBACK SECTION
+    # MODULAR FEEDBACK SECTION
     # =========================================================================
+    # Dynamically assembles feedback widgets from component registries.
+    # Each feedback widget needs: text (prompt) + clickable (callback)
+    # Components are randomly selected and assembled per card.
 
     def _has_feedback(self, card: Dict) -> bool:
         """Check if card already has feedback content."""
         card_str = json.dumps(card).lower()
         return any(p.lower() in card_str for p in FEEDBACK_DETECTION_PATTERNS)
 
-    def _create_feedback_section(self, card_id: str) -> Dict:
-        """Create feedback section with dual 👍/👎 buttons."""
-        # Use a valid placeholder URL if no feedback webhook is configured
-        # Invalid URLs (like just "?params") break the entire card rendering
-        base_url = getattr(_settings, 'feedback_webhook_url', '') or "https://feedback.example.com"
-        widgets = []
+    def _clean_card_metadata(self, obj: Any) -> Any:
+        """Remove underscore-prefixed keys (Google Chat rejects them)."""
+        if isinstance(obj, dict):
+            return {k: self._clean_card_metadata(v) for k, v in obj.items() if not k.startswith('_')}
+        elif isinstance(obj, list):
+            return [self._clean_card_metadata(item) for item in obj]
+        return obj
 
-        # Content feedback
-        content_prompt = random.choice(CONTENT_FEEDBACK_PROMPTS)
-        widgets.append({"textParagraph": {"text": f"<i>{content_prompt}</i>"}})
+    def _get_feedback_base_url(self) -> str:
+        """Get the feedback base URL from settings.
 
+        Uses the server's base_url with /card-feedback endpoint.
+        Falls back to placeholder only if base_url is not configured.
+        """
+        # Use the server's base_url (e.g., https://localhost:8002)
+        base_url = getattr(_settings, 'base_url', '')
+        if base_url:
+            return f"{base_url}/card-feedback"
+        return "https://feedback.example.com"
+
+    def _make_callback_url(self, card_id: str, feedback_val: str, feedback_type: str) -> str:
+        """Create feedback callback URL."""
+        base_url = self._get_feedback_base_url()
+        return f"{base_url}?card_id={card_id}&feedback={feedback_val}&feedback_type={feedback_type}"
+
+    def _store_card_pattern(
+        self,
+        card_id: str,
+        description: str,
+        title: Optional[str],
+        structure_dsl: Optional[str],
+        card: Dict[str, Any],
+    ) -> None:
+        """
+        Store the main card content pattern in Qdrant for the feedback loop.
+
+        This stores ONLY the main card content (pattern_type="content"),
+        NOT the feedback UI section which is stored separately.
+
+        Args:
+            card_id: Unique ID for this card
+            description: Original card description
+            title: Card title
+            structure_dsl: DSL structure if parsed
+            card: The built card dict (without feedback section)
+        """
+        if not ENABLE_FEEDBACK_BUTTONS:
+            return  # Skip if feedback is disabled
+
+        try:
+            from gchat.feedback_loop import get_feedback_loop
+
+            feedback_loop = get_feedback_loop()
+
+            # Extract component paths from card structure
+            component_paths = self._extract_component_paths(card)
+
+            # Build instance params from card content
+            instance_params = {
+                "title": title,
+                "description": description[:500] if description else "",
+                "dsl": structure_dsl,
+                "component_count": len(component_paths),
+            }
+
+            # Store the CONTENT pattern (main card, not feedback UI)
+            point_id = feedback_loop.store_instance_pattern(
+                card_description=description,
+                component_paths=component_paths,
+                instance_params=instance_params,
+                card_id=card_id,
+                structure_description=structure_dsl or "",
+                pattern_type="content",  # Tag as main content
+            )
+
+            if point_id:
+                logger.debug(f"📦 Stored content pattern: {card_id[:8]}... -> {point_id[:8]}...")
+
+        except Exception as e:
+            # Don't fail card generation if pattern storage fails
+            logger.warning(f"⚠️ Failed to store card pattern: {e}")
+
+    def _store_feedback_ui_pattern(
+        self,
+        card_id: str,
+        feedback_section: Dict[str, Any],
+    ) -> None:
+        """
+        Store the feedback UI section pattern in Qdrant separately.
+
+        This stores the randomly generated feedback UI (pattern_type="feedback_ui"),
+        allowing learning of which feedback layouts work best.
+
+        Args:
+            card_id: Unique ID for this card (links content + feedback_ui patterns)
+            feedback_section: The feedback section dict with _feedback_assembly metadata
+        """
+        if not ENABLE_FEEDBACK_BUTTONS:
+            return
+
+        try:
+            from gchat.feedback_loop import get_feedback_loop
+
+            feedback_loop = get_feedback_loop()
+
+            # Get assembly metadata
+            assembly = feedback_section.get("_feedback_assembly", {})
+            if not assembly:
+                return  # No metadata to store
+
+            # Build description from assembly
+            description = (
+                f"Feedback UI: {assembly.get('content_text', '?')} + "
+                f"{assembly.get('form_text', '?')} in {assembly.get('layout', '?')} layout"
+            )
+
+            # Extract component paths from feedback widgets
+            component_paths = []
+            for widget in feedback_section.get("widgets", []):
+                for key in widget.keys():
+                    if key == "textParagraph":
+                        component_paths.append("TextParagraph")
+                    elif key == "decoratedText":
+                        component_paths.append("DecoratedText")
+                    elif key == "buttonList":
+                        component_paths.append("ButtonList")
+                    elif key == "chipList":
+                        component_paths.append("ChipList")
+                    elif key == "columns":
+                        component_paths.append("Columns")
+                    elif key == "divider":
+                        component_paths.append("Divider")
+
+            # Store the FEEDBACK_UI pattern
+            point_id = feedback_loop.store_instance_pattern(
+                card_description=description,
+                component_paths=component_paths,
+                instance_params=assembly,  # Store the assembly metadata
+                card_id=f"{card_id}_feedback",  # Link to parent card
+                structure_description=description,
+                pattern_type="feedback_ui",  # Tag as feedback UI
+            )
+
+            if point_id:
+                logger.debug(f"📦 Stored feedback_ui pattern: {card_id[:8]}... -> {point_id[:8]}...")
+
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to store feedback_ui pattern: {e}")
+
+    def _extract_component_paths(self, card: Dict[str, Any]) -> List[str]:
+        """
+        Extract component paths from a card structure.
+
+        Walks through the card dict and identifies widget types used.
+
+        Returns:
+            List of component names found (e.g., ["Section", "TextParagraph", "ButtonList"])
+        """
+        paths = []
+
+        def walk(obj: Any, depth: int = 0):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    # Identify widget types
+                    if key in (
+                        "textParagraph", "decoratedText", "buttonList", "chipList",
+                        "image", "grid", "columns", "divider", "textInput",
+                        "selectionInput", "dateTimePicker"
+                    ):
+                        # Convert to PascalCase component name
+                        component_name = "".join(word.capitalize() for word in key.split("_"))
+                        if key == "textParagraph":
+                            component_name = "TextParagraph"
+                        elif key == "decoratedText":
+                            component_name = "DecoratedText"
+                        elif key == "buttonList":
+                            component_name = "ButtonList"
+                        elif key == "chipList":
+                            component_name = "ChipList"
+                        paths.append(component_name)
+                    walk(value, depth + 1)
+            elif isinstance(obj, list):
+                for item in obj:
+                    walk(item, depth)
+
+        # Add Section for each section
+        sections = card.get("sections", [])
+        for _ in sections:
+            paths.append("Section")
+
+        # Walk through widgets
+        for section in sections:
+            walk(section.get("widgets", []))
+
+        return paths
+
+    # -------------------------------------------------------------------------
+    # TEXT COMPONENT BUILDERS
+    # Each returns a widget dict that displays the feedback prompt text
+    # -------------------------------------------------------------------------
+
+    def _text_paragraph(self, text: str, **kwargs) -> Dict:
+        """Simple text paragraph."""
+        return {"textParagraph": {"text": f"<i>{text}</i>"}}
+
+    def _text_decorated(self, text: str, **kwargs) -> Dict:
+        """Decorated text without icon."""
+        return {"decoratedText": {"text": text, "wrapText": True}}
+
+    def _text_decorated_icon(self, text: str, **kwargs) -> Dict:
+        """Decorated text with random icon."""
+        return {
+            "decoratedText": {
+                "startIcon": {"knownIcon": random.choice(FEEDBACK_ICONS)},
+                "text": text,
+                "wrapText": True,
+            }
+        }
+
+    def _text_decorated_labeled(self, text: str, label: str = "Feedback", **kwargs) -> Dict:
+        """Decorated text with top label."""
+        return {
+            "decoratedText": {
+                "topLabel": label,
+                "text": text,
+                "wrapText": True,
+            }
+        }
+
+    def _text_chip(self, text: str, **kwargs) -> Dict:
+        """Chip used for text display (non-clickable)."""
+        return {
+            "chipList": {
+                "chips": [{"label": text, "disabled": True}]
+            }
+        }
+
+    # -------------------------------------------------------------------------
+    # CLICKABLE COMPONENT BUILDERS
+    # Each returns a widget dict with onClick callbacks for positive/negative
+    # -------------------------------------------------------------------------
+
+    def _click_button_list(self, card_id: str, feedback_type: str, **kwargs) -> Dict:
+        """Standard button list with 2 buttons."""
         pos_label = random.choice(POSITIVE_LABELS)
         neg_label = random.choice(NEGATIVE_LABELS)
+        return {
+            "buttonList": {
+                "buttons": [
+                    {"text": pos_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}},
+                    {"text": neg_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}},
+                ]
+            }
+        }
 
-        widgets.append({
+    def _click_chip_list(self, card_id: str, feedback_type: str, **kwargs) -> Dict:
+        """Clickable chip list with 2 chips."""
+        pos_label = random.choice(POSITIVE_LABELS)
+        neg_label = random.choice(NEGATIVE_LABELS)
+        return {
+            "chipList": {
+                "chips": [
+                    {"label": pos_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}},
+                    {"label": neg_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}},
+                ]
+            }
+        }
+
+    def _click_icon_buttons(self, card_id: str, feedback_type: str, **kwargs) -> Dict:
+        """Button list with icons (positive/negative themed icons)."""
+        pos_label = random.choice(POSITIVE_LABELS)
+        neg_label = random.choice(NEGATIVE_LABELS)
+        return {
             "buttonList": {
                 "buttons": [
                     {
                         "text": pos_label,
-                        "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=positive&feedback_type=content"}}
+                        "icon": {"knownIcon": random.choice(POSITIVE_ICONS)},
+                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}
                     },
                     {
                         "text": neg_label,
-                        "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=negative&feedback_type=content"}}
-                    }
+                        "icon": {"knownIcon": random.choice(NEGATIVE_ICONS)},
+                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}
+                    },
                 ]
             }
-        })
+        }
 
-        # Form feedback
-        form_prompt = random.choice(FORM_FEEDBACK_PROMPTS)
-        widgets.append({"textParagraph": {"text": f"<i>{form_prompt}</i>"}})
-
-        pos_label2 = random.choice(POSITIVE_LABELS)
-        neg_label2 = random.choice(NEGATIVE_LABELS)
-
-        widgets.append({
+    def _click_icon_buttons_alt(self, card_id: str, feedback_type: str, **kwargs) -> Dict:
+        """Alternative button list with STAR/BOOKMARK icons."""
+        pos_label = random.choice(POSITIVE_LABELS)
+        neg_label = random.choice(NEGATIVE_LABELS)
+        return {
             "buttonList": {
                 "buttons": [
                     {
-                        "text": pos_label2,
-                        "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=positive&feedback_type=form"}}
+                        "text": pos_label,
+                        "icon": {"knownIcon": "STAR"},
+                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}
                     },
                     {
-                        "text": neg_label2,
-                        "onClick": {"openLink": {"url": f"{base_url}?card_id={card_id}&feedback=negative&feedback_type=form"}}
+                        "text": neg_label,
+                        "icon": {"knownIcon": "BOOKMARK"},
+                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}
+                    },
+                ]
+            }
+        }
+
+    def _click_url_image_buttons(self, card_id: str, feedback_type: str, **kwargs) -> Dict:
+        """Button list with URL-based images (check/cancel, Y/N, or colored squares)."""
+        pos_label = random.choice(POSITIVE_LABELS)
+        neg_label = random.choice(NEGATIVE_LABELS)
+        return {
+            "buttonList": {
+                "buttons": [
+                    {
+                        "text": pos_label,
+                        "icon": {"iconUrl": random.choice(POSITIVE_IMAGE_URLS)},
+                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}
+                    },
+                    {
+                        "text": neg_label,
+                        "icon": {"iconUrl": random.choice(NEGATIVE_IMAGE_URLS)},
+                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}
+                    },
+                ]
+            }
+        }
+
+    # -------------------------------------------------------------------------
+    # DUAL COMPONENT BUILDERS (text + click in one widget)
+    # -------------------------------------------------------------------------
+
+    def _dual_decorated_with_button(self, text: str, card_id: str, feedback_type: str, **kwargs) -> List[Dict]:
+        """Decorated text with inline button + separate negative button."""
+        pos_label = random.choice(POSITIVE_LABELS)
+        neg_label = random.choice(NEGATIVE_LABELS)
+        # Return 2 widgets: decorated text with positive button, then negative button
+        return [
+            {
+                "decoratedText": {
+                    "startIcon": {"knownIcon": random.choice(FEEDBACK_ICONS)},
+                    "text": text,
+                    "button": {
+                        "text": pos_label,
+                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}
+                    },
+                    "wrapText": True,
+                }
+            },
+            {
+                "buttonList": {
+                    "buttons": [{
+                        "text": neg_label,
+                        "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}
+                    }]
+                }
+            }
+        ]
+
+    def _dual_columns_inline(self, text: str, card_id: str, feedback_type: str, **kwargs) -> List[Dict]:
+        """Columns with text left, buttons right (all in one widget)."""
+        pos_label = random.choice(POSITIVE_LABELS)
+        neg_label = random.choice(NEGATIVE_LABELS)
+        # Returns a list with single widget (columns has both buttons)
+        return [{
+            "columns": {
+                "columnItems": [
+                    {
+                        "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
+                        "horizontalAlignment": "START",
+                        "verticalAlignment": "CENTER",
+                        "widgets": [{"decoratedText": {"text": text, "wrapText": True}}]
+                    },
+                    {
+                        "horizontalSizeStyle": "FILL_MINIMUM_SPACE",
+                        "horizontalAlignment": "END",
+                        "verticalAlignment": "CENTER",
+                        "widgets": [{
+                            "buttonList": {
+                                "buttons": [
+                                    {"text": pos_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "positive", feedback_type)}}},
+                                    {"text": neg_label, "onClick": {"openLink": {"url": self._make_callback_url(card_id, "negative", feedback_type)}}},
+                                ]
+                            }
+                        }]
                     }
                 ]
             }
-        })
+        }]
 
-        return {"widgets": widgets}
+    # -------------------------------------------------------------------------
+    # LAYOUT WRAPPERS
+    # -------------------------------------------------------------------------
+
+    def _layout_sequential(self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool) -> List[Dict]:
+        """Sequential layout: content then form (or reversed)."""
+        return content_widgets + form_widgets if content_first else form_widgets + content_widgets
+
+    def _layout_with_divider(self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool) -> List[Dict]:
+        """Layout with divider between content and form."""
+        if content_first:
+            return content_widgets + [{"divider": {}}] + form_widgets
+        return form_widgets + [{"divider": {}}] + content_widgets
+
+    def _layout_compact(self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool) -> List[Dict]:
+        """Compact layout: all text first, then all buttons."""
+        # Extract text and button widgets
+        texts = [w for w in content_widgets + form_widgets if not any(k in w for k in ['buttonList', 'chipList', 'grid'])]
+        buttons = [w for w in content_widgets + form_widgets if any(k in w for k in ['buttonList', 'chipList', 'grid'])]
+        return texts + buttons if content_first else buttons + texts
+
+    # -------------------------------------------------------------------------
+    # MODULAR ASSEMBLY
+    # -------------------------------------------------------------------------
+
+    def _create_feedback_section(self, card_id: str) -> Dict:
+        """
+        Create feedback section by randomly assembling components.
+
+        Assembly process:
+        1. Select text component type for content feedback
+        2. Select text component type for form feedback
+        3. Select clickable component type for content feedback
+        4. Select clickable component type for form feedback
+        5. Select layout wrapper
+        6. Select order (content first vs form first)
+
+        This creates massive variety for training data collection.
+        """
+        # Component registries with builder methods
+        text_builders = {
+            "text_paragraph": self._text_paragraph,
+            "decorated_text": self._text_decorated,
+            "decorated_text_icon": self._text_decorated_icon,
+            "decorated_text_labeled": self._text_decorated_labeled,
+            "chip_text": self._text_chip,
+        }
+
+        click_builders = {
+            "button_list": self._click_button_list,
+            "chip_list": self._click_chip_list,
+            "icon_buttons": self._click_icon_buttons,
+            "icon_buttons_alt": self._click_icon_buttons_alt,
+            "url_image_buttons": self._click_url_image_buttons,
+        }
+
+        dual_builders = {
+            "decorated_with_button": self._dual_decorated_with_button,
+            "columns_inline": self._dual_columns_inline,
+        }
+
+        layout_builders = {
+            "sequential": self._layout_sequential,
+            "with_divider": self._layout_with_divider,
+            "compact": self._layout_compact,
+        }
+
+        # Random selections
+        content_text_type = random.choice(list(text_builders.keys()))
+        form_text_type = random.choice(list(text_builders.keys()))
+        content_click_type = random.choice(list(click_builders.keys()))
+        form_click_type = random.choice(list(click_builders.keys()))
+        layout_type = random.choice(list(layout_builders.keys()))
+        content_first = random.choice([True, False])
+
+        # Occasionally use dual components (30% chance)
+        use_dual_content = random.random() < 0.3
+        use_dual_form = random.random() < 0.3
+
+        # Build content feedback widgets
+        content_prompt = random.choice(CONTENT_FEEDBACK_PROMPTS)
+        if use_dual_content:
+            dual_type = random.choice(list(dual_builders.keys()))
+            # Dual builders now return lists
+            content_widgets = dual_builders[dual_type](content_prompt, card_id, "content")
+            content_text_type = f"dual:{dual_type}"
+            content_click_type = f"dual:{dual_type}"
+        else:
+            content_widgets = [
+                text_builders[content_text_type](content_prompt, label="Content"),
+                click_builders[content_click_type](card_id, "content"),
+            ]
+
+        # Build form feedback widgets
+        form_prompt = random.choice(FORM_FEEDBACK_PROMPTS)
+        if use_dual_form:
+            dual_type = random.choice(list(dual_builders.keys()))
+            # Dual builders now return lists
+            form_widgets = dual_builders[dual_type](form_prompt, card_id, "form")
+            form_text_type = f"dual:{dual_type}"
+            form_click_type = f"dual:{dual_type}"
+        else:
+            form_widgets = [
+                text_builders[form_text_type](form_prompt, label="Layout"),
+                click_builders[form_click_type](card_id, "form"),
+            ]
+
+        # Apply layout
+        widgets = layout_builders[layout_type](content_widgets, form_widgets, content_first)
+
+        # Build metadata for training
+        assembly_metadata = {
+            "content_text": content_text_type,
+            "content_click": content_click_type,
+            "form_text": form_text_type,
+            "form_click": form_click_type,
+            "layout": layout_type,
+            "content_first": content_first,
+        }
+
+        logger.debug(f"🎲 Feedback assembly: {assembly_metadata}")
+
+        return {
+            "widgets": widgets,
+            "_feedback_assembly": assembly_metadata,
+        }
 
     # =========================================================================
     # MAIN BUILD METHOD
@@ -628,20 +1163,40 @@ class SmartCardBuilderV2:
                 if subtitle:
                     card["header"]["subtitle"] = subtitle
 
-        # Add feedback section
-        if ENABLE_FEEDBACK_BUTTONS and card and not self._has_feedback(card):
-            feedback = self._create_feedback_section(card_id)
-            if "sections" in card:
-                card["sections"].append(feedback)
-            else:
-                card["sections"] = [feedback]
-
-        # Add metadata
+        # Store metadata for debugging (will be cleaned before return)
         card["_card_id"] = card_id
         if structure_dsl:
             card["_dsl_structure"] = structure_dsl
 
-        return card
+        # IMPORTANT: Store instance pattern BEFORE adding feedback section
+        # This keeps the main card pattern (from tool inference) separate from
+        # the randomly generated feedback UI. Only the meaningful content is stored.
+        self._store_card_pattern(
+            card_id=card_id,
+            description=description,
+            title=title,
+            structure_dsl=structure_dsl,
+            card=card,  # Card WITHOUT feedback section
+        )
+
+        # Add feedback section AFTER storing content pattern
+        # The feedback UI is stored SEPARATELY with pattern_type="feedback_ui"
+        if ENABLE_FEEDBACK_BUTTONS and card and not self._has_feedback(card):
+            feedback = self._create_feedback_section(card_id)
+
+            # Store the feedback UI pattern separately (pattern_type="feedback_ui")
+            self._store_feedback_ui_pattern(card_id, feedback)
+
+            # Add a divider before feedback to visually separate content from feedback UI
+            divider_section = {"widgets": [{"divider": {}}]}
+            if "sections" in card:
+                card["sections"].append(divider_section)
+                card["sections"].append(feedback)
+            else:
+                card["sections"] = [divider_section, feedback]
+
+        # Clean metadata before returning (Google Chat rejects underscore-prefixed keys)
+        return self._clean_card_metadata(card)
 
 
 # =============================================================================

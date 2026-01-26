@@ -639,7 +639,7 @@ def test_smart_card_builder_integration():
     print("SMARTCARDBUILDER INTEGRATION TEST")
     print("=" * 60)
 
-    from gchat.smart_card_builder_v2 import get_smart_card_builder
+    from gchat.smart_card_builder import get_smart_card_builder
 
     wrapper = get_card_framework_wrapper()
     builder = get_smart_card_builder()
