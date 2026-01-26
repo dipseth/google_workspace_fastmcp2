@@ -37,7 +37,54 @@ load_dotenv()
 
 from config.enhanced_logging import setup_logger
 
+# Import universal styling system for random colors
+from middleware.filters.styling_filters import (
+    COLOR_SCHEMES,
+    SEMANTIC_COLORS,
+    STYLING_FILTERS,
+    ComponentStyler,
+    ColorCycler,
+    color_filter,
+    price_filter,
+    badge_filter,
+    bold_filter,
+    strike_filter,
+)
+
+# Import Jinja templating system for rich card styling
+from middleware.template_core.jinja_environment import JinjaEnvironmentManager
+
 logger = setup_logger()
+
+
+# =========================================================================
+# JINJA TEMPLATING SETUP
+# =========================================================================
+
+def get_jinja_environment():
+    """Get configured Jinja environment with all styling filters."""
+    jinja_mgr = JinjaEnvironmentManager()
+    jinja_mgr.setup_jinja2_environment()
+    jinja_mgr.register_filters(STYLING_FILTERS)
+    return jinja_mgr.jinja2_env
+
+
+# Global Jinja environment (lazy-loaded)
+_JINJA_ENV = None
+
+def jinja_env():
+    """Get or create the global Jinja environment."""
+    global _JINJA_ENV
+    if _JINJA_ENV is None:
+        _JINJA_ENV = get_jinja_environment()
+    return _JINJA_ENV
+
+
+def render_jinja_template(template_str: str, **context) -> str:
+    """Render a Jinja template string with styling filters."""
+    env = jinja_env()
+    template = env.from_string(template_str)
+    return template.render(**context)
 
 
 # =========================================================================
@@ -47,6 +94,195 @@ logger = setup_logger()
 PRIMITIVE_TYPES = {str, int, float, bool, bytes, type(None)}
 BUILTIN_PREFIXES = {"builtins", "typing", "collections", "abc"}
 TARGET_MODULE = "card_framework"
+
+# Random color scheme for this run
+CURRENT_COLOR_SCHEME = random.choice(list(COLOR_SCHEMES.keys()))
+STYLER = ComponentStyler(scheme=CURRENT_COLOR_SCHEME, target="gchat")
+
+# =========================================================================
+# STYLED CONTENT GENERATORS (Using Jinja Templates)
+# =========================================================================
+
+# Pre-defined Jinja templates for various card themes
+CARD_THEMES = {
+    "status": {
+        "name": "System Status",
+        "templates": {
+            "title": '{{ title | color("#1a73e8") | bold }}',
+            "success": '{{ text | success_text }}',
+            "warning": '{{ text | warning_text }}',
+            "error": '{{ text | error_text }}',
+            "metric": '{{ label | muted_text }}: {{ value | color("#34a853") | bold }}',
+        },
+        "sample_data": {
+            "title": "System Health",
+            "items": [
+                {"text": "API: Online", "type": "success"},
+                {"text": "Database: Connected", "type": "success"},
+                {"text": "Cache: High Latency", "type": "warning"},
+            ]
+        }
+    },
+    "pricing": {
+        "name": "Product Pricing",
+        "templates": {
+            "title": '{{ title | bold }}',
+            "price": '{{ amount | price(currency) }}',
+            "sale_price": '{{ "SALE" | badge("#ea4335") }} {{ amount | price(currency) }}',
+            "original": 'Was: {{ amount | price(currency) | strike }}',
+            "savings": '{{ text | color("#34a853") | bold }}',
+        },
+        "sample_data": {
+            "title": "Special Offer",
+            "currency": "USD",
+            "original_price": 149.99,
+            "sale_price": 99.99,
+        }
+    },
+    "build": {
+        "name": "Build Status",
+        "templates": {
+            "title": '{{ name | bold }} #{{ number }}',
+            "passed": '{{ "PASSED" | success_text }}',
+            "failed": '{{ "FAILED" | error_text }}',
+            "duration": '{{ "Duration" | muted_text }}: {{ time }}',
+            "tests": '{{ "Tests" | muted_text }}: {{ passed | color("#34a853") }}/{{ total }}',
+            "coverage": '{{ "Coverage" | muted_text }}: {{ percent | color("#1a73e8") }}%',
+        },
+        "sample_data": {
+            "name": "Build",
+            "number": random.randint(1000, 9999),
+            "time": f"{random.randint(1, 5)}m {random.randint(0, 59)}s",
+            "passed": random.randint(90, 150),
+            "total": 150,
+            "percent": round(random.uniform(85, 99), 1),
+        }
+    },
+    "alert": {
+        "name": "Alert Notification",
+        "templates": {
+            "title": '{{ severity | badge(color) }} {{ title }}',
+            "message": '{{ message }}',
+            "timestamp": '{{ "Time" | muted_text }}: {{ time }}',
+            "source": '{{ "Source" | muted_text }}: {{ source | color("#1a73e8") }}',
+        },
+        "sample_data": {
+            "severity": "WARNING",
+            "color": "#fbbc05",
+            "title": "High Memory Usage",
+            "message": "Memory usage exceeded 85% threshold",
+            "time": "2 minutes ago",
+            "source": "monitoring-service",
+        }
+    },
+    "metrics": {
+        "name": "Dashboard Metrics",
+        "templates": {
+            "title": '{{ title | color("#1a73e8") | bold }}',
+            "metric_up": '{{ label }}: {{ value | color("#34a853") | bold }} {{ "↑" | color("#34a853") }}',
+            "metric_down": '{{ label }}: {{ value | color("#ea4335") | bold }} {{ "↓" | color("#ea4335") }}',
+            "metric_neutral": '{{ label }}: {{ value | bold }}',
+            "percentage": '{{ label }}: {{ value | color(color) }}%',
+        },
+        "sample_data": {
+            "title": "Performance Metrics",
+            "metrics": [
+                {"label": "Requests/sec", "value": "2,450", "trend": "up"},
+                {"label": "Latency", "value": "45ms", "trend": "down"},
+                {"label": "Error Rate", "value": "0.02%", "trend": "neutral"},
+            ]
+        }
+    },
+}
+
+
+def get_random_theme() -> Dict[str, Any]:
+    """Get a random card theme with its templates and sample data."""
+    theme_name = random.choice(list(CARD_THEMES.keys()))
+    return {"name": theme_name, **CARD_THEMES[theme_name]}
+
+
+def render_themed_text(theme_name: str, template_key: str, **context) -> str:
+    """Render text using a theme's template."""
+    theme = CARD_THEMES.get(theme_name, CARD_THEMES["status"])
+    template_str = theme["templates"].get(template_key, "{{ text }}")
+    return render_jinja_template(template_str, **context)
+
+
+# Styled minimal values - uses random colors for visual variety
+def get_styled_text(text: str, component_type: str = "default") -> str:
+    """Get styled text with alternating colors."""
+    return STYLER.auto_style(component_type, text)
+
+
+def get_random_styled_title() -> str:
+    """Generate a random styled title using Jinja templates."""
+    titles = ["Dashboard", "Report", "Status", "Metrics", "Overview", "Summary"]
+    colors = ["#1a73e8", "#34a853", "#8430ce", "#00acc1"]
+    title = random.choice(titles)
+    color = random.choice(colors)
+    return render_jinja_template('{{ title | color(color) | bold }}', title=title, color=color)
+
+
+def get_random_styled_text() -> str:
+    """Generate random styled sample text using Jinja templates."""
+    templates = [
+        '{{ text | success_text }}',
+        '{{ text | color("#1a73e8") }}',
+        '{{ text | muted_text }}',
+        '{{ text | warning_text }}',
+        '{{ text | bold }}',
+    ]
+    texts = ["Active", "Connected", "Running", "Healthy", "Online", "Ready"]
+    template = random.choice(templates)
+    text = random.choice(texts)
+    return render_jinja_template(template, text=text)
+
+
+def get_random_price_text() -> str:
+    """Generate random price text using Jinja price filter."""
+    prices = [9.99, 19.99, 49.99, 99.99, 149.99, 199.99]
+    currencies = ["USD", "EUR", "GBP"]
+    price = random.choice(prices)
+    currency = random.choice(currencies)
+
+    # Randomly choose sale or regular price
+    if random.random() > 0.5:
+        return render_jinja_template(
+            '{{ "SALE" | badge("#ea4335") }} {{ price | price(currency) }}',
+            price=price, currency=currency
+        )
+    return render_jinja_template('{{ price | price(currency) }}', price=price, currency=currency)
+
+
+def get_random_status_text() -> str:
+    """Generate random status text with appropriate styling."""
+    statuses = [
+        ("Online", "success_text"),
+        ("Offline", "error_text"),
+        ("Degraded", "warning_text"),
+        ("Maintenance", "muted_text"),
+        ("Starting", "color(\"#1a73e8\")"),
+    ]
+    status, filter_name = random.choice(statuses)
+    return render_jinja_template(f'{{{{ status | {filter_name} }}}}', status=status)
+
+
+def get_random_metric_text() -> str:
+    """Generate random metric text with values."""
+    metrics = [
+        ("CPU", f"{random.randint(10, 95)}%", "#34a853" if random.random() > 0.3 else "#ea4335"),
+        ("Memory", f"{random.randint(20, 90)}%", "#34a853" if random.random() > 0.3 else "#fbbc05"),
+        ("Disk", f"{random.randint(30, 85)}%", "#34a853"),
+        ("Requests", f"{random.randint(100, 5000)}/s", "#1a73e8"),
+        ("Latency", f"{random.randint(5, 200)}ms", "#34a853" if random.random() > 0.5 else "#fbbc05"),
+    ]
+    label, value, color = random.choice(metrics)
+    return render_jinja_template(
+        '{{ label | muted_text }}: {{ value | color(color) | bold }}',
+        label=label, value=value, color=color
+    )
+
 
 # Minimal valid values for common field types
 MINIMAL_VALUES = {
@@ -63,6 +299,28 @@ MINIMAL_VALUES = {
     "label": "Label",
     "action_method_name": "test_action",
 }
+
+
+# Styled versions of minimal values (generated fresh each call)
+def get_styled_minimal_values() -> Dict[str, Any]:
+    """Get minimal values with random Jinja styling applied to text fields."""
+    scheme = random.choice(list(COLOR_SCHEMES.keys()))
+    cycler = ColorCycler.from_scheme(scheme)
+
+    return {
+        "str": "test",
+        "int": 1,
+        "float": 1.0,
+        "bool": True,
+        "image_url": random.choice(VALID_IMAGE_URLS) if 'VALID_IMAGE_URLS' in dir() else "https://example.com/image.png",
+        "url": "https://example.com",
+        "text": render_jinja_template('{{ text | color(color) }}', text="Sample text", color=cycler.next()),
+        "title": render_jinja_template('{{ title | color(color) | bold }}', title="Sample title", color=cycler.next()),
+        "alt_text": "Alt text",
+        "name": "test_name",
+        "label": render_jinja_template('{{ label | color(color) }}', label="Label", color=cycler.next()),
+        "action_method_name": "test_action",
+    }
 
 # Test webhook from environment
 TEST_WEBHOOK = os.getenv("TEST_CHAT_WEBHOOK")
@@ -574,7 +832,7 @@ def store_validated_patterns(results: List[Dict], dry_run: bool = False) -> int:
 # COMPLEX NESTING VALIDATION
 # =========================================================================
 
-def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = False) -> List[Dict]:
+def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = False, use_styled_content: bool = True) -> List[Dict]:
     """
     Validate complex multi-level nesting scenarios.
 
@@ -584,11 +842,34 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
     - Multi-section cards (RAG Evaluation Summary style)
     - Form cards (inputs + selection + date picker)
     - Grid cards (image gallery)
+
+    Args:
+        validator: RelationshipValidator instance
+        verbose: Print detailed output
+        use_styled_content: Apply random colors/styles to text content
     """
     logger.info("")
     logger.info("=" * 70)
     logger.info("COMPLEX NESTING VALIDATION (Field Notes Patterns)")
     logger.info("=" * 70)
+
+    # Pick random color scheme for this validation run
+    scheme_name = random.choice(list(COLOR_SCHEMES.keys()))
+    styler = ComponentStyler(scheme=scheme_name, target="gchat")
+    logger.info(f"Using color scheme: {scheme_name}")
+
+    def styled_text(text: str, component_type: str = "default", bold: bool = False) -> str:
+        """Apply random styling to text if enabled."""
+        if use_styled_content:
+            return styler.auto_style(component_type, text, bold=bold)
+        return text
+
+    def random_color_text(text: str, bold: bool = False) -> str:
+        """Apply a random semantic color to text."""
+        if use_styled_content:
+            color = random.choice(["success", "info", "primary", "warning", "accent"])
+            return color_filter(text, color, target="gchat", bold=bold)
+        return text
 
     complex_scenarios = []
 
@@ -614,6 +895,7 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                 "success": True,
                 "rendered_json": rendered,
                 "structure_description": "Image with clickable link action",
+                "color_scheme": scheme_name,
             })
             if verbose:
                 logger.info("  ✅ Clickable Image")
@@ -627,12 +909,13 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             if verbose:
                 logger.warning(f"  ❌ Clickable Image: {e}")
 
-        # Scenario 2: Button with Icon
+        # Scenario 2: Button with Icon (with styled text)
         try:
             # KnownIcon is a nested class inside Icon
             icon = Icon(known_icon=Icon.KnownIcon.STAR)
             onclick = OnClick(open_link=OpenLink(url="https://example.com"))
-            button = Button(text="Click me", icon=icon, on_click=onclick)
+            button_text = styled_text("Click me", "button", bold=True)
+            button = Button(text=button_text, icon=icon, on_click=onclick)
             rendered = button.render()
 
             complex_scenarios.append({
@@ -641,6 +924,7 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                 "success": True,
                 "rendered_json": rendered,
                 "structure_description": "Button with icon and click action",
+                "color_scheme": scheme_name,
             })
             if verbose:
                 logger.info("  ✅ Button with Icon")
@@ -654,12 +938,14 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             if verbose:
                 logger.warning(f"  ❌ Button with Icon: {e}")
 
-        # Scenario 3: DecoratedText with Icon and Button
+        # Scenario 3: DecoratedText with Icon and Button (styled content)
         try:
             # KnownIcon is a nested class inside Icon
             icon = Icon(known_icon=Icon.KnownIcon.DESCRIPTION)
-            button = Button(text="Action")
-            text = DecoratedText(text="Content", start_icon=icon, button=button)
+            action_text = styled_text("Action", "button")
+            button = Button(text=action_text)
+            content_text = random_color_text("Sample content with styling")
+            text = DecoratedText(text=content_text, start_icon=icon, button=button)
             rendered = text.render()
 
             complex_scenarios.append({
@@ -668,6 +954,7 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                 "success": True,
                 "rendered_json": rendered,
                 "structure_description": "Decorated text with leading icon and action button",
+                "color_scheme": scheme_name,
             })
             if verbose:
                 logger.info("  ✅ DecoratedText with Icon and Button")
@@ -681,12 +968,15 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             if verbose:
                 logger.warning(f"  ❌ DecoratedText with Icon and Button: {e}")
 
-        # Scenario 4: Grid with clickable items
+        # Scenario 4: Grid with clickable items (styled titles)
         try:
             onclick = OnClick(open_link=OpenLink(url="https://example.com"))
-            item1 = GridItem(id="item1", title="Item 1")
-            item2 = GridItem(id="item2", title="Item 2")
-            grid = Grid(title="My Grid", items=[item1, item2], on_click=onclick)
+            item1_title = styled_text("Item 1", "grid_item", bold=True)
+            item2_title = styled_text("Item 2", "grid_item", bold=True)
+            item1 = GridItem(id="item1", title=item1_title)
+            item2 = GridItem(id="item2", title=item2_title)
+            grid_title = random_color_text("My Grid", bold=True)
+            grid = Grid(title=grid_title, items=[item1, item2], on_click=onclick)
             rendered = grid.render()
 
             complex_scenarios.append({
@@ -708,11 +998,13 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             if verbose:
                 logger.warning(f"  ❌ Grid with Clickable Items: {e}")
 
-        # Scenario 5: Section with multiple widget types
+        # Scenario 5: Section with multiple widget types (styled)
         try:
-            text = DecoratedText(text="Info text")
+            info_text = random_color_text("Info text with random styling")
+            text = DecoratedText(text=info_text)
             image = Image(image_url="https://example.com/img.png", alt_text="Image")
-            section = Section(header="Mixed Section", widgets=[text, image])
+            section_header = styled_text("Mixed Section", "section", bold=True)
+            section = Section(header=section_header, widgets=[text, image])
             rendered = section.render()
 
             complex_scenarios.append({
@@ -721,6 +1013,7 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                 "success": True,
                 "rendered_json": rendered,
                 "structure_description": "Section containing text and image widgets",
+                "color_scheme": scheme_name,
             })
             if verbose:
                 logger.info("  ✅ Section with Mixed Widgets")
@@ -734,10 +1027,12 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
             if verbose:
                 logger.warning(f"  ❌ Section with Mixed Widgets: {e}")
 
-        # Scenario 6: ButtonList with multiple styled buttons
+        # Scenario 6: ButtonList with multiple styled buttons (alternating colors)
         try:
-            btn1 = Button(text="Primary", color={"red": 0.2, "green": 0.6, "blue": 0.9})
-            btn2 = Button(text="Secondary")
+            btn1_text = styled_text("Primary", "button", bold=True)
+            btn2_text = styled_text("Secondary", "button")
+            btn1 = Button(text=btn1_text, color={"red": 0.2, "green": 0.6, "blue": 0.9})
+            btn2 = Button(text=btn2_text)
             button_list = ButtonList(buttons=[btn1, btn2])
             rendered = button_list.render()
 
@@ -747,6 +1042,7 @@ def validate_complex_nestings(validator: RelationshipValidator, verbose: bool = 
                 "success": True,
                 "rendered_json": rendered,
                 "structure_description": "Button list with multiple styled buttons",
+                "color_scheme": scheme_name,
             })
             if verbose:
                 logger.info("  ✅ ButtonList with Styled Buttons")
@@ -1102,8 +1398,9 @@ class RandomCardGenerator:
       - OverflowMenuItem -> [Widget, Icon]
     """
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, use_jinja_styling: bool = True):
         self.verbose = verbose
+        self._use_jinja_styling = use_jinja_styling
         self._components = {}
         self._relationships = {}
         # Coverage tracking - ensure we use all parents and children
@@ -1111,6 +1408,8 @@ class RandomCardGenerator:
         self._used_children: Set[str] = set()
         self._all_parents: Set[str] = set()
         self._all_children: Set[str] = set()
+        # Current theme for styled content
+        self._current_theme = get_random_theme() if use_jinja_styling else None
         self._load_components()
 
     def _track_usage(self, parent: str = None, child: str = None):
@@ -1316,8 +1615,8 @@ class RandomCardGenerator:
         """Get a random Google-hosted image URL that actually works."""
         return random.choice(VALID_IMAGE_URLS)
 
-    def _random_text(self, field: str = "text") -> str:
-        """Generate random text content."""
+    def _random_text(self, field: str = "text", styled: bool = True) -> str:
+        """Generate random text content with optional Jinja styling."""
         texts = {
             "title": ["Dashboard", "Report", "Summary", "Overview", "Status", "Metrics"],
             "subtitle": ["Generated", "Updated", "Live Data", "Real-time"],
@@ -1326,7 +1625,43 @@ class RandomCardGenerator:
             "name": [f"field_{random.randint(100, 999)}"],
         }
         options = texts.get(field, texts["text"])
-        return random.choice(options)
+        base_text = random.choice(options)
+
+        if not styled or not self._use_jinja_styling:
+            return base_text
+
+        # Apply Jinja styling based on field type
+        if field == "title":
+            return get_random_styled_title()
+        elif field == "text":
+            # Randomly choose between different styled text generators
+            generators = [
+                get_random_styled_text,
+                get_random_status_text,
+                get_random_metric_text,
+            ]
+            return random.choice(generators)()
+        elif field == "label":
+            colors = ["#1a73e8", "#34a853", "#8430ce", "#00acc1", "#fbbc05"]
+            return render_jinja_template(
+                '{{ label | color(color) }}',
+                label=base_text, color=random.choice(colors)
+            )
+        elif field == "subtitle":
+            return render_jinja_template('{{ text | muted_text }}', text=base_text)
+
+        return base_text
+
+    def _random_styled_content(self, content_type: str = "status") -> str:
+        """Generate random styled content using Jinja templates based on content type."""
+        if content_type == "status":
+            return get_random_status_text()
+        elif content_type == "metric":
+            return get_random_metric_text()
+        elif content_type == "price":
+            return get_random_price_text()
+        else:
+            return get_random_styled_text()
 
     def _random_url(self) -> str:
         """Generate a random valid URL."""
@@ -1353,9 +1688,10 @@ class RandomCardGenerator:
         return None
 
     def _build_button(self, with_icon: bool = False, with_onclick: bool = True) -> Any:
-        """Build a random Button."""
+        """Build a random Button. Note: Button text does NOT support HTML styling."""
         Button = self._components["Button"]
-        kwargs = {"text": self._random_text("label")}
+        # Button text does NOT support HTML - use plain text only
+        kwargs = {"text": self._random_text("label", styled=False)}
 
         if with_icon and random.random() > 0.5:
             icon = self._build_icon()
@@ -1373,9 +1709,10 @@ class RandomCardGenerator:
         return Button(**kwargs)
 
     def _build_chip(self) -> Any:
-        """Build a random Chip."""
+        """Build a random Chip. Note: Chip label does NOT support HTML styling."""
         Chip = self._components["Chip"]
-        kwargs = {"label": self._random_text("label")}
+        # Chip label does NOT support HTML - use plain text only
+        kwargs = {"label": self._random_text("label", styled=False)}
 
         if random.random() > 0.5:
             icon = self._build_icon()
@@ -1484,11 +1821,22 @@ class RandomCardGenerator:
 
         elif widget_type == "DecoratedText":
             DecoratedText = self._components["DecoratedText"]
-            kwargs = {"text": self._random_text()}
+
+            # Use Jinja-styled content based on random content type
+            if self._use_jinja_styling:
+                content_types = ["status", "metric", "text"]
+                content_type = random.choice(content_types)
+                kwargs = {"text": self._random_styled_content(content_type)}
+                description += f" ({content_type} styled)"
+            else:
+                kwargs = {"text": self._random_text()}
 
             if random.random() > 0.5:
-                kwargs["top_label"] = "Status"
+                # DecoratedText top_label does NOT support HTML - use plain text only
+                labels = ["Status", "Metric", "Info", "Value", "Result"]
+                kwargs["top_label"] = random.choice(labels)
             if random.random() > 0.5:
+                # DecoratedText bottom_label does NOT support HTML - use plain text only
                 kwargs["bottom_label"] = "Details"
             if random.random() > 0.5:
                 icon = self._build_icon()
@@ -1503,12 +1851,54 @@ class RandomCardGenerator:
 
         elif widget_type == "TextParagraph":
             TextParagraph = self._components["TextParagraph"]
-            html_texts = [
-                "<b>Bold text</b> and <i>italic</i>",
-                '<font color="#1a73e8">Colored text</font>',
-                "Plain text content here",
-            ]
-            return TextParagraph(text=random.choice(html_texts)), description
+
+            if self._use_jinja_styling:
+                # Generate rich styled text paragraphs using Jinja templates
+                styled_templates = [
+                    # Status-style paragraphs
+                    '{{ "System Status" | bold }}: {{ status | success_text }}',
+                    '{{ label | muted_text }}: {{ value | color("#1a73e8") | bold }}',
+                    '{{ "Alert" | badge("#fbbc05") }} {{ message }}',
+                    # Price-style paragraphs
+                    '{{ "Price" | muted_text }}: {{ price | price("USD") }}',
+                    '{{ "SALE" | badge("#ea4335") }} {{ price | price("USD") }} (was {{ original | price("USD") | strike }})',
+                    # Metric-style paragraphs
+                    '{{ metric | bold }}: {{ value | color(color) }}%',
+                    '{{ "Build" | bold }} #{{ number }}: {{ status | success_text }}',
+                    # Rich text combinations
+                    '{{ title | color("#1a73e8") | bold }}\n{{ description | muted_text }}',
+                ]
+                template = random.choice(styled_templates)
+
+                # Generate context values
+                context = {
+                    "status": random.choice(["Online", "Active", "Healthy", "Running"]),
+                    "label": random.choice(["CPU", "Memory", "Latency", "Requests"]),
+                    "value": str(random.randint(10, 99)),
+                    "message": "Check system status",
+                    "price": round(random.uniform(9.99, 199.99), 2),
+                    "original": round(random.uniform(100, 299.99), 2),
+                    "metric": random.choice(["Coverage", "Success Rate", "Uptime"]),
+                    "color": random.choice(["#34a853", "#1a73e8", "#fbbc05"]),
+                    "number": random.randint(1000, 9999),
+                    "title": random.choice(["Overview", "Summary", "Report"]),
+                    "description": "Generated with Jinja templating",
+                }
+
+                try:
+                    styled_text = render_jinja_template(template, **context)
+                    description += " (Jinja styled)"
+                except Exception:
+                    styled_text = '<font color="#1a73e8">Styled text content</font>'
+
+                return TextParagraph(text=styled_text), description
+            else:
+                html_texts = [
+                    "<b>Bold text</b> and <i>italic</i>",
+                    '<font color="#1a73e8">Colored text</font>',
+                    "Plain text content here",
+                ]
+                return TextParagraph(text=random.choice(html_texts)), description
 
         elif widget_type == "ButtonList":
             ButtonList = self._components["ButtonList"]
@@ -1521,8 +1911,9 @@ class RandomCardGenerator:
             Grid = self._components["Grid"]
             num_items = random.randint(2, 4)
             items = [self._build_grid_item(i) for i in range(num_items)]
+            # Grid title does NOT support HTML - use plain text only
             kwargs = {
-                "title": self._random_text("title"),
+                "title": self._random_text("title", styled=False),
                 "column_count": random.choice([2, 3]),
                 "items": items,
             }
@@ -1570,9 +1961,10 @@ class RandomCardGenerator:
                 ))
                 self._track_usage(child="SelectionItem")
 
+            # SelectionInput label does NOT support HTML - use plain text only
             kwargs = {
                 "name": f"selection_{random.randint(100, 999)}",
-                "label": self._random_text("label"),
+                "label": self._random_text("label", styled=False),
                 "items": items,
             }
             if sel_type:
@@ -1588,9 +1980,10 @@ class RandomCardGenerator:
             InputType = getattr(TextInput, "Type", None)
             is_multiline = random.random() > 0.5
 
+            # TextInput label does NOT support HTML - use plain text only
             kwargs = {
                 "name": f"input_{random.randint(100, 999)}",
-                "label": self._random_text("label"),
+                "label": self._random_text("label", styled=False),
             }
 
             if InputType:
@@ -1608,9 +2001,10 @@ class RandomCardGenerator:
         elif widget_type == "DateTimePicker":
             DateTimePicker = self._components["DateTimePicker"]
 
+            # DateTimePicker label does NOT support HTML - use plain text only
             kwargs = {
                 "name": f"date_{random.randint(100, 999)}",
-                "label": self._random_text("label"),
+                "label": self._random_text("label", styled=False),
             }
 
             # Get Type enum if available
@@ -1727,8 +2121,9 @@ class RandomCardGenerator:
             widgets.append(widget)
             descriptions.append(desc)
 
+        # Section header DOES support HTML styling
         section = Section(
-            header=self._random_text("title"),
+            header=self._random_text("title", styled=True),
             widgets=widgets
         )
 
@@ -1778,10 +2173,11 @@ class RandomCardGenerator:
         kwargs = {"sections": sections}
 
         # Random header (70% chance)
+        # CardHeader title/subtitle do NOT support HTML - use plain text only
         if CardHeader and random.random() > 0.3:
             kwargs["header"] = CardHeader(
-                title=self._random_text("title"),
-                subtitle=self._random_text("subtitle"),
+                title=self._random_text("title", styled=False),
+                subtitle=self._random_text("subtitle", styled=False),
                 image_url=self._random_image_url()
             )
 
@@ -1808,6 +2204,7 @@ def run_random_webhook_tests(
     verbose: bool = False,
     delay: float = 1.0,
     ensure_coverage: bool = True,
+    use_jinja_styling: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Generate random cards and send them to the webhook to validate.
@@ -1818,19 +2215,22 @@ def run_random_webhook_tests(
         verbose: Show detailed output
         delay: Delay between webhook requests in seconds
         ensure_coverage: If True, ensure ALL parents and children are used at least once
+        use_jinja_styling: If True, apply Jinja template styling to text content
 
     Returns list of test results.
     """
     logger.info("")
     logger.info("=" * 70)
     logger.info(f"RANDOM WEBHOOK VALIDATION ({num_tests} tests)")
+    if use_jinja_styling:
+        logger.info(f"  Jinja styling: ENABLED (rich HTML styling)")
     logger.info("=" * 70)
 
     if not webhook_url and not TEST_WEBHOOK:
         logger.error("No webhook URL! Set TEST_CHAT_WEBHOOK env var or pass --webhook")
         return []
 
-    generator = RandomCardGenerator(verbose=verbose)
+    generator = RandomCardGenerator(verbose=verbose, use_jinja_styling=use_jinja_styling)
     results = []
 
     for i in range(num_tests):
@@ -2087,7 +2487,35 @@ def main():
         default=1.0,
         help="Delay between webhook requests in seconds (default: 1.0)"
     )
+    parser.add_argument(
+        "--styled", "-s",
+        action="store_true",
+        default=True,
+        help="Apply random colors/styles to text content (default: enabled)"
+    )
+    parser.add_argument(
+        "--no-styled",
+        action="store_true",
+        help="Disable random styling (plain text only)"
+    )
+    parser.add_argument(
+        "--color-scheme",
+        type=str,
+        default=None,
+        choices=list(COLOR_SCHEMES.keys()),
+        help=f"Use specific color scheme (choices: {', '.join(COLOR_SCHEMES.keys())})"
+    )
     args = parser.parse_args()
+
+    # Handle styled flag
+    use_styled = args.styled and not args.no_styled
+
+    # Update global styler if specific scheme requested
+    global STYLER, CURRENT_COLOR_SCHEME
+    if args.color_scheme:
+        CURRENT_COLOR_SCHEME = args.color_scheme
+        STYLER = ComponentStyler(scheme=args.color_scheme, target="gchat")
+        logger.info(f"Using color scheme: {args.color_scheme}")
 
     total_stored = 0
 
@@ -2104,6 +2532,7 @@ def main():
             webhook_url=args.webhook,
             verbose=args.verbose,
             delay=args.delay,
+            use_jinja_styling=use_styled,
         )
 
         # Store successful random patterns
@@ -2170,7 +2599,11 @@ def main():
     # Complex nesting validation
     logger.info("")
     validator = RelationshipValidator(verbose=args.verbose)
-    complex_results = validate_complex_nestings(validator, verbose=args.verbose)
+    complex_results = validate_complex_nestings(
+        validator,
+        verbose=args.verbose,
+        use_styled_content=use_styled
+    )
 
     complex_success = sum(1 for r in complex_results if r.get("success"))
     complex_fail = sum(1 for r in complex_results if not r.get("success"))

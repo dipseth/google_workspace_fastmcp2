@@ -313,10 +313,12 @@ class ComponentSearchInfo(BaseModel):
             "fallback",
             "nlp_sections",
             "smart_builder",
+            "card_builder_v2",
+            "dsl_builder",
         ]
     ] = Field(
         None,
-        description="Type of component found: 'class' for Card/Widget classes, 'function' for factory functions, 'module' for module-level components, 'simple_fallback' when no match found, 'nlp_sections' for NLP-parsed multi-section cards, 'smart_builder' for SmartCardBuilder with Qdrant vector search",
+        description="Type of component found: 'class' for Card/Widget classes, 'function' for factory functions, 'module' for module-level components, 'simple_fallback' when no match found, 'nlp_sections' for NLP-parsed multi-section cards, 'smart_builder' for SmartCardBuilder with Qdrant vector search, 'card_builder_v2' for DSL-based card construction, 'dsl_builder' for structure DSL parsing",
     )
     searchScore: Optional[float] = Field(
         None,
@@ -400,6 +402,14 @@ class SendDynamicCardResponse(BaseModel):
     validationIssues: Optional[List[str]] = Field(
         None,
         description="List of validation issues if validation failed",
+    )
+    jinjaTemplateApplied: bool = Field(
+        False,
+        description="Whether Jinja2 template styling was applied to card content",
+    )
+    dslDetected: Optional[str] = Field(
+        None,
+        description="DSL structure detected in card_description (if any)",
     )
     message: str = Field(
         ...,

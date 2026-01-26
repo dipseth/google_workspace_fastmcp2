@@ -125,8 +125,12 @@ class FeedbackLoop:
         """
         Embed relationship/structure information using MiniLM.
 
-        Creates a text representation of the card structure from parent_paths
+        Creates a compact text representation of the card structure from parent_paths
         and optional structure description, then embeds with MiniLM (384d).
+
+        Uses compact format for better embedding efficiency:
+            Verbose: "Card structure with: DecoratedText, ButtonList. Components: DecoratedText contains ButtonList"
+            Compact: "Card[DecoratedText, ButtonList] :: description"
 
         Args:
             parent_paths: List of component paths used (e.g., ["card_framework.v2.widgets.DecoratedText"])
@@ -140,25 +144,8 @@ class FeedbackLoop:
             return [0.0] * RELATIONSHIPS_DIM
 
         try:
-            # Build structure text from parent_paths
-            # Extract component names and build hierarchy description
-            components = []
-            for path in parent_paths:
-                # Extract class name from full path
-                class_name = path.split(".")[-1]
-                components.append(class_name)
-
-            # Create NL description of structure
-            if components:
-                structure_text = f"Card structure with: {', '.join(components)}"
-                if len(components) > 1:
-                    structure_text += f". Components: {' contains '.join(components)}"
-            else:
-                structure_text = "Empty card structure"
-
-            # Append custom structure description if provided
-            if structure_description:
-                structure_text = f"{structure_text}. {structure_description}"
+            # Build compact structure text
+            structure_text = self._build_compact_structure_text(parent_paths, structure_description)
 
             # Embed with MiniLM (single vector)
             vectors_raw = list(embedder.embed([structure_text]))[0]
@@ -167,6 +154,61 @@ class FeedbackLoop:
         except Exception as e:
             logger.warning(f"Failed to embed relationships: {e}")
             return [0.0] * RELATIONSHIPS_DIM
+
+    def _build_compact_structure_text(self, component_paths: List[str], structure_description: str = "") -> str:
+        """
+        Build compact structure text for instance patterns WITH DSL NOTATION.
+
+        Delegates to ModuleWrapper.build_dsl_from_paths() which is the canonical
+        implementation. This ensures consistent DSL notation across all ingestion paths.
+
+        Examples:
+            Paths: ["Section", "DecoratedText", "ButtonList", "Button"]
+            DSL: "§[δ, Ƀ, ᵬ] | Section DecoratedText ButtonList Button"
+
+            Paths: ["Section", "DecoratedText", "DecoratedText", "DecoratedText"]
+            DSL: "§[δ×3] | Section DecoratedText×3"
+
+        Args:
+            component_paths: List of component paths or names
+            structure_description: Optional natural language description
+
+        Returns:
+            DSL notation + component names for better embedding matching
+        """
+        try:
+            from gchat.card_framework_wrapper import get_card_framework_wrapper
+            wrapper = get_card_framework_wrapper()
+            return wrapper.build_dsl_from_paths(component_paths, structure_description)
+        except Exception as e:
+            logger.warning(f"Failed to use ModuleWrapper for DSL: {e}, using fallback")
+            # Fallback to basic format if wrapper unavailable
+            if not component_paths:
+                return f"§[] | {structure_description[:100]}" if structure_description else "§[]"
+            names = [p.split(".")[-1] if "." in p else p for p in component_paths]
+            return f"§[...] | {' '.join(names)}"
+
+    def _get_dsl_symbols(self) -> Dict[str, str]:
+        """
+        Get DSL symbol mappings from ModuleWrapper.
+
+        Returns:
+            Dict mapping component name → DSL symbol
+        """
+        if not hasattr(self, "_dsl_symbols_cache") or self._dsl_symbols_cache is None:
+            try:
+                from gchat.card_framework_wrapper import get_card_framework_wrapper
+                wrapper = get_card_framework_wrapper()
+                validator = wrapper.get_structure_validator()
+                # symbols maps name → symbol
+                self._dsl_symbols_cache = validator.symbols
+                logger.debug(f"Loaded {len(self._dsl_symbols_cache)} DSL symbols")
+            except Exception as e:
+                logger.warning(f"Could not load DSL symbols: {e}")
+                # Fallback to empty dict - will use first char of component name
+                self._dsl_symbols_cache = {}
+
+        return self._dsl_symbols_cache
 
     def _check_collection_exists(self) -> bool:
         """Check if the collection exists in Qdrant."""
@@ -634,6 +676,12 @@ class FeedbackLoop:
         # For now, we'll use the description vectors (simplified)
         colbert_vectors = description_vectors
 
+        # Build DSL notation for searchability and embedding
+        dsl_relationship_text = self._build_compact_structure_text(
+            component_paths,
+            structure_description or ""
+        )
+
         # Embed relationships/structure using MiniLM
         relationship_vector = self._embed_relationships(
             component_paths,
@@ -665,6 +713,8 @@ class FeedbackLoop:
                     "parent_paths": component_paths,  # Links to existing class points
                     "instance_params": instance_params,
                     "card_description": card_description,
+                    # DSL notation for text search (e.g., "§[δ×3, Ƀ[ᵬ×2]] | Section DecoratedText×3...")
+                    "relationship_text": dsl_relationship_text,
                     # Dual feedback fields
                     "content_feedback": content_feedback,  # Affects inputs searches
                     "form_feedback": form_feedback,  # Affects relationships searches

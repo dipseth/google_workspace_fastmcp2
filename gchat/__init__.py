@@ -6,9 +6,7 @@ import logging
 
 from config.enhanced_logging import setup_logger
 
-from . import chat_tools
-
 logger = setup_logger()
 
-
-__all__ = ["chat_tools"]
+# Main exports - lazy imports to avoid circular dependencies
+__all__ = ["SmartCardBuilder", "get_smart_card_builder"]

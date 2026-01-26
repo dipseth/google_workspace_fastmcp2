@@ -52,7 +52,6 @@ Key Features:
 from typing import Annotated, Any, Dict, Optional
 
 from fastmcp import Context, FastMCP
-from fastmcp.server.dependencies import get_context
 from pydantic import BaseModel, Field
 
 from config.enhanced_logging import setup_logger
@@ -77,19 +76,21 @@ class MacroCreationResponse(BaseModel):
     )
 
 
-async def get_template_middleware_from_context():
+def get_template_middleware_from_registry():
     """
-    Extract the EnhancedTemplateMiddleware instance from FastMCP context.
+    Get the EnhancedTemplateMiddleware instance from the module-level registry.
+
+    This uses the registry pattern instead of context state to avoid serialization
+    issues with non-serializable middleware instances.
 
     Returns:
         EnhancedTemplateMiddleware instance or None if not found
     """
     try:
-        # Use the same pattern as module_wrapper_mcp.py
-        ctx = get_context()
-        return await ctx.get_state("template_middleware_instance")
+        from middleware.template_middleware import get_template_middleware_instance
+        return get_template_middleware_instance()
     except Exception as e:
-        logger.error(f"❌ Failed to get template middleware from context: {e}")
+        logger.error(f"❌ Failed to get template middleware from registry: {e}")
         return None
 
 
@@ -175,8 +176,8 @@ async def create_template_macro(
     try:
         await ctx.info(f"Creating template macro '{macro_name}'...")
 
-        # Get the template middleware from context
-        template_middleware = await get_template_middleware_from_context()
+        # Get the template middleware from registry
+        template_middleware = get_template_middleware_from_registry()
         if not template_middleware:
             error_msg = "Template middleware not available - cannot create macros"
             await ctx.error(error_msg)

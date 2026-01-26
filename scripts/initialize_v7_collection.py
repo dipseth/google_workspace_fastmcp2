@@ -3,9 +3,14 @@
 Initialize mcp_gchat_cards_v7 Collection
 
 This script creates the v7 collection with three named vectors:
-1. components (128d) - Component identity: Name + Type + Path + Docstring
+1. components (128d) - Component identity: Name + Type + Path + Docstring + Symbol
 2. inputs (128d) - Input values: Literals, defaults, enum values / instance_params
 3. relationships (384d) - Graph: Parent-child connections, NL descriptions
+
+Symbol embedding is integrated during ingestion:
+- Each component gets a unique Unicode symbol (e.g., ᵬ=Button, §=Section)
+- Symbols are embedded alongside component identity for semantic association
+- Queries containing symbols (like "ᵬ[ᵬ×2]") match the right components
 
 Usage:
     python scripts/initialize_v7_collection.py
@@ -13,6 +18,7 @@ Usage:
 
 import os
 import sys
+from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -27,6 +33,23 @@ V7_COLLECTION_NAME = "mcp_gchat_cards_v7"
 # Vector dimensions
 COLBERT_DIM = 128  # ColBERT multi-vector
 RELATIONSHIPS_DIM = 384  # MiniLM dense vector
+
+# =============================================================================
+# SYMBOL OVERRIDES (Optional - comment out to use auto-generated symbols)
+# =============================================================================
+# The SymbolGenerator in adapters/symbol_generator.py auto-generates symbols
+# based on first letter using visually similar Unicode characters:
+#   B → ["ᵬ", "Ƀ", "β", "ℬ", "ɓ"]  (for Button, ButtonList)
+#   S → ["§", "ʂ", "ş", "ș", "σ"]  (for Section, SelectionInput)
+#   G → ["ℊ", "ǵ", "ǧ", "γ", "ɠ"]  (for Grid, GridItem)
+#
+# These overrides are only needed if you want specific symbol assignments.
+# Uncomment and import in index_components_v7() if needed.
+#
+# Symbol overrides are NOT used - we rely on auto-generation based on:
+# 1. Hierarchy priority (components with more children get priority)
+# 2. Name length bonus (shorter names get their letter's first symbol)
+# This ensures intuitive mappings like §=Section, ᵬ=Button automatically.
 
 
 def create_v7_collection(force_recreate: bool = False):
@@ -166,6 +189,26 @@ def create_v7_collection(force_recreate: bool = False):
     )
     print("  ✅ full_path (keyword)")
 
+    # symbol - Fast symbol → component lookup (DSL resolution)
+    client.create_payload_index(
+        collection_name=V7_COLLECTION_NAME,
+        field_name="symbol",
+        field_schema=KeywordIndexParams(
+            type=KeywordIndexType.KEYWORD,
+        ),
+    )
+    print("  ✅ symbol (keyword)")
+
+    # symbol_dsl - Fast lookup by "ᵬ=Button" format
+    client.create_payload_index(
+        collection_name=V7_COLLECTION_NAME,
+        field_name="symbol_dsl",
+        field_schema=KeywordIndexParams(
+            type=KeywordIndexType.KEYWORD,
+        ),
+    )
+    print("  ✅ symbol_dsl (keyword)")
+
     # Verify
     info = client.get_collection(V7_COLLECTION_NAME)
     vectors = info.config.params.vectors
@@ -239,16 +282,142 @@ def extract_input_values(component) -> str:
     return ", ".join(parts)
 
 
+def build_compact_relationship_text(component_name: str, relationships: List[Dict], component_type: str = "class") -> str:
+    """
+    Build compact, structured relationship text for embedding.
+
+    Converts verbose relationship descriptions into a compact, pattern-friendly format
+    that embeds more efficiently and produces better semantic matches.
+
+    Examples:
+        Verbose: "DecoratedText with Icon, Button, OnClick. decorated text with icon,
+                  decorated text with button, decorated text containing onclick"
+        Compact: "DecoratedText[icon:Icon?, button:Button?, on_click:OnClick?]"
+
+        Verbose: "Grid with GridItem, GridItem, GridItem, GridItem"
+        Compact: "Grid[4×GridItem]"
+
+        Verbose: "Columns with Column, Column containing DecoratedText"
+        Compact: "Columns[2×Column[widgets]]"
+
+    Args:
+        component_name: Name of the parent component
+        relationships: List of relationship dicts with keys:
+            - field_name: Field in parent that holds child
+            - child_class: Name of child class
+            - is_optional: Whether field is optional
+            - depth: Nesting depth
+        component_type: Type of component ("class", "function", etc.)
+
+    Returns:
+        Compact relationship text suitable for embedding
+    """
+    if not relationships:
+        return f"{component_name}:{component_type}[]"
+
+    # Group relationships by child class to detect repetition
+    child_counts = {}
+    fields_by_child = {}
+
+    for rel in relationships:
+        child = rel.get("child_class", "")
+        field = rel.get("field_name", "")
+        optional = rel.get("is_optional", True)
+
+        if child:
+            child_counts[child] = child_counts.get(child, 0) + 1
+            if child not in fields_by_child:
+                fields_by_child[child] = []
+            fields_by_child[child].append((field, optional))
+
+    # Build compact representation
+    parts = []
+    processed_children = set()
+
+    for rel in relationships:
+        child = rel.get("child_class", "")
+        field = rel.get("field_name", "")
+        optional = rel.get("is_optional", True)
+
+        if child in processed_children:
+            continue
+
+        count = child_counts.get(child, 1)
+        opt_marker = "?" if optional else ""
+
+        if count > 1:
+            # Multiple instances of same child type - use multiplier notation
+            # e.g., "buttons:Button*3" or "items:GridItem*6"
+            fields = [f[0] for f in fields_by_child[child]]
+            if len(set(fields)) == 1:
+                # Same field repeated (like list items)
+                parts.append(f"{fields[0]}:{child}×{count}")
+            else:
+                # Different fields with same type
+                parts.append(f"{child}×{count}[{','.join(fields)}]")
+            processed_children.add(child)
+        else:
+            # Single instance
+            parts.append(f"{field}:{child}{opt_marker}")
+
+    return f"{component_name}[{', '.join(parts)}]"
+
+
+def build_compact_structure_text(
+    component_paths: List[str],
+    structure_description: str = "",
+    symbol_mapping: Optional[Dict[str, str]] = None,
+    wrapper: Optional["ModuleWrapper"] = None,
+) -> str:
+    """
+    Build compact structure text for instance patterns WITH DSL NOTATION.
+
+    Delegates to ModuleWrapper.build_dsl_from_paths() which is the canonical
+    implementation. This ensures consistent DSL notation across all ingestion paths.
+
+    Examples:
+        Paths: ["Section", "DecoratedText", "ButtonList", "Button"]
+        DSL: "§[δ, Ƀ, ᵬ] | Section DecoratedText ButtonList Button"
+
+        Paths: ["Section", "DecoratedText", "DecoratedText", "DecoratedText"]
+        DSL: "§[δ×3] | Section DecoratedText×3"
+
+    Args:
+        component_paths: List of component paths or names
+        structure_description: Optional natural language description
+        symbol_mapping: DEPRECATED - ignored, uses wrapper.symbol_mapping
+        wrapper: Optional ModuleWrapper instance (fetched if not provided)
+
+    Returns:
+        DSL-notation structure text suitable for embedding
+    """
+    # Use provided wrapper or get from card_framework_wrapper
+    if wrapper is None:
+        try:
+            from gchat.card_framework_wrapper import get_card_framework_wrapper
+            wrapper = get_card_framework_wrapper()
+        except Exception:
+            # Fallback if wrapper unavailable
+            if not component_paths:
+                return f"§[] | {structure_description[:100]}" if structure_description else "§[]"
+            names = [p.split(".")[-1] if "." in p else p for p in component_paths]
+            return f"§[...] | {' '.join(names)}"
+
+    # Use the canonical implementation from ModuleWrapper
+    return wrapper.build_dsl_from_paths(component_paths, structure_description)
+
+
 def index_components_v7():
-    """Index card_framework components into v7 with three vectors."""
+    """Index card_framework components into v7 with deterministic symbol-wrapped embeddings."""
     from adapters.module_wrapper import ModuleWrapper
+    from adapters.structure_validator import StructureValidator
     from fastembed import TextEmbedding, LateInteractionTextEmbedding
     from config.qdrant_client import get_qdrant_client
     from qdrant_client.models import PointStruct
     import hashlib
 
     print("\n" + "=" * 60)
-    print("INDEXING COMPONENTS INTO V7")
+    print("INDEXING COMPONENTS INTO V7 (WITH SYMBOL-ENRICHED EMBEDDINGS)")
     print("=" * 60)
 
     # Initialize wrapper - use existing v6 to discover components
@@ -260,6 +429,20 @@ def index_components_v7():
         auto_initialize=True,
         index_nested=True,
     )
+
+    # Generate symbols automatically based on hierarchy priority + name length
+    # No explicit overrides - the algorithm should produce intuitive mappings
+    print("\nGenerating symbols (auto-generated)...")
+    symbol_mapping = wrapper.symbol_mapping  # Uses priority + length bonus
+    print(f"  Symbol mapping generated: {len(symbol_mapping)} symbols")
+
+    # Initialize structure validator for symbol-enriched relationship text
+    # This creates text like: "Ƀ ButtonList | contains ᵬ Button | Ƀ[ᵬ]"
+    print("\nInitializing structure validator for symbol-enriched relationships...")
+    structure_validator = StructureValidator(wrapper)
+    # Pre-cache relationships (symbols already cached via wrapper.symbol_mapping)
+    _ = structure_validator.relationships
+    print(f"  Validator ready with {len(structure_validator.relationships)} parent relationships")
 
     # Initialize embedders
     print("\nInitializing embedders...")
@@ -283,21 +466,41 @@ def index_components_v7():
     print("\nGenerating embeddings and creating points...")
     for i, (path, component) in enumerate(wrapper.components.items()):
         # === COMPONENTS VECTOR: Identity (Name + Type + Path + Docstring) ===
+        # Build the base component text
         component_text = f"Name: {component.name}\nType: {component.component_type}\nPath: {component.full_path}"
         if component.docstring:
             component_text += f"\nDocumentation: {component.docstring[:500]}"
 
+        # Get symbol for this component (if it has one)
+        component_symbol = wrapper.get_symbol_for_component(component.name)
+
+        # Apply deterministic symbol wrapping for ColBERT embedding
+        # Format: "{symbol} {text} {symbol}" - ALWAYS this format if symbol exists
+        # This creates strong bidirectional token-level association
+        component_text = wrapper.get_symbol_wrapped_text(component.name, component_text)
+
         # === INPUTS VECTOR: Values (defaults, enums, literals) ===
         inputs_text = extract_input_values(component)
+        # Also wrap inputs with symbol for consistent matching
+        inputs_text = wrapper.get_symbol_wrapped_text(component.name, inputs_text)
 
         # === RELATIONSHIPS VECTOR: Graph (parent-child connections) ===
+        # Use symbol-enriched format for better embedding efficiency
+        # Format: "Ƀ ButtonList | contains ᵬ Button | Ƀ[ᵬ]"
+        # This embeds symbols alongside relationships so semantic search works with DSL
         rels = relationships_by_parent.get(component.name, []) if component.component_type == "class" else []
-        if rels:
-            child_classes = list(set(r["child_class"] for r in rels))
-            nl_descriptions = ", ".join(r["nl_description"] for r in rels)
-            relationship_text = f"{component.name} with {', '.join(child_classes)}. {nl_descriptions}"
+        if component.component_type == "class" and component.name in structure_validator.symbols:
+            # Use symbol-enriched relationship text
+            relationship_text = structure_validator.get_enriched_relationship_text(component.name)
         else:
-            relationship_text = f"{component.name} {component.component_type}"
+            # Fall back to compact format for non-class components
+            relationship_text = build_compact_relationship_text(
+                component.name,
+                rels,
+                component.component_type
+            )
+        # Extract child_classes for payload (still useful for filtering)
+        child_classes = list(set(r["child_class"] for r in rels)) if rels else []
 
         # Generate embeddings
         comp_emb = list(colbert_embedder.embed([component_text]))[0]
@@ -316,14 +519,23 @@ def index_components_v7():
 
         # Build payload
         payload = component.to_dict()
-        payload["indexed_at"] = "v7_restructured"
-        payload["inputs_text"] = inputs_text  # Store for debugging
+        payload["indexed_at"] = "v7_symbol_wrapped"  # Deterministic symbol wrapping
+        payload["inputs_text"] = inputs_text  # Store for debugging (includes symbol wrapping)
+        payload["relationship_text"] = relationship_text  # Store symbol-enriched format
+
+        # Store symbol in payload for DSL lookups and reverse mapping
+        if component_symbol:
+            payload["symbol"] = component_symbol
+            payload["symbol_dsl"] = f"{component_symbol}={component.name}"  # e.g., "ᵬ=Button"
+            payload["embedding_format"] = "symbol_wrapped"  # Indicates "{sym} {text} {sym}" format
+
         if rels:
             payload["relationships"] = {
                 "children": rels,
                 "child_classes": child_classes,
                 "max_depth": max(r["depth"] for r in rels),
-                "nl_descriptions": nl_descriptions,
+                "compact_text": relationship_text,  # Symbol-enriched representation
+                "symbol_enriched": component.component_type == "class" and component.name in structure_validator.symbols,
             }
 
         # Create point with three vectors
@@ -474,10 +686,14 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
         # === INPUTS VECTOR: Actual parameter values ===
         inputs_text = format_instance_params(instance_params)
 
-        # === RELATIONSHIPS VECTOR: Component connections ===
+        # === RELATIONSHIPS VECTOR: Component connections WITH DSL NOTATION ===
+        # Use DSL notation so queries like "§[δ×3, Ƀ]" match these patterns
         if parent_paths:
-            component_names = [pp.split(".")[-1] for pp in parent_paths]
-            relationship_text = f"instance pattern using {', '.join(component_names[:5])}"
+            relationship_text = build_compact_structure_text(
+                parent_paths,
+                card_desc,
+                symbol_mapping=None,  # Will fetch from wrapper
+            )
         else:
             relationship_text = f"{name} instance pattern"
 
@@ -497,8 +713,9 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
         point_id = f"{hash_hex[:8]}-{hash_hex[8:12]}-{hash_hex[12:16]}-{hash_hex[16:20]}-{hash_hex[20:32]}"
 
         # Update payload
-        payload["indexed_at"] = "v7_restructured"
+        payload["indexed_at"] = "v7_dsl_enriched"
         payload["inputs_text"] = inputs_text
+        payload["relationship_text"] = relationship_text  # DSL notation for semantic search
 
         # Create point with three vectors (same structure as components)
         point = PointStruct(
@@ -577,6 +794,22 @@ def test_v7_search():
             rels = p.payload.get("relationships", {})
             children = rels.get("child_classes", [])
             print(f"    {p.payload.get('name')} (children: {children})")
+
+    # Test symbol-enriched relationships (DSL matching)
+    print("\n--- SYMBOL-ENRICHED RELATIONSHIPS (DSL) ---")
+    for query in ["Ƀ[ᵬ]", "§ Section contains", "ℊ Grid contains ǵ GridItem"]:
+        emb = list(minilm.embed([query]))[0]
+        vec = emb.tolist() if hasattr(emb, "tolist") else list(emb)
+        results = client.query_points(
+            collection_name=V7_COLLECTION_NAME, query=vec, using="relationships", limit=2, with_payload=["name", "symbol", "relationships"]
+        )
+        print(f"  '{query}' →")
+        for p in results.points:
+            sym = p.payload.get("symbol", "?")
+            name = p.payload.get("name", "?")
+            rels = p.payload.get("relationships", {})
+            compact = rels.get("compact_text", "")[:60] if rels else ""
+            print(f"    {sym}={name}: {compact}")
 
 
 def main():

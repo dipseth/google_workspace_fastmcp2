@@ -38,6 +38,25 @@ logger = setup_logger()
 # Backwards-compat exports used by older tests/tools
 JINJA2_AVAILABLE = True
 
+# Module-level registry for middleware instance (avoids serialization issues with context state)
+_middleware_instance_registry: dict = {}
+
+
+def get_template_middleware_instance() -> Optional["EnhancedTemplateMiddleware"]:
+    """
+    Get the template middleware instance from the module-level registry.
+
+    This function provides access to the middleware instance for tools that
+    need to interact with the macro manager (e.g., create_template_macro).
+
+    Using a module-level registry avoids serialization issues that occur
+    when storing the middleware instance in FastMCP context state.
+
+    Returns:
+        EnhancedTemplateMiddleware instance or None if not registered
+    """
+    return _middleware_instance_registry.get("instance")
+
 
 class EnhancedTemplateMiddleware(Middleware):
     """
@@ -195,15 +214,12 @@ class EnhancedTemplateMiddleware(Middleware):
             }
 
             if tool_name in template_macro_tools:
-                if context.fastmcp_context:
-                    # Store reference to this middleware for template macro tools
-                    await context.fastmcp_context.set_state(
-                        "template_middleware_instance", self
+                # Store reference in module-level registry (not context state to avoid serialization issues)
+                _middleware_instance_registry["instance"] = self
+                if self.enable_debug_logging:
+                    logger.debug(
+                        f"🎯 Stored template middleware reference in registry for tool: {tool_name}"
                     )
-                    if self.enable_debug_logging:
-                        logger.debug(
-                            f"🎯 Stored template middleware reference for tool: {tool_name}"
-                        )
 
                 # Skip template processing for template macro tools (they handle raw templates)
                 if self.enable_debug_logging:
