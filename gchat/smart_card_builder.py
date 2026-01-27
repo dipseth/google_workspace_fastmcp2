@@ -38,6 +38,355 @@ ENABLE_FEEDBACK_BUTTONS = os.getenv("ENABLE_CARD_FEEDBACK", "true").lower() == "
 
 
 # =============================================================================
+# PREPARED PATTERN - Deferred Rendering Support
+# =============================================================================
+
+
+class PreparedPattern:
+    """
+    A pattern prepared for rendering with deferred parameter population.
+
+    This class allows you to:
+    1. Load component classes from the wrapper once
+    2. Set/update parameters before rendering
+    3. Render to Google Chat JSON when ready
+
+    Usage:
+        # Get a prepared pattern
+        prepared = PreparedPattern.from_pattern(pattern, wrapper)
+
+        # Set params (chainable)
+        prepared.set_params(text="Hello", title="My Card")
+
+        # Or set individual params
+        prepared.set_param("buttons", [{"text": "Click", "url": "..."}])
+
+        # Render when ready
+        card_json = prepared.render()
+
+        # Or get instances without rendering (for inspection/modification)
+        instances = prepared.get_instances()
+    """
+
+    def __init__(self, component_paths: List[str], wrapper):
+        """
+        Initialize with component paths and wrapper.
+
+        Args:
+            component_paths: List of component names (e.g., ["Section", "DecoratedText", "ButtonList"])
+            wrapper: ModuleWrapper instance for loading component classes
+        """
+        self.component_paths = component_paths
+        self.wrapper = wrapper
+        self.params: Dict[str, Any] = {}
+        self._component_classes: Dict[str, Any] = {}
+        self._load_component_classes()
+
+    def _load_component_classes(self):
+        """Load component classes from wrapper."""
+        if not self.wrapper:
+            return
+
+        for comp_name in set(self.component_paths):
+            if comp_name in ("Section",):  # Skip containers
+                continue
+
+            # Try common paths
+            paths_to_try = [
+                f"card_framework.v2.widgets.{comp_name.lower()}.{comp_name}",
+                f"card_framework.v2.{comp_name.lower()}.{comp_name}",
+            ]
+
+            for path in paths_to_try:
+                comp_class = self.wrapper.get_component_by_path(path)
+                if comp_class:
+                    self._component_classes[comp_name] = comp_class
+                    break
+
+    def set_params(self, **params) -> "PreparedPattern":
+        """
+        Set multiple parameters at once. Chainable.
+
+        Args:
+            **params: Parameter key-value pairs
+
+        Returns:
+            Self for chaining
+        """
+        self.params.update(params)
+        return self
+
+    def set_param(self, key: str, value: Any) -> "PreparedPattern":
+        """
+        Set a single parameter. Chainable.
+
+        Args:
+            key: Parameter name
+            value: Parameter value
+
+        Returns:
+            Self for chaining
+        """
+        self.params[key] = value
+        return self
+
+    def get_instances(self) -> List[Dict[str, Any]]:
+        """
+        Get component instances without rendering.
+
+        Useful for inspection or manual modification before rendering.
+
+        Returns:
+            List of dicts with 'name', 'class', 'instance' (or None if instantiation failed)
+        """
+        instances = []
+        for comp_name in self.component_paths:
+            if comp_name in ("Section",):
+                continue
+
+            comp_class = self._component_classes.get(comp_name)
+            instance = None
+
+            if comp_class:
+                # Get params relevant to this component
+                comp_params = self._get_params_for_component(comp_name)
+                instance = self.wrapper.create_card_component(comp_class, comp_params)
+
+            instances.append({
+                "name": comp_name,
+                "class": comp_class,
+                "instance": instance,
+            })
+
+        return instances
+
+    def _get_params_for_component(self, comp_name: str) -> Dict[str, Any]:
+        """Get relevant params for a specific component type."""
+        # Map common param names to component-specific ones
+        param_mapping = {
+            "DecoratedText": {"text": "text", "description": "text"},
+            "TextParagraph": {"text": "text", "description": "text"},
+            "TextInput": {"name": "name", "label": "label"},
+            "DateTimePicker": {"name": "name", "label": "label"},
+            "SelectionInput": {"name": "name", "label": "label"},
+            "Image": {"image_url": "image_url"},
+            "Button": {"text": "text", "url": "url"},
+        }
+
+        comp_params = {}
+        mappings = param_mapping.get(comp_name, {})
+
+        for param_key, comp_key in mappings.items():
+            if param_key in self.params:
+                comp_params[comp_key] = self.params[param_key]
+
+        return comp_params
+
+    def render(self, include_header: bool = True) -> Dict[str, Any]:
+        """
+        Render the pattern to Google Chat card JSON.
+
+        Args:
+            include_header: Whether to include card header if title is set
+
+        Returns:
+            Card dict in Google Chat format
+        """
+        widgets = []
+        text_consumed = False
+        buttons_consumed = False
+        image_consumed = False
+
+        for comp_name in self.component_paths:
+            if comp_name in ("Section",):
+                continue
+
+            comp_class = self._component_classes.get(comp_name)
+
+            if comp_class:
+                # Try to use wrapper's create_card_component + render
+                comp_params = self._get_params_for_component(comp_name)
+                instance = self.wrapper.create_card_component(comp_class, comp_params)
+
+                if instance and hasattr(instance, 'render'):
+                    widget = instance.render()
+                    if widget:
+                        widgets.append(widget)
+                        # Track consumption
+                        if comp_name in ("DecoratedText", "TextParagraph"):
+                            text_consumed = True
+                        elif comp_name == "ButtonList":
+                            buttons_consumed = True
+                        elif comp_name == "Image":
+                            image_consumed = True
+                    continue
+
+            # Fallback: manual widget construction for components that failed
+            widget = self._build_fallback_widget(
+                comp_name, text_consumed, buttons_consumed, image_consumed
+            )
+            if widget:
+                widgets.append(widget)
+                if comp_name in ("DecoratedText", "TextParagraph"):
+                    text_consumed = True
+                elif comp_name == "ButtonList":
+                    buttons_consumed = True
+                elif comp_name == "Image":
+                    image_consumed = True
+
+        # Build card structure
+        card = {"sections": [{"widgets": widgets}]} if widgets else {"sections": []}
+
+        # Add header if requested and title exists
+        if include_header and self.params.get("title"):
+            card["header"] = {"title": self.params["title"]}
+            if self.params.get("subtitle"):
+                card["header"]["subtitle"] = self.params["subtitle"]
+
+        return card
+
+    def _build_fallback_widget(
+        self, comp_name: str, text_consumed: bool, buttons_consumed: bool, image_consumed: bool
+    ) -> Optional[Dict]:
+        """Build widget manually when component class rendering fails."""
+        if comp_name in ("DecoratedText",) and not text_consumed:
+            text = self.params.get("text") or self.params.get("description", "")
+            if text:
+                return {"decoratedText": {"text": text, "wrapText": True}}
+
+        elif comp_name in ("TextParagraph",) and not text_consumed:
+            text = self.params.get("text") or self.params.get("description", "")
+            if text:
+                return {"textParagraph": {"text": text}}
+
+        elif comp_name == "ButtonList" and not buttons_consumed:
+            buttons = self.params.get("buttons", [])
+            if buttons:
+                btn_list = []
+                for btn in buttons:
+                    if isinstance(btn, dict):
+                        btn_obj = {"text": btn.get("text", "Button")}
+                        if btn.get("url"):
+                            btn_obj["onClick"] = {"openLink": {"url": btn["url"]}}
+                        btn_list.append(btn_obj)
+                if btn_list:
+                    return {"buttonList": {"buttons": btn_list}}
+
+        elif comp_name == "Image" and not image_consumed:
+            image_url = self.params.get("image_url")
+            if image_url:
+                return {"image": {"imageUrl": image_url}}
+
+        elif comp_name == "Divider":
+            return {"divider": {}}
+
+        return None
+
+    @classmethod
+    def from_pattern(cls, pattern: Dict[str, Any], wrapper) -> "PreparedPattern":
+        """
+        Create a PreparedPattern from a pattern dict.
+
+        Args:
+            pattern: Dict with 'component_paths' and optionally 'instance_params'
+            wrapper: ModuleWrapper instance
+
+        Returns:
+            PreparedPattern ready for param setting and rendering
+        """
+        component_paths = pattern.get("component_paths", [])
+        instance_params = pattern.get("instance_params", {})
+
+        prepared = cls(component_paths, wrapper)
+        if instance_params:
+            prepared.set_params(**instance_params)
+
+        return prepared
+
+    @classmethod
+    def from_dsl(cls, dsl_string: str, wrapper) -> "PreparedPattern":
+        """
+        Create a PreparedPattern from DSL notation.
+
+        Args:
+            dsl_string: DSL like "§[δ×3, Ƀ[ᵬ×2]]"
+            wrapper: ModuleWrapper instance
+
+        Returns:
+            PreparedPattern ready for param setting and rendering
+        """
+        from gchat.card_framework_wrapper import parse_dsl
+
+        result = parse_dsl(dsl_string)
+        if not result.is_valid:
+            logger.warning(f"Invalid DSL: {result.issues}")
+            return cls(["Section", "TextParagraph"], wrapper)
+
+        return cls(result.component_paths, wrapper)
+
+
+def prepare_pattern(
+    pattern: Dict[str, Any],
+    wrapper=None,
+) -> PreparedPattern:
+    """
+    Convenience function to create a PreparedPattern.
+
+    Args:
+        pattern: Dict with 'component_paths' and optionally 'instance_params'
+        wrapper: ModuleWrapper instance (uses singleton if not provided)
+
+    Returns:
+        PreparedPattern ready for param setting and rendering
+
+    Example:
+        from gchat.smart_card_builder import prepare_pattern
+
+        pattern = {"component_paths": ["Section", "DecoratedText", "ButtonList"]}
+        card = (
+            prepare_pattern(pattern)
+            .set_params(text="Hello World", buttons=[{"text": "Click"}])
+            .render()
+        )
+    """
+    if wrapper is None:
+        from gchat.card_framework_wrapper import get_card_framework_wrapper
+        wrapper = get_card_framework_wrapper()
+
+    return PreparedPattern.from_pattern(pattern, wrapper)
+
+
+def prepare_pattern_from_dsl(
+    dsl_string: str,
+    wrapper=None,
+) -> PreparedPattern:
+    """
+    Convenience function to create a PreparedPattern from DSL.
+
+    Args:
+        dsl_string: DSL notation like "§[δ×3, Ƀ[ᵬ×2]]"
+        wrapper: ModuleWrapper instance (uses singleton if not provided)
+
+    Returns:
+        PreparedPattern ready for param setting and rendering
+
+    Example:
+        from gchat.smart_card_builder import prepare_pattern_from_dsl
+
+        card = (
+            prepare_pattern_from_dsl("§[δ, Ƀ[ᵬ×2]]")
+            .set_params(text="Status: OK", buttons=[{"text": "Refresh"}, {"text": "Close"}])
+            .render()
+        )
+    """
+    if wrapper is None:
+        from gchat.card_framework_wrapper import get_card_framework_wrapper
+        wrapper = get_card_framework_wrapper()
+
+    return PreparedPattern.from_dsl(dsl_string, wrapper)
+
+
+# =============================================================================
 # FEEDBACK CONTENT POOLS
 # =============================================================================
 
@@ -213,6 +562,294 @@ class SmartCardBuilderV2:
         except Exception as e:
             logger.warning(f"Could not get DSL parser: {e}")
             return None
+
+    # =========================================================================
+    # QDRANT PATTERN LOOKUP
+    # =========================================================================
+
+    def _query_qdrant_patterns(
+        self,
+        description: str,
+        card_params: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Query Qdrant for matching instance patterns.
+
+        Uses feedback_loop.query_with_feedback() to find patterns
+        that match the description (with or without DSL symbols).
+
+        Args:
+            description: Card description (may include DSL symbols)
+            card_params: Additional params to include in search context
+
+        Returns:
+            Dict with component_paths, instance_params from best match, or None
+        """
+        try:
+            from gchat.feedback_loop import get_feedback_loop
+
+            feedback_loop = get_feedback_loop()
+
+            # Query using description - symbols in description will match
+            # symbol-enriched embeddings in Qdrant
+            # component_query searches 'components' vector, description searches 'inputs' vector
+            class_results, content_patterns, form_patterns = (
+                feedback_loop.query_with_feedback(
+                    component_query=description,  # Use description for component search too
+                    description=description,
+                    limit=5,
+                )
+            )
+
+            # Use best matching content pattern (has positive content_feedback)
+            if content_patterns:
+                best_pattern = content_patterns[0]
+                logger.info(
+                    f"🎯 Found Qdrant pattern: {best_pattern.get('structure_description', '')[:50]}..."
+                )
+                return {
+                    "component_paths": best_pattern.get("component_paths", []),
+                    "instance_params": best_pattern.get("instance_params", {}),
+                    "structure_description": best_pattern.get(
+                        "structure_description", ""
+                    ),
+                    "score": best_pattern.get("score", 0),
+                }
+
+            # If no content patterns, try class results
+            if class_results:
+                # Extract component paths from class results
+                component_paths = [r.get("name", "") for r in class_results[:5]]
+                logger.info(f"🔍 Found class components: {component_paths}")
+                return {
+                    "component_paths": component_paths,
+                    "instance_params": {},
+                    "structure_description": f"From classes: {', '.join(component_paths)}",
+                    "score": class_results[0].get("score", 0) if class_results else 0,
+                }
+
+            return None
+        except Exception as e:
+            logger.warning(f"Qdrant pattern query failed: {e}")
+            return None
+
+    def _generate_pattern_from_wrapper(
+        self,
+        description: str,
+        card_params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a valid instance pattern using ModuleWrapper relationships.
+
+        Similar to how feedback section and smoke_test_generator work -
+        use ModuleWrapper's component hierarchy to create valid structures.
+
+        Args:
+            description: Original card description
+            card_params: Parameters to determine component structure
+
+        Returns:
+            Dict with component_paths and instance_params
+        """
+        # Determine what components to use based on params
+        component_paths = ["Section"]  # Always start with Section
+
+        if card_params:
+            # Add text component if we have text content
+            if card_params.get("text") or card_params.get("description"):
+                component_paths.append("DecoratedText")
+
+            # Add button list if we have buttons
+            if card_params.get("buttons"):
+                component_paths.append("ButtonList")
+                # Add individual buttons
+                for _ in card_params["buttons"]:
+                    component_paths.append("Button")
+
+            # Add image if we have image URL
+            if card_params.get("image_url"):
+                component_paths.append("Image")
+
+        # Default: Section with TextParagraph if nothing specified
+        if len(component_paths) == 1:
+            component_paths.append("TextParagraph")
+
+        logger.info(f"🔧 Generated pattern: {component_paths}")
+
+        return {
+            "component_paths": component_paths,
+            "instance_params": card_params or {},
+            "structure_description": f"Generated from: {description[:100]}",
+        }
+
+    def _build_from_pattern(
+        self,
+        pattern: Dict[str, Any],
+        card_params: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build card from Qdrant pattern.
+
+        Similar to how _create_feedback_section() builds widgets -
+        we construct the Google Chat JSON structure directly based on
+        the component_paths from the pattern.
+
+        Args:
+            pattern: Dict with component_paths and instance_params
+            card_params: Additional params (title, subtitle, text, buttons, etc.)
+
+        Returns:
+            Card dict in Google Chat format
+        """
+        component_paths = pattern.get("component_paths", [])
+        instance_params = pattern.get("instance_params", {})
+
+        # Merge card_params into instance_params (card_params takes precedence)
+        params = {**instance_params, **(card_params or {})}
+
+        # Build widgets based on component paths
+        widgets = []
+        text_consumed = False
+        buttons_consumed = False
+        image_consumed = False
+
+        for comp_name in component_paths:
+            if comp_name in ("DecoratedText", "decoratedText") and not text_consumed:
+                text = params.get("text") or params.get("description", "")
+                if text:
+                    widgets.append(
+                        {
+                            "decoratedText": {
+                                "text": self._format_text_for_chat(text),
+                                "wrapText": True,
+                            }
+                        }
+                    )
+                    text_consumed = True
+
+            elif comp_name in ("TextParagraph", "textParagraph") and not text_consumed:
+                text = params.get("text") or params.get("description", "")
+                if text:
+                    widgets.append(
+                        {"textParagraph": {"text": self._format_text_for_chat(text)}}
+                    )
+                    text_consumed = True
+
+            elif comp_name in ("ButtonList", "buttonList") and not buttons_consumed:
+                buttons = params.get("buttons", [])
+                if buttons:
+                    btn_list = []
+                    for btn in buttons:
+                        if isinstance(btn, dict):
+                            btn_obj = {"text": btn.get("text", "Button")}
+                            if btn.get("url"):
+                                btn_obj["onClick"] = {"openLink": {"url": btn["url"]}}
+                            btn_list.append(btn_obj)
+                    if btn_list:
+                        widgets.append({"buttonList": {"buttons": btn_list}})
+                        buttons_consumed = True
+
+            elif comp_name in ("Image", "image") and not image_consumed:
+                image_url = params.get("image_url")
+                if image_url:
+                    widgets.append({"image": {"imageUrl": image_url}})
+                    image_consumed = True
+
+            elif comp_name in ("Divider", "divider"):
+                widgets.append({"divider": {}})
+
+            elif comp_name == "Section":
+                # Section is a container, not a widget - skip
+                pass
+
+            elif comp_name == "Button":
+                # Individual buttons are handled by ButtonList - skip
+                pass
+
+            # Dynamic fallback: Use wrapper to render any other component
+            else:
+                widget = self._render_via_wrapper(comp_name, 0)
+                if widget:
+                    widgets.append(widget)
+
+        # If we have text but no text widget was added, add one now
+        if not text_consumed and (params.get("text") or params.get("description")):
+            text = params.get("text") or params.get("description", "")
+            widgets.insert(
+                0,
+                {
+                    "decoratedText": {
+                        "text": self._format_text_for_chat(text),
+                        "wrapText": True,
+                    }
+                },
+            )
+
+        # If we have buttons but no button widget was added, add one now
+        if not buttons_consumed and params.get("buttons"):
+            buttons = params["buttons"]
+            btn_list = []
+            for btn in buttons:
+                if isinstance(btn, dict):
+                    btn_obj = {"text": btn.get("text", "Button")}
+                    if btn.get("url"):
+                        btn_obj["onClick"] = {"openLink": {"url": btn["url"]}}
+                    btn_list.append(btn_obj)
+            if btn_list:
+                widgets.append({"buttonList": {"buttons": btn_list}})
+
+        # Build card structure
+        if not widgets:
+            return None
+
+        card = {"sections": [{"widgets": widgets}]}
+
+        # Add header
+        title = params.get("title")
+        subtitle = params.get("subtitle")
+        if title:
+            card["header"] = {"title": title}
+            if subtitle:
+                card["header"]["subtitle"] = subtitle
+
+        return card
+
+    def _format_text_for_chat(self, text: str) -> str:
+        """
+        Format text with basic markdown-to-HTML conversion for Google Chat.
+
+        Handles:
+        - **bold** -> <b>bold</b>
+        - *italic* -> <i>italic</i>
+        - Bullet points (-, •, *) at line start -> proper formatting
+        """
+        import re
+
+        if not text:
+            return ""
+
+        result = text
+
+        # Convert **bold** to <b>bold</b>
+        result = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", result)
+
+        # Convert *italic* to <i>italic</i> (but not bullet points)
+        result = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", result)
+
+        # Convert markdown bullet points to HTML
+        # Handle lines starting with -, •, or * followed by space
+        lines = result.split("\n")
+        formatted_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith(("- ", "• ", "* ")):
+                # Convert to bullet point with proper formatting
+                content = stripped[2:].strip()
+                formatted_lines.append(f"• {content}")
+            else:
+                formatted_lines.append(line)
+
+        return "\n".join(formatted_lines)
 
     # =========================================================================
     # DSL EXTRACTION
@@ -451,6 +1088,13 @@ class SmartCardBuilderV2:
                             }
                         )
 
+                # Dynamic fallback: Use wrapper to render any other top-level component
+                else:
+                    for _ in range(multiplier):
+                        widget = self._render_via_wrapper(comp_name, _)
+                        if widget:
+                            sections.append({"widgets": [widget]})
+
             if not sections:
                 return None
 
@@ -475,16 +1119,18 @@ class SmartCardBuilderV2:
         image_url: Optional[str],
         content_texts: List[Dict],
     ) -> List[Dict]:
-        """Build widgets from DSL children."""
+        """Build widgets from DSL children using ModuleWrapper component loading."""
         widgets = []
         text_index = 0
+        input_index = 0
 
         for child in children:
             child_name = child.get("name", "")
             multiplier = child.get("multiplier", 1)
             grandchildren = child.get("children", [])
 
-            for _ in range(multiplier):
+            for i in range(multiplier):
+                # Text display components
                 if child_name == "DecoratedText":
                     if text_index < len(content_texts):
                         widget_text = content_texts[text_index].get("styled", "")
@@ -492,7 +1138,6 @@ class SmartCardBuilderV2:
                     else:
                         widget_text = f"Item {text_index + 1}"
                         text_index += 1
-
                     widgets.append(
                         {"decoratedText": {"text": widget_text, "wrapText": True}}
                     )
@@ -504,24 +1149,181 @@ class SmartCardBuilderV2:
                     else:
                         widget_text = f"Paragraph {text_index + 1}"
                         text_index += 1
-
                     widgets.append({"textParagraph": {"text": widget_text}})
 
+                # Divider
+                elif child_name == "Divider":
+                    widgets.append({"divider": {}})
+
+                # Image
+                elif child_name == "Image":
+                    img_url = image_url or f"https://picsum.photos/400/200?{i}"
+                    widgets.append({"image": {"imageUrl": img_url}})
+
+                # Button components
                 elif child_name == "ButtonList":
                     btn_widget = self._build_button_list(grandchildren, buttons, 1)
                     if btn_widget:
                         widgets.append(btn_widget)
 
+                # Grid components
                 elif child_name == "Grid":
                     grid_widget = self._build_grid(grandchildren, 1)
                     if grid_widget:
                         widgets.append(grid_widget)
 
-                elif child_name == "Image":
-                    if image_url:
-                        widgets.append({"image": {"imageUrl": image_url}})
+                # Form input components
+                elif child_name == "TextInput":
+                    input_index += 1
+                    widgets.append({
+                        "textInput": {
+                            "name": f"text_input_{input_index}",
+                            "label": f"Text Input {input_index}",
+                        }
+                    })
+
+                elif child_name == "DateTimePicker":
+                    input_index += 1
+                    widgets.append({
+                        "dateTimePicker": {
+                            "name": f"datetime_{input_index}",
+                            "label": f"Select Date/Time",
+                            "type": "DATE_AND_TIME",
+                        }
+                    })
+
+                elif child_name == "SelectionInput":
+                    input_index += 1
+                    widgets.append({
+                        "selectionInput": {
+                            "name": f"selection_{input_index}",
+                            "label": f"Select Option",
+                            "type": "DROPDOWN",
+                            "items": [
+                                {"text": "Option 1", "value": "1", "selected": False},
+                                {"text": "Option 2", "value": "2", "selected": False},
+                                {"text": "Option 3", "value": "3", "selected": False},
+                            ],
+                        }
+                    })
+
+                # Chip components
+                elif child_name == "ChipList":
+                    chip_count = (
+                        sum(c.get("multiplier", 1) for c in grandchildren if c.get("name") == "Chip")
+                        or multiplier
+                    )
+                    chips = [{"label": f"Chip {j + 1}"} for j in range(chip_count)]
+                    if chips:
+                        widgets.append({"chipList": {"chips": chips}})
+
+                # Column layout
+                elif child_name == "Columns":
+                    column_items = []
+                    for col_child in grandchildren:
+                        if col_child.get("name") == "Column":
+                            col_mult = col_child.get("multiplier", 1)
+                            col_grandchildren = col_child.get("children", [])
+                            for _ in range(col_mult):
+                                col_widgets = []
+                                for gc in col_grandchildren:
+                                    gc_name = gc.get("name", "")
+                                    gc_mult = gc.get("multiplier", 1)
+                                    for _ in range(gc_mult):
+                                        if gc_name == "DecoratedText":
+                                            col_widgets.append({"decoratedText": {"text": "Column item", "wrapText": True}})
+                                        elif gc_name == "TextParagraph":
+                                            col_widgets.append({"textParagraph": {"text": "Column text"}})
+                                        elif gc_name == "Image":
+                                            col_widgets.append({"image": {"imageUrl": "https://picsum.photos/200/100"}})
+                                column_items.append({"widgets": col_widgets})
+                    if not column_items:
+                        column_items = [
+                            {"widgets": [{"textParagraph": {"text": "Column 1"}}]},
+                            {"widgets": [{"textParagraph": {"text": "Column 2"}}]},
+                        ]
+                    widgets.append({"columns": {"columnItems": column_items}})
+
+                # Dynamic fallback: Use wrapper to render any other component
+                else:
+                    widget = self._render_via_wrapper(child_name, i)
+                    if widget:
+                        widgets.append(widget)
 
         return widgets
+
+    def _render_via_wrapper(
+        self, component_name: str, index: int = 0
+    ) -> Optional[Dict]:
+        """
+        Use the ModuleWrapper to dynamically render any component.
+
+        Gets the component class from the wrapper, instantiates it with
+        minimal params, and calls .render() to get the widget JSON.
+        """
+        wrapper = self._get_wrapper()
+        if not wrapper:
+            return None
+
+        try:
+            # Get the component class
+            comp_class = wrapper.get_component_by_path(
+                f"card_framework.v2.widgets.{component_name.lower()}.{component_name}"
+            )
+
+            if not comp_class:
+                # Try alternate path
+                comp_class = wrapper.get_component_by_path(
+                    f"card_framework.v2.{component_name.lower()}.{component_name}"
+                )
+
+            if not comp_class:
+                logger.debug(f"Component class not found: {component_name}")
+                return None
+
+            # Build minimal params based on component name
+            params = self._get_default_params(component_name, index)
+
+            # Use wrapper's create_card_component for proper instantiation
+            instance = wrapper.create_card_component(comp_class, params)
+
+            if instance and hasattr(instance, 'render'):
+                return instance.render()
+            elif instance and hasattr(instance, 'to_dict'):
+                # Manual wrap for components without render
+                key = component_name[0].lower() + component_name[1:]
+                return {key: instance.to_dict()}
+
+        except Exception as e:
+            logger.debug(f"Dynamic render failed for {component_name}: {e}")
+
+        return None
+
+    def _get_default_params(self, component_name: str, index: int = 0) -> Dict:
+        """Get minimal default params for a component type."""
+        defaults = {
+            # Text display
+            "TextParagraph": {"text": f"Paragraph {index + 1}"},
+            "DecoratedText": {"text": f"Item {index + 1}"},
+            # Form inputs (require 'name' field)
+            "TextInput": {"name": f"text_input_{index}", "label": "Text Input"},
+            "DateTimePicker": {"name": f"datetime_{index}", "label": "Select Date/Time"},
+            "SelectionInput": {"name": f"selection_{index}", "label": "Select Option", "type": "DROPDOWN"},
+            # Layout
+            "Divider": {},
+            "Image": {"image_url": f"https://picsum.photos/400/200?{index}"},
+            "Grid": {"column_count": 2},
+            "GridItem": {"title": f"Grid Item {index + 1}"},
+            # Buttons and chips
+            "Button": {"text": f"Button {index + 1}"},
+            "ButtonList": {},
+            "Chip": {"label": f"Chip {index + 1}"},
+            "ChipList": {},
+            # Columns
+            "Columns": {},
+            "Column": {},
+        }
+        return defaults.get(component_name, {})
 
     def _build_button_list(
         self,
@@ -1350,9 +2152,36 @@ class SmartCardBuilderV2:
                         if subtitle:
                             card["header"]["subtitle"] = subtitle
 
-        # Fallback: Simple card from description
+        # Query Qdrant for matching instance patterns
         if not card:
-            logger.info("📝 Building simple card from description")
+            card_params = {
+                "title": title,
+                "subtitle": subtitle,
+                "buttons": buttons,
+                "image_url": image_url,
+            }
+            pattern = self._query_qdrant_patterns(description, card_params)
+            if pattern:
+                logger.info(
+                    f"🎯 Found Qdrant pattern match: {pattern.get('structure_description', '')[:50]}..."
+                )
+                card = self._build_from_pattern(pattern, card_params)
+
+        # Generate pattern on-the-fly if Qdrant has no match
+        if not card:
+            card_params = {
+                "title": title,
+                "subtitle": subtitle,
+                "buttons": buttons,
+                "image_url": image_url,
+            }
+            logger.info("🔧 Generating pattern from ModuleWrapper relationships")
+            pattern = self._generate_pattern_from_wrapper(description, card_params)
+            card = self._build_from_pattern(pattern, card_params)
+
+        # Fallback: Simple card from description (last resort)
+        if not card:
+            logger.info("📝 Building simple card from description (fallback)")
             card = {
                 "sections": [{"widgets": [{"textParagraph": {"text": description}}]}]
             }

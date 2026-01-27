@@ -576,71 +576,118 @@ def get_component_relationships_for_dsl() -> Dict[str, List[str]]:
 
     Returns a dict mapping parent components to their valid children,
     using component names (not symbols).
+
+    Dynamically loads relationships from Qdrant and expands base class
+    references (e.g., Widget) to actual widget subclasses via Python introspection.
     """
     wrapper = get_card_framework_wrapper()
-
-    # Try to get from Qdrant first
     relationships = {}
-    if wrapper.client:
-        try:
-            from qdrant_client import models
 
-            results, _ = wrapper.client.scroll(
-                collection_name=wrapper.collection_name,
-                scroll_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="type",
-                            match=models.MatchValue(value="class"),
-                        )
-                    ]
-                ),
-                limit=200,
-                with_payload=["name", "relationships"],
-            )
+    # Step 1: Get Widget subclasses via Python introspection (most accurate)
+    widget_subclasses = _get_widget_subclasses()
+    logger.info(f"📦 Found {len(widget_subclasses)} Widget subclasses via introspection")
 
-            for point in results:
-                name = point.payload.get("name")
-                rels = point.payload.get("relationships", {})
-                children = rels.get("child_classes", [])
-                if name and children:
-                    relationships[name] = children
+    if not wrapper.client:
+        logger.warning("No Qdrant client - using introspection-based relationships")
+        return _build_relationships_from_introspection(widget_subclasses)
 
-            logger.info(
-                f"📋 Loaded {len(relationships)} component relationships for DSL"
-            )
-            return relationships
+    try:
+        from qdrant_client import models
 
-        except Exception as e:
-            logger.warning(f"Failed to load relationships from Qdrant: {e}")
+        # Step 2: Get all classes with their relationships from Qdrant
+        results, _ = wrapper.client.scroll(
+            collection_name=wrapper.collection_name,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="type",
+                        match=models.MatchValue(value="class"),
+                    )
+                ]
+            ),
+            limit=300,
+            with_payload=["name", "relationships"],
+        )
 
-    # Fallback defaults
+        # Step 3: Build relationships, expanding Widget -> all widget subclasses
+        for point in results:
+            payload = point.payload
+            name = payload.get("name")
+            rels = payload.get("relationships", {})
+            children = rels.get("child_classes", [])
+
+            if name and children:
+                # Expand "Widget" to all actual widget subclasses
+                expanded_children = []
+                for child in children:
+                    if child == "Widget":
+                        # Replace Widget with all subclasses from introspection
+                        expanded_children.extend(widget_subclasses)
+                    else:
+                        expanded_children.append(child)
+
+                relationships[name] = expanded_children
+
+        logger.info(
+            f"📋 Loaded {len(relationships)} component relationships for DSL (Qdrant + introspection)"
+        )
+
+        # Log Section's children for debugging
+        section_children = relationships.get("Section", [])
+        logger.info(f"📋 Section can contain: {len(section_children)} widget types: {section_children}")
+
+        return relationships
+
+    except Exception as e:
+        logger.warning(f"Failed to load relationships from Qdrant: {e}")
+        return _build_relationships_from_introspection(widget_subclasses)
+
+
+def _get_widget_subclasses() -> List[str]:
+    """Get all Widget subclasses via Python introspection."""
+    try:
+        from card_framework.v2.widget import Widget
+
+        def get_all_subclasses(cls):
+            all_subs = []
+            for sub in cls.__subclasses__():
+                all_subs.append(sub)
+                all_subs.extend(get_all_subclasses(sub))
+            return all_subs
+
+        subclasses = get_all_subclasses(Widget)
+        return sorted([c.__name__ for c in subclasses])
+    except ImportError:
+        logger.warning("Could not import Widget class for introspection")
+        return [
+            "Action", "Button", "ButtonList", "Chip", "ChipList",
+            "Columns", "DateTimePicker", "DecoratedText", "Divider",
+            "Grid", "Image", "SelectionInput", "SwitchControl",
+            "TextInput", "TextParagraph", "UpdatedWidget",
+        ]
+
+
+def _build_relationships_from_introspection(widget_subclasses: List[str]) -> Dict[str, List[str]]:
+    """Build relationships using Python introspection when Qdrant is unavailable."""
     return {
-        "Card": ["Header", "Section", "CardFixedFooter"],
-        "Section": [
-            "DecoratedText",
-            "TextParagraph",
-            "ButtonList",
-            "Grid",
-            "Divider",
-            "Image",
-            "Columns",
-            "SelectionInput",
-            "TextInput",
-            "DateTimePicker",
-            "ChipList",
-        ],
+        "Card": ["CardHeader", "Section", "CardFixedFooter"],
+        "Section": ["CollapseControl"] + widget_subclasses,
         "Columns": ["Column"],
-        "Column": ["DecoratedText", "TextParagraph", "Image", "ButtonList"],
+        "Column": widget_subclasses,  # Column can contain any widget
         "ButtonList": ["Button"],
         "ChipList": ["Chip"],
         "Grid": ["GridItem"],
         "DecoratedText": ["Icon", "Button", "OnClick", "SwitchControl"],
-        "Button": ["Icon", "OnClick"],
+        "Button": ["Icon", "OnClick", "Color"],
         "Chip": ["Icon", "OnClick"],
         "OnClick": ["OpenLink", "Action", "OverflowMenu"],
         "OverflowMenu": ["OverflowMenuItem"],
+        "GridItem": ["ImageComponent"],
+        "TextInput": ["Suggestions", "Validation"],
+        "SelectionInput": ["SelectionItem", "PlatformDataSource"],
     }
+
+
 
 
 # =============================================================================

@@ -28,16 +28,46 @@ logger = logging.getLogger(__name__)
 
 
 def _get_nl_relationship_patterns() -> Dict[tuple, str]:
-    """Get NL relationship patterns (lazy load to avoid circular imports)."""
-    try:
-        from gchat.smart_card_builder import SmartCardBuilder
-
-        return SmartCardBuilder.NL_RELATIONSHIP_PATTERNS
-    except ImportError:
-        return {
-            ("Image", "OnClick"): "clickable image, image with click action",
-            ("Button", "OnClick"): "button click action, button that opens link",
-        }
+    """Get NL relationship patterns for generating natural language descriptions."""
+    # These patterns describe how parent-child relationships work in Google Chat cards
+    return {
+        # Widget containers
+        ("Section", "Widget"): "section containing widgets",
+        ("Section", "DecoratedText"): "section with decorated text items",
+        ("Section", "TextParagraph"): "section with text paragraphs",
+        ("Section", "ButtonList"): "section with button list",
+        ("Section", "Grid"): "section with grid layout",
+        ("Section", "Image"): "section with image",
+        ("Section", "Columns"): "section with column layout",
+        ("Section", "Divider"): "section with divider",
+        ("Section", "TextInput"): "section with text input field",
+        ("Section", "DateTimePicker"): "section with date/time picker",
+        ("Section", "SelectionInput"): "section with selection input",
+        ("Section", "ChipList"): "section with chip list",
+        # Click actions
+        ("Image", "OnClick"): "clickable image, image with click action",
+        ("Button", "OnClick"): "button click action, button that opens link",
+        ("Chip", "OnClick"): "clickable chip",
+        ("DecoratedText", "OnClick"): "clickable decorated text",
+        ("GridItem", "OnClick"): "clickable grid item",
+        # Button containers
+        ("ButtonList", "Button"): "list of buttons",
+        ("ChipList", "Chip"): "list of chips",
+        # Layout
+        ("Columns", "Column"): "multi-column layout",
+        ("Column", "Widget"): "column containing widgets",
+        ("Grid", "GridItem"): "grid with items",
+        # Icons and styling
+        ("Button", "Icon"): "button with icon",
+        ("Chip", "Icon"): "chip with icon",
+        ("DecoratedText", "Icon"): "decorated text with icon",
+        ("DecoratedText", "Button"): "decorated text with button",
+        ("DecoratedText", "SwitchControl"): "decorated text with switch/toggle",
+        # Card structure
+        ("Card", "Section"): "card with sections",
+        ("Card", "CardHeader"): "card with header",
+        ("Card", "CardFixedFooter"): "card with footer",
+    }
 
 
 # =============================================================================

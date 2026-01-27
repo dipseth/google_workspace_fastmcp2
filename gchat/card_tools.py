@@ -737,9 +737,31 @@ def setup_card_tools(mcp: FastMCP) -> None:
     # Initialize card framework wrapper
     _initialize_card_framework_wrapper()
 
+    # Generate DSL documentation dynamically after wrapper is initialized
+    # This ensures symbol mappings are included in tool documentation
+    from gchat.card_framework_wrapper import get_dsl_documentation
+
+    dsl_field_desc = _get_dsl_field_description()
+    dsl_full_doc = get_dsl_documentation(include_examples=True, include_hierarchy=True)
+
+    # Build dynamic tool description with symbol mappings
+    tool_description = (
+        f"Send any type of card to Google Chat using natural language or DSL notation. "
+        f"{dsl_field_desc}"
+    )
+
+    # Build dynamic field help with full DSL info
+    card_description_help = (
+        "Describe the card naturally or use DSL structure notation. "
+        "Sections, grids, forms, buttons—just say what you want. "
+        "URLs become buttons. Prices get styled. Icons appear where they fit. "
+        "Supports Jinja templates: {{ 'text' | success_text }}, {{ price | price('USD') }}. "
+        f"{dsl_field_desc}"
+    )
+
     @mcp.tool(
         name="send_dynamic_card",
-        description="Send any type of card to Google Chat using natural language description with NLP extraction",
+        description=tool_description,
         tags={"chat", "card", "dynamic", "google", "unified", "nlp"},
         annotations={
             "title": "Send Dynamic Card with NLP",
@@ -747,6 +769,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
             "destructiveHint": False,
             "idempotentHint": False,
             "openWorldHint": True,
+            "dsl_documentation": dsl_full_doc,  # Full DSL docs in annotations
             "examples": [
                 {
                     "description": "Simple card",
@@ -754,9 +777,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     "card_params": {"title": "Alert", "text": "System update complete"},
                 },
                 {
-                    "description": "Multi-section card (recommended pattern)",
-                    "card_description": "First section titled 'Deployments' showing Frontend at https://app.example.com. Second section titled 'Status' showing All systems operational.",
-                    "card_params": {"title": "Dashboard"},
+                    "description": "DSL card with symbols",
+                    "card_description": "§[δ×2, Ƀ[ᵬ×2]] Status Dashboard",
+                    "card_params": {"title": "Dashboard", "text": "System status"},
                 },
             ],
         },
@@ -772,14 +795,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
         ],
         card_description: Annotated[
             str,
-            Field(
-                description=(
-                    "Describe the card naturally or use DSL structure notation. "
-                    "Sections, grids, forms, buttons—just say what you want. "
-                    "URLs become buttons. Prices get styled. Icons appear where they fit. "
-                    "Supports Jinja templates: {{ 'text' | success_text }}, {{ price | price('USD') }}"
-                )
-            ),
+            Field(description=card_description_help),
         ],
         card_params: Annotated[
             Optional[Dict[str, Any]],

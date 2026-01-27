@@ -21,6 +21,7 @@ flowchart TB
 
     subgraph Builder["⚙️ smart_card_builder.py"]
         Parse["Parse DSL Symbols"]
+        QueryPatterns["Query Qdrant Patterns"]
         Build["Build Card Structure"]
         Feedback["Add Feedback Section"]
     end
@@ -53,6 +54,9 @@ flowchart TB
     DSL --> Tool
     Tool --> Parse
     Parse --> |"§[δ×3]"| Symbols
+    Parse --> |"No DSL"| QueryPatterns
+    QueryPatterns --> |"Search"| Patterns
+    Patterns --> |"Match found"| Build
     Symbols --> |"Section, DecoratedText×3"| Build
     Build --> |"Search"| Components
     Components --> Load
@@ -427,6 +431,9 @@ The main card builder supporting:
 ```python
 class SmartCardBuilderV2:
     def build(description, title, subtitle) -> Dict
+    def _query_qdrant_patterns(description, card_params) -> Optional[Dict]
+    def _build_from_pattern(pattern, card_params) -> Optional[Dict]
+    def _generate_pattern_from_wrapper(description, card_params) -> Dict
     def _create_feedback_section(card_id) -> Dict
     def _store_card_pattern(card_id, ...) -> None
     def _store_feedback_ui_pattern(card_id, feedback_section) -> None
@@ -470,17 +477,24 @@ Used by:
 ┌─────────────────────────────────────────────────────────────────┐
 │  send_dynamic_card(description, title, ...)                     │
 ├─────────────────────────────────────────────────────────────────┤
-│  1. SmartCardBuilder.build()                                    │
-│     ├── Parse DSL (if present)                                  │
-│     ├── Build main card content                                 │
-│     └── Store content pattern (pattern_type="content")          │
+│  1. SmartCardBuilder.build() - Fallback Chain:                  │
+│     ├── 1a. Try Structure DSL parsing (§[δ×3, Ƀ[ᵬ×2]])         │
+│     ├── 1b. Try Content DSL parsing (δ 'text' success)          │
+│     ├── 1c. Query Qdrant for matching instance patterns         │
+│     │       └── feedback_loop.query_with_feedback()             │
+│     ├── 1d. Generate pattern from ModuleWrapper relationships   │
+│     │       └── _generate_pattern_from_wrapper()                │
+│     └── 1e. Plain text fallback (last resort)                   │
 ├─────────────────────────────────────────────────────────────────┤
-│  2. Add Feedback Section                                        │
+│  2. Store Content Pattern                                       │
+│     └── pattern_type="content" (before feedback added)          │
+├─────────────────────────────────────────────────────────────────┤
+│  3. Add Feedback Section                                        │
 │     ├── Random component assembly                               │
 │     ├── Store feedback_ui pattern (pattern_type="feedback_ui")  │
 │     └── Add divider + feedback widgets                          │
 ├─────────────────────────────────────────────────────────────────┤
-│  3. Send to Google Chat                                         │
+│  4. Send to Google Chat                                         │
 │     └── Webhook or Chat API                                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
