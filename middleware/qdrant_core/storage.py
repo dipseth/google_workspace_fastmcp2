@@ -797,6 +797,10 @@ class QdrantStorageManager:
             batch = responses[i : i + batch_size]
             batch_points = []
 
+            # Phase 1: Prepare all data and collect embedding texts
+            prepared_items = []
+            embed_texts = []
+
             for response_data in batch:
                 try:
                     # Extract required fields
@@ -820,21 +824,62 @@ class QdrantStorageManager:
                         "execution_time_ms": execution_time_ms,
                     }
 
-                    # Generate embedding text and embedding
+                    # Generate embedding text (collect for batch processing)
                     embed_text = f"Tool: {tool_name}\nArguments: {json.dumps(tool_args)}\nResponse: {str(response)[:1000]}"
+                    embed_texts.append(embed_text)
 
-                    # Generate embedding using FastEmbed
-                    embedding_list = await asyncio.to_thread(
-                        lambda q: list(self.client_manager.embedder.embed([q])),
-                        embed_text,
-                    )
-                    embedding = embedding_list[0] if embedding_list else None
+                    # Store prepared data for later
+                    prepared_items.append({
+                        "tool_name": tool_name,
+                        "payload_data": payload_data,
+                        "execution_time_ms": execution_time_ms,
+                    })
 
-                    if embedding is None:
-                        logger.error(
-                            f"Failed to generate embedding for bulk store: {embed_text[:100]}..."
+                except Exception as e:
+                    logger.error(f"❌ Failed to prepare response for bulk storage: {e}")
+                    # Add None to maintain index alignment
+                    embed_texts.append(None)
+                    prepared_items.append(None)
+                    continue
+
+            # Phase 2: Generate ALL embeddings in a single batch call (MUCH faster)
+            if embed_texts:
+                valid_texts = [t for t in embed_texts if t is not None]
+                if valid_texts:
+                    try:
+                        embeddings_list = await asyncio.to_thread(
+                            lambda texts: list(self.client_manager.embedder.embed(texts)),
+                            valid_texts,
                         )
-                        continue
+                    except Exception as e:
+                        logger.error(f"❌ Batch embedding generation failed: {e}")
+                        embeddings_list = []
+                else:
+                    embeddings_list = []
+
+                # Map embeddings back to prepared items (accounting for None entries)
+                embedding_idx = 0
+                embeddings_mapped = []
+                for text in embed_texts:
+                    if text is not None and embedding_idx < len(embeddings_list):
+                        embeddings_mapped.append(embeddings_list[embedding_idx])
+                        embedding_idx += 1
+                    else:
+                        embeddings_mapped.append(None)
+            else:
+                embeddings_mapped = []
+
+            # Phase 3: Create points with embeddings
+            _, qdrant_models = get_qdrant_imports()
+
+            for idx, (prepared, embedding) in enumerate(zip(prepared_items, embeddings_mapped)):
+                if prepared is None or embedding is None:
+                    continue
+
+                try:
+                    tool_name = prepared["tool_name"]
+                    payload_data = prepared["payload_data"]
+                    execution_time_ms = prepared["execution_time_ms"]
 
                     # Sanitize and handle compression
                     sanitized_payload = sanitize_for_json(payload_data)
@@ -846,8 +891,6 @@ class QdrantStorageManager:
                         else json_data
                     )
 
-                    # Create point with validated payload data
-                    _, qdrant_models = get_qdrant_imports()
                     point_id = str(uuid.uuid4())
 
                     # Create raw payload
@@ -877,10 +920,10 @@ class QdrantStorageManager:
                     stored_ids.append(point_id)
 
                 except Exception as e:
-                    logger.error(f"❌ Failed to prepare response for bulk storage: {e}")
+                    logger.error(f"❌ Failed to create point for bulk storage: {e}")
                     continue
 
-            # Store batch in Qdrant
+            # Phase 4: Store batch in Qdrant
             if batch_points:
                 try:
                     await asyncio.to_thread(

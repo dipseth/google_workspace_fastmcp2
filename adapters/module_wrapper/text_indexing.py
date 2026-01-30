@@ -8,11 +8,25 @@ on component metadata. These complement vector embeddings for:
 - Phrase matching for multi-word names
 - Language-aware stopword filtering
 
-Usage:
-    from adapters.module_wrapper.text_indexing import create_component_text_indices
+Usage (standalone functions):
+    from adapters.module_wrapper.text_indexing import (
+        create_component_text_indices,
+        search_by_text,
+        search_within_module,
+    )
 
     client = get_qdrant_client()
     create_component_text_indices(client, "mcp_gchat_cards_v7")
+    results = search_by_text(client, "mcp_gchat_cards_v7", "name", "Button")
+
+Usage (via ModuleWrapper - preferred):
+    wrapper = ModuleWrapper("card_framework.v2", auto_initialize=True)
+    results = wrapper.search_by_text("name", "Button")
+    results = wrapper.search_within_module("card_framework", "Button")
+
+Note: The SearchMixin provides equivalent methods that use the wrapper's
+client and collection_name. These standalone functions are maintained for
+backwards compatibility and for use in scripts without a wrapper instance.
 """
 
 import logging

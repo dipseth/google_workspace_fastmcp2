@@ -652,16 +652,16 @@ class SymbolsMixin:
                 raise ImportError("Rich not requested")
 
         except ImportError:
-            print(f"DSL Symbols for {self.module_name}")
-            print("=" * 50)
+            logger.info(f"DSL Symbols for {self.module_name}")
+            logger.info("=" * 50)
             for comp, sym in sorted(self.symbol_mapping.items())[:20]:
                 children = self.relationships.get(comp, [])
                 child_str = ", ".join(children[:3]) if children else "-"
-                print(f"  {sym} = {comp} → [{child_str}]")
+                logger.info(f"  {sym} = {comp} → [{child_str}]")
 
             meta = self.dsl_metadata
-            print(
-                f"\nSymbols: {meta['symbol_count']}, Containers: {len(meta['containers'])}"
+            logger.info(
+                f"Symbols: {meta['symbol_count']}, Containers: {len(meta['containers'])}"
             )
 
     def get_styling_registry(self):
@@ -671,6 +671,26 @@ class SymbolsMixin:
         )
 
         return create_default_styling_registry()
+
+    # =========================================================================
+    # DSL EXTRACTION AND SEARCH (DEPRECATED - use SearchMixin methods)
+    # =========================================================================
+    #
+    # NOTE: The following methods have been moved to SearchMixin for better
+    # organization. These wrappers are provided for backwards compatibility.
+    # Please use the SearchMixin methods directly:
+    #   - extract_dsl_from_text() -> SearchMixin.extract_dsl_from_text()
+    #   - search_by_dsl() -> SearchMixin.search_by_dsl()
+    #   - search_by_dsl_hybrid() -> SearchMixin.search_by_dsl_hybrid()
+    #
+    # The implementations in SearchMixin are now the canonical versions.
+    # =========================================================================
+
+    # Note: extract_dsl_from_text, search_by_dsl, and search_by_dsl_hybrid
+    # are now implemented in SearchMixin. Since ModuleWrapper inherits from
+    # both SymbolsMixin and SearchMixin, the methods are available through
+    # the SearchMixin. No wrapper methods needed here as Python's MRO will
+    # resolve to the SearchMixin implementations.
 
 
 # Export for convenience

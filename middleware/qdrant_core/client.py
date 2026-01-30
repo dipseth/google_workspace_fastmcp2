@@ -381,22 +381,10 @@ class QdrantClientManager:
                     "type",
                 ]
 
-                for field in filterable_fields:
-                    try:
-                        # Use KeywordIndexParams for more robust index creation
-                        keyword_index = qdrant_models["KeywordIndexParams"](
-                            type=qdrant_models["KeywordIndexType"].KEYWORD,
-                            on_disk=False,  # Keep frequently accessed fields in memory
-                        )
-                        await asyncio.to_thread(
-                            self.client.create_payload_index,
-                            collection_name=self.config.collection_name,
-                            field_name=field,
-                            field_schema=keyword_index,
-                        )
-                        logger.info(f"✅ Created keyword index for field: {field}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to create index for {field}: {e}")
+                # Create indexes in parallel for faster initialization
+                await self._create_indexes_parallel(
+                    filterable_fields, qdrant_models, log_prefix="Created"
+                )
 
             else:
                 logger.info(
@@ -436,33 +424,70 @@ class QdrantClientManager:
                         "email",
                         "type",
                     ]
-                    for field in filterable_fields:
-                        if field not in existing_indexes:
-                            try:
-                                # Use KeywordIndexParams for more robust index creation
-                                keyword_index = qdrant_models["KeywordIndexParams"](
-                                    type=qdrant_models["KeywordIndexType"].KEYWORD,
-                                    on_disk=False,  # Keep frequently accessed fields in memory
-                                )
-                                await asyncio.to_thread(
-                                    self.client.create_payload_index,
-                                    collection_name=self.config.collection_name,
-                                    field_name=field,
-                                    field_schema=keyword_index,
-                                )
-                                logger.info(
-                                    f"✅ Created missing keyword index for field: {field}"
-                                )
-                            except Exception as e:
-                                logger.warning(
-                                    f"⚠️ Failed to create missing index for {field}: {e}"
-                                )
+                    # Filter to only missing fields and create in parallel
+                    missing_fields = [f for f in filterable_fields if f not in existing_indexes]
+                    if missing_fields:
+                        await self._create_indexes_parallel(
+                            missing_fields, qdrant_models, log_prefix="Created missing"
+                        )
                 except Exception as e:
                     logger.warning(f"⚠️ Could not check existing indexes: {e}")
 
         except Exception as e:
             logger.error(f"❌ Failed to ensure collection exists: {e}")
             raise
+
+    async def _create_indexes_parallel(
+        self,
+        fields: list,
+        qdrant_models: dict,
+        log_prefix: str = "Created",
+        max_concurrent: int = 5,
+    ) -> None:
+        """
+        Create payload indexes in parallel for faster initialization.
+
+        Args:
+            fields: List of field names to index
+            qdrant_models: Qdrant models dict with KeywordIndexParams etc.
+            log_prefix: Prefix for log messages (e.g., "Created" or "Created missing")
+            max_concurrent: Maximum concurrent index creation operations
+        """
+        if not fields:
+            return
+
+        async def create_single_index(field: str) -> tuple[str, bool, str]:
+            """Create a single index, return (field, success, error_msg)."""
+            try:
+                keyword_index = qdrant_models["KeywordIndexParams"](
+                    type=qdrant_models["KeywordIndexType"].KEYWORD,
+                    on_disk=False,  # Keep frequently accessed fields in memory
+                )
+                await asyncio.to_thread(
+                    self.client.create_payload_index,
+                    collection_name=self.config.collection_name,
+                    field_name=field,
+                    field_schema=keyword_index,
+                )
+                return (field, True, "")
+            except Exception as e:
+                return (field, False, str(e))
+
+        # Process in batches to avoid overwhelming the server
+        for i in range(0, len(fields), max_concurrent):
+            batch = fields[i : i + max_concurrent]
+            tasks = [create_single_index(field) for field in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.warning(f"⚠️ Index creation error: {result}")
+                elif isinstance(result, tuple):
+                    field, success, error_msg = result
+                    if success:
+                        logger.info(f"✅ {log_prefix} keyword index for field: {field}")
+                    else:
+                        logger.warning(f"⚠️ Failed to create index for {field}: {error_msg}")
 
     def _should_compress(self, data: str) -> bool:
         """Check if data should be compressed based on size."""
@@ -738,39 +763,32 @@ class QdrantClientManager:
                 f"📊 Current collection: {old_stats['points_count']} points, {old_stats['indexed_vectors_count']} indexed"
             )
 
-            # Step 1: Create new optimized collection configuration
+            # Step 1: Create optimized collection configuration
+            # Note: Vector size/distance can't be changed after creation
             optimization_params = self.config.get_optimization_params()
 
-            # Vector configuration
-            vector_config = qdrant_models["VectorParams"](
-                size=self.embedding_dim,
-                distance=getattr(
-                    qdrant_models["Distance"], self.config.distance.upper()
-                ),
-                **optimization_params["vector_config"],
-            )
-
-            # HNSW configuration
+            # HNSW configuration (can be updated)
             hnsw_config = qdrant_models["HnswConfigDiff"](
                 **optimization_params["hnsw_config"]
             )
 
-            # Optimizer configuration
+            # Optimizer configuration (can be updated)
             optimizer_config = qdrant_models["OptimizersConfigDiff"](
                 **optimization_params["optimizer_config"]
             )
 
             # Step 2: Update collection with new configuration
+            # Note: vectors_config requires VectorParamsDiff, not VectorParams
+            # Vector size/distance are immutable, so we only update hnsw and optimizer
             try:
                 await asyncio.to_thread(
                     self.client.update_collection,
                     collection_name=self.config.collection_name,
-                    vectors_config=vector_config,
                     hnsw_config=hnsw_config,
                     optimizers_config=optimizer_config,
                 )
 
-                logger.info("✅ Updated collection configuration")
+                logger.info("✅ Updated collection configuration (hnsw + optimizer)")
 
             except Exception as e:
                 logger.warning(
