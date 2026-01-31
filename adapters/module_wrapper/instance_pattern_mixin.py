@@ -543,7 +543,7 @@ class InstancePatternMixin:
         description: str = "",
         feedback: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        generate_variations: bool = False,
+        generate_variations: bool = True,
         num_structure_variations: Optional[int] = None,
         num_param_variations: Optional[int] = None,
         cache_pattern: bool = True,
@@ -592,8 +592,8 @@ class InstancePatternMixin:
             except Exception as e:
                 logger.warning(f"Failed to cache pattern: {e}")
 
-        # Generate variations if requested
-        if generate_variations and feedback == "positive":
+        # Generate variations if requested (skip only for explicitly negative feedback)
+        if generate_variations and feedback != "negative":
             self.generate_pattern_variations(
                 pattern=pattern,
                 num_structure_variations=num_structure_variations,
