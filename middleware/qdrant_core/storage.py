@@ -1179,9 +1179,7 @@ class QdrantStorageManager:
 
             # Get collection statistics
             total_points = collection_info.points_count or 0
-            indexed_points = getattr(
-                collection_info, "indexed_vectors_count", total_points
-            )
+            indexed_points = collection_info.indexed_vectors_count or total_points
 
             # Calculate fragmentation and health metrics
             index_ratio = indexed_points / max(total_points, 1)

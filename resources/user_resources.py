@@ -27,6 +27,7 @@ from auth.context import (
     list_sessions,
 )
 from auth.google_auth import get_valid_credentials
+from tools.server_tools import _get_globally_disabled_tools
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
@@ -277,7 +278,9 @@ class ToolsDirectoryResponse(TypedDict):
     detailed capability descriptions, authentication requirements, and migration status.
     """
 
-    total_tools: int  # Total number of tools available across all categories
+    total_tools: int  # Total number of tools registered across all categories
+    active_tools: int  # Number of tools currently enabled/visible to clients
+    disabled_tools_count: int  # Number of tools globally disabled via manage_tools
     total_categories: int  # Number of tool categories with at least one tool
     detailed_tools_count: int  # Number of detailed tools (no email parameter required)
     tools_by_category: Dict[
@@ -1511,13 +1514,20 @@ def setup_user_resources(mcp: FastMCP) -> None:
             total_tools = len(registered_tools)
             detailed_tools_count = categories["detailed_tools"]["tool_count"]
 
+            # Get globally disabled tools to calculate active count
+            disabled_tools = _get_globally_disabled_tools(fastmcp_server)
+            disabled_tools_count = len(disabled_tools)
+            active_tools = total_tools - disabled_tools_count
+
             # Log discovery results
             await ctx.info(
-                f"🔍 Dynamic tool discovery: Found {total_tools} tools, {detailed_tools_count} detailed"
+                f"🔍 Dynamic tool discovery: Found {total_tools} tools, {active_tools} active, {disabled_tools_count} disabled"
             )
 
             response = ToolsDirectoryResponse(
                 total_tools=total_tools,
+                active_tools=active_tools,
+                disabled_tools_count=disabled_tools_count,
                 total_categories=len(
                     [cat for cat in categories.values() if cat["tool_count"] > 0]
                 ),
@@ -1534,6 +1544,8 @@ def setup_user_resources(mcp: FastMCP) -> None:
             # Fallback to minimal response
             response = ToolsDirectoryResponse(
                 total_tools=0,
+                active_tools=0,
+                disabled_tools_count=0,
                 total_categories=0,
                 detailed_tools_count=0,
                 tools_by_category={},
@@ -1548,6 +1560,8 @@ def setup_user_resources(mcp: FastMCP) -> None:
             logger.error(f"Error generating tools list: {e}")
             response = ToolsDirectoryResponse(
                 total_tools=0,
+                active_tools=0,
+                disabled_tools_count=0,
                 total_categories=0,
                 detailed_tools_count=0,
                 tools_by_category={},

@@ -1130,17 +1130,11 @@ class QdrantSearchManager:
 
             stats = {
                 "collection_name": self.config.collection_name,
-                "total_points": collection_info.points_count,
-                "vectors_count": getattr(collection_info, "vectors_count", 0),
-                "indexed_vectors_count": getattr(
-                    collection_info, "indexed_vectors_count", 0
-                ),
-                "segments_count": getattr(collection_info, "segments_count", 0),
-                "status": (
-                    str(collection_info.status)
-                    if hasattr(collection_info, "status")
-                    else "unknown"
-                ),
+                "total_points": collection_info.points_count or 0,
+                "vectors_count": collection_info.indexed_vectors_count or 0,
+                "indexed_vectors_count": collection_info.indexed_vectors_count or 0,
+                "segments_count": collection_info.segments_count,
+                "status": str(collection_info.status),
                 "config": {
                     "vector_size": self.config.vector_size,
                     "distance": self.config.distance,

@@ -691,11 +691,9 @@ class QdrantClientManager:
                 )
 
                 optimization_results["collection_stats"] = {
-                    "points_count": getattr(refreshed_info, "points_count", 0),
-                    "indexed_vectors_count": getattr(
-                        refreshed_info, "indexed_vectors_count", 0
-                    ),
-                    "vectors_count": getattr(refreshed_info, "vectors_count", 0),
+                    "points_count": refreshed_info.points_count or 0,
+                    "indexed_vectors_count": refreshed_info.indexed_vectors_count or 0,
+                    "vectors_count": refreshed_info.indexed_vectors_count or 0,
                 }
 
             except Exception as e:
@@ -753,10 +751,8 @@ class QdrantClientManager:
             )
 
             old_stats = {
-                "points_count": getattr(old_collection_info, "points_count", 0),
-                "indexed_vectors_count": getattr(
-                    old_collection_info, "indexed_vectors_count", 0
-                ),
+                "points_count": old_collection_info.points_count or 0,
+                "indexed_vectors_count": old_collection_info.indexed_vectors_count or 0,
             }
 
             logger.info(
@@ -965,10 +961,8 @@ class QdrantClientManager:
             )
 
             new_stats = {
-                "points_count": getattr(new_collection_info, "points_count", 0),
-                "indexed_vectors_count": getattr(
-                    new_collection_info, "indexed_vectors_count", 0
-                ),
+                "points_count": new_collection_info.points_count or 0,
+                "indexed_vectors_count": new_collection_info.indexed_vectors_count or 0,
             }
 
             end_time = datetime.now(timezone.utc)

@@ -184,35 +184,14 @@ class QdrantResourceHandler:
                         self.client_manager.client.get_collection, collection.name
                     )
 
-                    # Qdrant collection info structure - handle None values properly
                     collections_info.append(
                         QdrantCollectionInfo(
                             name=collection.name,
-                            points_count=(
-                                info.points_count
-                                if info.points_count is not None
-                                else 0
-                            ),
-                            vectors_count=(
-                                info.vectors_count
-                                if info.vectors_count is not None
-                                else 0
-                            ),
-                            indexed_vectors_count=(
-                                info.indexed_vectors_count
-                                if info.indexed_vectors_count is not None
-                                else 0
-                            ),
-                            segments_count=(
-                                info.segments_count
-                                if info.segments_count is not None
-                                else 0
-                            ),
-                            status=(
-                                str(info.status)
-                                if info.status is not None
-                                else "unknown"
-                            ),
+                            points_count=info.points_count or 0,
+                            vectors_count=info.indexed_vectors_count or 0,
+                            indexed_vectors_count=info.indexed_vectors_count or 0,
+                            segments_count=info.segments_count,
+                            status=str(info.status),
                         )
                     )
                 except Exception as e:
@@ -270,31 +249,11 @@ class QdrantResourceHandler:
             collection_info_dict = None
             if collection_info:
                 collection_info_dict = {
-                    "vectors_count": (
-                        collection_info.vectors_count
-                        if collection_info.vectors_count is not None
-                        else 0
-                    ),
-                    "indexed_vectors_count": (
-                        collection_info.indexed_vectors_count
-                        if collection_info.indexed_vectors_count is not None
-                        else 0
-                    ),
-                    "points_count": (
-                        collection_info.points_count
-                        if collection_info.points_count is not None
-                        else 0
-                    ),
-                    "segments_count": (
-                        collection_info.segments_count
-                        if collection_info.segments_count is not None
-                        else 0
-                    ),
-                    "status": (
-                        str(collection_info.status)
-                        if collection_info.status is not None
-                        else "unknown"
-                    ),
+                    "vectors_count": collection_info.indexed_vectors_count or 0,
+                    "indexed_vectors_count": collection_info.indexed_vectors_count or 0,
+                    "points_count": collection_info.points_count or 0,
+                    "segments_count": collection_info.segments_count,
+                    "status": str(collection_info.status),
                 }
 
             return QdrantCollectionDetailsResponse(
