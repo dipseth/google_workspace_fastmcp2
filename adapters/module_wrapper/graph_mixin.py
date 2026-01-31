@@ -31,9 +31,53 @@ Usage:
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Set, Tuple, runtime_checkable
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# COMPONENT METADATA PROTOCOL
+# =============================================================================
+# Defines the interface for component metadata queries.
+# Any class implementing this protocol can be used as a metadata provider.
+
+
+@runtime_checkable
+class ComponentMetadataProvider(Protocol):
+    """Protocol for component metadata queries.
+
+    This defines the interface that ModuleWrapper (via GraphMixin) implements.
+    SmartCardBuilder and other consumers should type-hint against this protocol.
+    """
+
+    def get_context_resource(self, component: str) -> Optional[Tuple[str, str]]:
+        """Get (context_key, index_key) for a component's resource consumption."""
+        ...
+
+    def get_children_field(self, container: str) -> Optional[str]:
+        """Get JSON field name where container stores children."""
+        ...
+
+    def get_container_child_type(self, container: str) -> Optional[str]:
+        """Get expected child type for a homogeneous container."""
+        ...
+
+    def get_required_wrapper(self, component: str) -> Optional[str]:
+        """Get required wrapper parent for a component."""
+        ...
+
+    def is_widget_type(self, component: str) -> bool:
+        """Check if component is a valid widget type."""
+        ...
+
+    def is_form_component(self, component: str) -> bool:
+        """Check if component is a form component."""
+        ...
+
+    def is_empty_component(self, component: str) -> bool:
+        """Check if component is empty (no content params)."""
+        ...
 
 # Lazy import for NetworkX
 _networkx = None
@@ -64,6 +108,16 @@ class GraphMixin:
     - symbol_mapping: Dict[str, str] (component → symbol)
     - reverse_symbol_mapping: Dict[str, str] (symbol → component)
     - components: Dict[str, ModuleComponent]
+
+    This is a GENERAL-PURPOSE mixin for any Python module's component graph.
+
+    Provides:
+    1. DAG construction and traversal (get_children, get_descendants, can_contain, etc.)
+    2. Component metadata registry (register_*, get_*) for domain-specific metadata
+
+    Domain-specific wrappers (e.g., card_framework_wrapper.py) should:
+    1. Call register_* methods to populate component metadata
+    2. Query via get_* methods
     """
 
     def __init__(self, *args, **kwargs):
@@ -71,6 +125,16 @@ class GraphMixin:
         super().__init__(*args, **kwargs)
         self._relationship_graph = None
         self._graph_built = False
+
+        # Component metadata registries (populated by domain-specific wrappers)
+        self._context_resources: Dict[str, Tuple[str, str]] = {}  # component → (context_key, index_key)
+        self._container_children_field: Dict[str, str] = {}  # container → json_field_name
+        self._container_child_type: Dict[str, str] = {}  # container → expected_child_type
+        self._required_wrappers: Dict[str, str] = {}  # child → required_wrapper_parent
+        self._widget_types: Set[str] = set()  # valid widget types (can be children of heterogeneous containers)
+        self._heterogeneous_containers: Set[str] = set()  # containers that can hold any widget_type
+        self._form_components: Set[str] = set()  # components needing 'name' field
+        self._empty_components: Set[str] = set()  # components with no content params
 
     # =========================================================================
     # GRAPH CONSTRUCTION
@@ -815,8 +879,358 @@ class GraphMixin:
         return "\n".join(lines)
 
 
+    # =========================================================================
+    # COMPONENT METADATA REGISTRATION (General-Purpose)
+    # =========================================================================
+    # Domain-specific wrappers call these to register their component metadata.
+    # Example: card_framework_wrapper registers Button→("buttons", "_button_index")
+
+    def register_context_resource(
+        self, component: str, context_key: str, index_key: str
+    ) -> None:
+        """
+        Register what context resource a component consumes.
+
+        Args:
+            component: Component name (e.g., "Button")
+            context_key: Context dict key (e.g., "buttons")
+            index_key: Index tracking key (e.g., "_button_index")
+
+        Example:
+            >>> wrapper.register_context_resource("Button", "buttons", "_button_index")
+            >>> wrapper.register_context_resource("Chip", "chips", "_chip_index")
+        """
+        self._context_resources[component] = (context_key, index_key)
+        logger.debug(f"Registered context resource: {component} → {context_key}")
+
+    def register_container(
+        self,
+        container: str,
+        children_field: str,
+        child_type: Optional[str] = None,
+    ) -> None:
+        """
+        Register a container component's structure.
+
+        Args:
+            container: Container name (e.g., "ButtonList")
+            children_field: JSON field for children (e.g., "buttons")
+            child_type: Expected child type if homogeneous (e.g., "Button")
+
+        Example:
+            >>> wrapper.register_container("ButtonList", "buttons", "Button")
+            >>> wrapper.register_container("Section", "widgets")  # heterogeneous
+        """
+        self._container_children_field[container] = children_field
+        if child_type:
+            self._container_child_type[container] = child_type
+        logger.debug(f"Registered container: {container}.{children_field} → {child_type}")
+
+    def register_wrapper_requirement(self, child: str, wrapper: str) -> None:
+        """
+        Register that a component requires a wrapper parent.
+
+        Args:
+            child: Child component name (e.g., "Button")
+            wrapper: Required wrapper parent (e.g., "ButtonList")
+
+        Example:
+            >>> wrapper.register_wrapper_requirement("Button", "ButtonList")
+            >>> wrapper.register_wrapper_requirement("Chip", "ChipList")
+        """
+        self._required_wrappers[child] = wrapper
+        logger.debug(f"Registered wrapper requirement: {child} → {wrapper}")
+
+    def register_widget_type(self, component: str) -> None:
+        """Register a component as a valid widget type."""
+        self._widget_types.add(component)
+
+    def register_form_component(self, component: str) -> None:
+        """Register a component as a form component (needs 'name' field)."""
+        self._form_components.add(component)
+
+    def register_empty_component(self, component: str) -> None:
+        """Register a component as empty (no content params)."""
+        self._empty_components.add(component)
+
+    def register_component_metadata_batch(
+        self,
+        context_resources: Optional[Dict[str, Tuple[str, str]]] = None,
+        containers: Optional[Dict[str, Tuple[str, Optional[str]]]] = None,
+        wrapper_requirements: Optional[Dict[str, str]] = None,
+        widget_types: Optional[Set[str]] = None,
+        heterogeneous_containers: Optional[Set[str]] = None,
+        form_components: Optional[Set[str]] = None,
+        empty_components: Optional[Set[str]] = None,
+    ) -> None:
+        """
+        Register multiple component metadata entries at once.
+
+        Args:
+            context_resources: {component: (context_key, index_key)}
+            containers: {container: (children_field, child_type)}
+            wrapper_requirements: {child: wrapper}
+            widget_types: Set of widget type names (valid children for heterogeneous containers)
+            heterogeneous_containers: Set of containers that can hold any widget_type
+            form_components: Set of form component names
+            empty_components: Set of empty component names
+
+        Example:
+            >>> wrapper.register_component_metadata_batch(
+            ...     context_resources={
+            ...         "Button": ("buttons", "_button_index"),
+            ...         "Chip": ("chips", "_chip_index"),
+            ...     },
+            ...     containers={
+            ...         "ButtonList": ("buttons", "Button"),
+            ...         "Section": ("widgets", None),
+            ...     },
+            ...     wrapper_requirements={
+            ...         "Button": "ButtonList",
+            ...         "Chip": "ChipList",
+            ...     },
+            ...     widget_types={"DecoratedText", "ButtonList", "Image"},
+            ...     heterogeneous_containers={"Section", "Column"},
+            ... )
+        """
+        if context_resources:
+            for comp, (ctx_key, idx_key) in context_resources.items():
+                self.register_context_resource(comp, ctx_key, idx_key)
+
+        if containers:
+            for container, (field, child_type) in containers.items():
+                self.register_container(container, field, child_type)
+
+        if wrapper_requirements:
+            for child, wrapper in wrapper_requirements.items():
+                self.register_wrapper_requirement(child, wrapper)
+
+        if widget_types:
+            self._widget_types.update(widget_types)
+
+        if heterogeneous_containers:
+            self._heterogeneous_containers.update(heterogeneous_containers)
+
+        if form_components:
+            self._form_components.update(form_components)
+
+        if empty_components:
+            self._empty_components.update(empty_components)
+
+        logger.info(
+            f"Registered component metadata batch: "
+            f"{len(context_resources or {})} resources, "
+            f"{len(containers or {})} containers, "
+            f"{len(wrapper_requirements or {})} wrappers"
+        )
+
+    # =========================================================================
+    # COMPONENT METADATA QUERIES (General-Purpose)
+    # =========================================================================
+
+    def get_context_resource(self, component: str) -> Optional[Tuple[str, str]]:
+        """
+        Get what context resource a component consumes.
+
+        Returns:
+            Tuple of (context_key, index_key) or None
+        """
+        return self._context_resources.get(component)
+
+    def get_children_field(self, container: str) -> Optional[str]:
+        """
+        Get the JSON field name where container stores children.
+
+        Returns:
+            Field name (e.g., "buttons", "widgets") or None
+        """
+        return self._container_children_field.get(container)
+
+    def get_container_child_type(self, container: str) -> Optional[str]:
+        """
+        Get the expected child type for a homogeneous container.
+
+        Returns:
+            Child type name or None if container is heterogeneous
+        """
+        return self._container_child_type.get(container)
+
+    def get_required_wrapper(self, component: str) -> Optional[str]:
+        """
+        Get the wrapper parent required for a component.
+
+        Returns:
+            Wrapper name or None if no wrapper needed
+        """
+        return self._required_wrappers.get(component)
+
+    def get_widget_types(self) -> Set[str]:
+        """Get all registered widget types."""
+        return self._widget_types.copy()
+
+    def is_widget_type(self, component: str) -> bool:
+        """Check if component is a registered widget type."""
+        return component in self._widget_types
+
+    def is_form_component(self, component: str) -> bool:
+        """Check if component is a form component."""
+        return component in self._form_components
+
+    def is_empty_component(self, component: str) -> bool:
+        """Check if component is empty (no content params)."""
+        return component in self._empty_components
+
+    def is_container(self, component: str) -> bool:
+        """Check if component is a registered container."""
+        return component in self._container_children_field
+
+    def get_all_context_resources(self) -> Dict[str, Tuple[str, str]]:
+        """Get all registered context resources."""
+        return self._context_resources.copy()
+
+    def get_all_containers(self) -> Dict[str, str]:
+        """Get all registered containers with their children fields."""
+        return self._container_children_field.copy()
+
+    def get_all_wrapper_requirements(self) -> Dict[str, str]:
+        """Get all registered wrapper requirements."""
+        return self._required_wrappers.copy()
+
+    # =========================================================================
+    # SYMBOL RESOLUTION IN CONTEXT
+    # =========================================================================
+
+    def resolve_symbol_in_context(
+        self,
+        symbol: str,
+        parent_component: str,
+        symbol_mapping: Optional[Dict[str, str]] = None,
+        reverse_symbol_mapping: Optional[Dict[str, str]] = None,
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """
+        Resolve a symbol to a valid component for a given parent context.
+
+        If the symbol maps to a component that isn't valid for the parent,
+        uses the DAG to find the closest valid match.
+
+        Args:
+            symbol: The DSL symbol (e.g., "ℬ")
+            parent_component: The parent context (e.g., "Section")
+            symbol_mapping: Optional {component_name: symbol} mapping
+            reverse_symbol_mapping: Optional {symbol: component_name} mapping
+
+        Returns:
+            Tuple of (resolved_component, suggested_symbol, suggestion_message)
+            - resolved_component: The component name (original or closest match)
+            - suggested_symbol: The correct symbol if different from input
+            - suggestion_message: Human-readable suggestion if correction needed
+
+        Example:
+            >>> wrapper.resolve_symbol_in_context("ℬ", "Section")
+            ("ButtonList", "Ƀ", "ℬ (BorderType) invalid in Section; use Ƀ (ButtonList)")
+        """
+        # Get mappings from self if not provided
+        if symbol_mapping is None:
+            symbol_mapping = getattr(self, "symbol_mapping", {})
+        if reverse_symbol_mapping is None:
+            reverse_symbol_mapping = getattr(self, "reverse_symbol_mapping", {})
+
+        # Resolve symbol to component name
+        component = reverse_symbol_mapping.get(symbol, symbol)
+
+        # Get valid children for parent (uses DAG + registered widget types)
+        valid_children = self.get_valid_children_for_parent(parent_component)
+
+        # Check if component is valid in this context
+        if component in valid_children:
+            return (component, None, None)  # Valid, no correction needed
+
+        # Component is invalid - find closest valid match
+        if not valid_children:
+            return (component, None, f"No valid children for {parent_component}")
+
+        # Score candidates by similarity to the invalid component
+        def similarity_score(candidate: str) -> float:
+            score = 0.0
+
+            # 1. Symbol visual similarity (same starting character)
+            cand_symbol = symbol_mapping.get(candidate, "")
+            if cand_symbol and symbol:
+                # Check if symbols look similar (same Unicode block or starting letter)
+                if cand_symbol[0].lower() == symbol[0].lower():
+                    score += 3.0
+                # Check similar category (both uppercase, both lowercase, etc.)
+                if cand_symbol[0].isupper() == symbol[0].isupper():
+                    score += 1.0
+
+            # 2. Name similarity (same starting letter, same suffix)
+            if candidate[0].lower() == component[0].lower():
+                score += 2.0
+            if candidate.endswith("List") and component.endswith("Type"):
+                score += 1.5  # Common confusion: BorderType vs ButtonList
+            if candidate.endswith("List") and "List" not in component:
+                # Prefer list containers when user used non-list
+                score += 0.5
+
+            # 3. Functional similarity (both containers, both have children)
+            if self.is_container(candidate) and self.is_container(component):
+                score += 1.0
+
+            return score
+
+        # Sort candidates by score
+        scored = [(c, similarity_score(c)) for c in valid_children]
+        scored.sort(key=lambda x: (-x[1], x[0]))  # Highest score first, then alpha
+
+        best_match = scored[0][0] if scored else None
+
+        if best_match:
+            best_symbol = symbol_mapping.get(best_match, best_match[0])
+            suggestion = (
+                f"{symbol} ({component}) invalid in {parent_component}; "
+                f"use {best_symbol} ({best_match})"
+            )
+            return (best_match, best_symbol, suggestion)
+
+        return (component, None, f"{component} invalid in {parent_component}")
+
+    def get_valid_children_for_parent(self, parent: str) -> List[str]:
+        """
+        Get all valid direct children for a parent component.
+
+        Combines DAG relationships with widget types for heterogeneous containers.
+
+        Args:
+            parent: Parent component name
+
+        Returns:
+            List of valid child component names
+        """
+        valid = set(self.get_children(parent))
+
+        # Heterogeneous containers can contain any registered widget type
+        if parent in self._heterogeneous_containers:
+            valid |= self._widget_types
+
+        return sorted(valid)
+
+    def register_heterogeneous_container(self, container: str) -> None:
+        """
+        Register a container that can hold any widget type.
+
+        Args:
+            container: Container component name (e.g., "Section", "Column")
+        """
+        self._heterogeneous_containers.add(container)
+
+    def get_heterogeneous_containers(self) -> Set[str]:
+        """Get all registered heterogeneous containers."""
+        return self._heterogeneous_containers.copy()
+
+
 # Export for convenience
 __all__ = [
     "GraphMixin",
+    "ComponentMetadataProvider",
     "_get_networkx",
 ]
