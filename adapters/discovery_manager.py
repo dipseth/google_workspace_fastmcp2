@@ -4,19 +4,15 @@ Discovers available APIs and configurations
 """
 
 import json
+from pathlib import Path
 
 import yaml
 
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-from pathlib import Path
 
 from typing_extensions import Any, Dict, List, Optional
-
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 
 
 class DiscoveryManager:
