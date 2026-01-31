@@ -157,6 +157,24 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "COLBERT_EMBEDDING_DEV"},
     )
 
+    # Skills Provider Configuration
+    # When enabled, generates skill documents from ModuleWrapper and serves via FastMCP
+    enable_skills_provider: bool = Field(
+        default=False,
+        description="Enable FastMCP SkillsDirectoryProvider for dynamic skill generation",
+        json_schema_extra={"env": "ENABLE_SKILLS_PROVIDER"},
+    )
+    skills_directory: str = Field(
+        default="",
+        description="Directory for skill documents. If empty, uses ~/.claude/skills",
+        json_schema_extra={"env": "SKILLS_DIRECTORY"},
+    )
+    skills_auto_regenerate: bool = Field(
+        default=True,
+        description="Regenerate skill documents on startup",
+        json_schema_extra={"env": "SKILLS_AUTO_REGENERATE"},
+    )
+
     # Google Chat Card Collection Configuration
     # v7 collection has three named vectors:
     #   - components: Identity (Name + Type + Path + Docstring)
@@ -448,6 +466,13 @@ class Settings(BaseSettings):
         if self.session_tool_state_file:
             return Path(self.session_tool_state_file)
         return Path(self.credentials_dir) / "session_tool_states.json"
+
+    @property
+    def skills_directory_path(self) -> Path:
+        """Get the path for skill documents directory."""
+        if self.skills_directory:
+            return Path(self.skills_directory).expanduser().resolve()
+        return Path.home() / ".claude" / "skills"
 
     def get_minimal_startup_services(self) -> List[str]:
         """
