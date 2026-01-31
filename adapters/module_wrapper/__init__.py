@@ -145,6 +145,13 @@ from adapters.module_wrapper.symbol_generator import (
     extract_component_names_from_wrapper,
 )
 from adapters.module_wrapper.symbols_mixin import SymbolsMixin
+from adapters.module_wrapper.skills_mixin import SkillsMixin
+from adapters.module_wrapper.skill_types import (
+    SkillDocument,
+    SkillInfo,
+    SkillManifest,
+    SkillGeneratorConfig,
+)
 
 # =============================================================================
 # TEXT INDEXING
@@ -169,6 +176,7 @@ class ModuleWrapper(
     SearchMixin,
     RelationshipsMixin,
     SymbolsMixin,
+    SkillsMixin,
     PipelineMixin,
     GraphMixin,
     CacheMixin,
@@ -189,6 +197,7 @@ class ModuleWrapper(
     - Graph-based relationship DAG (GraphMixin)
     - Tiered component caching (CacheMixin)
     - Instance pattern storage and variation (InstancePatternMixin)
+    - Skill document generation (SkillsMixin)
     - Base module introspection (ModuleWrapperBase)
 
     Usage:
@@ -345,6 +354,7 @@ __all__ = [
     "SearchMixin",
     "RelationshipsMixin",
     "SymbolsMixin",
+    "SkillsMixin",
     "PipelineMixin",
     "GraphMixin",
     "ComponentMetadataProvider",
@@ -356,6 +366,11 @@ __all__ = [
     "VariationFamily",
     "StructureVariator",
     "ParameterVariator",
+    # Skill types
+    "SkillDocument",
+    "SkillInfo",
+    "SkillManifest",
+    "SkillGeneratorConfig",
     # Lazy imports
     "_get_qdrant_imports",
     "_get_numpy",
