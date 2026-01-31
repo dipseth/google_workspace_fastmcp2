@@ -95,7 +95,11 @@ from adapters.module_wrapper.qdrant_mixin import (
     _get_numpy,
     _get_qdrant_imports,
 )
-from adapters.module_wrapper.graph_mixin import GraphMixin, _get_networkx
+from adapters.module_wrapper.graph_mixin import (
+    GraphMixin,
+    ComponentMetadataProvider,
+    _get_networkx,
+)
 from adapters.module_wrapper.relationships_mixin import RelationshipsMixin
 from adapters.module_wrapper.cache_mixin import CacheMixin
 from adapters.module_wrapper.instance_pattern_mixin import (
@@ -343,6 +347,7 @@ __all__ = [
     "SymbolsMixin",
     "PipelineMixin",
     "GraphMixin",
+    "ComponentMetadataProvider",
     "CacheMixin",
     "InstancePatternMixin",
     # Instance pattern classes

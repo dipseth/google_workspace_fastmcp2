@@ -232,20 +232,28 @@ class CacheMixin:
         if "." in component_name and component_name.count(".") >= 2:
             return component_name
 
+        # Collect all matching paths, then prefer v2 over v1
+        matching_paths = []
+
         # Search in components dict by name suffix
         for comp_key, comp in self.components.items():
             # Check if key ends with the component name
             if comp_key.endswith(f".{component_name}") or comp_key == component_name:
-                # comp.full_path might be like "card_framework.v2.widgets.Button"
-                # but the importable path is "card_framework.v2.widgets.button.Button"
                 full_path = comp.full_path
                 if full_path:
-                    return full_path
+                    matching_paths.append(full_path)
 
             # Also check comp.name
-            if hasattr(comp, "name") and comp.name == component_name:
+            elif hasattr(comp, "name") and comp.name == component_name:
                 if comp.full_path:
-                    return comp.full_path
+                    matching_paths.append(comp.full_path)
+
+        # Prefer v2 paths over v1 paths (e.g., card_framework.v2.message.Message over card_framework.Message)
+        if matching_paths:
+            v2_paths = [p for p in matching_paths if ".v2." in p]
+            if v2_paths:
+                return v2_paths[0]
+            return matching_paths[0]
 
         # Try common patterns for card_framework
         common_patterns = [
