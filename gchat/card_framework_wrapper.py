@@ -892,6 +892,114 @@ def get_dsl_field_description() -> str:
     )
 
 
+def get_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
+    """
+    Generate dynamic tool examples using symbols from the DAG.
+
+    Creates examples that demonstrate common card patterns with proper
+    DSL notation and matching card_params.
+
+    Args:
+        max_examples: Maximum number of examples to generate
+
+    Returns:
+        List of example dicts with description, card_description, card_params
+    """
+    symbols = get_gchat_symbols()
+
+    # Get symbols for common components (with fallbacks)
+    section = symbols.get("Section", "§")
+    dtext = symbols.get("DecoratedText", "δ")
+    btnlist = symbols.get("ButtonList", "Ƀ")
+    btn = symbols.get("Button", "ᵬ")
+    grid = symbols.get("Grid", "ℊ")
+    gitem = symbols.get("GridItem", "ǵ")
+    chiplist = symbols.get("ChipList", "ȼ")
+    chip = symbols.get("Chip", "ℂ")
+    carousel = symbols.get("Carousel", "◦")
+    ccard = symbols.get("CarouselCard", "▲")
+    image = symbols.get("Image", "Ɨ")
+    divider = symbols.get("Divider", "Đ")
+
+    # Define examples using dynamic symbols
+    all_examples = [
+        {
+            "description": "Simple text card",
+            "card_description": f"{section}[{dtext}]",
+            "card_params": {"title": "Alert", "text": "System update complete"},
+        },
+        {
+            "description": "Text + 2 action buttons",
+            "card_description": f"{section}[{dtext}, {btnlist}[{btn}×2]]",
+            "card_params": {
+                "title": "Actions Required",
+                "text": "Choose an action",
+                "buttons": [
+                    {"text": "Approve", "url": "https://example.com/yes"},
+                    {"text": "Reject", "url": "https://example.com/no"},
+                ],
+            },
+        },
+        {
+            "description": "Grid with 4 items",
+            "card_description": f"{section}[{grid}[{gitem}×4]]",
+            "card_params": {
+                "title": "Gallery",
+                "images": [
+                    "https://picsum.photos/200/200?1",
+                    "https://picsum.photos/200/200?2",
+                    "https://picsum.photos/200/200?3",
+                    "https://picsum.photos/200/200?4",
+                ],
+            },
+        },
+        {
+            "description": "Jinja styled status text",
+            "card_description": f"{section}[{dtext}]",
+            "card_params": {
+                "title": "System Status",
+                "text": "Server: {{ 'Online' | success_text }} | DB: {{ 'Warning' | warning_text }}",
+            },
+        },
+        {
+            "description": "Chip list for quick selection",
+            "card_description": f"{section}[{dtext}, {chiplist}[{chip}×3]]",
+            "card_params": {
+                "title": "Select Tags",
+                "text": "Choose categories",
+                "chips": [
+                    {"text": "Bug", "url": "#bug"},
+                    {"text": "Feature", "url": "#feature"},
+                    {"text": "Docs", "url": "#docs"},
+                ],
+            },
+        },
+        {
+            "description": "Carousel with 3 cards",
+            "card_description": f"{carousel}[{ccard}×3]",
+            "card_params": {
+                "title": "Recent Items",
+                "cards": [
+                    {"title": "Card 1", "text": "First item"},
+                    {"title": "Card 2", "text": "Second item"},
+                    {"title": "Card 3", "text": "Third item"},
+                ],
+            },
+        },
+        {
+            "description": "Image with text and divider",
+            "card_description": f"{section}[{image}, {divider}, {dtext}]",
+            "card_params": {
+                "title": "Featured",
+                "image_url": "https://picsum.photos/400/200",
+                "text": "Featured content description",
+            },
+        },
+    ]
+
+    return all_examples[:max_examples]
+
+
 def get_hierarchy_tree_text(
     root_components: Optional[List[str]] = None,
     max_depth: int = 3,

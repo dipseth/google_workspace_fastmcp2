@@ -440,16 +440,31 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
     # Generate DSL documentation dynamically after wrapper is initialized
     # This ensures symbol mappings are included in tool documentation
-    from gchat.card_framework_wrapper import get_dsl_documentation
+    from gchat.card_framework_wrapper import (
+        get_dsl_documentation,
+        get_tool_examples,
+        get_gchat_symbols,
+    )
 
     dsl_field_desc = _get_dsl_field_description()
     dsl_full_doc = get_dsl_documentation(include_examples=True, include_hierarchy=True)
+    tool_examples = get_tool_examples(max_examples=5)
+    symbols = get_gchat_symbols()
 
-    # Build dynamic tool description with symbol mappings - DSL FIRST
+    # Build dynamic tool description with actual symbols from DAG
+    section_sym = symbols.get("Section", "§")
+    dtext_sym = symbols.get("DecoratedText", "δ")
+    btnlist_sym = symbols.get("ButtonList", "Ƀ")
+    btn_sym = symbols.get("Button", "ᵬ")
+    grid_sym = symbols.get("Grid", "ℊ")
+    gitem_sym = symbols.get("GridItem", "ǵ")
+
     tool_description = (
         "Send cards to Google Chat using DSL notation for precise structure control. "
         "REQUIRED: Use DSL symbols in card_description to define card structure. "
-        "Common patterns: §[δ] = text card, §[δ, Ƀ[ᵬ×2]] = text + 2 buttons, §[ℊ[ǵ×4]] = grid with 4 items. "
+        f"Common patterns: {section_sym}[{dtext_sym}] = text card, "
+        f"{section_sym}[{dtext_sym}, {btnlist_sym}[{btn_sym}×2]] = text + 2 buttons, "
+        f"{section_sym}[{grid_sym}[{gitem_sym}×4]] = grid with 4 items. "
         f"{dsl_field_desc}"
     )
 
@@ -457,11 +472,10 @@ def setup_card_tools(mcp: FastMCP) -> None:
     card_description_help = (
         "IMPORTANT: Start with DSL symbols to define card structure. "
         "Without DSL, cards render as simple text only. "
-        "DSL Examples: "
-        "§[δ] = Section with DecoratedText, "
-        "§[δ, Ƀ[ᵬ×2]] = text + 2 buttons, "
-        "§[δ×3] = 3 text items, "
-        "§[ℊ[ǵ×4]] = grid with 4 items. "
+        f"DSL Examples: {section_sym}[{dtext_sym}] = Section with DecoratedText, "
+        f"{section_sym}[{dtext_sym}, {btnlist_sym}[{btn_sym}×2]] = text + 2 buttons, "
+        f"{section_sym}[{dtext_sym}×3] = 3 text items, "
+        f"{section_sym}[{grid_sym}[{gitem_sym}×4]] = grid with 4 items. "
         "Provide content in card_params: title, subtitle, text, buttons=[{text, url}]. "
         "Jinja styling in text: {{ 'Online' | success_text }}, {{ text | color('#hex') }}. "
         f"{dsl_field_desc}"
@@ -479,40 +493,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
             "idempotentHint": False,
             "openWorldHint": True,
             "dsl_documentation": dsl_full_doc,  # Full DSL docs in annotations
-            "examples": [
-                {
-                    "description": "Basic text card (DSL required)",
-                    "card_description": "§[δ]",
-                    "card_params": {"title": "Alert", "text": "System update complete"},
-                },
-                {
-                    "description": "Text + 2 buttons",
-                    "card_description": "§[δ, Ƀ[ᵬ×2]]",
-                    "card_params": {
-                        "title": "Actions",
-                        "text": "Choose an action",
-                        "buttons": [{"text": "Approve", "url": "https://example.com/yes"}, {"text": "Reject", "url": "https://example.com/no"}]
-                    },
-                },
-                {
-                    "description": "Multiple text items",
-                    "card_description": "§[δ×3]",
-                    "card_params": {"title": "Status Report", "text": "Line 1\nLine 2\nLine 3"},
-                },
-                {
-                    "description": "Jinja styled text",
-                    "card_description": "§[δ]",
-                    "card_params": {
-                        "title": "System Status",
-                        "text": "Server: {{ 'Online' | success_text }} | DB: {{ 'Warning' | warning_text }}"
-                    },
-                },
-                {
-                    "description": "Grid with 4 items",
-                    "card_description": "§[ℊ[ǵ×4]]",
-                    "card_params": {"title": "Gallery", "images": ["url1", "url2", "url3", "url4"]},
-                },
-            ],
+            "examples": tool_examples,  # Dynamically generated from DAG symbols
         },
     )
     async def send_dynamic_card(
@@ -537,7 +518,10 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 default=None,
                 description="Explicit overrides: title, subtitle, text, buttons, images. "
                 "The 'text' field supports Jinja filters ({{ 'text' | success_text }}) "
-                "and raw HTML (<font color=\"#hex\">text</font>).",
+                "and raw HTML (<font color=\"#hex\">text</font>). "
+                "Message-level fields: 'message_text' (plain text above card), "
+                "'fallback_text' (notification text), "
+                "'accessory_widgets' (buttons outside card: [{buttonList: {buttons: [{text, url}]}}]).",
             ),
         ] = None,
         thread_key: Annotated[
