@@ -37,6 +37,12 @@ from adapters.module_wrapper.skill_types import (
     SkillInfo,
     SkillManifest,
 )
+from adapters.module_wrapper.types import (
+    ComponentName,
+    Payload,
+    RelationshipDict,
+    SymbolMapping,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +210,7 @@ class SkillsMixin:
 
     def generate_component_docs(
         self,
-        component_name: Optional[str] = None,
+        component_name: Optional[ComponentName] = None,
     ) -> Dict[str, SkillDocument]:
         """
         Generate documentation for components from self.components.

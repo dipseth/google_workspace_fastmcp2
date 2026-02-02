@@ -16,15 +16,24 @@ that uses VariationGenerator and related classes directly.
 import logging
 from typing import Any, Dict, List, Optional
 
+from adapters.module_wrapper.types import (
+    ComponentPaths,
+    DSLNotation,
+    Payload,
+    RelationshipDict,
+)
+
 logger = logging.getLogger(__name__)
 
 # Re-export from instance_pattern_mixin for backwards compatibility
 from adapters.module_wrapper.instance_pattern_mixin import (
     InstancePattern,
-    PatternVariation as Variation,  # Alias for backwards compatibility
-    VariationFamily,
-    StructureVariator,
     ParameterVariator,
+    StructureVariator,
+    VariationFamily,
+)
+from adapters.module_wrapper.instance_pattern_mixin import (
+    PatternVariation as Variation,  # Alias for backwards compatibility
 )
 
 
@@ -63,7 +72,7 @@ class VariationGenerator:
 
     def generate_variations(
         self,
-        pattern: Dict[str, Any],
+        pattern: Payload,
         num_structure_variations: int = 3,
         num_param_variations: int = 2,
         cache_variations: bool = True,
@@ -193,7 +202,7 @@ class VariationGenerator:
         return []
 
     @property
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> Payload:
         """Get generator statistics."""
         wrapper = self._ensure_wrapper()
         if wrapper and hasattr(wrapper, "pattern_stats"):
@@ -225,7 +234,7 @@ def get_variation_generator() -> VariationGenerator:
 
 
 def generate_and_cache_variations(
-    pattern: Dict[str, Any],
+    pattern: Payload,
     num_structure_variations: int = 3,
     num_param_variations: int = 2,
 ) -> Optional[VariationFamily]:

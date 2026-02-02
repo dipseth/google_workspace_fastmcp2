@@ -11,6 +11,15 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from adapters.module_wrapper.types import (
+    COLBERT_DIM,
+    MINILM_DIM,
+    EmbeddingConfig,
+    EmbeddingDimension,
+    EmbeddingVector,
+    MultiVector,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,9 +72,9 @@ class EmbeddingMixin:
 
     # Attributes to be set by __init__ in the composed class
     embedder: Any = None
-    embedding_dim: Optional[int] = None
+    embedding_dim: Optional[EmbeddingDimension] = None
     colbert_embedder: Any = None
-    colbert_embedding_dim: int = 128
+    colbert_embedding_dim: EmbeddingDimension = COLBERT_DIM
     _colbert_initialized: bool = False
 
     def _clear_fastembed_cache(self, model_name: Optional[str] = None) -> bool:

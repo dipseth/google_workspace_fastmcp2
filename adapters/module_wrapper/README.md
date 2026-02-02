@@ -339,6 +339,33 @@ entry = wrapper.get_cached_entry("status_card_v1")
 - [Relationships & DAG](docs/relationships-dag.md) - Graph structure and traversal
 - [Caching](docs/caching.md) - Tiered cache system
 - [Instance Patterns](docs/instance-patterns.md) - Pattern storage and variations
+- [Types Reference](docs/types-reference.md) - Type aliases, protocols, and dataclasses
+
+## Type System
+
+The package includes a centralized type system (`types.py`) for consistency:
+
+```python
+from adapters.module_wrapper.types import (
+    # Type Aliases
+    Payload, SymbolMapping, ComponentPath, RelationshipDict,
+    EmbeddingVector, MultiVector, DSLNotation,
+    # Protocols
+    Serializable, Timestamped, Validatable, HasSymbol, Embeddable,
+    # Dataclasses
+    SearchResult, ComponentInfo, RelationshipInfo,
+    QdrantConfig, EmbeddingConfig, IndexingStats,
+    # Constants
+    COLBERT_DIM, MINILM_DIM, RELATIONSHIPS_DIM,
+)
+
+# Example: Use SearchResult for consistent API
+results: List[SearchResult] = wrapper.search_v7_hybrid("status card")
+for r in results:
+    print(f"{r.name} ({r.symbol}): {r.score:.3f}")
+```
+
+See [Types Reference](docs/types-reference.md) for complete documentation.
 
 ## Version
 

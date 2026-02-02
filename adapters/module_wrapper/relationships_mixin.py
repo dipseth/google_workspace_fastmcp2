@@ -22,6 +22,14 @@ from typing import (
     get_type_hints,
 )
 
+from adapters.module_wrapper.types import (
+    ComponentName,
+    Payload,
+    RelationshipDict,
+    RelationshipInfo,
+    RelationshipList,
+)
+
 from .core import BUILTIN_PREFIXES, PRIMITIVE_TYPES, ModuleComponent
 
 logger = logging.getLogger(__name__)
@@ -263,7 +271,7 @@ class RelationshipsMixin:
 
         return relationships
 
-    def extract_relationships(self, max_depth: int = 5) -> List[Dict[str, Any]]:
+    def extract_relationships(self, max_depth: int = 5) -> RelationshipList:
         """
         Extract all component relationships from indexed components.
 
@@ -322,8 +330,8 @@ class RelationshipsMixin:
         return all_relationships
 
     def extract_relationships_by_child(
-        self, child_class: str, max_depth: int = 5
-    ) -> List[Dict[str, Any]]:
+        self, child_class: ComponentName, max_depth: int = 5
+    ) -> RelationshipList:
         """
         Extract relationships filtered by child class name.
 
@@ -372,7 +380,7 @@ class RelationshipsMixin:
         return dict(by_parent)
 
     @property
-    def relationships(self) -> Dict[str, List[str]]:
+    def relationships(self) -> RelationshipDict:
         """Get cached relationships grouped by parent component."""
         if self._cached_relationships is None:
             raw_rels = self.extract_relationships_by_parent(max_depth=5)
@@ -383,7 +391,7 @@ class RelationshipsMixin:
         return self._cached_relationships
 
     @property
-    def relationship_metadata(self) -> Dict[str, Any]:
+    def relationship_metadata(self) -> Payload:
         """Get metadata about relationships."""
         rels = self.relationships
         return {

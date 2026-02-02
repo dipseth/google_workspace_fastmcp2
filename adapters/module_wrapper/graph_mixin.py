@@ -33,6 +33,14 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Protocol, Set, Tuple, runtime_checkable
 
+from adapters.module_wrapper.types import (
+    ComponentName,
+    Payload,
+    RelationshipDict,
+    ReverseSymbolMapping,
+    SymbolMapping,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -291,10 +299,10 @@ class GraphMixin:
 
     def get_descendants(
         self,
-        node: str,
+        node: ComponentName,
         depth: Optional[int] = None,
         include_self: bool = False,
-    ) -> List[str]:
+    ) -> List[ComponentName]:
         """
         Get all components that can be contained within a component (recursively).
 
@@ -333,9 +341,9 @@ class GraphMixin:
 
     def get_ancestors(
         self,
-        node: str,
+        node: ComponentName,
         include_self: bool = False,
-    ) -> List[str]:
+    ) -> List[ComponentName]:
         """
         Get all components that can contain this component.
 
@@ -366,7 +374,7 @@ class GraphMixin:
 
         return ancestors
 
-    def get_children(self, node: str) -> List[str]:
+    def get_children(self, node: ComponentName) -> List[ComponentName]:
         """
         Get direct children of a component (one level only).
 
@@ -383,7 +391,7 @@ class GraphMixin:
 
         return list(graph.successors(node))
 
-    def get_parents(self, node: str) -> List[str]:
+    def get_parents(self, node: ComponentName) -> List[ComponentName]:
         """
         Get direct parents of a component (one level only).
 
@@ -404,7 +412,7 @@ class GraphMixin:
     # PATH QUERIES
     # =========================================================================
 
-    def get_path(self, source: str, target: str) -> List[str]:
+    def get_path(self, source: ComponentName, target: ComponentName) -> List[ComponentName]:
         """
         Get the shortest containment path from source to target.
 
@@ -434,10 +442,10 @@ class GraphMixin:
 
     def get_all_paths(
         self,
-        source: str,
-        target: str,
+        source: ComponentName,
+        target: ComponentName,
         max_depth: Optional[int] = 10,
-    ) -> List[List[str]]:
+    ) -> List[List[ComponentName]]:
         """
         Get all possible containment paths from source to target.
 
@@ -509,6 +517,10 @@ class GraphMixin:
         """
         Check if a container can hold a component (directly or nested).
 
+        Uses both DAG relationships and registered metadata:
+        - Heterogeneous containers (Section, Column) can hold any widget_type
+        - Components requiring wrappers are valid if the wrapper is valid
+
         Args:
             container: Container component name
             component: Component to check
@@ -518,6 +530,8 @@ class GraphMixin:
             True if container can hold component
 
         Example:
+            >>> wrapper.can_contain("Section", "DecoratedText")
+            True  # Section is heterogeneous, DecoratedText is widget_type
             >>> wrapper.can_contain("Section", "Icon")
             True  # Via DecoratedText or Button
             >>> wrapper.can_contain("Section", "Icon", direct_only=True)
@@ -525,13 +539,44 @@ class GraphMixin:
         """
         graph = self.get_relationship_graph()
 
-        if container not in graph or component not in graph:
-            return False
+        # Check graph-based containment
+        container_in_graph = container in graph
+        component_in_graph = component in graph
 
         if direct_only:
-            return graph.has_edge(container, component)
-        else:
-            return component in self.get_descendants(container)
+            # Direct containment: check graph edge or heterogeneous container
+            if container_in_graph and component_in_graph:
+                if graph.has_edge(container, component):
+                    return True
+            # Heterogeneous containers can directly contain widget types
+            if container in self._heterogeneous_containers and component in self._widget_types:
+                return True
+            return False
+
+        # Non-direct (nested) containment checks
+        # 1. Check if heterogeneous container can hold widget type directly
+        if container in self._heterogeneous_containers and component in self._widget_types:
+            return True
+
+        # 2. Check if component needs a wrapper that container can hold
+        if component in self._required_wrappers:
+            wrapper = self._required_wrappers[component]
+            if self.can_contain(container, wrapper, direct_only=False):
+                return True
+
+        # 3. Check graph descendants for nested containment
+        if container_in_graph and component_in_graph:
+            if component in self.get_descendants(container):
+                return True
+
+        # 4. Check if any widget type that container can hold can itself contain component
+        if container in self._heterogeneous_containers:
+            for widget_type in self._widget_types:
+                if widget_type in graph and component_in_graph:
+                    if component in self.get_descendants(widget_type):
+                        return True
+
+        return False
 
     def get_common_ancestors(self, *nodes: str) -> List[str]:
         """

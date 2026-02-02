@@ -37,9 +37,14 @@ from typing import Any, Dict, List, Optional, Set, Union
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# CORE CLASSES
+# TYPE DEFINITIONS (Import First for Use by Other Modules)
 # =============================================================================
 
+from adapters.module_wrapper.cache_mixin import CacheMixin
+
+# =============================================================================
+# CORE CLASSES
+# =============================================================================
 from adapters.module_wrapper.core import (
     BUILTIN_PREFIXES,
     DEFAULT_RELATIONSHIP_DEPTH,
@@ -80,10 +85,23 @@ from adapters.module_wrapper.embedding_mixin import (
     _get_colbert_embed,
     _get_fastembed,
 )
+from adapters.module_wrapper.graph_mixin import (
+    ComponentMetadataProvider,
+    GraphMixin,
+    _get_networkx,
+)
 from adapters.module_wrapper.indexing_mixin import (
     STD_LIB_PREFIXES,
     THIRD_PARTY_PREFIXES,
     IndexingMixin,
+)
+from adapters.module_wrapper.instance_pattern_mixin import (
+    InstancePattern,
+    InstancePatternMixin,
+    ParameterVariator,
+    PatternVariation,
+    StructureVariator,
+    VariationFamily,
 )
 from adapters.module_wrapper.pipeline_mixin import PipelineMixin
 
@@ -95,26 +113,19 @@ from adapters.module_wrapper.qdrant_mixin import (
     _get_numpy,
     _get_qdrant_imports,
 )
-from adapters.module_wrapper.graph_mixin import (
-    GraphMixin,
-    ComponentMetadataProvider,
-    _get_networkx,
-)
 from adapters.module_wrapper.relationships_mixin import RelationshipsMixin
-from adapters.module_wrapper.cache_mixin import CacheMixin
-from adapters.module_wrapper.instance_pattern_mixin import (
-    InstancePatternMixin,
-    InstancePattern,
-    PatternVariation,
-    VariationFamily,
-    StructureVariator,
-    ParameterVariator,
-)
 from adapters.module_wrapper.search_mixin import (
     COLBERT_DIM,
     RELATIONSHIPS_DIM,
     SearchMixin,
 )
+from adapters.module_wrapper.skill_types import (
+    SkillDocument,
+    SkillGeneratorConfig,
+    SkillInfo,
+    SkillManifest,
+)
+from adapters.module_wrapper.skills_mixin import SkillsMixin
 
 # =============================================================================
 # STRUCTURE VALIDATION
@@ -145,13 +156,6 @@ from adapters.module_wrapper.symbol_generator import (
     extract_component_names_from_wrapper,
 )
 from adapters.module_wrapper.symbols_mixin import SymbolsMixin
-from adapters.module_wrapper.skills_mixin import SkillsMixin
-from adapters.module_wrapper.skill_types import (
-    SkillDocument,
-    SkillInfo,
-    SkillManifest,
-    SkillGeneratorConfig,
-)
 
 # =============================================================================
 # TEXT INDEXING
@@ -162,6 +166,52 @@ from adapters.module_wrapper.text_indexing import (
     search_by_text,
     search_components_by_relationship,
     search_within_module,
+)
+from adapters.module_wrapper.types import (
+    # Constants (also available from core, but centralized here)
+    COLBERT_DIM as TYPES_COLBERT_DIM,
+)
+from adapters.module_wrapper.types import (
+    MINILM_DIM,
+    CacheKey,
+    ComponentInfo,
+    ComponentName,
+    ComponentPath,
+    ComponentPaths,
+    DSLNotation,
+    Embeddable,
+    EmbeddingConfig,
+    EmbeddingDimension,
+    EmbeddingVector,
+    EvictionCallback,
+    HasSymbol,
+    IndexingStats,
+    IssueList,
+    JsonDict,
+    MultiVector,
+    # Type Aliases
+    Payload,
+    # Dataclasses
+    QdrantConfig,
+    QdrantFilter,
+    QueryText,
+    RelationshipDict,
+    RelationshipInfo,
+    RelationshipList,
+    ReverseSymbolMapping,
+    SearchResult,
+    # Protocols
+    Serializable,
+    SuggestionList,
+    Symbol,
+    SymbolMapping,
+    Timestamped,
+    TimestampedMixin,
+    Validatable,
+    WrapperGetter,
+)
+from adapters.module_wrapper.types import (
+    RELATIONSHIPS_DIM as TYPES_RELATIONSHIPS_DIM,
 )
 
 # =============================================================================

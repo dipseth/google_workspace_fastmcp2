@@ -9,6 +9,17 @@ import logging
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
+from adapters.module_wrapper.types import (
+    ComponentName,
+    ComponentPaths,
+    DSLNotation,
+    Payload,
+    RelationshipDict,
+    ReverseSymbolMapping,
+    Symbol,
+    SymbolMapping,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +45,7 @@ class SymbolsMixin:
     def get_symbol_table_text(
         self,
         module_prefix: Optional[str] = None,
-        custom_overrides: Optional[Dict[str, str]] = None,
+        custom_overrides: Optional[SymbolMapping] = None,
     ) -> str:
         """
         Generate human-readable symbol table for LLM instructions.
@@ -66,7 +77,7 @@ class SymbolsMixin:
 
     def build_component_embedding_with_symbol(
         self,
-        component_name: str,
+        component_name: ComponentName,
         module_prefix: Optional[str] = None,
     ) -> str:
         """
@@ -86,7 +97,7 @@ class SymbolsMixin:
 
         return generator.build_embedding_text(component_name)
 
-    def get_symbol_wrapped_text(self, component_name: str, text: str) -> str:
+    def get_symbol_wrapped_text(self, component_name: ComponentName, text: str) -> str:
         """
         Wrap text with the component's symbol for deterministic ColBERT embedding.
 
@@ -111,19 +122,19 @@ class SymbolsMixin:
             return f"{symbol} {text} {symbol}"
         return text
 
-    def get_symbol_for_component(self, component_name: str) -> Optional[str]:
+    def get_symbol_for_component(self, component_name: ComponentName) -> Optional[Symbol]:
         """Get the symbol for a component, if one exists."""
         return self.symbol_mapping.get(component_name)
 
-    def get_component_for_symbol(self, symbol: str) -> Optional[str]:
+    def get_component_for_symbol(self, symbol: Symbol) -> Optional[ComponentName]:
         """Get the component name for a symbol, if one exists."""
         return self.reverse_symbol_mapping.get(symbol)
 
     def query_by_symbol(
         self,
-        symbol: str,
+        symbol: Symbol,
         collection_name: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[Payload]:
         """
         Query Qdrant for a component by its symbol.
 
@@ -172,7 +183,7 @@ class SymbolsMixin:
                 return self.components[comp_name].to_dict()
             return None
 
-    def parse_dsl_to_components(self, dsl_string: str) -> Dict[str, Any]:
+    def parse_dsl_to_components(self, dsl_string: DSLNotation) -> Payload:
         """
         Parse DSL notation and resolve to component names and paths.
 
@@ -317,9 +328,9 @@ class SymbolsMixin:
 
     def instantiate_from_dsl(
         self,
-        dsl_string: str,
-        content: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        dsl_string: DSLNotation,
+        content: Optional[Payload] = None,
+    ) -> Payload:
         """
         Parse DSL and prepare component instances with content.
 
@@ -381,10 +392,10 @@ class SymbolsMixin:
 
     def build_dsl_from_paths(
         self,
-        component_paths: List[str],
+        component_paths: ComponentPaths,
         structure_description: str = "",
-        root_component: Optional[str] = None,
-    ) -> str:
+        root_component: Optional[ComponentName] = None,
+    ) -> DSLNotation:
         """
         Build DSL notation from a list of component paths.
 
@@ -454,7 +465,7 @@ class SymbolsMixin:
 
         return combined
 
-    def get_dsl_for_component(self, component_name: str, max_children: int = 5) -> str:
+    def get_dsl_for_component(self, component_name: ComponentName, max_children: int = 5) -> DSLNotation:
         """
         Get the DSL structure showing what a component can contain.
 
@@ -474,7 +485,7 @@ class SymbolsMixin:
         child_syms = [self.symbol_mapping.get(c, c) for c in children[:max_children]]
         return f"{symbol}[{', '.join(child_syms)}]"
 
-    def get_embedding_text(self, component_name: str, include_dsl: bool = True) -> str:
+    def get_embedding_text(self, component_name: ComponentName, include_dsl: bool = True) -> str:
         """
         Get embedding-efficient text for a component.
 
@@ -490,12 +501,12 @@ class SymbolsMixin:
         validator = self.get_structure_validator()
         return validator.get_enriched_relationship_text(component_name)
 
-    def get_all_embedding_texts(self) -> Dict[str, str]:
+    def get_all_embedding_texts(self) -> Dict[ComponentName, str]:
         """Get embedding texts for all components with relationships."""
         validator = self.get_structure_validator()
         return validator.get_all_enriched_relationships()
 
-    def backfill_symbols(self, batch_size: int = 100) -> Dict[str, int]:
+    def backfill_symbols(self, batch_size: int = 100) -> Payload:
         """
         Backfill symbol fields for existing points that don't have them.
 

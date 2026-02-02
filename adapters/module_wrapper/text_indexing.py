@@ -32,6 +32,11 @@ backwards compatibility and for use in scripts without a wrapper instance.
 import logging
 from typing import List, Optional
 
+from adapters.module_wrapper.types import (
+    ComponentName,
+    QueryText,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -198,7 +203,7 @@ def search_by_text(
     client,
     collection_name: str,
     field: str,
-    query: str,
+    query: QueryText,
     limit: int = 10,
     is_phrase: bool = False,
 ) -> list:
@@ -241,7 +246,7 @@ def search_by_text(
 def search_components_by_relationship(
     client,
     collection_name: str,
-    relationship_query: str,
+    relationship_query: QueryText,
     limit: int = 10,
 ) -> list:
     """
@@ -312,7 +317,7 @@ def search_within_module(
     client,
     collection_name: str,
     module_name: str,
-    text_query: str,
+    text_query: QueryText,
     field: str = "name",
     limit: int = 10,
 ) -> list:

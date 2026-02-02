@@ -43,13 +43,37 @@ import asyncio
 import importlib
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+from adapters.module_wrapper.types import (
+    # Constants
+    COLBERT_DIM as _COLBERT_DIM,
+)
+from adapters.module_wrapper.types import (
+    RELATIONSHIPS_DIM as _RELATIONSHIPS_DIM,
+)
+from adapters.module_wrapper.types import (
+    ComponentName,
+    ComponentPath,
+    EmbeddingVector,
+    MultiVector,
+    # Type Aliases
+    Payload,
+    QdrantFilter,
+    QueryText,
+    RelationshipDict,
+    ReverseSymbolMapping,
+    # Dataclasses
+    SearchResult,
+    Symbol,
+    SymbolMapping,
+)
 
 logger = logging.getLogger(__name__)
 
-# Constants for V7 collection
-COLBERT_DIM = 128  # ColBERT embedding dimension
-RELATIONSHIPS_DIM = 384  # MiniLM embedding dimension for relationships
+# Re-export constants for backwards compatibility
+COLBERT_DIM = _COLBERT_DIM  # ColBERT embedding dimension
+RELATIONSHIPS_DIM = _RELATIONSHIPS_DIM  # MiniLM embedding dimension for relationships
 
 
 # =============================================================================
@@ -142,8 +166,8 @@ class SearchMixin:
             return None
 
     def _embed_with_colbert(
-        self, text: str, token_ratio: float = 1.0
-    ) -> Optional[List[List[float]]]:
+        self, text: QueryText, token_ratio: float = 1.0
+    ) -> Optional[MultiVector]:
         """
         Generate ColBERT multi-vector embedding for text.
 
@@ -174,7 +198,7 @@ class SearchMixin:
             logger.error(f"ColBERT embedding failed: {e}")
             return None
 
-    def _embed_with_minilm(self, text: str) -> Optional[List[float]]:
+    def _embed_with_minilm(self, text: QueryText) -> Optional[EmbeddingVector]:
         """
         Generate MiniLM single-vector embedding for text.
 
@@ -206,8 +230,8 @@ class SearchMixin:
     # =========================================================================
 
     def search(
-        self, query: str, limit: int = 5, score_threshold: float = 0.3
-    ) -> List[Dict[str, Any]]:
+        self, query: QueryText, limit: int = 5, score_threshold: float = 0.3
+    ) -> List[Payload]:
         """
         Search for components in the module.
 
@@ -271,8 +295,8 @@ class SearchMixin:
             raise
 
     async def search_async(
-        self, query: str, limit: int = 5, score_threshold: float = 0.3
-    ) -> List[Dict[str, Any]]:
+        self, query: QueryText, limit: int = 5, score_threshold: float = 0.3
+    ) -> List[Payload]:
         """
         Search for components in the module asynchronously.
 
@@ -341,8 +365,8 @@ class SearchMixin:
             raise
 
     def colbert_search(
-        self, query: str, limit: int = 5, score_threshold: float = 0.3
-    ) -> List[Dict[str, Any]]:
+        self, query: QueryText, limit: int = 5, score_threshold: float = 0.3
+    ) -> List[Payload]:
         """
         Search for components using ColBERT multi-vector embeddings.
 
@@ -429,7 +453,7 @@ class SearchMixin:
             logger.info("Falling back to standard search")
             return self.search(query, limit, score_threshold)
 
-    def _direct_component_lookup(self, component_name: str) -> List[Dict[str, Any]]:
+    def _direct_component_lookup(self, component_name: ComponentName) -> List[Payload]:
         """
         Direct lookup for components by name.
 
@@ -493,7 +517,7 @@ class SearchMixin:
 
         return results
 
-    def _process_search_results(self, points: List) -> List[Dict[str, Any]]:
+    def _process_search_results(self, points: List[Any]) -> List[Payload]:
         """
         Process Qdrant search results into a standard format.
 
@@ -786,10 +810,10 @@ class SearchMixin:
 
     def query_by_symbol(
         self,
-        symbol: str,
+        symbol: Symbol,
         include_relationships: bool = True,
         limit: int = 1,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Payload]:
         """
         Query components by their DSL symbol.
 
@@ -859,10 +883,10 @@ class SearchMixin:
     def search_by_text(
         self,
         field: str,
-        query: str,
+        query: QueryText,
         limit: int = 10,
         is_phrase: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Payload]:
         """
         Search collection using Qdrant text index.
 
@@ -919,9 +943,9 @@ class SearchMixin:
 
     def search_by_relationship_text(
         self,
-        query: str,
+        query: QueryText,
         limit: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Payload]:
         """
         Search components by their relationship descriptions.
 

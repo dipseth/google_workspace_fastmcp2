@@ -27,6 +27,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
+from adapters.module_wrapper.types import (
+    ComponentName,
+    Payload,
+    ReverseSymbolMapping,
+    Symbol,
+    SymbolMapping,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -250,7 +258,7 @@ class SymbolGenerator:
     def __init__(
         self,
         module_prefix: Optional[str] = None,
-        custom_symbols: Optional[Dict[str, str]] = None,
+        custom_symbols: Optional[SymbolMapping] = None,
     ):
         """
         Initialize the symbol generator.
@@ -310,7 +318,7 @@ class SymbolGenerator:
         counter = len([s for s in self._used_symbols if s.startswith(letter_upper)])
         return f"{letter_upper}_{counter}"
 
-    def generate_symbol(self, component_name: str) -> str:
+    def generate_symbol(self, component_name: ComponentName) -> Symbol:
         """
         Generate a symbol for a single component.
 

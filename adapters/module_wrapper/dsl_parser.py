@@ -49,6 +49,20 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
+from adapters.module_wrapper.types import (
+    ComponentName,
+    ComponentPaths,
+    DSLNotation,
+    HasSymbol,
+    IssueList,
+    Payload,
+    ReverseSymbolMapping,
+    Serializable,
+    SuggestionList,
+    Symbol,
+    SymbolMapping,
+)
+
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper
 
@@ -374,8 +388,8 @@ class DSLParser:
 
     def __init__(
         self,
-        symbol_mapping: Optional[Dict[str, str]] = None,
-        reverse_mapping: Optional[Dict[str, str]] = None,
+        symbol_mapping: Optional[SymbolMapping] = None,
+        reverse_mapping: Optional[ReverseSymbolMapping] = None,
         relationships: Optional[Dict[str, List[str]]] = None,
         wrapper: Optional["ModuleWrapper"] = None,
     ):
@@ -406,12 +420,12 @@ class DSLParser:
         self._parse_cache: Dict[str, DSLParseResult] = {}
 
     @property
-    def symbols(self) -> Dict[str, str]:
+    def symbols(self) -> SymbolMapping:
         """Get component → symbol mapping."""
         return self._symbol_mapping
 
     @property
-    def reverse_symbols(self) -> Dict[str, str]:
+    def reverse_symbols(self) -> ReverseSymbolMapping:
         """Get symbol → component mapping."""
         return self._reverse_mapping
 
@@ -433,7 +447,7 @@ class DSLParser:
     # TOKENIZATION
     # =========================================================================
 
-    def tokenize(self, dsl_string: str) -> List[DSLToken]:
+    def tokenize(self, dsl_string: DSLNotation) -> List[DSLToken]:
         """
         Tokenize a DSL string into tokens.
 

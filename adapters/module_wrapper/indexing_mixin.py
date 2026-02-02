@@ -12,6 +12,14 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
+from adapters.module_wrapper.types import (
+    ComponentName,
+    ComponentPath,
+    EmbeddingVector,
+    IndexingStats,
+    Payload,
+)
+
 from .core import ModuleComponent
 
 logger = logging.getLogger(__name__)
@@ -250,9 +258,9 @@ class IndexingMixin:
 
     def _create_component(
         self,
-        name: str,
+        name: ComponentName,
         obj: Any,
-        module_path: str,
+        module_path: ComponentPath,
         parent: Optional[ModuleComponent] = None,
     ) -> ModuleComponent:
         """
@@ -384,7 +392,7 @@ class IndexingMixin:
         except Exception as e:
             logger.warning(f"Error indexing nested components for {parent.name}: {e}")
 
-    def _index_submodule(self, name: str, submodule: Any):
+    def _index_submodule(self, name: ComponentName, submodule: Any):
         """
         Recursively index a submodule's components.
 

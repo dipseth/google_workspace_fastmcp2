@@ -23,6 +23,16 @@ Usage:
 import logging
 from typing import Any, Dict, List, Optional, Type
 
+from adapters.module_wrapper.types import (
+    CacheKey,
+    ComponentPath,
+    ComponentPaths,
+    DSLNotation,
+    Payload,
+    SymbolMapping,
+    WrapperGetter,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -121,11 +131,11 @@ class CacheMixin:
 
     def cache_pattern(
         self,
-        key: str,
-        component_paths: List[str],
-        instance_params: Optional[Dict[str, Any]] = None,
+        key: CacheKey,
+        component_paths: ComponentPaths,
+        instance_params: Optional[Payload] = None,
         resolve_classes: bool = True,
-        dsl_notation: Optional[str] = None,
+        dsl_notation: Optional[DSLNotation] = None,
         structure_description: Optional[str] = None,
     ) -> "CacheEntry":
         """
@@ -200,8 +210,8 @@ class CacheMixin:
 
     def get_cached_entry(
         self,
-        key: str,
-        component_paths: Optional[List[str]] = None,
+        key: CacheKey,
+        component_paths: Optional[ComponentPaths] = None,
     ) -> Optional["CacheEntry"]:
         """
         Get a cached pattern entry.
@@ -218,7 +228,7 @@ class CacheMixin:
         cache = self._get_component_cache()
         return cache.get(key, component_paths)
 
-    def _resolve_component_path(self, component_name: str) -> Optional[str]:
+    def _resolve_component_path(self, component_name: str) -> Optional[ComponentPath]:
         """
         Resolve a component name to its full importable path.
 

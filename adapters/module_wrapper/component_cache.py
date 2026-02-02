@@ -45,6 +45,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
 
+from adapters.module_wrapper.types import (
+    CacheKey,
+    ComponentPath,
+    ComponentPaths,
+    DSLNotation,
+    EvictionCallback,
+    Payload,
+    Serializable,
+    TimestampedMixin,
+    WrapperGetter,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,10 +70,10 @@ class CacheEntry:
     """
 
     # Serializable (stored in L2 pickle)
-    key: str
-    component_paths: List[str]
+    key: CacheKey
+    component_paths: ComponentPaths
     instance_params: Dict[str, Any]
-    dsl_notation: Optional[str] = None
+    dsl_notation: Optional[DSLNotation] = None
     structure_description: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     last_accessed: float = field(default_factory=time.time)
@@ -71,7 +83,7 @@ class CacheEntry:
     component_classes: Dict[str, Type] = field(default_factory=dict)
     _is_hydrated: bool = False
 
-    def to_serializable(self) -> Dict[str, Any]:
+    def to_serializable(self) -> Payload:
         """Extract serializable data for pickle storage."""
         return {
             "key": self.key,
@@ -117,14 +129,14 @@ class LRUCache:
     def __init__(
         self,
         maxsize: int = 100,
-        on_evict: Optional[Callable[[str, CacheEntry], None]] = None,
+        on_evict: Optional[EvictionCallback] = None,
     ):
         self.maxsize = maxsize
         self.on_evict = on_evict
         self._cache: OrderedDict[str, CacheEntry] = OrderedDict()
         self._lock = threading.RLock()
 
-    def get(self, key: str) -> Optional[CacheEntry]:
+    def get(self, key: CacheKey) -> Optional[CacheEntry]:
         """Get item and move to end (most recently used)."""
         with self._lock:
             if key not in self._cache:
@@ -135,7 +147,7 @@ class LRUCache:
             entry.touch()
             return entry
 
-    def put(self, key: str, entry: CacheEntry) -> None:
+    def put(self, key: CacheKey, entry: CacheEntry) -> None:
         """Add item, evicting oldest if at capacity."""
         with self._lock:
             if key in self._cache:
@@ -154,12 +166,12 @@ class LRUCache:
 
             self._cache[key] = entry
 
-    def remove(self, key: str) -> Optional[CacheEntry]:
+    def remove(self, key: CacheKey) -> Optional[CacheEntry]:
         """Remove and return item without triggering eviction callback."""
         with self._lock:
             return self._cache.pop(key, None)
 
-    def contains(self, key: str) -> bool:
+    def contains(self, key: CacheKey) -> bool:
         """Check if key exists without updating access time."""
         with self._lock:
             return key in self._cache
@@ -171,7 +183,7 @@ class LRUCache:
             self._cache.clear()
             return count
 
-    def keys(self) -> List[str]:
+    def keys(self) -> List[CacheKey]:
         """Get all keys (snapshot)."""
         with self._lock:
             return list(self._cache.keys())
@@ -196,7 +208,7 @@ class ComponentCache:
         self,
         memory_limit: int = 100,
         cache_dir: Optional[str] = None,
-        wrapper_getter: Optional[Callable] = None,
+        wrapper_getter: Optional[WrapperGetter] = None,
         auto_hydrate: bool = True,
     ):
         """
@@ -239,7 +251,7 @@ class ComponentCache:
             f"L2={self.cache_dir}, L2 entries={len(self._l2_index)}"
         )
 
-    def _get_pickle_path(self, key: str) -> Path:
+    def _get_pickle_path(self, key: CacheKey) -> Path:
         """Get pickle file path for a cache key."""
         # Use hash to avoid filesystem issues with special characters
         key_hash = hashlib.sha256(key.encode()).hexdigest()[:16]
@@ -288,7 +300,7 @@ class ComponentCache:
             logger.info(f"Rebuilt L2 index: {len(self._l2_index)} entries")
             self._save_l2_index()
 
-    def _spill_to_l2(self, key: str, entry: CacheEntry) -> None:
+    def _spill_to_l2(self, key: CacheKey, entry: CacheEntry) -> None:
         """Callback when L1 evicts an item - save to L2."""
         pkl_path = self._get_pickle_path(key)
         try:
@@ -303,7 +315,7 @@ class ComponentCache:
         except Exception as e:
             logger.warning(f"Failed to spill {key} to L2: {e}")
 
-    def _load_from_l2(self, key: str) -> Optional[CacheEntry]:
+    def _load_from_l2(self, key: CacheKey) -> Optional[CacheEntry]:
         """Load entry from L2 pickle storage."""
         with self._l2_lock:
             if key not in self._l2_index:
@@ -370,7 +382,7 @@ class ComponentCache:
             return False
 
     def _reconstruct_from_wrapper(
-        self, key: str, component_paths: List[str]
+        self, key: CacheKey, component_paths: ComponentPaths
     ) -> Optional[CacheEntry]:
         """
         L3: Reconstruct entry from wrapper using component paths.
@@ -412,8 +424,8 @@ class ComponentCache:
 
     def get(
         self,
-        key: str,
-        component_paths: Optional[List[str]] = None,
+        key: CacheKey,
+        component_paths: Optional[ComponentPaths] = None,
     ) -> Optional[CacheEntry]:
         """
         Get a cached component entry.
@@ -459,11 +471,11 @@ class ComponentCache:
 
     def put(
         self,
-        key: str,
-        component_paths: List[str],
-        instance_params: Optional[Dict[str, Any]] = None,
+        key: CacheKey,
+        component_paths: ComponentPaths,
+        instance_params: Optional[Payload] = None,
         component_classes: Optional[Dict[str, Type]] = None,
-        dsl_notation: Optional[str] = None,
+        dsl_notation: Optional[DSLNotation] = None,
         structure_description: Optional[str] = None,
     ) -> CacheEntry:
         """
@@ -497,8 +509,8 @@ class ComponentCache:
 
     def put_from_pattern(
         self,
-        pattern: Dict[str, Any],
-        key: Optional[str] = None,
+        pattern: Payload,
+        key: Optional[CacheKey] = None,
     ) -> CacheEntry:
         """
         Store a component entry from an instance_pattern dict.
@@ -533,7 +545,7 @@ class ComponentCache:
             structure_description=pattern.get("structure_description"),
         )
 
-    def remove(self, key: str) -> bool:
+    def remove(self, key: CacheKey) -> bool:
         """
         Remove an entry from all cache levels.
 
@@ -634,7 +646,7 @@ class ComponentCache:
             return 0
 
     @property
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> Payload:
         """Get cache statistics."""
         total_requests = sum(self._stats.values())
         hit_rate = (
@@ -705,7 +717,7 @@ def get_component_cache(
         return _cache_instance
 
 
-def cache_pattern(pattern: Dict[str, Any], key: Optional[str] = None) -> CacheEntry:
+def cache_pattern(pattern: Payload, key: Optional[CacheKey] = None) -> CacheEntry:
     """
     Convenience function to cache an instance pattern.
 
@@ -721,8 +733,8 @@ def cache_pattern(pattern: Dict[str, Any], key: Optional[str] = None) -> CacheEn
 
 
 def get_cached_components(
-    key: str,
-    component_paths: Optional[List[str]] = None,
+    key: CacheKey,
+    component_paths: Optional[ComponentPaths] = None,
 ) -> Optional[Dict[str, Type]]:
     """
     Convenience function to get cached component classes.

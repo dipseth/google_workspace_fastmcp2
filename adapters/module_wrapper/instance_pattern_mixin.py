@@ -42,6 +42,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
+from adapters.module_wrapper.types import (
+    CacheKey,
+    ComponentPaths,
+    DSLNotation,
+    Payload,
+    RelationshipDict,
+    TimestampedMixin,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,15 +69,15 @@ class InstancePattern:
     """
 
     pattern_id: str
-    component_paths: List[str]
-    instance_params: Dict[str, Any]
+    component_paths: ComponentPaths
+    instance_params: Payload
     description: str = ""
-    dsl_notation: Optional[str] = None
+    dsl_notation: Optional[DSLNotation] = None
     feedback: Optional[str] = None  # "positive", "negative", None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Payload = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
 
-    def to_payload(self) -> Dict[str, Any]:
+    def to_payload(self) -> Payload:
         """Convert to Qdrant payload format."""
         return {
             "name": f"instance_pattern_{self.pattern_id[:8]}",
@@ -90,11 +99,11 @@ class PatternVariation:
 
     variation_id: str
     variation_type: str  # "structure", "parameter", "combined"
-    component_paths: List[str]
-    instance_params: Dict[str, Any]
+    component_paths: ComponentPaths
+    instance_params: Payload
     parent_id: str
-    dsl_notation: Optional[str] = None
-    cache_key: Optional[str] = None
+    dsl_notation: Optional[DSLNotation] = None
+    cache_key: Optional[CacheKey] = None
     created_at: float = field(default_factory=time.time)
 
 
@@ -105,7 +114,7 @@ class VariationFamily:
     parent_id: str
     source_pattern: InstancePattern
     variations: List[PatternVariation] = field(default_factory=list)
-    cache_keys: List[str] = field(default_factory=list)
+    cache_keys: List[CacheKey] = field(default_factory=list)
 
     @property
     def size(self) -> int:
@@ -124,12 +133,12 @@ class StructureVariator:
     Works with any module wrapper that has a relationships dict.
     """
 
-    def __init__(self, relationships: Dict[str, List[str]]):
+    def __init__(self, relationships: RelationshipDict):
         """
         Args:
             relationships: Dict mapping parent component → list of valid children
         """
-        self.relationships = relationships
+        self.relationships: RelationshipDict = relationships
         self._sibling_cache: Dict[str, List[str]] = {}
 
     def get_valid_children(self, component_name: str) -> List[str]:
@@ -153,9 +162,9 @@ class StructureVariator:
 
     def swap_sibling(
         self,
-        component_paths: List[str],
+        component_paths: ComponentPaths,
         target_index: Optional[int] = None,
-    ) -> Optional[List[str]]:
+    ) -> Optional[ComponentPaths]:
         """Swap a component with a valid sibling."""
         import random
 
@@ -181,9 +190,9 @@ class StructureVariator:
 
     def add_child(
         self,
-        component_paths: List[str],
+        component_paths: ComponentPaths,
         parent_name: Optional[str] = None,
-    ) -> Optional[List[str]]:
+    ) -> Optional[ComponentPaths]:
         """Add a valid child component."""
         import random
 
@@ -218,9 +227,9 @@ class StructureVariator:
 
     def remove_optional(
         self,
-        component_paths: List[str],
+        component_paths: ComponentPaths,
         required: Optional[Set[str]] = None,
-    ) -> Optional[List[str]]:
+    ) -> Optional[ComponentPaths]:
         """Remove a non-required component."""
         import random
 
@@ -242,10 +251,10 @@ class StructureVariator:
 
     def expand_repeated(
         self,
-        component_paths: List[str],
+        component_paths: ComponentPaths,
         repeatable: Optional[List[str]] = None,
         max_expand: int = 2,
-    ) -> Optional[List[str]]:
+    ) -> Optional[ComponentPaths]:
         """Add more instances of a repeatable component."""
         import random
 
@@ -272,11 +281,11 @@ class StructureVariator:
 
     def generate_variations(
         self,
-        component_paths: List[str],
+        component_paths: ComponentPaths,
         num_variations: int = 3,
         required_components: Optional[Set[str]] = None,
         repeatable_components: Optional[List[str]] = None,
-    ) -> List[List[str]]:
+    ) -> List[ComponentPaths]:
         """Generate multiple structural variations."""
         import random
 
@@ -368,10 +377,10 @@ class ParameterVariator:
 
     def vary_params(
         self,
-        params: Dict[str, Any],
+        params: Payload,
         vary_keys: Optional[List[str]] = None,
         max_keys_to_vary: int = 3,
-    ) -> Dict[str, Any]:
+    ) -> Payload:
         """
         Generate a variation of parameters.
 
@@ -423,9 +432,9 @@ class ParameterVariator:
 
     def generate_variations(
         self,
-        params: Dict[str, Any],
+        params: Payload,
         num_variations: int = 3,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Payload]:
         """Generate multiple parameter variations."""
         variations = []
         seen_hashes = set()
@@ -527,7 +536,7 @@ class InstancePatternMixin:
         content = f"{pattern.component_paths}{pattern.instance_params}{pattern.description}"
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
-    def _build_pattern_dsl(self, component_paths: List[str]) -> Optional[str]:
+    def _build_pattern_dsl(self, component_paths: ComponentPaths) -> Optional[DSLNotation]:
         """Build DSL notation for a pattern."""
         if hasattr(self, "build_dsl_from_paths"):
             try:
@@ -538,11 +547,11 @@ class InstancePatternMixin:
 
     def store_instance_pattern(
         self,
-        component_paths: List[str],
-        instance_params: Dict[str, Any],
+        component_paths: ComponentPaths,
+        instance_params: Payload,
         description: str = "",
         feedback: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Payload] = None,
         generate_variations: bool = True,
         num_structure_variations: Optional[int] = None,
         num_param_variations: Optional[int] = None,
@@ -822,7 +831,7 @@ class InstancePatternMixin:
         self,
         pattern_id: str,
         variation_type: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[Payload]:
         """
         Get a cached variation with hydrated component classes.
 
@@ -854,7 +863,7 @@ class InstancePatternMixin:
         return None
 
     @property
-    def pattern_stats(self) -> Dict[str, Any]:
+    def pattern_stats(self) -> Payload:
         """Get instance pattern statistics."""
         families = self._get_variation_families()
         total_variations = sum(f.size for f in families.values())
