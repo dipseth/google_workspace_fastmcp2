@@ -29,11 +29,15 @@ class TestFastMCPToolRegistry:
         
         assert result == {"tool1": "instance1", "tool2": "instance2"}
 
+    @pytest.mark.skipif(
+        True, 
+        reason="Requires fastmcp.tools.tool.Tool to be available - tested in integration tests"
+    )
     def test_get_tools_dict_fastmcp_3x(self):
         """Test accessing tools from FastMCP 3.0+ structure."""
-        # Skip the actual Tool import validation since it requires fastmcp to be installed
-        # The logic just needs isinstance check to work
-        pytest.skip("Requires fastmcp installed - logic tested in integration tests")
+        # This test requires the actual fastmcp package to properly test isinstance checks
+        # The logic is covered by integration tests that run with fastmcp installed
+        pass
 
     def test_get_tools_dict_unsupported(self):
         """Test error when server structure is unsupported."""

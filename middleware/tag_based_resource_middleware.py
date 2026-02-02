@@ -491,15 +491,19 @@ class TagBasedResourceMiddleware(Middleware):
         return None, None
 
     def _convert_result_to_serializable(self, result: Any) -> Any:
-        """Convert tool result to serializable format using compatibility utilities."""
+        """
+        Convert tool result to serializable format using compatibility utilities.
+        
+        Special handling: Some tool results have iterable content with text attributes
+        that need to be extracted individually and potentially parsed as JSON.
+        This case isn't handled by the generic ResponseSerializer.
+        """
         from config.fastmcp_compat import ResponseSerializer
         
-        # Use ResponseSerializer for consistent serialization
-        serialized = ResponseSerializer.serialize(result)
-        
-        # Handle special case where content is iterable (list of items with text)
+        # Check for special iterable content case before using generic serializer
         if hasattr(result, "content"):
             content = result.content
+            # Handle list of items with text attributes (e.g., MCP resource contents)
             if hasattr(content, "__iter__") and not isinstance(content, (str, bytes)):
                 extracted_content = []
                 for item in content:
@@ -518,7 +522,8 @@ class TagBasedResourceMiddleware(Middleware):
                 else:
                     return extracted_content
         
-        return serialized
+        # For all other cases, use the standard ResponseSerializer
+        return ResponseSerializer.serialize(result)
 
     async def _handle_service_lists(
         self, service: str, context: MiddlewareContext
