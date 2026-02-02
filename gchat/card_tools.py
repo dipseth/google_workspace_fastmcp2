@@ -114,6 +114,96 @@ except ImportError:
     Message = None  # Placeholder for when Card Framework is not available
 
 
+def _generate_alternative_dsl(
+    rendered_dsl: Optional[str],
+    component_paths: Optional[list] = None,
+    max_alternatives: int = 3,
+) -> Optional[list]:
+    """
+    Generate alternative valid DSL patterns based on rendered card structure.
+
+    Uses the wrapper's variation capabilities to suggest similar but different
+    card structures that would also be valid.
+
+    Args:
+        rendered_dsl: The DSL notation of the rendered card
+        component_paths: List of component paths used in the card
+        max_alternatives: Maximum number of alternatives to generate
+
+    Returns:
+        List of alternative DSL strings, or None if generation fails
+    """
+    if not rendered_dsl:
+        return None
+
+    try:
+        from gchat.card_framework_wrapper import get_card_framework_wrapper
+
+        wrapper = get_card_framework_wrapper()
+        symbols = wrapper.symbol_mapping
+
+        # Extract components from rendered DSL (first section before +)
+        base_dsl = rendered_dsl.split(" + ")[0].strip()
+
+        # Common alternative patterns based on what's in the DSL
+        alternatives = []
+
+        # Get symbols for common components
+        section_sym = symbols.get("Section", "§")
+        text_sym = symbols.get("DecoratedText", "δ")
+        para_sym = symbols.get("TextParagraph", "ʈ")
+        btn_list_sym = symbols.get("ButtonList", "Ƀ")
+        btn_sym = symbols.get("Button", "ᵬ")
+        chip_list_sym = symbols.get("ChipList", "ȼ")
+        chip_sym = symbols.get("Chip", "ℂ")
+        img_sym = symbols.get("Image", "Ɨ")
+        grid_sym = symbols.get("Grid", "ℊ")
+        grid_item_sym = symbols.get("GridItem", "ǵ")
+        divider_sym = symbols.get("Divider", "Đ")
+
+        # Generate variations based on common patterns
+        if text_sym in base_dsl:
+            # Text card variations
+            alternatives.append(f"{section_sym}[{text_sym}, {divider_sym}]")
+            alternatives.append(f"{section_sym}[{para_sym}]")
+            alternatives.append(f"{section_sym}[{text_sym}, {btn_list_sym}[{btn_sym}]]")
+
+        if btn_list_sym in base_dsl or btn_sym in base_dsl:
+            # Button variations
+            alternatives.append(f"{section_sym}[{text_sym}, {btn_list_sym}[{btn_sym}×3]]")
+            alternatives.append(f"{section_sym}[{chip_list_sym}[{chip_sym}×2]]")
+
+        if chip_list_sym in base_dsl or chip_sym in base_dsl:
+            # Chip variations
+            alternatives.append(f"{section_sym}[{text_sym}, {chip_list_sym}[{chip_sym}×3]]")
+            alternatives.append(f"{section_sym}[{btn_list_sym}[{btn_sym}×2]]")
+
+        if img_sym in base_dsl:
+            # Image variations
+            alternatives.append(f"{section_sym}[{img_sym}, {text_sym}]")
+            alternatives.append(f"{section_sym}[{grid_sym}[{grid_item_sym}×4]]")
+
+        # Add a grid alternative if not already present
+        if grid_sym not in base_dsl:
+            alternatives.append(f"{section_sym}[{grid_sym}[{grid_item_sym}×4]]")
+
+        # Filter out duplicates and the original, limit results
+        seen = {base_dsl}
+        unique = []
+        for alt in alternatives:
+            if alt not in seen:
+                seen.add(alt)
+                unique.append(alt)
+                if len(unique) >= max_alternatives:
+                    break
+
+        return unique if unique else None
+
+    except Exception as e:
+        logger.debug(f"Failed to generate alternative DSL: {e}")
+        return None
+
+
 # Global variables for module wrappers and caches
 _card_framework_wrapper = None
 _qdrant_client = None
@@ -528,6 +618,15 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 card_params = {}
 
             # =================================================================
+            # EXTRACT MESSAGE-LEVEL PARAMS FROM card_params (early extraction)
+            # These need to be extracted before webhook URL is built
+            # =================================================================
+            if not thread_key:
+                thread_key = card_params.get("thread_key") or card_params.get("thread")
+                if thread_key:
+                    logger.info(f"🧵 Extracted thread_key from card_params: {thread_key}")
+
+            # =================================================================
             # NLP PARSING COMMENTED OUT - SmartCardBuilder has its own inference
             # SmartCardBuilder.infer_content_type() detects prices, IDs, URLs, etc.
             # SmartCardBuilder.infer_layout() detects columns, image positioning
@@ -711,10 +810,47 @@ def setup_card_tools(mcp: FastMCP) -> None:
             # Create message payload
             message_obj = Message()
 
-            # IMPORTANT: Don't set top-level message text when sending a card.
-            # If we include both message-level text and a card widget (e.g. textParagraph),
-            # Google Chat renders BOTH, which looks like duplicated content.
-            # Keep text content inside card widgets only.
+            # =================================================================
+            # MESSAGE-LEVEL PARAMS FROM card_params
+            # These can be passed in card_params as an alternative to tool params
+            # =================================================================
+
+            # Extract thread_key from card_params if not provided as tool param
+            if not thread_key:
+                thread_key = card_params.get("thread_key") or card_params.get("thread")
+                if thread_key:
+                    logger.debug(f"🧵 Extracted thread_key from card_params: {thread_key}")
+
+            # Set fallback_text if provided in card_params
+            # This shows in notifications and is used for accessibility
+            fallback_text = card_params.get("fallback_text") or card_params.get("notification_text")
+            if fallback_text:
+                message_obj.fallback_text = fallback_text
+                logger.debug(f"📱 Set fallback_text for notifications: {fallback_text[:50]}...")
+
+            # Set plain text content (appears above/below card)
+            text_content = card_params.get("text_content") or card_params.get("message_text")
+            if text_content:
+                message_obj.text = text_content
+                logger.debug(f"📝 Set message text: {text_content[:50]}...")
+
+            # Set quoted message metadata for reply quotes
+            quoted_message = card_params.get("quoted_message_metadata") or card_params.get("quote")
+            if quoted_message:
+                if isinstance(quoted_message, dict):
+                    # Expect {"name": "spaces/X/messages/Y", "lastUpdateTime": "..."}
+                    from card_framework.v2.message import QuotedMessageMetadata
+                    message_obj.quoted_message_metadata = QuotedMessageMetadata(
+                        name=quoted_message.get("name"),
+                        last_update_time=quoted_message.get("last_update_time") or quoted_message.get("lastUpdateTime")
+                    )
+                    logger.debug(f"💬 Set quoted message: {quoted_message.get('name')}")
+
+            # Set annotations (rich text annotations like user mentions)
+            annotations = card_params.get("annotations")
+            if annotations and isinstance(annotations, list):
+                message_obj.annotations = annotations
+                logger.debug(f"🏷️ Set {len(annotations)} annotations")
 
             # Add card to message - handle both single card object and wrapped format
             if isinstance(google_format_card, dict) and "cardsV2" in google_format_card:
@@ -725,16 +861,52 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 # New format - single card object
                 message_obj.cards_v2.append(google_format_card)
 
+            # Add accessory_widgets if provided (buttons at bottom of message, outside card)
+            # These are useful for feedback buttons or quick actions
+            accessory_widgets = card_params.get("accessory_widgets")
+            if accessory_widgets:
+                # Use wrapper to get classes (avoid direct imports)
+                # Use full paths for v2 classes to avoid v1 conflicts
+                from gchat.card_framework_wrapper import get_card_framework_wrapper
+                wrapper = get_card_framework_wrapper()
+                AccessoryWidget = wrapper.get_cached_class("AccessoryWidget")
+                ButtonList = wrapper.get_cached_class("ButtonList")
+                Button = wrapper.get_cached_class("Button")
+                # OnClick and OpenLink need full paths to get v2 versions
+                OnClick = wrapper.get_component_by_path("card_framework.v2.widgets.on_click.OnClick")
+                OpenLink = wrapper.get_component_by_path("card_framework.v2.widgets.open_link.OpenLink")
+
+                if AccessoryWidget and ButtonList and Button:
+                    for aw in accessory_widgets:
+                        if isinstance(aw, dict):
+                            # Build AccessoryWidget from dict
+                            # AccessoryWidget only supports button_list per API docs
+                            if "buttonList" in aw or "button_list" in aw:
+                                button_list = aw.get("buttonList") or aw.get("button_list")
+                                buttons = []
+                                for btn_data in button_list.get("buttons", []):
+                                    btn = Button(text=btn_data.get("text", ""))
+                                    if btn_data.get("onClick") or btn_data.get("url"):
+                                        url = btn_data.get("url") or btn_data.get("onClick", {}).get("openLink", {}).get("url")
+                                        if url and OnClick and OpenLink:
+                                            btn.on_click = OnClick(open_link=OpenLink(url=url))
+                                    buttons.append(btn)
+                                if buttons:
+                                    bl = ButtonList(buttons=buttons)
+                                    aw_obj = AccessoryWidget(button_list=bl)
+                                    message_obj.accessory_widgets.append(aw_obj)
+                                    logger.debug(f"🔘 Added accessory widget with {len(buttons)} buttons")
+
             # Render message
             message_body = message_obj.render()
 
-            # Fix Card Framework v2 field name issue: ensure proper cards_v2 format for webhook
-            # The Google Chat webhook API expects snake_case (cards_v2), NOT camelCase (cardsV2)
-            if "cards_v_2" in message_body:
-                message_body["cards_v2"] = message_body.pop("cards_v_2")
-            # Convert camelCase back to snake_case for webhook delivery (webhook API expects snake_case)
-            if "cardsV2" in message_body:
-                message_body["cards_v2"] = message_body.pop("cardsV2")
+            # Convert snake_case to camelCase using SmartCardBuilder's method
+            builder = get_smart_card_builder()
+            message_body = builder._convert_to_camel_case(message_body)
+
+            # Special case: fallbackText -> text (Google Chat webhook uses 'text' not 'fallbackText')
+            if "fallbackText" in message_body:
+                message_body["text"] = message_body.pop("fallbackText")
 
             # CRITICAL DEBUGGING: Pre-validate card content before sending
             await progress.set_message("Validating card content...")
@@ -743,8 +915,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 if isinstance(google_format_card, dict)
                 else {}
             )
-            # Use SmartCardBuilder directly for validation
-            builder = get_smart_card_builder()
+            # Use SmartCardBuilder for validation (reuse builder from camelCase conversion)
             is_valid_content, content_issues = builder.validate_content(final_card)
 
             # Generate DSL notation from rendered card (for LLM learning)
@@ -812,10 +983,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 # produces correctly formatted cards.
                 webhook_message_body = builder._clean_card_metadata(message_body)
 
-                # CRITICAL FIX: Add thread to message body for webhook threading
-                if thread_key:
-                    webhook_message_body["thread"] = {"name": thread_key}
-                    logger.debug(f"Added thread to webhook message body: {thread_key}")
+                # NOTE: Threading for webhooks is handled via URL params (threadKey, messageReplyOption)
+                # added in _process_thread_key_for_webhook_url(). Do NOT add thread.name to body
+                # as it expects a full resource name which we don't have for new threads.
 
                 # ENHANCED DEBUGGING: Log everything before sending
                 logger.info(
@@ -964,6 +1134,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             inputMapping=input_mapping_info,
                             expectedParams=expected_params_info,
                             suggestedDsl=suggested_dsl,
+                            alternativeDsl=_generate_alternative_dsl(rendered_dsl),
                             message="Card message sent successfully via webhook",
                         )
                 elif response.status_code == 429:
@@ -1088,6 +1259,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     inputMapping=input_mapping_info,
                     expectedParams=expected_params_info,
                     suggestedDsl=suggested_dsl,
+                    alternativeDsl=_generate_alternative_dsl(rendered_dsl),
                     message=f"Card message sent successfully to space '{space_id}'",
                 )
 

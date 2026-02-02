@@ -996,10 +996,16 @@ async def run_smoke_tests(
 if __name__ == "__main__":
     import sys
 
+    from config.enhanced_logging import setup_logger
+
+    logger = setup_logger()
+
     if len(sys.argv) < 2:
-        print("Usage: python smoke_test_generator.py <webhook_url> [num_iterations]")
-        print("\nExample:")
-        print(
+        logger.error(
+            "Usage: python smoke_test_generator.py <webhook_url> [num_iterations]"
+        )
+        logger.error("Example:")
+        logger.error(
             "  python smoke_test_generator.py 'https://chat.googleapis.com/v1/spaces/...' 3"
         )
         sys.exit(1)
@@ -1007,23 +1013,25 @@ if __name__ == "__main__":
     webhook_url = sys.argv[1]
     num_iterations = int(sys.argv[2]) if len(sys.argv) > 2 else 1
 
-    print(f"Running smoke tests against: {webhook_url[:50]}...")
-    print(f"Iterations: {num_iterations}")
-    print()
+    logger.info("Running smoke tests against: %s...", webhook_url[:50])
+    logger.info("Iterations: %s", num_iterations)
 
     results = asyncio.run(run_smoke_tests(webhook_url, num_iterations))
 
     # Summary
     success_count = sum(1 for r in results if r.success)
-    print()
-    print("=" * 60)
-    print(f"SMOKE TEST SUMMARY: {success_count}/{len(results)} passed")
-    print("=" * 60)
+    logger.info("%s", "=" * 60)
+    logger.info("SMOKE TEST SUMMARY: %s/%s passed", success_count, len(results))
+    logger.info("%s", "=" * 60)
 
     for r in results:
         status = "✅" if r.success else "❌"
-        print(
-            f"  {status} {r.test_id}: text={r.text_count}, clickable={r.clickable_count}"
+        logger.info(
+            "  %s %s: text=%s, clickable=%s",
+            status,
+            r.test_id,
+            r.text_count,
+            r.clickable_count,
         )
         if r.error:
-            print(f"      Error: {r.error[:80]}")
+            logger.error("      Error: %s", r.error[:80])

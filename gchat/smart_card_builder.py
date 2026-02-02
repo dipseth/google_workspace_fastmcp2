@@ -2,17 +2,23 @@
 Smart Card Builder v2 - DSL + Embeddings Focused
 
 A streamlined card builder that uses:
-1. Structure DSL: §[δ×3, Ƀ[ᵬ×2]] for component hierarchy
-2. Content DSL: δ 'text' success bold for styled content
+1. Structure DSL: symbol[child×N] for component hierarchy
+2. Content DSL: symbol 'text' style for styled content
 3. Qdrant ColBERT embeddings for semantic search
 4. ModuleWrapper for component loading
+
+NOTE: All DSL symbols are dynamically generated from ModuleWrapper.
+Query wrapper.symbol_mapping for current symbol-to-component mappings.
+Common examples (may vary): § (Section), δ (DecoratedText), Ƀ (ButtonList), ᵬ (Button)
 
 This replaces the legacy NL parsing with a cleaner DSL-first approach.
 
 Usage:
     builder = SmartCardBuilderV2()
+    # Get current symbols from wrapper
+    symbols = builder._get_wrapper().symbol_mapping
     card = builder.build(
-        description="§[δ×3, Ƀ[ᵬ×2]] Dashboard\\n\\nδ 'Status: Online' success bold",
+        description="§[δ×3, Ƀ[ᵬ×2]] Dashboard",  # Use symbols from mapping
         title="My Card"
     )
 """
@@ -21,9 +27,13 @@ import json
 import logging
 import os
 import random
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from functools import wraps
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
 
 from dotenv import load_dotenv
 
@@ -41,48 +51,258 @@ ENABLE_FEEDBACK_BUTTONS = os.getenv("ENABLE_CARD_FEEDBACK", "true").lower() == "
 
 
 # =============================================================================
-# GENERIC COMPONENT CONFIGURATION (Mapping-Driven, No If/Else)
+# FIRE-AND-FORGET DECORATOR
 # =============================================================================
-# These mappings replace hardcoded if/elif chains with dynamic configuration.
-# They can be extended or derived from wrapper metadata.
+# Decorator to run methods in background threads for non-blocking storage operations.
+
+F = TypeVar("F", bound=Callable[..., None])
+
+
+def fire_and_forget(func: F) -> F:
+    """Run a method in a background daemon thread.
+
+    The decorated function runs asynchronously and returns immediately.
+    The original sync function is preserved as `.sync` for testing/direct calls.
+
+    Usage:
+        @fire_and_forget
+        def _store_something(self, data):
+            # This runs in background thread
+            ...
+
+        # Call async (fire-and-forget):
+        obj._store_something(data)
+
+        # Call sync (for testing):
+        obj._store_something.sync(obj, data)
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        thread = threading.Thread(target=lambda: func(*args, **kwargs), daemon=True)
+        thread.start()
+
+    # Preserve sync version for testing
+    wrapper.sync = func  # type: ignore[attr-defined]
+    return wrapper  # type: ignore[return-value]
+
+
+# =============================================================================
+# GENERIC COMPONENT CONFIGURATION (Fallback Defaults)
+# =============================================================================
+# These mappings are FALLBACKS when ModuleWrapper is not available.
+# When wrapper is available, use wrapper.get_context_resource(), etc.
+# The wrapper's metadata is the SSoT (set in card_framework_wrapper.py).
 
 # Context consumers: component_name -> (context_key, index_key)
-# Defines which context resource each component type consumes from
-CONTEXT_CONSUMERS: Dict[str, Tuple[str, str]] = {
+# FALLBACK - Use wrapper.get_context_resource() when available
+_CONTEXT_CONSUMERS_FALLBACK: Dict[str, Tuple[str, str]] = {
     "Button": ("buttons", "_button_index"),
+    "Chip": ("chips", "_chip_index"),
     "DecoratedText": ("content_texts", "_text_index"),
     "TextParagraph": ("content_texts", "_text_index"),
+    "CarouselCard": ("carousel_cards", "_carousel_card_index"),
 }
 
 # Container components: component_name -> children_field
-# Defines how container components store their children
-CONTAINER_CHILDREN: Dict[str, str] = {
+# FALLBACK - Use wrapper.get_children_field() when available
+_CONTAINER_CHILDREN_FALLBACK: Dict[str, str] = {
     "ButtonList": "buttons",
     "Grid": "items",
     "ChipList": "chips",
     "Columns": "columnItems",
     "Column": "widgets",
+    "Section": "widgets",
+    # Carousel hierarchy (Google Chat API specific)
+    "Carousel": "carouselCards",
+    "CarouselCard": "widgets",  # via NestedWidget
+    "NestedWidget": "widgets",
 }
 
 # Child component mapping for containers: what child type each container expects
-CONTAINER_CHILD_TYPE: Dict[str, str] = {
+# FALLBACK - Use wrapper.get_container_child_type() when available
+_CONTAINER_CHILD_TYPE_FALLBACK: Dict[str, str] = {
     "ButtonList": "Button",
     "Grid": "GridItem",
     "ChipList": "Chip",
     "Columns": "Column",
+    # Carousel hierarchy
+    "Carousel": "CarouselCard",
+    "CarouselCard": "NestedWidget",
+    "NestedWidget": "TextParagraph",  # NestedWidget supports TextParagraph, ButtonList, Image
 }
 
 # Form components that require a 'name' field
-FORM_COMPONENTS: set = {"TextInput", "DateTimePicker", "SelectionInput", "SwitchControl"}
+# FALLBACK - Use wrapper.is_form_component() when available
+_FORM_COMPONENTS_FALLBACK: set = {"TextInput", "DateTimePicker", "SelectionInput", "SwitchControl"}
 
 # Components with no content (just structure)
-EMPTY_COMPONENTS: set = {"Divider"}
+# FALLBACK - Use wrapper.is_empty_component() when available
+_EMPTY_COMPONENTS_FALLBACK: set = {"Divider", "CollapseControl"}
+
+
+# =============================================================================
+# COMPONENT METADATA ACCESSORS (Query Wrapper or Fall Back)
+# =============================================================================
+# These functions query the ModuleWrapper (via ComponentMetadataProvider protocol)
+# for component metadata. If wrapper is None, fall back to the static dicts above.
+
+# Import the protocol for type checking
+try:
+    from adapters.module_wrapper import ComponentMetadataProvider
+except ImportError:
+    ComponentMetadataProvider = None  # type: ignore
+
+
+def get_context_resource(
+    component: str, wrapper: Optional["ComponentMetadataProvider"] = None
+) -> Optional[Tuple[str, str]]:
+    """Get context resource for a component (wrapper SSoT, fallback to dict)."""
+    if wrapper is not None:
+        result = wrapper.get_context_resource(component)
+        if result:
+            return result
+    return _CONTEXT_CONSUMERS_FALLBACK.get(component)
+
+
+def get_children_field(
+    container: str, wrapper: Optional["ComponentMetadataProvider"] = None
+) -> Optional[str]:
+    """Get children field for a container (wrapper SSoT, fallback to dict)."""
+    if wrapper is not None:
+        result = wrapper.get_children_field(container)
+        if result:
+            return result
+    return _CONTAINER_CHILDREN_FALLBACK.get(container)
+
+
+def get_container_child_type(
+    container: str, wrapper: Optional["ComponentMetadataProvider"] = None
+) -> Optional[str]:
+    """Get expected child type for a container (wrapper SSoT, fallback to dict)."""
+    if wrapper is not None:
+        result = wrapper.get_container_child_type(container)
+        if result:
+            return result
+    return _CONTAINER_CHILD_TYPE_FALLBACK.get(container)
+
+
+def is_form_component(
+    component: str, wrapper: Optional["ComponentMetadataProvider"] = None
+) -> bool:
+    """Check if component is a form component (wrapper SSoT, fallback to set)."""
+    if wrapper is not None:
+        return wrapper.is_form_component(component)
+    return component in _FORM_COMPONENTS_FALLBACK
+
+
+def is_empty_component(
+    component: str, wrapper: Optional["ComponentMetadataProvider"] = None
+) -> bool:
+    """Check if component is empty (wrapper SSoT, fallback to set)."""
+    if wrapper is not None:
+        return wrapper.is_empty_component(component)
+    return component in _EMPTY_COMPONENTS_FALLBACK
+
+
+# =============================================================================
+# STYLE METADATA EXTRACTION
+# =============================================================================
+
+
+def extract_style_metadata(text: str) -> Dict[str, List[str]]:
+    """
+    Extract style information from Jinja expressions in text.
+
+    Analyzes text for Jinja filter usage, colors, semantic styles, and formatting
+    to build a style metadata dictionary that can be stored with patterns and
+    reapplied to new cards.
+
+    Args:
+        text: Text potentially containing Jinja expressions like {{ 'text' | filter }}
+
+    Returns:
+        Dict with keys:
+        - jinja_filters: All filters used (e.g., ["success_text", "bold"])
+        - colors: Hex colors found (e.g., ["#00FF00"])
+        - semantic_styles: Semantic style names (e.g., ["success", "error"])
+        - formatting: Formatting filters (e.g., ["bold", "italic"])
+    """
+    import re
+
+    metadata: Dict[str, List[str]] = {
+        "jinja_filters": [],
+        "colors": [],
+        "semantic_styles": [],
+        "formatting": [],
+    }
+
+    if not text:
+        return metadata
+
+    # Extract Jinja filter chains: {{ 'text' | filter1 | filter2 }}
+    # Matches everything after the first pipe until closing braces
+    jinja_pattern = r"\{\{\s*[^|]+\|([^}]+)\}\}"
+    for match in re.finditer(jinja_pattern, text):
+        filters = [f.strip() for f in match.group(1).split("|")]
+        metadata["jinja_filters"].extend(filters)
+
+    # Extract colors: color('#HEX') or color('#hex') or color('success')
+    color_pattern = r"color\(['\"]?(#[0-9A-Fa-f]{6})['\"]?\)"
+    metadata["colors"] = re.findall(color_pattern, text)
+
+    # Map filters to semantic styles
+    SEMANTIC_MAP = {
+        "success_text": "success",
+        "error_text": "error",
+        "warning_text": "warning",
+        "info_text": "info",
+    }
+    for f in metadata["jinja_filters"]:
+        if f in SEMANTIC_MAP:
+            metadata["semantic_styles"].append(SEMANTIC_MAP[f])
+
+    # Extract formatting filters
+    FORMATTING = {"bold", "italic", "strike", "underline"}
+    metadata["formatting"] = [f for f in metadata["jinja_filters"] if f in FORMATTING]
+
+    # Deduplicate all lists
+    for key in metadata:
+        metadata[key] = list(set(metadata[key]))
+
+    return metadata
+
 
 # =============================================================================
 # COMPONENT PARAMS REGISTRY - Documents expected params for each component
 # =============================================================================
 
 COMPONENT_PARAMS: Dict[str, Dict[str, str]] = {
+    # ==========================================================================
+    # MESSAGE-LEVEL COMPONENTS (above Card level)
+    # These can be passed in card_params and will be applied to the Message
+    # ==========================================================================
+    "Message": {
+        "fallback_text": "Text shown in notifications and for accessibility (optional)",
+        "notification_text": "Alias for fallback_text",
+        "accessory_widgets": "List of AccessoryWidget dicts for buttons at message bottom",
+        "thread_key": "Thread key for reply threading (custom key or existing thread ID)",
+        "thread": "Alias for thread_key",
+        "text_content": "Plain text to appear with the card",
+        "message_text": "Alias for text_content",
+        "quoted_message_metadata": "Quote a message: {name: 'spaces/X/messages/Y'}",
+        "quote": "Alias for quoted_message_metadata",
+        "annotations": "List of annotation dicts for rich text (mentions, etc.)",
+    },
+    "AccessoryWidget": {
+        "button_list": "ButtonList dict with buttons array: {buttons: [{text, url}, ...]}",
+    },
+    "Thread": {
+        "name": "Full thread resource name (spaces/X/threads/Y)",
+        "thread_key": "Custom thread key for creating/replying to threads",
+    },
+    # ==========================================================================
+    # WIDGET COMPONENTS
+    # ==========================================================================
     "DecoratedText": {
         "text": "Main text content to display",
         "top_label": "Small label above the text",
@@ -124,7 +344,600 @@ COMPONENT_PARAMS: Dict[str, Dict[str, str]] = {
     "Column": {"widgets": "List of widget dicts for this column"},
     "Divider": {},
     "Section": {"header": "Optional section header text", "widgets": "List of widgets"},
+    # Carousel components (Google Chat API specific)
+    # Note: CarouselCard has NO header field - use textParagraph for titles
+    # Widgets are direct (textParagraph, buttonList, image) - NOT wrapped in nestedWidget
+    "Carousel": {"carouselCards": "List of CarouselCard dicts"},
+    "CarouselCard": {
+        "widgets": "List of widget dicts (textParagraph, buttonList, image)",
+        "footerWidgets": "Optional list of widget dicts for actions",
+    },
 }
+
+
+# =============================================================================
+# DYNAMIC FEEDBACK BUILDER - DAG-Aware, Variation-Based Feedback
+# =============================================================================
+
+
+class DynamicFeedbackBuilder:
+    """
+    Builds feedback widgets dynamically using ModuleWrapper's DAG and variation system.
+
+    This replaces hardcoded feedback widget construction with a system that:
+    1. Uses the DAG to understand valid widget containment for any container type
+    2. Creates feedback patterns using InstancePattern
+    3. Generates variations using StructureVariator and ParameterVariator
+    4. Renders using get_cached_class() and .render()
+
+    Supports:
+    - Section (widgets[] field)
+    - CarouselCard (widgets[] + footerWidgets[] fields)
+    - Any future container type with widget children
+
+    Usage:
+        builder = DynamicFeedbackBuilder(wrapper)
+        feedback = builder.build_feedback_for_container(
+            container_type="CarouselCard",
+            card_id="my_card_123",
+            variation_type="structure",  # or "parameter", "random"
+        )
+        # Returns dict with widgets to append to container
+    """
+
+    # Container type -> (content_field, action_field)
+    # content_field: where text prompts go
+    # action_field: where buttons/chips go (None = same as content)
+    CONTAINER_FIELDS = {
+        "Section": ("widgets", None),  # Both go in widgets
+        "CarouselCard": ("widgets", "footerWidgets"),  # Prompts in widgets, buttons in footer
+        "NestedWidget": ("widgets", None),
+        "Column": ("widgets", None),
+    }
+
+    # Valid widget types for feedback by container
+    # These should ideally come from the DAG, but we define defaults
+    FEEDBACK_WIDGET_TYPES = {
+        "text_prompt": ["TextParagraph", "DecoratedText"],
+        "action_button": ["ButtonList", "ChipList"],
+    }
+
+    # Feedback icons for content and form/layout
+    # Note: prompts are loaded at runtime to avoid circular reference
+    FEEDBACK_ICONS = {
+        "content": {"positive": "thumb_up", "negative": "thumb_down"},
+        "form": {"positive": "check_circle", "negative": "cancel"},
+    }
+
+    def __init__(self, wrapper=None):
+        """
+        Initialize the dynamic feedback builder.
+
+        Args:
+            wrapper: ModuleWrapper instance (optional, fetched lazily)
+        """
+        self._wrapper = wrapper
+        self._structure_variator = None
+        self._param_variator = None
+        self._feedback_patterns_cache = {}
+
+    def _get_wrapper(self):
+        """Get or create the wrapper instance."""
+        if self._wrapper is None:
+            try:
+                from gchat.card_framework_wrapper import get_card_framework_wrapper
+                self._wrapper = get_card_framework_wrapper()
+            except ImportError:
+                logger.warning("Could not get card_framework_wrapper")
+        return self._wrapper
+
+    def _get_structure_variator(self):
+        """Get or create the structure variator from wrapper's relationships."""
+        if self._structure_variator is None:
+            wrapper = self._get_wrapper()
+            if wrapper:
+                from adapters.module_wrapper.instance_pattern_mixin import StructureVariator
+                relationships = getattr(wrapper, "relationships", {})
+                # Augment with feedback-specific relationships
+                feedback_relationships = self._get_feedback_relationships()
+                relationships = {**relationships, **feedback_relationships}
+                self._structure_variator = StructureVariator(relationships)
+        return self._structure_variator
+
+    def _get_param_variator(self):
+        """Get or create the parameter variator."""
+        if self._param_variator is None:
+            from adapters.module_wrapper.instance_pattern_mixin import ParameterVariator
+            # Custom variators for feedback-specific params
+            custom_variators = {
+                "prompt": self._vary_prompt,
+                "icon": self._vary_icon,
+            }
+            self._param_variator = ParameterVariator(custom_variators)
+        return self._param_variator
+
+    def _get_feedback_relationships(self) -> Dict[str, List[str]]:
+        """
+        Define feedback widget containment relationships.
+
+        These augment the wrapper's DAG for feedback-specific structures.
+        """
+        return {
+            # Feedback containers can hold these widgets
+            "FeedbackSection": ["TextParagraph", "DecoratedText", "ButtonList", "ChipList", "Divider"],
+            "FeedbackPrompt": ["TextParagraph", "DecoratedText"],
+            "FeedbackAction": ["ButtonList", "ChipList", "Button", "Chip"],
+            # Widget types for variation
+            "TextParagraph": [],  # Leaf
+            "DecoratedText": ["Icon", "Button"],
+            "ButtonList": ["Button"],
+            "ChipList": ["Chip"],
+            "Button": ["Icon"],
+            "Chip": ["Icon"],
+        }
+
+    def _vary_prompt(self, value: str) -> str:
+        """Custom variator for feedback prompts."""
+        # Apply random styling
+        style = random.choice(FEEDBACK_TEXT_STYLES)
+        # Extract keyword from template if present
+        if "{keyword}" in str(value):
+            return value  # Template, don't modify
+        return f"<b>{value}</b>" if style == "bold" else value
+
+    def _vary_icon(self, value: str) -> str:
+        """Custom variator for feedback icons."""
+        positive_icons = ["thumb_up", "check_circle", "sentiment_satisfied", "star"]
+        negative_icons = ["thumb_down", "cancel", "sentiment_dissatisfied", "close"]
+        if value in positive_icons:
+            return random.choice(positive_icons)
+        if value in negative_icons:
+            return random.choice(negative_icons)
+        return value
+
+    def _get_valid_children_for_container(self, container_type: str) -> List[str]:
+        """
+        Get valid widget children for a container type using the DAG.
+
+        Args:
+            container_type: "Section", "CarouselCard", etc.
+
+        Returns:
+            List of valid child widget type names
+        """
+        wrapper = self._get_wrapper()
+        if wrapper and hasattr(wrapper, "get_children"):
+            try:
+                return wrapper.get_children(container_type)
+            except Exception:
+                pass
+
+        # Fallback: use static mapping
+        fallback_children = {
+            "Section": ["TextParagraph", "DecoratedText", "ButtonList", "ChipList", "Image", "Divider", "Grid"],
+            "CarouselCard": ["TextParagraph", "DecoratedText", "ButtonList", "Image"],  # via NestedWidget
+            "NestedWidget": ["TextParagraph", "DecoratedText", "ButtonList", "Image"],
+            "Column": ["TextParagraph", "DecoratedText", "ButtonList", "Image"],
+        }
+        return fallback_children.get(container_type, ["TextParagraph", "ButtonList"])
+
+    def _build_widget_via_wrapper(
+        self,
+        widget_type: str,
+        params: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build a widget using wrapper's get_cached_class() and .render().
+
+        Args:
+            widget_type: "TextParagraph", "ButtonList", etc.
+            params: Parameters for the widget
+
+        Returns:
+            Widget dict in Google Chat format, or None on error
+        """
+        wrapper = self._get_wrapper()
+        if not wrapper:
+            return self._build_widget_fallback(widget_type, params)
+
+        try:
+            # Get cached class
+            component_class = wrapper.get_cached_class(widget_type)
+            if not component_class:
+                return self._build_widget_fallback(widget_type, params)
+
+            # Instantiate and render
+            instance = component_class(**params)
+            if hasattr(instance, "render"):
+                rendered = instance.render()
+                # Convert to dict if needed
+                if hasattr(rendered, "to_dict"):
+                    return rendered.to_dict()
+                elif isinstance(rendered, dict):
+                    return rendered
+                else:
+                    return {"error": f"Unknown render result type: {type(rendered)}"}
+
+            return self._build_widget_fallback(widget_type, params)
+
+        except Exception as e:
+            logger.warning(f"Failed to build {widget_type} via wrapper: {e}")
+            return self._build_widget_fallback(widget_type, params)
+
+    def _build_widget_fallback(
+        self,
+        widget_type: str,
+        params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Fallback widget builder when wrapper is unavailable.
+
+        Args:
+            widget_type: Widget type name
+            params: Widget parameters
+
+        Returns:
+            Widget dict in Google Chat format
+        """
+        widget_key = {
+            "TextParagraph": "textParagraph",
+            "DecoratedText": "decoratedText",
+            "ButtonList": "buttonList",
+            "ChipList": "chipList",
+            "Button": "button",
+            "Chip": "chip",
+            "Image": "image",
+            "Icon": "icon",
+            "Divider": "divider",
+        }.get(widget_type, widget_type.lower())
+
+        if widget_type == "TextParagraph":
+            return {"textParagraph": {"text": params.get("text", "")}}
+
+        elif widget_type == "DecoratedText":
+            widget = {"text": params.get("text", ""), "wrapText": params.get("wrap_text", True)}
+            if params.get("icon"):
+                widget["startIcon"] = {"materialIcon": {"name": params["icon"]}}
+            if params.get("button"):
+                widget["button"] = params["button"]
+            return {"decoratedText": widget}
+
+        elif widget_type == "ButtonList":
+            return {"buttonList": {"buttons": params.get("buttons", [])}}
+
+        elif widget_type == "ChipList":
+            return {"chipList": {"chips": params.get("chips", [])}}
+
+        elif widget_type == "Divider":
+            return {"divider": {}}
+
+        else:
+            return {widget_key: params}
+
+    def _get_feedback_prompts(self, feedback_type: str) -> List[Tuple[str, str]]:
+        """Get feedback prompts for a feedback type (loaded at runtime)."""
+        if feedback_type == "content":
+            return CONTENT_FEEDBACK_PROMPTS
+        else:
+            return FORM_FEEDBACK_PROMPTS
+
+    def _create_feedback_pattern(
+        self,
+        feedback_type: str,
+        container_type: str,
+        card_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Create a feedback pattern for the given feedback type and container.
+
+        Uses InstancePattern to define the structure.
+
+        Args:
+            feedback_type: "content" or "form"
+            container_type: "Section", "CarouselCard", etc.
+            card_id: Unique card identifier for callback URLs
+
+        Returns:
+            Pattern dict with component_paths and instance_params
+        """
+        # Load prompts at runtime to avoid circular reference
+        prompts = self._get_feedback_prompts(feedback_type)
+        icons = self.FEEDBACK_ICONS.get(feedback_type, self.FEEDBACK_ICONS["content"])
+
+        prompt_tuple = random.choice(prompts)
+        template, keyword = prompt_tuple
+
+        # Apply styling to keyword
+        style = random.choice(FEEDBACK_TEXT_STYLES)
+        styled_keyword = self._style_keyword(keyword, style)
+        prompt_text = f"<i>{template.format(keyword=styled_keyword)}</i>"
+
+        # Get valid children for this container
+        valid_children = self._get_valid_children_for_container(container_type)
+
+        # Choose text widget type based on valid children
+        text_types = [t for t in ["DecoratedText", "TextParagraph"] if t in valid_children]
+        text_type = random.choice(text_types) if text_types else "TextParagraph"
+
+        # Choose action widget type
+        action_types = [t for t in ["ButtonList", "ChipList"] if t in valid_children]
+        action_type = random.choice(action_types) if action_types else "ButtonList"
+
+        # Build component paths
+        component_paths = [text_type, action_type]
+
+        # Build instance params
+        instance_params = {
+            "prompt_text": prompt_text,
+            "feedback_type": feedback_type,
+            "card_id": card_id,
+            "positive_icon": icons["positive"],
+            "negative_icon": icons["negative"],
+            "keyword": keyword,
+            "style": style,
+        }
+
+        return {
+            "component_paths": component_paths,
+            "instance_params": instance_params,
+            "text_type": text_type,
+            "action_type": action_type,
+        }
+
+    def _style_keyword(self, keyword: str, style: str) -> str:
+        """Apply HTML styling to a feedback keyword."""
+        colors = {
+            "success": "#34a853",
+            "warning": "#fbbc05",
+            "info": "#4285f4",
+            "muted": "#9e9e9e",
+        }
+
+        if style == "bold":
+            return f"<b>{keyword}</b>"
+        elif style == "success":
+            return f'<font color="{colors["success"]}">{keyword}</font>'
+        elif style == "warning":
+            return f'<font color="{colors["warning"]}">{keyword}</font>'
+        elif style == "info":
+            return f'<font color="{colors["info"]}">{keyword}</font>'
+        elif style == "muted":
+            return f'<font color="{colors["muted"]}">{keyword}</font>'
+        elif style == "bold_success":
+            return f'<b><font color="{colors["success"]}">{keyword}</font></b>'
+        elif style == "bold_info":
+            return f'<b><font color="{colors["info"]}">{keyword}</font></b>'
+        else:
+            return f"<b>{keyword}</b>"
+
+    def _render_pattern_to_widgets(
+        self,
+        pattern: Dict[str, Any],
+        card_id: str,
+        feedback_type: str,
+        make_callback_url: callable,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Render a feedback pattern to actual widgets.
+
+        Args:
+            pattern: Pattern dict with component_paths and instance_params
+            card_id: Card ID for callback URLs
+            feedback_type: "content" or "form"
+            make_callback_url: Callback URL builder function
+
+        Returns:
+            Dict with 'text_widgets' and 'action_widgets' lists
+        """
+        params = pattern["instance_params"]
+        text_type = pattern["text_type"]
+        action_type = pattern["action_type"]
+
+        # Build text prompt widget
+        text_params = {"text": params["prompt_text"]}
+        if text_type == "DecoratedText":
+            text_params["wrap_text"] = True
+        text_widget = self._build_widget_via_wrapper(text_type, text_params)
+
+        # Build action buttons widget
+        pos_url = make_callback_url(card_id, "positive", feedback_type)
+        neg_url = make_callback_url(card_id, "negative", feedback_type)
+
+        if action_type == "ButtonList":
+            action_params = {
+                "buttons": [
+                    {
+                        "icon": {"materialIcon": {"name": params["positive_icon"]}},
+                        "onClick": {"openLink": {"url": pos_url}},
+                        "altText": f"{feedback_type.title()} helpful",
+                    },
+                    {
+                        "icon": {"materialIcon": {"name": params["negative_icon"]}},
+                        "onClick": {"openLink": {"url": neg_url}},
+                        "altText": f"{feedback_type.title()} not helpful",
+                    },
+                ]
+            }
+        else:  # ChipList
+            action_params = {
+                "chips": [
+                    {
+                        "icon": {"materialIcon": {"name": params["positive_icon"]}},
+                        "onClick": {"openLink": {"url": pos_url}},
+                        "altText": f"{feedback_type.title()} helpful",
+                    },
+                    {
+                        "icon": {"materialIcon": {"name": params["negative_icon"]}},
+                        "onClick": {"openLink": {"url": neg_url}},
+                        "altText": f"{feedback_type.title()} not helpful",
+                    },
+                ]
+            }
+
+        action_widget = self._build_widget_via_wrapper(action_type, action_params)
+
+        return {
+            "text_widgets": [text_widget] if text_widget else [],
+            "action_widgets": [action_widget] if action_widget else [],
+        }
+
+    def build_feedback_for_container(
+        self,
+        container_type: str,
+        card_id: str,
+        make_callback_url: callable,
+        include_content: bool = True,
+        include_form: bool = True,
+        variation_type: Optional[str] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Build feedback widgets adapted for a specific container type.
+
+        This is the main entry point for dynamic feedback generation.
+
+        Args:
+            container_type: "Section", "CarouselCard", etc.
+            card_id: Unique card identifier
+            make_callback_url: Function to create callback URLs
+            include_content: Include content feedback
+            include_form: Include form/layout feedback
+            variation_type: "structure", "parameter", or None for random
+
+        Returns:
+            Dict with keys based on container type:
+            - Section: {"widgets": [...]}
+            - CarouselCard: {"widgets": [...], "footerWidgets": [...]}
+        """
+        content_field, action_field = self.CONTAINER_FIELDS.get(
+            container_type, ("widgets", None)
+        )
+
+        result = {content_field: []}
+        if action_field and action_field != content_field:
+            result[action_field] = []
+
+        # Generate variations if variator available
+        variator = self._get_structure_variator()
+
+        # Build content feedback
+        if include_content:
+            content_pattern = self._create_feedback_pattern("content", container_type, card_id)
+
+            # Apply structural variation if requested
+            if variation_type == "structure" and variator:
+                variations = variator.generate_variations(content_pattern["component_paths"], 1)
+                if variations:
+                    content_pattern["component_paths"] = variations[0]
+                    # Update types based on variation
+                    if len(content_pattern["component_paths"]) >= 2:
+                        content_pattern["text_type"] = content_pattern["component_paths"][0]
+                        content_pattern["action_type"] = content_pattern["component_paths"][1]
+
+            # Apply parameter variation if requested
+            if variation_type == "parameter":
+                param_variator = self._get_param_variator()
+                if param_variator:
+                    content_pattern["instance_params"] = param_variator.vary_params(
+                        content_pattern["instance_params"]
+                    )
+
+            rendered = self._render_pattern_to_widgets(
+                content_pattern, card_id, "content", make_callback_url
+            )
+
+            # Add to appropriate fields
+            result[content_field].extend(rendered["text_widgets"])
+            target_field = action_field if action_field else content_field
+            if target_field not in result:
+                result[target_field] = []
+            result[target_field].extend(rendered["action_widgets"])
+
+        # Build form/layout feedback
+        if include_form:
+            form_pattern = self._create_feedback_pattern("form", container_type, card_id)
+
+            if variation_type == "structure" and variator:
+                variations = variator.generate_variations(form_pattern["component_paths"], 1)
+                if variations:
+                    form_pattern["component_paths"] = variations[0]
+                    if len(form_pattern["component_paths"]) >= 2:
+                        form_pattern["text_type"] = form_pattern["component_paths"][0]
+                        form_pattern["action_type"] = form_pattern["component_paths"][1]
+
+            if variation_type == "parameter":
+                param_variator = self._get_param_variator()
+                if param_variator:
+                    form_pattern["instance_params"] = param_variator.vary_params(
+                        form_pattern["instance_params"]
+                    )
+
+            rendered = self._render_pattern_to_widgets(
+                form_pattern, card_id, "form", make_callback_url
+            )
+
+            result[content_field].extend(rendered["text_widgets"])
+            target_field = action_field if action_field else content_field
+            result[target_field].extend(rendered["action_widgets"])
+
+        return result
+
+    def store_feedback_pattern(
+        self,
+        container_type: str,
+        card_id: str,
+        feedback: str = "positive",
+    ) -> Optional[str]:
+        """
+        Store a successful feedback pattern for learning.
+
+        Args:
+            container_type: Container type used
+            card_id: Card identifier
+            feedback: "positive" or "negative"
+
+        Returns:
+            Pattern ID if stored, None otherwise
+        """
+        wrapper = self._get_wrapper()
+        if not wrapper or not hasattr(wrapper, "store_instance_pattern"):
+            return None
+
+        # Create pattern for both content and form feedback
+        content_pattern = self._create_feedback_pattern("content", container_type, card_id)
+        form_pattern = self._create_feedback_pattern("form", container_type, card_id)
+
+        component_paths = content_pattern["component_paths"] + form_pattern["component_paths"]
+        instance_params = {
+            "container_type": container_type,
+            "content_text_type": content_pattern["text_type"],
+            "content_action_type": content_pattern["action_type"],
+            "form_text_type": form_pattern["text_type"],
+            "form_action_type": form_pattern["action_type"],
+        }
+
+        try:
+            return wrapper.store_instance_pattern(
+                component_paths=component_paths,
+                instance_params=instance_params,
+                description=f"Feedback pattern for {container_type}",
+                feedback=feedback,
+                generate_variations=feedback == "positive",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to store feedback pattern: {e}")
+            return None
+
+
+# Global instance for convenience
+_dynamic_feedback_builder: Optional[DynamicFeedbackBuilder] = None
+
+
+def get_dynamic_feedback_builder() -> DynamicFeedbackBuilder:
+    """Get the singleton DynamicFeedbackBuilder instance."""
+    global _dynamic_feedback_builder
+    if _dynamic_feedback_builder is None:
+        _dynamic_feedback_builder = DynamicFeedbackBuilder()
+    return _dynamic_feedback_builder
 
 
 # =============================================================================
@@ -211,7 +1024,7 @@ class PreparedPattern:
         self._load_component_classes()
 
     def _load_component_classes(self):
-        """Load component classes from wrapper."""
+        """Load component classes from wrapper using cached class retrieval."""
         if not self.wrapper:
             return
 
@@ -219,17 +1032,22 @@ class PreparedPattern:
             if comp_name in ("Section",):  # Skip containers
                 continue
 
-            # Try common paths
-            paths_to_try = [
-                f"card_framework.v2.widgets.{comp_name.lower()}.{comp_name}",
-                f"card_framework.v2.{comp_name.lower()}.{comp_name}",
-            ]
+            # Use cached class retrieval for fast L1 memory access
+            comp_class = self.wrapper.get_cached_class(comp_name)
 
-            for path in paths_to_try:
-                comp_class = self.wrapper.get_component_by_path(path)
-                if comp_class:
-                    self._component_classes[comp_name] = comp_class
-                    break
+            # Fallback to path-based lookup if not in cache
+            if not comp_class:
+                paths_to_try = [
+                    f"card_framework.v2.widgets.{comp_name.lower()}.{comp_name}",
+                    f"card_framework.v2.{comp_name.lower()}.{comp_name}",
+                ]
+                for path in paths_to_try:
+                    comp_class = self.wrapper.get_component_by_path(path)
+                    if comp_class:
+                        break
+
+            if comp_class:
+                self._component_classes[comp_name] = comp_class
 
     def set_params(self, **params) -> "PreparedPattern":
         """
@@ -441,7 +1259,7 @@ class PreparedPattern:
         Create a PreparedPattern from DSL notation.
 
         Args:
-            dsl_string: DSL like "§[δ×3, Ƀ[ᵬ×2]]"
+            dsl_string: DSL notation (symbols from wrapper.symbol_mapping)
             wrapper: ModuleWrapper instance
 
         Returns:
@@ -496,7 +1314,7 @@ def prepare_pattern_from_dsl(
     Convenience function to create a PreparedPattern from DSL.
 
     Args:
-        dsl_string: DSL notation like "§[δ×3, Ƀ[ᵬ×2]]"
+        dsl_string: DSL notation (symbols from ModuleWrapper.symbol_mapping)
         wrapper: ModuleWrapper instance (uses singleton if not provided)
 
     Returns:
@@ -504,9 +1322,9 @@ def prepare_pattern_from_dsl(
 
     Example:
         from gchat.smart_card_builder import prepare_pattern_from_dsl
-
+        # Get symbols from wrapper.symbol_mapping for current mappings
         card = (
-            prepare_pattern_from_dsl("§[δ, Ƀ[ᵬ×2]]")
+            prepare_pattern_from_dsl("<Section>[<DecoratedText>, <ButtonList>[<Button>×2]]")
             .set_params(text="Status: OK", buttons=[{"text": "Refresh"}, {"text": "Close"}])
             .render()
         )
@@ -687,6 +1505,116 @@ SECTION_STYLES = [
     "collapsible_1",    # Collapsible, 1 widget visible by default
 ]
 
+# =============================================================================
+# CLICK HANDLER CONFIGURATIONS
+# =============================================================================
+# Config-driven factory for feedback click handlers.
+# Each config defines how to build the clickable feedback widget.
+
+CLICK_CONFIGS: Dict[str, Dict[str, Any]] = {
+    # Binary positive/negative handlers
+    "button_list": {
+        "widget": "buttonList",
+        "items_key": "buttons",
+        "binary": True,  # Uses pos/neg labels
+        "use_chips": False,
+    },
+    "chip_list": {
+        "widget": "chipList",
+        "items_key": "chips",
+        "binary": True,
+        "use_chips": True,
+    },
+    "icon_buttons": {
+        "widget": "buttonList",
+        "items_key": "buttons",
+        "binary": True,
+        "use_chips": False,
+        "pos_icon_source": "POSITIVE_MATERIAL_ICONS",  # Random from list
+        "neg_icon_source": "NEGATIVE_MATERIAL_ICONS",
+    },
+    "icon_buttons_alt": {
+        "widget": "buttonList",
+        "items_key": "buttons",
+        "binary": True,
+        "use_chips": False,
+        "pos_icon": "thumb_up",  # Fixed icon
+        "neg_icon": "thumb_down",
+    },
+    "url_image_buttons": {
+        "widget": "buttonList",
+        "items_key": "buttons",
+        "binary": True,
+        "use_chips": False,
+        "pos_icon_url_source": "POSITIVE_IMAGE_URLS",
+        "neg_icon_url_source": "NEGATIVE_IMAGE_URLS",
+    },
+    # Multi-option rating handlers (not binary)
+    "star_rating": {
+        "widget": "buttonList",
+        "items_key": "buttons",
+        "binary": False,
+        "button_type": "BORDERLESS",
+        "ratings": [
+            ("star_outline", "👎 Not great", "negative"),
+            ("star_half", "😐 OK", "neutral"),
+            ("star", "👍 Great!", "positive"),
+        ],
+    },
+    "emoji_rating": {
+        "widget": "buttonList",
+        "items_key": "buttons",
+        "binary": False,
+        "button_type": "BORDERLESS",
+        "ratings": [
+            ("sentiment_dissatisfied", "😞", "negative"),
+            ("sentiment_neutral", "😐", "neutral"),
+            ("sentiment_satisfied", "😊", "positive"),
+        ],
+    },
+}
+
+# =============================================================================
+# TEXT COMPONENT CONFIGURATIONS
+# =============================================================================
+# Config-driven factory for feedback text components.
+
+TEXT_CONFIGS: Dict[str, Dict[str, Any]] = {
+    "text_paragraph": {
+        "component": "TextParagraph",
+        "format_text": lambda t: f"<i>{t}</i>",  # Italic wrapper
+    },
+    "decorated_text": {
+        "component": "DecoratedText",
+        "wrap_text": True,
+    },
+    "decorated_text_icon": {
+        "component": "DecoratedText",
+        "wrap_text": True,
+        "add_random_icon": True,  # Uses FEEDBACK_MATERIAL_ICONS
+    },
+    "decorated_text_labeled": {
+        "component": "DecoratedText",
+        "wrap_text": True,
+        "top_label": "Feedback",
+    },
+    "chip_text": {
+        "component": "chipList",  # Direct dict, not via wrapper
+        "direct_dict": True,  # Skip wrapper, return dict directly
+    },
+}
+
+# =============================================================================
+# LAYOUT CONFIGURATIONS
+# =============================================================================
+# Config for feedback layout options.
+
+LAYOUT_CONFIGS: Dict[str, Dict[str, Any]] = {
+    "sequential": {"add_divider": False},
+    "with_divider": {"add_divider": True},
+    "compact": {"group_by_type": True},  # Groups text and buttons separately
+}
+
 
 # =============================================================================
 # COMPONENT PATHS REGISTRY
@@ -712,6 +1640,10 @@ COMPONENT_PATHS = {
     "Grid": "card_framework.v2.widgets.grid.Grid",
     "GridItem": "card_framework.v2.widgets.grid.GridItem",
     "ImageComponent": "card_framework.v2.widgets.grid.ImageComponent",
+    # Carousel components (Google Chat API specific - custom registered)
+    "Carousel": "card_framework.v2.Carousel",  # Custom component via wrapper
+    "CarouselCard": "card_framework.v2.CarouselCard",  # Custom component via wrapper
+    "NestedWidget": "card_framework.v2.NestedWidget",  # Custom component via wrapper
 }
 
 # Patterns that indicate a card ALREADY has feedback buttons
@@ -733,10 +1665,13 @@ class SmartCardBuilderV2:
     Streamlined card builder using DSL + Qdrant embeddings.
 
     Flow:
-    1. Parse Structure DSL from description (e.g., §[δ×3, Ƀ[ᵬ×2]])
-    2. Parse Content DSL for styled content (e.g., δ 'text' success bold)
+    1. Parse Structure DSL from description (symbols from ModuleWrapper)
+    2. Parse Content DSL for styled content (symbol 'text' style)
     3. Build card from parsed structure with styled content
     4. Add feedback section for learning loop
+
+    NOTE: All DSL symbols are dynamically generated from ModuleWrapper.
+    Query wrapper.symbol_mapping for current symbol-to-component mappings.
     """
 
     def __init__(self):
@@ -934,7 +1869,7 @@ class SmartCardBuilderV2:
         Checks multiple fields in order of preference:
         1. component_paths - direct field
         2. parent_paths - alternate field name used in storage
-        3. relationship_text - parse from DSL notation like "§[δ, Ƀ] | Section DecoratedText ButtonList"
+        3. relationship_text - parse from DSL notation (symbols from ModuleWrapper)
 
         Args:
             pattern: Pattern dict from Qdrant query result
@@ -954,7 +1889,7 @@ class SmartCardBuilderV2:
             return [p.split(".")[-1] if "." in p else p for p in paths]
 
         # Parse from relationship_text as fallback
-        # Format: "§[δ, Ƀ] | Section DecoratedText ButtonList :: description"
+        # Format: "<DSL> | Component Names :: description"
         rel_text = pattern.get("relationship_text", "")
         if rel_text and "|" in rel_text:
             try:
@@ -987,6 +1922,8 @@ class SmartCardBuilderV2:
         Uses DSL-aware search when DSL symbols are detected in the description,
         otherwise falls back to hybrid V7 search with positive feedback filters.
 
+        Searches are parallelized when DSL is detected for improved latency.
+
         Args:
             description: Card description (may include DSL symbols)
             card_params: Additional params to include in search context
@@ -999,33 +1936,18 @@ class SmartCardBuilderV2:
 
             wrapper = get_card_framework_wrapper()
 
-            # Check for DSL in description
+            # Check for DSL in description (fast, synchronous - determines search strategy)
             extracted = wrapper.extract_dsl_from_text(description)
+            has_dsl = extracted.get("has_dsl")
 
-            if extracted.get("has_dsl"):
-                # Use DSL-aware search
+            if has_dsl:
                 logger.info(f"🔤 DSL detected: {extracted['dsl']}")
-                results = wrapper.search_by_dsl(
-                    text=description,
-                    limit=5,
-                    score_threshold=0.3,
-                    vector_name="inputs",  # Search for patterns
-                    type_filter="instance_pattern",
-                )
 
-                if results:
-                    best = results[0]
-                    component_paths = self._extract_paths_from_pattern(best)
-                    return {
-                        "component_paths": component_paths,
-                        "instance_params": best.get("instance_params", {}),
-                        "structure_description": best.get("structure_description", ""),
-                        "score": best.get("score", 0),
-                        "source": "wrapper_dsl",
-                    }
-            else:
-                # Use hybrid V7 search with positive feedback
-                class_results, content_patterns, form_patterns = wrapper.search_v7_hybrid(
+            # Run searches in parallel when DSL is detected (both searches are independent)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                # Always submit hybrid search for style_metadata extraction
+                hybrid_future = executor.submit(
+                    wrapper.search_v7_hybrid,
                     description=description,
                     component_paths=None,
                     limit=5,
@@ -1035,17 +1957,74 @@ class SmartCardBuilderV2:
                     include_classes=False,  # Only want patterns
                 )
 
-                # Prefer content patterns (have positive content_feedback)
-                if content_patterns:
-                    best = content_patterns[0]
-                    component_paths = self._extract_paths_from_pattern(best)
-                    return {
-                        "component_paths": component_paths,
-                        "instance_params": best.get("instance_params", {}),
-                        "structure_description": best.get("structure_description", ""),
-                        "score": best.get("score", 0),
-                        "source": "wrapper_hybrid",
-                    }
+                # Conditionally submit DSL search in parallel
+                dsl_future = None
+                if has_dsl:
+                    dsl_future = executor.submit(
+                        wrapper.search_by_dsl,
+                        text=description,
+                        limit=5,
+                        score_threshold=0.3,
+                        vector_name="inputs",  # Search for patterns
+                        type_filter="instance_pattern",
+                    )
+
+                # Gather results (blocks until complete)
+                class_results, content_patterns, form_patterns = hybrid_future.result()
+                dsl_results = dsl_future.result() if dsl_future else None
+
+            # Find patterns with actual style_metadata content (for auto-styling)
+            styled_pattern = None
+            for pattern in content_patterns:
+                instance_params = pattern.get("instance_params", {})
+                style_meta = instance_params.get("style_metadata", {})
+                # Check for actual style content, not just empty dict
+                if style_meta.get("semantic_styles") or style_meta.get("jinja_filters"):
+                    styled_pattern = pattern
+                    logger.info(f"🎨 Found pattern with style_metadata: {style_meta}")
+                    break
+
+            # Process DSL results if available
+            if dsl_results:
+                best = dsl_results[0]
+                component_paths = self._extract_paths_from_pattern(best)
+                instance_params = best.get("instance_params", {})
+
+                # Check if DSL result has actual style content (not just empty dict)
+                dsl_style = instance_params.get("style_metadata", {})
+                dsl_has_styles = dsl_style.get("semantic_styles") or dsl_style.get("jinja_filters")
+
+                # Merge style_metadata from styled_pattern if DSL result lacks actual styles
+                if styled_pattern and not dsl_has_styles:
+                    styled_instance_params = styled_pattern.get("instance_params", {})
+                    styled_style = styled_instance_params.get("style_metadata", {})
+                    if styled_style.get("semantic_styles") or styled_style.get("jinja_filters"):
+                        instance_params = {
+                            **instance_params,
+                            "style_metadata": styled_style,
+                        }
+                        logger.info(f"🎨 Merged style_metadata from similar pattern: {styled_style}")
+
+                return {
+                    "component_paths": component_paths,
+                    "instance_params": instance_params,
+                    "structure_description": best.get("structure_description", ""),
+                    "score": best.get("score", 0),
+                    "source": "wrapper_dsl",
+                }
+
+            # No DSL results - use hybrid search results
+            if content_patterns:
+                # Prefer patterns with style_metadata
+                best = styled_pattern if styled_pattern else content_patterns[0]
+                component_paths = self._extract_paths_from_pattern(best)
+                return {
+                    "component_paths": component_paths,
+                    "instance_params": best.get("instance_params", {}),
+                    "structure_description": best.get("structure_description", ""),
+                    "score": best.get("score", 0),
+                    "source": "wrapper_hybrid",
+                }
 
             return None
 
@@ -1213,8 +2192,15 @@ class SmartCardBuilderV2:
         component_paths = pattern.get("component_paths", [])
         instance_params = pattern.get("instance_params", {})
 
+        # Get style metadata from matched pattern
+        style_metadata = instance_params.get("style_metadata", {})
+
         # Merge card_params into instance_params (card_params takes precedence)
         params = {**instance_params, **(card_params or {})}
+
+        # Auto-apply styles from matched pattern if not already styled
+        if style_metadata and not self._has_explicit_styles(params):
+            params = self._apply_pattern_styles(params, style_metadata)
 
         # Build widgets based on component paths
         widgets = []
@@ -1286,7 +2272,7 @@ class SmartCardBuilderV2:
             # Dynamic fallback: Use generic widget builder
             else:
                 # Create minimal context for generic builder
-                context = {"buttons": [], "content_texts": [], "_button_index": 0, "_text_index": 0}
+                context = {"buttons": [], "chips": [], "content_texts": [], "_button_index": 0, "_chip_index": 0, "_text_index": 0}
                 widget = self._build_widget_generic(comp_name, [], context)
                 if widget:
                     widgets.append(widget)
@@ -1332,6 +2318,208 @@ class SmartCardBuilderV2:
                 card["header"]["subtitle"] = subtitle
 
         return card
+
+    def _has_explicit_styles(self, params: Dict[str, Any]) -> bool:
+        """
+        Check if the text field already contains Jinja styling.
+
+        Returns True if the 'text' field contains Jinja filter expressions,
+        indicating the user has explicitly specified styles for the content
+        that will be displayed. Only checks 'text' field since that's what
+        _apply_pattern_styles will modify.
+        """
+        text = params.get("text", "")
+        if isinstance(text, str) and "{{" in text and "|" in text:
+            return True
+        return False
+
+    def _apply_pattern_styles(
+        self, params: Dict[str, Any], style_metadata: Dict[str, List[str]]
+    ) -> Dict[str, Any]:
+        """
+        Apply proven styles from a matched pattern to text fields.
+
+        Uses content-aware style selection to determine which semantic style
+        to apply based on the text content. For example, text containing "online"
+        or "success" will receive success_text styling if the pattern used it.
+
+        Args:
+            params: Card parameters containing text fields
+            style_metadata: Style metadata from matched pattern with keys:
+                - semantic_styles: ["success", "error", "warning", "info"]
+                - formatting: ["bold", "italic", "strike", "underline"]
+
+        Returns:
+            Updated params dict with Jinja styling applied to text field
+        """
+        semantic_styles = style_metadata.get("semantic_styles", [])
+        formatting = style_metadata.get("formatting", [])
+
+        # If no styles to apply, return unchanged
+        if not semantic_styles and not formatting:
+            return params
+
+        # Get text content for content-aware style selection
+        text = params.get("text", "") or params.get("description", "")
+        if not text or not isinstance(text, str):
+            return params
+
+        # Content-aware style selection based on keywords
+        style_to_apply = None
+        text_lower = text.lower()
+
+        if "success" in semantic_styles:
+            if any(word in text_lower for word in ["online", "success", "ok", "active", "running", "healthy", "ready", "up"]):
+                style_to_apply = "success_text"
+        if not style_to_apply and "error" in semantic_styles:
+            if any(word in text_lower for word in ["error", "fail", "offline", "down", "unhealthy", "critical", "dead"]):
+                style_to_apply = "error_text"
+        if not style_to_apply and "warning" in semantic_styles:
+            if any(word in text_lower for word in ["warning", "pending", "slow", "degraded", "unknown", "wait"]):
+                style_to_apply = "warning_text"
+        if not style_to_apply and "info" in semantic_styles:
+            style_to_apply = "info_text"
+
+        # Apply style to text field
+        if style_to_apply and "text" in params:
+            # Escape single quotes in text for Jinja template
+            escaped_text = params["text"].replace("'", "\\'")
+            styled_text = f"{{{{ '{escaped_text}' | {style_to_apply} }}}}"
+
+            # Add formatting filters if present
+            for fmt in formatting:
+                # Remove closing braces and add filter
+                styled_text = styled_text[:-3] + f" | {fmt} }}}}"
+
+            params = {**params, "text": styled_text}
+            logger.debug(f"🎨 Auto-applied style: {style_to_apply} (formatting: {formatting})")
+
+        return params
+
+    def _get_style_for_text(
+        self, text: str, style_metadata: Dict[str, List[str]]
+    ) -> Optional[str]:
+        """
+        Determine which style to apply based on text content and available styles.
+
+        If ANY semantic style is present in the pattern, we enable full semantic
+        styling based on content keywords. This allows a single "success" pattern
+        to also style "error" and "warning" content appropriately.
+
+        Returns the Jinja filter name (e.g., "success_text") or None if no match.
+        """
+        if not text or not isinstance(text, str):
+            return None
+
+        semantic_styles = style_metadata.get("semantic_styles", [])
+        if not semantic_styles:
+            return None
+
+        text_lower = text.lower()
+
+        # If ANY semantic style is present, enable full semantic styling
+        # This allows patterns with just "success" to also style error/warning content
+        enable_all_semantic = len(semantic_styles) > 0
+
+        # Check for success keywords
+        if enable_all_semantic or "success" in semantic_styles:
+            if any(word in text_lower for word in ["online", "success", "ok", "active", "running", "healthy", "ready", "up", "connected", "enabled", "available", "complete", "done"]):
+                return "success_text"
+
+        # Check for error keywords
+        if enable_all_semantic or "error" in semantic_styles:
+            if any(word in text_lower for word in ["error", "fail", "offline", "down", "unhealthy", "critical", "dead", "disconnected", "disabled", "unavailable", "stopped"]):
+                return "error_text"
+
+        # Check for warning keywords
+        if enable_all_semantic or "warning" in semantic_styles:
+            if any(word in text_lower for word in ["warning", "pending", "slow", "degraded", "unknown", "wait", "timeout", "retry", "limited"]):
+                return "warning_text"
+
+        # Info is fallback only if explicitly in semantic_styles
+        if "info" in semantic_styles:
+            return "info_text"
+
+        return None
+
+    def _apply_style_to_text(
+        self, text: str, style_metadata: Dict[str, List[str]]
+    ) -> str:
+        """
+        Apply style to a single text string based on its content.
+
+        Returns styled text with Jinja template if applicable, otherwise original text.
+        """
+        # Skip if already has Jinja styling
+        if "{{" in text and "|" in text:
+            return text
+
+        style_to_apply = self._get_style_for_text(text, style_metadata)
+        if not style_to_apply:
+            return text
+
+        # Escape single quotes for Jinja template
+        escaped_text = text.replace("'", "\\'")
+        styled_text = f"{{{{ '{escaped_text}' | {style_to_apply} }}}}"
+
+        # Add formatting filters if present
+        formatting = style_metadata.get("formatting", [])
+        for fmt in formatting:
+            styled_text = styled_text[:-3] + f" | {fmt} }}}}"
+
+        return styled_text
+
+    def _apply_styles_recursively(
+        self, obj: Any, style_metadata: Dict[str, List[str]], depth: int = 0
+    ) -> Any:
+        """
+        Recursively walk a card structure and apply styles to all text fields.
+
+        Handles:
+        - decoratedText.text
+        - textParagraph.text
+        - button.text
+        - chip.label
+        - header.title, header.subtitle
+        - Any nested structures
+
+        Args:
+            obj: Card dict, list, or value to process
+            style_metadata: Style metadata with semantic_styles and formatting
+            depth: Current recursion depth (for logging)
+
+        Returns:
+            Modified object with styles applied to text fields
+        """
+        if not style_metadata.get("semantic_styles"):
+            return obj
+
+        if isinstance(obj, dict):
+            result = {}
+            for key, value in obj.items():
+                # Text fields that should be styled
+                if key == "text" and isinstance(value, str):
+                    result[key] = self._apply_style_to_text(value, style_metadata)
+                elif key == "title" and isinstance(value, str) and depth > 0:
+                    # Style titles in widgets (not card header)
+                    result[key] = self._apply_style_to_text(value, style_metadata)
+                elif key == "label" and isinstance(value, str):
+                    # Chip labels
+                    result[key] = self._apply_style_to_text(value, style_metadata)
+                elif key == "topLabel" and isinstance(value, str):
+                    result[key] = self._apply_style_to_text(value, style_metadata)
+                elif key == "bottomLabel" and isinstance(value, str):
+                    result[key] = self._apply_style_to_text(value, style_metadata)
+                else:
+                    # Recurse into nested structures
+                    result[key] = self._apply_styles_recursively(value, style_metadata, depth + 1)
+            return result
+
+        elif isinstance(obj, list):
+            return [self._apply_styles_recursively(item, style_metadata, depth) for item in obj]
+
+        else:
+            return obj
 
     def _format_text_for_chat(self, text: str) -> str:
         """
@@ -1386,7 +2574,8 @@ class SmartCardBuilderV2:
         """
         Extract Structure DSL notation from description.
 
-        Example: "§[δ×3, Ƀ[ᵬ×2]] Dashboard" → "§[δ×3, Ƀ[ᵬ×2]]"
+        Extracts symbol patterns like "Symbol[Child×N]" from start of description.
+        Symbols are dynamically mapped via ModuleWrapper.
         """
         if not description:
             return None
@@ -1403,9 +2592,9 @@ class SmartCardBuilderV2:
         """
         Parse Content DSL from description.
 
-        Content DSL format:
-            δ 'Status: Online' success bold
-            ᵬ Click Here https://example.com
+        Content DSL format (symbols from ModuleWrapper):
+            <symbol> 'text content' style_modifier
+            <symbol> Label https://url.com
 
         Returns dict with styled texts and buttons.
         """
@@ -1543,11 +2732,16 @@ class SmartCardBuilderV2:
         title: Optional[str] = None,
         subtitle: Optional[str] = None,
         buttons: Optional[List[Dict]] = None,
+        chips: Optional[List[Dict]] = None,
         image_url: Optional[str] = None,
         text: Optional[str] = None,
         items: Optional[List[Dict]] = None,
+        cards: Optional[List[Dict]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Build a card from parsed DSL structure."""
+        """Build a card from parsed DSL structure.
+
+        Handles both regular card DSL and carousel DSL (symbols from ModuleWrapper).
+        """
         wrapper = self._get_wrapper()
         if not wrapper:
             return None
@@ -1582,7 +2776,7 @@ class SmartCardBuilderV2:
                 logger.info(f"📝 Using explicit text param: {text[:50]}...")
 
             # If items array provided, convert to content_texts for DecoratedText widgets
-            # Each item can have: text, icon, top_label, bottom_label
+            # Each item can have: text, icon, top_label, bottom_label, wrapText
             if items:
                 for item in items:
                     item_text = item.get("text", "")
@@ -1595,16 +2789,22 @@ class SmartCardBuilderV2:
                         content_entry["top_label"] = item["top_label"]
                     if item.get("bottom_label"):
                         content_entry["bottom_label"] = item["bottom_label"]
+                    # Always default wrapText to True for DecoratedText items
+                    content_entry["wrapText"] = item.get("wrapText", True)
                     content_texts.append(content_entry)
                 logger.info(f"📝 Added {len(items)} items to content_texts")
 
             # Create shared context for unified resource consumption
-            # This ensures buttons, texts, etc. are consumed sequentially across all components
+            # This ensures buttons, texts, chips, cards, etc. are consumed sequentially across all components
             context = {
                 "buttons": buttons or [],
+                "chips": chips or [],
+                "carousel_cards": cards or [],  # For carousel DSL (symbols from ModuleWrapper)
                 "image_url": image_url,
                 "content_texts": content_texts,
                 "_button_index": 0,  # Track button consumption
+                "_chip_index": 0,  # Track chip consumption
+                "_carousel_card_index": 0,  # Track carousel card consumption
                 "_text_index": 0,  # Track text consumption
                 "_mapping_report": InputMappingReport(),  # Track input consumption
             }
@@ -1668,14 +2868,17 @@ class SmartCardBuilderV2:
     ) -> Dict[str, Any]:
         """Consume resource from context for a component type.
 
-        Uses CONTEXT_CONSUMERS mapping to determine what to consume.
+        Uses wrapper.get_context_resource() (SSoT) or fallback dict.
         Returns params populated from context, or empty dict.
         Also records consumption in InputMappingReport if present in context.
         """
-        if component_name not in CONTEXT_CONSUMERS:
+        # Query wrapper (SSoT) or fallback to dict
+        wrapper = self._get_wrapper()
+        resource_info = get_context_resource(component_name, wrapper)
+        if not resource_info:
             return {}
 
-        context_key, index_key = CONTEXT_CONSUMERS[component_name]
+        context_key, index_key = resource_info
         resources = context.get(context_key, [])
         current_index = context.get(index_key, 0)
 
@@ -1688,13 +2891,15 @@ class SmartCardBuilderV2:
                 # For content_texts, use 'styled' key (from Content DSL) or 'text' key (explicit)
                 if context_key == "content_texts":
                     params["text"] = resource.get("styled") or resource.get("text", "")
-                    # Pass through icon, top_label, bottom_label for DecoratedText
+                    # Pass through icon, top_label, bottom_label, wrapText for DecoratedText
                     if resource.get("icon"):
                         params["icon"] = resource["icon"]
                     if resource.get("top_label"):
                         params["top_label"] = resource["top_label"]
                     if resource.get("bottom_label"):
                         params["bottom_label"] = resource["bottom_label"]
+                    # Always include wrapText (default True for multi-line content)
+                    params["wrapText"] = resource.get("wrapText", True)
                     # Record the consumption in mapping report
                     if mapping_report:
                         value = str(resource.get("styled", resource.get("content", "")))
@@ -1723,12 +2928,58 @@ class SmartCardBuilderV2:
                             component=component_name,
                             field_name="button",
                         )
+                # For chips, extract chip-specific fields (label, url, icon)
+                elif context_key == "chips":
+                    # Chips use 'label' but accept 'text' as alias
+                    params["label"] = resource.get("label") or resource.get("text", "Chip")
+                    if resource.get("url"):
+                        params["url"] = resource["url"]
+                    # Pass through icon (material icon name)
+                    if resource.get("icon"):
+                        params["icon"] = resource["icon"]
+                    # Record the consumption in mapping report
+                    if mapping_report:
+                        value = str(resource.get("label") or resource.get("text", "Chip"))
+                        mapping_report.record(
+                            input_type="chip",
+                            index=current_index,
+                            value=value,
+                            component=component_name,
+                            field_name="chip",
+                        )
+                # For carousel cards, extract card-specific fields
+                elif context_key == "carousel_cards":
+                    # Pass through all carousel card fields
+                    params["title"] = resource.get("title", f"Card {current_index + 1}")
+                    if resource.get("subtitle"):
+                        params["subtitle"] = resource["subtitle"]
+                    if resource.get("image_url"):
+                        params["image_url"] = resource["image_url"]
+                    if resource.get("text"):
+                        params["text"] = resource["text"]
+                    if resource.get("buttons"):
+                        params["buttons"] = resource["buttons"]
+                    if resource.get("footer_buttons"):
+                        params["footer_buttons"] = resource["footer_buttons"]
+                    # Record the consumption in mapping report
+                    if mapping_report:
+                        mapping_report.record(
+                            input_type="carousel_card",
+                            index=current_index,
+                            value=resource.get("title", ""),
+                            component=component_name,
+                            field_name="carousel_card",
+                        )
             context[index_key] = current_index + 1
         else:
             # No more resources - don't use placeholder, let caller handle missing text
-            # Button still needs a label for UX
+            # Button and Chip still need labels for UX
             if component_name == "Button":
                 params["text"] = f"Button {current_index + 1}"
+            elif component_name == "Chip":
+                params["label"] = f"Chip {current_index + 1}"
+            elif component_name == "CarouselCard":
+                params["title"] = f"Card {current_index + 1}"
             context[index_key] = current_index + 1
 
         return params
@@ -1770,9 +3021,10 @@ class SmartCardBuilderV2:
 
         json_key = self._get_json_key(component_name)
         params = explicit_params.copy() if explicit_params else {}
+        wrapper = self._get_wrapper()
 
         # 1. Empty components (just structure, no content)
-        if component_name in EMPTY_COMPONENTS:
+        if is_empty_component(component_name, wrapper):
             return {json_key: {}}
 
         # 2. Consume from context if this component type uses resources
@@ -1782,10 +3034,21 @@ class SmartCardBuilderV2:
             params.setdefault(k, v)
 
         # 3. Container components - build children recursively
-        if component_name in CONTAINER_CHILDREN:
-            return self._build_container_generic(
+        children_field = get_children_field(component_name, wrapper)
+        if children_field:
+            logger.debug(
+                f"🎠 Container component: {component_name} "
+                f"(children_field={children_field}, "
+                f"children_count={len(grandchildren)})"
+            )
+            result = self._build_container_generic(
                 component_name, grandchildren, context, params
             )
+            logger.debug(
+                f"🎠 Container result for {component_name}: "
+                f"{result.keys() if result else 'None'}"
+            )
+            return result
 
         # 4. Components with nested children (like DecoratedText with Button)
         # Build children first - they come back as pre-built JSON dicts
@@ -1796,13 +3059,13 @@ class SmartCardBuilderV2:
             )
 
         # 5. Form components need a name field
-        if component_name in FORM_COMPONENTS:
+        if is_form_component(component_name, wrapper):
             input_index = context.get("_input_index", 0)
             params.setdefault("name", f"{component_name.lower()}_{input_index}")
             params.setdefault("label", component_name.replace("Input", " Input"))
             context["_input_index"] = input_index + 1
 
-        # 5.5 Pre-process DecoratedText special fields (icon -> startIcon, labels)
+        # 5.5 Pre-process DecoratedText special fields (icon -> startIcon, labels, wrapText)
         # Must happen BEFORE wrapper build so wrapper gets clean params
         decorated_text_extras = {}
         if component_name == "DecoratedText":
@@ -1813,13 +3076,15 @@ class SmartCardBuilderV2:
                 decorated_text_extras["topLabel"] = params.pop("top_label")
             if params.get("bottom_label"):
                 decorated_text_extras["bottomLabel"] = params.pop("bottom_label")
+            # Always ensure wrapText is set (default True for multi-line content)
+            decorated_text_extras["wrapText"] = params.pop("wrapText", True)
 
         # 6. Build via wrapper for proper type handling (only if no pre-built children)
         # When there are pre-built children (JSON dicts), wrapper can't use them directly
         if not child_params:
             wrapper = self._get_wrapper()
             if wrapper:
-                built = self._build_via_wrapper_generic(wrapper, component_name, params)
+                built = self._build_component(component_name, params, wrapper=wrapper)
                 if built:
                     # Merge in DecoratedText extras (icon, labels) after wrapper build
                     if decorated_text_extras:
@@ -1851,7 +3116,9 @@ class SmartCardBuilderV2:
             img_url = params.get("imageUrl") or context.get("image_url") or "https://picsum.photos/400/200"
             return {json_key: {"imageUrl": img_url}}
 
-        return {json_key: widget_content} if widget_content else {json_key: {"text": "Item"}}
+        # Return None instead of "Item" placeholder if no content
+        # This ensures only explicitly provided content is rendered
+        return {json_key: widget_content} if widget_content else None
 
     def _build_container_generic(
         self,
@@ -1862,11 +3129,12 @@ class SmartCardBuilderV2:
     ) -> Optional[Dict[str, Any]]:
         """Build container components (ButtonList, Grid, etc.) generically.
 
-        Uses CONTAINER_CHILDREN and CONTAINER_CHILD_TYPE mappings.
+        Uses wrapper.get_children_field() and wrapper.get_container_child_type() (SSoT).
         """
         json_key = self._get_json_key(component_name)
-        children_field = CONTAINER_CHILDREN[component_name]
-        expected_child_type = CONTAINER_CHILD_TYPE.get(component_name)
+        wrapper = self._get_wrapper()
+        children_field = get_children_field(component_name, wrapper) or "widgets"
+        expected_child_type = get_container_child_type(component_name, wrapper)
 
         # Count expected children from DSL
         if expected_child_type and children:
@@ -1902,13 +3170,71 @@ class SmartCardBuilderV2:
                     "image": {"imageUri": f"https://picsum.photos/200/200?{idx}"},
                 })
             elif expected_child_type == "Chip":
-                idx = len(built_children)
-                built_children.append({"label": f"Chip {idx + 1}"})
+                # Consume chip from context (similar to Button)
+                chip_params = self._consume_from_context("Chip", context)
+                chip_obj = {"label": chip_params.get("label") or chip_params.get("text", f"Chip {len(built_children) + 1}")}
+                if chip_params.get("url"):
+                    chip_obj["onClick"] = {"openLink": {"url": chip_params["url"]}}
+                # Add icon if provided
+                if chip_params.get("icon"):
+                    chip_obj["icon"] = {"materialIcon": {"name": chip_params["icon"]}}
+                built_children.append(chip_obj)
+            elif expected_child_type == "CarouselCard":
+                # Consume carousel card from context and build via wrapper
+                card_params = self._consume_from_context("CarouselCard", context)
+                logger.debug(
+                    f"🎠 CarouselCard #{len(built_children)}: "
+                    f"params={list(card_params.keys())}"
+                )
+                # Use wrapper's component system for CarouselCard
+                wrapper = self._get_wrapper()
+                if wrapper:
+                    carousel_card = self._build_component("CarouselCard", card_params, wrapper=wrapper)
+                    logger.debug(
+                        f"🎠 Wrapper build result: "
+                        f"{'success' if carousel_card else 'None (using fallback)'}"
+                    )
+                    if carousel_card:
+                        built_children.append(carousel_card)
+                    else:
+                        # Fallback: build carousel card without wrapper class
+                        idx = len(built_children)
+                        widgets = []
+
+                        # Add title as bold text paragraph
+                        title = card_params.get("title", f"Card {idx + 1}")
+                        if title:
+                            widgets.append({"textParagraph": {"text": f"<b>{title}</b>"}})
+
+                        # Add main text content if provided
+                        text = card_params.get("text")
+                        if text:
+                            widgets.append({"textParagraph": {"text": text}})
+
+                        # Add buttons if provided
+                        buttons = card_params.get("buttons", [])
+                        if buttons:
+                            btn_list = []
+                            for b in buttons:
+                                btn_obj = {"text": b.get("text", "Button")}
+                                if b.get("url"):
+                                    btn_obj["onClick"] = {"openLink": {"url": b["url"]}}
+                                btn_list.append(btn_obj)
+                            widgets.append({"buttonList": {"buttons": btn_list}})
+
+                        built_children.append({"widgets": widgets})
+                        logger.debug(
+                            f"🎠 Built fallback CarouselCard with "
+                            f"{len(widgets)} widget(s)"
+                        )
             else:
-                # Generic child
-                built_children.append({"text": f"Item {len(built_children) + 1}"})
+                # Skip generic child fallback - don't create "Item N" placeholders
+                # This ensures only explicitly provided content is rendered
+                logger.debug(f"🎠 Skipping fallback for unknown child type in {component_name}")
+                continue
 
         if not built_children:
+            logger.debug(f"🎠 No children built for {component_name}")
             return None
 
         result = {children_field: built_children}
@@ -1917,7 +3243,12 @@ class SmartCardBuilderV2:
         if component_name == "Grid":
             result["columnCount"] = min(3, len(built_children))
 
-        return {json_key: result}
+        final_result = {json_key: result}
+        logger.debug(
+            f"🎠 _build_container_generic returning: "
+            f"{{'{json_key}': {{{repr(children_field)}: [{len(built_children)} items]}}}}"
+        )
+        return final_result
 
     def _build_columns_generic(
         self,
@@ -1959,42 +3290,434 @@ class SmartCardBuilderV2:
 
         return {"columns": {"columnItems": column_items}}
 
-    def _build_via_wrapper_generic(
+    # =========================================================================
+    # NOTE: Carousel is built via the generic DSL flow using symbols
+    # dynamically generated from ModuleWrapper (e.g., ◦[▲×N]).
+    # The wrapper's CarouselCard component handles the structure.
+    # =========================================================================
+
+    def _build_component(
         self,
-        wrapper,
         component_name: str,
         params: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
-        """Build any component via wrapper generically.
+        wrapper: Optional["ComponentMetadataProvider"] = None,
+        wrap_with_key: bool = False,
+        children: Optional[List[Dict[str, Any]]] = None,
+        validate: bool = False,
+        return_instance: bool = False,
+        child_instances: Optional[List[Any]] = None,
+        auto_wrap: bool = False,
+        target_parent: Optional[str] = None,
+    ) -> Optional[Union[Dict[str, Any], Any]]:
+        """Universal component builder leveraging ModuleWrapper DAG and metadata.
 
-        Tries to instantiate the component class and render it.
-        Returns the inner dict (without the json_key wrapper).
+        This method can build ANY component type by:
+        1. Using get_cached_class() for fast L1 cache lookup
+        2. Falling back to wrapper.search() for discovery
+        3. Using wrapper metadata to validate and enrich params
+        4. Supporting nested children with DAG validation
+        5. Using create_card_component() for proper param filtering
+        6. Auto-wrapping components using DAG relationships (e.g., Button → ButtonList)
+
+        Args:
+            component_name: Component type (e.g., "TextParagraph", "DecoratedText")
+            params: Parameters for the component
+            wrapper: Optional ModuleWrapper instance. If None, uses self._get_wrapper()
+            wrap_with_key: If True, returns {jsonKey: innerDict}. If False, returns innerDict only.
+            children: Optional pre-built child widgets (JSON dicts) to nest inside this component
+            validate: If True, validate children against DAG relationships
+            return_instance: If True, return the component instance instead of rendered JSON.
+                           Use this when building nested structures (e.g., Card with Sections).
+            child_instances: Optional component instances (not JSON) to pass to container components.
+                           Use with return_instance=True for building full component hierarchies.
+            auto_wrap: If True, automatically wrap component in required container using DAG.
+                      Example: Button with target_parent=Section → ButtonList containing Button.
+            target_parent: Target parent component name for auto_wrap. Required if auto_wrap=True.
+                          The DAG will determine if wrapping is needed to make component valid
+                          as a child of target_parent.
+
+        Returns:
+            - If return_instance=True: Component instance (for nesting in parent components)
+            - If return_instance=False: Widget dict (wrapped or inner based on wrap_with_key)
+            - None/fallback dict if build fails
         """
-        # Try common paths
-        paths = [
-            f"card_framework.v2.widgets.{component_name.lower()}.{component_name}",
-            f"card_framework.v2.widgets.decorated_text.{component_name}",
-            f"card_framework.v2.{component_name.lower()}.{component_name}",
-        ]
+        wrapper = wrapper or self._get_wrapper()
+        json_key = self._get_json_key(component_name)
 
-        comp_class = None
-        for path in paths:
-            comp_class = wrapper.get_component_by_path(path)
-            if comp_class:
-                break
+        if not wrapper:
+            # Fallback to simple dict if no wrapper
+            inner = params.copy()
+            if children:
+                inner["widgets"] = children  # Generic children field
+            return {json_key: inner} if wrap_with_key else inner
 
-        if not comp_class:
+        # 0. Auto-wrap using DAG if requested
+        # Example: Button with target_parent=Section → ButtonList(buttons=[Button])
+        if auto_wrap and target_parent:
+            required_wrapper = self._find_required_wrapper_via_dag(
+                component_name, target_parent, wrapper
+            )
+            if required_wrapper and required_wrapper != component_name:
+                logger.debug(
+                    f"DAG auto-wrap: {component_name} → {required_wrapper} for {target_parent}"
+                )
+                # Build the inner component first
+                inner_component = self._build_component(
+                    component_name=component_name,
+                    params=params,
+                    wrapper=wrapper,
+                    wrap_with_key=False,
+                    children=children,
+                    validate=validate,
+                    return_instance=return_instance,
+                    child_instances=child_instances,
+                    auto_wrap=False,  # Prevent infinite recursion
+                )
+                if inner_component is None:
+                    return None
+
+                # Build the wrapper container with the inner component as child
+                if return_instance:
+                    # Return wrapper instance with inner as child_instance
+                    return self._build_component(
+                        component_name=required_wrapper,
+                        params={},
+                        wrapper=wrapper,
+                        wrap_with_key=wrap_with_key,
+                        return_instance=True,
+                        child_instances=[inner_component],
+                        auto_wrap=False,
+                    )
+                else:
+                    # Build wrapper with inner as JSON child
+                    wrapped_inner = {json_key: inner_component} if not isinstance(inner_component, dict) or json_key not in inner_component else inner_component
+                    return self._build_component(
+                        component_name=required_wrapper,
+                        params={},
+                        wrapper=wrapper,
+                        wrap_with_key=wrap_with_key,
+                        children=[wrapped_inner],
+                        validate=validate,
+                        auto_wrap=False,
+                    )
+
+        # 1. Query wrapper metadata for component info
+        is_empty = is_empty_component(component_name, wrapper)
+        children_field = get_children_field(component_name, wrapper)
+
+        # 2. Validate children against DAG if requested
+        if validate and children and hasattr(wrapper, "can_contain"):
+            for child in children:
+                # Extract child component name from the widget dict
+                child_key = next(iter(child.keys()), None) if isinstance(child, dict) else None
+                if child_key:
+                    child_name = self._json_key_to_component_name(child_key)
+                    if not wrapper.can_contain(component_name, child_name):
+                        logger.warning(
+                            f"DAG validation: {component_name} cannot contain {child_name}"
+                        )
+
+        # 3. Try cached class first (fast L1 memory cache)
+        comp_class = wrapper.get_cached_class(component_name)
+
+        # 4. Fallback to wrapper search if not in cache
+        if not comp_class and hasattr(wrapper, "search"):
+            try:
+                results = wrapper.search(component_name, limit=1)
+                if results:
+                    result = results[0]
+                    path = result.get("path") or result.get("component_path")
+                    if path:
+                        comp_class = wrapper.get_component_by_path(path)
+            except Exception as e:
+                logger.debug(f"Wrapper search failed for {component_name}: {e}")
+
+        # 5. Handle empty components (no params needed)
+        if is_empty:
+            if return_instance and comp_class:
+                try:
+                    instance = wrapper.create_card_component(comp_class, {})
+                    if instance:
+                        return instance
+                except Exception:
+                    pass
+            result = {json_key: {}}
+            if children and children_field:
+                result[json_key][children_field] = children
+            return result if wrap_with_key else result.get(json_key, {})
+
+        # 6. Build via wrapper class if found
+        if comp_class:
+            try:
+                # Merge child_instances into params for container components
+                build_params = params.copy()
+
+                # Pre-process: Convert shorthand params to proper nested structures
+                # Button/Chip: url -> on_click.open_link.url
+                if component_name in ("Button", "Chip") and "url" in build_params:
+                    url = build_params.pop("url")
+                    if url and "on_click" not in build_params:
+                        # Build OnClick -> OpenLink structure
+                        try:
+                            from card_framework.v2.widgets.on_click import OnClick
+                            from card_framework.v2.widgets.open_link import OpenLink
+                            build_params["on_click"] = OnClick(open_link=OpenLink(url=url))
+                        except ImportError:
+                            # Fallback: pass as dict (will be handled by create_card_component)
+                            build_params["on_click"] = {"open_link": {"url": url}}
+
+                if child_instances:
+                    # Map child instances to appropriate param names based on component type
+                    if component_name == "Card":
+                        # Card expects: header (CardHeader), sections (List[Section])
+                        headers = [c for c in child_instances if type(c).__name__ == "CardHeader"]
+                        sections = [c for c in child_instances if type(c).__name__ == "Section"]
+                        if headers:
+                            build_params["header"] = headers[0]
+                        if sections:
+                            build_params["sections"] = sections
+                    elif component_name == "Section":
+                        # Section expects: widgets (List[Widget])
+                        build_params["widgets"] = child_instances
+                    elif component_name in ("ButtonList", "ChipList"):
+                        # Container expects: buttons/chips list
+                        build_params[children_field or "buttons"] = child_instances
+                    elif component_name == "Columns":
+                        # Columns expects: columnItems (List[Column])
+                        build_params["column_items"] = child_instances
+                    elif component_name == "Grid":
+                        # Grid expects: items (List[GridItem])
+                        build_params["items"] = child_instances
+                    elif component_name == "Carousel":
+                        # Carousel expects: carouselCards (List[CarouselCard])
+                        build_params["carousel_cards"] = child_instances
+
+                instance = wrapper.create_card_component(comp_class, build_params)
+                if instance:
+                    # Pre-process: Set fields on the instance that the wrapper class may not handle
+                    if component_name == "DecoratedText":
+                        # Ensure wrapText is set on the instance
+                        if hasattr(instance, "wrap_text"):
+                            # wrap_text is the Python attribute name (snake_case)
+                            instance.wrap_text = params.get("wrapText", params.get("wrap_text", True))
+
+                    # Return instance if requested (for nesting in parent components)
+                    if return_instance:
+                        return instance
+
+                    # Prefer render() for full widget output, fallback to to_dict()
+                    if hasattr(instance, "render"):
+                        rendered = instance.render()
+                        converted = self._convert_to_camel_case(rendered)
+                    elif hasattr(instance, "to_dict"):
+                        rendered = instance.to_dict()
+                        converted = self._convert_to_camel_case(rendered)
+                    else:
+                        converted = None
+
+                    if converted:
+                        # Handle already-wrapped vs inner dict
+                        if json_key in converted and len(converted) == 1:
+                            inner = converted[json_key]
+                        else:
+                            inner = converted
+
+                        # Post-process: Add fields the wrapper class doesn't support
+                        # but Google Chat API needs
+                        if component_name == "DecoratedText":
+                            # wrapText defaults to True unless explicitly False
+                            inner["wrapText"] = params.get("wrapText", True)
+                            # Handle icon -> startIcon conversion
+                            if params.get("icon") and "startIcon" not in inner:
+                                inner["startIcon"] = {"materialIcon": {"name": params["icon"]}}
+                            # Handle label fields
+                            if params.get("top_label") and "topLabel" not in inner:
+                                inner["topLabel"] = params["top_label"]
+                            if params.get("bottom_label") and "bottomLabel" not in inner:
+                                inner["bottomLabel"] = params["bottom_label"]
+
+                        # Add children if provided (JSON dicts, not instances)
+                        if children and children_field:
+                            inner[children_field] = children
+
+                        return {json_key: inner} if wrap_with_key else inner
+            except Exception as e:
+                logger.debug(f"Component build failed for {component_name}: {e}")
+
+        # 7. Fallback: build from params directly
+        inner = params.copy()
+        if children and children_field:
+            inner[children_field] = children
+        elif children:
+            # Use default children field based on component type
+            default_field = "widgets" if component_name in ("Section",) else "buttons"
+            inner[default_field] = children
+
+        return {json_key: inner} if wrap_with_key else inner
+
+    def _find_required_wrapper_via_dag(
+        self,
+        component: str,
+        target_parent: str,
+        wrapper: Optional["ComponentMetadataProvider"] = None,
+    ) -> Optional[str]:
+        """Find the required wrapper for a component to be valid in target_parent.
+
+        Uses the DAG and registered metadata to determine if wrapping is needed:
+        1. Check if component is a valid direct child of target_parent
+        2. If not, check for explicit wrapper requirement
+        3. If not found, try common naming pattern (Button → ButtonList)
+        4. Fall back to DAG path-finding
+
+        Args:
+            component: Component to potentially wrap (e.g., "Button")
+            target_parent: Target container (e.g., "Section")
+            wrapper: ModuleWrapper with DAG capabilities
+
+        Returns:
+            Required wrapper component name, or None if no wrapping needed
+
+        Example:
+            >>> _find_required_wrapper_via_dag("Button", "Section")
+            "ButtonList"  # Button needs ButtonList wrapper to go in Section
+            >>> _find_required_wrapper_via_dag("DecoratedText", "Section")
+            None  # DecoratedText can go directly in Section
+        """
+        wrapper = wrapper or self._get_wrapper()
+        if not wrapper:
             return None
 
-        try:
-            instance = wrapper.create_card_component(comp_class, params)
-            if instance and hasattr(instance, "to_dict"):
-                rendered = instance.to_dict()
-                return self._convert_to_camel_case(rendered)
-        except Exception as e:
-            logger.debug(f"Generic wrapper build failed for {component_name}: {e}")
+        # Get valid children for target_parent (uses DAG + widget types registry)
+        valid_children = []
+        if hasattr(wrapper, "get_valid_children_for_parent"):
+            valid_children = wrapper.get_valid_children_for_parent(target_parent)
+
+        # 1. Check if component is already a valid direct child (no wrapper needed)
+        if component in valid_children:
+            return None
+
+        # Also check can_contain for direct containment
+        if hasattr(wrapper, "can_contain"):
+            if wrapper.can_contain(target_parent, component, direct_only=True):
+                return None
+
+        # 2. Check for explicit wrapper requirement registration
+        if hasattr(wrapper, "get_required_wrapper"):
+            explicit_wrapper = wrapper.get_required_wrapper(component)
+            if explicit_wrapper:
+                # Verify the wrapper is a valid child of target_parent
+                if explicit_wrapper in valid_children:
+                    return explicit_wrapper
+                # Also check via can_contain
+                if hasattr(wrapper, "can_contain"):
+                    if wrapper.can_contain(target_parent, explicit_wrapper, direct_only=False):
+                        return explicit_wrapper
+
+        # 3. Try common naming pattern: Component → ComponentList
+        wrapper_name = f"{component}List"
+        if wrapper_name in valid_children:
+            return wrapper_name
+
+        # 4. Use DAG path-finding as fallback
+        if hasattr(wrapper, "get_path"):
+            path = wrapper.get_path(target_parent, component)
+            if path and len(path) >= 3:
+                # Path is [target_parent, ..., wrapper, component]
+                # The wrapper is the component right before the target
+                intermediate = path[-2]  # Second-to-last is the direct parent
+                if intermediate != target_parent and intermediate in valid_children:
+                    return intermediate
 
         return None
+
+    def _json_key_to_component_name(self, json_key: str) -> str:
+        """Convert JSON key to component name (e.g., 'decoratedText' -> 'DecoratedText')."""
+        # Handle common mappings
+        key_to_name = {
+            "decoratedText": "DecoratedText",
+            "textParagraph": "TextParagraph",
+            "buttonList": "ButtonList",
+            "chipList": "ChipList",
+            "image": "Image",
+            "divider": "Divider",
+            "grid": "Grid",
+            "columns": "Columns",
+            "carousel": "Carousel",
+            "carouselCard": "CarouselCard",
+            "textInput": "TextInput",
+            "selectionInput": "SelectionInput",
+            "dateTimePicker": "DateTimePicker",
+        }
+        return key_to_name.get(json_key, json_key.title().replace("_", ""))
+
+    def build_component_tree(
+        self,
+        tree: Dict[str, Any],
+        validate: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """Build a complete component tree from a nested structure.
+
+        This method recursively builds a component hierarchy using the ModuleWrapper
+        DAG for validation and metadata queries. It's the high-level entry point
+        for building any component structure.
+
+        Args:
+            tree: Nested structure like:
+                {
+                    "component": "Section",
+                    "params": {"header": "My Section"},
+                    "children": [
+                        {"component": "DecoratedText", "params": {"text": "Hello"}},
+                        {"component": "ButtonList", "children": [
+                            {"component": "Button", "params": {"text": "Click", "url": "..."}}
+                        ]}
+                    ]
+                }
+            validate: If True, validate parent-child relationships against DAG
+
+        Returns:
+            Built widget dict in Google Chat format, or None if build fails.
+
+        Example:
+            tree = {
+                "component": "Section",
+                "children": [
+                    {"component": "DecoratedText", "params": {"text": "Status: OK", "wrapText": True}},
+                    {"component": "ButtonList", "children": [
+                        {"component": "Button", "params": {"text": "Refresh", "url": "https://..."}}
+                    ]}
+                ]
+            }
+            result = builder.build_component_tree(tree)
+            # Returns: {"section": {"widgets": [{"decoratedText": {...}}, {"buttonList": {...}}]}}
+        """
+        wrapper = self._get_wrapper()
+        component_name = tree.get("component")
+        params = tree.get("params", {}).copy()
+        child_trees = tree.get("children", [])
+
+        if not component_name:
+            logger.warning("build_component_tree: missing 'component' key")
+            return None
+
+        # Recursively build children first
+        built_children = []
+        if child_trees:
+            for child_tree in child_trees:
+                child_widget = self.build_component_tree(child_tree, validate=validate)
+                if child_widget:
+                    built_children.append(child_widget)
+
+        # Build this component with its children
+        # (_build_component queries children_field internally via get_children_field)
+        return self._build_component(
+            component_name=component_name,
+            params=params,
+            wrapper=wrapper,
+            wrap_with_key=True,
+            children=built_children if built_children else None,
+            validate=validate,
+        )
 
     def _build_widgets(
         self,
@@ -2007,13 +3730,13 @@ class SmartCardBuilderV2:
         """Build widgets from DSL children using GENERIC mapping-driven approach.
 
         This method uses _build_widget_generic for ALL component types, avoiding
-        if/elif chains. Component behavior is determined by:
-        - CONTEXT_CONSUMERS: Which resources each component consumes
-        - CONTAINER_CHILDREN: How container components store children
-        - FORM_COMPONENTS: Components needing name fields
-        - EMPTY_COMPONENTS: Structure-only components
+        if/elif chains. Component behavior is determined by querying the ModuleWrapper:
+        - get_context_resource(): Which resources each component consumes
+        - get_children_field(): How container components store children
+        - is_form_component(): Components needing name fields
+        - is_empty_component(): Structure-only components
 
-        Supports nested DSL notation like δ[ᵬ] (DecoratedText with Button) via
+        Supports nested DSL notation (e.g., DecoratedText[Button]) via
         _map_children_to_params which uses wrapper relationship metadata.
 
         Args:
@@ -2024,7 +3747,7 @@ class SmartCardBuilderV2:
             context: Shared context for unified resource consumption
 
         Note: Resource consumption is tracked in context (_button_index, _text_index)
-        so resources used in nested DSL (e.g., δ[ᵬ]) aren't reused elsewhere.
+        so resources used in nested DSL aren't reused elsewhere.
         """
         widgets = []
 
@@ -2032,9 +3755,11 @@ class SmartCardBuilderV2:
         if context is None:
             context = {
                 "buttons": buttons or [],
+                "chips": [],  # Chips should come from shared context
                 "image_url": image_url,
                 "content_texts": content_texts,
                 "_button_index": 0,
+                "_chip_index": 0,
                 "_text_index": 0,
                 "_input_index": 0,
             }
@@ -2171,7 +3896,7 @@ class SmartCardBuilderV2:
         """
         Resolve parameters for a child component using MAPPING-DRIVEN approach.
 
-        Uses CONTEXT_CONSUMERS mapping and component defaults mapping.
+        Uses wrapper.get_context_resource() and component defaults mapping.
         No if/elif chains for specific component types.
 
         Args:
@@ -2217,10 +3942,16 @@ class SmartCardBuilderV2:
 
         The wrapper renders snake_case (e.g., start_icon, on_click) but
         Google Chat API expects camelCase (e.g., startIcon, onClick).
+
+        Keys starting with underscore (e.g., _card_id, _feedback_assembly) are
+        internal metadata and are stripped from the output.
         """
         if isinstance(data, dict):
             result = {}
             for key, value in data.items():
+                # Skip internal metadata keys (start with underscore)
+                if key.startswith("_"):
+                    continue
                 # Convert snake_case to camelCase
                 parts = key.split("_")
                 camel_key = parts[0] + "".join(word.capitalize() for word in parts[1:])
@@ -2274,7 +4005,7 @@ class SmartCardBuilderV2:
             builder = specialized_builders.get(child_name)
             if builder:
                 return builder(wrapper, params)
-            return self._build_via_wrapper_generic(wrapper, child_name, params)
+            return self._build_component(child_name, params, wrapper=wrapper)
 
         except Exception as e:
             logger.warning(f"Failed to build {child_name} via wrapper: {e}")
@@ -2284,13 +4015,13 @@ class SmartCardBuilderV2:
         self, wrapper, params: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """Build a Button using wrapper component classes."""
-        # Get component classes
-        Button = wrapper.get_component_by_path("card_framework.v2.widgets.button.Button")
-        OnClick = wrapper.get_component_by_path("card_framework.v2.widgets.on_click.OnClick")
-        OpenLink = wrapper.get_component_by_path("card_framework.v2.widgets.open_link.OpenLink")
+        # Get component classes via cache for fast retrieval
+        Button = wrapper.get_cached_class("Button")
+        OnClick = wrapper.get_cached_class("OnClick")
+        OpenLink = wrapper.get_cached_class("OpenLink")
 
         if not all([Button, OnClick, OpenLink]):
-            logger.debug("Could not get Button/OnClick/OpenLink classes")
+            logger.debug("Could not get Button/OnClick/OpenLink classes from cache")
             return None
 
         # Build OnClick with OpenLink
@@ -2315,10 +4046,11 @@ class SmartCardBuilderV2:
         self, wrapper, params: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """Build an Icon using wrapper component classes."""
-        Icon = wrapper.get_component_by_path("card_framework.v2.widgets.icon.Icon")
+        # Use cached class for fast retrieval
+        Icon = wrapper.get_cached_class("Icon")
 
         if not Icon:
-            logger.debug("Could not get Icon class")
+            logger.debug("Could not get Icon class from cache")
             return None
 
         # Get the KnownIcon enum
@@ -2351,9 +4083,8 @@ class SmartCardBuilderV2:
         self, wrapper, params: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """Build a SwitchControl using wrapper component classes."""
-        SwitchControl = wrapper.get_component_by_path(
-            "card_framework.v2.widgets.switch_control.SwitchControl"
-        )
+        # Use cached class for fast retrieval
+        SwitchControl = wrapper.get_cached_class("SwitchControl")
 
         if not SwitchControl:
             logger.debug("Could not get SwitchControl class")
@@ -2377,11 +4108,12 @@ class SmartCardBuilderV2:
         self, wrapper, params: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """Build an OnClick using wrapper component classes."""
-        OnClick = wrapper.get_component_by_path("card_framework.v2.widgets.on_click.OnClick")
-        OpenLink = wrapper.get_component_by_path("card_framework.v2.widgets.open_link.OpenLink")
+        # Use cached classes for fast retrieval
+        OnClick = wrapper.get_cached_class("OnClick")
+        OpenLink = wrapper.get_cached_class("OpenLink")
 
         if not all([OnClick, OpenLink]):
-            logger.debug("Could not get OnClick/OpenLink classes")
+            logger.debug("Could not get OnClick/OpenLink classes from cache")
             return None
 
         try:
@@ -2519,7 +4251,7 @@ class SmartCardBuilderV2:
             card: Card dict in Google Chat format (with sections/widgets)
 
         Returns:
-            DSL string like "§[δ×2, Ƀ[ᵬ×2]]" or None if unable to generate
+            DSL string using symbols from ModuleWrapper, or None if unable to generate
         """
         try:
             wrapper = self._get_wrapper()
@@ -2646,19 +4378,34 @@ class SmartCardBuilderV2:
         base_url = self._get_feedback_base_url()
         return f"{base_url}?card_id={card_id}&feedback={feedback_val}&feedback_type={feedback_type}"
 
-    def _store_card_pattern_sync(
+    @fire_and_forget
+    def _store_card_pattern(
         self,
         card_id: str,
         description: str,
         title: Optional[str],
         structure_dsl: Optional[str],
         card: Dict[str, Any],
+        description_rendered: Optional[str] = None,
+        jinja_applied: bool = False,
     ) -> None:
         """
-        Store the main card content pattern in Qdrant (synchronous).
+        Store the main card content pattern in Qdrant (fire-and-forget).
+
+        Runs in background thread to avoid blocking card building.
+        Use _store_card_pattern.sync() for synchronous testing.
 
         This stores ONLY the main card content (pattern_type="content"),
         NOT the feedback UI section which is stored separately.
+
+        Args:
+            card_id: Unique ID for this card
+            description: Original card description (RAW, before Jinja processing)
+            title: Card title
+            structure_dsl: DSL structure if parsed
+            card: The built card dict (without feedback section)
+            description_rendered: Jinja-processed description (if different from raw)
+            jinja_applied: Whether Jinja template processing was applied
         """
         if not ENABLE_FEEDBACK_BUTTONS:
             return  # Skip if feedback is disabled
@@ -2672,12 +4419,34 @@ class SmartCardBuilderV2:
             component_paths = self._extract_component_paths(card)
 
             # Build instance params from card content
+            # Stores BOTH raw and processed text for pattern reuse
             instance_params = {
                 "title": title,
                 "description": description[:500] if description else "",
                 "dsl": structure_dsl,
                 "component_count": len(component_paths),
+                # Store Jinja-processed output for analytics/debugging
+                "description_rendered": description_rendered[:500] if description_rendered else None,
+                # Track whether Jinja actually transformed the text
+                "jinja_applied": jinja_applied,
             }
+
+            # Extract style metadata from rendered description (or raw if no rendering)
+            style_metadata = extract_style_metadata(description_rendered or description)
+
+            # Also scan instance_params for any text fields with Jinja
+            for key, value in instance_params.items():
+                if isinstance(value, str) and "{{" in value:
+                    additional_styles = extract_style_metadata(value)
+                    for style_field in ["jinja_filters", "colors", "semantic_styles", "formatting"]:
+                        style_metadata[style_field].extend(additional_styles.get(style_field, []))
+
+            # Deduplicate after merging
+            for key in style_metadata:
+                style_metadata[key] = list(set(style_metadata[key]))
+
+            # Store style metadata with instance params
+            instance_params["style_metadata"] = style_metadata
 
             # Store the CONTENT pattern (main card, not feedback UI)
             point_id = feedback_loop.store_instance_pattern(
@@ -2693,57 +4462,33 @@ class SmartCardBuilderV2:
                 logger.debug(
                     f"📦 Stored content pattern: {card_id[:8]}... -> {point_id[:8]}..."
                 )
+                if jinja_applied:
+                    logger.debug(f"   🎨 Jinja rendered: '{description[:30]}...' -> '{description_rendered[:30] if description_rendered else ''}...'")
+                if style_metadata.get("semantic_styles") or style_metadata.get("formatting"):
+                    logger.debug(f"   🎨 Style metadata: {style_metadata}")
 
         except Exception as e:
             # Don't fail card generation if pattern storage fails
             logger.warning(f"⚠️ Failed to store card pattern: {e}")
 
-    def _store_card_pattern(
-        self,
-        card_id: str,
-        description: str,
-        title: Optional[str],
-        structure_dsl: Optional[str],
-        card: Dict[str, Any],
-    ) -> None:
-        """
-        Store the main card content pattern in Qdrant (fire-and-forget).
-
-        This runs the storage operation in a background thread to avoid
-        blocking the card building process.
-
-        Args:
-            card_id: Unique ID for this card
-            description: Original card description
-            title: Card title
-            structure_dsl: DSL structure if parsed
-            card: The built card dict (without feedback section)
-        """
-        import threading
-
-        if not ENABLE_FEEDBACK_BUTTONS:
-            return  # Skip if feedback is disabled
-
-        # Make a copy of card to avoid mutation issues
-        card_copy = dict(card) if card else {}
-
-        def store_in_background():
-            self._store_card_pattern_sync(card_id, description, title, structure_dsl, card_copy)
-
-        thread = threading.Thread(target=store_in_background, daemon=True)
-        thread.start()
-        logger.debug(f"🚀 Pattern storage started in background for {card_id[:8]}...")
-
-    def _store_feedback_ui_pattern_sync(
+    @fire_and_forget
+    def _store_feedback_ui_pattern(
         self,
         card_id: str,
         feedback_section: Dict[str, Any],
     ) -> None:
         """
-        Store the feedback UI section pattern in Qdrant (synchronous).
+        Store the feedback UI section pattern in Qdrant (fire-and-forget).
+
+        Runs in background thread to avoid blocking card building.
+        Use _store_feedback_ui_pattern.sync() for synchronous testing.
 
         This stores the randomly generated feedback UI (pattern_type="feedback_ui"),
         allowing learning of which feedback layouts work best.
+
+        Args:
+            card_id: Unique ID for this card (links content + feedback_ui patterns)
+            feedback_section: The feedback section dict with _feedback_assembly metadata
         """
         if not ENABLE_FEEDBACK_BUTTONS:
             return
@@ -2765,21 +4510,20 @@ class SmartCardBuilderV2:
             )
 
             # Extract component paths from feedback widgets
+            # Map camelCase JSON keys to PascalCase component names
+            json_key_to_component = {
+                "textParagraph": "TextParagraph",
+                "decoratedText": "DecoratedText",
+                "buttonList": "ButtonList",
+                "chipList": "ChipList",
+                "columns": "Columns",
+                "divider": "Divider",
+            }
             component_paths = []
             for widget in feedback_section.get("widgets", []):
                 for key in widget.keys():
-                    if key == "textParagraph":
-                        component_paths.append("TextParagraph")
-                    elif key == "decoratedText":
-                        component_paths.append("DecoratedText")
-                    elif key == "buttonList":
-                        component_paths.append("ButtonList")
-                    elif key == "chipList":
-                        component_paths.append("ChipList")
-                    elif key == "columns":
-                        component_paths.append("Columns")
-                    elif key == "divider":
-                        component_paths.append("Divider")
+                    if key in json_key_to_component:
+                        component_paths.append(json_key_to_component[key])
 
             # Store the FEEDBACK_UI pattern
             point_id = feedback_loop.store_instance_pattern(
@@ -2798,36 +4542,6 @@ class SmartCardBuilderV2:
 
         except Exception as e:
             logger.warning(f"⚠️ Failed to store feedback_ui pattern: {e}")
-
-    def _store_feedback_ui_pattern(
-        self,
-        card_id: str,
-        feedback_section: Dict[str, Any],
-    ) -> None:
-        """
-        Store the feedback UI section pattern in Qdrant (fire-and-forget).
-
-        This runs the storage operation in a background thread to avoid
-        blocking the card building process.
-
-        Args:
-            card_id: Unique ID for this card (links content + feedback_ui patterns)
-            feedback_section: The feedback section dict with _feedback_assembly metadata
-        """
-        import threading
-
-        if not ENABLE_FEEDBACK_BUTTONS:
-            return
-
-        # Make a copy to avoid mutation issues
-        feedback_copy = dict(feedback_section) if feedback_section else {}
-
-        def store_in_background():
-            self._store_feedback_ui_pattern_sync(card_id, feedback_copy)
-
-        thread = threading.Thread(target=store_in_background, daemon=True)
-        thread.start()
-        logger.debug(f"🚀 Feedback UI pattern storage started in background for {card_id[:8]}...")
     # OPTIMIAED MAKE DYNMAIC NOT PREDEFINED DUAL COMPONENT BUILDERS (text + click in one widget)
 
     def _extract_component_paths(self, card: Dict[str, Any]) -> List[str]:
@@ -2897,60 +4611,19 @@ class SmartCardBuilderV2:
         component_name: str,
         params: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        """
-        Build a feedback widget using wrapper component and .render().
+        """Build a feedback widget using the unified _build_component method.
 
-        This is the generic builder for all feedback widgets. It:
-        1. Gets the component class from wrapper
-        2. Instantiates with params
-        3. Calls .render() or .to_dict() + camelCase conversion
+        Thin wrapper that ensures wrap_with_key=True for feedback widgets,
+        which need the full {jsonKey: innerDict} format.
 
         Args:
             component_name: Component type (e.g., "TextParagraph", "DecoratedText")
             params: Parameters for the component
 
         Returns:
-            Widget dict in Google Chat format
+            Widget dict in Google Chat format: {jsonKey: innerDict}
         """
-        wrapper = self._get_wrapper()
-        if not wrapper:
-            # Fallback to simple dict if no wrapper
-            json_key = self._get_json_key(component_name)
-            return {json_key: params}
-
-        try:
-            # Get component class
-            paths = [
-                f"card_framework.v2.widgets.{component_name.lower()}.{component_name}",
-                f"card_framework.v2.widgets.text_paragraph.{component_name}",
-                f"card_framework.v2.widgets.decorated_text.{component_name}",
-                f"card_framework.v2.widgets.chip_list.{component_name}",
-            ]
-
-            comp_class = None
-            for path in paths:
-                comp_class = wrapper.get_component_by_path(path)
-                if comp_class:
-                    break
-
-            if comp_class:
-                instance = wrapper.create_card_component(comp_class, params)
-                if instance:
-                    if hasattr(instance, "render"):
-                        rendered = instance.render()
-                        # Convert to camelCase for Google Chat API
-                        return self._convert_to_camel_case(rendered)
-                    elif hasattr(instance, "to_dict"):
-                        json_key = self._get_json_key(component_name)
-                        rendered = instance.to_dict()
-                        return {json_key: self._convert_to_camel_case(rendered)}
-
-        except Exception as e:
-            logger.debug(f"Wrapper build failed for {component_name}: {e}")
-
-        # Fallback
-        json_key = self._get_json_key(component_name)
-        return {json_key: params}
+        return self._build_component(component_name, params, wrap_with_key=True)
 
     # -------------------------------------------------------------------------
     # TEXT COMPONENT BUILDERS
@@ -3000,42 +4673,65 @@ class SmartCardBuilderV2:
         styled_keyword = self._style_feedback_keyword(keyword, style)
         return template.format(keyword=styled_keyword)
 
-    def _text_paragraph(self, text: str, **_kwargs) -> Dict:
-        """Simple text paragraph - uses wrapper TextParagraph.render()."""
-        formatted_text = f"<i>{text}</i>"
-        return self._build_feedback_widget("TextParagraph", {"text": formatted_text})
+    def _build_text_feedback(self, text_type: str, text: str, **kwargs) -> Dict:
+        """Unified config-driven text builder - replaces 5 individual text methods.
 
-    def _text_decorated(self, text: str, **_kwargs) -> Dict:
-        """Decorated text - uses wrapper DecoratedText.render()."""
-        return self._build_feedback_widget("DecoratedText", {"text": text, "wrap_text": True})
+        Uses TEXT_CONFIGS to determine component type and formatting.
 
-    def _text_decorated_icon(self, text: str, **_kwargs) -> Dict:
-        """Decorated text with icon - uses wrapper with MaterialIcon.
+        Args:
+            text_type: Key in TEXT_CONFIGS (e.g., "text_paragraph", "decorated_text")
+            text: Text content to display
+            **kwargs: Additional params (e.g., label for decorated_text_labeled)
 
-        Uses the full Material Design icon set (2,209+ icons) for visual variety
-        instead of the limited knownIcon set.
+        Returns:
+            Widget dict (e.g., {"textParagraph": {"text": "..."}})
         """
-        # Select from Material Icons for feedback prompts
-        icon_name = random.choice(FEEDBACK_MATERIAL_ICONS)
-        widget = self._build_feedback_widget("DecoratedText", {"text": text, "wrap_text": True})
-        # Add materialIcon using wrapper helper
-        if widget and "decoratedText" in widget:
+        config = TEXT_CONFIGS.get(text_type)
+        if not config:
+            # Fallback to simple text paragraph
+            config = TEXT_CONFIGS["text_paragraph"]
+
+        # Handle direct dict components (chip_text)
+        if config.get("direct_dict"):
+            return {"chipList": {"chips": [{"label": text, "enabled": False}]}}
+
+        # Apply text formatting if configured
+        format_fn = config.get("format_text")
+        formatted_text = format_fn(text) if format_fn else text
+
+        # Build params
+        component_name = config["component"]
+        params = {"text": formatted_text}
+        if config.get("wrap_text"):
+            params["wrap_text"] = True
+        if config.get("top_label") or kwargs.get("label"):
+            params["top_label"] = kwargs.get("label") or config.get("top_label")
+
+        # Build widget
+        widget = self._build_feedback_widget(component_name, params)
+
+        # Add icon if configured
+        if config.get("add_random_icon") and widget and "decoratedText" in widget:
+            icon_name = random.choice(FEEDBACK_MATERIAL_ICONS)
             widget["decoratedText"]["startIcon"] = self._build_start_icon(icon_name)
+
         return widget
 
-    def _text_decorated_labeled(
-        self, text: str, label: str = "Feedback", **_kwargs
-    ) -> Dict:
-        """Decorated text with label - uses wrapper DecoratedText.render()."""
-        return self._build_feedback_widget(
-            "DecoratedText", {"text": text, "wrap_text": True, "top_label": label}
-        )
+    # Convenience wrappers for backward compatibility with _create_feedback_section
+    def _text_paragraph(self, text: str, **_kwargs) -> Dict:
+        return self._build_text_feedback("text_paragraph", text)
+
+    def _text_decorated(self, text: str, **_kwargs) -> Dict:
+        return self._build_text_feedback("decorated_text", text)
+
+    def _text_decorated_icon(self, text: str, **_kwargs) -> Dict:
+        return self._build_text_feedback("decorated_text_icon", text)
+
+    def _text_decorated_labeled(self, text: str, label: str = "Feedback", **_kwargs) -> Dict:
+        return self._build_text_feedback("decorated_text_labeled", text, label=label)
 
     def _text_chip(self, text: str, **_kwargs) -> Dict:
-        """Chip for text display - creates chipList directly (wrapper may produce invalid output)."""
-        # Create chipList directly - wrapper's ChipList.render() can produce invalid selectionItem
-        # Use 'enabled: false' to make chip non-clickable (not 'disabled' which isn't valid)
-        return {"chipList": {"chips": [{"label": text, "enabled": False}]}}
+        return self._build_text_feedback("chip_text", text)
 
     # -------------------------------------------------------------------------
     # CLICKABLE COMPONENT BUILDERS (Config-Driven)
@@ -3067,10 +4763,10 @@ class SmartCardBuilderV2:
         wrapper = self._get_wrapper()
         if wrapper:
             try:
-                # Get Button and OnClick classes
-                Button = wrapper.get_component_by_path("card_framework.v2.widgets.button.Button")
-                OnClick = wrapper.get_component_by_path("card_framework.v2.widgets.on_click.OnClick")
-                OpenLink = wrapper.get_component_by_path("card_framework.v2.widgets.open_link.OpenLink")
+                # Get Button and OnClick classes via cache for fast retrieval
+                Button = wrapper.get_cached_class("Button")
+                OnClick = wrapper.get_cached_class("OnClick")
+                OpenLink = wrapper.get_cached_class("OpenLink")
 
                 if all([Button, OnClick, OpenLink]):
                     open_link = OpenLink(url=url)
@@ -3114,9 +4810,10 @@ class SmartCardBuilderV2:
         wrapper = self._get_wrapper()
         if wrapper:
             try:
-                Chip = wrapper.get_component_by_path("card_framework.v2.widgets.chip.Chip")
-                OnClick = wrapper.get_component_by_path("card_framework.v2.widgets.on_click.OnClick")
-                OpenLink = wrapper.get_component_by_path("card_framework.v2.widgets.open_link.OpenLink")
+                # Get Chip and OnClick classes via cache for fast retrieval
+                Chip = wrapper.get_cached_class("Chip")
+                OnClick = wrapper.get_cached_class("OnClick")
+                OpenLink = wrapper.get_cached_class("OpenLink")
 
                 if all([Chip, OnClick, OpenLink]):
                     open_link = OpenLink(url=url)
@@ -3131,154 +4828,115 @@ class SmartCardBuilderV2:
         # Fallback
         return {"label": label, "onClick": {"openLink": {"url": url}}}
 
-    def _click_button_list(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
-        """Standard button list - uses wrapper Button.render()."""
-        pos_label = random.choice(POSITIVE_LABELS)
-        neg_label = random.choice(NEGATIVE_LABELS)
-        pos_url = self._make_callback_url(card_id, "positive", feedback_type)
-        neg_url = self._make_callback_url(card_id, "negative", feedback_type)
-        # Randomly choose button type for visual variety
-        btn_type = random.choice(BUTTON_TYPES)
+    def _build_clickable_feedback(
+        self, handler_type: str, card_id: str, feedback_type: str
+    ) -> Dict:
+        """Unified config-driven click handler - replaces 7 individual methods.
 
-        buttons = [
-            self._build_feedback_button_item(pos_label, pos_url, button_type=btn_type),
-            self._build_feedback_button_item(neg_label, neg_url, button_type=btn_type),
-        ]
-        return {"buttonList": {"buttons": buttons}}
+        Uses CLICK_CONFIGS to determine widget structure, icons, and behavior.
+
+        Args:
+            handler_type: Key in CLICK_CONFIGS (e.g., "button_list", "star_rating")
+            card_id: Card ID for callback URL
+            feedback_type: Feedback type for callback URL
+
+        Returns:
+            Widget dict (e.g., {"buttonList": {"buttons": [...]}})
+        """
+        config = CLICK_CONFIGS.get(handler_type)
+        if not config:
+            # Fallback to basic button list
+            config = CLICK_CONFIGS["button_list"]
+
+        widget_key = config["widget"]
+        items_key = config["items_key"]
+        use_chips = config.get("use_chips", False)
+        btn_type = config.get("button_type") or random.choice(BUTTON_TYPES)
+
+        items = []
+
+        if config.get("binary", True):
+            # Binary positive/negative feedback
+            pos_label = random.choice(POSITIVE_LABELS)
+            neg_label = random.choice(NEGATIVE_LABELS)
+            pos_url = self._make_callback_url(card_id, "positive", feedback_type)
+            neg_url = self._make_callback_url(card_id, "negative", feedback_type)
+
+            # Determine icons
+            pos_icon = config.get("pos_icon")
+            neg_icon = config.get("neg_icon")
+            pos_icon_url = None
+            neg_icon_url = None
+
+            if config.get("pos_icon_source"):
+                # Random icon from list
+                icon_list = globals().get(config["pos_icon_source"], [])
+                pos_icon = random.choice(icon_list) if icon_list else None
+            if config.get("neg_icon_source"):
+                icon_list = globals().get(config["neg_icon_source"], [])
+                neg_icon = random.choice(icon_list) if icon_list else None
+            if config.get("pos_icon_url_source"):
+                url_list = globals().get(config["pos_icon_url_source"], [])
+                pos_icon_url = random.choice(url_list) if url_list else None
+            if config.get("neg_icon_url_source"):
+                url_list = globals().get(config["neg_icon_url_source"], [])
+                neg_icon_url = random.choice(url_list) if url_list else None
+
+            if use_chips:
+                items = [
+                    self._build_feedback_chip_item(pos_label, pos_url),
+                    self._build_feedback_chip_item(neg_label, neg_url),
+                ]
+            else:
+                items = [
+                    self._build_feedback_button_item(
+                        pos_label, pos_url,
+                        material_icon=pos_icon,
+                        icon_url=pos_icon_url,
+                        button_type=btn_type
+                    ),
+                    self._build_feedback_button_item(
+                        neg_label, neg_url,
+                        material_icon=neg_icon,
+                        icon_url=neg_icon_url,
+                        button_type=btn_type
+                    ),
+                ]
+        else:
+            # Multi-option ratings (star, emoji, etc.)
+            ratings = config.get("ratings", [])
+            for icon_name, label, rating_value in ratings:
+                url = self._make_callback_url(card_id, rating_value, feedback_type)
+                btn = self._build_feedback_button_item(
+                    label, url,
+                    material_icon=icon_name,
+                    button_type=btn_type
+                )
+                items.append(btn)
+
+        return {widget_key: {items_key: items}}
+
+    # Convenience wrappers for backward compatibility with _create_feedback_section
+    def _click_button_list(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
+        return self._build_clickable_feedback("button_list", card_id, feedback_type)
 
     def _click_chip_list(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
-        """Clickable chip list - uses wrapper Chip.render()."""
-        pos_label = random.choice(POSITIVE_LABELS)
-        neg_label = random.choice(NEGATIVE_LABELS)
-        pos_url = self._make_callback_url(card_id, "positive", feedback_type)
-        neg_url = self._make_callback_url(card_id, "negative", feedback_type)
-
-        chips = [
-            self._build_feedback_chip_item(pos_label, pos_url),
-            self._build_feedback_chip_item(neg_label, neg_url),
-        ]
-        return {"chipList": {"chips": chips}}
+        return self._build_clickable_feedback("chip_list", card_id, feedback_type)
 
     def _click_icon_buttons(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
-        """Button list with Material Icons - uses wrapper Button.render().
+        return self._build_clickable_feedback("icon_buttons", card_id, feedback_type)
 
-        Uses the full Material Design icon set (2,209+ icons) for visual variety.
-        """
-        pos_label = random.choice(POSITIVE_LABELS)
-        neg_label = random.choice(NEGATIVE_LABELS)
-        pos_url = self._make_callback_url(card_id, "positive", feedback_type)
-        neg_url = self._make_callback_url(card_id, "negative", feedback_type)
-        btn_type = random.choice(BUTTON_TYPES)
+    def _click_icon_buttons_alt(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
+        return self._build_clickable_feedback("icon_buttons_alt", card_id, feedback_type)
 
-        buttons = [
-            self._build_feedback_button_item(
-                pos_label, pos_url,
-                material_icon=random.choice(POSITIVE_MATERIAL_ICONS),
-                button_type=btn_type
-            ),
-            self._build_feedback_button_item(
-                neg_label, neg_url,
-                material_icon=random.choice(NEGATIVE_MATERIAL_ICONS),
-                button_type=btn_type
-            ),
-        ]
-        return {"buttonList": {"buttons": buttons}}
-
-    def _click_icon_buttons_alt(
-        self, card_id: str, feedback_type: str, **_kwargs
-    ) -> Dict:
-        """Alternative button list with semantic Material Icons.
-
-        Uses thumb_up/thumb_down for clear positive/negative feedback indication.
-        """
-        pos_label = random.choice(POSITIVE_LABELS)
-        neg_label = random.choice(NEGATIVE_LABELS)
-        pos_url = self._make_callback_url(card_id, "positive", feedback_type)
-        neg_url = self._make_callback_url(card_id, "negative", feedback_type)
-        btn_type = random.choice(BUTTON_TYPES)
-
-        buttons = [
-            self._build_feedback_button_item(
-                pos_label, pos_url,
-                material_icon="thumb_up",  # Clear positive indicator
-                button_type=btn_type
-            ),
-            self._build_feedback_button_item(
-                neg_label, neg_url,
-                material_icon="thumb_down",  # Clear negative indicator
-                button_type=btn_type
-            ),
-        ]
-        return {"buttonList": {"buttons": buttons}}
-
-    def _click_url_image_buttons(
-        self, card_id: str, feedback_type: str, **_kwargs
-    ) -> Dict:
-        """Button list with URL-based images - uses wrapper."""
-        pos_label = random.choice(POSITIVE_LABELS)
-        neg_label = random.choice(NEGATIVE_LABELS)
-        pos_url = self._make_callback_url(card_id, "positive", feedback_type)
-        neg_url = self._make_callback_url(card_id, "negative", feedback_type)
-        btn_type = random.choice(BUTTON_TYPES)
-
-        buttons = [
-            self._build_feedback_button_item(
-                pos_label, pos_url, icon_url=random.choice(POSITIVE_IMAGE_URLS), button_type=btn_type
-            ),
-            self._build_feedback_button_item(
-                neg_label, neg_url, icon_url=random.choice(NEGATIVE_IMAGE_URLS), button_type=btn_type
-            ),
-        ]
-        return {"buttonList": {"buttons": buttons}}
+    def _click_url_image_buttons(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
+        return self._build_clickable_feedback("url_image_buttons", card_id, feedback_type)
 
     def _click_star_rating(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
-        """Star rating buttons using Material Icons.
-
-        Creates a 3-star rating system (bad/ok/great) using star_outline, star_half, star icons.
-        This provides more nuanced feedback than binary positive/negative.
-        """
-        # Rating levels with corresponding icons and labels
-        ratings = [
-            ("star_outline", "👎 Not great", "negative"),
-            ("star_half", "😐 OK", "neutral"),
-            ("star", "👍 Great!", "positive"),
-        ]
-
-        buttons = []
-        for icon_name, label, rating_value in ratings:
-            url = self._make_callback_url(card_id, rating_value, feedback_type)
-            btn = self._build_feedback_button_item(
-                label, url,
-                material_icon=icon_name,
-                button_type="BORDERLESS"  # Cleaner look for ratings
-            )
-            buttons.append(btn)
-
-        return {"buttonList": {"buttons": buttons}}
+        return self._build_clickable_feedback("star_rating", card_id, feedback_type)
 
     def _click_emoji_rating(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
-        """Emoji-style rating buttons using sentiment Material Icons.
-
-        Creates a 3-point sentiment scale using Material Design sentiment icons.
-        """
-        # Sentiment levels with corresponding icons
-        sentiments = [
-            ("sentiment_dissatisfied", "😞", "negative"),
-            ("sentiment_neutral", "😐", "neutral"),
-            ("sentiment_satisfied", "😊", "positive"),
-        ]
-
-        buttons = []
-        for icon_name, label, rating_value in sentiments:
-            url = self._make_callback_url(card_id, rating_value, feedback_type)
-            btn = self._build_feedback_button_item(
-                label, url,
-                material_icon=icon_name,
-                button_type="BORDERLESS"
-            )
-            buttons.append(btn)
-
-        return {"buttonList": {"buttons": buttons}}
+        return self._build_clickable_feedback("emoji_rating", card_id, feedback_type)
 
     # -------------------------------------------------------------------------
     # DUAL COMPONENT BUILDERS (text + click in one widget)
@@ -3387,40 +5045,64 @@ class SmartCardBuilderV2:
     # LAYOUT WRAPPERS
     # -------------------------------------------------------------------------
 
+    def _build_feedback_layout(
+        self,
+        layout_type: str,
+        content_widgets: List[Dict],
+        form_widgets: List[Dict],
+        content_first: bool,
+    ) -> List[Dict]:
+        """Unified config-driven layout builder - replaces 3 individual layout methods.
+
+        Uses LAYOUT_CONFIGS to determine layout behavior.
+
+        Args:
+            layout_type: Key in LAYOUT_CONFIGS (e.g., "sequential", "with_divider")
+            content_widgets: Content feedback widgets
+            form_widgets: Form/action feedback widgets
+            content_first: Whether content should appear first
+
+        Returns:
+            Combined list of widgets in the specified layout
+        """
+        config = LAYOUT_CONFIGS.get(layout_type, {})
+
+        # Handle compact layout (groups by type)
+        if config.get("group_by_type"):
+            texts = [
+                w
+                for w in content_widgets + form_widgets
+                if not any(k in w for k in ["buttonList", "chipList", "grid"])
+            ]
+            buttons = [
+                w
+                for w in content_widgets + form_widgets
+                if any(k in w for k in ["buttonList", "chipList", "grid"])
+            ]
+            return texts + buttons if content_first else buttons + texts
+
+        # Standard sequential layout with optional divider
+        first, second = (content_widgets, form_widgets) if content_first else (form_widgets, content_widgets)
+
+        if config.get("add_divider"):
+            return first + [{"divider": {}}] + second
+        return first + second
+
+    # Convenience wrappers for backward compatibility
     def _layout_sequential(
         self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
     ) -> List[Dict]:
-        """Sequential layout: content then form (or reversed)."""
-        return (
-            content_widgets + form_widgets
-            if content_first
-            else form_widgets + content_widgets
-        )
+        return self._build_feedback_layout("sequential", content_widgets, form_widgets, content_first)
 
     def _layout_with_divider(
         self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
     ) -> List[Dict]:
-        """Layout with divider between content and form."""
-        if content_first:
-            return content_widgets + [{"divider": {}}] + form_widgets
-        return form_widgets + [{"divider": {}}] + content_widgets
+        return self._build_feedback_layout("with_divider", content_widgets, form_widgets, content_first)
 
     def _layout_compact(
         self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
     ) -> List[Dict]:
-        """Compact layout: all text first, then all buttons."""
-        # Extract text and button widgets
-        texts = [
-            w
-            for w in content_widgets + form_widgets
-            if not any(k in w for k in ["buttonList", "chipList", "grid"])
-        ]
-        buttons = [
-            w
-            for w in content_widgets + form_widgets
-            if any(k in w for k in ["buttonList", "chipList", "grid"])
-        ]
-        return texts + buttons if content_first else buttons + texts
+        return self._build_feedback_layout("compact", content_widgets, form_widgets, content_first)
 
     # -------------------------------------------------------------------------
     # MODULAR ASSEMBLY
@@ -3578,25 +5260,28 @@ class SmartCardBuilderV2:
         title: Optional[str] = None,
         subtitle: Optional[str] = None,
         buttons: Optional[List[Dict]] = None,
+        chips: Optional[List[Dict]] = None,
         image_url: Optional[str] = None,
         text: Optional[str] = None,
         items: Optional[List[Dict]] = None,
+        cards: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         """
         Build a card from DSL description.
 
         Args:
             description: Card description with optional DSL notation
-                Structure DSL: §[δ×3, Ƀ[ᵬ×2]] Dashboard
-                Content DSL:
-                    δ 'Status: Online' success bold
-                    ᵬ Refresh https://example.com
+                Structure DSL: Symbol[Child×N] pattern (symbols from ModuleWrapper)
+                Carousel DSL: Use symbols from ModuleWrapper (query wrapper for current mappings)
+                Content DSL: <symbol> 'text' style_modifier
             title: Card header title
             subtitle: Card header subtitle
             buttons: Explicit button list (overrides Content DSL buttons)
+            chips: Explicit chip list [{label, url, icon}, ...]
             image_url: Image URL for image widgets
             text: Explicit text content for text widgets (used if no Content DSL texts)
             items: Array of decorated text items [{text, icon, top_label}, ...]
+            cards: Carousel cards list [{title, subtitle, image_url, text, buttons}, ...]
 
         Returns:
             Card dict in Google Chat format
@@ -3605,20 +5290,79 @@ class SmartCardBuilderV2:
         card = None
         # Reset Jinja tracking for this build
         self._jinja_applied = False
+        # Track the Jinja-rendered description (if different from raw)
+        self._description_rendered: Optional[str] = None
 
-        # Try DSL-based building first
+        # Pre-process description through Jinja to capture rendered version
+        # This allows us to store both raw and processed text in the pattern
+        if description:
+            processed_desc = self._format_text_for_chat(description)
+            if processed_desc != description:
+                self._description_rendered = processed_desc
+
+        # Collect all params for pattern detection
+        all_params = {
+            "title": title,
+            "subtitle": subtitle,
+            "buttons": buttons,
+            "chips": chips,
+            "image_url": image_url,
+            "text": text,
+            "items": items,
+            "cards": cards,  # Carousel cards
+        }
+
+        # Try DSL-based building first (handles both regular cards and carousels)
+        # DSL symbols are dynamically generated from ModuleWrapper
         structure_dsl = self._extract_structure_dsl(description)
         if structure_dsl:
             logger.info(f"🔣 Found Structure DSL: {structure_dsl}")
+
+            # Auto-apply styles from similar patterns (before DSL build)
+            # This allows DSL cards to inherit styles from previously successful cards
+            styled_text = text
+            styled_items = items
+
+            # Query pattern for style_metadata
+            pattern = self._query_qdrant_patterns(description, all_params)
+            style_metadata = {}
+            if pattern:
+                style_metadata = pattern.get("instance_params", {}).get("style_metadata", {})
+
+            if style_metadata.get("semantic_styles") or style_metadata.get("jinja_filters"):
+                logger.info(f"🎨 Found style_metadata for auto-styling: {style_metadata}")
+
+                # Apply styles to text
+                if text and not self._has_explicit_styles({"text": text}):
+                    styled_text = self._apply_style_to_text(text, style_metadata)
+                    if styled_text != text:
+                        logger.info(f"🎨 Styled text: {text[:30]}... -> {styled_text[:50]}...")
+
+                # Apply styles to each item in items array
+                if items:
+                    styled_items = []
+                    for item in items:
+                        styled_item = dict(item)  # Copy to avoid mutation
+                        if item.get("text") and not self._has_explicit_styles({"text": item["text"]}):
+                            styled_item["text"] = self._apply_style_to_text(item["text"], style_metadata)
+                        if item.get("top_label") and not self._has_explicit_styles({"text": item["top_label"]}):
+                            styled_item["top_label"] = self._apply_style_to_text(item["top_label"], style_metadata)
+                        if item.get("bottom_label") and not self._has_explicit_styles({"text": item["bottom_label"]}):
+                            styled_item["bottom_label"] = self._apply_style_to_text(item["bottom_label"], style_metadata)
+                        styled_items.append(styled_item)
+                    logger.info(f"🎨 Styled {len(items)} items")
+
             card = self._build_from_dsl(
                 structure_dsl=structure_dsl,
                 description=description,
                 title=title,
                 subtitle=subtitle,
                 buttons=buttons,
+                chips=chips,
                 image_url=image_url,
-                text=text,
-                items=items,
+                text=styled_text,
+                items=styled_items,
+                cards=cards,
             )
 
         # Fallback: Try Content DSL only (no structure)
@@ -3632,8 +5376,10 @@ class SmartCardBuilderV2:
                 context = {
                     "content_texts": content_dsl.get("texts", []),
                     "buttons": content_dsl.get("buttons", []),
+                    "chips": chips or [],
                     "_text_index": 0,
                     "_button_index": 0,
+                    "_chip_index": 0,
                     "_input_index": 0,
                 }
 
@@ -3714,12 +5460,16 @@ class SmartCardBuilderV2:
         # IMPORTANT: Store instance pattern BEFORE adding feedback section
         # This keeps the main card pattern (from tool inference) separate from
         # the randomly generated feedback UI. Only the meaningful content is stored.
+        # Stores BOTH raw description and Jinja-rendered version for analytics
+        # Note: Pass copies and captured state since this runs in background thread
         self._store_card_pattern(
             card_id=card_id,
             description=description,
             title=title,
             structure_dsl=structure_dsl,
-            card=card,  # Card WITHOUT feedback section
+            card=dict(card) if card else {},  # Copy to avoid mutation issues
+            description_rendered=self._description_rendered,
+            jinja_applied=self._jinja_applied,
         )
 
         # Add feedback section AFTER storing content pattern
@@ -3728,7 +5478,8 @@ class SmartCardBuilderV2:
             feedback = self._create_feedback_section(card_id)
 
             # Store the feedback UI pattern separately (pattern_type="feedback_ui")
-            self._store_feedback_ui_pattern(card_id, feedback)
+            # Note: Pass copy since this runs in background thread
+            self._store_feedback_ui_pattern(card_id, dict(feedback) if feedback else {})
 
             # Add a divider before feedback to visually separate content from feedback UI
             divider_section = {"widgets": [{"divider": {}}]}
@@ -3753,6 +5504,7 @@ class SmartCardBuilderV2:
         image_url: Optional[str] = None,
         text: Optional[str] = None,
         buttons: Optional[List[Dict]] = None,
+        chips: Optional[List[Dict]] = None,
         fields: Optional[List[Dict]] = None,
         submit_action: Optional[Dict] = None,
         grid: Optional[Dict] = None,
@@ -3761,6 +5513,7 @@ class SmartCardBuilderV2:
         column_count: int = 2,
         sections: Optional[List[Dict]] = None,
         items: Optional[List[Dict]] = None,
+        cards: Optional[List[Dict]] = None,
         strict_mode: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -3769,10 +5522,12 @@ class SmartCardBuilderV2:
         This method provides compatibility with the v1 SmartCardBuilder interface.
         All parameters are accepted but DSL in description takes precedence.
 
-        For explicit sections, grids, or forms - use DSL notation:
-        - Forms: τ (TextInput), ► (SelectionInput), □ (DateTimePicker)
-        - Grids: ℊ[ǵ×4] (Grid with 4 GridItems)
-        - Sections: §[δ×3] (Section with 3 DecoratedText)
+        For explicit sections, grids, or forms - use DSL notation.
+        NOTE: Symbols are dynamically generated from ModuleWrapper.
+        Query wrapper.symbol_mapping for current mappings. Common examples:
+        - Forms: TextInput, SelectionInput, DateTimePicker symbols
+        - Grids: Grid[GridItem×N] pattern
+        - Sections: Section[DecoratedText×N] pattern
 
         Args:
             description: Card description with optional DSL notation
@@ -3781,9 +5536,10 @@ class SmartCardBuilderV2:
             image_url: Image URL for image widgets
             text: Explicit text content (merged with description)
             buttons: Button list [{text, url}]
-            fields: Form fields (use DSL instead: τ, ►, □)
+            chips: Chip list [{label, url}]
+            fields: Form fields (use DSL with TextInput/SelectionInput/DateTimePicker symbols)
             submit_action: Form submit (use DSL for forms)
-            grid: Grid structure (use DSL instead: ℊ[ǵ×N])
+            grid: Grid structure (use DSL with Grid[GridItem×N] pattern)
             images: Image URLs for grid (use DSL)
             image_titles: Titles for grid images
             column_count: Grid column count
@@ -3876,9 +5632,11 @@ class SmartCardBuilderV2:
             title=title,
             subtitle=subtitle,
             buttons=buttons,
+            chips=chips,
             image_url=image_url,
             text=text,
             items=items,
+            cards=cards,
         )
 
     def initialize(self):
@@ -3918,6 +5676,7 @@ class SmartCardBuilderV2:
         image_url = card_params.get("image_url")
         text = card_params.get("text")
         buttons = card_params.get("buttons")
+        chips = card_params.get("chips")
         fields = card_params.get("fields")
         submit_action = card_params.get("submit_action")
         grid = card_params.get("grid")
@@ -3926,6 +5685,8 @@ class SmartCardBuilderV2:
         column_count = card_params.get("column_count", 2)
         sections = card_params.get("sections")
         items = card_params.get("items")  # Array of decorated text items
+        # Carousel params
+        cards = card_params.get("cards") or card_params.get("carousel_cards")
 
         logger.info(f"🔨 SmartCardBuilder.build_card_v2: {card_description[:80]}...")
         if fields:
@@ -3934,8 +5695,10 @@ class SmartCardBuilderV2:
             logger.info(f"🔲 Grid params provided: {len(images) if images else 'direct grid'}")
         if sections:
             logger.info(f"📋 Explicit sections provided: {len(sections)} section(s)")
+        if cards:
+            logger.info(f"🎠 Carousel mode: {len(cards)} card(s)")
 
-        # Build card using build_card_from_description
+        # Build card using build_card_from_description (handles all card types including carousel)
         card_dict = self.build_card_from_description(
             description=card_description,
             title=title,
@@ -3943,6 +5706,7 @@ class SmartCardBuilderV2:
             image_url=image_url,
             text=text,
             buttons=buttons,
+            chips=chips,
             fields=fields,
             submit_action=submit_action,
             grid=grid,
@@ -3951,6 +5715,7 @@ class SmartCardBuilderV2:
             column_count=column_count,
             sections=sections,
             items=items,
+            cards=cards,
         )
 
         if not card_dict:
@@ -3979,10 +5744,10 @@ def suggest_dsl_for_params(
 
     Args:
         card_params: Dictionary with parameters like text, buttons, image_url, etc.
-        symbols: Symbol mapping from get_gchat_symbols() (e.g., {'Section': '§'})
+        symbols: Symbol mapping from ModuleWrapper (e.g., wrapper.symbol_mapping)
 
     Returns:
-        Suggested DSL string like "§[δ, Ƀ[ᵬ×2]]" or None if no suggestion
+        Suggested DSL string using symbols from the mapping, or None if no suggestion
     """
     if not card_params:
         return None

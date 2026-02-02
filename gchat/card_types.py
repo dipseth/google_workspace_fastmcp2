@@ -472,6 +472,11 @@ class SendDynamicCardResponse(BaseModel):
     suggestedDsl: Optional[str] = Field(
         None, description="Suggested DSL when params provided but no DSL in description"
     )
+    alternativeDsl: Optional[List[str]] = Field(
+        None,
+        description="Alternative valid DSL patterns using similar components. "
+        "Use these for inspiration on different card structures.",
+    )
     message: str = Field(
         ...,
         description="Human-readable status message describing the result",

@@ -41,9 +41,11 @@ logger = setup_logger()
 # PARAMETER SCHEMA EXTRACTION
 # =============================================================================
 
+
 @dataclass
 class FieldInfo:
     """Information about a component field/parameter."""
+
     name: str
     field_type: str
     has_default: bool
@@ -57,6 +59,7 @@ class FieldInfo:
 @dataclass
 class ComponentSchema:
     """Schema for a component including all its parameters."""
+
     name: str
     fields: Dict[str, FieldInfo] = field(default_factory=dict)
     json_key: str = ""  # e.g., "decoratedText" for DecoratedText
@@ -74,7 +77,7 @@ def extract_component_schema(component_class: Any) -> Optional[ComponentSchema]:
     """
     from dataclasses import MISSING
 
-    if not hasattr(component_class, '__dataclass_fields__'):
+    if not hasattr(component_class, "__dataclass_fields__"):
         return None
 
     name = component_class.__name__
@@ -87,12 +90,12 @@ def extract_component_schema(component_class: Any) -> Optional[ComponentSchema]:
 
     for field_name, field_obj in component_class.__dataclass_fields__.items():
         # Skip private fields
-        if field_name.startswith('_'):
+        if field_name.startswith("_"):
             continue
 
         # Determine type
-        type_str = getattr(field_obj.type, '__name__', str(field_obj.type))
-        is_optional = 'Optional' in str(field_obj.type) or type_str == 'Optional'
+        type_str = getattr(field_obj.type, "__name__", str(field_obj.type))
+        is_optional = "Optional" in str(field_obj.type) or type_str == "Optional"
 
         # Determine default
         if field_obj.default is not MISSING:
@@ -127,10 +130,11 @@ def extract_component_schema(component_class: Any) -> Optional[ComponentSchema]:
 try:
     from gchat.material_icons import (
         MATERIAL_ICONS,
-        is_valid_icon,
-        create_material_icon,
         SEMANTIC_ICONS,
+        create_material_icon,
+        is_valid_icon,
     )
+
     _MATERIAL_ICONS_AVAILABLE = True
 except ImportError:
     MATERIAL_ICONS = frozenset()
@@ -143,24 +147,59 @@ except ImportError:
     def create_material_icon(name: str, fill: bool = False) -> dict:
         return {"materialIcon": {"name": name}}
 
+
 # Curated list of useful material icons for testing
 # These are common, visually distinct icons that render well
 CURATED_MATERIAL_ICONS = [
-    "star", "favorite", "check_circle", "home", "settings",
-    "person", "email", "phone", "calendar_today", "schedule",
-    "notifications", "shopping_cart", "search", "edit", "delete",
-    "add", "remove", "arrow_forward", "arrow_back", "refresh",
-    "cloud", "folder", "attach_file", "link", "share",
-    "thumb_up", "thumb_down", "bookmark", "flag", "info",
-    "warning", "error", "help", "lightbulb", "verified",
+    "star",
+    "favorite",
+    "check_circle",
+    "home",
+    "settings",
+    "person",
+    "email",
+    "phone",
+    "calendar_today",
+    "schedule",
+    "notifications",
+    "shopping_cart",
+    "search",
+    "edit",
+    "delete",
+    "add",
+    "remove",
+    "arrow_forward",
+    "arrow_back",
+    "refresh",
+    "cloud",
+    "folder",
+    "attach_file",
+    "link",
+    "share",
+    "thumb_up",
+    "thumb_down",
+    "bookmark",
+    "flag",
+    "info",
+    "warning",
+    "error",
+    "help",
+    "lightbulb",
+    "verified",
 ]
 
 # Sample values by type for generating test data
 SAMPLE_VALUES_BY_TYPE = {
     "str": [
-        "Test text", "Sample content", "Hello world",
-        "Generated value", "Lorem ipsum", "Quick test",
-        "Status update", "Action required", "Review pending",
+        "Test text",
+        "Sample content",
+        "Hello world",
+        "Generated value",
+        "Lorem ipsum",
+        "Quick test",
+        "Status update",
+        "Action required",
+        "Review pending",
     ],
     "bool": [True, False],
     "int": [0, 1, 5, 10, 42, 100],
@@ -178,9 +217,19 @@ SAMPLE_VALUES_BY_TYPE = {
 
 # Known icons (legacy format for knownIcon field)
 KNOWN_ICONS = [
-    "STAR", "BOOKMARK", "DESCRIPTION", "EMAIL", "CLOCK",
-    "CONFIRMATION_NUMBER", "NOTIFICATIONS", "PERSON", "PHONE",
-    "FLIGHT_ARRIVAL", "FLIGHT_DEPARTURE", "HOTEL", "INVITE",
+    "STAR",
+    "BOOKMARK",
+    "DESCRIPTION",
+    "EMAIL",
+    "CLOCK",
+    "CONFIRMATION_NUMBER",
+    "NOTIFICATIONS",
+    "PERSON",
+    "PHONE",
+    "FLIGHT_ARRIVAL",
+    "FLIGHT_DEPARTURE",
+    "HOTEL",
+    "INVITE",
 ]
 
 # Sample images for testing (define here for use in COMPONENT_DEFAULTS)
@@ -207,7 +256,16 @@ COMPONENT_DEFAULTS = {
         ],
     },
     "Button": {
-        "text": ["Submit", "Cancel", "Confirm", "Next", "Back", "View", "Edit", "Delete"],
+        "text": [
+            "Submit",
+            "Cancel",
+            "Confirm",
+            "Next",
+            "Back",
+            "View",
+            "Edit",
+            "Delete",
+        ],
     },
     "Image": {
         "image_url": PARAM_SAMPLE_IMAGES,
@@ -337,6 +395,7 @@ def generate_component_test_values(
 # CONFIGURATION
 # =============================================================================
 
+
 @dataclass
 class DAGGeneratorConfig:
     """Configuration for DAG-based structure generation."""
@@ -347,23 +406,33 @@ class DAGGeneratorConfig:
     min_children_per_node: int = 1
 
     # Component preferences (boost probability)
-    preferred_components: List[str] = field(default_factory=lambda: [
-        "DecoratedText", "ButtonList", "Button", "TextParagraph"
-    ])
+    preferred_components: List[str] = field(
+        default_factory=lambda: [
+            "DecoratedText",
+            "ButtonList",
+            "Button",
+            "TextParagraph",
+        ]
+    )
 
     # Components to avoid (reduce probability)
-    avoid_components: List[str] = field(default_factory=lambda: [
-        "Carousel", "CarouselCard", "NestedWidget",  # Complex carousel
-        "Columns", "Column",  # Complex multi-column
-        "CollapseControl",  # Requires special handling
-    ])
+    avoid_components: List[str] = field(
+        default_factory=lambda: [
+            "Carousel",
+            "CarouselCard",
+            "NestedWidget",  # Complex carousel
+            "Columns",
+            "Column",  # Complex multi-column
+            "CollapseControl",  # Requires special handling
+        ]
+    )
 
     # Required components (must appear somewhere in structure)
     required_components: List[str] = field(default_factory=list)
 
     # Probability weights
     prefer_weight: float = 2.0  # Multiplier for preferred components
-    avoid_weight: float = 0.2   # Multiplier for avoided components
+    avoid_weight: float = 0.2  # Multiplier for avoided components
 
     # Content generation
     include_content: bool = True
@@ -396,17 +465,22 @@ WIDGET_HIERARCHY = {
     "Card": ["Section", "CardHeader", "CardFixedFooter", "Carousel"],
     "CardHeader": [],  # Just displays title/subtitle
     "CardFixedFooter": ["Button"],  # primaryButton, secondaryButton
-
     # Section is the main container for widgets
     "Section": [
-        "DecoratedText", "TextParagraph", "Image", "Divider",
-        "ButtonList", "Grid", "Columns", "SelectionInput",
-        "DateTimePicker", "ChipList", "CollapseControl"
+        "DecoratedText",
+        "TextParagraph",
+        "Image",
+        "Divider",
+        "ButtonList",
+        "Grid",
+        "Columns",
+        "SelectionInput",
+        "DateTimePicker",
+        "ChipList",
+        "CollapseControl",
     ],
-
     # CollapseControl for expandable sections
     "CollapseControl": ["Button"],  # expandButton, collapseButton
-
     # Widget internals
     "DecoratedText": ["Icon", "Button", "SwitchControl"],
     "ButtonList": ["Button"],
@@ -417,35 +491,66 @@ WIDGET_HIERARCHY = {
     "Column": ["DecoratedText", "TextParagraph", "Image", "ButtonList"],
     "ChipList": ["Chip"],
     "Chip": ["Icon"],
-
     # Carousel (Custom Google Chat API component)
     # Note: NestedWidget only supports textParagraph, buttonList, image (NOT decoratedText!)
     "Carousel": ["CarouselCard"],
     "CarouselCard": ["NestedWidget"],
-    "NestedWidget": ["TextParagraph", "ButtonList", "Image"],  # Limited set per API docs
+    "NestedWidget": [
+        "TextParagraph",
+        "ButtonList",
+        "Image",
+    ],  # Limited set per API docs
 }
 
 # Leaf components (no children)
 LEAF_COMPONENTS = {
-    "TextParagraph", "Image", "Divider", "Icon",
-    "SwitchControl", "SelectionInput", "DateTimePicker",
-    "Widget", "CardHeader"
+    "TextParagraph",
+    "Image",
+    "Divider",
+    "Icon",
+    "SwitchControl",
+    "SelectionInput",
+    "DateTimePicker",
+    "Widget",
+    "CardHeader",
 }
 
 # Internal types that are NOT renderable widgets (exclude from generation)
 # These come from type annotations but aren't actual widget containers
 INTERNAL_TYPES = {
     # Enums and types
-    "Type", "Color", "OnClick", "Action", "OverflowMenu",
-    "HorizontalAlignment", "VerticalAlignment", "HorizontalSizeStyle",
-    "ControlType", "DisplayStyle", "LoadIndicator", "MatchedUrl",
-    "ResponseType", "Interaction", "BorderType", "ImageType",
-    "GridItemLayout", "Layout", "DividerStyle", "WrapStyle",
-    "OpenAs", "OnClose", "UpdatedWidget", "SelectionType",
-    "PlatformDataSource", "CommonDataSource",
+    "Type",
+    "Color",
+    "OnClick",
+    "Action",
+    "OverflowMenu",
+    "HorizontalAlignment",
+    "VerticalAlignment",
+    "HorizontalSizeStyle",
+    "ControlType",
+    "DisplayStyle",
+    "LoadIndicator",
+    "MatchedUrl",
+    "ResponseType",
+    "Interaction",
+    "BorderType",
+    "ImageType",
+    "GridItemLayout",
+    "Layout",
+    "DividerStyle",
+    "WrapStyle",
+    "OpenAs",
+    "OnClose",
+    "UpdatedWidget",
+    "SelectionType",
+    "PlatformDataSource",
+    "CommonDataSource",
     # Internal structures
-    "AttachmentDataRef", "CustomEmojiPayload", "SuggestionItem",
-    "CollapseControl", "ImageComponent",
+    "AttachmentDataRef",
+    "CustomEmojiPayload",
+    "SuggestionItem",
+    "CollapseControl",
+    "ImageComponent",
 }
 
 
@@ -463,13 +568,24 @@ SAMPLE_TEXTS = [
 ]
 
 SAMPLE_BUTTON_LABELS = [
-    "View Details", "Confirm", "Cancel", "Submit",
-    "Next", "Previous", "Approve", "Reject",
+    "View Details",
+    "Confirm",
+    "Cancel",
+    "Submit",
+    "Next",
+    "Previous",
+    "Approve",
+    "Reject",
 ]
 
 SAMPLE_ICONS = [
-    "STAR", "BOOKMARK", "DESCRIPTION", "EMAIL",
-    "CLOCK", "CONFIRMATION_NUMBER", "NOTIFICATIONS",
+    "STAR",
+    "BOOKMARK",
+    "DESCRIPTION",
+    "EMAIL",
+    "CLOCK",
+    "CONFIRMATION_NUMBER",
+    "NOTIFICATIONS",
 ]
 
 SAMPLE_IMAGES = [
@@ -483,9 +599,11 @@ SAMPLE_IMAGES = [
 # DAG STRUCTURE GENERATOR
 # =============================================================================
 
+
 @dataclass
 class ParameterizedNode:
     """A node in the structure tree with parameter values."""
+
     name: str
     symbol: str
     depth: int
@@ -508,13 +626,16 @@ class ParameterizedNode:
                     "is_required": f.is_required,
                 }
                 for name, f in self.parameters.items()
-            } if self.parameters else {},
+            }
+            if self.parameters
+            else {},
         }
 
 
 @dataclass
 class ParameterizedStructure:
     """Generated structure with full parameter information."""
+
     root: str
     components: List[str]
     dsl: str
@@ -549,14 +670,14 @@ class DAGStructureGenerator:
         """Get ModuleWrapper singleton with graph built."""
         if self._wrapper is None:
             from gchat.card_framework_wrapper import get_card_framework_wrapper
+
             self._wrapper = get_card_framework_wrapper()
 
         # Ensure graph is built with widget hierarchy
         if not self._graph_built:
             self._wrapper.build_relationship_graph()
             self._wrapper.add_relationships_to_graph(
-                WIDGET_HIERARCHY,
-                edge_type="widget_contains"
+                WIDGET_HIERARCHY, edge_type="widget_contains"
             )
             self._graph_built = True
 
@@ -649,9 +770,8 @@ class DAGStructureGenerator:
             )
 
             # Decide whether to generate a value
-            should_fill = (
-                (fill_required and param.is_required) or
-                (param.is_optional and random.random() < fill_optional_probability)
+            should_fill = (fill_required and param.is_required) or (
+                param.is_optional and random.random() < fill_optional_probability
             )
 
             if should_fill:
@@ -707,7 +827,7 @@ class DAGStructureGenerator:
         # Determine number of children
         num_children = random.randint(
             config.min_children_per_node,
-            min(config.max_children_per_node, len(available))
+            min(config.max_children_per_node, len(available)),
         )
 
         # Weighted selection without replacement
@@ -1046,14 +1166,14 @@ class DAGStructureGenerator:
 
             for child in node.get("children", []):
                 # Check if parent can contain child
-                if not wrapper.can_contain(node["name"], child["name"], direct_only=True):
+                if not wrapper.can_contain(
+                    node["name"], child["name"], direct_only=True
+                ):
                     # Also check our hierarchy
                     hierarchy_children = WIDGET_HIERARCHY.get(node["name"], [])
                     if child["name"] not in hierarchy_children:
                         is_valid = False
-                        issues.append(
-                            f"{node['name']} cannot contain {child['name']}"
-                        )
+                        issues.append(f"{node['name']} cannot contain {child['name']}")
                 validate_paths(child, current_path)
 
         validate_paths(tree)
@@ -1095,9 +1215,9 @@ class DAGStructureGenerator:
 
         # Add a default widget if empty
         if not card_content["widgets"]:
-            card_content["widgets"].append({
-                "textParagraph": {"text": "Carousel card content"}
-            })
+            card_content["widgets"].append(
+                {"textParagraph": {"text": "Carousel card content"}}
+            )
 
         return card_content, widget_index
 
@@ -1351,7 +1471,9 @@ class DAGStructureGenerator:
         if component == "Section":
             section_widgets = []
             for child in children:
-                child_widgets, widget_index = self.parameterized_tree_to_widgets(child, widget_index)
+                child_widgets, widget_index = self.parameterized_tree_to_widgets(
+                    child, widget_index
+                )
                 section_widgets.extend(child_widgets)
             return section_widgets, widget_index
 
@@ -1359,12 +1481,16 @@ class DAGStructureGenerator:
             buttons = []
             for child in children:
                 if child.name == "Button":
-                    btn_content = self._generate_content_from_params(child, widget_index)
+                    btn_content = self._generate_content_from_params(
+                        child, widget_index
+                    )
                     widget_index += 1
                     # Handle Button's children (Icon)
                     for btn_child in child.children:
                         if btn_child.name == "Icon":
-                            btn_content["icon"] = self._generate_content_from_params(btn_child)
+                            btn_content["icon"] = self._generate_content_from_params(
+                                btn_child
+                            )
                     buttons.append(btn_content)
             content["buttonList"]["buttons"] = buttons
             widgets.append(content)
@@ -1374,9 +1500,13 @@ class DAGStructureGenerator:
             control_set = False
             for child in children:
                 if child.name == "Icon":
-                    content["decoratedText"]["startIcon"] = self._generate_content_from_params(child)
+                    content["decoratedText"]["startIcon"] = (
+                        self._generate_content_from_params(child)
+                    )
                 elif child.name == "Button" and not control_set:
-                    content["decoratedText"]["button"] = self._generate_content_from_params(child, widget_index)
+                    content["decoratedText"]["button"] = (
+                        self._generate_content_from_params(child, widget_index)
+                    )
                     widget_index += 1
                     control_set = True  # Can't add switchControl now
                 elif child.name == "SwitchControl" and not control_set:
@@ -1411,34 +1541,44 @@ class DAGStructureGenerator:
                     chip = self._generate_content_from_params(child, widget_index)
                     widget_index += 1
                     chips.append(chip)
-            widgets.append({
-                "chipList": {
-                    "chips": chips if chips else [{"label": "Default Chip"}],
+            widgets.append(
+                {
+                    "chipList": {
+                        "chips": chips if chips else [{"label": "Default Chip"}],
+                    }
                 }
-            })
+            )
 
         elif component == "Carousel":
             carousel_cards = []
             for child in children:
                 if child.name == "CarouselCard":
-                    card_content, widget_index = self._build_parameterized_carousel_card(child, widget_index)
+                    card_content, widget_index = (
+                        self._build_parameterized_carousel_card(child, widget_index)
+                    )
                     carousel_cards.append(card_content)
 
             if not carousel_cards:
-                carousel_cards.append({
-                    "widgets": [{"textParagraph": {"text": "Carousel item"}}],
-                    "footerWidgets": [],
-                })
+                carousel_cards.append(
+                    {
+                        "widgets": [{"textParagraph": {"text": "Carousel item"}}],
+                        "footerWidgets": [],
+                    }
+                )
 
-            widgets.append({
-                "carousel": {
-                    "carouselCards": carousel_cards,
+            widgets.append(
+                {
+                    "carousel": {
+                        "carouselCards": carousel_cards,
+                    }
                 }
-            })
+            )
 
         elif component == "NestedWidget":
             for child in children:
-                child_widgets, widget_index = self.parameterized_tree_to_widgets(child, widget_index)
+                child_widgets, widget_index = self.parameterized_tree_to_widgets(
+                    child, widget_index
+                )
                 widgets.extend(child_widgets)
 
         elif component == "Columns":
@@ -1447,26 +1587,30 @@ class DAGStructureGenerator:
                 if child.name == "Column":
                     col_widgets = []
                     for col_child in child.children:
-                        child_widgets, widget_index = self.parameterized_tree_to_widgets(
-                            col_child, widget_index
+                        child_widgets, widget_index = (
+                            self.parameterized_tree_to_widgets(col_child, widget_index)
                         )
                         col_widgets.extend(child_widgets)
 
-                    columns.append({
-                        "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
-                        "horizontalAlignment": "CENTER",
-                        "verticalAlignment": "CENTER",
-                        "widgets": col_widgets if col_widgets else [
-                            {"textParagraph": {"text": "Column content"}}
-                        ],
-                    })
+                    columns.append(
+                        {
+                            "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
+                            "horizontalAlignment": "CENTER",
+                            "verticalAlignment": "CENTER",
+                            "widgets": col_widgets
+                            if col_widgets
+                            else [{"textParagraph": {"text": "Column content"}}],
+                        }
+                    )
 
             if columns:
-                widgets.append({
-                    "columns": {
-                        "columnItems": columns,
+                widgets.append(
+                    {
+                        "columns": {
+                            "columnItems": columns,
+                        }
                     }
-                })
+                )
 
         else:
             # Leaf widgets
@@ -1494,9 +1638,9 @@ class DAGStructureGenerator:
                     card_content["widgets"].extend(child_widgets)
 
         if not card_content["widgets"]:
-            card_content["widgets"].append({
-                "textParagraph": {"text": "Carousel card content"}
-            })
+            card_content["widgets"].append(
+                {"textParagraph": {"text": "Carousel card content"}}
+            )
 
         return card_content, widget_index
 
@@ -1531,9 +1675,11 @@ class DAGStructureGenerator:
                     "title": title,
                     "subtitle": subtitle or f"DSL: {structure.dsl}",
                 },
-                "sections": [{
-                    "widgets": widgets,
-                }],
+                "sections": [
+                    {
+                        "widgets": widgets,
+                    }
+                ],
             },
         }
 
@@ -1640,9 +1786,13 @@ class DAGStructureGenerator:
             control_set = False
             for child in children:
                 if child["name"] == "Icon":
-                    content["decoratedText"]["startIcon"] = self._generate_content("Icon")
+                    content["decoratedText"]["startIcon"] = self._generate_content(
+                        "Icon"
+                    )
                 elif child["name"] == "Button" and not control_set:
-                    content["decoratedText"]["button"] = self._generate_content("Button", widget_index)
+                    content["decoratedText"]["button"] = self._generate_content(
+                        "Button", widget_index
+                    )
                     widget_index += 1
                     control_set = True
                 elif child["name"] == "SwitchControl" and not control_set:
@@ -1677,30 +1827,38 @@ class DAGStructureGenerator:
             carousel_cards = []
             for child in children:
                 if child["name"] == "CarouselCard":
-                    card_content, widget_index = self._build_carousel_card(child, widget_index)
+                    card_content, widget_index = self._build_carousel_card(
+                        child, widget_index
+                    )
                     carousel_cards.append(card_content)
 
             # Add at least one card if empty
             if not carousel_cards:
-                carousel_cards.append({
-                    "widgets": [{"textParagraph": {"text": "Carousel item"}}],
-                    "footerWidgets": [],
-                })
+                carousel_cards.append(
+                    {
+                        "widgets": [{"textParagraph": {"text": "Carousel item"}}],
+                        "footerWidgets": [],
+                    }
+                )
 
-            widgets.append({
-                "carousel": {
-                    "carouselCards": carousel_cards,
+            widgets.append(
+                {
+                    "carousel": {
+                        "carouselCards": carousel_cards,
+                    }
                 }
-            })
+            )
 
         elif component == "CarouselCard":
             # Standalone CarouselCard (shouldn't happen, but handle it)
             card_content, widget_index = self._build_carousel_card(tree, widget_index)
-            widgets.append({
-                "carousel": {
-                    "carouselCards": [card_content],
+            widgets.append(
+                {
+                    "carousel": {
+                        "carouselCards": [card_content],
+                    }
                 }
-            })
+            )
 
         elif component == "NestedWidget":
             # NestedWidget just passes through its children (no wrapping)
@@ -1717,12 +1875,14 @@ class DAGStructureGenerator:
                     widget_index += 1
                     buttons.append(btn)
             if buttons:
-                widgets.append({
-                    "collapseControl": {
-                        "expandButton": buttons[0] if len(buttons) > 0 else None,
-                        "collapseButton": buttons[1] if len(buttons) > 1 else None,
+                widgets.append(
+                    {
+                        "collapseControl": {
+                            "expandButton": buttons[0] if len(buttons) > 0 else None,
+                            "collapseButton": buttons[1] if len(buttons) > 1 else None,
+                        }
                     }
-                })
+                )
 
         elif component == "Columns":
             # Columns widget contains Column items
@@ -1737,21 +1897,25 @@ class DAGStructureGenerator:
                         )
                         col_widgets.extend(child_widgets)
 
-                    columns.append({
-                        "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
-                        "horizontalAlignment": "CENTER",
-                        "verticalAlignment": "CENTER",
-                        "widgets": col_widgets if col_widgets else [
-                            {"textParagraph": {"text": "Column content"}}
-                        ],
-                    })
+                    columns.append(
+                        {
+                            "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
+                            "horizontalAlignment": "CENTER",
+                            "verticalAlignment": "CENTER",
+                            "widgets": col_widgets
+                            if col_widgets
+                            else [{"textParagraph": {"text": "Column content"}}],
+                        }
+                    )
 
             if columns:
-                widgets.append({
-                    "columns": {
-                        "columnItems": columns,
+                widgets.append(
+                    {
+                        "columns": {
+                            "columnItems": columns,
+                        }
                     }
-                })
+                )
 
         elif component == "ChipList":
             # ChipList contains Chip items
@@ -1768,11 +1932,13 @@ class DAGStructureGenerator:
                             chip["icon"] = self._generate_content("Icon")
                     chips.append(chip)
 
-            widgets.append({
-                "chipList": {
-                    "chips": chips if chips else [{"label": "Default Chip"}],
+            widgets.append(
+                {
+                    "chipList": {
+                        "chips": chips if chips else [{"label": "Default Chip"}],
+                    }
                 }
-            })
+            )
 
         else:
             # Leaf widgets
@@ -1852,9 +2018,11 @@ class DAGStructureGenerator:
                     "title": title,
                     "subtitle": subtitle or f"DSL: {structure.dsl}",
                 },
-                "sections": [{
-                    "widgets": widgets,
-                }],
+                "sections": [
+                    {
+                        "widgets": widgets,
+                    }
+                ],
             },
         }
 
@@ -1912,8 +2080,7 @@ class DAGStructureGenerator:
             List of card JSON structures
         """
         return [
-            self.generate_random_card(root, required_components)
-            for _ in range(count)
+            self.generate_random_card(root, required_components) for _ in range(count)
         ]
 
     def generate_widget_showcase_carousel(self) -> Dict[str, Any]:
@@ -1935,98 +2102,139 @@ class DAGStructureGenerator:
         carousel_cards = []
 
         # Card 1: Text Formatting
-        carousel_cards.append({
-            "widgets": [
-                {"textParagraph": {"text": "<b>📝 Text Formatting</b>"}},
-                {"textParagraph": {"text": "Normal text paragraph"}},
-                {"textParagraph": {"text": "<i>Italic text</i> and <b>bold text</b>"}},
-                {"textParagraph": {"text": "<font color=\"#4285F4\">Colored text</font>"}},
-            ],
-            "footerWidgets": [
-                {"buttonList": {"buttons": [{"text": "Text Demo"}]}}
-            ],
-        })
+        carousel_cards.append(
+            {
+                "widgets": [
+                    {"textParagraph": {"text": "<b>📝 Text Formatting</b>"}},
+                    {"textParagraph": {"text": "Normal text paragraph"}},
+                    {
+                        "textParagraph": {
+                            "text": "<i>Italic text</i> and <b>bold text</b>"
+                        }
+                    },
+                    {
+                        "textParagraph": {
+                            "text": '<font color="#4285F4">Colored text</font>'
+                        }
+                    },
+                ],
+                "footerWidgets": [{"buttonList": {"buttons": [{"text": "Text Demo"}]}}],
+            }
+        )
 
         # Card 2: Images
-        carousel_cards.append({
-            "widgets": [
-                {"textParagraph": {"text": "<b>🖼️ Images</b>"}},
-                {
-                    "image": {
-                        "imageUrl": SAMPLE_IMAGES[0],
-                        "altText": "Sample image 1",
-                    }
-                },
-                {"textParagraph": {"text": "Images with alt text for accessibility"}},
-            ],
-            "footerWidgets": [
-                {"buttonList": {"buttons": [{"text": "View Gallery"}]}}
-            ],
-        })
+        carousel_cards.append(
+            {
+                "widgets": [
+                    {"textParagraph": {"text": "<b>🖼️ Images</b>"}},
+                    {
+                        "image": {
+                            "imageUrl": SAMPLE_IMAGES[0],
+                            "altText": "Sample image 1",
+                        }
+                    },
+                    {
+                        "textParagraph": {
+                            "text": "Images with alt text for accessibility"
+                        }
+                    },
+                ],
+                "footerWidgets": [
+                    {"buttonList": {"buttons": [{"text": "View Gallery"}]}}
+                ],
+            }
+        )
 
         # Card 3: More Images
-        carousel_cards.append({
-            "widgets": [
-                {"textParagraph": {"text": "<b>🎨 Gallery Item</b>"}},
-                {
-                    "image": {
-                        "imageUrl": SAMPLE_IMAGES[1],
-                        "altText": "Sample image 2",
-                    }
-                },
-                {"textParagraph": {"text": "Carousel cards are great for galleries!"}},
-            ],
-            "footerWidgets": [
-                {"buttonList": {"buttons": [{"text": "Next →"}]}}
-            ],
-        })
+        carousel_cards.append(
+            {
+                "widgets": [
+                    {"textParagraph": {"text": "<b>🎨 Gallery Item</b>"}},
+                    {
+                        "image": {
+                            "imageUrl": SAMPLE_IMAGES[1],
+                            "altText": "Sample image 2",
+                        }
+                    },
+                    {
+                        "textParagraph": {
+                            "text": "Carousel cards are great for galleries!"
+                        }
+                    },
+                ],
+                "footerWidgets": [{"buttonList": {"buttons": [{"text": "Next →"}]}}],
+            }
+        )
 
         # Card 4: Button Variations
-        carousel_cards.append({
-            "widgets": [
-                {"textParagraph": {"text": "<b>🔘 Button List</b>"}},
-                {"textParagraph": {"text": "Buttons with material icons:"}},
-                {
-                    "buttonList": {
-                        "buttons": [
-                            {"text": "Star", "icon": create_material_icon("star")},
-                            {"text": "Save", "icon": create_material_icon("bookmark")},
-                            {"text": "Share", "icon": create_material_icon("share")},
-                        ]
+        carousel_cards.append(
+            {
+                "widgets": [
+                    {"textParagraph": {"text": "<b>🔘 Button List</b>"}},
+                    {"textParagraph": {"text": "Buttons with material icons:"}},
+                    {
+                        "buttonList": {
+                            "buttons": [
+                                {"text": "Star", "icon": create_material_icon("star")},
+                                {
+                                    "text": "Save",
+                                    "icon": create_material_icon("bookmark"),
+                                },
+                                {
+                                    "text": "Share",
+                                    "icon": create_material_icon("share"),
+                                },
+                            ]
+                        }
+                    },
+                ],
+                "footerWidgets": [
+                    {
+                        "buttonList": {
+                            "buttons": [
+                                {"text": "Action 1"},
+                                {"text": "Action 2"},
+                            ]
+                        }
                     }
-                },
-            ],
-            "footerWidgets": [
-                {"buttonList": {"buttons": [
-                    {"text": "Action 1"},
-                    {"text": "Action 2"},
-                ]}}
-            ],
-        })
+                ],
+            }
+        )
 
         # Card 5: Combined
-        carousel_cards.append({
-            "widgets": [
-                {"textParagraph": {"text": "<b>✨ Combined</b>"}},
-                {
-                    "image": {
-                        "imageUrl": SAMPLE_IMAGES[2] if len(SAMPLE_IMAGES) > 2 else SAMPLE_IMAGES[0],
-                        "altText": "Feature image",
-                    }
-                },
-                {"textParagraph": {"text": "<b>Feature Title</b><br>Description text here"}},
-                {
-                    "buttonList": {
-                        "buttons": [
-                            {"text": "Learn More", "icon": create_material_icon("arrow_forward")},
-                        ]
-                    }
-                },
-            ],
-            "footerWidgets": [
-                {"buttonList": {"buttons": [{"text": "Get Started"}]}}
-            ],
-        })
+        carousel_cards.append(
+            {
+                "widgets": [
+                    {"textParagraph": {"text": "<b>✨ Combined</b>"}},
+                    {
+                        "image": {
+                            "imageUrl": SAMPLE_IMAGES[2]
+                            if len(SAMPLE_IMAGES) > 2
+                            else SAMPLE_IMAGES[0],
+                            "altText": "Feature image",
+                        }
+                    },
+                    {
+                        "textParagraph": {
+                            "text": "<b>Feature Title</b><br>Description text here"
+                        }
+                    },
+                    {
+                        "buttonList": {
+                            "buttons": [
+                                {
+                                    "text": "Learn More",
+                                    "icon": create_material_icon("arrow_forward"),
+                                },
+                            ]
+                        }
+                    },
+                ],
+                "footerWidgets": [
+                    {"buttonList": {"buttons": [{"text": "Get Started"}]}}
+                ],
+            }
+        )
 
         # Build card structure
         card_dict = {
@@ -2036,11 +2244,13 @@ class DAGStructureGenerator:
                     "title": "Carousel Showcase",
                     "subtitle": "NestedWidget: textParagraph, buttonList, image",
                 },
-                "sections": [{
-                    "widgets": [
-                        {"carousel": {"carouselCards": carousel_cards}},
-                    ],
-                }],
+                "sections": [
+                    {
+                        "widgets": [
+                            {"carousel": {"carouselCards": carousel_cards}},
+                        ],
+                    }
+                ],
             },
         }
 
@@ -2048,8 +2258,16 @@ class DAGStructureGenerator:
         message["_dag_gen_meta"] = {
             "test_id": self.config.test_id,
             "dsl": "§[◦[▲×5]]",
-            "components": ["Carousel", "CarouselCard", "NestedWidget",
-                           "TextParagraph", "Image", "ButtonList", "Button", "Icon"],
+            "components": [
+                "Carousel",
+                "CarouselCard",
+                "NestedWidget",
+                "TextParagraph",
+                "Image",
+                "ButtonList",
+                "Button",
+                "Icon",
+            ],
             "is_showcase": True,
         }
 
@@ -2073,21 +2291,29 @@ class DAGStructureGenerator:
         # Build carousel cards manually for reliable structure
         carousel_cards = []
         for i in range(num_carousel_items):
-            carousel_cards.append({
-                "widgets": [
-                    {"textParagraph": {"text": f"<b>Carousel Item {i+1}</b>"}},
-                    {"textParagraph": {"text": random.choice(SAMPLE_TEXTS)}},
-                    {"image": {
-                        "imageUrl": random.choice(SAMPLE_IMAGES),
-                        "altText": f"Image {i+1}",
-                    }},
-                ],
-                "footerWidgets": [
-                    {"buttonList": {"buttons": [
-                        {"text": f"Action {i+1}"},
-                    ]}},
-                ],
-            })
+            carousel_cards.append(
+                {
+                    "widgets": [
+                        {"textParagraph": {"text": f"<b>Carousel Item {i + 1}</b>"}},
+                        {"textParagraph": {"text": random.choice(SAMPLE_TEXTS)}},
+                        {
+                            "image": {
+                                "imageUrl": random.choice(SAMPLE_IMAGES),
+                                "altText": f"Image {i + 1}",
+                            }
+                        },
+                    ],
+                    "footerWidgets": [
+                        {
+                            "buttonList": {
+                                "buttons": [
+                                    {"text": f"Action {i + 1}"},
+                                ]
+                            }
+                        },
+                    ],
+                }
+            )
 
         # Build card structure
         card_dict = {
@@ -2097,11 +2323,13 @@ class DAGStructureGenerator:
                     "title": "DAG Carousel Test",
                     "subtitle": f"DSL: §[◦[▲×{num_carousel_items}]]",
                 },
-                "sections": [{
-                    "widgets": [
-                        {"carousel": {"carouselCards": carousel_cards}},
-                    ],
-                }],
+                "sections": [
+                    {
+                        "widgets": [
+                            {"carousel": {"carouselCards": carousel_cards}},
+                        ],
+                    }
+                ],
             },
         }
 
@@ -2111,7 +2339,8 @@ class DAGStructureGenerator:
         message["_dag_gen_meta"] = {
             "test_id": self.config.test_id,
             "dsl": f"§[◦[▲×{num_carousel_items}]]",
-            "components": ["Section", "Carousel"] + ["CarouselCard"] * num_carousel_items,
+            "components": ["Section", "Carousel"]
+            + ["CarouselCard"] * num_carousel_items,
             "is_carousel": True,
         }
 
@@ -2187,6 +2416,7 @@ class DAGStructureGenerator:
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
+
 def generate_dag_card(
     root: str = "Section",
     required: Optional[List[str]] = None,
@@ -2254,6 +2484,7 @@ async def send_parameterized_cards_to_webhook(
         List of results with card info and response status
     """
     import asyncio
+
     import httpx
 
     config = DAGGeneratorConfig(webhook_url=webhook_url)
@@ -2277,8 +2508,8 @@ async def send_parameterized_cards_to_webhook(
                 )
                 card = gen.parameterized_structure_to_card(
                     structure,
-                    title=f"Parameterized Card #{i+1}",
-                    subtitle=f"DSL: {structure.dsl}"
+                    title=f"Parameterized Card #{i + 1}",
+                    subtitle=f"DSL: {structure.dsl}",
                 )
                 structure_dsl = structure.dsl
                 components = structure.components
@@ -2313,14 +2544,16 @@ async def send_parameterized_cards_to_webhook(
                     stats_str = ""
                     if param_stats:
                         stats_str = f" [params: {param_stats['with_values']}/{param_stats['total']}]"
-                    print(f"✅ Card {i+1}: {structure_dsl}{stats_str}")
+                    logger.info("✅ Card %s: %s%s", i + 1, structure_dsl, stats_str)
                 else:
-                    result["error"] = f"HTTP {response.status_code}: {response.text[:100]}"
-                    print(f"❌ Card {i+1}: {result['error']}")
+                    result["error"] = (
+                        f"HTTP {response.status_code}: {response.text[:100]}"
+                    )
+                    logger.error("❌ Card %s: %s", i + 1, result["error"])
 
             except Exception as e:
                 result["error"] = str(e)
-                print(f"❌ Card {i+1}: {e}")
+                logger.exception("❌ Card %s failed", i + 1)
 
             results.append(result)
 
@@ -2353,6 +2586,7 @@ async def send_dag_cards_to_webhook(
         List of results with card info and response status
     """
     import asyncio
+
     import httpx
 
     config = DAGGeneratorConfig(webhook_url=webhook_url)
@@ -2373,8 +2607,8 @@ async def send_dag_cards_to_webhook(
                 structure = gen.generate_random_structure(root, required)
                 card = gen.structure_to_card(
                     structure,
-                    title=f"DAG Test Card #{i+1}",
-                    subtitle=f"DSL: {structure.dsl}"
+                    title=f"DAG Test Card #{i + 1}",
+                    subtitle=f"DSL: {structure.dsl}",
                 )
                 structure_dsl = structure.dsl
                 components = structure.components
@@ -2400,14 +2634,16 @@ async def send_dag_cards_to_webhook(
 
                 if response.status_code == 200:
                     result["success"] = True
-                    print(f"✅ Card {i+1}: {structure_dsl}")
+                    logger.info("✅ Card %s: %s", i + 1, structure_dsl)
                 else:
-                    result["error"] = f"HTTP {response.status_code}: {response.text[:100]}"
-                    print(f"❌ Card {i+1}: {result['error']}")
+                    result["error"] = (
+                        f"HTTP {response.status_code}: {response.text[:100]}"
+                    )
+                    logger.error("❌ Card %s: %s", i + 1, result["error"])
 
             except Exception as e:
                 result["error"] = str(e)
-                print(f"❌ Card {i+1}: {e}")
+                logger.exception("❌ Card %s failed", i + 1)
 
             results.append(result)
 
@@ -2440,6 +2676,7 @@ async def run_stress_test(
         Dict with test results and coverage stats
     """
     import asyncio
+
     import httpx
 
     # All testable components from WIDGET_HIERARCHY
@@ -2449,7 +2686,9 @@ async def run_stress_test(
         ALL_COMPONENTS.update(children)
 
     # Remove internal/abstract types
-    TESTABLE_COMPONENTS = ALL_COMPONENTS - INTERNAL_TYPES - {"Card", "CardHeader", "CardFixedFooter"}
+    TESTABLE_COMPONENTS = (
+        ALL_COMPONENTS - INTERNAL_TYPES - {"Card", "CardHeader", "CardFixedFooter"}
+    )
 
     # Group components by what can contain them (for targeted testing)
     SECTION_CHILDREN = set(WIDGET_HIERARCHY.get("Section", []))
@@ -2478,8 +2717,16 @@ async def run_stress_test(
 
     async with httpx.AsyncClient(verify=False) as client:
         # Test batch 1: Basic Section widgets
-        print("📦 Testing basic Section widgets...")
-        basic_widgets = ["DecoratedText", "TextParagraph", "Image", "Divider", "ButtonList", "SelectionInput", "DateTimePicker"]
+        logger.info("📦 Testing basic Section widgets...")
+        basic_widgets = [
+            "DecoratedText",
+            "TextParagraph",
+            "Image",
+            "Divider",
+            "ButtonList",
+            "SelectionInput",
+            "DateTimePicker",
+        ]
         for widget in basic_widgets:
             config.test_id = str(uuid.uuid4())[:8]
             try:
@@ -2491,7 +2738,7 @@ async def run_stress_test(
                 card = gen.parameterized_structure_to_card(
                     structure,
                     title=f"Stress: {widget}",
-                    subtitle=f"DSL: {structure.dsl}"
+                    subtitle=f"DSL: {structure.dsl}",
                 )
                 meta = card.pop("_dag_gen_meta", {})
 
@@ -2501,32 +2748,36 @@ async def run_stress_test(
                 if response.status_code == 200:
                     results["successful"] += 1
                     results["components_tested"].update(structure.components)
-                    print(f"  ✅ {widget}: {structure.dsl}")
+                    logger.info("  ✅ %s: %s", widget, structure.dsl)
                 else:
                     results["failed"] += 1
-                    results["errors"].append({
+                    results["errors"].append(
+                        {
+                            "widget": widget,
+                            "dsl": structure.dsl,
+                            "error": response.text[:100],
+                        }
+                    )
+                    logger.error("  ❌ %s: %s", widget, response.text[:80])
+
+                results["cards"].append(
+                    {
                         "widget": widget,
                         "dsl": structure.dsl,
-                        "error": response.text[:100],
-                    })
-                    print(f"  ❌ {widget}: {response.text[:80]}")
-
-                results["cards"].append({
-                    "widget": widget,
-                    "dsl": structure.dsl,
-                    "success": response.status_code == 200,
-                    "params": meta.get("parameter_stats", {}),
-                })
+                        "success": response.status_code == 200,
+                        "params": meta.get("parameter_stats", {}),
+                    }
+                )
 
             except Exception as e:
                 results["failed"] += 1
                 results["errors"].append({"widget": widget, "error": str(e)})
-                print(f"  ❌ {widget}: {e}")
+                logger.exception("  ❌ %s failed", widget)
 
             await asyncio.sleep(delay_seconds)
 
         # Test batch 2: Complex nested structures
-        print("\n🏗️ Testing complex nested structures...")
+        logger.info("🏗️ Testing complex nested structures...")
         complex_combos = [
             ["DecoratedText", "ButtonList", "Image"],
             ["Grid", "GridItem"],
@@ -2544,7 +2795,7 @@ async def run_stress_test(
                 card = gen.parameterized_structure_to_card(
                     structure,
                     title=f"Complex: {'+'.join(combo[:2])}",
-                    subtitle=f"DSL: {structure.dsl}"
+                    subtitle=f"DSL: {structure.dsl}",
                 )
                 meta = card.pop("_dag_gen_meta", {})
 
@@ -2554,25 +2805,27 @@ async def run_stress_test(
                 if response.status_code == 200:
                     results["successful"] += 1
                     results["components_tested"].update(structure.components)
-                    print(f"  ✅ {'+'.join(combo[:2])}: {structure.dsl}")
+                    logger.info("  ✅ %s: %s", "+".join(combo[:2]), structure.dsl)
                 else:
                     results["failed"] += 1
-                    results["errors"].append({
-                        "combo": combo,
-                        "dsl": structure.dsl,
-                        "error": response.text[:100],
-                    })
-                    print(f"  ❌ {'+'.join(combo[:2])}: {response.text[:80]}")
+                    results["errors"].append(
+                        {
+                            "combo": combo,
+                            "dsl": structure.dsl,
+                            "error": response.text[:100],
+                        }
+                    )
+                    logger.error("  ❌ %s: %s", "+".join(combo[:2]), response.text[:80])
 
             except Exception as e:
                 results["failed"] += 1
                 results["errors"].append({"combo": combo, "error": str(e)})
-                print(f"  ❌ {'+'.join(combo[:2])}: {e}")
+                logger.exception("  ❌ %s failed", "+".join(combo[:2]))
 
             await asyncio.sleep(delay_seconds)
 
         # Test batch 3: Carousel
-        print("\n🎠 Testing Carousel...")
+        logger.info("🎠 Testing Carousel...")
         config.test_id = str(uuid.uuid4())[:8]
         try:
             card = gen.generate_carousel_card(num_carousel_items=4)
@@ -2583,15 +2836,17 @@ async def run_stress_test(
 
             if response.status_code == 200:
                 results["successful"] += 1
-                results["components_tested"].update(["Carousel", "CarouselCard", "NestedWidget"])
-                print(f"  ✅ Carousel: {meta.get('dsl')}")
+                results["components_tested"].update(
+                    ["Carousel", "CarouselCard", "NestedWidget"]
+                )
+                logger.info("  ✅ Carousel: %s", meta.get("dsl"))
             else:
                 results["failed"] += 1
-                print(f"  ❌ Carousel: {response.text[:80]}")
+                logger.error("  ❌ Carousel: %s", response.text[:80])
 
         except Exception as e:
             results["failed"] += 1
-            print(f"  ❌ Carousel: {e}")
+            logger.exception("  ❌ Carousel failed")
 
     # Calculate coverage
     results["components_tested"] = set(results["components_tested"])
@@ -2599,18 +2854,27 @@ async def run_stress_test(
     coverage = len(results["components_tested"]) / len(TESTABLE_COMPONENTS) * 100
 
     # Summary
-    print("\n" + "=" * 60)
-    print(f"STRESS TEST COMPLETE")
-    print("=" * 60)
-    print(f"Cards: {results['successful']}/{results['total_cards']} successful")
-    print(f"Coverage: {len(results['components_tested'])}/{len(TESTABLE_COMPONENTS)} components ({coverage:.1f}%)")
-    print(f"\nTested: {sorted(results['components_tested'])}")
+    logger.info("%s", "=" * 60)
+    logger.info("STRESS TEST COMPLETE")
+    logger.info("%s", "=" * 60)
+    logger.info(
+        "Cards: %s/%s successful",
+        results["successful"],
+        results["total_cards"],
+    )
+    logger.info(
+        "Coverage: %s/%s components (%.1f%%)",
+        len(results["components_tested"]),
+        len(TESTABLE_COMPONENTS),
+        coverage,
+    )
+    logger.info("Tested: %s", sorted(results["components_tested"]))
     if results["components_missing"]:
-        print(f"Missing: {sorted(results['components_missing'])}")
+        logger.warning("Missing: %s", sorted(results["components_missing"]))
     if results["errors"]:
-        print(f"\nErrors ({len(results['errors'])}):")
+        logger.error("Errors (%s):", len(results["errors"]))
         for err in results["errors"][:5]:
-            print(f"  - {err}")
+            logger.error("  - %s", err)
 
     return results
 
@@ -2630,6 +2894,7 @@ def run_dag_stress_test(
         Dict with test results and coverage stats
     """
     import asyncio
+
     return asyncio.run(run_stress_test(webhook_url, fill_probability))
 
 
@@ -2649,30 +2914,32 @@ def run_dag_smoke_test(
     import asyncio
 
     mode = "parameterized" if use_parameterized else "basic"
-    print(f"🔥 Running DAG smoke test ({mode}): {count} cards")
-    print(f"   Webhook: {webhook_url[:50]}...")
-    print()
+    logger.info("🔥 Running DAG smoke test (%s): %s cards", mode, count)
+    logger.info("   Webhook: %s...", webhook_url[:50])
 
     if use_parameterized:
-        results = asyncio.run(send_parameterized_cards_to_webhook(
-            webhook_url,
-            count=count,
-            include_carousel=True,
-            fill_optional_probability=0.5,
-        ))
+        results = asyncio.run(
+            send_parameterized_cards_to_webhook(
+                webhook_url,
+                count=count,
+                include_carousel=True,
+                fill_optional_probability=0.5,
+            )
+        )
     else:
-        results = asyncio.run(send_dag_cards_to_webhook(
-            webhook_url,
-            count=count,
-            include_carousel=True,
-        ))
+        results = asyncio.run(
+            send_dag_cards_to_webhook(
+                webhook_url,
+                count=count,
+                include_carousel=True,
+            )
+        )
 
     # Summary
     success = sum(1 for r in results if r["success"])
-    print()
-    print("=" * 60)
-    print(f"DAG SMOKE TEST: {success}/{len(results)} cards sent successfully")
-    print("=" * 60)
+    logger.info("%s", "=" * 60)
+    logger.info("DAG SMOKE TEST: %s/%s cards sent successfully", success, len(results))
+    logger.info("%s", "=" * 60)
 
     for r in results:
         status = "✅" if r["success"] else "❌"
@@ -2680,9 +2947,15 @@ def run_dag_smoke_test(
         if r.get("parameter_stats"):
             ps = r["parameter_stats"]
             stats_str = f" [{ps['with_values']}/{ps['total']} params]"
-        print(f"  {status} #{r['index']}: {r['dsl']}{stats_str}")
+        logger.info(
+            "  %s #%s: %s%s",
+            status,
+            r["index"],
+            r["dsl"],
+            stats_str,
+        )
         if r["error"]:
-            print(f"      Error: {r['error'][:60]}")
+            logger.error("      Error: %s", r["error"][:60])
 
 
 # =============================================================================
@@ -2711,53 +2984,63 @@ if __name__ == "__main__":
         run_dag_smoke_test(webhook_url, count, use_parameterized=True)
     else:
         # Demo mode - just print structures
-        print("=== DAG Structure Generator Demo ===")
-        print("(Set MCP_CHAT_WEBHOOK env var or pass URL to send cards)\n")
+        logger.info("=== DAG Structure Generator Demo ===")
+        logger.info("(Set MCP_CHAT_WEBHOOK env var or pass URL to send cards)")
 
         gen = DAGStructureGenerator()
 
         # Generate random structures (basic)
-        print("Generating random structures (basic)...\n")
+        logger.info("Generating random structures (basic)...")
 
         for i in range(3):
             structure = gen.generate_random_structure("Section")
-            print(f"{i+1}. DSL: {structure.dsl}")
-            print(f"   Components: {structure.components}")
-            print(f"   Depth: {structure.depth}, Valid: {structure.is_valid}")
-            print()
+            logger.info("%s. DSL: %s", i + 1, structure.dsl)
+            logger.info("   Components: %s", structure.components)
+            logger.info("   Depth: %s, Valid: %s", structure.depth, structure.is_valid)
 
         # Generate parameterized structures
-        print("\nGenerating parameterized structures...\n")
+        logger.info("Generating parameterized structures...")
 
         for i in range(3):
             structure = gen.generate_parameterized_structure(
                 "Section",
                 fill_optional_probability=0.5,
             )
-            print(f"{i+1}. DSL: {structure.dsl}")
-            print(f"   Components: {structure.components}")
-            print(f"   Parameters: {structure.parameters_with_values}/{structure.total_parameters} filled")
-            print(f"   Using defaults: {structure.parameters_using_defaults}")
-            print()
+            logger.info("%s. DSL: %s", i + 1, structure.dsl)
+            logger.info("   Components: %s", structure.components)
+            logger.info(
+                "   Parameters: %s/%s filled",
+                structure.parameters_with_values,
+                structure.total_parameters,
+            )
+            logger.info("   Using defaults: %s", structure.parameters_using_defaults)
 
         # Generate a Carousel
-        print("Generating Carousel structure...")
+        logger.info("Generating Carousel structure...")
         carousel = gen.generate_random_structure("Carousel")
-        print(f"   DSL: {carousel.dsl}")
-        print(f"   Components: {carousel.components}")
-        print()
+        logger.info("   DSL: %s", carousel.dsl)
+        logger.info("   Components: %s", carousel.components)
 
         # Generate a parameterized card
-        print("Generating parameterized card...")
-        card = gen.generate_parameterized_card("Section", ["DecoratedText", "ButtonList"])
+        logger.info("Generating parameterized card...")
+        card = gen.generate_parameterized_card(
+            "Section", ["DecoratedText", "ButtonList"]
+        )
         meta = card.pop("_dag_gen_meta", {})
 
-        print(f"\nCard DSL: {meta.get('dsl')}")
-        print(f"Components: {meta.get('components')}")
+        logger.info("Card DSL: %s", meta.get("dsl"))
+        logger.info("Components: %s", meta.get("components"))
         param_stats = meta.get("parameter_stats", {})
-        print(f"Parameter stats: {param_stats.get('with_values', 0)}/{param_stats.get('total', 0)} filled")
-        print("\nCard JSON (first section):")
+        logger.info(
+            "Parameter stats: %s/%s filled",
+            param_stats.get("with_values", 0),
+            param_stats.get("total", 0),
+        )
+        logger.info("Card JSON (first section):")
         # Handle both snake_case and camelCase field names
         cards = card.get("cards_v2") or card.get("cardsV2") or []
         if cards:
-            print(json.dumps(cards[0]["card"]["sections"][0], indent=2))
+            logger.info(
+                "\n%s",
+                json.dumps(cards[0]["card"]["sections"][0], indent=2),
+            )
