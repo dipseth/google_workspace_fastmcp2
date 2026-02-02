@@ -21,7 +21,7 @@ def test_smart_card_builder_wrapper_search():
     print("TEST: SmartCardBuilder._query_wrapper_patterns()")
     print("=" * 60)
 
-    from gchat.smart_card_builder import SmartCardBuilder
+    from gchat.card_builder import SmartCardBuilder
 
     builder = SmartCardBuilder()
 

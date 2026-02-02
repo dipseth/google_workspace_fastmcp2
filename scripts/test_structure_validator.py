@@ -682,7 +682,7 @@ def test_smart_card_builder_integration():
     print("SMARTCARDBUILDER INTEGRATION TEST")
     print("=" * 60)
 
-    from gchat.smart_card_builder import get_smart_card_builder
+    from gchat.card_builder import get_smart_card_builder
 
     wrapper = get_card_framework_wrapper()
     builder = get_smart_card_builder()
@@ -737,7 +737,7 @@ def test_smart_card_builder_integration():
     print("  " + "-" * 38)
 
     dsl_desc = "§[δ×2, Ƀ[ᵬ×2]] Server Status"
-    card = builder.build_card_from_description(
+    card = builder.build(
         description=dsl_desc,
         title="Test DSL Card",
         text="System online",
@@ -766,7 +766,7 @@ def test_smart_card_builder_integration():
     print("  " + "-" * 38)
 
     nl_desc = "Product showcase card"
-    card = builder.build_card_from_description(
+    card = builder.build(
         description=nl_desc,
         title="Product Card",
         text="Amazing product",

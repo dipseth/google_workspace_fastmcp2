@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def test_extract_paths():
     """Test the path extraction from different pattern formats."""
-    from gchat.smart_card_builder import get_smart_card_builder
+    from gchat.card_builder import get_smart_card_builder
 
     builder = get_smart_card_builder()
 
