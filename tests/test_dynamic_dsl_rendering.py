@@ -316,7 +316,7 @@ def test_generate_and_render_random_structure():
 
 def test_prepared_pattern_with_dynamic_structure():
     """Test PreparedPattern with dynamically generated structure."""
-    from gchat.smart_card_builder import PreparedPattern
+    from gchat.card_builder import PreparedPattern
     from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()

@@ -229,7 +229,7 @@ def test_get_field_for_child_chiplist_chip():
 
 def test_nested_dsl_decorated_text_with_button():
     """Test rendering DecoratedText with nested Button via DSL."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -264,7 +264,7 @@ def test_nested_dsl_decorated_text_with_button():
 
 def test_nested_dsl_decorated_text_with_icon():
     """Test rendering DecoratedText with nested Icon via DSL."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -293,7 +293,7 @@ def test_nested_dsl_decorated_text_with_icon():
 
 def test_nested_dsl_decorated_text_with_multiple_children():
     """Test rendering DecoratedText with both Icon and Button."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -318,7 +318,7 @@ def test_nested_dsl_decorated_text_with_multiple_children():
 
 def test_nested_dsl_without_children():
     """Test that DecoratedText without children still works."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -341,7 +341,7 @@ def test_nested_dsl_without_children():
 
 def test_nested_dsl_button_list_with_buttons():
     """Test ButtonList with nested Button children via DSL."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -390,7 +390,7 @@ def test_get_field_for_child_case_sensitivity():
 
 def test_nested_dsl_handles_missing_wrapper_gracefully():
     """Test that child mapping doesn't crash without wrapper."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
     # Force wrapper to None (simulate failure)
@@ -439,7 +439,7 @@ def test_relationship_metadata_completeness():
 @webhook
 def test_webhook_decorated_text_with_icon_and_button():
     """Send DecoratedText with Icon and Button to real webhook."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -469,7 +469,7 @@ def test_webhook_decorated_text_with_icon_and_button():
 @webhook
 def test_webhook_multiple_decorated_texts_with_children():
     """Send multiple DecoratedTexts with different children to webhook."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -503,7 +503,7 @@ def test_webhook_multiple_decorated_texts_with_children():
 @webhook
 def test_webhook_button_list_with_buttons():
     """Send ButtonList with multiple Buttons to webhook."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -537,7 +537,7 @@ def test_webhook_button_list_with_buttons():
 @webhook
 def test_webhook_complex_nested_structure():
     """Send a complex card with multiple nested structures."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -571,7 +571,7 @@ def test_webhook_complex_nested_structure():
 @webhook
 def test_webhook_grid_with_items():
     """Send Grid component to webhook."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -608,7 +608,7 @@ def test_unified_button_consumption():
     When DSL has δ[ᵬ] (button in DecoratedText) and Ƀ[ᵬ×2] (buttons in ButtonList),
     buttons should be consumed in order: first to DT, remaining to BL.
     """
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -650,7 +650,7 @@ def test_unified_button_consumption():
 @webhook
 def test_webhook_unified_button_distribution():
     """Send card with unified button distribution to webhook."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -897,7 +897,7 @@ def test_random_dsl_generation():
 
 def test_random_dsl_cards_build_successfully():
     """Test that randomly generated DSL structures build into valid cards."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     components = get_available_components()
     builder = SmartCardBuilderV2()
@@ -974,7 +974,7 @@ def test_random_component_combinations():
 @webhook
 def test_webhook_random_dsl_cards():
     """Send randomly generated DSL cards to the webhook."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     components = get_available_components()
     builder = SmartCardBuilderV2()
@@ -1026,7 +1026,7 @@ def test_webhook_random_dsl_cards():
 @webhook
 def test_webhook_random_nested_structures():
     """Send cards with TRULY random nested component structures."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     components = get_available_components()
     wrapper = components["wrapper"]
@@ -1111,7 +1111,7 @@ def test_webhook_kitchen_sink_all_components():
     This is the comprehensive test that demonstrates the full DSL capability
     by including as many different component types as possible in one card.
     """
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     components = get_available_components()
     wrapper = components["wrapper"]
