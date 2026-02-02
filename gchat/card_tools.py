@@ -64,7 +64,7 @@ from .card_types import (
 # SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
 # from .nlp_card_parser import parse_enhanced_natural_language_description
 # Import SmartCardBuilder for component-based card creation
-from .smart_card_builder import COMPONENT_PARAMS, get_smart_card_builder, suggest_dsl_for_params
+from .card_builder import COMPONENT_PARAMS, get_smart_card_builder, suggest_dsl_for_params
 
 logger = setup_logger()
 logger.info("Card Framework v2 is available for rich card creation")
@@ -755,11 +755,61 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 logger.info("🔨 Using SmartCardBuilder as primary card building path")
                 await progress.set_message("Querying Qdrant and building card structure...")
                 try:
-                    # Use SmartCardBuilder.build_card_v2() directly
+                    # Use SmartCardBuilder.build() directly with unpacked params
+                    import time
                     builder = get_smart_card_builder()
-                    google_format_card = builder.build_card_v2(
-                        card_description, card_params
+
+                    # Extract params
+                    title = card_params.get("title") if card_params else None
+                    subtitle = card_params.get("subtitle") if card_params else None
+                    image_url = card_params.get("image_url") if card_params else None
+                    text = card_params.get("text") if card_params else None
+                    buttons = card_params.get("buttons") if card_params else None
+                    chips = card_params.get("chips") if card_params else None
+                    grid = card_params.get("grid") if card_params else None
+                    images = card_params.get("images") if card_params else None
+                    image_titles = card_params.get("image_titles") if card_params else None
+                    items = card_params.get("items") if card_params else None
+                    cards = (card_params.get("cards") or card_params.get("carousel_cards")) if card_params else None
+
+                    # Convert grid images to items for DSL building
+                    grid_items = None
+                    if images:
+                        logger.info(f"🔲 Grid images: {len(images)}")
+                        grid_items = [
+                            {
+                                "title": image_titles[i] if image_titles and i < len(image_titles) else f"Item {i + 1}",
+                                "image_url": img_url
+                            }
+                            for i, img_url in enumerate(images)
+                        ]
+                    elif grid and grid.get("items"):
+                        logger.info(f"🔲 Grid items: {len(grid.get('items', []))}")
+                        grid_items = grid["items"]
+
+                    if cards:
+                        logger.info(f"🎠 Carousel: {len(cards)} card(s)")
+
+                    # Build card via unified DSL/DAG pipeline
+                    card_dict = builder.build(
+                        description=card_description,
+                        title=title,
+                        subtitle=subtitle,
+                        buttons=buttons,
+                        chips=chips,
+                        image_url=image_url,
+                        text=text,
+                        items=grid_items or items,
+                        cards=cards,
                     )
+
+                    # Wrap in cardsV2 format for Google Chat API
+                    if card_dict:
+                        card_id = f"smart_card_{int(time.time())}_{hash(str(card_params)) % 10000}"
+                        google_format_card = {
+                            "cardId": card_id,
+                            "card": card_dict,
+                        }
                     if google_format_card:
                         best_match = {
                             "type": "smart_builder",
