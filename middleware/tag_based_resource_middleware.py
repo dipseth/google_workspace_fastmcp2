@@ -25,6 +25,9 @@ from auth.context import get_user_email_context
 # Import centralized scope registry for dynamic service metadata
 from auth.scope_registry import ScopeRegistry
 
+# Import FastMCP compatibility utilities
+from config.fastmcp_compat import FastMCPToolRegistry
+
 from .service_list_response import (
     ServiceErrorResponse,
     ServiceItemDetailsResponse,
@@ -1043,35 +1046,19 @@ class TagBasedResourceMiddleware(Middleware):
         """
         try:
             if hasattr(context, "fastmcp_context") and context.fastmcp_context:
-                # Access the tool registry (supports FastMCP 2.x and 3.0.0b1+)
+                # Access the tool registry using compatibility utility
                 mcp_server = context.fastmcp_context.fastmcp
-                tools_dict = {}
-
-                # FastMCP 2.x path
-                if hasattr(mcp_server, "_tool_manager") and hasattr(
-                    mcp_server._tool_manager, "_tools"
-                ):
-                    tools_dict = mcp_server._tool_manager._tools
-                # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-                elif hasattr(mcp_server, "_local_provider") and hasattr(
-                    mcp_server._local_provider, "_components"
-                ):
-                    from fastmcp.tools.tool import Tool
-
-                    components = mcp_server._local_provider._components
-                    tools_dict = {
-                        v.name: v for v in components.values() if isinstance(v, Tool)
-                    }
-
-                if tools_dict:
+                
+                try:
+                    tools_dict = FastMCPToolRegistry.get_tools_dict(mcp_server)
                     tool_names = set(tools_dict.keys())
 
                     if self.enable_debug_logging:
                         logger.debug(f"🔧 Found {len(tool_names)} available tools")
 
                     return tool_names
-                else:
-                    logger.warning("⚠️ Cannot access tool registry from FastMCP server")
+                except RuntimeError as e:
+                    logger.warning(f"⚠️ Cannot access tool registry: {e}")
                     return set()
             else:
                 logger.warning("⚠️ No FastMCP context available for tool discovery")
@@ -1116,51 +1103,17 @@ class TagBasedResourceMiddleware(Middleware):
         if self.enable_debug_logging:
             logger.debug(f"🔧 Calling tool {tool_name} with parameters: {parameters}")
 
-        # Get the tool from the registry (supports FastMCP 2.x and 3.0.0b1+)
+        # Get the tool from the registry using compatibility utility
         mcp_server = context.fastmcp_context.fastmcp
-        tools_dict = {}
-
-        # FastMCP 2.x path
-        if hasattr(mcp_server, "_tool_manager") and hasattr(
-            mcp_server._tool_manager, "_tools"
-        ):
-            tools_dict = mcp_server._tool_manager._tools
-        # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-        elif hasattr(mcp_server, "_local_provider") and hasattr(
-            mcp_server._local_provider, "_components"
-        ):
-            from fastmcp.tools.tool import Tool
-
-            components = mcp_server._local_provider._components
-            tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
-
-        if not tools_dict:
-            raise RuntimeError("Cannot access tool registry from FastMCP server")
+        tools_dict = FastMCPToolRegistry.get_tools_dict(mcp_server)
 
         if tool_name not in tools_dict:
             raise RuntimeError(f"Tool '{tool_name}' not found in registry")
 
         tool_instance = tools_dict[tool_name]
 
-        # Get the actual callable function from the tool
-        # Tools might be wrapped in different ways depending on middleware processing
-        if hasattr(tool_instance, "fn"):
-            # Tool has a fn attribute that contains the actual function
-            tool_func = tool_instance.fn
-        elif hasattr(tool_instance, "func"):
-            # Tool has a func attribute
-            tool_func = tool_instance.func
-        elif hasattr(tool_instance, "__call__"):
-            # Tool is directly callable
-            tool_func = tool_instance
-        else:
-            # Try to find the actual function
-            logger.error(
-                f"Tool structure: {type(tool_instance)}, attributes: {dir(tool_instance)}"
-            )
-            raise RuntimeError(
-                f"Tool '{tool_name}' is not callable - unable to find callable function"
-            )
+        # Extract the callable function using compatibility utility
+        tool_func = FastMCPToolRegistry.extract_callable(tool_instance)
 
         # Call the tool's function with parameters
         try:

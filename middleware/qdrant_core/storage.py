@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Union
 
 from config.enhanced_logging import setup_logger
+from config.fastmcp_compat import ResponseSerializer, ContextExtractor
 
 from .client import QdrantClientManager
 from .config import PayloadType
@@ -383,17 +384,9 @@ class QdrantStorageManager:
         elif context is not None and response is not None:
             # Called with MiddlewareContext object
             try:
-                # Extract tool information from context.message (following FastMCP pattern)
-                tool_name = (
-                    getattr(context.message, "name", "unknown_tool")
-                    if hasattr(context, "message")
-                    else "unknown_tool"
-                )
-                arguments = (
-                    getattr(context.message, "arguments", {})
-                    if hasattr(context, "message")
-                    else {}
-                )
+                # Extract tool information using ContextExtractor utility
+                tool_name = ContextExtractor.get_tool_name(context, default="unknown_tool")
+                arguments = ContextExtractor.get_arguments(context, default={})
 
                 # Extract user information from auth context
                 from auth.context import get_session_context, get_user_email_context
@@ -401,19 +394,8 @@ class QdrantStorageManager:
                 user_email = await get_user_email_context() or "unknown"
                 session_id = await get_session_context() or str(uuid.uuid4())
 
-                # Properly serialize response (handle ToolResult objects)
-                if hasattr(response, "content"):
-                    # FastMCP ToolResult object
-                    serialized_response = response.content
-                elif hasattr(response, "to_dict"):
-                    # Object with to_dict method
-                    serialized_response = response.to_dict()
-                elif hasattr(response, "__dict__"):
-                    # Generic object with attributes
-                    serialized_response = response.__dict__
-                else:
-                    # Convert to string as fallback
-                    serialized_response = str(response)
+                # Properly serialize response using ResponseSerializer utility
+                serialized_response = ResponseSerializer.serialize(response)
 
                 # Create response payload
                 response_data = {

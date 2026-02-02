@@ -28,6 +28,7 @@ from auth.context import (
 )
 from auth.google_auth import get_valid_credentials
 from config.enhanced_logging import setup_logger
+from config.fastmcp_compat import ToolsListAccessor
 from tools.server_tools import _get_globally_disabled_tools
 
 logger = setup_logger()
@@ -1221,82 +1222,13 @@ def setup_user_resources(mcp: FastMCP) -> None:
             await ctx.debug(f"FastMCP server type: {type(fastmcp_server)}")
             await ctx.debug(f"FastMCP server attributes: {dir(fastmcp_server)}")
 
-            # Try to access tools via the documented fastmcp.tools attribute
-            tools_list = None
-            registered_tools = {}
-
-            if hasattr(fastmcp_server, "tools"):
-                tools_list = fastmcp_server.tools
-                await ctx.info(f"✅ Found fastmcp.tools attribute: {type(tools_list)}")
-                await ctx.debug(
-                    f"Tools list length: {len(tools_list) if hasattr(tools_list, '__len__') else 'unknown'}"
-                )
-
-                # Convert tools list to dictionary if it's a list
-                if isinstance(tools_list, list):
-                    for tool in tools_list:
-                        if hasattr(tool, "name"):
-                            registered_tools[tool.name] = tool
-                        else:
-                            await ctx.warning(
-                                f"Tool in list has no name attribute: {tool}"
-                            )
-                elif hasattr(tools_list, "items"):
-                    # It's already a dict-like object
-                    registered_tools = dict(tools_list.items())
-                else:
-                    await ctx.warning(
-                        f"Tools attribute is not list or dict: {type(tools_list)}"
-                    )
-
-            # Fallback to tool manager if tools attribute doesn't work
-            if not registered_tools and hasattr(fastmcp_server, "_tool_manager"):
-                await ctx.info("Falling back to _tool_manager")
-                if hasattr(fastmcp_server._tool_manager, "_tools"):
-                    registered_tools = fastmcp_server._tool_manager._tools
-                    await ctx.info(
-                        f"✅ Found {len(registered_tools)} tools via _tool_manager"
-                    )
-                elif hasattr(fastmcp_server._tool_manager, "tools"):
-                    registered_tools = fastmcp_server._tool_manager.tools
-                    await ctx.info(
-                        f"✅ Found {len(registered_tools)} tools via _tool_manager.tools"
-                    )
-
-            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-            if not registered_tools and hasattr(fastmcp_server, "_local_provider"):
-                await ctx.info("Falling back to _local_provider (FastMCP 3.0+)")
-                if hasattr(fastmcp_server._local_provider, "_components"):
-                    from fastmcp.tools.tool import Tool
-
-                    components = fastmcp_server._local_provider._components
-                    registered_tools = {
-                        v.name: v for v in components.values() if isinstance(v, Tool)
-                    }
-                    await ctx.info(
-                        f"✅ Found {len(registered_tools)} tools via _local_provider"
-                    )
-
-            if not registered_tools:
-                await ctx.warning(
-                    "Could not access tools from FastMCP server - trying alternative methods"
-                )
-                # Try other common attributes
-                for attr_name in ["_tools", "tool_registry", "registry"]:
-                    if hasattr(fastmcp_server, attr_name):
-                        attr_value = getattr(fastmcp_server, attr_name)
-                        await ctx.debug(
-                            f"Found attribute {attr_name}: {type(attr_value)}"
-                        )
-                        if hasattr(attr_value, "items"):
-                            registered_tools = dict(attr_value.items())
-                            break
-                        elif hasattr(attr_value, "__len__") and len(attr_value) > 0:
-                            # Convert list to dict
-                            for item in attr_value:
-                                if hasattr(item, "name"):
-                                    registered_tools[item.name] = item
-                            break
+            # Use compatibility utility to access tools
+            try:
+                registered_tools = ToolsListAccessor.get_tools_dict(fastmcp_server)
+                await ctx.info(f"✅ Found {len(registered_tools)} tools via ToolsListAccessor")
+            except RuntimeError as e:
+                await ctx.warning(f"Could not access tools: {e}")
+                registered_tools = {}
 
             await ctx.info(f"🔍 Final tool count: {len(registered_tools)}")
 
