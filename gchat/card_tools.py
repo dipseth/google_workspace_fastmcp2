@@ -31,19 +31,15 @@ more powerful approach that can handle any card type.
 """
 
 import asyncio
-import inspect
 import json
-import time
-import uuid
 
 # Import MCP-related components
 from fastmcp import FastMCP
+from fastmcp.dependencies import Progress
 from pydantic import Field
-from typing_extensions import Annotated, Any, Dict, List, Optional, Tuple
+from typing_extensions import Annotated, Any, Dict, Optional
 
 # Template middleware integration handled at server level - no imports needed here
-# Import ModuleWrapper
-from adapters.module_wrapper import ModuleWrapper
 from auth.context import get_injected_service
 
 # Import auth helpers
@@ -55,17 +51,24 @@ from config.enhanced_logging import setup_logger
 # Import settings for default webhook configuration
 from config.settings import settings
 
-# Import structured response types
-from .card_types import (
-    ComponentSearchInfo,
-    SendDynamicCardResponse,
-)
-
 # NLP parser commented out - SmartCardBuilder handles all parsing and rendering
 # SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
 # from .nlp_card_parser import parse_enhanced_natural_language_description
 # Import SmartCardBuilder for component-based card creation
-from .smart_card_builder import get_smart_card_builder
+from .card_builder import (
+    COMPONENT_PARAMS,
+    get_smart_card_builder,
+    suggest_dsl_for_params,
+)
+
+# Import structured response types
+from .card_types import (
+    ComponentSearchInfo,
+    DSLValidationInfo,
+    ExpectedParamsInfo,
+    InputMappingInfo,
+    SendDynamicCardResponse,
+)
 
 logger = setup_logger()
 logger.info("Card Framework v2 is available for rich card creation")
@@ -113,6 +116,100 @@ except ImportError:
     logger.warning("Card Framework v2 not available. Falling back to REST API format.")
 
     Message = None  # Placeholder for when Card Framework is not available
+
+
+def _generate_alternative_dsl(
+    rendered_dsl: Optional[str],
+    component_paths: Optional[list] = None,
+    max_alternatives: int = 3,
+) -> Optional[list]:
+    """
+    Generate alternative valid DSL patterns based on rendered card structure.
+
+    Uses the wrapper's variation capabilities to suggest similar but different
+    card structures that would also be valid.
+
+    Args:
+        rendered_dsl: The DSL notation of the rendered card
+        component_paths: List of component paths used in the card
+        max_alternatives: Maximum number of alternatives to generate
+
+    Returns:
+        List of alternative DSL strings, or None if generation fails
+    """
+    if not rendered_dsl:
+        return None
+
+    try:
+        from gchat.card_framework_wrapper import get_card_framework_wrapper
+
+        wrapper = get_card_framework_wrapper()
+        symbols = wrapper.symbol_mapping
+
+        # Extract components from rendered DSL (first section before +)
+        base_dsl = rendered_dsl.split(" + ")[0].strip()
+
+        # Common alternative patterns based on what's in the DSL
+        alternatives = []
+
+        # Get symbols for common components
+        section_sym = symbols.get("Section", "§")
+        text_sym = symbols.get("DecoratedText", "δ")
+        para_sym = symbols.get("TextParagraph", "ʈ")
+        btn_list_sym = symbols.get("ButtonList", "Ƀ")
+        btn_sym = symbols.get("Button", "ᵬ")
+        chip_list_sym = symbols.get("ChipList", "ȼ")
+        chip_sym = symbols.get("Chip", "ℂ")
+        img_sym = symbols.get("Image", "Ɨ")
+        grid_sym = symbols.get("Grid", "ℊ")
+        grid_item_sym = symbols.get("GridItem", "ǵ")
+        divider_sym = symbols.get("Divider", "Đ")
+
+        # Generate variations based on common patterns
+        if text_sym in base_dsl:
+            # Text card variations
+            alternatives.append(f"{section_sym}[{text_sym}, {divider_sym}]")
+            alternatives.append(f"{section_sym}[{para_sym}]")
+            alternatives.append(f"{section_sym}[{text_sym}, {btn_list_sym}[{btn_sym}]]")
+
+        if btn_list_sym in base_dsl or btn_sym in base_dsl:
+            # Button variations
+            alternatives.append(
+                f"{section_sym}[{text_sym}, {btn_list_sym}[{btn_sym}×3]]"
+            )
+            alternatives.append(f"{section_sym}[{chip_list_sym}[{chip_sym}×2]]")
+
+        if chip_list_sym in base_dsl or chip_sym in base_dsl:
+            # Chip variations
+            alternatives.append(
+                f"{section_sym}[{text_sym}, {chip_list_sym}[{chip_sym}×3]]"
+            )
+            alternatives.append(f"{section_sym}[{btn_list_sym}[{btn_sym}×2]]")
+
+        if img_sym in base_dsl:
+            # Image variations
+            alternatives.append(f"{section_sym}[{img_sym}, {text_sym}]")
+            alternatives.append(f"{section_sym}[{grid_sym}[{grid_item_sym}×4]]")
+
+        # Add a grid alternative if not already present
+        if grid_sym not in base_dsl:
+            alternatives.append(f"{section_sym}[{grid_sym}[{grid_item_sym}×4]]")
+
+        # Filter out duplicates and the original, limit results
+        seen = {base_dsl}
+        unique = []
+        for alt in alternatives:
+            if alt not in seen:
+                seen.add(alt)
+                unique.append(alt)
+                if len(unique) >= max_alternatives:
+                    break
+
+        return unique if unique else None
+
+    except Exception as e:
+        logger.debug(f"Failed to generate alternative DSL: {e}")
+        return None
 
 
 # Global variables for module wrappers and caches
@@ -302,20 +399,18 @@ def _initialize_card_framework_wrapper(force_reset: bool = False):
 
 def _initialize_colbert_wrapper():
     """
-    Initialize ColBERT wrapper for multi-vector embeddings.
+    Initialize SmartCardBuilder for card building.
 
     This is called on server startup when COLBERT_EMBEDDING_DEV=true.
-    SmartCardBuilder handles its own ColBERT initialization via _get_embedder(),
-    but this function ensures the embedder is pre-loaded for faster first queries.
+    SmartCardBuilderV2 queries Qdrant directly (no local ColBERT embedder).
     """
     try:
         builder = get_smart_card_builder()
-        # Force initialization of Qdrant and ColBERT embedder
+        # Force initialization (lazy init is no-op, but keeps compatibility)
         builder.initialize()
-        builder._get_embedder()
-        logger.info("✅ ColBERT wrapper initialized via SmartCardBuilder")
+        logger.info("✅ SmartCardBuilder initialized")
     except Exception as e:
-        logger.warning(f"⚠️ ColBERT wrapper initialization failed: {e}")
+        logger.warning(f"⚠️ SmartCardBuilder initialization failed: {e}")
         # Non-fatal - will initialize on-demand when needed
 
 
@@ -339,392 +434,6 @@ def _get_dsl_field_description() -> str:
         )
 
 
-def _build_simple_card_structure(params: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Build a simple card structure when no ModuleWrapper components are found.
-
-    SIMPLIFIED: This replaces complex transformation logic with a simple, reliable approach.
-
-    Args:
-        params: Card parameters (title, text, buttons, etc.)
-
-    Returns:
-        Google Chat API format card with cardId
-    """
-    card_dict = _build_card_structure_from_params(params)
-
-    return {
-        "cardId": f"simple_card_{int(time.time())}_{hash(str(params)) % 10000}",
-        "card": card_dict,
-    }
-
-
-def _validate_card_content(card_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    """
-    Validate that a card has actual renderable content for Google Chat.
-
-    Args:
-        card_dict: The card dictionary to validate
-
-    Returns:
-        Tuple of (is_valid, list_of_issues)
-    """
-    issues = []
-
-    # Check if card has any content at all
-    if not card_dict:
-        issues.append("Card dictionary is empty")
-        return False, issues
-
-    # Check header content
-    header_has_content = False
-    if "header" in card_dict and isinstance(card_dict["header"], dict):
-        header = card_dict["header"]
-        if header.get("title") and header["title"].strip():
-            header_has_content = True
-        elif header.get("subtitle") and header["subtitle"].strip():
-            header_has_content = True
-
-    # Check sections content
-    sections_have_content = False
-    if "sections" in card_dict and isinstance(card_dict["sections"], list):
-        for section_idx, section in enumerate(card_dict["sections"]):
-            if not isinstance(section, dict):
-                issues.append(f"Section {section_idx} is not a dictionary")
-                continue
-
-            if "widgets" not in section:
-                issues.append(f"Section {section_idx} has no widgets")
-                continue
-
-            widgets = section["widgets"]
-            if not isinstance(widgets, list):
-                issues.append(f"Section {section_idx} widgets is not a list")
-                continue
-
-            if len(widgets) == 0:
-                issues.append(f"Section {section_idx} has empty widgets list")
-                continue
-
-            # Check each widget for actual content
-            section_has_content = False
-            for widget_idx, widget in enumerate(widgets):
-                if not isinstance(widget, dict):
-                    issues.append(
-                        f"Section {section_idx}, widget {widget_idx} is not a dictionary"
-                    )
-                    continue
-
-                # Check for text content
-                if "textParagraph" in widget:
-                    text_content = widget["textParagraph"].get("text", "").strip()
-                    if text_content:
-                        section_has_content = True
-
-                # Check for image content
-                elif "image" in widget:
-                    image_url = widget["image"].get("imageUrl", "").strip()
-                    if image_url:
-                        section_has_content = True
-
-                # Check for button content
-                elif "buttonList" in widget:
-                    buttons = widget["buttonList"].get("buttons", [])
-                    if isinstance(buttons, list) and len(buttons) > 0:
-                        for button in buttons:
-                            if (
-                                isinstance(button, dict)
-                                and button.get("text", "").strip()
-                            ):
-                                section_has_content = True
-                                break
-
-                # Check other widget types (support both camelCase and snake_case)
-                elif any(
-                    key in widget
-                    for key in [
-                        "decoratedText",
-                        "decorated_text",
-                        "selectionInput",
-                        "selection_input",
-                        "textInput",
-                        "text_input",
-                        "divider",
-                        "buttonList",
-                        "button_list",
-                        "columns",
-                        "grid",
-                    ]
-                ):
-                    section_has_content = True
-
-            if section_has_content:
-                sections_have_content = True
-    else:
-        issues.append("Card has no sections or sections is not a list")
-
-    # Card must have either header content OR section content
-    has_content = header_has_content or sections_have_content
-
-    if not has_content:
-        issues.append(
-            "Card has no renderable content (empty header and empty/missing sections)"
-        )
-
-    return has_content, issues
-
-
-def _build_card_with_smart_builder(
-    card_description: str, card_params: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Build a card using SmartCardBuilder.
-
-    SmartCardBuilder handles the full flow:
-    1. Parses natural language description into sections/items
-    2. Uses Qdrant vector search to find components
-    3. Loads components via ModuleWrapper
-    4. Infers layout from description (columns, image positioning)
-    5. Renders using component .render() methods
-    6. Builds form cards when fields are provided
-
-    Args:
-        card_description: Natural language description (parsed by SmartCardBuilder)
-        card_params: Parameters with title, subtitle, image_url, text, buttons, fields, submit_action
-
-    Returns:
-        Card structure in cardsV2 format ready for Google Chat API
-    """
-    import time
-
-    builder = get_smart_card_builder()
-
-    # Extract all params - pass everything to SmartCardBuilder
-    title = card_params.get("title")
-    subtitle = card_params.get("subtitle")
-    image_url = card_params.get("image_url")
-    text = card_params.get("text")
-    buttons = card_params.get("buttons")
-    fields = card_params.get("fields")  # Form fields
-    submit_action = card_params.get("submit_action")  # Form submit action
-    # Grid params - these get passed through to SmartCardBuilder
-    grid = card_params.get("grid")
-    images = card_params.get("images")
-    image_titles = card_params.get("image_titles")
-    column_count = card_params.get("column_count", 2)
-    # Explicit sections - pass through directly (bypass NLP parsing)
-    sections = card_params.get("sections")
-
-    logger.info(f"🔨 SmartCardBuilder parsing description: {card_description[:80]}...")
-    if fields:
-        logger.info(f"📝 Form card mode: {len(fields)} field(s)")
-    if grid or images:
-        logger.info(
-            f"🔲 Grid params provided: {len(images) if images else 'direct grid'}"
-        )
-    if sections:
-        logger.info(f"📋 Explicit sections provided: {len(sections)} section(s)")
-
-    # Build card using SmartCardBuilder - pass all params including sections
-    card_dict = builder.build_card_from_description(
-        description=card_description,
-        title=title,
-        subtitle=subtitle,
-        image_url=image_url,
-        text=text,  # Pass text for layout inference (columns, etc.)
-        buttons=buttons,  # Pass buttons too
-        fields=fields,  # Form fields
-        submit_action=submit_action,  # Form submit action
-        grid=grid,  # Direct grid structure
-        images=images,  # Image URLs for grid
-        image_titles=image_titles,  # Titles for grid images
-        column_count=column_count,  # Grid columns
-        sections=sections,  # Explicit sections (pass-through mode)
-    )
-
-    if not card_dict:
-        logger.warning("⚠️ SmartCardBuilder returned empty card")
-        return {}
-
-    # Wrap in cardsV2 format
-    card_id = f"smart_card_{int(time.time())}_{hash(str(card_params)) % 10000}"
-
-    return {
-        "cardId": card_id,
-        "card": card_dict,
-    }
-
-
-def _build_card_structure_from_params(
-    params: Dict[str, Any], sections: List[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """Build card structure directly from parameters when no component is available."""
-    card_dict = {}
-
-    # CRITICAL FIX: Handle both flat and nested header structures
-    header = {}
-
-    # Check if params has a nested "header" object
-    if "header" in params and isinstance(params["header"], dict):
-        header_data = params["header"]
-        if "title" in header_data:
-            header["title"] = header_data["title"]
-        if "subtitle" in header_data:
-            header["subtitle"] = header_data["subtitle"]
-    else:
-        # Handle flat structure (title/subtitle directly in params)
-        if "title" in params:
-            header["title"] = params["title"]
-        if "subtitle" in params:
-            header["subtitle"] = params["subtitle"]
-
-    # Only add header if we have title or subtitle
-    if header:
-        card_dict["header"] = header
-        logger.info(f"✅ Built header: {header}")
-
-    # Handle sections
-    # CRITICAL FIX: Also check params.get("sections") when explicit sections arg is None
-    # This ensures NLP-extracted sections don't get dropped in fallback paths
-    if sections:
-        card_dict["sections"] = sections
-        # ENHANCEMENT: Add image_url as widget in first section if provided
-        if "image_url" in params and sections:
-            image_widget = {"image": {"imageUrl": params["image_url"]}}
-            if "image_alt_text" in params:
-                image_widget["image"]["altText"] = params["image_alt_text"]
-            # Insert image at the beginning of first section's widgets
-            if sections[0].get("widgets"):
-                sections[0]["widgets"].insert(0, image_widget)
-            else:
-                sections[0]["widgets"] = [image_widget]
-            logger.info(
-                f"✅ Added image widget to first section: {params['image_url']}"
-            )
-    elif isinstance(params.get("sections"), list) and params.get("sections"):
-        card_dict["sections"] = params["sections"]
-        logger.info(
-            f"✅ Using sections from params: {len(params['sections'])} section(s)"
-        )
-        # ENHANCEMENT: Add image_url as widget in first section if provided
-        if "image_url" in params and card_dict["sections"]:
-            image_widget = {"image": {"imageUrl": params["image_url"]}}
-            if "image_alt_text" in params:
-                image_widget["image"]["altText"] = params["image_alt_text"]
-            # Insert image at the beginning of first section's widgets
-            if card_dict["sections"][0].get("widgets"):
-                card_dict["sections"][0]["widgets"].insert(0, image_widget)
-            else:
-                card_dict["sections"][0]["widgets"] = [image_widget]
-            logger.info(
-                f"✅ Added image widget to first section: {params['image_url']}"
-            )
-    else:
-        widgets = []
-
-        # Add text widget if provided
-        if "text" in params:
-            widgets.append({"textParagraph": {"text": params["text"]}})
-            logger.info(f"✅ Added text widget: {params['text'][:50]}...")
-
-        # Add image widget if provided
-        if "image_url" in params:
-            image_widget = {"image": {"imageUrl": params["image_url"]}}
-            # Add alt text if provided
-            if "image_alt_text" in params:
-                image_widget["image"]["altText"] = params["image_alt_text"]
-            widgets.append(image_widget)
-            logger.info(f"✅ Added image widget: {params['image_url']}")
-
-        # Add buttons widget if provided
-        if "buttons" in params and isinstance(params["buttons"], list):
-            button_widgets = []
-            for button_data in params["buttons"]:
-                if isinstance(button_data, dict):
-                    # CRITICAL FIX: Check if button is already processed (has onClick)
-                    if "onClick" in button_data:
-                        # Button already processed by hybrid approach - use as-is
-                        button_widget = button_data.copy()
-                        logger.info(f"✅ Using pre-processed button: {button_widget}")
-                    else:
-                        # Button not processed yet - process it now
-                        button_widget = {"text": button_data.get("text", "Button")}
-
-                        # Handle various onclick formats
-                        onclick_url = (
-                            button_data.get("onclick_action")
-                            or button_data.get("action")
-                            or button_data.get("url")
-                        )
-                        if onclick_url:
-                            button_widget["onClick"] = {
-                                "openLink": {"url": onclick_url}
-                            }
-
-                        # CRITICAL FIX: Use correct 'type' field for button styling (not 'style')
-                        btn_type = button_data.get("type")
-                        if btn_type in [
-                            "FILLED",
-                            "FILLED_TONAL",
-                            "OUTLINED",
-                            "BORDERLESS",
-                        ]:
-                            button_widget["type"] = btn_type
-                            logger.info(f"🎨 Added button type: {btn_type}")
-
-                        logger.info(f"✅ Processed new button: {button_widget}")
-
-                    button_widgets.append(button_widget)
-
-            if button_widgets:
-                widgets.append({"buttonList": {"buttons": button_widgets}})
-
-        # CRITICAL FIX: Don't create empty sections - ensure we have some content
-        if not widgets and not header:
-            # Fallback: add a basic text widget to prevent completely empty card
-            widgets.append(
-                {"textParagraph": {"text": "Empty card - no content provided"}}
-            )
-            logger.warning("⚠️ Created fallback text widget for empty card")
-
-        # Always create sections even if no widgets (required for valid card)
-        card_dict["sections"] = [{"widgets": widgets}]
-        logger.info(f"✅ Built {len(widgets)} widgets in sections")
-
-    # VALIDATE CARD CONTENT before returning
-    is_valid, issues = _validate_card_content(card_dict)
-    if not is_valid:
-        logger.error(f"❌ CARD CONTENT VALIDATION FAILED: {issues}")
-        logger.error(f"❌ Invalid card structure: {json.dumps(card_dict, indent=2)}")
-
-        # Add error information to card for debugging
-        card_dict.setdefault("_debug_info", {})["validation_issues"] = issues
-    else:
-        logger.info("✅ Card content validation passed")
-
-    logger.info(f"✅ Final card structure keys: {list(card_dict.keys())}")
-    return card_dict
-
-
-def _strip_internal_fields(obj: Any) -> Any:
-    """
-    Recursively strip internal fields (starting with _) from dictionaries.
-
-    These fields are used internally (e.g., _card_id for feedback tracking)
-    but should not be sent to external APIs like Google Chat.
-    """
-    if isinstance(obj, dict):
-        return {
-            key: _strip_internal_fields(value)
-            for key, value in obj.items()
-            if not key.startswith("_")
-        }
-    elif isinstance(obj, list):
-        return [_strip_internal_fields(item) for item in obj]
-    else:
-        return obj
-
-
 def setup_card_tools(mcp: FastMCP) -> None:
     """
     Setup the card tools for MCP.
@@ -739,30 +448,52 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
     # Generate DSL documentation dynamically after wrapper is initialized
     # This ensures symbol mappings are included in tool documentation
-    from gchat.card_framework_wrapper import get_dsl_documentation
+    from gchat.card_framework_wrapper import (
+        get_dsl_documentation,
+        get_gchat_symbols,
+        get_tool_examples,
+    )
 
     dsl_field_desc = _get_dsl_field_description()
     dsl_full_doc = get_dsl_documentation(include_examples=True, include_hierarchy=True)
+    tool_examples = get_tool_examples(max_examples=5)
+    symbols = get_gchat_symbols()
 
-    # Build dynamic tool description with symbol mappings
+    # Build dynamic tool description with actual symbols from DAG
+    section_sym = symbols.get("Section", "§")
+    dtext_sym = symbols.get("DecoratedText", "δ")
+    btnlist_sym = symbols.get("ButtonList", "Ƀ")
+    btn_sym = symbols.get("Button", "ᵬ")
+    grid_sym = symbols.get("Grid", "ℊ")
+    gitem_sym = symbols.get("GridItem", "ǵ")
+
     tool_description = (
-        f"Send any type of card to Google Chat using natural language or DSL notation. "
+        "Send cards to Google Chat using DSL notation for precise structure control. "
+        "REQUIRED: Use DSL symbols in card_description to define card structure. "
+        f"Common patterns: {section_sym}[{dtext_sym}] = text card, "
+        f"{section_sym}[{dtext_sym}, {btnlist_sym}[{btn_sym}×2]] = text + 2 buttons, "
+        f"{section_sym}[{grid_sym}[{gitem_sym}×4]] = grid with 4 items. "
         f"{dsl_field_desc}"
     )
 
-    # Build dynamic field help with full DSL info
+    # Build dynamic field help - DSL is primary, NL is fallback
     card_description_help = (
-        "Describe the card naturally or use DSL structure notation. "
-        "Sections, grids, forms, buttons—just say what you want. "
-        "URLs become buttons. Prices get styled. Icons appear where they fit. "
-        "Supports Jinja templates: {{ 'text' | success_text }}, {{ price | price('USD') }}. "
+        "IMPORTANT: Start with DSL symbols to define card structure. "
+        "Without DSL, cards render as simple text only. "
+        f"DSL Examples: {section_sym}[{dtext_sym}] = Section with DecoratedText, "
+        f"{section_sym}[{dtext_sym}, {btnlist_sym}[{btn_sym}×2]] = text + 2 buttons, "
+        f"{section_sym}[{dtext_sym}×3] = 3 text items, "
+        f"{section_sym}[{grid_sym}[{gitem_sym}×4]] = grid with 4 items. "
+        "Provide content in card_params: title, subtitle, text, buttons=[{text, url}]. "
+        "Jinja styling in text: {{ 'Online' | success_text }}, {{ text | color('#hex') }}. "
         f"{dsl_field_desc}"
     )
 
     @mcp.tool(
         name="send_dynamic_card",
         description=tool_description,
-        tags={"chat", "card", "dynamic", "google", "unified", "nlp"},
+        tags={"chat", "card", "dynamic", "google"},
+        task=True,  # Enable background task execution for long-running card operations
         annotations={
             "title": "Send Dynamic Card with NLP",
             "readOnlyHint": False,
@@ -770,18 +501,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
             "idempotentHint": False,
             "openWorldHint": True,
             "dsl_documentation": dsl_full_doc,  # Full DSL docs in annotations
-            "examples": [
-                {
-                    "description": "Simple card",
-                    "card_description": "simple notification",
-                    "card_params": {"title": "Alert", "text": "System update complete"},
-                },
-                {
-                    "description": "DSL card with symbols",
-                    "card_description": "§[δ×2, Ƀ[ᵬ×2]] Status Dashboard",
-                    "card_params": {"title": "Dashboard", "text": "System status"},
-                },
-            ],
+            "examples": tool_examples,  # Dynamically generated from DAG symbols
         },
     )
     async def send_dynamic_card(
@@ -789,19 +509,27 @@ def setup_card_tools(mcp: FastMCP) -> None:
             str,
             Field(description="Google email for authentication"),
         ],
-        space_id: Annotated[
-            str,
-            Field(description="Chat space ID (e.g., 'spaces/AAAA1234')"),
-        ],
         card_description: Annotated[
             str,
             Field(description=card_description_help),
         ],
+        space_id: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description="Chat space ID (e.g., 'spaces/AAAA1234'). Optional when using webhook (most common). Required only for API delivery.",
+            ),
+        ] = None,
         card_params: Annotated[
             Optional[Dict[str, Any]],
             Field(
                 default=None,
-                description="Explicit overrides: title, subtitle, text, buttons, images. These take priority.",
+                description="Explicit overrides: title, subtitle, text, buttons, images. "
+                "The 'text' field supports Jinja filters ({{ 'text' | success_text }}) "
+                'and raw HTML (<font color="#hex">text</font>). '
+                "Message-level fields: 'message_text' (plain text above card), "
+                "'fallback_text' (notification text), "
+                "'accessory_widgets' (buttons outside card: [{buttonList: {buttons: [{text, url}]}}]).",
             ),
         ] = None,
         thread_key: Annotated[
@@ -812,50 +540,85 @@ def setup_card_tools(mcp: FastMCP) -> None:
             Optional[str],
             Field(
                 default=None,
-                description="Webhook URL (optional, uses default if not set)",
+                description="Webhook URL. Defaults to MCP_CHAT_WEBHOOK env var if not provided.",
             ),
         ] = None,
+        progress: Progress = Progress(),  # FastMCP background task progress reporting
     ) -> SendDynamicCardResponse:
         """
-        Send a card to Google Chat. Describe what you want; the system builds it.
+        Send a card to Google Chat using DSL notation for structure control.
 
-        Two modes available:
-        1. Natural Language (default): Describe the card and SmartCardBuilder infers structure
-        2. DSL Mode: Include DSL notation in card_description for explicit structure control
+        IMPORTANT: Use DSL symbols in card_description to define card structure.
+        Without DSL, cards render as simple text only.
 
-        Natural Language mode:
-        - Structure emerges from your words
-        - URLs transform into buttons
-        - Keywords summon icons
-        - Layouts adapt to content
-        - Jinja templates supported: {{ text | success_text }}, {{ price | price("USD") }}
+        DSL Syntax:
+        - §[widgets] = Section containing widgets
+        - δ = DecoratedText (text display)
+        - Ƀ[ᵬ×N] = ButtonList with N buttons
+        - ℊ[ǵ×N] = Grid with N items
+        - ×N = repeat N times
 
-        DSL Mode (embedded in card_description):
-        - Use symbols for precise structure control
-        - Auto-detected when card_description contains symbol[...] patterns
-        - Symbols are auto-generated from ModuleWrapper (use manage_tools to see current mappings)
-        - Syntax: symbol[child, child] for nesting, symbol×N for repetition
+        Common Patterns:
+        - §[δ] = Simple text card
+        - §[δ, Ƀ[ᵬ×2]] = Text + 2 buttons
+        - §[δ×3] = 3 text items
+        - §[ℊ[ǵ×4]] = Grid with 4 items
+        - §[δ, Ƀ[ᵬ×2], δ] = Text, buttons, more text
 
-        Jinja Styling Filters:
-        - success_text, error_text, warning_text, muted_text (status colors)
-        - color("#hex"), bold, strike (formatting)
-        - price("USD"), badge("#hex") (special formatting)
+        Content (in card_params):
+        - title: Card header title
+        - subtitle: Card header subtitle
+        - text: Main text content
+        - buttons: [{text, url}, ...] for ButtonList
+
+        Jinja Styling (in card_params.text):
+        - {{ 'text' | success_text }} = green
+        - {{ 'text' | error_text }} = red
+        - {{ 'text' | warning_text }} = yellow
+        - {{ 'text' | color('#hex') }} = custom color
 
         Examples:
-            NL: "Product card showing $49.99 with Buy button"
-            Jinja: "Status: {{ 'Online' | success_text }} - Price: {{ 99.99 | price('USD') }}"
+            card_description="§[δ]", card_params={"title": "Alert", "text": "Done"}
+            card_description="§[δ, Ƀ[ᵬ×2]]", card_params={"title": "Actions", "buttons": [...]}
         """
         try:
             logger.info(f"🔍 Finding card component for: {card_description}")
 
+            # Report progress for background task tracking
+            await progress.set_message("Initializing card builder...")
+
             # Use default webhook from settings if not provided
             if not webhook_url and settings.mcp_chat_webhook:
                 webhook_url = settings.mcp_chat_webhook
-                logger.info(f"📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
+                logger.info("📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
+
+            # Validate: space_id is required for API mode (when no webhook)
+            if not webhook_url and not space_id:
+                return SendDynamicCardResponse(
+                    success=False,
+                    deliveryMethod="api",
+                    cardType="unknown",
+                    cardDescription=card_description,
+                    userEmail=user_google_email,
+                    validationPassed=False,
+                    message="space_id is required when no webhook_url is provided (API mode)",
+                    error="Missing required parameter: space_id",
+                )
 
             # Default parameters if not provided
             if card_params is None:
                 card_params = {}
+
+            # =================================================================
+            # EXTRACT MESSAGE-LEVEL PARAMS FROM card_params (early extraction)
+            # These need to be extracted before webhook URL is built
+            # =================================================================
+            if not thread_key:
+                thread_key = card_params.get("thread_key") or card_params.get("thread")
+                if thread_key:
+                    logger.info(
+                        f"🧵 Extracted thread_key from card_params: {thread_key}"
+                    )
 
             # =================================================================
             # NLP PARSING COMMENTED OUT - SmartCardBuilder has its own inference
@@ -898,13 +661,80 @@ def setup_card_tools(mcp: FastMCP) -> None:
             google_format_card = None
 
             # =================================================================
-            # NO DSL PARSING NEEDED - Qdrant handles it via vector similarity!
-            #
-            # The v7 collection has symbol-enriched embeddings, so a description like:
-            #   "§[δ, δ, Ƀ[ᵬ×2]] Dashboard with metrics"
-            # Will match against relationship vectors containing the same symbols.
-            # SmartCardBuilder queries Qdrant and handles the symbol matching.
+            # DSL VALIDATION AND SUGGESTIONS
+            # Extract and validate DSL from description, provide expected params
+            # and suggest DSL when params provided but no DSL in description
             # =================================================================
+            from gchat.card_framework_wrapper import (
+                extract_dsl_from_description,
+                get_dsl_parser,
+                get_gchat_symbols,
+            )
+
+            dsl_validation_result: Optional[DSLValidationInfo] = None
+            expected_params_info: Optional[ExpectedParamsInfo] = None
+            suggested_dsl: Optional[str] = None
+            input_mapping_info: Optional[InputMappingInfo] = None
+
+            # Extract DSL from description if present
+            dsl_string = (
+                extract_dsl_from_description(card_description)
+                if card_description
+                else None
+            )
+
+            if dsl_string:
+                await progress.set_message("Validating DSL structure...")
+                try:
+                    parser = get_dsl_parser()
+                    parsed = parser.parse(dsl_string)
+
+                    # Build expanded notation from root nodes
+                    expanded = None
+                    if parsed.root_nodes:
+                        expanded = ", ".join(
+                            node.to_expanded_notation() for node in parsed.root_nodes
+                        )
+
+                    dsl_validation_result = DSLValidationInfo(
+                        is_valid=parsed.is_valid,
+                        dsl_input=dsl_string,
+                        expanded_notation=expanded,
+                        component_counts=parsed.component_counts,
+                        issues=parsed.issues,
+                        suggestions=parsed.suggestions,
+                    )
+
+                    # Get expected params for detected components
+                    if parsed.component_counts:
+                        expected_params_info = ExpectedParamsInfo(
+                            by_component={
+                                comp: COMPONENT_PARAMS.get(comp, {})
+                                for comp in parsed.component_counts.keys()
+                                if comp in COMPONENT_PARAMS
+                            },
+                            common_params={
+                                "title": "Card header title",
+                                "subtitle": "Card header subtitle",
+                                "buttons": "List of [{text, url}] for Button components",
+                            },
+                        )
+
+                    logger.info(
+                        f"🔍 DSL validation: valid={parsed.is_valid}, components={parsed.component_counts}"
+                    )
+                except Exception as dsl_err:
+                    logger.warning(f"⚠️ DSL validation failed: {dsl_err}")
+
+            elif card_params:
+                # Suggest DSL when no DSL provided but params exist
+                try:
+                    symbols = get_gchat_symbols()
+                    suggested_dsl = suggest_dsl_for_params(card_params, symbols)
+                    if suggested_dsl:
+                        logger.info(f"💡 Suggested DSL for params: {suggested_dsl}")
+                except Exception as suggest_err:
+                    logger.warning(f"⚠️ DSL suggestion failed: {suggest_err}")
 
             # =================================================================
             # SMART CARD BUILDER - PRIMARY PATH (Natural Language)
@@ -921,10 +751,76 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
             if not google_format_card:
                 logger.info("🔨 Using SmartCardBuilder as primary card building path")
+                await progress.set_message(
+                    "Querying Qdrant and building card structure..."
+                )
                 try:
-                    google_format_card = _build_card_with_smart_builder(
-                        card_description, card_params
+                    # Use SmartCardBuilder.build() directly with unpacked params
+                    import time
+
+                    builder = get_smart_card_builder()
+
+                    # Extract params
+                    title = card_params.get("title") if card_params else None
+                    subtitle = card_params.get("subtitle") if card_params else None
+                    image_url = card_params.get("image_url") if card_params else None
+                    text = card_params.get("text") if card_params else None
+                    buttons = card_params.get("buttons") if card_params else None
+                    chips = card_params.get("chips") if card_params else None
+                    grid = card_params.get("grid") if card_params else None
+                    images = card_params.get("images") if card_params else None
+                    image_titles = (
+                        card_params.get("image_titles") if card_params else None
                     )
+                    items = card_params.get("items") if card_params else None
+                    cards = (
+                        (card_params.get("cards") or card_params.get("carousel_cards"))
+                        if card_params
+                        else None
+                    )
+
+                    # Convert grid images to items for DSL building
+                    grid_items = None
+                    if images:
+                        logger.info(f"🔲 Grid images: {len(images)}")
+                        grid_items = [
+                            {
+                                "title": (
+                                    image_titles[i]
+                                    if image_titles and i < len(image_titles)
+                                    else f"Item {i + 1}"
+                                ),
+                                "image_url": img_url,
+                            }
+                            for i, img_url in enumerate(images)
+                        ]
+                    elif grid and grid.get("items"):
+                        logger.info(f"🔲 Grid items: {len(grid.get('items', []))}")
+                        grid_items = grid["items"]
+
+                    if cards:
+                        logger.info(f"🎠 Carousel: {len(cards)} card(s)")
+
+                    # Build card via unified DSL/DAG pipeline
+                    card_dict = builder.build(
+                        description=card_description,
+                        title=title,
+                        subtitle=subtitle,
+                        buttons=buttons,
+                        chips=chips,
+                        image_url=image_url,
+                        text=text,
+                        items=grid_items or items,
+                        cards=cards,
+                    )
+
+                    # Wrap in cardsV2 format for Google Chat API
+                    if card_dict:
+                        card_id = f"smart_card_{int(time.time())}_{hash(str(card_params)) % 10000}"
+                        google_format_card = {
+                            "cardId": card_id,
+                            "card": card_dict,
+                        }
                     if google_format_card:
                         best_match = {
                             "type": "smart_builder",
@@ -932,6 +828,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             "score": 1.0,
                         }
                         logger.info("✅ SmartCardBuilder created card successfully")
+                        await progress.set_message(
+                            "Card structure built, preparing message..."
+                        )
 
                         # Extract DSL structure and Jinja template status from card
                         inner_card = google_format_card.get("card", {})
@@ -948,30 +847,13 @@ def setup_card_tools(mcp: FastMCP) -> None:
                                 logger.info("🎨 Jinja template was applied")
                 except Exception as smart_err:
                     logger.warning(
-                        f"⚠️ SmartCardBuilder failed, falling back to simple card: {smart_err}",
+                        f"⚠️ SmartCardBuilder failed: {smart_err}",
                         exc_info=True,
                     )
                     google_format_card = None
 
-            # =================================================================
-            # SIMPLE FALLBACK - Only used if SmartCardBuilder failed
-            # The legacy ColBERT/standard component search code has been removed
-            # because SmartCardBuilder now handles:
-            # - Qdrant vector search for components
-            # - ModuleWrapper.get_component_by_path() for loading
-            # - Smart content inference (prices, IDs, URLs, dates)
-            # - Layout inference (columns, image positioning)
-            # =================================================================
-            if not google_format_card:
-                logger.warning(
-                    "⚠️ SmartCardBuilder didn't create a card, using simple fallback"
-                )
-                google_format_card = _build_simple_card_structure(card_params)
-                best_match = {
-                    "type": "simple_fallback",
-                    "name": "simple_card",
-                    "score": 0.0,
-                }
+            # SmartCardBuilder always returns a valid card (has internal fallbacks)
+            # If we still have None, something is seriously wrong
 
             if not google_format_card:
                 return SendDynamicCardResponse(
@@ -991,10 +873,59 @@ def setup_card_tools(mcp: FastMCP) -> None:
             # Create message payload
             message_obj = Message()
 
-            # IMPORTANT: Don't set top-level message text when sending a card.
-            # If we include both message-level text and a card widget (e.g. textParagraph),
-            # Google Chat renders BOTH, which looks like duplicated content.
-            # Keep text content inside card widgets only.
+            # =================================================================
+            # MESSAGE-LEVEL PARAMS FROM card_params
+            # These can be passed in card_params as an alternative to tool params
+            # =================================================================
+
+            # Extract thread_key from card_params if not provided as tool param
+            if not thread_key:
+                thread_key = card_params.get("thread_key") or card_params.get("thread")
+                if thread_key:
+                    logger.debug(
+                        f"🧵 Extracted thread_key from card_params: {thread_key}"
+                    )
+
+            # Set fallback_text if provided in card_params
+            # This shows in notifications and is used for accessibility
+            fallback_text = card_params.get("fallback_text") or card_params.get(
+                "notification_text"
+            )
+            if fallback_text:
+                message_obj.fallback_text = fallback_text
+                logger.debug(
+                    f"📱 Set fallback_text for notifications: {fallback_text[:50]}..."
+                )
+
+            # Set plain text content (appears above/below card)
+            text_content = card_params.get("text_content") or card_params.get(
+                "message_text"
+            )
+            if text_content:
+                message_obj.text = text_content
+                logger.debug(f"📝 Set message text: {text_content[:50]}...")
+
+            # Set quoted message metadata for reply quotes
+            quoted_message = card_params.get(
+                "quoted_message_metadata"
+            ) or card_params.get("quote")
+            if quoted_message:
+                if isinstance(quoted_message, dict):
+                    # Expect {"name": "spaces/X/messages/Y", "lastUpdateTime": "..."}
+                    from card_framework.v2.message import QuotedMessageMetadata
+
+                    message_obj.quoted_message_metadata = QuotedMessageMetadata(
+                        name=quoted_message.get("name"),
+                        last_update_time=quoted_message.get("last_update_time")
+                        or quoted_message.get("lastUpdateTime"),
+                    )
+                    logger.debug(f"💬 Set quoted message: {quoted_message.get('name')}")
+
+            # Set annotations (rich text annotations like user mentions)
+            annotations = card_params.get("annotations")
+            if annotations and isinstance(annotations, list):
+                message_obj.annotations = annotations
+                logger.debug(f"🏷️ Set {len(annotations)} annotations")
 
             # Add card to message - handle both single card object and wrapped format
             if isinstance(google_format_card, dict) and "cardsV2" in google_format_card:
@@ -1005,24 +936,80 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 # New format - single card object
                 message_obj.cards_v2.append(google_format_card)
 
+            # Add accessory_widgets if provided (buttons at bottom of message, outside card)
+            # These are useful for feedback buttons or quick actions
+            accessory_widgets = card_params.get("accessory_widgets")
+            if accessory_widgets:
+                # Use wrapper to get classes (avoid direct imports)
+                # Use full paths for v2 classes to avoid v1 conflicts
+                from gchat.card_framework_wrapper import get_card_framework_wrapper
+
+                wrapper = get_card_framework_wrapper()
+                AccessoryWidget = wrapper.get_cached_class("AccessoryWidget")
+                ButtonList = wrapper.get_cached_class("ButtonList")
+                Button = wrapper.get_cached_class("Button")
+                # OnClick and OpenLink need full paths to get v2 versions
+                OnClick = wrapper.get_component_by_path(
+                    "card_framework.v2.widgets.on_click.OnClick"
+                )
+                OpenLink = wrapper.get_component_by_path(
+                    "card_framework.v2.widgets.open_link.OpenLink"
+                )
+
+                if AccessoryWidget and ButtonList and Button:
+                    for aw in accessory_widgets:
+                        if isinstance(aw, dict):
+                            # Build AccessoryWidget from dict
+                            # AccessoryWidget only supports button_list per API docs
+                            if "buttonList" in aw or "button_list" in aw:
+                                button_list = aw.get("buttonList") or aw.get(
+                                    "button_list"
+                                )
+                                buttons = []
+                                for btn_data in button_list.get("buttons", []):
+                                    btn = Button(text=btn_data.get("text", ""))
+                                    if btn_data.get("onClick") or btn_data.get("url"):
+                                        url = btn_data.get("url") or btn_data.get(
+                                            "onClick", {}
+                                        ).get("openLink", {}).get("url")
+                                        if url and OnClick and OpenLink:
+                                            btn.on_click = OnClick(
+                                                open_link=OpenLink(url=url)
+                                            )
+                                    buttons.append(btn)
+                                if buttons:
+                                    bl = ButtonList(buttons=buttons)
+                                    aw_obj = AccessoryWidget(button_list=bl)
+                                    message_obj.accessory_widgets.append(aw_obj)
+                                    logger.debug(
+                                        f"🔘 Added accessory widget with {len(buttons)} buttons"
+                                    )
+
             # Render message
             message_body = message_obj.render()
 
-            # Fix Card Framework v2 field name issue: ensure proper cards_v2 format for webhook
-            # The Google Chat webhook API expects snake_case (cards_v2), NOT camelCase (cardsV2)
-            if "cards_v_2" in message_body:
-                message_body["cards_v2"] = message_body.pop("cards_v_2")
-            # Convert camelCase back to snake_case for webhook delivery (webhook API expects snake_case)
-            if "cardsV2" in message_body:
-                message_body["cards_v2"] = message_body.pop("cardsV2")
+            # Convert snake_case to camelCase using SmartCardBuilder's method
+            builder = get_smart_card_builder()
+            message_body = builder._convert_to_camel_case(message_body)
+
+            # Special case: fallbackText -> text (Google Chat webhook uses 'text' not 'fallbackText')
+            if "fallbackText" in message_body:
+                message_body["text"] = message_body.pop("fallbackText")
 
             # CRITICAL DEBUGGING: Pre-validate card content before sending
+            await progress.set_message("Validating card content...")
             final_card = (
                 google_format_card.get("card", {})
                 if isinstance(google_format_card, dict)
                 else {}
             )
-            is_valid_content, content_issues = _validate_card_content(final_card)
+            # Use SmartCardBuilder for validation (reuse builder from camelCase conversion)
+            is_valid_content, content_issues = builder.validate_content(final_card)
+
+            # Generate DSL notation from rendered card (for LLM learning)
+            rendered_dsl = builder.generate_dsl_notation(google_format_card)
+            if rendered_dsl:
+                logger.info(f"🔣 Rendered DSL notation: {rendered_dsl}")
 
             if not is_valid_content:
                 logger.error(
@@ -1065,6 +1052,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
             # Choose delivery method based on webhook_url
             if webhook_url:
+                await progress.set_message("Sending card via webhook...")
                 # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
                 if thread_key:
                     logger.info(
@@ -1081,12 +1069,11 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 # NOTE: Do NOT convert field names - Google Chat webhook API expects camelCase
                 # for widget fields (onClick, imageUri, etc.). SmartCardBuilder already
                 # produces correctly formatted cards.
-                webhook_message_body = _strip_internal_fields(message_body)
+                webhook_message_body = builder._clean_card_metadata(message_body)
 
-                # CRITICAL FIX: Add thread to message body for webhook threading
-                if thread_key:
-                    webhook_message_body["thread"] = {"name": thread_key}
-                    logger.debug(f"Added thread to webhook message body: {thread_key}")
+                # NOTE: Threading for webhooks is handled via URL params (threadKey, messageReplyOption)
+                # added in _process_thread_key_for_webhook_url(). Do NOT add thread.name to body
+                # as it expects a full resource name which we don't have for new threads.
 
                 # ENHANCED DEBUGGING: Log everything before sending
                 logger.info(
@@ -1206,6 +1193,10 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             validationPassed=True,
                             dslDetected=dsl_detected,
                             jinjaTemplateApplied=jinja_template_applied,
+                            dslValidation=dsl_validation_result,
+                            inputMapping=input_mapping_info,
+                            expectedParams=expected_params_info,
+                            suggestedDsl=suggested_dsl,
                             message=f"Card sent (Status 200) but may appear blank. Response: {response.text}",
                         )
                     else:
@@ -1225,7 +1216,13 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             httpStatus=200,
                             validationPassed=True,
                             dslDetected=dsl_detected,
+                            renderedDslNotation=rendered_dsl,
                             jinjaTemplateApplied=jinja_template_applied,
+                            dslValidation=dsl_validation_result,
+                            inputMapping=input_mapping_info,
+                            expectedParams=expected_params_info,
+                            suggestedDsl=suggested_dsl,
+                            alternativeDsl=_generate_alternative_dsl(rendered_dsl),
                             message="Card message sent successfully via webhook",
                         )
                 elif response.status_code == 429:
@@ -1247,6 +1244,10 @@ def setup_card_tools(mcp: FastMCP) -> None:
                         validationPassed=True,
                         dslDetected=dsl_detected,
                         jinjaTemplateApplied=jinja_template_applied,
+                        dslValidation=dsl_validation_result,
+                        inputMapping=input_mapping_info,
+                        expectedParams=expected_params_info,
+                        suggestedDsl=suggested_dsl,
                         message="Rate limited (429) - Card format is correct but hitting quota limits",
                         error="Too many requests - reduce request frequency",
                     )
@@ -1277,11 +1278,16 @@ def setup_card_tools(mcp: FastMCP) -> None:
                         validationPassed=True,
                         dslDetected=dsl_detected,
                         jinjaTemplateApplied=jinja_template_applied,
+                        dslValidation=dsl_validation_result,
+                        inputMapping=input_mapping_info,
+                        expectedParams=expected_params_info,
+                        suggestedDsl=suggested_dsl,
                         message=f"Webhook delivery failed with status {response.status_code}",
                         error=response.text,
                     )
             else:
                 # Send via API
+                await progress.set_message("Sending card via Google Chat API...")
                 chat_service = await _get_chat_service_with_fallback(user_google_email)
 
                 if not chat_service:
@@ -1301,7 +1307,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
                 # Add thread key if provided
                 # Strip internal fields (like _card_id) before sending to API
-                api_message_body = _strip_internal_fields(message_body)
+                api_message_body = builder._clean_card_metadata(message_body)
                 request_params = {"parent": space_id, "body": api_message_body}
                 _process_thread_key_for_request(request_params, thread_key)
 
@@ -1335,7 +1341,13 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     userEmail=user_google_email,
                     validationPassed=True,
                     dslDetected=dsl_detected,
+                    renderedDslNotation=rendered_dsl,
                     jinjaTemplateApplied=jinja_template_applied,
+                    dslValidation=dsl_validation_result,
+                    inputMapping=input_mapping_info,
+                    expectedParams=expected_params_info,
+                    suggestedDsl=suggested_dsl,
+                    alternativeDsl=_generate_alternative_dsl(rendered_dsl),
                     message=f"Card message sent successfully to space '{space_id}'",
                 )
 

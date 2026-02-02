@@ -111,7 +111,7 @@ WARM_START_PATTERNS = [
 
 def verify_pattern_renders(pattern: dict) -> bool:
     """Verify that a pattern actually renders correctly."""
-    from gchat.smart_card_builder import SmartCardBuilder
+    from gchat.card_builder import SmartCardBuilder
 
     builder = SmartCardBuilder()
     builder.initialize()
@@ -121,7 +121,7 @@ def verify_pattern_renders(pattern: dict) -> bool:
 
     try:
         # Try to build the card from description
-        card = builder.build_card_from_description(
+        card = builder.build(
             description=description,
             title="Warm Start Test",
         )

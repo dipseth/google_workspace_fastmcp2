@@ -289,6 +289,51 @@ class NLPExtractionInfo(BaseModel):
     )
 
 
+class DSLValidationInfo(BaseModel):
+    """DSL structure validation results."""
+
+    is_valid: bool = Field(..., description="Whether DSL structure is valid")
+    dsl_input: Optional[str] = Field(None, description="The extracted DSL string")
+    expanded_notation: Optional[str] = Field(
+        None,
+        description="Human-readable expansion: Section[DecoratedText×3, ButtonList[Button×2]]",
+    )
+    component_counts: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Count per component: {'DecoratedText': 3, 'Button': 2}",
+    )
+    issues: List[str] = Field(
+        default_factory=list, description="Validation issues found"
+    )
+    suggestions: List[str] = Field(default_factory=list, description="Suggested fixes")
+
+
+class InputMappingInfo(BaseModel):
+    """How inputs were mapped to components."""
+
+    mappings: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="List of {input, value_preview, component, field}",
+    )
+    unconsumed: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Count of unconsumed inputs: {'buttons': 1, 'texts': 0}",
+    )
+
+
+class ExpectedParamsInfo(BaseModel):
+    """Expected parameters for detected components."""
+
+    by_component: Dict[str, Dict[str, str]] = Field(
+        default_factory=dict,
+        description="Params per component: {'DecoratedText': {'text': 'Main text'}}",
+    )
+    common_params: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Cross-component params: {'title': 'Card title', 'buttons': '...'}",
+    )
+
+
 class ComponentSearchInfo(BaseModel):
     """Information about ModuleWrapper component search results."""
 
@@ -351,9 +396,9 @@ class SendDynamicCardResponse(BaseModel):
         None,
         description="Google Chat message ID (format: spaces/{space}/messages/{message})",
     )
-    spaceId: str = Field(
-        ...,
-        description="Target Google Chat space ID where the card was sent",
+    spaceId: Optional[str] = Field(
+        None,
+        description="Target Google Chat space ID (optional for webhook delivery)",
     )
     deliveryMethod: Literal["api", "webhook"] = Field(
         ...,
@@ -410,6 +455,29 @@ class SendDynamicCardResponse(BaseModel):
     dslDetected: Optional[str] = Field(
         None,
         description="DSL structure detected in card_description (if any)",
+    )
+    renderedDslNotation: Optional[str] = Field(
+        None,
+        description="DSL symbol notation representing the rendered card structure. "
+        "Use this to learn the DSL syntax for future calls. "
+        "Format: §[components] where § is Section, δ is DecoratedText, Ƀ is ButtonList, etc.",
+    )
+    dslValidation: Optional[DSLValidationInfo] = Field(
+        None, description="DSL validation results if DSL detected in description"
+    )
+    inputMapping: Optional[InputMappingInfo] = Field(
+        None, description="How card_params inputs were distributed to components"
+    )
+    expectedParams: Optional[ExpectedParamsInfo] = Field(
+        None, description="What card_params this DSL structure accepts"
+    )
+    suggestedDsl: Optional[str] = Field(
+        None, description="Suggested DSL when params provided but no DSL in description"
+    )
+    alternativeDsl: Optional[List[str]] = Field(
+        None,
+        description="Alternative valid DSL patterns using similar components. "
+        "Use these for inspiration on different card structures.",
     )
     message: str = Field(
         ...,

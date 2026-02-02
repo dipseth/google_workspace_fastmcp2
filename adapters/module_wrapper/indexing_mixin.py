@@ -12,6 +12,14 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
+from adapters.module_wrapper.types import (
+    ComponentName,
+    ComponentPath,
+    EmbeddingVector,
+    IndexingStats,
+    Payload,
+)
+
 from .core import ModuleComponent
 
 logger = logging.getLogger(__name__)
@@ -250,9 +258,9 @@ class IndexingMixin:
 
     def _create_component(
         self,
-        name: str,
+        name: ComponentName,
         obj: Any,
-        module_path: str,
+        module_path: ComponentPath,
         parent: Optional[ModuleComponent] = None,
     ) -> ModuleComponent:
         """
@@ -384,7 +392,7 @@ class IndexingMixin:
         except Exception as e:
             logger.warning(f"Error indexing nested components for {parent.name}: {e}")
 
-    def _index_submodule(self, name: str, submodule: Any):
+    def _index_submodule(self, name: ComponentName, submodule: Any):
         """
         Recursively index a submodule's components.
 
@@ -635,9 +643,28 @@ class IndexingMixin:
                     component_type = payload.get("type", "variable")
                     docstring = payload.get("docstring", "")
                     source = payload.get("source", "")
+                    is_custom = payload.get("is_custom_component", False)
 
-                    # Try to resolve the actual object
-                    obj = self._resolve_object_from_path(path)
+                    # For custom components (e.g., Carousel, NestedWidget), create synthetic object
+                    # since they don't exist in the Python module
+                    if is_custom:
+                        json_field = payload.get("json_field", name.lower())
+                        children = payload.get("relationships", {}).get(
+                            "child_classes", []
+                        )
+                        obj = type(
+                            name,
+                            (),
+                            {
+                                "__doc__": docstring,
+                                "_json_field": json_field,
+                                "_is_custom_component": True,
+                                "_children": children,
+                            },
+                        )
+                    else:
+                        # Try to resolve the actual object from the module
+                        obj = self._resolve_object_from_path(path)
 
                     component = ModuleComponent(
                         name=name,

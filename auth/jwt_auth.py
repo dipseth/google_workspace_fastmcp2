@@ -223,20 +223,24 @@ def get_user_email_from_token() -> str:
 
 if __name__ == "__main__":
     # Development test using FastMCP 2 JWTVerifier and scope registry
+    from config.enhanced_logging import setup_logger
+
+    logger = setup_logger()
+
     auth_verifier = setup_jwt_auth()
     tokens = create_test_tokens()
 
-    print("\n🎫 Test JWT Tokens Generated with Scope Registry:")
-    print(f"Verifier Type: {type(auth_verifier).__name__}")
-    print(f"Issuer: {auth_verifier.issuer}")
-    print(f"Audience: {auth_verifier.audience}")
+    logger.info("🎫 Test JWT Tokens Generated with Scope Registry")
+    logger.info("Verifier Type: %s", type(auth_verifier).__name__)
+    logger.info("Issuer: %s", auth_verifier.issuer)
+    logger.info("Audience: %s", auth_verifier.audience)
 
     for email, token in tokens.items():
-        print(f"\nUser: {email}")
-        print(f"Token (first 50 chars): {token[:50]}...")
+        logger.info("User: %s", email)
+        logger.info("Token (first 50 chars): %s...", token[:50])
 
         # Demonstrate scope group usage
-        print("\n📋 Available Scope Groups:")
+        logger.info("📋 Available Scope Groups:")
         for group_name in [
             "drive_basic",
             "gmail_basic",
@@ -244,4 +248,4 @@ if __name__ == "__main__":
             "office_suite",
         ]:
             scopes = ScopeRegistry.resolve_scope_group(group_name)
-            print(f"  - {group_name}: {len(scopes)} scopes")
+            logger.info("  - %s: %s scopes", group_name, len(scopes))

@@ -29,6 +29,17 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
+from adapters.module_wrapper.types import (
+    ComponentName,
+    IssueList,
+    RelationshipDict,
+    ReverseSymbolMapping,
+    SuggestionList,
+    Symbol,
+    SymbolMapping,
+    Validatable,
+)
+
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper
 
@@ -141,7 +152,7 @@ class StructureValidator:
         self._widget_types: Set[str] = WIDGET_TYPES.copy()
 
     @property
-    def symbols(self) -> Dict[str, str]:
+    def symbols(self) -> SymbolMapping:
         """Get symbol mappings (cached).
 
         Uses shared symbols from structure_dsl for consistency with the DSL parser.
@@ -168,14 +179,14 @@ class StructureValidator:
         return self._symbols
 
     @property
-    def reverse_symbols(self) -> Dict[str, str]:
+    def reverse_symbols(self) -> ReverseSymbolMapping:
         """Get reverse symbol mappings: symbol → component name."""
         if self._reverse_symbols is None:
             self._reverse_symbols = {v: k for k, v in self.symbols.items()}
         return self._reverse_symbols
 
     @property
-    def relationships(self) -> Dict[str, List[str]]:
+    def relationships(self) -> RelationshipDict:
         """Get parent → children relationships (cached)."""
         if self._relationships is None:
             raw_rels = self.wrapper.extract_relationships_by_parent(max_depth=3)

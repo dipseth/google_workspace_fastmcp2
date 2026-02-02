@@ -17,6 +17,26 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Union
 from urllib.parse import urlparse
 
+from adapters.module_wrapper.types import (
+    BUILTIN_PREFIXES as _BUILTIN_PREFIXES,
+)
+from adapters.module_wrapper.types import (
+    # Constants (re-exported for backwards compatibility)
+    DEFAULT_RELATIONSHIP_DEPTH as _DEFAULT_RELATIONSHIP_DEPTH,
+)
+from adapters.module_wrapper.types import (
+    PRIMITIVE_TYPES as _PRIMITIVE_TYPES,
+)
+from adapters.module_wrapper.types import (
+    ComponentName,
+    ComponentPath,
+    # Type Aliases
+    Payload,
+    RelationshipDict,
+    ReverseSymbolMapping,
+    SymbolMapping,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,14 +44,11 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-# Default relationship extraction depth
-DEFAULT_RELATIONSHIP_DEPTH = 5
-
-# Primitive types to skip during relationship extraction
-PRIMITIVE_TYPES = {str, int, float, bool, bytes, type(None)}
-
-# Built-in module prefixes to skip
-BUILTIN_PREFIXES = {"builtins", "typing", "collections", "abc"}
+# Re-export constants from types.py for backwards compatibility
+# New code should import directly from types.py
+DEFAULT_RELATIONSHIP_DEPTH = _DEFAULT_RELATIONSHIP_DEPTH
+PRIMITIVE_TYPES = _PRIMITIVE_TYPES
+BUILTIN_PREFIXES = _BUILTIN_PREFIXES
 
 
 def parse_qdrant_url(url: str) -> Dict[str, Union[str, int, bool]]:
@@ -137,13 +154,23 @@ class ModuleComponent:
     Represents a component (class, function, variable) within a module.
 
     This is the fundamental unit that gets indexed and searched.
+    Implements the Serializable protocol via to_dict().
     """
+
+    name: ComponentName
+    obj: Any
+    module_path: ComponentPath
+    component_type: str
+    docstring: str
+    source: str
+    parent: Optional["ModuleComponent"]
+    children: Dict[ComponentName, "ModuleComponent"]
 
     def __init__(
         self,
-        name: str,
+        name: ComponentName,
         obj: Any,
-        module_path: str,
+        module_path: ComponentPath,
         component_type: str,
         docstring: str = "",
         source: str = "",
@@ -168,25 +195,25 @@ class ModuleComponent:
         self.docstring = docstring
         self.source = source
         self.parent = parent
-        self.children: Dict[str, "ModuleComponent"] = {}
+        self.children: Dict[ComponentName, "ModuleComponent"] = {}
 
     @property
-    def full_path(self) -> str:
+    def full_path(self) -> ComponentPath:
         """Get the full import path to this component."""
         if self.parent:
             return f"{self.parent.full_path}.{self.name}"
         return f"{self.module_path}.{self.name}"
 
-    def add_child(self, child: "ModuleComponent"):
+    def add_child(self, child: "ModuleComponent") -> None:
         """Add a child component."""
         self.children[child.name] = child
 
-    def get_child(self, name: str) -> Optional["ModuleComponent"]:
+    def get_child(self, name: ComponentName) -> Optional["ModuleComponent"]:
         """Get a child component by name."""
         return self.children.get(name)
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for storage."""
+    def to_dict(self) -> Payload:
+        """Convert to dictionary for storage (implements Serializable)."""
         return {
             "name": self.name,
             "type": self.component_type,

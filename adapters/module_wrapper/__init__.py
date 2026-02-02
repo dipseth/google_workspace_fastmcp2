@@ -37,9 +37,14 @@ from typing import Any, Dict, List, Optional, Set, Union
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# CORE CLASSES
+# TYPE DEFINITIONS (Import First for Use by Other Modules)
 # =============================================================================
 
+from adapters.module_wrapper.cache_mixin import CacheMixin
+
+# =============================================================================
+# CORE CLASSES
+# =============================================================================
 from adapters.module_wrapper.core import (
     BUILTIN_PREFIXES,
     DEFAULT_RELATIONSHIP_DEPTH,
@@ -80,10 +85,23 @@ from adapters.module_wrapper.embedding_mixin import (
     _get_colbert_embed,
     _get_fastembed,
 )
+from adapters.module_wrapper.graph_mixin import (
+    ComponentMetadataProvider,
+    GraphMixin,
+    _get_networkx,
+)
 from adapters.module_wrapper.indexing_mixin import (
     STD_LIB_PREFIXES,
     THIRD_PARTY_PREFIXES,
     IndexingMixin,
+)
+from adapters.module_wrapper.instance_pattern_mixin import (
+    InstancePattern,
+    InstancePatternMixin,
+    ParameterVariator,
+    PatternVariation,
+    StructureVariator,
+    VariationFamily,
 )
 from adapters.module_wrapper.pipeline_mixin import PipelineMixin
 
@@ -96,7 +114,18 @@ from adapters.module_wrapper.qdrant_mixin import (
     _get_qdrant_imports,
 )
 from adapters.module_wrapper.relationships_mixin import RelationshipsMixin
-from adapters.module_wrapper.search_mixin import SearchMixin
+from adapters.module_wrapper.search_mixin import (
+    COLBERT_DIM,
+    RELATIONSHIPS_DIM,
+    SearchMixin,
+)
+from adapters.module_wrapper.skill_types import (
+    SkillDocument,
+    SkillGeneratorConfig,
+    SkillInfo,
+    SkillManifest,
+)
+from adapters.module_wrapper.skills_mixin import SkillsMixin
 
 # =============================================================================
 # STRUCTURE VALIDATION
@@ -138,6 +167,52 @@ from adapters.module_wrapper.text_indexing import (
     search_components_by_relationship,
     search_within_module,
 )
+from adapters.module_wrapper.types import (
+    # Constants (also available from core, but centralized here)
+    COLBERT_DIM as TYPES_COLBERT_DIM,
+)
+from adapters.module_wrapper.types import (
+    MINILM_DIM,
+    CacheKey,
+    ComponentInfo,
+    ComponentName,
+    ComponentPath,
+    ComponentPaths,
+    DSLNotation,
+    Embeddable,
+    EmbeddingConfig,
+    EmbeddingDimension,
+    EmbeddingVector,
+    EvictionCallback,
+    HasSymbol,
+    IndexingStats,
+    IssueList,
+    JsonDict,
+    MultiVector,
+    # Type Aliases
+    Payload,
+    # Dataclasses
+    QdrantConfig,
+    QdrantFilter,
+    QueryText,
+    RelationshipDict,
+    RelationshipInfo,
+    RelationshipList,
+    ReverseSymbolMapping,
+    SearchResult,
+    # Protocols
+    Serializable,
+    SuggestionList,
+    Symbol,
+    SymbolMapping,
+    Timestamped,
+    TimestampedMixin,
+    Validatable,
+    WrapperGetter,
+)
+from adapters.module_wrapper.types import (
+    RELATIONSHIPS_DIM as TYPES_RELATIONSHIPS_DIM,
+)
 
 # =============================================================================
 # FULL MODULE WRAPPER - COMPOSED FROM MIXINS
@@ -151,7 +226,11 @@ class ModuleWrapper(
     SearchMixin,
     RelationshipsMixin,
     SymbolsMixin,
+    SkillsMixin,
     PipelineMixin,
+    GraphMixin,
+    CacheMixin,
+    InstancePatternMixin,
     ModuleWrapperBase,
 ):
     """
@@ -165,12 +244,34 @@ class ModuleWrapper(
     - Relationship extraction (RelationshipsMixin)
     - Symbol generation and DSL (SymbolsMixin)
     - V7 ingestion pipeline (PipelineMixin)
+    - Graph-based relationship DAG (GraphMixin)
+    - Tiered component caching (CacheMixin)
+    - Instance pattern storage and variation (InstancePatternMixin)
+    - Skill document generation (SkillsMixin)
     - Base module introspection (ModuleWrapperBase)
 
     Usage:
         wrapper = ModuleWrapper("card_framework.v2", auto_initialize=True)
         results = wrapper.search("button with click action")
         component = wrapper.get_component_by_path("card_framework.v2.widgets.button_list.ButtonList")
+
+        # Graph-based traversal
+        wrapper.build_relationship_graph()
+        descendants = wrapper.get_descendants("Section", depth=2)
+        paths = wrapper.get_all_paths("Card", "Icon")
+
+        # Component caching (fast retrieval without path reconstruction)
+        entry = wrapper.cache_pattern("my_card", ["Section", "DecoratedText"])
+        Section = wrapper.get_cached_class("Section")
+
+        # Instance pattern storage and variation generation
+        wrapper.store_instance_pattern(
+            component_paths=["Section", "DecoratedText"],
+            instance_params={"text": "Hello"},
+            description="A simple text card",
+            generate_variations=True,
+        )
+        variation = wrapper.get_cached_variation(pattern_id, "structure")
     """
 
     def __init__(
@@ -303,12 +404,29 @@ __all__ = [
     "SearchMixin",
     "RelationshipsMixin",
     "SymbolsMixin",
+    "SkillsMixin",
     "PipelineMixin",
+    "GraphMixin",
+    "ComponentMetadataProvider",
+    "CacheMixin",
+    "InstancePatternMixin",
+    # Instance pattern classes
+    "InstancePattern",
+    "PatternVariation",
+    "VariationFamily",
+    "StructureVariator",
+    "ParameterVariator",
+    # Skill types
+    "SkillDocument",
+    "SkillInfo",
+    "SkillManifest",
+    "SkillGeneratorConfig",
     # Lazy imports
     "_get_qdrant_imports",
     "_get_numpy",
     "_get_fastembed",
     "_get_colbert_embed",
+    "_get_networkx",
     # Symbol generation
     "SymbolGenerator",
     "StyleRule",
@@ -348,12 +466,15 @@ __all__ = [
     "content_dsl_to_jinja",
     "get_style_modifiers",
     "add_style_modifier",
-    # Text indexing
+    # Text indexing (standalone functions)
     "create_component_text_indices",
     "search_by_text",
     "search_components_by_relationship",
     "create_module_field_index",
     "search_within_module",
+    # Search constants
+    "COLBERT_DIM",
+    "RELATIONSHIPS_DIM",
 ]
 
 __version__ = "2.0.0"

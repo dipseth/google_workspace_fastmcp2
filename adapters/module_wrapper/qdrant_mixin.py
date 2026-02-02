@@ -9,6 +9,12 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 
+from adapters.module_wrapper.types import (
+    EmbeddingDimension,
+    Payload,
+    QdrantConfig,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -253,7 +259,7 @@ class QdrantMixin:
             return False
 
     @property
-    def collection_metadata(self) -> Dict[str, Any]:
+    def collection_metadata(self) -> Payload:
         """Get metadata about the Qdrant collection."""
         if not getattr(self, "_initialized", False):
             return {"error": "Not initialized"}

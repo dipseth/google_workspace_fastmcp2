@@ -121,7 +121,13 @@ except KeyError:
     )
     credential_storage_mode = CredentialStorageMode.FILE_ENCRYPTED
 
-# FastMCP 2.12.x handles lifespan management automatically - no custom lifespan needed
+# Import composable lifespans for server lifecycle management
+from lifespans import (
+    combined_server_lifespan,
+    register_profile_middleware,
+    register_qdrant_middleware,
+    register_template_middleware,
+)
 
 # Temporary: Disable GoogleProvider to fix MCP Inspector OAuth conflicts
 google_auth_provider = None
@@ -133,10 +139,14 @@ logger.info("  No transaction ID conflicts")
 
 # Removed modern_google_provider imports - using existing auth system
 
-# Create FastMCP instance without GoogleProvider (using legacy OAuth system)
+# Create FastMCP instance with composed lifespans for proper lifecycle management
+# Lifespans handle: Qdrant init/shutdown, ColBERT init, session state persistence,
+# cache cleanup, and dynamic instructions update
 mcp = FastMCP(
     name=settings.server_name,
     version=__version__,
+    list_page_size=25,  # Paginate tools/resources/prompts listing to reduce initial context
+    lifespan=combined_server_lifespan,  # Composed lifespans for server lifecycle
     instructions="""Google Workspace MCP Server - Comprehensive access to Google services.
 
 ## Authentication
@@ -219,6 +229,8 @@ template_middleware = setup_template_middleware(
     enable_caching=True,
     cache_ttl_seconds=300,
 )
+# Register with lifespan for cache cleanup on shutdown
+register_template_middleware(template_middleware)
 logger.info(
     "✅ Enhanced Template Parameter Middleware enabled - modular architecture with 12 focused components active"
 )
@@ -247,7 +259,9 @@ else:
         "⏭️  Enhanced Sampling Middleware disabled - set SAMPLING_TOOLS=true in .env to enable"
     )
 
-# 5. Initialize Qdrant unified middleware (completely non-blocking)
+# 5. Initialize Qdrant unified middleware (sync creation, async init via lifespan)
+# Note: Full async initialization (embedding model, background reindexing) is handled
+# by qdrant_lifespan on server startup. This sync init just creates the middleware.
 logger.info("🔄 Initializing Qdrant unified middleware...")
 qdrant_middleware = QdrantUnifiedMiddleware(
     qdrant_host=settings.qdrant_host,
@@ -264,7 +278,9 @@ qdrant_middleware = QdrantUnifiedMiddleware(
     ],  # Try configured port first, then fallback
 )
 mcp.add_middleware(qdrant_middleware)
-logger.info("✅ Qdrant unified middleware enabled - configured for cloud instance")
+# Register with lifespan for async initialization and graceful shutdown
+register_qdrant_middleware(qdrant_middleware)
+logger.info("✅ Qdrant unified middleware created (async init via lifespan)")
 logger.info(f"🔧 Qdrant URL: {settings.qdrant_url}")
 logger.info(f"🔧 API Key configured: {bool(settings.qdrant_api_key)}")
 
@@ -298,6 +314,8 @@ profile_middleware = ProfileEnrichmentMiddleware(
     enable_qdrant_cache=enable_qdrant_profile_cache,
 )
 mcp.add_middleware(profile_middleware)
+# Register with lifespan for cache cleanup on shutdown
+register_profile_middleware(profile_middleware)
 
 if enable_qdrant_profile_cache:
     logger.info("✅ Profile Enrichment Middleware enabled with TWO-TIER CACHING:")
@@ -357,26 +375,43 @@ setup_chat_tools(mcp)
 # Register Card Tools with ModuleWrapper integration
 setup_card_tools(mcp)
 
-# Initialize ColBERT wrapper on startup if COLBERT_EMBEDDING_DEV=true
-if settings.colbert_embedding_dev:
-    logger.info(
-        "🤖 COLBERT_EMBEDDING_DEV=true - Initializing ColBERT wrapper on startup..."
-    )
+# Setup Skills Provider for FastMCP (if enabled)
+if settings.enable_skills_provider:
+    logger.info("📚 Setting up Skills Provider for FastMCP...")
     try:
-        from gchat.card_tools import _initialize_colbert_wrapper
+        from gchat.card_framework_wrapper import get_card_framework_wrapper
+        from skills import setup_skills_provider
 
-        _initialize_colbert_wrapper()
-        logger.info(
-            "✅ ColBERT wrapper initialized on startup - multi-vector embeddings ready"
+        card_wrapper = get_card_framework_wrapper()
+        skills_path = setup_skills_provider(
+            mcp=mcp,
+            wrappers=[card_wrapper],
+            enabled_modules=["card_framework"],
+            skills_root=settings.skills_directory_path,
+            auto_regenerate=settings.skills_auto_regenerate,
         )
+        if skills_path:
+            logger.info(f"✅ Skills Provider enabled: {skills_path}")
+        else:
+            logger.warning("⚠️ Skills Provider setup returned no path")
+    except ImportError as e:
+        logger.warning(f"⚠️ Skills Provider not available (FastMCP 3.0+ required): {e}")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize ColBERT wrapper on startup: {e}")
-        logger.warning(
-            "⚠️ ColBERT mode will still work on-demand if called via use_colbert=True"
-        )
+        logger.error(f"❌ Failed to setup Skills Provider: {e}")
 else:
     logger.info(
-        "⏭️ ColBERT embedding initialization skipped - set COLBERT_EMBEDDING_DEV=true in .env to enable"
+        "⏭️ Skills Provider disabled - set ENABLE_SKILLS_PROVIDER=true in .env to enable"
+    )
+
+# ColBERT initialization is now handled by colbert_lifespan on server startup
+# This avoids sync initialization at module load and ensures proper async context
+if settings.colbert_embedding_dev:
+    logger.info(
+        "🤖 COLBERT_EMBEDDING_DEV=true - ColBERT wrapper will initialize via lifespan"
+    )
+else:
+    logger.info(
+        "⏭️ ColBERT embedding disabled - set COLBERT_EMBEDDING_DEV=true in .env to enable"
     )
 
 # DEPRECATED: Smart Card Tool removed due to formatting issues with Google Chat Cards v2 API
@@ -485,17 +520,9 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Could not register Qdrant tools and resources: {e}")
 
-# 8. Update MCP instructions with dynamic content from Qdrant
-logger.info("📋 Building dynamic MCP instructions from Qdrant analytics...")
-try:
-    import asyncio
-
-    # Run the async instruction update in a sync context
-    asyncio.run(update_mcp_instructions(mcp, qdrant_middleware))
-    logger.info("✅ MCP instructions updated with dynamic content from Qdrant")
-except Exception as e:
-    logger.warning(f"⚠️ Could not update dynamic instructions: {e}")
-    logger.info("  📋 Using static base instructions as fallback")
+# 8. Dynamic MCP instructions are now handled by dynamic_instructions_lifespan
+# This avoids blocking asyncio.run() at module load time and ensures proper async context
+logger.info("📋 Dynamic MCP instructions will be updated via lifespan on server start")
 
 
 # Setup OAuth endpoints (now using legacy system)

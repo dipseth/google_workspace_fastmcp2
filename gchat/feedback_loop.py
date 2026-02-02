@@ -65,6 +65,298 @@ class FeedbackLoop:
         self._relationship_embedder = None  # MiniLM for relationships
         self._initialized = False
         self._description_vector_ready = False
+        self._wrapper = None  # ModuleWrapper for SearchMixin methods
+        self._component_cache = None  # Tiered component cache
+        self._variation_generator = None  # Variation generator for pattern expansion
+
+    def _get_wrapper(self):
+        """
+        Get the CardFrameworkWrapper for SearchMixin-based searches.
+
+        Returns:
+            ModuleWrapper or None if unavailable
+        """
+        if self._wrapper is None:
+            try:
+                from gchat.card_framework_wrapper import get_card_framework_wrapper
+
+                self._wrapper = get_card_framework_wrapper()
+                logger.info("FeedbackLoop: Using wrapper for SearchMixin methods")
+            except Exception as e:
+                logger.debug(f"FeedbackLoop: Wrapper not available: {e}")
+        return self._wrapper
+
+    def _get_component_cache(self):
+        """
+        Get the tiered component cache.
+
+        Uses wrapper's cache if available, otherwise creates standalone cache.
+
+        Returns:
+            ComponentCache instance
+        """
+        if self._component_cache is None:
+            wrapper = self._get_wrapper()
+            if wrapper and hasattr(wrapper, "_get_component_cache"):
+                # Use wrapper's cache (shared)
+                self._component_cache = wrapper._get_component_cache()
+                logger.debug("FeedbackLoop: Using wrapper's component cache")
+            else:
+                # Create standalone cache
+                try:
+                    from adapters.module_wrapper.component_cache import (
+                        get_component_cache,
+                    )
+
+                    self._component_cache = get_component_cache()
+                    logger.debug("FeedbackLoop: Using standalone component cache")
+                except Exception as e:
+                    logger.debug(f"FeedbackLoop: Component cache not available: {e}")
+        return self._component_cache
+
+    def _cache_pattern(
+        self,
+        pattern: Dict[str, Any],
+        key: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Cache a pattern for fast retrieval.
+
+        Stores the pattern in the tiered cache (L1 memory → L2 pickle).
+        This allows subsequent retrievals to skip Qdrant entirely.
+
+        Args:
+            pattern: Pattern dict with component_paths, instance_params, etc.
+            key: Optional cache key (defaults to card_id or generated)
+
+        Returns:
+            Cache key used, or None if caching failed
+        """
+        cache = self._get_component_cache()
+        if not cache:
+            return None
+
+        try:
+            # Determine key
+            if not key:
+                key = pattern.get("card_id") or pattern.get("id")
+                if not key:
+                    import hashlib
+
+                    desc = pattern.get("card_description", "")
+                    key = f"pattern:{hashlib.sha256(desc.encode()).hexdigest()[:12]}"
+
+            # Use wrapper's cache_from_qdrant_pattern if available
+            wrapper = self._get_wrapper()
+            if wrapper and hasattr(wrapper, "cache_from_qdrant_pattern"):
+                wrapper.cache_from_qdrant_pattern(pattern, key)
+            else:
+                cache.put_from_pattern(pattern, key)
+
+            logger.debug(f"Cached pattern: {key}")
+            return key
+
+        except Exception as e:
+            logger.warning(f"Failed to cache pattern: {e}")
+            return None
+
+    def get_cached_pattern(
+        self,
+        key: str,
+        component_paths: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a cached pattern by key.
+
+        Returns cached pattern with hydrated component_classes for
+        instant instantiation without path reconstruction.
+
+        Args:
+            key: Cache key (card_id, pattern ID, or description hash)
+            component_paths: Optional paths for L3 reconstruction
+
+        Returns:
+            Dict with component_classes, instance_params, etc., or None
+        """
+        cache = self._get_component_cache()
+        if not cache:
+            return None
+
+        entry = cache.get(key, component_paths)
+        if not entry:
+            return None
+
+        # Return as dict for compatibility
+        return {
+            "key": entry.key,
+            "component_paths": entry.component_paths,
+            "instance_params": entry.instance_params,
+            "dsl_notation": entry.dsl_notation,
+            "structure_description": entry.structure_description,
+            "component_classes": entry.component_classes,
+            "_is_hydrated": entry._is_hydrated,
+            "_from_cache": True,
+        }
+
+    def _get_variation_generator(self):
+        """
+        Get the variation generator for pattern expansion.
+
+        Prefer using wrapper methods directly (generate_pattern_variations below).
+        This is maintained for backwards compatibility.
+
+        Returns:
+            VariationGenerator instance
+        """
+        if self._variation_generator is None:
+            try:
+                from adapters.module_wrapper.variation_generator import (
+                    get_variation_generator,
+                )
+
+                self._variation_generator = get_variation_generator()
+                logger.debug("FeedbackLoop: Variation generator initialized")
+            except Exception as e:
+                logger.debug(f"FeedbackLoop: Variation generator not available: {e}")
+        return self._variation_generator
+
+    def generate_pattern_variations(
+        self,
+        pattern: Dict[str, Any],
+        num_structure_variations: int = 3,
+        num_param_variations: int = 2,
+        cache_variations: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Generate and cache variations of a pattern.
+
+        Uses the DAG structure to create valid structural variations and
+        parameter variations. All variations are cached for fast retrieval.
+
+        Prefers using the wrapper's InstancePatternMixin methods directly.
+
+        Args:
+            pattern: Source pattern with component_paths and instance_params
+            num_structure_variations: Number of structural variations
+            num_param_variations: Number of parameter variations per structure
+            cache_variations: Whether to cache generated variations
+
+        Returns:
+            Dict with family info and variation keys, or None if failed
+        """
+        # Try wrapper's methods first (generic InstancePatternMixin)
+        wrapper = self._get_wrapper()
+        if wrapper and hasattr(wrapper, "generate_pattern_variations"):
+            try:
+                from adapters.module_wrapper.instance_pattern_mixin import (
+                    InstancePattern,
+                )
+
+                # Convert dict pattern to InstancePattern
+                component_paths = pattern.get("component_paths") or pattern.get(
+                    "parent_paths", []
+                )
+                instance_params = pattern.get("instance_params", {})
+                description = pattern.get("card_description", "")
+                pattern_id = pattern.get("card_id") or pattern.get("id", "")
+
+                instance_pattern = InstancePattern(
+                    pattern_id=pattern_id,
+                    component_paths=component_paths,
+                    instance_params=instance_params,
+                    description=description,
+                    dsl_notation=pattern.get("dsl_notation"),
+                    feedback=pattern.get("feedback") or pattern.get("content_feedback"),
+                )
+
+                family = wrapper.generate_pattern_variations(
+                    pattern=instance_pattern,
+                    num_structure_variations=num_structure_variations,
+                    num_param_variations=num_param_variations,
+                    cache_variations=cache_variations,
+                )
+
+                if family:
+                    return {
+                        "parent_key": family.parent_id,
+                        "num_variations": family.size,
+                        "cache_keys": family.cache_keys,
+                        "variation_types": [
+                            v.variation_type for v in family.variations
+                        ],
+                    }
+            except Exception as e:
+                logger.debug(f"Wrapper variation generation failed, falling back: {e}")
+
+        # Fallback to variation_generator module
+        generator = self._get_variation_generator()
+        if not generator:
+            return None
+
+        try:
+            family = generator.generate_variations(
+                pattern=pattern,
+                num_structure_variations=num_structure_variations,
+                num_param_variations=num_param_variations,
+                cache_variations=cache_variations,
+            )
+
+            return {
+                "parent_key": family.parent_key,
+                "num_variations": family.size,
+                "cache_keys": family.cache_keys,
+                "variation_types": [v.variation_type for v in family.variations],
+            }
+
+        except Exception as e:
+            logger.warning(f"Failed to generate variations: {e}")
+            return None
+
+    def get_cached_variation(
+        self,
+        parent_key: str,
+        variation_type: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a cached variation from a family.
+
+        Prefers using the wrapper's InstancePatternMixin methods directly.
+
+        Args:
+            parent_key: The parent pattern's cache key
+            variation_type: Optional type filter ("structure", "parameter", "original")
+
+        Returns:
+            Variation dict with component_classes, or None
+        """
+        # Try wrapper's methods first (generic InstancePatternMixin)
+        wrapper = self._get_wrapper()
+        if wrapper and hasattr(wrapper, "get_cached_variation"):
+            try:
+                result = wrapper.get_cached_variation(parent_key, variation_type)
+                if result:
+                    return result
+            except Exception as e:
+                logger.debug(f"Wrapper get_cached_variation failed, falling back: {e}")
+
+        # Fallback to variation_generator module
+        generator = self._get_variation_generator()
+        if not generator:
+            return None
+
+        if variation_type:
+            variation = generator.get_variation_by_type(parent_key, variation_type)
+        else:
+            variation = generator.get_random_variation(parent_key)
+
+        if not variation:
+            return None
+
+        # Get from cache (will hydrate component classes)
+        return self.get_cached_pattern(
+            variation.cache_key,
+            variation.component_paths,
+        )
 
     def _get_client(self):
         """Get Qdrant client singleton."""
@@ -105,9 +397,23 @@ class FeedbackLoop:
                 logger.warning(f"Failed to load MiniLM embedder: {e}")
         return self._relationship_embedder
 
-    def _embed_description(self, description: str) -> List[List[float]]:
+    def _embed_description(
+        self, description: str, token_ratio: float = 1.0
+    ) -> List[List[float]]:
         """
         Embed a card description using ColBERT.
+
+        ColBERT generates one 128d vector per token. MaxSim scoring computes:
+        - For each query token: find max similarity to any doc token
+        - Sum these maxes → final score
+
+        Fewer query tokens = less computation on Qdrant side, so we support
+        truncating to the first N% of tokens for performance optimization.
+
+        Args:
+            description: Card description text to embed
+            token_ratio: Fraction of tokens to keep (0.0-1.0, default 1.0 = all tokens).
+                         Values < 1.0 truncate to first N% of tokens for faster queries.
 
         Returns:
             List of token vectors (multi-vector embedding)
@@ -120,6 +426,12 @@ class FeedbackLoop:
             # ColBERT query embedding (multi-vector)
             vectors_raw = list(embedder.query_embed(description))[0]
             vectors = [vec.tolist() for vec in vectors_raw]
+
+            # Truncate to first N% of tokens if token_ratio < 1.0
+            if token_ratio < 1.0:
+                cutoff = max(1, int(len(vectors) * token_ratio))
+                vectors = vectors[:cutoff]
+
             return vectors
         except Exception as e:
             logger.warning(f"Failed to embed description: {e}")
@@ -658,6 +970,9 @@ class FeedbackLoop:
             str
         ] = None,  # Optional NL description of structure
         pattern_type: str = "content",  # "content" (main card) or "feedback_ui" (feedback section)
+        generate_variations: bool = False,  # Generate and cache variations
+        num_structure_variations: int = 3,  # Number of structural variations
+        num_param_variations: int = 2,  # Parameter variations per structure
     ) -> Optional[str]:
         """
         Store a card usage pattern as an instance_pattern point.
@@ -756,6 +1071,37 @@ class FeedbackLoop:
                 f"✅ Stored instance_pattern [{pattern_type}]: {point_id[:8]}... "
                 f"(content={content_feedback}, form={form_feedback})"
             )
+
+            # Cache the pattern for fast retrieval
+            cache_key = card_id or point_id
+            pattern_data = {
+                "id": point_id,
+                "card_id": card_id,
+                "component_paths": component_paths,
+                "instance_params": instance_params,
+                "card_description": card_description,
+                "dsl_notation": dsl_relationship_text,
+                "structure_description": structure_description,
+                "content_feedback": content_feedback,
+                "form_feedback": form_feedback,
+            }
+            self._cache_pattern(pattern=pattern_data, key=cache_key)
+
+            # Generate variations if requested and pattern has positive feedback
+            if generate_variations and (
+                content_feedback == "positive" or form_feedback == "positive"
+            ):
+                variation_result = self.generate_pattern_variations(
+                    pattern=pattern_data,
+                    num_structure_variations=num_structure_variations,
+                    num_param_variations=num_param_variations,
+                    cache_variations=True,
+                )
+                if variation_result:
+                    logger.info(
+                        f"📦 Generated {variation_result['num_variations']} variations "
+                        f"for {cache_key}"
+                    )
 
             # Cleanup old patterns if we exceed the limit
             self._cleanup_old_instance_patterns()
@@ -1548,6 +1894,51 @@ class FeedbackLoop:
             logger.error(f"Failed to promote to file: {e}")
             return False
 
+    def _query_via_wrapper(
+        self,
+        description: str,
+        component_paths: Optional[List[str]] = None,
+        limit: int = 10,
+        token_ratio: float = 1.0,
+    ) -> Optional[
+        Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]
+    ]:
+        """
+        Query using wrapper's SearchMixin methods (preferred when available).
+
+        Uses wrapper.search_v7_hybrid() with feedback filters for cleaner
+        code and better consistency with the SearchMixin architecture.
+
+        Returns:
+            Tuple of (class_results, content_patterns, form_patterns) or None if unavailable
+        """
+        wrapper = self._get_wrapper()
+        if not wrapper:
+            return None
+
+        try:
+            # Use wrapper's search_v7_hybrid with positive feedback filters
+            class_results, content_patterns, form_patterns = wrapper.search_v7_hybrid(
+                description=description,
+                component_paths=component_paths,
+                limit=limit,
+                token_ratio=token_ratio,
+                content_feedback="positive",  # Only get positive content patterns
+                form_feedback="positive",  # Only get positive form patterns
+                include_classes=True,
+            )
+
+            logger.info(
+                f"🔍 Wrapper search: {len(class_results)} classes, "
+                f"{len(content_patterns)} content (+), {len(form_patterns)} form (+)"
+            )
+
+            return class_results, content_patterns, form_patterns
+
+        except Exception as e:
+            logger.warning(f"Wrapper search failed, falling back to direct: {e}")
+            return None
+
     def query_with_feedback(
         self,
         component_query: str,
@@ -1555,6 +1946,7 @@ class FeedbackLoop:
         component_paths: Optional[List[str]] = None,
         limit: int = 10,
         use_negative_feedback: bool = True,
+        token_ratio: float = 1.0,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Hybrid query: Find components + boost with proven patterns (content + form).
@@ -1565,16 +1957,34 @@ class FeedbackLoop:
         3. Find successful patterns by structure (positive form_feedback on 'relationships')
         4. Fuse results with RRF, then demote components associated with negatives
 
+        Note: Prefers wrapper.search_v7_hybrid() when available for better consistency
+        with SearchMixin architecture. Falls back to direct Qdrant queries.
+
         Args:
             component_query: Query for component search (e.g., "v2.widgets.decorated_text.DecoratedText class")
             description: Card description for content pattern matching
             component_paths: Optional list of component paths for structure pattern matching
             limit: Max results
             use_negative_feedback: Whether to incorporate negative patterns (default True)
+            token_ratio: Fraction of ColBERT tokens to use (0.0-1.0, default 1.0 = all tokens).
+                         Lower values reduce Qdrant computation for faster queries.
 
         Returns:
             Tuple of (class_results, content_pattern_results, form_pattern_results)
         """
+        # Try wrapper-based search first (cleaner, uses SearchMixin)
+        # Skip if negative feedback is needed (wrapper doesn't handle demotion yet)
+        if not use_negative_feedback:
+            wrapper_result = self._query_via_wrapper(
+                description=description,
+                component_paths=component_paths,
+                limit=limit,
+                token_ratio=token_ratio,
+            )
+            if wrapper_result:
+                return wrapper_result
+
+        # Fall back to direct Qdrant queries (supports negative demotion)
         client = self._get_client()
         embedder = self._get_embedder()
 
@@ -1584,12 +1994,11 @@ class FeedbackLoop:
         try:
             from qdrant_client import models
 
-            # Embed component query
-            component_vectors_raw = list(embedder.query_embed(component_query))[0]
-            component_vectors = [vec.tolist() for vec in component_vectors_raw]
+            # Embed component query (also apply token truncation)
+            component_vectors = self._embed_description(component_query, token_ratio)
 
-            # Embed description for content (inputs) search
-            description_vectors = self._embed_description(description)
+            # Embed description for content (inputs) search (apply same truncation)
+            description_vectors = self._embed_description(description, token_ratio)
 
             if not description_vectors:
                 # Fallback to simple component search

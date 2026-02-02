@@ -19,6 +19,21 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
+from adapters.module_wrapper.types import (
+    COLBERT_DIM as _COLBERT_DIM,
+)
+from adapters.module_wrapper.types import (
+    RELATIONSHIPS_DIM as _RELATIONSHIPS_DIM,
+)
+from adapters.module_wrapper.types import (
+    ComponentName,
+    ComponentPath,
+    EmbeddingVector,
+    MultiVector,
+    Payload,
+    RelationshipList,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,9 +41,9 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # =============================================================================
 
-# Vector dimensions for v7 schema
-COLBERT_DIM = 128  # ColBERT multi-vector
-RELATIONSHIPS_DIM = 384  # MiniLM dense vector
+# Re-export constants for backwards compatibility
+COLBERT_DIM = _COLBERT_DIM  # ColBERT multi-vector
+RELATIONSHIPS_DIM = _RELATIONSHIPS_DIM  # MiniLM dense vector
 
 
 # =============================================================================
@@ -85,7 +100,9 @@ def extract_input_values(component) -> str:
 
 
 def build_compact_relationship_text(
-    component_name: str, relationships: List[Dict], component_type: str = "class"
+    component_name: ComponentName,
+    relationships: RelationshipList,
+    component_type: str = "class",
 ) -> str:
     """
     Build compact, structured relationship text for embedding.

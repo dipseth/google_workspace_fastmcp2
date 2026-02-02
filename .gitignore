@@ -127,3 +127,5 @@ docs/CLOUDFLARE_TUNNEL_SETUP.md
 google-workspace-automation_4.zip
 aesthetics_conversations_anthropic_v3.db
 .idea/**
+.component_cache/_index.pkl
+adapters/discovery_manager.py

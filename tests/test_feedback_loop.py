@@ -143,7 +143,7 @@ def test_feedback_buttons_in_card():
     print("TEST: Feedback buttons in card output")
     print("=" * 60)
 
-    from gchat.smart_card_builder import ENABLE_FEEDBACK_BUTTONS, SmartCardBuilder
+    from gchat.card_builder import ENABLE_FEEDBACK_BUTTONS, SmartCardBuilder
 
     print(f"   ENABLE_FEEDBACK_BUTTONS: {ENABLE_FEEDBACK_BUTTONS}")
 
@@ -151,7 +151,7 @@ def test_feedback_buttons_in_card():
     builder.initialize()
 
     # Build a simple card
-    card = builder.build_card_from_description(
+    card = builder.build(
         description='First section titled "Test" showing "Hello World"',
         title="Feedback Test Card",
     )
@@ -190,8 +190,8 @@ def test_proven_params_merged_into_card():
     print("TEST: Proven params merged into card building")
     print("=" * 60)
 
+    from gchat.card_builder import SmartCardBuilder
     from gchat.feedback_loop import get_feedback_loop
-    from gchat.smart_card_builder import SmartCardBuilder
 
     feedback_loop = get_feedback_loop()
 
@@ -221,7 +221,7 @@ def test_proven_params_merged_into_card():
     builder.initialize()
 
     # Use a similar description - should find our proven pattern
-    card = builder.build_card_from_description(
+    card = builder.build(
         description="notification card showing alert with dismiss",
         # No title, subtitle, text, or buttons provided explicitly
     )

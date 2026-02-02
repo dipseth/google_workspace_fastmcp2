@@ -12,7 +12,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gchat.smart_card_builder import (
+from gchat.card_builder import (
     CLICKABLE_COMPONENTS,
     DUAL_COMPONENTS,
     LAYOUT_WRAPPERS,
