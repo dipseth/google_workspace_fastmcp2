@@ -491,42 +491,34 @@ class TagBasedResourceMiddleware(Middleware):
         return None, None
 
     def _convert_result_to_serializable(self, result: Any) -> Any:
-        """Convert tool result to serializable format."""
-        # Same logic as in _handle_list_items
+        """Convert tool result to serializable format using compatibility utilities."""
+        from config.fastmcp_compat import ResponseSerializer
+        
+        # Use ResponseSerializer for consistent serialization
+        serialized = ResponseSerializer.serialize(result)
+        
+        # Handle special case where content is iterable (list of items with text)
         if hasattr(result, "content"):
             content = result.content
-            if hasattr(content, "text"):
-                return content.text
-            elif hasattr(content, "__iter__") and not isinstance(content, (str, bytes)):
+            if hasattr(content, "__iter__") and not isinstance(content, (str, bytes)):
                 extracted_content = []
                 for item in content:
                     if hasattr(item, "text"):
                         extracted_content.append(item.text)
                     else:
                         extracted_content.append(item)
-                if len(extracted_content) == 1 and isinstance(
-                    extracted_content[0], str
-                ):
+                
+                # Try to parse single string as JSON
+                if len(extracted_content) == 1 and isinstance(extracted_content[0], str):
                     try:
                         import json as json_module
-
                         return json_module.loads(extracted_content[0])
                     except:
                         return extracted_content[0]
                 else:
                     return extracted_content
-            elif hasattr(content, "model_dump"):
-                return content.model_dump()
-            elif hasattr(content, "dict"):
-                return content.dict()
-            else:
-                return content
-        elif hasattr(result, "model_dump"):
-            return result.model_dump()
-        elif hasattr(result, "dict"):
-            return result.dict()
-        else:
-            return result
+        
+        return serialized
 
     async def _handle_service_lists(
         self, service: str, context: MiddlewareContext
