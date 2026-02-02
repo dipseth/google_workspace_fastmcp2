@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 def test_return_instance():
     """Test return_instance feature."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
     wrapper = builder._get_wrapper()
@@ -171,7 +171,7 @@ def test_return_instance():
 
 def test_full_card_with_multiple_sections():
     """Test building a more complex card with multiple sections."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 

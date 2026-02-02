@@ -63,7 +63,7 @@ SAMPLE_TEXT_CONTENT = [
 # =============================================================================
 # FEEDBACK CARD CONTENT POOLS (imported from SmartCardBuilder - Single Source of Truth)
 # =============================================================================
-from gchat.smart_card_builder import (
+from gchat.card_builder import (
     CONTENT_FEEDBACK_PROMPTS,
     FORM_FEEDBACK_PROMPTS,
     NEGATIVE_LABELS,
@@ -186,7 +186,7 @@ class SmokeTestGenerator:
     def _get_builder(self):
         """Get SmartCardBuilder singleton."""
         if self._builder is None:
-            from gchat.smart_card_builder import SmartCardBuilder
+            from gchat.card_builder import SmartCardBuilder
 
             self._builder = SmartCardBuilder()
         return self._builder

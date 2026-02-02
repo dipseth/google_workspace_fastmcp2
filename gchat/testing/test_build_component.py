@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 def test_build_component():
     """Run comprehensive _build_component tests."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
     wrapper = builder._get_wrapper()

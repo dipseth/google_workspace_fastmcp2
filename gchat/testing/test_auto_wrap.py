@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 def test_auto_wrap_button():
     """Test auto_wrap for Button → ButtonList."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -53,7 +53,7 @@ def test_auto_wrap_button():
 
 def test_auto_wrap_chip():
     """Test auto_wrap for Chip → ChipList."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -78,7 +78,7 @@ def test_auto_wrap_chip():
 
 def test_no_wrap_decorated_text():
     """Test that DecoratedText doesn't get wrapped (direct child of Section)."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -105,7 +105,7 @@ def test_no_wrap_decorated_text():
 
 def test_auto_wrap_return_instance():
     """Test auto_wrap with return_instance=True."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 
@@ -136,7 +136,7 @@ def test_auto_wrap_return_instance():
 
 def test_full_card_with_auto_wrap():
     """Test building a complete card using auto_wrap."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     builder = SmartCardBuilderV2()
 

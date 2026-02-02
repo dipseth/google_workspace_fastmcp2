@@ -23,7 +23,7 @@ logger = setup_logger()
 
 def test_extract_style_metadata():
     """Test the extract_style_metadata helper function."""
-    from gchat.smart_card_builder import extract_style_metadata
+    from gchat.card_builder import extract_style_metadata
 
     print("\n" + "=" * 60)
     print("TEST 1: extract_style_metadata()")
@@ -78,7 +78,7 @@ def test_extract_style_metadata():
 
 def test_style_application_methods():
     """Test _has_explicit_styles and _apply_pattern_styles methods."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     print("\n" + "=" * 60)
     print("TEST 2: Style Application Methods")
@@ -166,7 +166,7 @@ def test_style_application_methods():
 
 def test_build_from_pattern_with_style():
     """Test that _build_from_pattern applies styles from style_metadata."""
-    from gchat.smart_card_builder import SmartCardBuilderV2
+    from gchat.card_builder import SmartCardBuilderV2
 
     print("\n" + "=" * 60)
     print("TEST 3: _build_from_pattern with Style Metadata")
@@ -253,7 +253,7 @@ def test_full_flow_store_and_retrieve():
 
     This mimics exactly what happens in send_dynamic_card.
     """
-    from gchat.smart_card_builder import SmartCardBuilderV2, extract_style_metadata
+    from gchat.card_builder import SmartCardBuilderV2, extract_style_metadata
     from gchat.feedback_loop import get_feedback_loop
 
     print("\n" + "=" * 60)
@@ -414,7 +414,7 @@ def test_dag_generated_styled_pattern():
 
     try:
         from gchat.testing.dag_structure_generator import DAGStructureGenerator
-        from gchat.smart_card_builder import SmartCardBuilderV2, extract_style_metadata
+        from gchat.card_builder import SmartCardBuilderV2, extract_style_metadata
 
         # Generate a random valid structure
         gen = DAGStructureGenerator()

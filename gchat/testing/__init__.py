@@ -5,6 +5,12 @@ Includes:
 - SmokeTestGenerator: Hardcoded smoke test card generation
 - DAGStructureGenerator: NetworkX DAG-based random valid structure generation
 
+Test Modules (run directly with: uv run python -m gchat.testing.<module>):
+- test_build_component: Tests _build_component() universality and robustness
+- test_auto_wrap: Tests DAG-based auto-wrapping (Button → ButtonList)
+- test_return_instance: Tests return_instance feature for building hierarchies
+- test_style_auto_application: Tests style metadata extraction and auto-application
+
 Usage:
     # Generate random valid structures
     from gchat.testing import generate_dag_structure, generate_dag_card
@@ -15,6 +21,12 @@ Usage:
     # Send test cards to webhook
     from gchat.testing import run_dag_smoke_test
     run_dag_smoke_test("https://chat.googleapis.com/v1/spaces/...", count=5)
+
+    # Run all tests
+    uv run python -m gchat.testing.test_build_component
+    uv run python -m gchat.testing.test_auto_wrap
+    uv run python -m gchat.testing.test_return_instance
+    uv run python -m gchat.testing.test_style_auto_application
 """
 
 from .smoke_test_generator import SmokeTestGenerator
