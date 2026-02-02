@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from config.enhanced_logging import setup_logger
+from config.fastmcp_compat import ResourceContentExtractor
 
 from .cache_manager import CacheManager
 from .utils import TemplateResolutionError
@@ -237,61 +238,19 @@ class ResourceHandler:
             except ImportError:
                 pass  # Pydantic not available, continue with other handlers
 
-            # Handle ReadResourceContents dataclass
-            if hasattr(resource_result, "content"):
-                content = resource_result.content
-                mime_type = getattr(resource_result, "mime_type", None)
+            # Use ResourceContentExtractor utility for standard extraction
+            extracted = ResourceContentExtractor.extract(resource_result)
 
-                if isinstance(content, str):
-                    if (
-                        mime_type == "application/json"
-                        or content.strip().startswith("{")
-                        or content.strip().startswith("[")
-                    ):
-                        try:
-                            extracted = json.loads(content)
-                        except json.JSONDecodeError:
-                            extracted = content
-                    else:
-                        extracted = content
-                else:
-                    extracted = content
-
-            # Handle standard MCP resource response structure
-            elif hasattr(resource_result, "contents") and resource_result.contents:
-                content_item = resource_result.contents[0]
-
-                if hasattr(content_item, "text") and content_item.text:
-                    try:
-                        extracted = json.loads(content_item.text)
-                    except json.JSONDecodeError:
-                        extracted = content_item.text
-                elif hasattr(content_item, "blob") and content_item.blob:
-                    extracted = content_item.blob
-                else:
-                    extracted = content_item
-
-            elif isinstance(resource_result, dict):
-                if "contents" in resource_result and resource_result["contents"]:
-                    content_item = resource_result["contents"][0]
-                    if "text" in content_item:
-                        try:
-                            extracted = json.loads(content_item["text"])
-                        except (json.JSONDecodeError, TypeError):
-                            extracted = content_item["text"]
-                    else:
-                        extracted = content_item
-                else:
-                    # Plain dict - check if we should unwrap it first
-                    if self._should_unwrap_dict(resource_result, depth):
-                        if self.enable_debug_logging:
-                            logger.debug(f"🔄 Unwrapping plain dict at depth {depth}")
-                        key = next(iter(resource_result.keys()))
-                        extracted = resource_result[key]
-                    else:
-                        extracted = resource_result
-            else:
-                extracted = resource_result
+            # Handle dict unwrapping for plain dicts
+            if isinstance(extracted, dict):
+                if isinstance(resource_result, dict):
+                    if "contents" not in resource_result:
+                        # Plain dict - check if we should unwrap it first
+                        if self._should_unwrap_dict(resource_result, depth):
+                            if self.enable_debug_logging:
+                                logger.debug(f"🔄 Unwrapping plain dict at depth {depth}")
+                            key = next(iter(resource_result.keys()))
+                            extracted = resource_result[key]
 
             # Recursive unwrapping if needed (for nested structures)
             if isinstance(extracted, dict) and self._should_unwrap_dict(
