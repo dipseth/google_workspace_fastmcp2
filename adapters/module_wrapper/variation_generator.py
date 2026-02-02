@@ -64,6 +64,7 @@ class VariationGenerator:
         if self.wrapper is None:
             try:
                 from gchat.card_framework_wrapper import get_card_framework_wrapper
+
                 self.wrapper = get_card_framework_wrapper()
             except ImportError:
                 logger.warning("Could not get card_framework_wrapper")
@@ -97,7 +98,9 @@ class VariationGenerator:
             return None
 
         # Convert dict pattern to InstancePattern
-        component_paths = pattern.get("component_paths") or pattern.get("parent_paths", [])
+        component_paths = pattern.get("component_paths") or pattern.get(
+            "parent_paths", []
+        )
         instance_params = pattern.get("instance_params", {})
         description = pattern.get("card_description", "")
         pattern_id = pattern.get("card_id") or pattern.get("id", "")
@@ -150,8 +153,9 @@ class VariationGenerator:
 
             for param_idx, params in enumerate(param_sets):
                 var_type = (
-                    "original" if struct_idx == 0 and param_idx == 0 else
-                    "structure" if struct_idx > 0 else "parameter"
+                    "original"
+                    if struct_idx == 0 and param_idx == 0
+                    else "structure" if struct_idx > 0 else "parameter"
                 )
 
                 variation = Variation(

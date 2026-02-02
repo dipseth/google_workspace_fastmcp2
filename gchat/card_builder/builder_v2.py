@@ -38,9 +38,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
 from dotenv import load_dotenv
 
 from config.settings import settings as _settings
+from middleware.filters import register_all_filters
 from middleware.filters.styling_filters import SEMANTIC_COLORS
 from middleware.template_core.jinja_environment import JinjaEnvironmentManager
-from middleware.filters import register_all_filters
 
 # NOTE: Rendering utilities are imported lazily to avoid circular imports
 # with gchat.card_builder.__init__.py. Use direct module import when needed:
@@ -60,92 +60,82 @@ ENABLE_FEEDBACK_BUTTONS = os.getenv("ENABLE_CARD_FEEDBACK", "true").lower() == "
 # These were previously defined inline. Now imported from card_builder package.
 
 # Fire-and-forget decorator
-from gchat.card_builder.utils import fire_and_forget
-
-# Metadata accessors (query wrapper or fall back to static dicts)
-from gchat.card_builder.metadata import (
-    get_context_resource,
-    get_children_field,
-    get_container_child_type,
-    is_form_component,
-    is_empty_component,
+# Component params registry
+# =============================================================================
+# COMPONENT PATHS AND DETECTION PATTERNS - Imported from card_builder.constants
+# =============================================================================
+from gchat.card_builder.constants import (
+    COMPONENT_PARAMS,
+    COMPONENT_PATHS,
+    FEEDBACK_DETECTION_PATTERNS,
 )
 
-# Style metadata extraction
-from gchat.card_builder.jinja_styling import extract_style_metadata
-
-# Component params registry
-from gchat.card_builder.constants import COMPONENT_PARAMS
-
 # NOTE: COMPONENT_PARAMS is imported from card_builder.constants above
-
-
 # =============================================================================
 # DYNAMIC FEEDBACK BUILDER - Imported from card_builder.feedback
 # =============================================================================
 # The DynamicFeedbackBuilder class has been migrated to gchat.card_builder.feedback.dynamic
 # Import it from there for full functionality.
+# =============================================================================
+# FEEDBACK CONSTANTS - Imported from card_builder.feedback package
+# =============================================================================
+# All feedback prompts, icons, components, and configs are now in card_builder.feedback
+from gchat.card_builder.feedback import (
+    BUTTON_TYPES,
+    # Configs
+    CLICK_CONFIGS,
+    CLICKABLE_COMPONENTS,
+    # Prompts
+    CONTENT_FEEDBACK_PROMPTS,
+    DUAL_COMPONENTS,
+    FEEDBACK_COLORS,
+    FEEDBACK_ICONS,
+    FEEDBACK_MATERIAL_ICONS,
+    FEEDBACK_TEXT_STYLES,
+    FORM_FEEDBACK_PROMPTS,
+    LAYOUT_CONFIGS,
+    LAYOUT_WRAPPERS,
+    NEGATIVE_ICONS,
+    NEGATIVE_IMAGE_URLS,
+    NEGATIVE_LABELS,
+    NEGATIVE_MATERIAL_ICONS,
+    POSITIVE_ICONS,
+    POSITIVE_IMAGE_URLS,
+    POSITIVE_LABELS,
+    # Icons
+    POSITIVE_MATERIAL_ICONS,
+    SECTION_STYLES,
+    # Component registries
+    TEXT_COMPONENTS,
+    TEXT_CONFIGS,
+    DynamicFeedbackBuilder,
+    get_dynamic_feedback_builder,
+)
 
-from gchat.card_builder.feedback import DynamicFeedbackBuilder, get_dynamic_feedback_builder
+# Style metadata extraction
+from gchat.card_builder.jinja_styling import extract_style_metadata
 
+# Metadata accessors (query wrapper or fall back to static dicts)
+from gchat.card_builder.metadata import (
+    get_children_field,
+    get_container_child_type,
+    get_context_resource,
+    is_empty_component,
+    is_form_component,
+)
 
 # =============================================================================
 # PREPARED PATTERNS - Imported from card_builder.prepared_pattern
 # =============================================================================
 # InputMappingReport, PreparedPattern, prepare_pattern, prepare_pattern_from_dsl
 # are now in gchat.card_builder.prepared_pattern
-
 from gchat.card_builder.prepared_pattern import (
     InputMappingReport,
     PreparedPattern,
     prepare_pattern,
     prepare_pattern_from_dsl,
 )
-
-
-# =============================================================================
-# FEEDBACK CONSTANTS - Imported from card_builder.feedback package
-# =============================================================================
-# All feedback prompts, icons, components, and configs are now in card_builder.feedback
-
-from gchat.card_builder.feedback import (
-    # Prompts
-    CONTENT_FEEDBACK_PROMPTS,
-    FORM_FEEDBACK_PROMPTS,
-    FEEDBACK_TEXT_STYLES,
-    FEEDBACK_COLORS,
-    POSITIVE_LABELS,
-    NEGATIVE_LABELS,
-    # Icons
-    POSITIVE_MATERIAL_ICONS,
-    NEGATIVE_MATERIAL_ICONS,
-    FEEDBACK_MATERIAL_ICONS,
-    POSITIVE_ICONS,
-    NEGATIVE_ICONS,
-    FEEDBACK_ICONS,
-    POSITIVE_IMAGE_URLS,
-    NEGATIVE_IMAGE_URLS,
-    # Component registries
-    TEXT_COMPONENTS,
-    CLICKABLE_COMPONENTS,
-    DUAL_COMPONENTS,
-    LAYOUT_WRAPPERS,
-    BUTTON_TYPES,
-    SECTION_STYLES,
-    # Configs
-    CLICK_CONFIGS,
-    TEXT_CONFIGS,
-    LAYOUT_CONFIGS,
-)
-
-# =============================================================================
-# COMPONENT PATHS AND DETECTION PATTERNS - Imported from card_builder.constants
-# =============================================================================
-
-from gchat.card_builder.constants import (
-    COMPONENT_PATHS,
-    FEEDBACK_DETECTION_PATTERNS,
-)
+from gchat.card_builder.utils import fire_and_forget
 
 
 class SmartCardBuilderV2:
@@ -192,14 +182,18 @@ class SmartCardBuilderV2:
                 logger.warning(f"Could not get ModuleWrapper: {e}")
         return self._wrapper
 
-    def _build_material_icon(self, icon_name: str, fill: bool = None, weight: int = None) -> Dict[str, Any]:
+    def _build_material_icon(
+        self, icon_name: str, fill: bool = None, weight: int = None
+    ) -> Dict[str, Any]:
         """Build a materialIcon dict. Delegates to card_builder.rendering.build_material_icon()."""
         from gchat.card_builder.rendering import build_material_icon
+
         return build_material_icon(icon_name, fill, weight)
 
     def _build_start_icon(self, icon_name: str) -> Dict[str, Any]:
         """Build a startIcon dict. Delegates to card_builder.rendering.build_start_icon()."""
         from gchat.card_builder.rendering import build_start_icon
+
         return build_start_icon(icon_name)
 
     def _get_qdrant_client(self):
@@ -213,16 +207,18 @@ class SmartCardBuilderV2:
                 logger.warning(f"Could not get Qdrant client: {e}")
         return self._qdrant_client
 
-    def _get_cache_key(self, description: str, card_params: Optional[Dict[str, Any]] = None) -> str:
+    def _get_cache_key(
+        self, description: str, card_params: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Generate a cache key from description and params."""
         import hashlib
+
         params_str = str(sorted(card_params.items())) if card_params else ""
         key_str = f"{description}:{params_str}"
         return hashlib.md5(key_str.encode()).hexdigest()
 
     def _get_cached_pattern(self, cache_key: str) -> Optional[Dict[str, Any]]:
         """Get a cached pattern if valid (not expired)."""
-        import time
         if cache_key in self._pattern_cache:
             timestamp = self._pattern_cache_timestamps.get(cache_key, 0)
             if time.time() - timestamp < self._pattern_cache_ttl:
@@ -236,10 +232,11 @@ class SmartCardBuilderV2:
 
     def _cache_pattern(self, cache_key: str, pattern: Optional[Dict[str, Any]]) -> None:
         """Cache a pattern result with TTL."""
-        import time
         # Evict oldest entries if cache is full
         if len(self._pattern_cache) >= self._pattern_cache_max_size:
-            oldest_key = min(self._pattern_cache_timestamps, key=self._pattern_cache_timestamps.get)
+            oldest_key = min(
+                self._pattern_cache_timestamps, key=self._pattern_cache_timestamps.get
+            )
             del self._pattern_cache[oldest_key]
             del self._pattern_cache_timestamps[oldest_key]
 
@@ -265,7 +262,9 @@ class SmartCardBuilderV2:
                 if self._jinja_env:
                     # Register all styling filters
                     register_all_filters(self._jinja_env)
-                    logger.debug("🎨 Jinja2 environment initialized with styling filters")
+                    logger.debug(
+                        "🎨 Jinja2 environment initialized with styling filters"
+                    )
             except Exception as e:
                 logger.warning(f"Could not initialize Jinja2 environment: {e}")
         return self._jinja_env
@@ -299,7 +298,9 @@ class SmartCardBuilderV2:
             # that were processed (i.e., the output differs from input)
             if result != text:
                 self._jinja_applied = True
-                logger.debug(f"🎨 Jinja template processed: '{text[:50]}...' -> '{result[:50]}...'")
+                logger.debug(
+                    f"🎨 Jinja template processed: '{text[:50]}...' -> '{result[:50]}...'"
+                )
             return result
         except Exception as e:
             logger.debug(f"Jinja2 processing skipped: {e}")
@@ -312,6 +313,7 @@ class SmartCardBuilderV2:
     def _extract_paths_from_pattern(self, pattern: Dict[str, Any]) -> List[str]:
         """Extract component paths from pattern. Delegates to card_builder.search."""
         from gchat.card_builder.search import extract_paths_from_pattern
+
         return extract_paths_from_pattern(pattern)
 
     def _query_wrapper_patterns(
@@ -395,18 +397,24 @@ class SmartCardBuilderV2:
 
                 # Check if DSL result has actual style content (not just empty dict)
                 dsl_style = instance_params.get("style_metadata", {})
-                dsl_has_styles = dsl_style.get("semantic_styles") or dsl_style.get("jinja_filters")
+                dsl_has_styles = dsl_style.get("semantic_styles") or dsl_style.get(
+                    "jinja_filters"
+                )
 
                 # Merge style_metadata from styled_pattern if DSL result lacks actual styles
                 if styled_pattern and not dsl_has_styles:
                     styled_instance_params = styled_pattern.get("instance_params", {})
                     styled_style = styled_instance_params.get("style_metadata", {})
-                    if styled_style.get("semantic_styles") or styled_style.get("jinja_filters"):
+                    if styled_style.get("semantic_styles") or styled_style.get(
+                        "jinja_filters"
+                    ):
                         instance_params = {
                             **instance_params,
                             "style_metadata": styled_style,
                         }
-                        logger.info(f"🎨 Merged style_metadata from similar pattern: {styled_style}")
+                        logger.info(
+                            f"🎨 Merged style_metadata from similar pattern: {styled_style}"
+                        )
 
                 return {
                     "component_paths": component_paths,
@@ -458,12 +466,16 @@ class SmartCardBuilderV2:
         cache_key = self._get_cache_key(description, card_params)
         cached_result = self._get_cached_pattern(cache_key)
         if cached_result is not None:
-            return cached_result if cached_result else None  # Handle cached None as empty dict
+            return (
+                cached_result if cached_result else None
+            )  # Handle cached None as empty dict
 
         # Try wrapper-based search first (DSL-aware, cleaner)
         wrapper_result = self._query_wrapper_patterns(description, card_params)
         if wrapper_result:
-            logger.info(f"✅ Wrapper pattern match (source: {wrapper_result.get('source', 'unknown')})")
+            logger.info(
+                f"✅ Wrapper pattern match (source: {wrapper_result.get('source', 'unknown')})"
+            )
             self._cache_pattern(cache_key, wrapper_result)
             return wrapper_result
 
@@ -649,7 +661,10 @@ class SmartCardBuilderV2:
                         if isinstance(btn, dict):
                             btn_instance = self._build_component(
                                 "Button",
-                                {"text": btn.get("text", "Button"), "url": btn.get("url")},
+                                {
+                                    "text": btn.get("text", "Button"),
+                                    "url": btn.get("url"),
+                                },
                                 wrapper=wrapper,
                                 return_instance=True,
                             )
@@ -710,7 +725,14 @@ class SmartCardBuilderV2:
             # Dynamic fallback: Use generic widget builder
             else:
                 # Create minimal context for generic builder
-                context = {"buttons": [], "chips": [], "content_texts": [], "_button_index": 0, "_chip_index": 0, "_text_index": 0}
+                context = {
+                    "buttons": [],
+                    "chips": [],
+                    "content_texts": [],
+                    "_button_index": 0,
+                    "_chip_index": 0,
+                    "_text_index": 0,
+                }
                 widget = self._build_widget_generic(comp_name, [], context)
                 if widget:
                     widgets.append(widget)
@@ -771,6 +793,7 @@ class SmartCardBuilderV2:
     def _has_explicit_styles(self, params: Dict[str, Any]) -> bool:
         """Check if params have explicit Jinja styles. Delegates to card_builder.jinja_styling."""
         from gchat.card_builder.jinja_styling import has_explicit_styles
+
         return has_explicit_styles(params)
 
     def _apply_pattern_styles(
@@ -778,6 +801,7 @@ class SmartCardBuilderV2:
     ) -> Dict[str, Any]:
         """Apply pattern styles to text fields. Delegates to card_builder.jinja_styling."""
         from gchat.card_builder.jinja_styling import apply_pattern_styles
+
         return apply_pattern_styles(params, style_metadata)
 
     def _get_style_for_text(
@@ -785,6 +809,7 @@ class SmartCardBuilderV2:
     ) -> Optional[str]:
         """Get style for text based on content. Delegates to card_builder.jinja_styling."""
         from gchat.card_builder.jinja_styling import get_style_for_text
+
         return get_style_for_text(text, style_metadata)
 
     def _apply_style_to_text(
@@ -792,6 +817,7 @@ class SmartCardBuilderV2:
     ) -> str:
         """Apply style to text string. Delegates to card_builder.jinja_styling."""
         from gchat.card_builder.jinja_styling import apply_style_to_text
+
         return apply_style_to_text(text, style_metadata)
 
     def _apply_styles_recursively(
@@ -799,11 +825,13 @@ class SmartCardBuilderV2:
     ) -> Any:
         """Apply styles recursively. Delegates to card_builder.jinja_styling."""
         from gchat.card_builder.jinja_styling import apply_styles_recursively
+
         return apply_styles_recursively(obj, style_metadata, depth)
 
     def _format_text_for_chat(self, text: str) -> str:
         """Format text for Google Chat. Delegates to card_builder.jinja_styling."""
         from gchat.card_builder.jinja_styling import format_text_for_chat
+
         return format_text_for_chat(text, self._get_jinja_env())
 
     # =========================================================================
@@ -926,6 +954,7 @@ class SmartCardBuilderV2:
         Delegates to gchat.card_builder.jinja_styling.apply_styles().
         """
         from gchat.card_builder.jinja_styling import apply_styles
+
         return apply_styles(text, styles, SEMANTIC_COLORS)
 
     # =========================================================================
@@ -1006,7 +1035,8 @@ class SmartCardBuilderV2:
             context = {
                 "buttons": buttons or [],
                 "chips": chips or [],
-                "carousel_cards": cards or [],  # For carousel DSL (symbols from ModuleWrapper)
+                "carousel_cards": cards
+                or [],  # For carousel DSL (symbols from ModuleWrapper)
                 "image_url": image_url,
                 "content_texts": content_texts,
                 "_button_index": 0,  # Track button consumption
@@ -1065,6 +1095,7 @@ class SmartCardBuilderV2:
         E.g., "DecoratedText" -> "decoratedText", "ButtonList" -> "buttonList"
         """
         from gchat.card_builder.rendering import get_json_key
+
         return get_json_key(component_name)
 
     def _consume_from_context(
@@ -1074,6 +1105,7 @@ class SmartCardBuilderV2:
     ) -> Dict[str, Any]:
         """Consume resource from context. Delegates to card_builder.context."""
         from gchat.card_builder.context import consume_from_context
+
         return consume_from_context(component_name, context, self._get_wrapper())
 
     def _build_widget_generic(
@@ -1103,10 +1135,16 @@ class SmartCardBuilderV2:
         # Skip non-widget components (containers, top-level structures)
         # Components that are NOT standalone widgets - skip them
         NON_WIDGET_COMPONENTS = {
-            "Card", "CardHeader", "Section",  # Top-level containers
-            "OnClick", "OpenLink", "onClick", "openLink",  # Nested inside buttons
+            "Card",
+            "CardHeader",
+            "Section",  # Top-level containers
+            "OnClick",
+            "OpenLink",
+            "onClick",
+            "openLink",  # Nested inside buttons
             "Button",  # Handled by ButtonList
-            "Icon", "icon",  # Nested inside decoratedText.startIcon or buttons
+            "Icon",
+            "icon",  # Nested inside decoratedText.startIcon or buttons
         }
         if component_name in NON_WIDGET_COMPONENTS:
             return None
@@ -1163,7 +1201,9 @@ class SmartCardBuilderV2:
         if component_name == "DecoratedText":
             if params.get("icon"):
                 icon_name = params.pop("icon")
-                decorated_text_extras["startIcon"] = {"materialIcon": {"name": icon_name}}
+                decorated_text_extras["startIcon"] = {
+                    "materialIcon": {"name": icon_name}
+                }
             if params.get("top_label"):
                 decorated_text_extras["topLabel"] = params.pop("top_label")
             if params.get("bottom_label"):
@@ -1206,7 +1246,11 @@ class SmartCardBuilderV2:
 
         # Handle Image special case
         if component_name == "Image":
-            img_url = params.get("imageUrl") or context.get("image_url") or "https://picsum.photos/400/200"
+            img_url = (
+                params.get("imageUrl")
+                or context.get("image_url")
+                or "https://picsum.photos/400/200"
+            )
             return {json_key: {"imageUrl": img_url}}
 
         # Return None instead of "Item" placeholder if no content
@@ -1258,14 +1302,19 @@ class SmartCardBuilderV2:
                 built_children.append(btn_obj)
             elif expected_child_type == "GridItem":
                 idx = len(built_children)
-                built_children.append({
-                    "title": f"Item {idx + 1}",
-                    "image": {"imageUri": f"https://picsum.photos/200/200?{idx}"},
-                })
+                built_children.append(
+                    {
+                        "title": f"Item {idx + 1}",
+                        "image": {"imageUri": f"https://picsum.photos/200/200?{idx}"},
+                    }
+                )
             elif expected_child_type == "Chip":
                 # Consume chip from context (similar to Button)
                 chip_params = self._consume_from_context("Chip", context)
-                chip_obj = {"label": chip_params.get("label") or chip_params.get("text", f"Chip {len(built_children) + 1}")}
+                chip_obj = {
+                    "label": chip_params.get("label")
+                    or chip_params.get("text", f"Chip {len(built_children) + 1}")
+                }
                 if chip_params.get("url"):
                     chip_obj["onClick"] = {"openLink": {"url": chip_params["url"]}}
                 # Add icon if provided
@@ -1284,7 +1333,9 @@ class SmartCardBuilderV2:
                 if wrapper:
                     # CRITICAL: CarouselCard only accepts 'widgets' array, not direct
                     # title/text fields. Transform title/text into TextParagraph widgets.
-                    if ("title" in card_params or "text" in card_params) and "widgets" not in card_params:
+                    if (
+                        "title" in card_params or "text" in card_params
+                    ) and "widgets" not in card_params:
                         widgets = []
                         idx = len(built_children)
 
@@ -1320,7 +1371,10 @@ class SmartCardBuilderV2:
                             for b in buttons:
                                 btn = self._build_component(
                                     "Button",
-                                    {"text": b.get("text", "Button"), "url": b.get("url")},
+                                    {
+                                        "text": b.get("text", "Button"),
+                                        "url": b.get("url"),
+                                    },
                                     wrapper=wrapper,
                                     return_instance=True,
                                 )
@@ -1338,7 +1392,9 @@ class SmartCardBuilderV2:
                                     widgets.append(btn_list_widget)
 
                         # Add image if provided
-                        image_url = card_params.get("image_url") or card_params.get("image")
+                        image_url = card_params.get("image_url") or card_params.get(
+                            "image"
+                        )
                         if image_url:
                             image_widget = self._build_component(
                                 "Image",
@@ -1357,9 +1413,7 @@ class SmartCardBuilderV2:
                     elif "widgets" in card_params:
                         # Already has widgets array - use as-is
                         built_children.append({"widgets": card_params["widgets"]})
-                        logger.debug(
-                            f"🎠 CarouselCard using provided widgets array"
-                        )
+                        logger.debug(f"🎠 CarouselCard using provided widgets array")
                     else:
                         # Empty card - create placeholder
                         logger.debug(f"🎠 CarouselCard with no content, skipping")
@@ -1367,7 +1421,9 @@ class SmartCardBuilderV2:
             else:
                 # Skip generic child fallback - don't create "Item N" placeholders
                 # This ensures only explicitly provided content is rendered
-                logger.debug(f"🎠 Skipping fallback for unknown child type in {component_name}")
+                logger.debug(
+                    f"🎠 Skipping fallback for unknown child type in {component_name}"
+                )
                 continue
 
         if not built_children:
@@ -1540,7 +1596,12 @@ class SmartCardBuilderV2:
                     )
                 else:
                     # Build wrapper with inner as JSON child
-                    wrapped_inner = {json_key: inner_component} if not isinstance(inner_component, dict) or json_key not in inner_component else inner_component
+                    wrapped_inner = (
+                        {json_key: inner_component}
+                        if not isinstance(inner_component, dict)
+                        or json_key not in inner_component
+                        else inner_component
+                    )
                     return self._build_component(
                         component_name=required_wrapper,
                         params={},
@@ -1559,7 +1620,9 @@ class SmartCardBuilderV2:
         if validate and children and hasattr(wrapper, "can_contain"):
             for child in children:
                 # Extract child component name from the widget dict
-                child_key = next(iter(child.keys()), None) if isinstance(child, dict) else None
+                child_key = (
+                    next(iter(child.keys()), None) if isinstance(child, dict) else None
+                )
                 if child_key:
                     child_name = self._json_key_to_component_name(child_key)
                     if not wrapper.can_contain(component_name, child_name):
@@ -1611,7 +1674,10 @@ class SmartCardBuilderV2:
                         try:
                             from card_framework.v2.widgets.on_click import OnClick
                             from card_framework.v2.widgets.open_link import OpenLink
-                            build_params["on_click"] = OnClick(open_link=OpenLink(url=url))
+
+                            build_params["on_click"] = OnClick(
+                                open_link=OpenLink(url=url)
+                            )
                         except ImportError:
                             # Fallback: pass as dict (will be handled by create_card_component)
                             build_params["on_click"] = {"open_link": {"url": url}}
@@ -1620,8 +1686,14 @@ class SmartCardBuilderV2:
                     # Map child instances to appropriate param names based on component type
                     if component_name == "Card":
                         # Card expects: header (CardHeader), sections (List[Section])
-                        headers = [c for c in child_instances if type(c).__name__ == "CardHeader"]
-                        sections = [c for c in child_instances if type(c).__name__ == "Section"]
+                        headers = [
+                            c
+                            for c in child_instances
+                            if type(c).__name__ == "CardHeader"
+                        ]
+                        sections = [
+                            c for c in child_instances if type(c).__name__ == "Section"
+                        ]
                         if headers:
                             build_params["header"] = headers[0]
                         if sections:
@@ -1649,7 +1721,9 @@ class SmartCardBuilderV2:
                         # Ensure wrapText is set on the instance
                         if hasattr(instance, "wrap_text"):
                             # wrap_text is the Python attribute name (snake_case)
-                            instance.wrap_text = params.get("wrapText", params.get("wrap_text", True))
+                            instance.wrap_text = params.get(
+                                "wrapText", params.get("wrap_text", True)
+                            )
 
                     # Return instance if requested (for nesting in parent components)
                     if return_instance:
@@ -1679,17 +1753,25 @@ class SmartCardBuilderV2:
                             inner["wrapText"] = params.get("wrapText", True)
                             # Handle icon -> startIcon conversion
                             if params.get("icon") and "startIcon" not in inner:
-                                inner["startIcon"] = {"materialIcon": {"name": params["icon"]}}
+                                inner["startIcon"] = {
+                                    "materialIcon": {"name": params["icon"]}
+                                }
                             # Handle label fields
                             if params.get("top_label") and "topLabel" not in inner:
                                 inner["topLabel"] = params["top_label"]
-                            if params.get("bottom_label") and "bottomLabel" not in inner:
+                            if (
+                                params.get("bottom_label")
+                                and "bottomLabel" not in inner
+                            ):
                                 inner["bottomLabel"] = params["bottom_label"]
 
                         # Add children if provided (JSON dicts, not instances)
                         if children and children_field:
                             # Unwrap array items (e.g., CarouselCard in carouselCards)
-                            from gchat.card_builder.rendering import prepare_children_for_container
+                            from gchat.card_builder.rendering import (
+                                prepare_children_for_container,
+                            )
+
                             inner[children_field] = prepare_children_for_container(
                                 component_name, children, children_field
                             )
@@ -1703,6 +1785,7 @@ class SmartCardBuilderV2:
         if children and children_field:
             # Unwrap array items (e.g., CarouselCard in carouselCards)
             from gchat.card_builder.rendering import prepare_children_for_container
+
             inner[children_field] = prepare_children_for_container(
                 component_name, children, children_field
             )
@@ -1768,7 +1851,9 @@ class SmartCardBuilderV2:
                     return explicit_wrapper
                 # Also check via can_contain
                 if hasattr(wrapper, "can_contain"):
-                    if wrapper.can_contain(target_parent, explicit_wrapper, direct_only=False):
+                    if wrapper.can_contain(
+                        target_parent, explicit_wrapper, direct_only=False
+                    ):
                         return explicit_wrapper
 
         # 3. Try common naming pattern: Component → ComponentList
@@ -1795,6 +1880,7 @@ class SmartCardBuilderV2:
         E.g., 'decoratedText' -> 'DecoratedText'
         """
         from gchat.card_builder.rendering import json_key_to_component_name
+
         return json_key_to_component_name(json_key)
 
     def build_component_tree(
@@ -1918,9 +2004,7 @@ class SmartCardBuilderV2:
 
             for _ in range(multiplier):
                 # GENERIC: Build any widget using mapping-driven approach
-                widget = self._build_widget_generic(
-                    child_name, grandchildren, context
-                )
+                widget = self._build_widget_generic(child_name, grandchildren, context)
                 if widget:
                     widgets.append(widget)
 
@@ -1929,6 +2013,7 @@ class SmartCardBuilderV2:
     def _get_default_params(self, component_name: str, index: int = 0) -> Dict:
         """Get minimal default params for a component type. Delegates to card_builder.constants."""
         from gchat.card_builder.constants import get_default_params
+
         return get_default_params(component_name, index)
 
     # =========================================================================
@@ -1984,6 +2069,7 @@ class SmartCardBuilderV2:
 
             # Convert Python field name to Google Chat JSON field name if needed
             from gchat.card_builder.constants import FIELD_NAME_TO_JSON
+
             json_field_name = FIELD_NAME_TO_JSON.get(
                 (parent_name, field_name), field_name
             )
@@ -2000,9 +2086,7 @@ class SmartCardBuilderV2:
 
             if child_widget is not None:
                 params[json_field_name] = child_widget
-                logger.debug(
-                    f"Mapped {child_name} to {parent_name}.{json_field_name}"
-                )
+                logger.debug(f"Mapped {child_name} to {parent_name}.{json_field_name}")
 
         return params
 
@@ -2064,6 +2148,7 @@ class SmartCardBuilderV2:
         Google Chat API expects camelCase (e.g., startIcon, onClick).
         """
         from gchat.card_builder.rendering import convert_to_camel_case
+
         return convert_to_camel_case(data)
 
     def _build_child_widget(
@@ -2120,6 +2205,7 @@ class SmartCardBuilderV2:
     ) -> Optional[Dict[str, Any]]:
         """Build a Button using wrapper component classes. Delegates to card_builder.rendering."""
         from gchat.card_builder.rendering import build_button_via_wrapper
+
         return build_button_via_wrapper(wrapper, params)
 
     def _build_icon_via_wrapper(
@@ -2127,6 +2213,7 @@ class SmartCardBuilderV2:
     ) -> Optional[Dict[str, Any]]:
         """Build an Icon using wrapper component classes. Delegates to card_builder.rendering."""
         from gchat.card_builder.rendering import build_icon_via_wrapper
+
         return build_icon_via_wrapper(wrapper, params)
 
     def _build_switch_via_wrapper(
@@ -2134,6 +2221,7 @@ class SmartCardBuilderV2:
     ) -> Optional[Dict[str, Any]]:
         """Build a SwitchControl. Delegates to card_builder.rendering."""
         from gchat.card_builder.rendering import build_switch_via_wrapper
+
         return build_switch_via_wrapper(wrapper, params)
 
     def _build_onclick_via_wrapper(
@@ -2141,6 +2229,7 @@ class SmartCardBuilderV2:
     ) -> Optional[Dict[str, Any]]:
         """Build an OnClick. Delegates to card_builder.rendering."""
         from gchat.card_builder.rendering import build_onclick_via_wrapper
+
         return build_onclick_via_wrapper(wrapper, params)
 
     # =========================================================================
@@ -2153,16 +2242,19 @@ class SmartCardBuilderV2:
     def _has_feedback(self, card: Dict) -> bool:
         """Check if card already has feedback content. Delegates to card_builder.validation."""
         from gchat.card_builder.validation import has_feedback
+
         return has_feedback(card)
 
     def _clean_card_metadata(self, obj: Any) -> Any:
         """Remove underscore-prefixed keys. Delegates to card_builder.validation."""
         from gchat.card_builder.validation import clean_card_metadata
+
         return clean_card_metadata(obj)
 
     def validate_content(self, card_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """Validate card content. Delegates to card_builder.validation."""
         from gchat.card_builder.validation import validate_content
+
         return validate_content(card_dict)
 
     def generate_dsl_notation(self, card: Dict[str, Any]) -> Optional[str]:
@@ -2182,6 +2274,7 @@ class SmartCardBuilderV2:
                 return None
 
             from gchat.card_builder.dsl import generate_dsl_notation
+
             return generate_dsl_notation(card, wrapper.symbol_mapping)
 
         except Exception as e:
@@ -2255,7 +2348,9 @@ class SmartCardBuilderV2:
                 "dsl": structure_dsl,
                 "component_count": len(component_paths),
                 # Store Jinja-processed output for analytics/debugging
-                "description_rendered": description_rendered[:500] if description_rendered else None,
+                "description_rendered": (
+                    description_rendered[:500] if description_rendered else None
+                ),
                 # Track whether Jinja actually transformed the text
                 "jinja_applied": jinja_applied,
             }
@@ -2267,8 +2362,15 @@ class SmartCardBuilderV2:
             for key, value in instance_params.items():
                 if isinstance(value, str) and "{{" in value:
                     additional_styles = extract_style_metadata(value)
-                    for style_field in ["jinja_filters", "colors", "semantic_styles", "formatting"]:
-                        style_metadata[style_field].extend(additional_styles.get(style_field, []))
+                    for style_field in [
+                        "jinja_filters",
+                        "colors",
+                        "semantic_styles",
+                        "formatting",
+                    ]:
+                        style_metadata[style_field].extend(
+                            additional_styles.get(style_field, [])
+                        )
 
             # Deduplicate after merging
             for key in style_metadata:
@@ -2292,8 +2394,12 @@ class SmartCardBuilderV2:
                     f"📦 Stored content pattern: {card_id[:8]}... -> {point_id[:8]}..."
                 )
                 if jinja_applied:
-                    logger.debug(f"   🎨 Jinja rendered: '{description[:30]}...' -> '{description_rendered[:30] if description_rendered else ''}...'")
-                if style_metadata.get("semantic_styles") or style_metadata.get("formatting"):
+                    logger.debug(
+                        f"   🎨 Jinja rendered: '{description[:30]}...' -> '{description_rendered[:30] if description_rendered else ''}...'"
+                    )
+                if style_metadata.get("semantic_styles") or style_metadata.get(
+                    "formatting"
+                ):
                     logger.debug(f"   🎨 Style metadata: {style_metadata}")
 
         except Exception as e:
@@ -2371,6 +2477,7 @@ class SmartCardBuilderV2:
 
         except Exception as e:
             logger.warning(f"⚠️ Failed to store feedback_ui pattern: {e}")
+
     # OPTIMIAED MAKE DYNMAIC NOT PREDEFINED DUAL COMPONENT BUILDERS (text + click in one widget)
 
     def _extract_component_paths(self, card: Dict[str, Any]) -> List[str]:
@@ -2382,6 +2489,7 @@ class SmartCardBuilderV2:
             List of component names found (e.g., ["Section", "TextParagraph", "ButtonList"])
         """
         from gchat.card_builder.dsl import extract_component_paths
+
         return extract_component_paths(card)
 
     # -------------------------------------------------------------------------
@@ -2419,6 +2527,7 @@ class SmartCardBuilderV2:
         Delegates to gchat.card_builder.jinja_styling.style_keyword().
         """
         from gchat.card_builder.jinja_styling import style_keyword
+
         return style_keyword(keyword, style, FEEDBACK_COLORS)
 
     def _build_styled_feedback_prompt(self, prompt_tuple: tuple) -> str:
@@ -2490,7 +2599,9 @@ class SmartCardBuilderV2:
     def _text_decorated_icon(self, text: str, **_kwargs) -> Dict:
         return self._build_text_feedback("decorated_text_icon", text)
 
-    def _text_decorated_labeled(self, text: str, label: str = "Feedback", **_kwargs) -> Dict:
+    def _text_decorated_labeled(
+        self, text: str, label: str = "Feedback", **_kwargs
+    ) -> Dict:
         return self._build_text_feedback("decorated_text_labeled", text, label=label)
 
     def _text_chip(self, text: str, **_kwargs) -> Dict:
@@ -2653,16 +2764,18 @@ class SmartCardBuilderV2:
             else:
                 items = [
                     self._build_feedback_button_item(
-                        pos_label, pos_url,
+                        pos_label,
+                        pos_url,
                         material_icon=pos_icon,
                         icon_url=pos_icon_url,
-                        button_type=btn_type
+                        button_type=btn_type,
                     ),
                     self._build_feedback_button_item(
-                        neg_label, neg_url,
+                        neg_label,
+                        neg_url,
                         material_icon=neg_icon,
                         icon_url=neg_icon_url,
-                        button_type=btn_type
+                        button_type=btn_type,
                     ),
                 ]
         else:
@@ -2671,9 +2784,7 @@ class SmartCardBuilderV2:
             for icon_name, label, rating_value in ratings:
                 url = self._make_callback_url(card_id, rating_value, feedback_type)
                 btn = self._build_feedback_button_item(
-                    label, url,
-                    material_icon=icon_name,
-                    button_type=btn_type
+                    label, url, material_icon=icon_name, button_type=btn_type
                 )
                 items.append(btn)
 
@@ -2689,11 +2800,19 @@ class SmartCardBuilderV2:
     def _click_icon_buttons(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
         return self._build_clickable_feedback("icon_buttons", card_id, feedback_type)
 
-    def _click_icon_buttons_alt(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
-        return self._build_clickable_feedback("icon_buttons_alt", card_id, feedback_type)
+    def _click_icon_buttons_alt(
+        self, card_id: str, feedback_type: str, **_kwargs
+    ) -> Dict:
+        return self._build_clickable_feedback(
+            "icon_buttons_alt", card_id, feedback_type
+        )
 
-    def _click_url_image_buttons(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
-        return self._build_clickable_feedback("url_image_buttons", card_id, feedback_type)
+    def _click_url_image_buttons(
+        self, card_id: str, feedback_type: str, **_kwargs
+    ) -> Dict:
+        return self._build_clickable_feedback(
+            "url_image_buttons", card_id, feedback_type
+        )
 
     def _click_star_rating(self, card_id: str, feedback_type: str, **_kwargs) -> Dict:
         return self._build_clickable_feedback("star_rating", card_id, feedback_type)
@@ -2724,13 +2843,19 @@ class SmartCardBuilderV2:
             "DecoratedText", {"text": text, "wrap_text": True}
         )
         if decorated_widget and "decoratedText" in decorated_widget:
-            decorated_widget["decoratedText"]["startIcon"] = self._build_start_icon(icon_name)
-            decorated_widget["decoratedText"]["button"] = self._build_feedback_button_item(
-                pos_label, pos_url, button_type=btn_type
+            decorated_widget["decoratedText"]["startIcon"] = self._build_start_icon(
+                icon_name
+            )
+            decorated_widget["decoratedText"]["button"] = (
+                self._build_feedback_button_item(
+                    pos_label, pos_url, button_type=btn_type
+                )
             )
 
         # Build separate negative button list using wrapper
-        neg_button = self._build_feedback_button_item(neg_label, neg_url, button_type=btn_type)
+        neg_button = self._build_feedback_button_item(
+            neg_label, neg_url, button_type=btn_type
+        )
         wrapper = self._get_wrapper()
         button_list_widget = self._build_component(
             "ButtonList",
@@ -2764,8 +2889,10 @@ class SmartCardBuilderV2:
             "DecoratedText", {"text": text, "wrap_text": True}
         )
         if decorated_widget and "decoratedText" in decorated_widget:
-            decorated_widget["decoratedText"]["button"] = self._build_feedback_button_item(
-                pos_label, pos_url, button_type=btn_type
+            decorated_widget["decoratedText"]["button"] = (
+                self._build_feedback_button_item(
+                    pos_label, pos_url, button_type=btn_type
+                )
             )
 
         return [decorated_widget]
@@ -2866,7 +2993,11 @@ class SmartCardBuilderV2:
             return texts + buttons if content_first else buttons + texts
 
         # Standard sequential layout with optional divider
-        first, second = (content_widgets, form_widgets) if content_first else (form_widgets, content_widgets)
+        first, second = (
+            (content_widgets, form_widgets)
+            if content_first
+            else (form_widgets, content_widgets)
+        )
 
         if config.get("add_divider"):
             return first + [{"divider": {}}] + second
@@ -2876,17 +3007,23 @@ class SmartCardBuilderV2:
     def _layout_sequential(
         self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
     ) -> List[Dict]:
-        return self._build_feedback_layout("sequential", content_widgets, form_widgets, content_first)
+        return self._build_feedback_layout(
+            "sequential", content_widgets, form_widgets, content_first
+        )
 
     def _layout_with_divider(
         self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
     ) -> List[Dict]:
-        return self._build_feedback_layout("with_divider", content_widgets, form_widgets, content_first)
+        return self._build_feedback_layout(
+            "with_divider", content_widgets, form_widgets, content_first
+        )
 
     def _layout_compact(
         self, content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
     ) -> List[Dict]:
-        return self._build_feedback_layout("compact", content_widgets, form_widgets, content_first)
+        return self._build_feedback_layout(
+            "compact", content_widgets, form_widgets, content_first
+        )
 
     # -------------------------------------------------------------------------
     # MODULAR ASSEMBLY
@@ -3111,28 +3248,48 @@ class SmartCardBuilderV2:
             pattern = self._query_qdrant_patterns(description, all_params)
             style_metadata = {}
             if pattern:
-                style_metadata = pattern.get("instance_params", {}).get("style_metadata", {})
+                style_metadata = pattern.get("instance_params", {}).get(
+                    "style_metadata", {}
+                )
 
-            if style_metadata.get("semantic_styles") or style_metadata.get("jinja_filters"):
-                logger.info(f"🎨 Found style_metadata for auto-styling: {style_metadata}")
+            if style_metadata.get("semantic_styles") or style_metadata.get(
+                "jinja_filters"
+            ):
+                logger.info(
+                    f"🎨 Found style_metadata for auto-styling: {style_metadata}"
+                )
 
                 # Apply styles to text
                 if text and not self._has_explicit_styles({"text": text}):
                     styled_text = self._apply_style_to_text(text, style_metadata)
                     if styled_text != text:
-                        logger.info(f"🎨 Styled text: {text[:30]}... -> {styled_text[:50]}...")
+                        logger.info(
+                            f"🎨 Styled text: {text[:30]}... -> {styled_text[:50]}..."
+                        )
 
                 # Apply styles to each item in items array
                 if items:
                     styled_items = []
                     for item in items:
                         styled_item = dict(item)  # Copy to avoid mutation
-                        if item.get("text") and not self._has_explicit_styles({"text": item["text"]}):
-                            styled_item["text"] = self._apply_style_to_text(item["text"], style_metadata)
-                        if item.get("top_label") and not self._has_explicit_styles({"text": item["top_label"]}):
-                            styled_item["top_label"] = self._apply_style_to_text(item["top_label"], style_metadata)
-                        if item.get("bottom_label") and not self._has_explicit_styles({"text": item["bottom_label"]}):
-                            styled_item["bottom_label"] = self._apply_style_to_text(item["bottom_label"], style_metadata)
+                        if item.get("text") and not self._has_explicit_styles(
+                            {"text": item["text"]}
+                        ):
+                            styled_item["text"] = self._apply_style_to_text(
+                                item["text"], style_metadata
+                            )
+                        if item.get("top_label") and not self._has_explicit_styles(
+                            {"text": item["top_label"]}
+                        ):
+                            styled_item["top_label"] = self._apply_style_to_text(
+                                item["top_label"], style_metadata
+                            )
+                        if item.get("bottom_label") and not self._has_explicit_styles(
+                            {"text": item["bottom_label"]}
+                        ):
+                            styled_item["bottom_label"] = self._apply_style_to_text(
+                                item["bottom_label"], style_metadata
+                            )
                         styled_items.append(styled_item)
                     logger.info(f"🎨 Styled {len(items)} items")
 
@@ -3179,7 +3336,9 @@ class SmartCardBuilderV2:
                     button_children = [
                         {"name": "Button", "multiplier": len(content_dsl["buttons"])}
                     ]
-                    widget = self._build_widget_generic("ButtonList", button_children, context)
+                    widget = self._build_widget_generic(
+                        "ButtonList", button_children, context
+                    )
                     if widget:
                         sections.append({"widgets": [widget]})
 
@@ -3235,7 +3394,11 @@ class SmartCardBuilderV2:
             else:
                 # Ultimate fallback if wrapper fails
                 processed_text = self._format_text_for_chat(description)
-                card = {"sections": [{"widgets": [{"textParagraph": {"text": processed_text}}]}]}
+                card = {
+                    "sections": [
+                        {"widgets": [{"textParagraph": {"text": processed_text}}]}
+                    ]
+                }
             if title:
                 card["header"] = {"title": title}
                 if subtitle:
@@ -3311,6 +3474,7 @@ def suggest_dsl_for_params(
         Suggested DSL string using symbols from the mapping, or None if no suggestion
     """
     from gchat.card_builder.dsl import suggest_dsl_for_params as _suggest_dsl
+
     return _suggest_dsl(card_params, symbols)
 
 

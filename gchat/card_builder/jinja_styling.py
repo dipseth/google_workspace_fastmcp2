@@ -107,6 +107,7 @@ def apply_styles(
         # Try to import from middleware, fall back to defaults
         try:
             from middleware.filters.styling_filters import SEMANTIC_COLORS
+
             semantic_colors = SEMANTIC_COLORS
         except ImportError:
             semantic_colors = DEFAULT_SEMANTIC_COLORS
@@ -187,7 +188,9 @@ def style_keyword(
     elif style == "muted":
         return f'<font color="{colors.get("muted", "#9aa0a6")}">{keyword}</font>'
     elif style == "bold_success":
-        return f'<b><font color="{colors.get("success", "#34a853")}">{keyword}</font></b>'
+        return (
+            f'<b><font color="{colors.get("success", "#34a853")}">{keyword}</font></b>'
+        )
     elif style == "bold_info":
         return f'<b><font color="{colors.get("info", "#4285f4")}">{keyword}</font></b>'
     else:
@@ -199,22 +202,55 @@ def style_keyword(
 # =============================================================================
 
 # Keywords that indicate success status
-SUCCESS_KEYWORDS = frozenset([
-    "online", "success", "ok", "active", "running", "healthy", "ready", "up",
-    "connected", "enabled", "available", "complete", "done"
-])
+SUCCESS_KEYWORDS = frozenset(
+    [
+        "online",
+        "success",
+        "ok",
+        "active",
+        "running",
+        "healthy",
+        "ready",
+        "up",
+        "connected",
+        "enabled",
+        "available",
+        "complete",
+        "done",
+    ]
+)
 
 # Keywords that indicate error status
-ERROR_KEYWORDS = frozenset([
-    "error", "fail", "offline", "down", "unhealthy", "critical", "dead",
-    "disconnected", "disabled", "unavailable", "stopped"
-])
+ERROR_KEYWORDS = frozenset(
+    [
+        "error",
+        "fail",
+        "offline",
+        "down",
+        "unhealthy",
+        "critical",
+        "dead",
+        "disconnected",
+        "disabled",
+        "unavailable",
+        "stopped",
+    ]
+)
 
 # Keywords that indicate warning status
-WARNING_KEYWORDS = frozenset([
-    "warning", "pending", "slow", "degraded", "unknown", "wait", "timeout",
-    "retry", "limited"
-])
+WARNING_KEYWORDS = frozenset(
+    [
+        "warning",
+        "pending",
+        "slow",
+        "degraded",
+        "unknown",
+        "wait",
+        "timeout",
+        "retry",
+        "limited",
+    ]
+)
 
 
 def has_explicit_styles(params: Dict[str, Any]) -> bool:

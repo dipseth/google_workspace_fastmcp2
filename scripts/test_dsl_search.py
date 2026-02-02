@@ -312,7 +312,9 @@ def test_search_by_dsl_with_truncation():
             overlap_count = len(set(result_names) & set(baseline_names or []))
             overlap = f"{overlap_count}/5 overlap"
 
-        print(f"   {ratio:.0%} tokens: {elapsed_ms:6.1f}ms, {len(results)} results ({overlap})")
+        print(
+            f"   {ratio:.0%} tokens: {elapsed_ms:6.1f}ms, {len(results)} results ({overlap})"
+        )
 
 
 def test_search_by_dsl_hybrid():
@@ -364,13 +366,17 @@ def test_search_v7_hybrid_with_feedback_filters():
         form_feedback="positive",
     )
 
-    print(f"   With filters: {len(classes)} classes, {len(patterns)} patterns, {len(rels)} relationships")
+    print(
+        f"   With filters: {len(classes)} classes, {len(patterns)} patterns, {len(rels)} relationships"
+    )
 
     # Show pattern feedback values
     for i, p in enumerate(patterns[:3], 1):
         content_fb = p.get("content_feedback", "none")
         form_fb = p.get("form_feedback", "none")
-        print(f"   {i}. {p.get('name', '?')[:30]} - content={content_fb}, form={form_fb}")
+        print(
+            f"   {i}. {p.get('name', '?')[:30]} - content={content_fb}, form={form_fb}"
+        )
 
     # Test without feedback filters for comparison
     print("\n🔍 Testing without feedback filters...")
@@ -379,7 +385,9 @@ def test_search_v7_hybrid_with_feedback_filters():
         limit=5,
     )
 
-    print(f"   Without filters: {len(classes2)} classes, {len(patterns2)} patterns, {len(rels2)} relationships")
+    print(
+        f"   Without filters: {len(classes2)} classes, {len(patterns2)} patterns, {len(rels2)} relationships"
+    )
 
     # Compare counts
     print("\n📊 Comparison:")
@@ -463,7 +471,9 @@ def test_search_v7_include_classes_flag():
     print(f"   include_classes=False: {len(classes2)} classes")
 
     assert len(classes) > 0, "Expected classes with include_classes=True"
-    assert len(classes2) == 0, f"Expected 0 classes with include_classes=False, got {len(classes2)}"
+    assert (
+        len(classes2) == 0
+    ), f"Expected 0 classes with include_classes=False, got {len(classes2)}"
 
     print("\n✓ include_classes flag tests passed")
 

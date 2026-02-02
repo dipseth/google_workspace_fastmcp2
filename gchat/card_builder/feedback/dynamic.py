@@ -45,7 +45,10 @@ class DynamicFeedbackBuilder:
     # action_field: where buttons/chips go (None = same as content)
     CONTAINER_FIELDS = {
         "Section": ("widgets", None),  # Both go in widgets
-        "CarouselCard": ("widgets", "footerWidgets"),  # Prompts in widgets, buttons in footer
+        "CarouselCard": (
+            "widgets",
+            "footerWidgets",
+        ),  # Prompts in widgets, buttons in footer
         "NestedWidget": ("widgets", None),
         "Column": ("widgets", None),
     }
@@ -81,6 +84,7 @@ class DynamicFeedbackBuilder:
         if self._wrapper is None:
             try:
                 from gchat.card_framework_wrapper import get_card_framework_wrapper
+
                 self._wrapper = get_card_framework_wrapper()
             except ImportError:
                 logger.warning("Could not get card_framework_wrapper")
@@ -91,7 +95,10 @@ class DynamicFeedbackBuilder:
         if self._structure_variator is None:
             wrapper = self._get_wrapper()
             if wrapper:
-                from adapters.module_wrapper.instance_pattern_mixin import StructureVariator
+                from adapters.module_wrapper.instance_pattern_mixin import (
+                    StructureVariator,
+                )
+
                 relationships = getattr(wrapper, "relationships", {})
                 # Augment with feedback-specific relationships
                 feedback_relationships = self._get_feedback_relationships()
@@ -103,6 +110,7 @@ class DynamicFeedbackBuilder:
         """Get or create the parameter variator."""
         if self._param_variator is None:
             from adapters.module_wrapper.instance_pattern_mixin import ParameterVariator
+
             # Custom variators for feedback-specific params
             custom_variators = {
                 "prompt": self._vary_prompt,
@@ -119,7 +127,13 @@ class DynamicFeedbackBuilder:
         """
         return {
             # Feedback containers can hold these widgets
-            "FeedbackSection": ["TextParagraph", "DecoratedText", "ButtonList", "ChipList", "Divider"],
+            "FeedbackSection": [
+                "TextParagraph",
+                "DecoratedText",
+                "ButtonList",
+                "ChipList",
+                "Divider",
+            ],
             "FeedbackPrompt": ["TextParagraph", "DecoratedText"],
             "FeedbackAction": ["ButtonList", "ChipList", "Button", "Chip"],
             # Widget types for variation
@@ -169,8 +183,21 @@ class DynamicFeedbackBuilder:
 
         # Fallback: use static mapping
         fallback_children = {
-            "Section": ["TextParagraph", "DecoratedText", "ButtonList", "ChipList", "Image", "Divider", "Grid"],
-            "CarouselCard": ["TextParagraph", "DecoratedText", "ButtonList", "Image"],  # via NestedWidget
+            "Section": [
+                "TextParagraph",
+                "DecoratedText",
+                "ButtonList",
+                "ChipList",
+                "Image",
+                "Divider",
+                "Grid",
+            ],
+            "CarouselCard": [
+                "TextParagraph",
+                "DecoratedText",
+                "ButtonList",
+                "Image",
+            ],  # via NestedWidget
             "NestedWidget": ["TextParagraph", "DecoratedText", "ButtonList", "Image"],
             "Column": ["TextParagraph", "DecoratedText", "ButtonList", "Image"],
         }
@@ -250,7 +277,10 @@ class DynamicFeedbackBuilder:
             return {"textParagraph": {"text": params.get("text", "")}}
 
         elif widget_type == "DecoratedText":
-            widget = {"text": params.get("text", ""), "wrapText": params.get("wrap_text", True)}
+            widget = {
+                "text": params.get("text", ""),
+                "wrapText": params.get("wrap_text", True),
+            }
             if params.get("icon"):
                 widget["startIcon"] = {"materialIcon": {"name": params["icon"]}}
             if params.get("button"):
@@ -311,7 +341,9 @@ class DynamicFeedbackBuilder:
         valid_children = self._get_valid_children_for_container(container_type)
 
         # Choose text widget type based on valid children
-        text_types = [t for t in ["DecoratedText", "TextParagraph"] if t in valid_children]
+        text_types = [
+            t for t in ["DecoratedText", "TextParagraph"] if t in valid_children
+        ]
         text_type = random.choice(text_types) if text_types else "TextParagraph"
 
         # Choose action widget type
@@ -476,17 +508,25 @@ class DynamicFeedbackBuilder:
 
         # Build content feedback
         if include_content:
-            content_pattern = self._create_feedback_pattern("content", container_type, card_id)
+            content_pattern = self._create_feedback_pattern(
+                "content", container_type, card_id
+            )
 
             # Apply structural variation if requested
             if variation_type == "structure" and variator:
-                variations = variator.generate_variations(content_pattern["component_paths"], 1)
+                variations = variator.generate_variations(
+                    content_pattern["component_paths"], 1
+                )
                 if variations:
                     content_pattern["component_paths"] = variations[0]
                     # Update types based on variation
                     if len(content_pattern["component_paths"]) >= 2:
-                        content_pattern["text_type"] = content_pattern["component_paths"][0]
-                        content_pattern["action_type"] = content_pattern["component_paths"][1]
+                        content_pattern["text_type"] = content_pattern[
+                            "component_paths"
+                        ][0]
+                        content_pattern["action_type"] = content_pattern[
+                            "component_paths"
+                        ][1]
 
             # Apply parameter variation if requested
             if variation_type == "parameter":
@@ -509,10 +549,14 @@ class DynamicFeedbackBuilder:
 
         # Build form/layout feedback
         if include_form:
-            form_pattern = self._create_feedback_pattern("form", container_type, card_id)
+            form_pattern = self._create_feedback_pattern(
+                "form", container_type, card_id
+            )
 
             if variation_type == "structure" and variator:
-                variations = variator.generate_variations(form_pattern["component_paths"], 1)
+                variations = variator.generate_variations(
+                    form_pattern["component_paths"], 1
+                )
                 if variations:
                     form_pattern["component_paths"] = variations[0]
                     if len(form_pattern["component_paths"]) >= 2:
@@ -558,10 +602,14 @@ class DynamicFeedbackBuilder:
             return None
 
         # Create pattern for both content and form feedback
-        content_pattern = self._create_feedback_pattern("content", container_type, card_id)
+        content_pattern = self._create_feedback_pattern(
+            "content", container_type, card_id
+        )
         form_pattern = self._create_feedback_pattern("form", container_type, card_id)
 
-        component_paths = content_pattern["component_paths"] + form_pattern["component_paths"]
+        component_paths = (
+            content_pattern["component_paths"] + form_pattern["component_paths"]
+        )
         instance_params = {
             "container_type": container_type,
             "content_text_type": content_pattern["text_type"],

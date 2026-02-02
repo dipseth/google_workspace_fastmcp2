@@ -541,7 +541,8 @@ class ComponentCache:
             key=key,
             component_paths=component_paths,
             instance_params=pattern.get("instance_params", {}),
-            dsl_notation=pattern.get("relationship_text") or pattern.get("dsl_notation"),
+            dsl_notation=pattern.get("relationship_text")
+            or pattern.get("dsl_notation"),
             structure_description=pattern.get("structure_description"),
         )
 

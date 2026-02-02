@@ -41,7 +41,9 @@ def test_auto_wrap_button():
     )
 
     # Should be wrapped in buttonList
-    assert "buttonList" in result, f"Expected buttonList wrapper, got: {list(result.keys())}"
+    assert (
+        "buttonList" in result
+    ), f"Expected buttonList wrapper, got: {list(result.keys())}"
     assert "buttons" in result["buttonList"], "Expected buttons array in buttonList"
     buttons = result["buttonList"]["buttons"]
     assert len(buttons) == 1, f"Expected 1 button, got {len(buttons)}"
@@ -69,7 +71,9 @@ def test_auto_wrap_chip():
         target_parent="Section",
     )
 
-    assert "chipList" in result, f"Expected chipList wrapper, got: {list(result.keys())}"
+    assert (
+        "chipList" in result
+    ), f"Expected chipList wrapper, got: {list(result.keys())}"
     print("✅ Chip correctly wrapped in ChipList")
     print(f"   Output: {json.dumps(result, indent=2)[:300]}")
 
@@ -95,7 +99,9 @@ def test_no_wrap_decorated_text():
     )
 
     # Should NOT be wrapped - decoratedText is a valid direct child
-    assert "decoratedText" in result, f"Expected decoratedText, got: {list(result.keys())}"
+    assert (
+        "decoratedText" in result
+    ), f"Expected decoratedText, got: {list(result.keys())}"
     assert "buttonList" not in result, "DecoratedText should not be wrapped"
     print("✅ DecoratedText not wrapped (correct)")
     print(f"   Output: {json.dumps(result, indent=2)[:200]}")
@@ -123,7 +129,9 @@ def test_auto_wrap_return_instance():
     )
 
     instance_name = type(instance).__name__
-    assert instance_name == "ButtonList", f"Expected ButtonList instance, got: {instance_name}"
+    assert (
+        instance_name == "ButtonList"
+    ), f"Expected ButtonList instance, got: {instance_name}"
     print(f"✅ Returned instance type: {instance_name}")
 
     # Verify it can render

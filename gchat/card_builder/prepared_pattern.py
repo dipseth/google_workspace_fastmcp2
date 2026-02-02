@@ -198,11 +198,13 @@ class PreparedPattern:
                 comp_params = self._get_params_for_component(comp_name)
                 instance = self.wrapper.create_card_component(comp_class, comp_params)
 
-            instances.append({
-                "name": comp_name,
-                "class": comp_class,
-                "instance": instance,
-            })
+            instances.append(
+                {
+                    "name": comp_name,
+                    "class": comp_class,
+                    "instance": instance,
+                }
+            )
 
         return instances
 
@@ -265,7 +267,7 @@ class PreparedPattern:
                 comp_params = self._get_params_for_component(comp_name)
                 instance = self.wrapper.create_card_component(comp_class, comp_params)
 
-                if instance and hasattr(instance, 'render'):
+                if instance and hasattr(instance, "render"):
                     widget = instance.render()
                     if widget:
                         widgets.append(widget)
@@ -420,6 +422,7 @@ def prepare_pattern(
     """
     if wrapper is None:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
+
         wrapper = get_card_framework_wrapper()
 
     return PreparedPattern.from_pattern(pattern, wrapper)
@@ -450,6 +453,7 @@ def prepare_pattern_from_dsl(
     """
     if wrapper is None:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
+
         wrapper = get_card_framework_wrapper()
 
     return PreparedPattern.from_dsl(dsl_string, wrapper)

@@ -505,9 +505,7 @@ class RelationshipsMixin:
                         points=point_ids,  # All points for this parent class at once
                     )
                     enriched_count += len(point_ids)
-                    logger.debug(
-                        f"Enriched {len(point_ids)} points for {parent_class}"
-                    )
+                    logger.debug(f"Enriched {len(point_ids)} points for {parent_class}")
                 except Exception as e:
                     logger.warning(
                         f"Failed to enrich {parent_class} ({len(point_ids)} points): {e}"
@@ -591,9 +589,7 @@ class RelationshipsMixin:
         lines.extend(format_tree(tree["tree"]))
         return "\n".join(lines)
 
-    def get_field_for_child(
-        self, parent: str, child: str
-    ) -> Optional[Dict[str, Any]]:
+    def get_field_for_child(self, parent: str, child: str) -> Optional[Dict[str, Any]]:
         """
         Get field metadata for where a child component belongs in a parent.
 
@@ -723,7 +719,10 @@ class RelationshipsMixin:
             else:
                 self.symbol_mapping = {**existing_symbols, **generated_symbols}
 
-            if hasattr(self, "reverse_symbol_mapping") and self.reverse_symbol_mapping is not None:
+            if (
+                hasattr(self, "reverse_symbol_mapping")
+                and self.reverse_symbol_mapping is not None
+            ):
                 self.reverse_symbol_mapping.update(
                     {v: k for k, v in generated_symbols.items()}
                 )
@@ -806,7 +805,9 @@ class RelationshipsMixin:
 
             # Get metadata for this component
             meta = custom_metadata.get(name, {})
-            docstring = meta.get("docstring", f"Custom Google Chat API component: {name}")
+            docstring = meta.get(
+                "docstring", f"Custom Google Chat API component: {name}"
+            )
             json_field = meta.get("json_field", name.lower())
 
             # Create a synthetic class object for the component
@@ -819,7 +820,7 @@ class RelationshipsMixin:
                     "_json_field": json_field,
                     "_is_custom_component": True,
                     "_children": custom_relationships.get(name, []),
-                }
+                },
             )
 
             # Create ModuleComponent
@@ -930,7 +931,9 @@ class RelationshipsMixin:
             collection_name = getattr(self, "collection_name", None)
 
         if not collection_name:
-            logger.warning("No collection_name available - cannot index custom components")
+            logger.warning(
+                "No collection_name available - cannot index custom components"
+            )
             return 0
 
         if not hasattr(self, "client") or not self.client:
@@ -952,7 +955,8 @@ class RelationshipsMixin:
         # Ensure we have symbols for these components (if requested)
         if generate_symbols:
             custom_relationships = {
-                name: meta.get("children", []) for name, meta in custom_components.items()
+                name: meta.get("children", [])
+                for name, meta in custom_components.items()
             }
             generated_symbols = self.register_custom_components(
                 custom_relationships, generate_symbols=True
@@ -989,15 +993,25 @@ class RelationshipsMixin:
                 from fastembed import LateInteractionTextEmbedding, TextEmbedding
 
                 # ColBERT for components and inputs (128d multi-vector)
-                colbert_embedder = LateInteractionTextEmbedding("colbert-ir/colbertv2.0")
+                colbert_embedder = LateInteractionTextEmbedding(
+                    "colbert-ir/colbertv2.0"
+                )
                 # MiniLM for relationships (384d dense)
-                relationships_embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
-                logger.info("Initialized ColBERT + MiniLM embedders for 3-vector indexing")
+                relationships_embedder = TextEmbedding(
+                    "sentence-transformers/all-MiniLM-L6-v2"
+                )
+                logger.info(
+                    "Initialized ColBERT + MiniLM embedders for 3-vector indexing"
+                )
             except ImportError as e:
-                logger.warning(f"FastEmbed models not available, falling back to single vector: {e}")
+                logger.warning(
+                    f"FastEmbed models not available, falling back to single vector: {e}"
+                )
                 has_multi_vector = False
 
-        logger.info(f"Indexing {len(custom_components)} custom components to Qdrant (module: {resolved_module_name}, multi-vector: {has_multi_vector and use_multi_vector})...")
+        logger.info(
+            f"Indexing {len(custom_components)} custom components to Qdrant (module: {resolved_module_name}, multi-vector: {has_multi_vector and use_multi_vector})..."
+        )
 
         points = []
         index_version = datetime.now(UTC).isoformat()
@@ -1038,20 +1052,41 @@ class RelationshipsMixin:
                         child_parts.append(child)
                 relationship_text = f"{symbol} {name} | contains {', '.join(child_parts)} | {symbol}[{','.join([all_symbols.get(c, c) for c in children])}]"
             else:
-                relationship_text = f"{symbol} {name} | no children | {symbol}[]" if symbol else f"{name}:{component_type}[]"
+                relationship_text = (
+                    f"{symbol} {name} | no children | {symbol}[]"
+                    if symbol
+                    else f"{name}:{component_type}[]"
+                )
 
             # === Generate embeddings ===
             try:
-                if use_multi_vector and has_multi_vector and colbert_embedder and relationships_embedder:
+                if (
+                    use_multi_vector
+                    and has_multi_vector
+                    and colbert_embedder
+                    and relationships_embedder
+                ):
                     # Generate all 3 vectors
                     comp_emb = list(colbert_embedder.embed([component_text]))[0]
-                    comp_vec = comp_emb.tolist() if hasattr(comp_emb, "tolist") else [list(v) for v in comp_emb]
+                    comp_vec = (
+                        comp_emb.tolist()
+                        if hasattr(comp_emb, "tolist")
+                        else [list(v) for v in comp_emb]
+                    )
 
                     inputs_emb = list(colbert_embedder.embed([inputs_text]))[0]
-                    inputs_vec = inputs_emb.tolist() if hasattr(inputs_emb, "tolist") else [list(v) for v in inputs_emb]
+                    inputs_vec = (
+                        inputs_emb.tolist()
+                        if hasattr(inputs_emb, "tolist")
+                        else [list(v) for v in inputs_emb]
+                    )
 
                     rel_emb = list(relationships_embedder.embed([relationship_text]))[0]
-                    rel_vec = rel_emb.tolist() if hasattr(rel_emb, "tolist") else list(rel_emb)
+                    rel_vec = (
+                        rel_emb.tolist()
+                        if hasattr(rel_emb, "tolist")
+                        else list(rel_emb)
+                    )
 
                     vector_data = {
                         "components": comp_vec,
@@ -1060,13 +1095,15 @@ class RelationshipsMixin:
                     }
                 else:
                     # Single vector fallback using wrapper's embedder
-                    embed_text = "\n".join([
-                        f"Name: {name}",
-                        f"Type: {component_type}",
-                        f"Path: {resolved_module_name}.{name}",
-                        f"Documentation: {docstring}",
-                        f"Children: {', '.join(children) if children else 'none'}",
-                    ])
+                    embed_text = "\n".join(
+                        [
+                            f"Name: {name}",
+                            f"Type: {component_type}",
+                            f"Path: {resolved_module_name}.{name}",
+                            f"Documentation: {docstring}",
+                            f"Children: {', '.join(children) if children else 'none'}",
+                        ]
+                    )
                     embedding_list = list(self.embedder.embed([embed_text]))
                     embedding = embedding_list[0] if embedding_list else None
 
@@ -1074,7 +1111,11 @@ class RelationshipsMixin:
                         logger.warning(f"No embedding generated for {name}")
                         continue
 
-                    vector_list = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
+                    vector_list = (
+                        embedding.tolist()
+                        if hasattr(embedding, "tolist")
+                        else list(embedding)
+                    )
 
                     # Use appropriate vector name or unnamed
                     if has_multi_vector and "relationships" in vector_names:
@@ -1127,7 +1168,9 @@ class RelationshipsMixin:
             if children:
                 child_symbols = [all_symbols.get(c, "") for c in children]
                 payload["relationships"] = {
-                    "children": [{"child_class": c, "field_name": c.lower()} for c in children],
+                    "children": [
+                        {"child_class": c, "field_name": c.lower()} for c in children
+                    ],
                     "child_classes": children,
                     "child_symbols": [s for s in child_symbols if s],
                     "max_depth": 1,
@@ -1151,7 +1194,9 @@ class RelationshipsMixin:
         # Upsert to Qdrant
         try:
             self.client.upsert(collection_name=collection_name, points=points)
-            logger.info(f"Successfully indexed {len(points)} custom components to {collection_name}")
+            logger.info(
+                f"Successfully indexed {len(points)} custom components to {collection_name}"
+            )
             return len(points)
         except Exception as e:
             logger.error(f"Failed to upsert custom components: {e}", exc_info=True)

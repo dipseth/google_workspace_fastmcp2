@@ -64,8 +64,10 @@ def get_component_class_from_wrapper(component_name: str):
 
     # Also try searching wrapper.components directly
     for comp_path, comp in wrapper.components.items():
-        if comp_path.endswith(f".{component_name}") or comp_path.endswith(f".{component_name.lower()}.{component_name}"):
-            if hasattr(comp, 'obj') and comp.obj:
+        if comp_path.endswith(f".{component_name}") or comp_path.endswith(
+            f".{component_name.lower()}.{component_name}"
+        ):
+            if hasattr(comp, "obj") and comp.obj:
                 return comp.obj
 
     return None
@@ -85,15 +87,18 @@ def get_required_fields_from_class(comp_class) -> Dict[str, Any]:
     if dataclasses.is_dataclass(comp_class):
         for field in dataclasses.fields(comp_class):
             # Fields without defaults are required
-            if field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING:
+            if (
+                field.default is dataclasses.MISSING
+                and field.default_factory is dataclasses.MISSING
+            ):
                 # Generate a sensible default based on field name/type
-                if 'name' in field.name.lower():
+                if "name" in field.name.lower():
                     required[field.name] = f"auto_{field.name}"
-                elif 'label' in field.name.lower():
+                elif "label" in field.name.lower():
                     required[field.name] = f"Auto Label"
-                elif 'text' in field.name.lower():
+                elif "text" in field.name.lower():
                     required[field.name] = "Auto generated text"
-                elif 'url' in field.name.lower():
+                elif "url" in field.name.lower():
                     required[field.name] = "https://example.com"
 
     return required
@@ -119,18 +124,18 @@ def render_component_dynamically(component_name: str, index: int = 0) -> Optiona
 
     # Add index to name fields for uniqueness
     for key in required_params:
-        if 'name' in key.lower():
+        if "name" in key.lower():
             required_params[key] = f"{required_params[key]}_{index}"
 
     try:
         # Use wrapper's create_card_component
         instance = wrapper.create_card_component(comp_class, required_params)
 
-        if instance and hasattr(instance, 'render'):
+        if instance and hasattr(instance, "render"):
             rendered = instance.render()
             print(f"  ✅ {component_name} rendered successfully")
             return rendered
-        elif instance and hasattr(instance, 'to_dict'):
+        elif instance and hasattr(instance, "to_dict"):
             key = component_name[0].lower() + component_name[1:]
             rendered = {key: instance.to_dict()}
             print(f"  ✅ {component_name} rendered via to_dict()")
@@ -220,12 +225,16 @@ def test_wrapper_provides_relationships():
     """Verify wrapper provides parent->child relationships."""
     relationships = get_all_relationships_from_wrapper()
 
-    assert len(relationships) > 5, f"Expected 5+ relationships, got {len(relationships)}"
+    assert (
+        len(relationships) > 5
+    ), f"Expected 5+ relationships, got {len(relationships)}"
 
     # Section should have children
     assert "Section" in relationships, "Section not in relationships"
     section_children = relationships["Section"]
-    assert len(section_children) > 5, f"Section should have 5+ children, got {len(section_children)}"
+    assert (
+        len(section_children) > 5
+    ), f"Section should have 5+ children, got {len(section_children)}"
 
     print(f"\nSection children: {section_children}")
 
@@ -236,9 +245,19 @@ def test_can_get_component_classes_dynamically():
 
     # Focus on actual widget component names (not enums, not internal classes)
     widget_names = [
-        "Button", "ButtonList", "DecoratedText", "TextParagraph",
-        "Grid", "Image", "Divider", "TextInput", "DateTimePicker",
-        "SelectionInput", "ChipList", "Columns", "Section",
+        "Button",
+        "ButtonList",
+        "DecoratedText",
+        "TextParagraph",
+        "Grid",
+        "Image",
+        "Divider",
+        "TextInput",
+        "DateTimePicker",
+        "SelectionInput",
+        "ChipList",
+        "Columns",
+        "Section",
     ]
 
     found = 0
@@ -280,7 +299,9 @@ def test_render_random_widget_components():
     print(f"\n📊 Successfully rendered {rendered}/{len(to_test)} components")
 
     # At least half should render
-    assert rendered >= len(to_test) // 2, f"Too many render failures: {rendered}/{len(to_test)}"
+    assert (
+        rendered >= len(to_test) // 2
+    ), f"Too many render failures: {rendered}/{len(to_test)}"
 
 
 def test_generate_and_render_random_structure():
@@ -370,7 +391,9 @@ def test_all_section_children_can_render():
     print(f"  ❌ Failed: {len(results['failed'])} - {results['failed']}")
 
     # Most should succeed
-    success_rate = len(results["success"]) / len(section_children) if section_children else 0
+    success_rate = (
+        len(results["success"]) / len(section_children) if section_children else 0
+    )
     assert success_rate >= 0.5, f"At least 50% should render, got {success_rate:.0%}"
 
 

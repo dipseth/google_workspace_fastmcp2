@@ -6,7 +6,6 @@ from typing import Dict, List
 
 from adapters.module_wrapper.types import ComponentName, ComponentPath, JsonDict
 
-
 # =============================================================================
 # COMPONENT PARAMS REGISTRY - Documents expected params for each component
 # =============================================================================
@@ -62,7 +61,11 @@ COMPONENT_PARAMS: Dict[ComponentName, Dict[str, str]] = {
         "items": "List of GridItem dicts",
     },
     "GridItem": {"title": "Item title", "subtitle": "Item subtitle"},
-    "TextInput": {"name": "Form field name", "label": "Input label", "hint": "Placeholder"},
+    "TextInput": {
+        "name": "Form field name",
+        "label": "Input label",
+        "hint": "Placeholder",
+    },
     "SelectionInput": {
         "name": "Form field name",
         "label": "Selection label",
@@ -146,7 +149,11 @@ DEFAULT_COMPONENT_PARAMS: Dict[ComponentName, JsonDict] = {
     # Form inputs (require 'name' field)
     "TextInput": {"name": "text_input_0", "label": "Text Input"},
     "DateTimePicker": {"name": "datetime_0", "label": "Select Date/Time"},
-    "SelectionInput": {"name": "selection_0", "label": "Select Option", "type": "DROPDOWN"},
+    "SelectionInput": {
+        "name": "selection_0",
+        "label": "Select Option",
+        "type": "DROPDOWN",
+    },
     # Layout
     "Divider": {},
     "Image": {"image_url": "https://picsum.photos/400/200"},

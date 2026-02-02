@@ -68,7 +68,9 @@ class SkillsMixin:
         self._skills_cache: Dict[str, SkillDocument] = {}
         self._skills_directory: Optional[Path] = None
         self._skill_templates: Dict[str, Callable] = {}  # Pluggable templates
-        self._skill_examples: Dict[str, List[str]] = {}  # Example content per skill type
+        self._skill_examples: Dict[str, List[str]] = (
+            {}
+        )  # Example content per skill type
         self._skill_metadata: Dict[str, Dict[str, Any]] = {}  # Additional metadata
 
     # =========================================================================
@@ -187,7 +189,9 @@ class SkillsMixin:
 
         for letter in sorted(by_letter.keys()):
             items = by_letter[letter]
-            mappings = [f"`{sym}` = {comp}" for sym, comp in sorted(items, key=lambda x: x[1])]
+            mappings = [
+                f"`{sym}` = {comp}" for sym, comp in sorted(items, key=lambda x: x[1])
+            ]
             lines.append(f"**{letter}:** {', '.join(mappings)}")
             lines.append("")  # Blank line
 
@@ -283,7 +287,11 @@ class SkillsMixin:
             docs[name] = SkillDocument(
                 name=name,
                 title=f"{name} Component",
-                description=comp.docstring[:100] if comp.docstring else f"{name} component documentation",
+                description=(
+                    comp.docstring[:100]
+                    if comp.docstring
+                    else f"{name} component documentation"
+                ),
                 content=content,
                 tags={"component", name.lower()},
             )
@@ -317,8 +325,7 @@ class SkillsMixin:
                 parent_sym = symbol_mapping.get(parent, "-")
                 if children:
                     child_syms = [
-                        f"`{symbol_mapping.get(c, c[0])}`={c}"
-                        for c in children[:5]
+                        f"`{symbol_mapping.get(c, c[0])}`={c}" for c in children[:5]
                     ]
                     if len(children) > 5:
                         child_syms.append(f"+{len(children) - 5} more")
@@ -365,7 +372,9 @@ class SkillsMixin:
 
         # Quick start section
         lines.append("## Quick Start\n")
-        lines.append(f"This skill provides documentation for the {module_name} module.\n")
+        lines.append(
+            f"This skill provides documentation for the {module_name} module.\n"
+        )
 
         # Available resources section
         lines.append("## Available Resources\n")
@@ -383,7 +392,12 @@ class SkillsMixin:
         components = getattr(self, "components", {})
         class_count = sum(1 for c in components.values() if c.component_type == "class")
         if class_count > 0:
-            resources.append(("components/", f"Per-component documentation ({class_count} components)"))
+            resources.append(
+                (
+                    "components/",
+                    f"Per-component documentation ({class_count} components)",
+                )
+            )
 
         for filename, desc in resources:
             lines.append(f"- `{filename}` - {desc}")
@@ -453,7 +467,7 @@ class SkillsMixin:
                 # Append examples if any
                 if examples and config.include_examples:
                     content += "\n\n## Examples\n\n"
-                    for ex in examples[:config.max_example_count]:
+                    for ex in examples[: config.max_example_count]:
                         content += f"- `{ex}`\n"
 
                 skills[template_name] = SkillDocument(
@@ -525,13 +539,15 @@ class SkillsMixin:
 
             # Track for manifest (skip nested component docs)
             if "/" not in skill_name:
-                skill_infos.append(SkillInfo(
-                    name=doc.name,
-                    title=doc.title,
-                    description=doc.description,
-                    filename=filename,
-                    tags=list(doc.tags),
-                ))
+                skill_infos.append(
+                    SkillInfo(
+                        name=doc.name,
+                        title=doc.title,
+                        description=doc.description,
+                        filename=filename,
+                        tags=list(doc.tags),
+                    )
+                )
 
         # Write manifest
         manifest = SkillManifest(
@@ -577,13 +593,15 @@ class SkillsMixin:
         skill_infos = []
         for skill_name, doc in self._skills_cache.items():
             if "/" not in skill_name:  # Skip nested docs
-                skill_infos.append(SkillInfo(
-                    name=doc.name,
-                    title=doc.title,
-                    description=doc.description,
-                    filename=f"{skill_name}.md",
-                    tags=list(doc.tags),
-                ))
+                skill_infos.append(
+                    SkillInfo(
+                        name=doc.name,
+                        title=doc.title,
+                        description=doc.description,
+                        filename=f"{skill_name}.md",
+                        tags=list(doc.tags),
+                    )
+                )
 
         return SkillManifest(
             name=config.skill_name or module_name.replace("_", "-"),

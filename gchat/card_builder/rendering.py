@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 
 from adapters.module_wrapper.types import ComponentName, JsonDict
 
-
 # =============================================================================
 # KEY CONVERSION UTILITIES
 # =============================================================================
@@ -121,10 +120,10 @@ def convert_to_camel_case(data: Any) -> Any:
 # When these components appear as children of a container, they should be unwrapped
 _ARRAY_ITEM_JSON_KEYS = {
     "carouselCard",  # Items in Carousel.carouselCards
-    "gridItem",      # Items in Grid.items
-    "column",        # Items in Columns.columnItems
-    "button",        # Items in ButtonList.buttons
-    "chip",          # Items in ChipList.chips
+    "gridItem",  # Items in Grid.items
+    "column",  # Items in Columns.columnItems
+    "button",  # Items in ButtonList.buttons
+    "chip",  # Items in ChipList.chips
 }
 
 
@@ -190,10 +189,10 @@ def should_unwrap_children(container: ComponentName, children_field: str) -> boo
     # Fields that contain array items (not widgets)
     array_fields = {
         "carouselCards",  # Carousel -> CarouselCard[]
-        "items",          # Grid -> GridItem[]
-        "columnItems",    # Columns -> Column[]
-        "buttons",        # ButtonList -> Button[]
-        "chips",          # ChipList -> Chip[]
+        "items",  # Grid -> GridItem[]
+        "columnItems",  # Columns -> Column[]
+        "buttons",  # ButtonList -> Button[]
+        "chips",  # ChipList -> Chip[]
     }
     return children_field in array_fields
 
@@ -374,7 +373,9 @@ def build_icon_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
         if hasattr(Icon, "KnownIcon"):
             known_icon_name = params.get("known_icon", "STAR")
             # Try to get the enum value
-            known_icon_enum = getattr(Icon.KnownIcon, known_icon_name, Icon.KnownIcon.STAR)
+            known_icon_enum = getattr(
+                Icon.KnownIcon, known_icon_name, Icon.KnownIcon.STAR
+            )
             icon = Icon(known_icon=known_icon_enum)
 
             if hasattr(icon, "to_dict"):

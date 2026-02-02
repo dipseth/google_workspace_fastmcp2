@@ -190,8 +190,8 @@ def test_proven_params_merged_into_card():
     print("TEST: Proven params merged into card building")
     print("=" * 60)
 
-    from gchat.feedback_loop import get_feedback_loop
     from gchat.card_builder import SmartCardBuilder
+    from gchat.feedback_loop import get_feedback_loop
 
     feedback_loop = get_feedback_loop()
 

@@ -27,21 +27,23 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 # JSON widget keys that can be identified in card structures
-WIDGET_JSON_KEYS = frozenset({
-    "textParagraph",
-    "decoratedText",
-    "buttonList",
-    "chipList",
-    "image",
-    "grid",
-    "columns",
-    "divider",
-    "textInput",
-    "selectionInput",
-    "dateTimePicker",
-    "carousel",
-    "carouselCard",
-})
+WIDGET_JSON_KEYS = frozenset(
+    {
+        "textParagraph",
+        "decoratedText",
+        "buttonList",
+        "chipList",
+        "image",
+        "grid",
+        "columns",
+        "divider",
+        "textInput",
+        "selectionInput",
+        "dateTimePicker",
+        "carousel",
+        "carouselCard",
+    }
+)
 
 
 # =============================================================================
@@ -243,19 +245,25 @@ def generate_dsl_notation(
                 btn_count = len(buttons)
                 if btn_count > 0:
                     btn_symbol = symbol_mapping.get("Button", "ᵬ")
-                    nested_dsl = f"{btn_symbol}×{btn_count}" if btn_count > 1 else btn_symbol
+                    nested_dsl = (
+                        f"{btn_symbol}×{btn_count}" if btn_count > 1 else btn_symbol
+                    )
             elif widget_type == "grid":
                 items = widget.get("grid", {}).get("items", [])
                 item_count = len(items)
                 if item_count > 0:
                     item_symbol = symbol_mapping.get("GridItem", "ǵ")
-                    nested_dsl = f"{item_symbol}×{item_count}" if item_count > 1 else item_symbol
+                    nested_dsl = (
+                        f"{item_symbol}×{item_count}" if item_count > 1 else item_symbol
+                    )
             elif widget_type == "chipList":
                 chips = widget.get("chipList", {}).get("chips", [])
                 chip_count = len(chips)
                 if chip_count > 0:
                     chip_symbol = symbol_mapping.get("Chip", "ꞓ")
-                    nested_dsl = f"{chip_symbol}×{chip_count}" if chip_count > 1 else chip_symbol
+                    nested_dsl = (
+                        f"{chip_symbol}×{chip_count}" if chip_count > 1 else chip_symbol
+                    )
 
             # Build symbol with optional nesting
             full_symbol = f"{symbol}[{nested_dsl}]" if nested_dsl else symbol

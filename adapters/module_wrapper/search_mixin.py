@@ -1420,7 +1420,9 @@ class SearchMixin:
                     }
                 )
 
-            logger.info(f"V7 search found {len(processed)} results (vector={vector_name})")
+            logger.info(
+                f"V7 search found {len(processed)} results (vector={vector_name})"
+            )
             return processed
 
         except Exception as e:
@@ -1671,7 +1673,9 @@ class SearchMixin:
                     result_by_id[result_id] = result
 
         # Sort by RRF score descending
-        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
+        sorted_ids = sorted(
+            rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True
+        )
 
         # Build final results
         merged = []
@@ -1680,7 +1684,9 @@ class SearchMixin:
             result["rrf_score"] = rrf_scores[result_id]
             merged.append(result)
 
-        logger.debug(f"RRF merged {sum(len(r) for r in result_lists)} results into {len(merged)}")
+        logger.debug(
+            f"RRF merged {sum(len(r) for r in result_lists)} results into {len(merged)}"
+        )
         return merged
 
 

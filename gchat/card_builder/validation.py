@@ -39,9 +39,7 @@ def clean_card_metadata(obj: Any) -> Any:
     """
     if isinstance(obj, dict):
         return {
-            k: clean_card_metadata(v)
-            for k, v in obj.items()
-            if not k.startswith("_")
+            k: clean_card_metadata(v) for k, v in obj.items() if not k.startswith("_")
         }
     elif isinstance(obj, list):
         return [clean_card_metadata(item) for item in obj]
@@ -103,7 +101,9 @@ def validate_content(card_dict: JsonDict) -> Tuple[bool, IssueList]:
             section_has_content = False
             for widget_idx, widget in enumerate(widgets):
                 if not isinstance(widget, dict):
-                    issues.append(f"Section {section_idx}, widget {widget_idx} is not a dictionary")
+                    issues.append(
+                        f"Section {section_idx}, widget {widget_idx} is not a dictionary"
+                    )
                     continue
 
                 # Check for various widget types with content
@@ -119,13 +119,27 @@ def validate_content(card_dict: JsonDict) -> Tuple[bool, IssueList]:
                     buttons = widget["buttonList"].get("buttons", [])
                     if isinstance(buttons, list) and len(buttons) > 0:
                         for button in buttons:
-                            if isinstance(button, dict) and button.get("text", "").strip():
+                            if (
+                                isinstance(button, dict)
+                                and button.get("text", "").strip()
+                            ):
                                 section_has_content = True
                                 break
-                elif any(key in widget for key in [
-                    "decoratedText", "decorated_text", "selectionInput", "selection_input",
-                    "textInput", "text_input", "divider", "columns", "grid", "chipList"
-                ]):
+                elif any(
+                    key in widget
+                    for key in [
+                        "decoratedText",
+                        "decorated_text",
+                        "selectionInput",
+                        "selection_input",
+                        "textInput",
+                        "text_input",
+                        "divider",
+                        "columns",
+                        "grid",
+                        "chipList",
+                    ]
+                ):
                     section_has_content = True
 
             if section_has_content:
@@ -136,7 +150,9 @@ def validate_content(card_dict: JsonDict) -> Tuple[bool, IssueList]:
     has_content = header_has_content or sections_have_content
 
     if not has_content:
-        issues.append("Card has no renderable content (empty header and empty/missing sections)")
+        issues.append(
+            "Card has no renderable content (empty header and empty/missing sections)"
+        )
 
     return has_content, issues
 

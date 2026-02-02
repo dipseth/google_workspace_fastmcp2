@@ -104,7 +104,9 @@ class FeedbackLoop:
             else:
                 # Create standalone cache
                 try:
-                    from adapters.module_wrapper.component_cache import get_component_cache
+                    from adapters.module_wrapper.component_cache import (
+                        get_component_cache,
+                    )
 
                     self._component_cache = get_component_cache()
                     logger.debug("FeedbackLoop: Using standalone component cache")
@@ -140,6 +142,7 @@ class FeedbackLoop:
                 key = pattern.get("card_id") or pattern.get("id")
                 if not key:
                     import hashlib
+
                     desc = pattern.get("card_description", "")
                     key = f"pattern:{hashlib.sha256(desc.encode()).hexdigest()[:12]}"
 
@@ -245,10 +248,14 @@ class FeedbackLoop:
         wrapper = self._get_wrapper()
         if wrapper and hasattr(wrapper, "generate_pattern_variations"):
             try:
-                from adapters.module_wrapper.instance_pattern_mixin import InstancePattern
+                from adapters.module_wrapper.instance_pattern_mixin import (
+                    InstancePattern,
+                )
 
                 # Convert dict pattern to InstancePattern
-                component_paths = pattern.get("component_paths") or pattern.get("parent_paths", [])
+                component_paths = pattern.get("component_paths") or pattern.get(
+                    "parent_paths", []
+                )
                 instance_params = pattern.get("instance_params", {})
                 description = pattern.get("card_description", "")
                 pattern_id = pattern.get("card_id") or pattern.get("id", "")
@@ -274,7 +281,9 @@ class FeedbackLoop:
                         "parent_key": family.parent_id,
                         "num_variations": family.size,
                         "cache_keys": family.cache_keys,
-                        "variation_types": [v.variation_type for v in family.variations],
+                        "variation_types": [
+                            v.variation_type for v in family.variations
+                        ],
                     }
             except Exception as e:
                 logger.debug(f"Wrapper variation generation failed, falling back: {e}")
@@ -1891,7 +1900,9 @@ class FeedbackLoop:
         component_paths: Optional[List[str]] = None,
         limit: int = 10,
         token_ratio: float = 1.0,
-    ) -> Optional[Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]]:
+    ) -> Optional[
+        Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]
+    ]:
         """
         Query using wrapper's SearchMixin methods (preferred when available).
 

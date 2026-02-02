@@ -4,7 +4,6 @@ Feedback prompts, labels, and text styling constants.
 
 from typing import Dict, List, Tuple
 
-
 # Feedback prompts - use {keyword} placeholder for styled keyword insertion
 CONTENT_FEEDBACK_PROMPTS: List[Tuple[str, str]] = [
     ("Was the {keyword} correct?", "content"),
@@ -25,13 +24,13 @@ FORM_FEEDBACK_PROMPTS: List[Tuple[str, str]] = [
 # Text styling options for feedback keywords (rendered as HTML)
 # These mirror the Jinja filters: success_text, warning_text, muted_text, color
 FEEDBACK_TEXT_STYLES: List[str] = [
-    "bold",           # <b>keyword</b> (classic)
-    "success",        # <font color="#34a853">keyword</font> (green)
-    "warning",        # <font color="#fbbc05">keyword</font> (yellow)
-    "info",           # <font color="#4285f4">keyword</font> (blue)
-    "muted",          # <font color="#9e9e9e">keyword</font> (gray)
-    "bold_success",   # <b><font color="#34a853">keyword</font></b>
-    "bold_info",      # <b><font color="#4285f4">keyword</font></b>
+    "bold",  # <b>keyword</b> (classic)
+    "success",  # <font color="#34a853">keyword</font> (green)
+    "warning",  # <font color="#fbbc05">keyword</font> (yellow)
+    "info",  # <font color="#4285f4">keyword</font> (blue)
+    "muted",  # <font color="#9e9e9e">keyword</font> (gray)
+    "bold_success",  # <b><font color="#34a853">keyword</font></b>
+    "bold_info",  # <b><font color="#4285f4">keyword</font></b>
 ]
 
 # Color mappings (matching SEMANTIC_COLORS from styling_filters.py)
@@ -43,8 +42,20 @@ FEEDBACK_COLORS: Dict[str, str] = {
     "error": "#ea4335",
 }
 
-POSITIVE_LABELS: List[str] = ["👍 Good", "👍 Yes", "👍 Correct", "✅ Looks good", "👍 Accurate"]
-NEGATIVE_LABELS: List[str] = ["👎 Bad", "👎 No", "👎 Wrong", "❌ Needs work", "👎 Not quite"]
+POSITIVE_LABELS: List[str] = [
+    "👍 Good",
+    "👍 Yes",
+    "👍 Correct",
+    "✅ Looks good",
+    "👍 Accurate",
+]
+NEGATIVE_LABELS: List[str] = [
+    "👎 Bad",
+    "👎 No",
+    "👎 Wrong",
+    "❌ Needs work",
+    "👎 Not quite",
+]
 
 
 __all__ = [

@@ -20,13 +20,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 WEBHOOK_URL = os.environ.get(
     "TEST_CHAT_WEBHOOK",
-    "https://chat.googleapis.com/v1/spaces/AAQAKl_yP9Y/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Ie8-brhWHA9kE_2JiqKRDhqjadPHK4RNe15UcWwLXDA"
+    "https://chat.googleapis.com/v1/spaces/AAQAKl_yP9Y/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Ie8-brhWHA9kE_2JiqKRDhqjadPHK4RNe15UcWwLXDA",
 )
 
 
 def snake_to_camel(s: str) -> str:
-    components = s.split('_')
-    return components[0] + ''.join(x.title() for x in components[1:])
+    components = s.split("_")
+    return components[0] + "".join(x.title() for x in components[1:])
 
 
 def convert_keys_to_camel(obj):
@@ -122,6 +122,7 @@ def demo_variation_generation():
 
     # Cache stats
     from adapters.module_wrapper.component_cache import get_component_cache
+
     cache = get_component_cache()
     print(f"\n4️⃣  Cache stats after variation generation:")
     print(f"   {cache}")
@@ -187,10 +188,11 @@ def demo_feedbackloop_variations():
 
 def build_variation_showcase_card(family):
     """Build a card showing the variation family."""
-    from gchat.card_framework_wrapper import get_card_framework_wrapper
-    from card_framework.v2.card import CardWithId, CardHeader
+    from card_framework.v2.card import CardHeader, CardWithId
     from card_framework.v2.message import Message
     from card_framework.v2.widgets.text_paragraph import TextParagraph
+
+    from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()
 
@@ -203,12 +205,15 @@ def build_variation_showcase_card(family):
 
     # Header section
     sections.append(
-        Section(header="Overview", widgets=[
-            TextParagraph(
-                text=f"<b>Parent Key:</b> {family.parent_key}\n"
-                     f"<b>Total Variations:</b> {family.size}"
-            ),
-        ])
+        Section(
+            header="Overview",
+            widgets=[
+                TextParagraph(
+                    text=f"<b>Parent Key:</b> {family.parent_key}\n"
+                    f"<b>Total Variations:</b> {family.size}"
+                ),
+            ],
+        )
     )
 
     # Group by type
@@ -231,9 +236,14 @@ def build_variation_showcase_card(family):
             )
 
         if widgets:
-            emoji = {"original": "🎯", "structure": "🏗️", "parameter": "⚙️"}.get(vtype, "📦")
+            emoji = {"original": "🎯", "structure": "🏗️", "parameter": "⚙️"}.get(
+                vtype, "📦"
+            )
             sections.append(
-                Section(header=f"{emoji} {vtype.title()} ({len(variations)})", widgets=widgets)
+                Section(
+                    header=f"{emoji} {vtype.title()} ({len(variations)})",
+                    widgets=widgets,
+                )
             )
 
     card = CardWithId(
@@ -252,11 +262,12 @@ def build_variation_showcase_card(family):
 
 def build_sample_variation_cards(family, max_cards: int = 2):
     """Build cards from actual variations to show they're valid."""
-    from gchat.card_framework_wrapper import get_card_framework_wrapper
-    from card_framework.v2.card import CardWithId, CardHeader
+    from card_framework.v2.card import CardHeader, CardWithId
     from card_framework.v2.message import Message
-    from card_framework.v2.widgets.text_paragraph import TextParagraph
     from card_framework.v2.widgets.on_click import OnClick, OpenLink
+    from card_framework.v2.widgets.text_paragraph import TextParagraph
+
+    from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()
 
@@ -293,16 +304,16 @@ def build_sample_variation_cards(family, max_cards: int = 2):
 
         # DSL notation
         if v.dsl_notation:
-            widgets.append(
-                TextParagraph(text=f"<i>DSL: {v.dsl_notation[:60]}...</i>")
-            )
+            widgets.append(TextParagraph(text=f"<i>DSL: {v.dsl_notation[:60]}...</i>"))
 
         # Add button if ButtonList in components
         if "ButtonList" in v.component_paths or "Button" in v.component_paths:
             buttons_data = params.get("buttons", [{"text": "Action"}])
             buttons = []
             for btn in buttons_data[:2]:
-                btn_text = btn.get("text", "Click") if isinstance(btn, dict) else str(btn)
+                btn_text = (
+                    btn.get("text", "Click") if isinstance(btn, dict) else str(btn)
+                )
                 buttons.append(
                     Button(
                         text=btn_text,
@@ -332,10 +343,11 @@ def build_sample_variation_cards(family, max_cards: int = 2):
 
 def demo_summary_card(family, generator_stats):
     """Build a summary card for the variation system."""
-    from gchat.card_framework_wrapper import get_card_framework_wrapper
-    from card_framework.v2.card import CardWithId, CardHeader
+    from card_framework.v2.card import CardHeader, CardWithId
     from card_framework.v2.message import Message
     from card_framework.v2.widgets.text_paragraph import TextParagraph
+
+    from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()
 
@@ -343,6 +355,7 @@ def demo_summary_card(family, generator_stats):
     DecoratedText = wrapper.get_cached_class("DecoratedText")
 
     from adapters.module_wrapper.component_cache import get_component_cache
+
     cache = get_component_cache()
     cache_stats = cache.stats
 
@@ -352,37 +365,46 @@ def demo_summary_card(family, generator_stats):
             subtitle="DAG-based pattern expansion",
         ),
         sections=[
-            Section(header="📊 Generator Stats", widgets=[
-                DecoratedText(
-                    text=f"<b>{generator_stats['num_families']}</b>",
-                    top_label="Pattern Families",
-                ),
-                DecoratedText(
-                    text=f"<b>{generator_stats['total_variations']}</b>",
-                    top_label="Total Variations",
-                ),
-                DecoratedText(
-                    text=f"<b>{generator_stats['avg_variations_per_family']:.1f}</b>",
-                    top_label="Avg per Family",
-                ),
-            ]),
-            Section(header="💾 Cache Stats", widgets=[
-                DecoratedText(
-                    text=f"<b>{cache_stats['l1_size']}</b> items",
-                    top_label="L1 (Memory)",
-                ),
-                DecoratedText(
-                    text=f"<b>{cache_stats['hit_rate']:.1%}</b>",
-                    top_label="Hit Rate",
-                ),
-            ]),
-            Section(header="🏗️ Architecture", widgets=[
-                TextParagraph(
-                    text="<b>Structural Variations:</b> Swap siblings, add/remove widgets\n"
-                         "<b>Parameter Variations:</b> Text, color, list modifications\n"
-                         "<b>Caching:</b> All variations pre-cached for instant retrieval"
-                ),
-            ]),
+            Section(
+                header="📊 Generator Stats",
+                widgets=[
+                    DecoratedText(
+                        text=f"<b>{generator_stats['num_families']}</b>",
+                        top_label="Pattern Families",
+                    ),
+                    DecoratedText(
+                        text=f"<b>{generator_stats['total_variations']}</b>",
+                        top_label="Total Variations",
+                    ),
+                    DecoratedText(
+                        text=f"<b>{generator_stats['avg_variations_per_family']:.1f}</b>",
+                        top_label="Avg per Family",
+                    ),
+                ],
+            ),
+            Section(
+                header="💾 Cache Stats",
+                widgets=[
+                    DecoratedText(
+                        text=f"<b>{cache_stats['l1_size']}</b> items",
+                        top_label="L1 (Memory)",
+                    ),
+                    DecoratedText(
+                        text=f"<b>{cache_stats['hit_rate']:.1%}</b>",
+                        top_label="Hit Rate",
+                    ),
+                ],
+            ),
+            Section(
+                header="🏗️ Architecture",
+                widgets=[
+                    TextParagraph(
+                        text="<b>Structural Variations:</b> Swap siblings, add/remove widgets\n"
+                        "<b>Parameter Variations:</b> Text, color, list modifications\n"
+                        "<b>Caching:</b> All variations pre-cached for instant retrieval"
+                    ),
+                ],
+            ),
         ],
         _CardWithId__card_id="variation-summary",
     )
@@ -421,6 +443,7 @@ if __name__ == "__main__":
 
     # 5. Send summary card
     from adapters.module_wrapper.variation_generator import get_variation_generator
+
     generator = get_variation_generator()
     payload3 = demo_summary_card(family, generator.stats)
     result = send_card(payload3, "Variation System Summary")

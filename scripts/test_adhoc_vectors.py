@@ -169,7 +169,8 @@ def main():
                         key="type", match=models.MatchValue(value="instance_pattern")
                     ),
                     models.FieldCondition(
-                        key="content_feedback", match=models.MatchValue(value="positive")
+                        key="content_feedback",
+                        match=models.MatchValue(value="positive"),
                     ),
                 ]
             ),
@@ -231,7 +232,9 @@ def main():
         )
         print(f"\n Found {len(results)} patterns with δ symbol:")
         for p in results:
-            print(f"   • {p.payload.get('name', '?')}: {p.payload.get('relationship_text', '')[:80]}")
+            print(
+                f"   • {p.payload.get('name', '?')}: {p.payload.get('relationship_text', '')[:80]}"
+            )
 
     except Exception as e:
         print(f"   ❌ DSL pattern search failed: {e}")

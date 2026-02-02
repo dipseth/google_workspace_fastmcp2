@@ -67,7 +67,10 @@ def test_return_instance():
     # Build child instances first
     header_instance = builder._build_component(
         "CardHeader",
-        {"title": "🧪 Instance Test Card", "subtitle": "Built using return_instance=True"},
+        {
+            "title": "🧪 Instance Test Card",
+            "subtitle": "Built using return_instance=True",
+        },
         return_instance=True,
     )
     print(f"CardHeader: {type(header_instance).__name__}")
@@ -80,7 +83,10 @@ def test_return_instance():
     )
     dt2 = builder._build_component(
         "DecoratedText",
-        {"text": "Each widget is a real Python object, not a JSON dict.", "wrap_text": True},
+        {
+            "text": "Each widget is a real Python object, not a JSON dict.",
+            "wrap_text": True,
+        },
         return_instance=True,
     )
     # Button must be inside ButtonList (not directly in Section widgets)
@@ -107,14 +113,20 @@ def test_return_instance():
     )
     print(f"Section with widgets: {type(section_with_widgets).__name__}")
     if section_with_widgets and hasattr(section_with_widgets, "widgets"):
-        print(f"  Widgets count: {len(section_with_widgets.widgets) if section_with_widgets.widgets else 0}")
+        print(
+            f"  Widgets count: {len(section_with_widgets.widgets) if section_with_widgets.widgets else 0}"
+        )
 
     # Build Card with header and section instances
     card_instance = builder._build_component(
         "Card",
         {},
         return_instance=True,
-        child_instances=[header_instance, section_with_widgets] if header_instance and section_with_widgets else None,
+        child_instances=(
+            [header_instance, section_with_widgets]
+            if header_instance and section_with_widgets
+            else None
+        ),
     )
     print(f"Card: {type(card_instance).__name__}")
 
@@ -137,6 +149,7 @@ def test_return_instance():
 
         # Wrap in cardsV2 format
         import time
+
         message_payload = {
             "cardsV2": [
                 {
@@ -188,9 +201,21 @@ def test_full_card_with_multiple_sections():
 
     # Section 1: Status info
     status_widgets = [
-        builder._build_component("DecoratedText", {"text": "🟢 API: Online", "wrap_text": True}, return_instance=True),
-        builder._build_component("DecoratedText", {"text": "🟢 Database: Connected", "wrap_text": True}, return_instance=True),
-        builder._build_component("DecoratedText", {"text": "🟡 Cache: Warming up", "wrap_text": True}, return_instance=True),
+        builder._build_component(
+            "DecoratedText",
+            {"text": "🟢 API: Online", "wrap_text": True},
+            return_instance=True,
+        ),
+        builder._build_component(
+            "DecoratedText",
+            {"text": "🟢 Database: Connected", "wrap_text": True},
+            return_instance=True,
+        ),
+        builder._build_component(
+            "DecoratedText",
+            {"text": "🟡 Cache: Warming up", "wrap_text": True},
+            return_instance=True,
+        ),
     ]
     section1 = builder._build_component(
         "Section",
@@ -200,8 +225,16 @@ def test_full_card_with_multiple_sections():
     )
 
     # Section 2: Actions (buttons must be in ButtonList)
-    btn1 = builder._build_component("Button", {"text": "🔄 Refresh", "url": "https://example.com/refresh"}, return_instance=True)
-    btn2 = builder._build_component("Button", {"text": "📋 Logs", "url": "https://example.com/logs"}, return_instance=True)
+    btn1 = builder._build_component(
+        "Button",
+        {"text": "🔄 Refresh", "url": "https://example.com/refresh"},
+        return_instance=True,
+    )
+    btn2 = builder._build_component(
+        "Button",
+        {"text": "📋 Logs", "url": "https://example.com/logs"},
+        return_instance=True,
+    )
     btn_list = builder._build_component(
         "ButtonList",
         {},
@@ -232,6 +265,7 @@ def test_full_card_with_multiple_sections():
         webhook_url = os.environ.get("TEST_CHAT_WEBHOOK")
         if webhook_url:
             import time
+
             message_payload = {
                 "cardsV2": [
                     {
@@ -241,7 +275,9 @@ def test_full_card_with_multiple_sections():
                 ]
             }
             try:
-                response = httpx.post(webhook_url, json=message_payload, timeout=30, verify=False)
+                response = httpx.post(
+                    webhook_url, json=message_payload, timeout=30, verify=False
+                )
                 print(f"\n✅ Complex card sent! Status: {response.status_code}")
             except Exception as e:
                 print(f"\n❌ Failed to send: {e}")
@@ -251,6 +287,7 @@ def test_full_card_with_multiple_sections():
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
+
     load_dotenv()
 
     test_return_instance()

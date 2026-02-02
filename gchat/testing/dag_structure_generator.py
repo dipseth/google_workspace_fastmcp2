@@ -618,17 +618,19 @@ class ParameterizedNode:
             "symbol": self.symbol,
             "depth": self.depth,
             "children": [c.to_dict() for c in self.children],
-            "parameters": {
-                name: {
-                    "type": f.field_type,
-                    "value": f.generated_value,
-                    "used_default": f.used_default,
-                    "is_required": f.is_required,
+            "parameters": (
+                {
+                    name: {
+                        "type": f.field_type,
+                        "value": f.generated_value,
+                        "used_default": f.used_default,
+                        "is_required": f.is_required,
+                    }
+                    for name, f in self.parameters.items()
                 }
-                for name, f in self.parameters.items()
-            }
-            if self.parameters
-            else {},
+                if self.parameters
+                else {}
+            ),
         }
 
 
@@ -1597,9 +1599,11 @@ class DAGStructureGenerator:
                             "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
                             "horizontalAlignment": "CENTER",
                             "verticalAlignment": "CENTER",
-                            "widgets": col_widgets
-                            if col_widgets
-                            else [{"textParagraph": {"text": "Column content"}}],
+                            "widgets": (
+                                col_widgets
+                                if col_widgets
+                                else [{"textParagraph": {"text": "Column content"}}]
+                            ),
                         }
                     )
 
@@ -1902,9 +1906,11 @@ class DAGStructureGenerator:
                             "horizontalSizeStyle": "FILL_AVAILABLE_SPACE",
                             "horizontalAlignment": "CENTER",
                             "verticalAlignment": "CENTER",
-                            "widgets": col_widgets
-                            if col_widgets
-                            else [{"textParagraph": {"text": "Column content"}}],
+                            "widgets": (
+                                col_widgets
+                                if col_widgets
+                                else [{"textParagraph": {"text": "Column content"}}]
+                            ),
                         }
                     )
 
@@ -2208,9 +2214,11 @@ class DAGStructureGenerator:
                     {"textParagraph": {"text": "<b>✨ Combined</b>"}},
                     {
                         "image": {
-                            "imageUrl": SAMPLE_IMAGES[2]
-                            if len(SAMPLE_IMAGES) > 2
-                            else SAMPLE_IMAGES[0],
+                            "imageUrl": (
+                                SAMPLE_IMAGES[2]
+                                if len(SAMPLE_IMAGES) > 2
+                                else SAMPLE_IMAGES[0]
+                            ),
                             "altText": "Feature image",
                         }
                     },

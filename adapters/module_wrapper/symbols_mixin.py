@@ -122,7 +122,9 @@ class SymbolsMixin:
             return f"{symbol} {text} {symbol}"
         return text
 
-    def get_symbol_for_component(self, component_name: ComponentName) -> Optional[Symbol]:
+    def get_symbol_for_component(
+        self, component_name: ComponentName
+    ) -> Optional[Symbol]:
         """Get the symbol for a component, if one exists."""
         return self.symbol_mapping.get(component_name)
 
@@ -465,7 +467,9 @@ class SymbolsMixin:
 
         return combined
 
-    def get_dsl_for_component(self, component_name: ComponentName, max_children: int = 5) -> DSLNotation:
+    def get_dsl_for_component(
+        self, component_name: ComponentName, max_children: int = 5
+    ) -> DSLNotation:
         """
         Get the DSL structure showing what a component can contain.
 
@@ -485,7 +489,9 @@ class SymbolsMixin:
         child_syms = [self.symbol_mapping.get(c, c) for c in children[:max_children]]
         return f"{symbol}[{', '.join(child_syms)}]"
 
-    def get_embedding_text(self, component_name: ComponentName, include_dsl: bool = True) -> str:
+    def get_embedding_text(
+        self, component_name: ComponentName, include_dsl: bool = True
+    ) -> str:
         """
         Get embedding-efficient text for a component.
 

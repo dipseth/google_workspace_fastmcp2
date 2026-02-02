@@ -21,11 +21,13 @@ class SkillDocument:
     examples, or reference material for a skill.
     """
 
-    name: str                           # "gchat-dsl-syntax"
-    title: str                          # "Google Chat Card DSL Syntax"
-    description: str                    # Brief description
-    content: str                        # Main markdown content
-    supporting_files: Dict[str, str] = field(default_factory=dict)  # filename -> content
+    name: str  # "gchat-dsl-syntax"
+    title: str  # "Google Chat Card DSL Syntax"
+    description: str  # Brief description
+    content: str  # Main markdown content
+    supporting_files: Dict[str, str] = field(
+        default_factory=dict
+    )  # filename -> content
     tags: Set[str] = field(default_factory=set)  # {"gchat", "cards", "dsl"}
     version: str = "1.0.0"
 
@@ -48,10 +50,10 @@ class SkillInfo:
     Metadata for a single skill in the manifest.
     """
 
-    name: str               # "dsl-syntax"
-    title: str              # "DSL Syntax Reference"
-    description: str        # Brief description
-    filename: str           # "dsl-syntax.md"
+    name: str  # "dsl-syntax"
+    title: str  # "DSL Syntax Reference"
+    description: str  # Brief description
+    filename: str  # "dsl-syntax.md"
     tags: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -74,11 +76,11 @@ class SkillManifest:
     metadata about all skills in the directory.
     """
 
-    name: str                       # "gchat-cards"
-    description: str                # "Google Chat Card Building Skills"
+    name: str  # "gchat-cards"
+    description: str  # "Google Chat Card Building Skills"
     skills: List[SkillInfo] = field(default_factory=list)
     generated_at: datetime = field(default_factory=datetime.utcnow)
-    source_module: str = ""         # "card_framework"
+    source_module: str = ""  # "card_framework"
     version: str = "1.0.0"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -100,8 +102,8 @@ class SkillGeneratorConfig:
     """
 
     # Output configuration
-    output_dir: Optional[str] = None     # Directory to write skills
-    main_file_name: str = "SKILL.md"     # Main skill file name
+    output_dir: Optional[str] = None  # Directory to write skills
+    main_file_name: str = "SKILL.md"  # Main skill file name
 
     # Content configuration
     include_examples: bool = True
@@ -110,8 +112,8 @@ class SkillGeneratorConfig:
     max_example_count: int = 10
 
     # Metadata
-    skill_name: str = ""                 # e.g., "gchat-cards"
-    skill_title: str = ""                # e.g., "Google Chat Card Builder"
+    skill_name: str = ""  # e.g., "gchat-cards"
+    skill_title: str = ""  # e.g., "Google Chat Card Builder"
     version: str = "1.0.0"
 
     def to_dict(self) -> Dict[str, Any]:

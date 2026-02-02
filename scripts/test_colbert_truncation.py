@@ -97,7 +97,11 @@ def get_test_descriptions(limit: int = 30) -> list[dict[str, Any]]:
                 ]
             ),
             limit=limit * 2,  # Fetch extra to filter
-            with_payload=["card_description", "relationship_text", "structure_description"],
+            with_payload=[
+                "card_description",
+                "relationship_text",
+                "structure_description",
+            ],
         )
 
         descriptions = []
@@ -164,15 +168,24 @@ def generate_synthetic_dsl_queries(wrapper, count: int = 10) -> list[dict[str, A
     # Common component combinations for testing
     test_patterns = [
         (["Section", "DecoratedText"], "Show a simple text message"),
-        (["Section", "DecoratedText", "ButtonList", "Button"], "Card with action buttons"),
-        (["Section", "DecoratedText", "DecoratedText", "DecoratedText"], "Card with multiple text items"),
+        (
+            ["Section", "DecoratedText", "ButtonList", "Button"],
+            "Card with action buttons",
+        ),
+        (
+            ["Section", "DecoratedText", "DecoratedText", "DecoratedText"],
+            "Card with multiple text items",
+        ),
         (["Section", "Grid", "GridItem"], "Grid layout with items"),
         (["Section", "DecoratedText", "Image"], "Card with image and text"),
         (["Section", "ButtonList", "Button", "Button"], "Card with two buttons"),
         (["Section", "ChipList", "Chip"], "Card with selectable chips"),
         (["Section", "Columns", "Column"], "Multi-column layout"),
         (["Section", "DecoratedText", "Divider", "ButtonList"], "Card with divider"),
-        (["Section", "TextParagraph", "ButtonList", "Button"], "Simple text with button"),
+        (
+            ["Section", "TextParagraph", "ButtonList", "Button"],
+            "Simple text with button",
+        ),
     ]
 
     queries = []
@@ -258,7 +271,9 @@ def benchmark_query(
     )
 
 
-def calculate_overlap(baseline_ids: list[str], test_ids: list[str], top_n: int) -> float:
+def calculate_overlap(
+    baseline_ids: list[str], test_ids: list[str], top_n: int
+) -> float:
     """Calculate overlap ratio for top N results."""
     if not baseline_ids or not test_ids:
         return 0.0
@@ -325,20 +340,24 @@ def run_benchmark(test_data: list[dict[str, Any]]) -> dict[float, ComparisonMetr
         dsl_part = data.get("relationship_text", "")[:30]
         desc_part = data.get("card_description", "")[:40]
 
-        print(f"\n[{i + 1}/{len(test_data)}] DSL: {dsl_part}... + \"{desc_part}...\"")
+        print(f'\n[{i + 1}/{len(test_data)}] DSL: {dsl_part}... + "{desc_part}..."')
 
         # Run for each token ratio
         for ratio in token_ratios:
             try:
                 # Show token details only for first query at baseline
-                show_tokens = (i == 0 and ratio == 1.0)
+                show_tokens = i == 0 and ratio == 1.0
                 result = benchmark_query(feedback_loop, dsl_query, ratio, show_tokens)
                 results_by_ratio[ratio].append(result)
 
                 if ratio == 1.0:
                     baseline_results[result.description] = result
 
-                status = "baseline" if ratio == 1.0 else f"{result.truncated_tokens}/{result.full_tokens} tokens"
+                status = (
+                    "baseline"
+                    if ratio == 1.0
+                    else f"{result.truncated_tokens}/{result.full_tokens} tokens"
+                )
                 print(
                     f"  {ratio:.0%}: {result.query_latency_ms:6.1f}ms, "
                     f"{len(result.result_ids)} results ({status})"
@@ -365,7 +384,11 @@ def run_benchmark(test_data: list[dict[str, Any]]) -> dict[float, ComparisonMetr
         correlations = []
 
         for result in ratio_results:
-            baseline = baseline_results.get(result.description[:50] + "..." if len(result.description) > 50 else result.description)
+            baseline = baseline_results.get(
+                result.description[:50] + "..."
+                if len(result.description) > 50
+                else result.description
+            )
             if not baseline:
                 # Find baseline by matching truncated description
                 for desc, base in baseline_results.items():
@@ -400,15 +423,15 @@ def run_benchmark(test_data: list[dict[str, Any]]) -> dict[float, ComparisonMetr
         metrics[ratio] = ComparisonMetrics(
             token_ratio=ratio,
             avg_speedup_percent=sum(speedups) / len(speedups) if speedups else 0,
-            avg_result_overlap_top5=sum(overlaps_top5) / len(overlaps_top5)
-            if overlaps_top5
-            else 0,
-            avg_result_overlap_top3=sum(overlaps_top3) / len(overlaps_top3)
-            if overlaps_top3
-            else 0,
-            avg_score_correlation=sum(correlations) / len(correlations)
-            if correlations
-            else 0,
+            avg_result_overlap_top5=(
+                sum(overlaps_top5) / len(overlaps_top5) if overlaps_top5 else 0
+            ),
+            avg_result_overlap_top3=(
+                sum(overlaps_top3) / len(overlaps_top3) if overlaps_top3 else 0
+            ),
+            avg_score_correlation=(
+                sum(correlations) / len(correlations) if correlations else 0
+            ),
             sample_count=len(ratio_results),
         )
 
@@ -460,7 +483,9 @@ def print_recommendations(metrics: dict[float, ComparisonMetrics]) -> None:
             reason = f"Quality too low ({overlap:.0%})"
         else:
             verdict = "MARGINAL"
-            reason = f"Speedup ({speedup:.0f}%) may not justify quality loss ({overlap:.0%})"
+            reason = (
+                f"Speedup ({speedup:.0f}%) may not justify quality loss ({overlap:.0%})"
+            )
 
         print(f"  {ratio:.0%} tokens: {verdict}")
         print(f"    {reason}")
@@ -486,7 +511,9 @@ def main():
         test_data = generate_synthetic_dsl_queries(wrapper, count=10)
 
     if not test_data:
-        print("\nERROR: Could not generate test data. Check ModuleWrapper availability.")
+        print(
+            "\nERROR: Could not generate test data. Check ModuleWrapper availability."
+        )
         return
 
     if len(test_data) < 5:

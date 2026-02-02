@@ -829,11 +829,13 @@ class QdrantStorageManager:
                     embed_texts.append(embed_text)
 
                     # Store prepared data for later
-                    prepared_items.append({
-                        "tool_name": tool_name,
-                        "payload_data": payload_data,
-                        "execution_time_ms": execution_time_ms,
-                    })
+                    prepared_items.append(
+                        {
+                            "tool_name": tool_name,
+                            "payload_data": payload_data,
+                            "execution_time_ms": execution_time_ms,
+                        }
+                    )
 
                 except Exception as e:
                     logger.error(f"❌ Failed to prepare response for bulk storage: {e}")
@@ -848,7 +850,9 @@ class QdrantStorageManager:
                 if valid_texts:
                     try:
                         embeddings_list = await asyncio.to_thread(
-                            lambda texts: list(self.client_manager.embedder.embed(texts)),
+                            lambda texts: list(
+                                self.client_manager.embedder.embed(texts)
+                            ),
                             valid_texts,
                         )
                     except Exception as e:
@@ -872,7 +876,9 @@ class QdrantStorageManager:
             # Phase 3: Create points with embeddings
             _, qdrant_models = get_qdrant_imports()
 
-            for idx, (prepared, embedding) in enumerate(zip(prepared_items, embeddings_mapped)):
+            for idx, (prepared, embedding) in enumerate(
+                zip(prepared_items, embeddings_mapped)
+            ):
                 if prepared is None or embedding is None:
                     continue
 

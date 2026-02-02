@@ -27,6 +27,7 @@ def fire_and_forget(func: F) -> F:
         # Call sync (for testing):
         obj._store_something.sync(obj, data)
     """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         thread = threading.Thread(target=lambda: func(*args, **kwargs), daemon=True)

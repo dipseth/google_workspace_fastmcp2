@@ -302,7 +302,9 @@ class DSLValidationInfo(BaseModel):
         default_factory=dict,
         description="Count per component: {'DecoratedText': 3, 'Button': 2}",
     )
-    issues: List[str] = Field(default_factory=list, description="Validation issues found")
+    issues: List[str] = Field(
+        default_factory=list, description="Validation issues found"
+    )
     suggestions: List[str] = Field(default_factory=list, description="Suggested fixes")
 
 

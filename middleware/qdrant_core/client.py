@@ -425,7 +425,9 @@ class QdrantClientManager:
                         "type",
                     ]
                     # Filter to only missing fields and create in parallel
-                    missing_fields = [f for f in filterable_fields if f not in existing_indexes]
+                    missing_fields = [
+                        f for f in filterable_fields if f not in existing_indexes
+                    ]
                     if missing_fields:
                         await self._create_indexes_parallel(
                             missing_fields, qdrant_models, log_prefix="Created missing"
@@ -487,7 +489,9 @@ class QdrantClientManager:
                     if success:
                         logger.info(f"✅ {log_prefix} keyword index for field: {field}")
                     else:
-                        logger.warning(f"⚠️ Failed to create index for {field}: {error_msg}")
+                        logger.warning(
+                            f"⚠️ Failed to create index for {field}: {error_msg}"
+                        )
 
     def _should_compress(self, data: str) -> bool:
         """Check if data should be compressed based on size."""

@@ -36,8 +36,10 @@ def test_smart_card_builder_wrapper_search():
         print(f"   score: {result.get('score', 0):.3f}")
 
         # With DSL, should use wrapper_dsl source
-        assert result.get("source") in ["wrapper_dsl", "wrapper_hybrid"], \
-            f"Expected 'wrapper_dsl' or 'wrapper_hybrid', got {result.get('source')}"
+        assert result.get("source") in [
+            "wrapper_dsl",
+            "wrapper_hybrid",
+        ], f"Expected 'wrapper_dsl' or 'wrapper_hybrid', got {result.get('source')}"
     else:
         print("   ⚠️ No result (may be expected if no matching patterns)")
 
@@ -55,7 +57,9 @@ def test_smart_card_builder_wrapper_search():
         if result2.get("source") == "wrapper_hybrid":
             print("   ✓ Correctly used hybrid search (no DSL)")
     else:
-        print("   ⚠️ No result (may be expected if no matching patterns with positive feedback)")
+        print(
+            "   ⚠️ No result (may be expected if no matching patterns with positive feedback)"
+        )
 
     # Test full _query_qdrant_patterns flow
     print("\n🔍 Testing _query_qdrant_patterns (full flow)...")
@@ -66,7 +70,9 @@ def test_smart_card_builder_wrapper_search():
         print(f"   source: {result3.get('source', 'fallback/feedback_loop')}")
         print(f"   component_paths count: {len(result3.get('component_paths', []))}")
     else:
-        print("   ⚠️ No patterns matched (expected if collection has no positive patterns)")
+        print(
+            "   ⚠️ No patterns matched (expected if collection has no positive patterns)"
+        )
 
     print("\n✓ SmartCardBuilder wrapper integration test complete")
 
@@ -99,7 +105,9 @@ def test_feedback_loop_wrapper_delegation():
         if class_results:
             print(f"   Sample class: {class_results[0].get('name', '?')}")
         if content_patterns:
-            print(f"   Sample content pattern: {content_patterns[0].get('name', '?')[:40]}")
+            print(
+                f"   Sample content pattern: {content_patterns[0].get('name', '?')[:40]}"
+            )
     else:
         print("   ⚠️ Wrapper returned None (wrapper may not be available)")
 
@@ -186,7 +194,9 @@ def test_wrapper_search_v7_hybrid_filters():
         include_classes=True,
     )
 
-    print(f"   Results: {len(classes)} classes, {len(content_patterns)} content, {len(form_patterns)} form")
+    print(
+        f"   Results: {len(classes)} classes, {len(content_patterns)} content, {len(form_patterns)} form"
+    )
 
     # Verify content patterns have positive feedback (if any returned)
     invalid_count = 0
@@ -211,7 +221,9 @@ def test_wrapper_search_v7_hybrid_filters():
         include_classes=True,
     )
 
-    print(f"   Results: {len(classes2)} classes, {len(content_patterns2)} content, {len(form_patterns2)} form")
+    print(
+        f"   Results: {len(classes2)} classes, {len(content_patterns2)} content, {len(form_patterns2)} form"
+    )
 
     # Compare - should generally get more results without filters
     if len(content_patterns2) >= len(content_patterns):

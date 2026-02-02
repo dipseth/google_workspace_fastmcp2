@@ -87,6 +87,7 @@ class ComponentMetadataProvider(Protocol):
         """Check if component is empty (no content params)."""
         ...
 
+
 # Lazy import for NetworkX
 _networkx = None
 
@@ -97,12 +98,11 @@ def _get_networkx():
     if _networkx is None:
         try:
             import networkx as nx
+
             _networkx = nx
             logger.debug("NetworkX loaded successfully")
         except ImportError:
-            logger.warning(
-                "NetworkX not installed. Install with: pip install networkx"
-            )
+            logger.warning("NetworkX not installed. Install with: pip install networkx")
             raise
     return _networkx
 
@@ -135,12 +135,22 @@ class GraphMixin:
         self._graph_built = False
 
         # Component metadata registries (populated by domain-specific wrappers)
-        self._context_resources: Dict[str, Tuple[str, str]] = {}  # component → (context_key, index_key)
-        self._container_children_field: Dict[str, str] = {}  # container → json_field_name
-        self._container_child_type: Dict[str, str] = {}  # container → expected_child_type
+        self._context_resources: Dict[str, Tuple[str, str]] = (
+            {}
+        )  # component → (context_key, index_key)
+        self._container_children_field: Dict[str, str] = (
+            {}
+        )  # container → json_field_name
+        self._container_child_type: Dict[str, str] = (
+            {}
+        )  # container → expected_child_type
         self._required_wrappers: Dict[str, str] = {}  # child → required_wrapper_parent
-        self._widget_types: Set[str] = set()  # valid widget types (can be children of heterogeneous containers)
-        self._heterogeneous_containers: Set[str] = set()  # containers that can hold any widget_type
+        self._widget_types: Set[str] = (
+            set()
+        )  # valid widget types (can be children of heterogeneous containers)
+        self._heterogeneous_containers: Set[str] = (
+            set()
+        )  # containers that can hold any widget_type
         self._form_components: Set[str] = set()  # components needing 'name' field
         self._empty_components: Set[str] = set()  # components with no content params
 
@@ -412,7 +422,9 @@ class GraphMixin:
     # PATH QUERIES
     # =========================================================================
 
-    def get_path(self, source: ComponentName, target: ComponentName) -> List[ComponentName]:
+    def get_path(
+        self, source: ComponentName, target: ComponentName
+    ) -> List[ComponentName]:
         """
         Get the shortest containment path from source to target.
 
@@ -474,9 +486,7 @@ class GraphMixin:
             return []
 
         try:
-            paths = list(nx.all_simple_paths(
-                graph, source, target, cutoff=max_depth
-            ))
+            paths = list(nx.all_simple_paths(graph, source, target, cutoff=max_depth))
             return paths
         except nx.NetworkXNoPath:
             return []
@@ -549,13 +559,19 @@ class GraphMixin:
                 if graph.has_edge(container, component):
                     return True
             # Heterogeneous containers can directly contain widget types
-            if container in self._heterogeneous_containers and component in self._widget_types:
+            if (
+                container in self._heterogeneous_containers
+                and component in self._widget_types
+            ):
                 return True
             return False
 
         # Non-direct (nested) containment checks
         # 1. Check if heterogeneous container can hold widget type directly
-        if container in self._heterogeneous_containers and component in self._widget_types:
+        if (
+            container in self._heterogeneous_containers
+            and component in self._widget_types
+        ):
             return True
 
         # 2. Check if component needs a wrapper that container can hold
@@ -807,7 +823,8 @@ class GraphMixin:
             "leaves": len(self.get_leaf_components()),
             "is_dag": nx.is_directed_acyclic_graph(graph),
             "density": nx.density(graph),
-            "avg_out_degree": sum(d for _, d in graph.out_degree()) / max(graph.number_of_nodes(), 1),
+            "avg_out_degree": sum(d for _, d in graph.out_degree())
+            / max(graph.number_of_nodes(), 1),
         }
 
     # =========================================================================
@@ -825,10 +842,7 @@ class GraphMixin:
         graph = self.get_relationship_graph()
 
         return {
-            "nodes": [
-                {"name": node, **graph.nodes[node]}
-                for node in graph.nodes()
-            ],
+            "nodes": [{"name": node, **graph.nodes[node]} for node in graph.nodes()],
             "edges": [
                 {"source": u, "target": v, **graph.edges[u, v]}
                 for u, v in graph.edges()
@@ -923,7 +937,6 @@ class GraphMixin:
         _build_tree(root, "", 0)
         return "\n".join(lines)
 
-
     # =========================================================================
     # COMPONENT METADATA REGISTRATION (General-Purpose)
     # =========================================================================
@@ -969,7 +982,9 @@ class GraphMixin:
         self._container_children_field[container] = children_field
         if child_type:
             self._container_child_type[container] = child_type
-        logger.debug(f"Registered container: {container}.{children_field} → {child_type}")
+        logger.debug(
+            f"Registered container: {container}.{children_field} → {child_type}"
+        )
 
     def register_wrapper_requirement(self, child: str, wrapper: str) -> None:
         """

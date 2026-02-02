@@ -543,7 +543,13 @@ def test_webhook_complex_nested_structure():
 
     # Get symbols from wrapper
     s = get_symbols("Section", "DecoratedText", "Icon", "Button", "ButtonList")
-    sec, dt, icon, btn, bl = s["Section"], s["DecoratedText"], s["Icon"], s["Button"], s["ButtonList"]
+    sec, dt, icon, btn, bl = (
+        s["Section"],
+        s["DecoratedText"],
+        s["Icon"],
+        s["Button"],
+        s["ButtonList"],
+    )
     dsl = f"{sec}[{dt}[{icon}, {btn}], {dt}, {bl}[{btn}×2], {dt}[{icon}]]"
 
     card = builder.build(
@@ -655,7 +661,13 @@ def test_webhook_unified_button_distribution():
     builder = SmartCardBuilderV2()
 
     s = get_symbols("Section", "DecoratedText", "Icon", "Button", "ButtonList")
-    sec, dt, icon, btn, bl = s["Section"], s["DecoratedText"], s["Icon"], s["Button"], s["ButtonList"]
+    sec, dt, icon, btn, bl = (
+        s["Section"],
+        s["DecoratedText"],
+        s["Icon"],
+        s["Button"],
+        s["ButtonList"],
+    )
     dsl = f"{sec}[{dt}[{icon}, {btn}], {bl}[{btn}×2]]"
 
     card = builder.build(
@@ -767,8 +779,8 @@ def get_available_components():
     """Dynamically discover available components from the wrapper."""
     from gchat.card_framework_wrapper import (
         get_card_framework_wrapper,
-        get_dsl_parser,
         get_component_relationships_for_dsl,
+        get_dsl_parser,
     )
 
     wrapper = get_card_framework_wrapper()
@@ -842,7 +854,11 @@ def build_random_dsl_structure(components: dict, depth: int = 1) -> str:
             if widget_name in ["ButtonList", "ChipList", "Grid"]:
                 count = test_random.randint(2, 4)
                 # Get child symbol for multiplier
-                child_map = {"ButtonList": "Button", "ChipList": "Chip", "Grid": "GridItem"}
+                child_map = {
+                    "ButtonList": "Button",
+                    "ChipList": "Chip",
+                    "Grid": "GridItem",
+                }
                 child_name = child_map.get(widget_name)
                 if child_name and child_name in symbols:
                     child_sym = symbols[child_name]
@@ -876,7 +892,9 @@ def test_dynamic_component_discovery():
 
     # Verify relationships exist
     assert len(components["relationships"]) > 0, "Should have relationships"
-    assert "DecoratedText" in components["relationships"], "DecoratedText should have children"
+    assert (
+        "DecoratedText" in components["relationships"]
+    ), "DecoratedText should have children"
 
 
 def test_random_dsl_generation():
@@ -1004,12 +1022,16 @@ def test_webhook_random_dsl_cards():
             card_id = f"random-dsl-{i+1}"
             success, message = send_card_to_webhook(card, card_id)
 
-            widget_count = sum(len(s.get("widgets", [])) for s in card.get("sections", []))
-            results.append({
-                "dsl": dsl,
-                "success": success,
-                "widgets": widget_count,
-            })
+            widget_count = sum(
+                len(s.get("widgets", [])) for s in card.get("sections", [])
+            )
+            results.append(
+                {
+                    "dsl": dsl,
+                    "success": success,
+                    "widgets": widget_count,
+                }
+            )
 
             status = "✅" if success else "❌"
             print(f"   {status} {dsl[:35]}... → {widget_count} widgets")
@@ -1020,7 +1042,9 @@ def test_webhook_random_dsl_cards():
     print(f"\n📊 Results: {successes}/{num_cards} sent successfully")
 
     # Be flexible - random DSL may generate structures that don't work with all API contexts
-    assert successes >= 1, f"At least one random DSL card should send successfully, got {successes}/{num_cards}"
+    assert (
+        successes >= 1
+    ), f"At least one random DSL card should send successfully, got {successes}/{num_cards}"
 
 
 @webhook
@@ -1041,7 +1065,14 @@ def test_webhook_random_nested_structures():
 
     # Filter to parents that can be rendered in a card (must be section-valid or common)
     # Include common container types: Section, DecoratedText, ButtonList, etc.
-    valid_parents = section_widgets | {"Section", "DecoratedText", "ButtonList", "ChipList", "Grid", "Columns"}
+    valid_parents = section_widgets | {
+        "Section",
+        "DecoratedText",
+        "ButtonList",
+        "ChipList",
+        "Grid",
+        "Columns",
+    }
 
     # TRULY random: Get parents that have children AND can be rendered
     parents_with_children = [
@@ -1099,7 +1130,9 @@ def test_webhook_random_nested_structures():
 
         time.sleep(0.5)
 
-    print(f"\n📊 Results: {successes}/{len(selected_structures)} nested structures sent")
+    print(
+        f"\n📊 Results: {successes}/{len(selected_structures)} nested structures sent"
+    )
     # Be flexible - some random combos may not render (e.g., ActionStatus, CardWithId require specific contexts)
     assert successes >= 1, f"At least one nested structure should send successfully"
 
@@ -1127,13 +1160,17 @@ def test_webhook_kitchen_sink_all_components():
 
     print(f"\n🍳 KITCHEN SINK TEST - All available components:")
     print(f"   Found {len(usable_widgets)} widget types that can go in Section")
-    print(f"   Widgets: {', '.join(usable_widgets[:15])}{'...' if len(usable_widgets) > 15 else ''}")
+    print(
+        f"   Widgets: {', '.join(usable_widgets[:15])}{'...' if len(usable_widgets) > 15 else ''}"
+    )
 
     # Build a massive DSL with ALL widget types we can use
     widget_parts = []
 
     # Group 1: Text widgets
-    text_widgets = [w for w in ["DecoratedText", "TextParagraph"] if w in usable_widgets]
+    text_widgets = [
+        w for w in ["DecoratedText", "TextParagraph"] if w in usable_widgets
+    ]
     for widget_name in text_widgets:
         widget_sym = symbols[widget_name]
         # Add nested children for DecoratedText
@@ -1218,7 +1255,9 @@ def test_webhook_kitchen_sink_all_components():
 
     # Count widgets in the card
     total_widgets = sum(len(s.get("widgets", [])) for s in card["sections"])
-    print(f"\n   📊 Built card with {total_widgets} total widgets across {len(card['sections'])} sections")
+    print(
+        f"\n   📊 Built card with {total_widgets} total widgets across {len(card['sections'])} sections"
+    )
 
     # Print what widget types we got
     widget_types_found = set()

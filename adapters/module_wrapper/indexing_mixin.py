@@ -649,7 +649,9 @@ class IndexingMixin:
                     # since they don't exist in the Python module
                     if is_custom:
                         json_field = payload.get("json_field", name.lower())
-                        children = payload.get("relationships", {}).get("child_classes", [])
+                        children = payload.get("relationships", {}).get(
+                            "child_classes", []
+                        )
                         obj = type(
                             name,
                             (),
@@ -658,7 +660,7 @@ class IndexingMixin:
                                 "_json_field": json_field,
                                 "_is_custom_component": True,
                                 "_children": children,
-                            }
+                            },
                         )
                     else:
                         # Try to resolve the actual object from the module

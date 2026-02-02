@@ -21,7 +21,7 @@ import httpx
 # Webhook URL from .env
 WEBHOOK_URL = os.environ.get(
     "TEST_CHAT_WEBHOOK",
-    "https://chat.googleapis.com/v1/spaces/AAQAKl_yP9Y/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Ie8-brhWHA9kE_2JiqKRDhqjadPHK4RNe15UcWwLXDA"
+    "https://chat.googleapis.com/v1/spaces/AAQAKl_yP9Y/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Ie8-brhWHA9kE_2JiqKRDhqjadPHK4RNe15UcWwLXDA",
 )
 
 
@@ -56,24 +56,30 @@ def send_card(card_payload: dict, description: str = ""):
 def test_textparagraph_html_default():
     """Test TextParagraph with HTML (default behavior)."""
     payload = {
-        "cardsV2": [{
-            "cardId": "test-html-default",
-            "card": {
-                "header": {
-                    "title": "TextParagraph: HTML (Default)",
-                    "subtitle": "textSyntax not set"
-                },
-                "sections": [{
-                    "widgets": [{
-                        "textParagraph": {
-                            "text": "<b>Bold</b>, <i>Italic</i>, <u>Underline</u><br>"
-                                    "<font color=\"#00FF00\">Green text</font>, "
-                                    "<a href=\"https://google.com\">Link</a>"
+        "cardsV2": [
+            {
+                "cardId": "test-html-default",
+                "card": {
+                    "header": {
+                        "title": "TextParagraph: HTML (Default)",
+                        "subtitle": "textSyntax not set",
+                    },
+                    "sections": [
+                        {
+                            "widgets": [
+                                {
+                                    "textParagraph": {
+                                        "text": "<b>Bold</b>, <i>Italic</i>, <u>Underline</u><br>"
+                                        '<font color="#00FF00">Green text</font>, '
+                                        '<a href="https://google.com">Link</a>'
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
+                    ],
+                },
             }
-        }]
+        ]
     }
     return send_card(payload, "TextParagraph with HTML (default)")
 
@@ -81,24 +87,30 @@ def test_textparagraph_html_default():
 def test_textparagraph_html_explicit():
     """Test TextParagraph with explicit HTML textSyntax."""
     payload = {
-        "cardsV2": [{
-            "cardId": "test-html-explicit",
-            "card": {
-                "header": {
-                    "title": "TextParagraph: HTML (Explicit)",
-                    "subtitle": "textSyntax: HTML"
-                },
-                "sections": [{
-                    "widgets": [{
-                        "textParagraph": {
-                            "text": "<b>Bold</b>, <i>Italic</i>, <strike>Strikethrough</strike><br>"
-                                    "<font color=\"#FF5733\">Orange text</font>",
-                            "textSyntax": "HTML"
+        "cardsV2": [
+            {
+                "cardId": "test-html-explicit",
+                "card": {
+                    "header": {
+                        "title": "TextParagraph: HTML (Explicit)",
+                        "subtitle": "textSyntax: HTML",
+                    },
+                    "sections": [
+                        {
+                            "widgets": [
+                                {
+                                    "textParagraph": {
+                                        "text": "<b>Bold</b>, <i>Italic</i>, <strike>Strikethrough</strike><br>"
+                                        '<font color="#FF5733">Orange text</font>',
+                                        "textSyntax": "HTML",
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
+                    ],
+                },
             }
-        }]
+        ]
     }
     return send_card(payload, "TextParagraph with explicit HTML textSyntax")
 
@@ -120,23 +132,29 @@ def test_textparagraph_markdown():
 ~~Strikethrough~~"""
 
     payload = {
-        "cardsV2": [{
-            "cardId": "test-markdown",
-            "card": {
-                "header": {
-                    "title": "TextParagraph: MARKDOWN",
-                    "subtitle": "textSyntax: MARKDOWN"
-                },
-                "sections": [{
-                    "widgets": [{
-                        "textParagraph": {
-                            "text": markdown_text,
-                            "textSyntax": "MARKDOWN"
+        "cardsV2": [
+            {
+                "cardId": "test-markdown",
+                "card": {
+                    "header": {
+                        "title": "TextParagraph: MARKDOWN",
+                        "subtitle": "textSyntax: MARKDOWN",
+                    },
+                    "sections": [
+                        {
+                            "widgets": [
+                                {
+                                    "textParagraph": {
+                                        "text": markdown_text,
+                                        "textSyntax": "MARKDOWN",
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
+                    ],
+                },
             }
-        }]
+        ]
     }
     return send_card(payload, "TextParagraph with MARKDOWN textSyntax")
 
@@ -153,23 +171,29 @@ def hello():
 Inline: `variable = 42`"""
 
     payload = {
-        "cardsV2": [{
-            "cardId": "test-markdown-code",
-            "card": {
-                "header": {
-                    "title": "TextParagraph: Markdown Code",
-                    "subtitle": "Testing code blocks"
-                },
-                "sections": [{
-                    "widgets": [{
-                        "textParagraph": {
-                            "text": markdown_text,
-                            "textSyntax": "MARKDOWN"
+        "cardsV2": [
+            {
+                "cardId": "test-markdown-code",
+                "card": {
+                    "header": {
+                        "title": "TextParagraph: Markdown Code",
+                        "subtitle": "Testing code blocks",
+                    },
+                    "sections": [
+                        {
+                            "widgets": [
+                                {
+                                    "textParagraph": {
+                                        "text": markdown_text,
+                                        "textSyntax": "MARKDOWN",
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
+                    ],
+                },
             }
-        }]
+        ]
     }
     return send_card(payload, "TextParagraph with markdown code blocks")
 
@@ -186,23 +210,24 @@ Line 7: Also hidden.
 Line 8: Also hidden."""
 
     payload = {
-        "cardsV2": [{
-            "cardId": "test-maxlines",
-            "card": {
-                "header": {
-                    "title": "TextParagraph: maxLines",
-                    "subtitle": "maxLines: 3"
-                },
-                "sections": [{
-                    "widgets": [{
-                        "textParagraph": {
-                            "text": long_text,
-                            "maxLines": 3
+        "cardsV2": [
+            {
+                "cardId": "test-maxlines",
+                "card": {
+                    "header": {
+                        "title": "TextParagraph: maxLines",
+                        "subtitle": "maxLines: 3",
+                    },
+                    "sections": [
+                        {
+                            "widgets": [
+                                {"textParagraph": {"text": long_text, "maxLines": 3}}
+                            ]
                         }
-                    }]
-                }]
+                    ],
+                },
             }
-        }]
+        ]
     }
     return send_card(payload, "TextParagraph with maxLines=3")
 
@@ -210,63 +235,74 @@ Line 8: Also hidden."""
 def test_decorated_text_with_text():
     """Test DecoratedText with text parameter (uses TextParagraph internally)."""
     payload = {
-        "cardsV2": [{
-            "cardId": "test-decorated-text",
-            "card": {
-                "header": {
-                    "title": "DecoratedText with text",
-                    "subtitle": "Testing text parameter"
-                },
-                "sections": [{
-                    "widgets": [{
-                        "decoratedText": {
-                            "topLabel": "Status",
-                            "text": "<b>Online</b> - <font color=\"#00FF00\">All systems operational</font>",
-                            "bottomLabel": "Updated 5 minutes ago",
-                            "startIcon": {
-                                "knownIcon": "STAR"
-                            }
+        "cardsV2": [
+            {
+                "cardId": "test-decorated-text",
+                "card": {
+                    "header": {
+                        "title": "DecoratedText with text",
+                        "subtitle": "Testing text parameter",
+                    },
+                    "sections": [
+                        {
+                            "widgets": [
+                                {
+                                    "decoratedText": {
+                                        "topLabel": "Status",
+                                        "text": '<b>Online</b> - <font color="#00FF00">All systems operational</font>',
+                                        "bottomLabel": "Updated 5 minutes ago",
+                                        "startIcon": {"knownIcon": "STAR"},
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
+                    ],
+                },
             }
-        }]
+        ]
     }
     return send_card(payload, "DecoratedText with HTML in text parameter")
 
 
 def test_decorated_text_wrap_text():
     """Test DecoratedText with wrapText for long content."""
-    long_text = "This is a very long text that should wrap across multiple lines when wrapText is enabled. " * 3
+    long_text = (
+        "This is a very long text that should wrap across multiple lines when wrapText is enabled. "
+        * 3
+    )
 
     payload = {
-        "cardsV2": [{
-            "cardId": "test-decorated-wrap",
-            "card": {
-                "header": {
-                    "title": "DecoratedText: wrapText",
-                    "subtitle": "Testing text wrapping"
-                },
-                "sections": [{
-                    "widgets": [
+        "cardsV2": [
+            {
+                "cardId": "test-decorated-wrap",
+                "card": {
+                    "header": {
+                        "title": "DecoratedText: wrapText",
+                        "subtitle": "Testing text wrapping",
+                    },
+                    "sections": [
                         {
-                            "decoratedText": {
-                                "topLabel": "Without wrapText",
-                                "text": long_text,
-                                "wrapText": False
-                            }
-                        },
-                        {
-                            "decoratedText": {
-                                "topLabel": "With wrapText=true",
-                                "text": long_text,
-                                "wrapText": True
-                            }
+                            "widgets": [
+                                {
+                                    "decoratedText": {
+                                        "topLabel": "Without wrapText",
+                                        "text": long_text,
+                                        "wrapText": False,
+                                    }
+                                },
+                                {
+                                    "decoratedText": {
+                                        "topLabel": "With wrapText=true",
+                                        "text": long_text,
+                                        "wrapText": True,
+                                    }
+                                },
+                            ]
                         }
-                    ]
-                }]
+                    ],
+                },
             }
-        }]
+        ]
     }
     return send_card(payload, "DecoratedText with wrapText comparison")
 
@@ -275,24 +311,30 @@ def test_markdown_in_decorated_text():
     """Test if DecoratedText text parameter supports markdown syntax."""
     # Note: DecoratedText may not support textSyntax - this tests if markdown works anyway
     payload = {
-        "cardsV2": [{
-            "cardId": "test-decorated-md",
-            "card": {
-                "header": {
-                    "title": "DecoratedText: Markdown Test",
-                    "subtitle": "Does text support markdown?"
-                },
-                "sections": [{
-                    "widgets": [{
-                        "decoratedText": {
-                            "topLabel": "Markdown in text",
-                            "text": "**Bold** and *italic* and `code`",
-                            "bottomLabel": "Raw markdown syntax"
+        "cardsV2": [
+            {
+                "cardId": "test-decorated-md",
+                "card": {
+                    "header": {
+                        "title": "DecoratedText: Markdown Test",
+                        "subtitle": "Does text support markdown?",
+                    },
+                    "sections": [
+                        {
+                            "widgets": [
+                                {
+                                    "decoratedText": {
+                                        "topLabel": "Markdown in text",
+                                        "text": "**Bold** and *italic* and `code`",
+                                        "bottomLabel": "Raw markdown syntax",
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
+                    ],
+                },
             }
-        }]
+        ]
     }
     return send_card(payload, "DecoratedText with raw markdown (may not render)")
 
@@ -305,23 +347,29 @@ def test_textparagraph_markdown_tables():
 | Cell 3   | Cell 4   |"""
 
     payload = {
-        "cardsV2": [{
-            "cardId": "test-markdown-table",
-            "card": {
-                "header": {
-                    "title": "TextParagraph: Markdown Table",
-                    "subtitle": "Testing table support"
-                },
-                "sections": [{
-                    "widgets": [{
-                        "textParagraph": {
-                            "text": markdown_text,
-                            "textSyntax": "MARKDOWN"
+        "cardsV2": [
+            {
+                "cardId": "test-markdown-table",
+                "card": {
+                    "header": {
+                        "title": "TextParagraph: Markdown Table",
+                        "subtitle": "Testing table support",
+                    },
+                    "sections": [
+                        {
+                            "widgets": [
+                                {
+                                    "textParagraph": {
+                                        "text": markdown_text,
+                                        "textSyntax": "MARKDOWN",
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
+                    ],
+                },
             }
-        }]
+        ]
     }
     return send_card(payload, "TextParagraph with markdown table")
 
@@ -329,39 +377,49 @@ def test_textparagraph_markdown_tables():
 def test_textparagraph_mixed_section():
     """Test a section with both TextParagraph and DecoratedText."""
     payload = {
-        "cardsV2": [{
-            "cardId": "test-mixed",
-            "card": {
-                "header": {
-                    "title": "Mixed Widgets Test",
-                    "subtitle": "TextParagraph + DecoratedText"
+        "cardsV2": [
+            {
+                "cardId": "test-mixed",
+                "card": {
+                    "header": {
+                        "title": "Mixed Widgets Test",
+                        "subtitle": "TextParagraph + DecoratedText",
+                    },
+                    "sections": [
+                        {
+                            "header": "Markdown Section",
+                            "widgets": [
+                                {
+                                    "textParagraph": {
+                                        "text": "**Status Report**\n\n- Server: *Online*\n- Database: *Connected*",
+                                        "textSyntax": "MARKDOWN",
+                                    }
+                                }
+                            ],
+                        },
+                        {
+                            "header": "Details Section",
+                            "widgets": [
+                                {
+                                    "decoratedText": {
+                                        "topLabel": "CPU Usage",
+                                        "text": '<font color="#00FF00">23%</font>',
+                                        "startIcon": {"knownIcon": "CLOCK"},
+                                    }
+                                },
+                                {
+                                    "decoratedText": {
+                                        "topLabel": "Memory",
+                                        "text": '<font color="#FFA500">67%</font>',
+                                        "startIcon": {"knownIcon": "BOOKMARK"},
+                                    }
+                                },
+                            ],
+                        },
+                    ],
                 },
-                "sections": [{
-                    "header": "Markdown Section",
-                    "widgets": [{
-                        "textParagraph": {
-                            "text": "**Status Report**\n\n- Server: *Online*\n- Database: *Connected*",
-                            "textSyntax": "MARKDOWN"
-                        }
-                    }]
-                }, {
-                    "header": "Details Section",
-                    "widgets": [{
-                        "decoratedText": {
-                            "topLabel": "CPU Usage",
-                            "text": "<font color=\"#00FF00\">23%</font>",
-                            "startIcon": {"knownIcon": "CLOCK"}
-                        }
-                    }, {
-                        "decoratedText": {
-                            "topLabel": "Memory",
-                            "text": "<font color=\"#FFA500\">67%</font>",
-                            "startIcon": {"knownIcon": "BOOKMARK"}
-                        }
-                    }]
-                }]
             }
-        }]
+        ]
     }
     return send_card(payload, "Mixed TextParagraph and DecoratedText")
 

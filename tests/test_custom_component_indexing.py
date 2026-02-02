@@ -7,9 +7,9 @@ are properly indexed to Qdrant with symbols, relationships, and searchable embed
 The implementation is generic and works with any ModuleWrapper, not just card_framework.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 # Patch the qdrant import at module level for all tests
 QDRANT_IMPORT_PATH = "adapters.module_wrapper.qdrant_mixin._get_qdrant_imports"
@@ -36,7 +36,9 @@ class TestCustomComponentIndexing:
 
         # Mock embedding generation - return fresh embedding for each call
         mock_embedding = [0.1] * 384  # Typical embedding dimension
-        mock_embedder.embed.side_effect = lambda texts: iter([mock_embedding for _ in texts])
+        mock_embedder.embed.side_effect = lambda texts: iter(
+            [mock_embedding for _ in texts]
+        )
 
         mixin.client = mock_client
         mixin.embedder = mock_embedder
@@ -81,7 +83,9 @@ class TestCustomComponentIndexing:
 
         mock_client = MagicMock()
         mock_embedder = MagicMock()
-        mock_embedder.embed.side_effect = lambda texts: iter([[0.1] * 384 for _ in texts])
+        mock_embedder.embed.side_effect = lambda texts: iter(
+            [[0.1] * 384 for _ in texts]
+        )
 
         mixin.client = mock_client
         mixin.embedder = mock_embedder
@@ -114,7 +118,9 @@ class TestCustomComponentIndexing:
 
         mock_client = MagicMock()
         mock_embedder = MagicMock()
-        mock_embedder.embed.side_effect = lambda texts: iter([[0.1] * 384 for _ in texts])
+        mock_embedder.embed.side_effect = lambda texts: iter(
+            [[0.1] * 384 for _ in texts]
+        )
 
         mixin.client = mock_client
         mixin.embedder = mock_embedder
@@ -166,7 +172,9 @@ class TestCustomComponentIndexing:
 
         mock_client = MagicMock()
         mock_embedder = MagicMock()
-        mock_embedder.embed.side_effect = lambda texts: iter([[0.1] * 384 for _ in texts])
+        mock_embedder.embed.side_effect = lambda texts: iter(
+            [[0.1] * 384 for _ in texts]
+        )
 
         mixin.client = mock_client
         mixin.embedder = mock_embedder
@@ -184,8 +192,7 @@ class TestCustomComponentIndexing:
         with patch(QDRANT_IMPORT_PATH) as mock_imports:
             mock_imports.return_value = (None, {"PointStruct": MockPointStruct})
             mixin.index_custom_components(
-                custom_components,
-                module_name="custom_api_module"
+                custom_components, module_name="custom_api_module"
             )
 
         # Verify custom module name is used
@@ -206,7 +213,9 @@ class TestCustomComponentIndexing:
 
         mock_client = MagicMock()
         mock_embedder = MagicMock()
-        mock_embedder.embed.side_effect = lambda texts: iter([[0.1] * 384 for _ in texts])
+        mock_embedder.embed.side_effect = lambda texts: iter(
+            [[0.1] * 384 for _ in texts]
+        )
 
         mixin.client = mock_client
         mixin.embedder = mock_embedder
@@ -229,7 +238,7 @@ class TestCustomComponentIndexing:
                 custom_payload_fields={
                     "api_version": "v2",
                     "category": "widgets",
-                }
+                },
             )
 
         # Verify custom fields are in all payloads
@@ -251,7 +260,9 @@ class TestCustomComponentIndexing:
 
         mock_client = MagicMock()
         mock_embedder = MagicMock()
-        mock_embedder.embed.side_effect = lambda texts: iter([[0.1] * 384 for _ in texts])
+        mock_embedder.embed.side_effect = lambda texts: iter(
+            [[0.1] * 384 for _ in texts]
+        )
 
         mixin.client = mock_client
         mixin.embedder = mock_embedder
@@ -293,7 +304,9 @@ class TestCustomComponentIndexing:
 
         mock_client = MagicMock()
         mock_embedder = MagicMock()
-        mock_embedder.embed.side_effect = lambda texts: iter([[0.1] * 384 for _ in texts])
+        mock_embedder.embed.side_effect = lambda texts: iter(
+            [[0.1] * 384 for _ in texts]
+        )
 
         mixin.client = mock_client
         mixin.embedder = mock_embedder
@@ -310,10 +323,7 @@ class TestCustomComponentIndexing:
 
         with patch(QDRANT_IMPORT_PATH) as mock_imports:
             mock_imports.return_value = (None, {"PointStruct": MockPointStruct})
-            mixin.index_custom_components(
-                custom_components,
-                generate_symbols=False
-            )
+            mixin.index_custom_components(custom_components, generate_symbols=False)
 
         # Verify no symbol in payload
         assert len(captured_payloads) == 1
@@ -326,7 +336,10 @@ class TestCustomComponentQdrantIntegration:
     @pytest.fixture
     def wrapper(self):
         """Get the singleton wrapper with fresh state."""
-        from gchat.card_framework_wrapper import reset_wrapper, get_card_framework_wrapper
+        from gchat.card_framework_wrapper import (
+            get_card_framework_wrapper,
+            reset_wrapper,
+        )
 
         reset_wrapper()
         return get_card_framework_wrapper()
@@ -346,9 +359,7 @@ class TestCustomComponentQdrantIntegration:
 
         # Should find Carousel or CarouselCard
         names = [r.get("name") for r in results]
-        carousel_found = any(
-            "Carousel" in name for name in names if name
-        )
+        carousel_found = any("Carousel" in name for name in names if name)
 
         # If no results from DSL search, try regular search
         if not carousel_found:
@@ -362,8 +373,7 @@ class TestCustomComponentQdrantIntegration:
             carousel_found = "Carousel" in names2 or "CarouselCard" in names2
 
         assert carousel_found, (
-            f"Carousel not found via search. "
-            f"DSL search names: {names}"
+            f"Carousel not found via search. " f"DSL search names: {names}"
         )
 
     def test_custom_components_in_v7_hybrid_search(self, wrapper):
@@ -383,9 +393,9 @@ class TestCustomComponentQdrantIntegration:
 
         # Custom components should be indexed and searchable
         # May not always return Carousel directly, but should have valid results
-        assert len(class_results) > 0 or len(patterns) > 0, (
-            "V7 hybrid search returned no results"
-        )
+        assert (
+            len(class_results) > 0 or len(patterns) > 0
+        ), "V7 hybrid search returned no results"
 
         # Log what was found for debugging
         if class_names:

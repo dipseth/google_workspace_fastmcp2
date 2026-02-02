@@ -146,7 +146,9 @@ def test_style_application_methods():
     print(f"\n  Input params: {params4}")
     print(f"  Style metadata: {style_metadata4}")
     print(f"  Result: {result4}")
-    assert result4["text"] == "Random text here", "Should not apply style without matching keywords"
+    assert (
+        result4["text"] == "Random text here"
+    ), "Should not apply style without matching keywords"
     print("  PASSED: Did NOT apply style when no keywords match")
 
     # Info styling as fallback
@@ -198,7 +200,9 @@ def test_build_from_pattern_with_style():
 
     print(f"\nPattern from Qdrant:")
     print(f"  component_paths: {pattern['component_paths']}")
-    print(f"  instance_params.style_metadata: {pattern['instance_params']['style_metadata']}")
+    print(
+        f"  instance_params.style_metadata: {pattern['instance_params']['style_metadata']}"
+    )
 
     print(f"\nNew card_params (should get auto-styled):")
     print(f"  {json.dumps(card_params, indent=2)}")
@@ -266,7 +270,9 @@ def test_full_flow_store_and_retrieve():
 
     print(f"\n[Step 1] Original styled card:")
     print(f"  Description: {original_description}")
-    print(f"  Extracted style_metadata: {json.dumps(original_style_metadata, indent=2)}")
+    print(
+        f"  Extracted style_metadata: {json.dumps(original_style_metadata, indent=2)}"
+    )
 
     # Step 2: Store pattern in Qdrant (simulating what _store_card_pattern_sync does)
     feedback_loop = get_feedback_loop()
@@ -312,6 +318,7 @@ def test_full_flow_store_and_retrieve():
 
     # Give Qdrant a moment to index
     import time
+
     time.sleep(0.5)
 
     # Step 3: Search for similar pattern (simulating what SmartCardBuilder does)
@@ -336,13 +343,19 @@ def test_full_flow_store_and_retrieve():
             if content_patterns:
                 best_pattern = content_patterns[0]
                 print(f"  Best match score: {best_pattern.get('score', 'N/A')}")
-                print(f"  Best match card_description: {best_pattern.get('card_description', 'N/A')[:50]}...")
+                print(
+                    f"  Best match card_description: {best_pattern.get('card_description', 'N/A')[:50]}..."
+                )
 
                 # Check if style_metadata is in the retrieved pattern
                 retrieved_instance_params = best_pattern.get("instance_params", {})
-                retrieved_style_metadata = retrieved_instance_params.get("style_metadata", {})
+                retrieved_style_metadata = retrieved_instance_params.get(
+                    "style_metadata", {}
+                )
 
-                print(f"  Retrieved style_metadata: {json.dumps(retrieved_style_metadata, indent=2)}")
+                print(
+                    f"  Retrieved style_metadata: {json.dumps(retrieved_style_metadata, indent=2)}"
+                )
 
                 if retrieved_style_metadata:
                     print("  SUCCESS: Style metadata was retrieved from Qdrant!")
@@ -367,7 +380,9 @@ def test_full_flow_store_and_retrieve():
                 }
 
                 print(f"  New card_params: {new_card_params}")
-                print(f"  Pattern instance_params.style_metadata: {retrieved_style_metadata}")
+                print(
+                    f"  Pattern instance_params.style_metadata: {retrieved_style_metadata}"
+                )
 
                 card = builder._build_from_pattern(pattern_for_build, new_card_params)
 
@@ -381,6 +396,7 @@ def test_full_flow_store_and_retrieve():
     except Exception as e:
         print(f"  Error during search: {e}")
         import traceback
+
         traceback.print_exc()
 
     # Cleanup: Remove test pattern
@@ -413,8 +429,8 @@ def test_dag_generated_styled_pattern():
     print("=" * 60)
 
     try:
-        from gchat.testing.dag_structure_generator import DAGStructureGenerator
         from gchat.card_builder import SmartCardBuilderV2, extract_style_metadata
+        from gchat.testing.dag_structure_generator import DAGStructureGenerator
 
         # Generate a random valid structure
         gen = DAGStructureGenerator()
@@ -434,7 +450,11 @@ def test_dag_generated_styled_pattern():
 
         # Build pattern as it would be stored in Qdrant
         pattern = {
-            "component_paths": structure.components if structure.components else ["Section", "DecoratedText"],
+            "component_paths": (
+                structure.components
+                if structure.components
+                else ["Section", "DecoratedText"]
+            ),
             "instance_params": {
                 "title": "Health Check",
                 "description": styled_text,
@@ -490,6 +510,7 @@ def test_dag_generated_styled_pattern():
     except Exception as e:
         print(f"  Error: {e}")
         import traceback
+
         traceback.print_exc()
 
     print("\n" + "=" * 60)

@@ -21,8 +21,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
-    from adapters.module_wrapper import ModuleWrapper
     from fastmcp import FastMCP
+
+    from adapters.module_wrapper import ModuleWrapper
 
 logger = logging.getLogger(__name__)
 

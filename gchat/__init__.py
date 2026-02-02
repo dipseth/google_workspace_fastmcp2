@@ -10,32 +10,32 @@ logger = setup_logger()
 
 # Material Icons - complete set of valid Google Material Design icon names
 from gchat.material_icons import (
-    MATERIAL_ICONS,
-    is_valid_icon,
-    get_icons_by_prefix,
-    get_icons_containing,
-    ARROW_ICONS,
-    KEYBOARD_ICONS,
-    CHECK_ICONS,
     ADD_ICONS,
-    REMOVE_ICONS,
-    EDIT_ICONS,
+    ARROW_ICONS,
+    CHECK_ICONS,
     DELETE_ICONS,
-    STAR_ICONS,
-    SETTINGS_ICONS,
-    # Semantic mappings
-    SEMANTIC_ICONS,
-    get_semantic_icon,
-    # Utilities
-    suggest_icons,
-    create_material_icon,
-    create_icon_widget,
+    EDIT_ICONS,
     # Color utilities
     ICON_COLORS,
-    hex_to_color,
-    get_icon_color,
+    KEYBOARD_ICONS,
+    MATERIAL_ICONS,
+    REMOVE_ICONS,
+    # Semantic mappings
+    SEMANTIC_ICONS,
+    SETTINGS_ICONS,
+    STAR_ICONS,
     create_icon_button,
     create_icon_button_list,
+    create_icon_widget,
+    create_material_icon,
+    get_icon_color,
+    get_icons_by_prefix,
+    get_icons_containing,
+    get_semantic_icon,
+    hex_to_color,
+    is_valid_icon,
+    # Utilities
+    suggest_icons,
 )
 
 # Main exports - lazy imports to avoid circular dependencies

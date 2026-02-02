@@ -343,7 +343,7 @@ class ParameterVariator:
             lambda v: v.title(),
             lambda v: f"[{v}]",
             lambda v: f"• {v}",
-            lambda v: v[:len(v) // 2] + "..." if len(v) > 10 else v,
+            lambda v: v[: len(v) // 2] + "..." if len(v) > 10 else v,
         ]
 
         return random.choice(variations)(value)
@@ -504,7 +504,9 @@ class InstancePatternMixin:
         if max_patterns is not None:
             self._pattern_config["max_patterns"] = max_patterns
         if default_structure_variations is not None:
-            self._pattern_config["default_structure_variations"] = default_structure_variations
+            self._pattern_config["default_structure_variations"] = (
+                default_structure_variations
+            )
         if default_param_variations is not None:
             self._pattern_config["default_param_variations"] = default_param_variations
         if required_components is not None:
@@ -533,10 +535,14 @@ class InstancePatternMixin:
 
     def _generate_pattern_id(self, pattern: InstancePattern) -> str:
         """Generate a unique pattern ID."""
-        content = f"{pattern.component_paths}{pattern.instance_params}{pattern.description}"
+        content = (
+            f"{pattern.component_paths}{pattern.instance_params}{pattern.description}"
+        )
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
-    def _build_pattern_dsl(self, component_paths: ComponentPaths) -> Optional[DSLNotation]:
+    def _build_pattern_dsl(
+        self, component_paths: ComponentPaths
+    ) -> Optional[DSLNotation]:
         """Build DSL notation for a pattern."""
         if hasattr(self, "build_dsl_from_paths"):
             try:
@@ -736,7 +742,9 @@ class InstancePatternMixin:
         for struct_idx, struct_paths in enumerate(all_structures):
             # Generate param variations
             if struct_idx == 0:
-                param_sets = [pattern.instance_params] + param_variator.generate_variations(
+                param_sets = [
+                    pattern.instance_params
+                ] + param_variator.generate_variations(
                     pattern.instance_params, num_param - 1
                 )
             else:
@@ -746,8 +754,9 @@ class InstancePatternMixin:
 
             for param_idx, params in enumerate(param_sets):
                 var_type = (
-                    "original" if struct_idx == 0 and param_idx == 0 else
-                    "structure" if struct_idx > 0 else "parameter"
+                    "original"
+                    if struct_idx == 0 and param_idx == 0
+                    else "structure" if struct_idx > 0 else "parameter"
                 )
 
                 variation = PatternVariation(
@@ -822,7 +831,9 @@ class InstancePatternMixin:
             return None
 
         if variation_type:
-            matching = [v for v in family.variations if v.variation_type == variation_type]
+            matching = [
+                v for v in family.variations if v.variation_type == variation_type
+            ]
             return random.choice(matching) if matching else None
 
         return random.choice(family.variations) if family.variations else None
@@ -848,7 +859,9 @@ class InstancePatternMixin:
 
         # Get from cache
         if hasattr(self, "get_cached_entry"):
-            entry = self.get_cached_entry(variation.cache_key, variation.component_paths)
+            entry = self.get_cached_entry(
+                variation.cache_key, variation.component_paths
+            )
             if entry:
                 return {
                     "key": entry.key,

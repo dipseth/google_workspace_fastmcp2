@@ -4,7 +4,6 @@ Component registries for modular feedback widget assembly.
 
 from typing import List
 
-
 # =============================================================================
 # MODULAR FEEDBACK COMPONENT REGISTRY
 # =============================================================================
@@ -48,17 +47,17 @@ LAYOUT_WRAPPERS: List[str] = [
 # Button type styles (Google Chat Card v2)
 # https://developers.google.com/workspace/chat/api/reference/rest/v1/cards#type_1
 BUTTON_TYPES: List[str] = [
-    "OUTLINED",      # Medium-emphasis, default styling
-    "FILLED",        # High-emphasis, solid color container
+    "OUTLINED",  # Medium-emphasis, default styling
+    "FILLED",  # High-emphasis, solid color container
     "FILLED_TONAL",  # Middle ground between filled and outlined
-    "BORDERLESS",    # Low-emphasis, no visible container (most compact)
+    "BORDERLESS",  # Low-emphasis, no visible container (most compact)
 ]
 
 # Section styles for feedback area
 SECTION_STYLES: List[str] = [
-    "normal",           # Standard section (current behavior)
-    "collapsible_0",    # Collapsible, 0 widgets visible by default (most compact)
-    "collapsible_1",    # Collapsible, 1 widget visible by default
+    "normal",  # Standard section (current behavior)
+    "collapsible_0",  # Collapsible, 0 widgets visible by default (most compact)
+    "collapsible_1",  # Collapsible, 1 widget visible by default
 ]
 
 

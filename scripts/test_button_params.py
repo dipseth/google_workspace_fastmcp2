@@ -24,14 +24,14 @@ from gchat.card_framework_wrapper import get_card_framework_wrapper
 
 WEBHOOK_URL = os.environ.get(
     "TEST_CHAT_WEBHOOK",
-    "https://chat.googleapis.com/v1/spaces/AAQAKl_yP9Y/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Ie8-brhWHA9kE_2JiqKRDhqjadPHK4RNe15UcWwLXDA"
+    "https://chat.googleapis.com/v1/spaces/AAQAKl_yP9Y/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Ie8-brhWHA9kE_2JiqKRDhqjadPHK4RNe15UcWwLXDA",
 )
 
 
 def snake_to_camel(s: str) -> str:
     """Convert snake_case to camelCase."""
-    components = s.split('_')
-    return components[0] + ''.join(x.title() for x in components[1:])
+    components = s.split("_")
+    return components[0] + "".join(x.title() for x in components[1:])
 
 
 def convert_keys_to_camel(obj):
@@ -62,8 +62,8 @@ class WrappedComponents:
 
         # Search for the component
         results = self.wrapper.search(name, limit=1)
-        if results and results[0].get('component'):
-            cls = results[0]['component']
+        if results and results[0].get("component"):
+            cls = results[0]["component"]
             self._cache[name] = cls
             return cls
 
@@ -83,76 +83,77 @@ class WrappedComponents:
 
     @property
     def Button(self):
-        return self.get('Button')
+        return self.get("Button")
 
     @property
     def ButtonList(self):
-        return self.get('ButtonList')
+        return self.get("ButtonList")
 
     @property
     def Icon(self):
-        return self.get('Icon')
+        return self.get("Icon")
 
     @property
     def Color(self):
-        return self.get('Color')
+        return self.get("Color")
 
     @property
     def OnClick(self):
-        return self.get('OnClick')
+        return self.get("OnClick")
 
     @property
     def OpenLink(self):
-        return self.get('OpenLink')
+        return self.get("OpenLink")
 
     @property
     def TextParagraph(self):
-        return self.get('TextParagraph')
+        return self.get("TextParagraph")
 
     @property
     def DecoratedText(self):
-        return self.get('DecoratedText')
+        return self.get("DecoratedText")
 
     @property
     def Section(self):
-        return self.get('Section')
+        return self.get("Section")
 
     @property
     def Card(self):
-        return self.get('Card')
+        return self.get("Card")
 
     @property
     def CardHeader(self):
-        return self.get('CardHeader')
+        return self.get("CardHeader")
 
     @property
     def Message(self):
-        return self.get('Message')
+        return self.get("Message")
 
     @property
     def CardWithId(self):
         """CardWithId is in card_framework.v2.card module."""
-        if 'CardWithId' not in self._cache:
+        if "CardWithId" not in self._cache:
             from card_framework.v2.card import CardWithId
-            self._cache['CardWithId'] = CardWithId
-        return self._cache['CardWithId']
+
+            self._cache["CardWithId"] = CardWithId
+        return self._cache["CardWithId"]
 
     # Custom components (registered via wrapper)
     @property
     def Carousel(self):
-        return self.get('Carousel')
+        return self.get("Carousel")
 
     @property
     def CarouselCard(self):
-        return self.get('CarouselCard')
+        return self.get("CarouselCard")
 
     @property
     def NestedWidget(self):
-        return self.get('NestedWidget')
+        return self.get("NestedWidget")
 
     def get_symbol(self, name: str) -> str:
         """Get the DSL symbol for a component."""
-        return self.wrapper.symbol_mapping.get(name, '')
+        return self.wrapper.symbol_mapping.get(name, "")
 
 
 # Global instance
@@ -283,7 +284,9 @@ def test_button_colors():
     ]
 
     card = CardWithId(
-        header=CardHeader(title="Button Colors (Wrapped)", subtitle="RGB via ModuleWrapper"),
+        header=CardHeader(
+            title="Button Colors (Wrapped)", subtitle="RGB via ModuleWrapper"
+        ),
         sections=[Section(widgets=[ButtonList(buttons=buttons)])],
         _CardWithId__card_id="button-colors-wrapped",
     )
@@ -366,7 +369,9 @@ def test_button_states():
     ]
 
     card = CardWithId(
-        header=CardHeader(title="Button States (Wrapped)", subtitle="Via ModuleWrapper"),
+        header=CardHeader(
+            title="Button States (Wrapped)", subtitle="Via ModuleWrapper"
+        ),
         sections=[Section(widgets=[ButtonList(buttons=buttons)])],
         _CardWithId__card_id="button-states-wrapped",
     )
@@ -401,18 +406,23 @@ def test_full_button():
     )
 
     # Show DSL symbols for components used
-    symbols_text = f"Symbols: Button={c.get_symbol('Button')}, Icon={c.get_symbol('Icon')}"
+    symbols_text = (
+        f"Symbols: Button={c.get_symbol('Button')}, Icon={c.get_symbol('Icon')}"
+    )
 
     card = CardWithId(
         header=CardHeader(
-            title="Full Button (Wrapped)",
-            subtitle="All params via ModuleWrapper"
+            title="Full Button (Wrapped)", subtitle="All params via ModuleWrapper"
         ),
         sections=[
-            Section(widgets=[
-                TextParagraph(text=f"<b>Button with all parameters:</b><br>{symbols_text}"),
-                ButtonList(buttons=[btn]),
-            ])
+            Section(
+                widgets=[
+                    TextParagraph(
+                        text=f"<b>Button with all parameters:</b><br>{symbols_text}"
+                    ),
+                    ButtonList(buttons=[btn]),
+                ]
+            )
         ],
         _CardWithId__card_id="button-full-wrapped",
     )
@@ -430,7 +440,7 @@ def test_wrapped_component_info():
     print("WRAPPED COMPONENT INFO")
     print("=" * 60)
 
-    components_to_check = ['Button', 'Icon', 'Color', 'OnClick', 'Section', 'Card']
+    components_to_check = ["Button", "Icon", "Color", "OnClick", "Section", "Card"]
 
     for name in components_to_check:
         cls = c.get(name)
@@ -439,7 +449,7 @@ def test_wrapped_component_info():
 
     # Check custom components
     print("\nCustom Components (Google Chat API only):")
-    custom = ['Carousel', 'CarouselCard', 'NestedWidget']
+    custom = ["Carousel", "CarouselCard", "NestedWidget"]
     for name in custom:
         symbol = c.get_symbol(name)
         # Custom components are registered but may not have Python classes

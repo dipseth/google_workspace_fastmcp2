@@ -20,14 +20,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 WEBHOOK_URL = os.environ.get(
     "TEST_CHAT_WEBHOOK",
-    "https://chat.googleapis.com/v1/spaces/AAQAKl_yP9Y/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Ie8-brhWHA9kE_2JiqKRDhqjadPHK4RNe15UcWwLXDA"
+    "https://chat.googleapis.com/v1/spaces/AAQAKl_yP9Y/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Ie8-brhWHA9kE_2JiqKRDhqjadPHK4RNe15UcWwLXDA",
 )
 
 
 def snake_to_camel(s: str) -> str:
     """Convert snake_case to camelCase."""
-    components = s.split('_')
-    return components[0] + ''.join(x.title() for x in components[1:])
+    components = s.split("_")
+    return components[0] + "".join(x.title() for x in components[1:])
 
 
 def convert_keys_to_camel(obj):
@@ -78,7 +78,13 @@ def demo_cache_performance():
 
     # Time first access (cache miss - needs resolution)
     print("\n1️⃣  First access (cold cache)...")
-    components_to_test = ["Section", "DecoratedText", "ButtonList", "Button", "TextParagraph"]
+    components_to_test = [
+        "Section",
+        "DecoratedText",
+        "ButtonList",
+        "Button",
+        "TextParagraph",
+    ]
 
     cold_times = []
     for name in components_to_test:
@@ -118,18 +124,19 @@ def demo_cache_performance():
         "cold_avg_ms": avg_cold,
         "warm_avg_ms": avg_warm,
         "speedup": speedup,
-        "hit_rate": stats['hit_rate'],
+        "hit_rate": stats["hit_rate"],
     }
 
 
 def demo_build_card_from_cache():
     """Build a card using only cached components."""
-    from gchat.card_framework_wrapper import get_card_framework_wrapper
-    from card_framework.v2.card import CardWithId
+    from card_framework.v2.card import CardHeader, CardWithId
     from card_framework.v2.message import Message
+
     # Direct imports for components with complex paths
     from card_framework.v2.widgets.on_click import OnClick, OpenLink
-    from card_framework.v2.card import CardHeader
+
+    from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     print("\n" + "=" * 60)
     print("BUILD CARD FROM CACHED COMPONENTS")
@@ -162,7 +169,7 @@ def demo_build_card_from_cache():
 
     # Build widgets
     status_widget = DecoratedText(
-        text="<font color=\"#00C853\">● Online</font>",
+        text='<font color="#00C853">● Online</font>',
         top_label="System Status",
         wrap_text=True,
     )
@@ -178,16 +185,18 @@ def demo_build_card_from_cache():
     )
 
     # Buttons
-    buttons = ButtonList(buttons=[
-        Button(
-            text="View Docs",
-            on_click=OnClick(open_link=OpenLink(url="https://github.com")),
-        ),
-        Button(
-            text="Refresh",
-            on_click=OnClick(open_link=OpenLink(url="https://google.com")),
-        ),
-    ])
+    buttons = ButtonList(
+        buttons=[
+            Button(
+                text="View Docs",
+                on_click=OnClick(open_link=OpenLink(url="https://github.com")),
+            ),
+            Button(
+                text="Refresh",
+                on_click=OnClick(open_link=OpenLink(url="https://google.com")),
+            ),
+        ]
+    )
 
     # Build card
     card = CardWithId(
@@ -197,7 +206,9 @@ def demo_build_card_from_cache():
         ),
         sections=[
             Section(header="Status", widgets=[status_widget]),
-            Section(header="Cache Metrics", widgets=[cache_stats_widget, hit_rate_widget]),
+            Section(
+                header="Cache Metrics", widgets=[cache_stats_widget, hit_rate_widget]
+            ),
             Section(widgets=[buttons]),
         ],
         _CardWithId__card_id="cache-demo-card",
@@ -209,17 +220,20 @@ def demo_build_card_from_cache():
     rendered = message.render()
     payload = convert_keys_to_camel(rendered)
 
-    print(f"   Built card with {len(payload['cardsV2'][0]['card']['sections'])} sections")
+    print(
+        f"   Built card with {len(payload['cardsV2'][0]['card']['sections'])} sections"
+    )
 
     return payload
 
 
 def demo_pattern_caching():
     """Demonstrate pattern caching via FeedbackLoop."""
-    from gchat.feedback_loop import get_feedback_loop
-    from gchat.card_framework_wrapper import get_card_framework_wrapper
     from card_framework.v2.card import CardHeader
     from card_framework.v2.widgets.text_paragraph import TextParagraph
+
+    from gchat.card_framework_wrapper import get_card_framework_wrapper
+    from gchat.feedback_loop import get_feedback_loop
 
     print("\n" + "=" * 60)
     print("PATTERN CACHING VIA FEEDBACKLOOP")
@@ -259,7 +273,9 @@ def demo_pattern_caching():
         print(f"   Retrieved: {cached['key']}")
         print(f"   From cache: {cached.get('_from_cache', False)}")
         print(f"   Components: {cached['component_paths']}")
-        print(f"   Classes available: {list(cached.get('component_classes', {}).keys())}")
+        print(
+            f"   Classes available: {list(cached.get('component_classes', {}).keys())}"
+        )
 
         # Build a card showing the cached info
         card = CardWithId(
@@ -268,17 +284,26 @@ def demo_pattern_caching():
                 subtitle="Cached via FeedbackLoop",
             ),
             sections=[
-                Section(widgets=[
-                    TextParagraph(text=f"<b>Key:</b> {cached['key']}"),
-                    TextParagraph(text=f"<b>DSL:</b> <code>{cached.get('dsl_notation', 'N/A')}</code>"),
-                    TextParagraph(text=f"<b>Components:</b> {', '.join(cached['component_paths'])}"),
-                ]),
-                Section(header="Cache Status", widgets=[
-                    DecoratedText(
-                        text="<font color=\"#00C853\">✓ Retrieved from cache</font>",
-                        top_label="Status",
-                    ),
-                ]),
+                Section(
+                    widgets=[
+                        TextParagraph(text=f"<b>Key:</b> {cached['key']}"),
+                        TextParagraph(
+                            text=f"<b>DSL:</b> <code>{cached.get('dsl_notation', 'N/A')}</code>"
+                        ),
+                        TextParagraph(
+                            text=f"<b>Components:</b> {', '.join(cached['component_paths'])}"
+                        ),
+                    ]
+                ),
+                Section(
+                    header="Cache Status",
+                    widgets=[
+                        DecoratedText(
+                            text='<font color="#00C853">✓ Retrieved from cache</font>',
+                            top_label="Status",
+                        ),
+                    ],
+                ),
             ],
             _CardWithId__card_id="pattern-cache-demo",
         )
@@ -292,11 +317,12 @@ def demo_pattern_caching():
 
 def demo_summary_card(perf_stats: dict):
     """Build a summary card with all demo results."""
-    from gchat.card_framework_wrapper import get_card_framework_wrapper
-    from card_framework.v2.card import CardWithId, CardHeader
+    from card_framework.v2.card import CardHeader, CardWithId
     from card_framework.v2.message import Message
     from card_framework.v2.widgets.on_click import OnClick, OpenLink
     from card_framework.v2.widgets.text_paragraph import TextParagraph
+
+    from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()
 
@@ -314,47 +340,60 @@ def demo_summary_card(perf_stats: dict):
             subtitle="Tiered caching: L1 (memory) → L2 (pickle) → L3 (resolve)",
         ),
         sections=[
-            Section(header="⚡ Performance", widgets=[
-                DecoratedText(
-                    text=f"<b>{perf_stats['speedup']:.0f}x</b> faster",
-                    top_label="Cache Speedup",
-                ),
-                DecoratedText(
-                    text=f"Cold: {perf_stats['cold_avg_ms']:.2f}ms → Warm: {perf_stats['warm_avg_ms']:.3f}ms",
-                    top_label="Avg Retrieval Time",
-                ),
-            ]),
-            Section(header="📊 Cache Stats", widgets=[
-                DecoratedText(
-                    text=f"<b>{stats['l1_size']}</b> components",
-                    top_label="L1 (Memory) Size",
-                ),
-                DecoratedText(
-                    text=f"<b>{stats['l2_size']}</b> entries",
-                    top_label="L2 (Pickle) Size",
-                ),
-                DecoratedText(
-                    text=f"<b>{stats['hit_rate']:.1%}</b>",
-                    top_label="Hit Rate",
-                ),
-            ]),
-            Section(header="🏗️ Architecture", widgets=[
-                TextParagraph(
-                    text="<b>L1:</b> LRU memory cache (instant)\n"
-                         "<b>L2:</b> Pickle spillover (persistent)\n"
-                         "<b>L3:</b> Path resolution (fallback)"
-                ),
-            ]),
-            Section(widgets=[
-                ButtonList(buttons=[
-                    Button(
-                        text="View Source",
-                        on_click=OnClick(open_link=OpenLink(
-                            url="https://github.com"
-                        )),
+            Section(
+                header="⚡ Performance",
+                widgets=[
+                    DecoratedText(
+                        text=f"<b>{perf_stats['speedup']:.0f}x</b> faster",
+                        top_label="Cache Speedup",
                     ),
-                ]),
-            ]),
+                    DecoratedText(
+                        text=f"Cold: {perf_stats['cold_avg_ms']:.2f}ms → Warm: {perf_stats['warm_avg_ms']:.3f}ms",
+                        top_label="Avg Retrieval Time",
+                    ),
+                ],
+            ),
+            Section(
+                header="📊 Cache Stats",
+                widgets=[
+                    DecoratedText(
+                        text=f"<b>{stats['l1_size']}</b> components",
+                        top_label="L1 (Memory) Size",
+                    ),
+                    DecoratedText(
+                        text=f"<b>{stats['l2_size']}</b> entries",
+                        top_label="L2 (Pickle) Size",
+                    ),
+                    DecoratedText(
+                        text=f"<b>{stats['hit_rate']:.1%}</b>",
+                        top_label="Hit Rate",
+                    ),
+                ],
+            ),
+            Section(
+                header="🏗️ Architecture",
+                widgets=[
+                    TextParagraph(
+                        text="<b>L1:</b> LRU memory cache (instant)\n"
+                        "<b>L2:</b> Pickle spillover (persistent)\n"
+                        "<b>L3:</b> Path resolution (fallback)"
+                    ),
+                ],
+            ),
+            Section(
+                widgets=[
+                    ButtonList(
+                        buttons=[
+                            Button(
+                                text="View Source",
+                                on_click=OnClick(
+                                    open_link=OpenLink(url="https://github.com")
+                                ),
+                            ),
+                        ]
+                    ),
+                ]
+            ),
         ],
         _CardWithId__card_id="cache-summary",
     )

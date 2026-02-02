@@ -4,7 +4,6 @@ Config-driven factories for feedback widget construction.
 
 from typing import Any, Dict
 
-
 # =============================================================================
 # CLICK HANDLER CONFIGURATIONS
 # =============================================================================

@@ -4,7 +4,6 @@ Material icons and image URLs for feedback widgets.
 
 from typing import List
 
-
 # =============================================================================
 # MATERIAL ICONS FOR FEEDBACK (using materialIcon, not knownIcon)
 # =============================================================================

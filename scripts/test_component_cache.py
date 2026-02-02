@@ -11,8 +11,8 @@ Verifies:
 """
 
 import os
-import sys
 import shutil
+import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,7 +24,7 @@ def test_standalone_cache():
     print("TEST: Standalone ComponentCache")
     print("=" * 60)
 
-    from adapters.module_wrapper.component_cache import ComponentCache, CacheEntry
+    from adapters.module_wrapper.component_cache import CacheEntry, ComponentCache
 
     # Create cache with small limit to test eviction
     cache_dir = ".test_cache"
@@ -137,7 +137,9 @@ def test_wrapper_integration():
 
     # Test get_cached_classes (multiple)
     print("\n5️⃣  Testing get_cached_classes...")
-    classes = wrapper.get_cached_classes(["Button", "Section", "DecoratedText", "TextParagraph"])
+    classes = wrapper.get_cached_classes(
+        ["Button", "Section", "DecoratedText", "TextParagraph"]
+    )
     print(f"   Got {len(classes)} classes: {list(classes.keys())}")
     assert len(classes) >= 3, f"Expected at least 3 classes, got {len(classes)}"
 
@@ -178,7 +180,9 @@ def test_feedback_loop_integration():
     if cached:
         print(f"   Retrieved: {cached['key']}")
         print(f"   Component paths: {cached['component_paths']}")
-        print(f"   Component classes: {list(cached.get('component_classes', {}).keys())}")
+        print(
+            f"   Component classes: {list(cached.get('component_classes', {}).keys())}"
+        )
         print(f"   From cache: {cached.get('_from_cache', False)}")
     else:
         print("   ⚠️ Pattern not found in cache")
@@ -220,8 +224,9 @@ def test_cache_persistence():
     print(f"   Cache2: L1={len(cache2._l1)}, L2={len(cache2._l2_index)}")
 
     # L2 should have same items
-    assert len(cache2._l2_index) == l2_count, \
-        f"L2 index not persisted: expected {l2_count}, got {len(cache2._l2_index)}"
+    assert (
+        len(cache2._l2_index) == l2_count
+    ), f"L2 index not persisted: expected {l2_count}, got {len(cache2._l2_index)}"
 
     # Retrieve an evicted item from L2
     print("\n3️⃣  Retrieving item from persisted L2...")
@@ -286,12 +291,16 @@ def test_cache_with_real_components():
         print("\n✅ Real component instantiation test passed!")
         return True
     else:
-        missing = [n for n, c in [
-            ("Section", Section),
-            ("DecoratedText", DecoratedText),
-            ("ButtonList", ButtonList),
-            ("Button", Button),
-        ] if c is None]
+        missing = [
+            n
+            for n, c in [
+                ("Section", Section),
+                ("DecoratedText", DecoratedText),
+                ("ButtonList", ButtonList),
+                ("Button", Button),
+            ]
+            if c is None
+        ]
         print(f"   ⚠️ Missing classes: {missing}")
         return False
 
@@ -332,9 +341,11 @@ def test_cache_stats_and_hit_rate():
     print(f"   Hit rate: {stats['hit_rate']:.1%}")
     print(f"   Total requests: {stats['total_requests']}")
 
-    assert stats['l1_hits'] == 9, f"Expected 9 L1 hits, got {stats['l1_hits']}"
-    assert stats['misses'] == 2, f"Expected 2 misses, got {stats['misses']}"
-    assert stats['hit_rate'] > 0.8, f"Expected hit rate > 80%, got {stats['hit_rate']:.1%}"
+    assert stats["l1_hits"] == 9, f"Expected 9 L1 hits, got {stats['l1_hits']}"
+    assert stats["misses"] == 2, f"Expected 2 misses, got {stats['misses']}"
+    assert (
+        stats["hit_rate"] > 0.8
+    ), f"Expected hit rate > 80%, got {stats['hit_rate']:.1%}"
 
     # Cleanup
     shutil.rmtree(cache_dir)
@@ -364,6 +375,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"\n❌ {test.__name__} failed with exception: {e}")
             import traceback
+
             traceback.print_exc()
             results.append((test.__name__, False))
 

@@ -51,6 +51,16 @@ from config.enhanced_logging import setup_logger
 # Import settings for default webhook configuration
 from config.settings import settings
 
+# NLP parser commented out - SmartCardBuilder handles all parsing and rendering
+# SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
+# from .nlp_card_parser import parse_enhanced_natural_language_description
+# Import SmartCardBuilder for component-based card creation
+from .card_builder import (
+    COMPONENT_PARAMS,
+    get_smart_card_builder,
+    suggest_dsl_for_params,
+)
+
 # Import structured response types
 from .card_types import (
     ComponentSearchInfo,
@@ -59,12 +69,6 @@ from .card_types import (
     InputMappingInfo,
     SendDynamicCardResponse,
 )
-
-# NLP parser commented out - SmartCardBuilder handles all parsing and rendering
-# SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
-# from .nlp_card_parser import parse_enhanced_natural_language_description
-# Import SmartCardBuilder for component-based card creation
-from .card_builder import COMPONENT_PARAMS, get_smart_card_builder, suggest_dsl_for_params
 
 logger = setup_logger()
 logger.info("Card Framework v2 is available for rich card creation")
@@ -170,12 +174,16 @@ def _generate_alternative_dsl(
 
         if btn_list_sym in base_dsl or btn_sym in base_dsl:
             # Button variations
-            alternatives.append(f"{section_sym}[{text_sym}, {btn_list_sym}[{btn_sym}×3]]")
+            alternatives.append(
+                f"{section_sym}[{text_sym}, {btn_list_sym}[{btn_sym}×3]]"
+            )
             alternatives.append(f"{section_sym}[{chip_list_sym}[{chip_sym}×2]]")
 
         if chip_list_sym in base_dsl or chip_sym in base_dsl:
             # Chip variations
-            alternatives.append(f"{section_sym}[{text_sym}, {chip_list_sym}[{chip_sym}×3]]")
+            alternatives.append(
+                f"{section_sym}[{text_sym}, {chip_list_sym}[{chip_sym}×3]]"
+            )
             alternatives.append(f"{section_sym}[{btn_list_sym}[{btn_sym}×2]]")
 
         if img_sym in base_dsl:
@@ -442,8 +450,8 @@ def setup_card_tools(mcp: FastMCP) -> None:
     # This ensures symbol mappings are included in tool documentation
     from gchat.card_framework_wrapper import (
         get_dsl_documentation,
-        get_tool_examples,
         get_gchat_symbols,
+        get_tool_examples,
     )
 
     dsl_field_desc = _get_dsl_field_description()
@@ -518,7 +526,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 default=None,
                 description="Explicit overrides: title, subtitle, text, buttons, images. "
                 "The 'text' field supports Jinja filters ({{ 'text' | success_text }}) "
-                "and raw HTML (<font color=\"#hex\">text</font>). "
+                'and raw HTML (<font color="#hex">text</font>). '
                 "Message-level fields: 'message_text' (plain text above card), "
                 "'fallback_text' (notification text), "
                 "'accessory_widgets' (buttons outside card: [{buttonList: {buttons: [{text, url}]}}]).",
@@ -608,7 +616,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
             if not thread_key:
                 thread_key = card_params.get("thread_key") or card_params.get("thread")
                 if thread_key:
-                    logger.info(f"🧵 Extracted thread_key from card_params: {thread_key}")
+                    logger.info(
+                        f"🧵 Extracted thread_key from card_params: {thread_key}"
+                    )
 
             # =================================================================
             # NLP PARSING COMMENTED OUT - SmartCardBuilder has its own inference
@@ -668,7 +678,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
             # Extract DSL from description if present
             dsl_string = (
-                extract_dsl_from_description(card_description) if card_description else None
+                extract_dsl_from_description(card_description)
+                if card_description
+                else None
             )
 
             if dsl_string:
@@ -708,7 +720,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             },
                         )
 
-                    logger.info(f"🔍 DSL validation: valid={parsed.is_valid}, components={parsed.component_counts}")
+                    logger.info(
+                        f"🔍 DSL validation: valid={parsed.is_valid}, components={parsed.component_counts}"
+                    )
                 except Exception as dsl_err:
                     logger.warning(f"⚠️ DSL validation failed: {dsl_err}")
 
@@ -737,10 +751,13 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
             if not google_format_card:
                 logger.info("🔨 Using SmartCardBuilder as primary card building path")
-                await progress.set_message("Querying Qdrant and building card structure...")
+                await progress.set_message(
+                    "Querying Qdrant and building card structure..."
+                )
                 try:
                     # Use SmartCardBuilder.build() directly with unpacked params
                     import time
+
                     builder = get_smart_card_builder()
 
                     # Extract params
@@ -752,9 +769,15 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     chips = card_params.get("chips") if card_params else None
                     grid = card_params.get("grid") if card_params else None
                     images = card_params.get("images") if card_params else None
-                    image_titles = card_params.get("image_titles") if card_params else None
+                    image_titles = (
+                        card_params.get("image_titles") if card_params else None
+                    )
                     items = card_params.get("items") if card_params else None
-                    cards = (card_params.get("cards") or card_params.get("carousel_cards")) if card_params else None
+                    cards = (
+                        (card_params.get("cards") or card_params.get("carousel_cards"))
+                        if card_params
+                        else None
+                    )
 
                     # Convert grid images to items for DSL building
                     grid_items = None
@@ -762,8 +785,12 @@ def setup_card_tools(mcp: FastMCP) -> None:
                         logger.info(f"🔲 Grid images: {len(images)}")
                         grid_items = [
                             {
-                                "title": image_titles[i] if image_titles and i < len(image_titles) else f"Item {i + 1}",
-                                "image_url": img_url
+                                "title": (
+                                    image_titles[i]
+                                    if image_titles and i < len(image_titles)
+                                    else f"Item {i + 1}"
+                                ),
+                                "image_url": img_url,
                             }
                             for i, img_url in enumerate(images)
                         ]
@@ -801,7 +828,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             "score": 1.0,
                         }
                         logger.info("✅ SmartCardBuilder created card successfully")
-                        await progress.set_message("Card structure built, preparing message...")
+                        await progress.set_message(
+                            "Card structure built, preparing message..."
+                        )
 
                         # Extract DSL structure and Jinja template status from card
                         inner_card = google_format_card.get("card", {})
@@ -853,30 +882,42 @@ def setup_card_tools(mcp: FastMCP) -> None:
             if not thread_key:
                 thread_key = card_params.get("thread_key") or card_params.get("thread")
                 if thread_key:
-                    logger.debug(f"🧵 Extracted thread_key from card_params: {thread_key}")
+                    logger.debug(
+                        f"🧵 Extracted thread_key from card_params: {thread_key}"
+                    )
 
             # Set fallback_text if provided in card_params
             # This shows in notifications and is used for accessibility
-            fallback_text = card_params.get("fallback_text") or card_params.get("notification_text")
+            fallback_text = card_params.get("fallback_text") or card_params.get(
+                "notification_text"
+            )
             if fallback_text:
                 message_obj.fallback_text = fallback_text
-                logger.debug(f"📱 Set fallback_text for notifications: {fallback_text[:50]}...")
+                logger.debug(
+                    f"📱 Set fallback_text for notifications: {fallback_text[:50]}..."
+                )
 
             # Set plain text content (appears above/below card)
-            text_content = card_params.get("text_content") or card_params.get("message_text")
+            text_content = card_params.get("text_content") or card_params.get(
+                "message_text"
+            )
             if text_content:
                 message_obj.text = text_content
                 logger.debug(f"📝 Set message text: {text_content[:50]}...")
 
             # Set quoted message metadata for reply quotes
-            quoted_message = card_params.get("quoted_message_metadata") or card_params.get("quote")
+            quoted_message = card_params.get(
+                "quoted_message_metadata"
+            ) or card_params.get("quote")
             if quoted_message:
                 if isinstance(quoted_message, dict):
                     # Expect {"name": "spaces/X/messages/Y", "lastUpdateTime": "..."}
                     from card_framework.v2.message import QuotedMessageMetadata
+
                     message_obj.quoted_message_metadata = QuotedMessageMetadata(
                         name=quoted_message.get("name"),
-                        last_update_time=quoted_message.get("last_update_time") or quoted_message.get("lastUpdateTime")
+                        last_update_time=quoted_message.get("last_update_time")
+                        or quoted_message.get("lastUpdateTime"),
                     )
                     logger.debug(f"💬 Set quoted message: {quoted_message.get('name')}")
 
@@ -902,13 +943,18 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 # Use wrapper to get classes (avoid direct imports)
                 # Use full paths for v2 classes to avoid v1 conflicts
                 from gchat.card_framework_wrapper import get_card_framework_wrapper
+
                 wrapper = get_card_framework_wrapper()
                 AccessoryWidget = wrapper.get_cached_class("AccessoryWidget")
                 ButtonList = wrapper.get_cached_class("ButtonList")
                 Button = wrapper.get_cached_class("Button")
                 # OnClick and OpenLink need full paths to get v2 versions
-                OnClick = wrapper.get_component_by_path("card_framework.v2.widgets.on_click.OnClick")
-                OpenLink = wrapper.get_component_by_path("card_framework.v2.widgets.open_link.OpenLink")
+                OnClick = wrapper.get_component_by_path(
+                    "card_framework.v2.widgets.on_click.OnClick"
+                )
+                OpenLink = wrapper.get_component_by_path(
+                    "card_framework.v2.widgets.open_link.OpenLink"
+                )
 
                 if AccessoryWidget and ButtonList and Button:
                     for aw in accessory_widgets:
@@ -916,20 +962,28 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             # Build AccessoryWidget from dict
                             # AccessoryWidget only supports button_list per API docs
                             if "buttonList" in aw or "button_list" in aw:
-                                button_list = aw.get("buttonList") or aw.get("button_list")
+                                button_list = aw.get("buttonList") or aw.get(
+                                    "button_list"
+                                )
                                 buttons = []
                                 for btn_data in button_list.get("buttons", []):
                                     btn = Button(text=btn_data.get("text", ""))
                                     if btn_data.get("onClick") or btn_data.get("url"):
-                                        url = btn_data.get("url") or btn_data.get("onClick", {}).get("openLink", {}).get("url")
+                                        url = btn_data.get("url") or btn_data.get(
+                                            "onClick", {}
+                                        ).get("openLink", {}).get("url")
                                         if url and OnClick and OpenLink:
-                                            btn.on_click = OnClick(open_link=OpenLink(url=url))
+                                            btn.on_click = OnClick(
+                                                open_link=OpenLink(url=url)
+                                            )
                                     buttons.append(btn)
                                 if buttons:
                                     bl = ButtonList(buttons=buttons)
                                     aw_obj = AccessoryWidget(button_list=bl)
                                     message_obj.accessory_widgets.append(aw_obj)
-                                    logger.debug(f"🔘 Added accessory widget with {len(buttons)} buttons")
+                                    logger.debug(
+                                        f"🔘 Added accessory widget with {len(buttons)} buttons"
+                                    )
 
             # Render message
             message_body = message_obj.render()

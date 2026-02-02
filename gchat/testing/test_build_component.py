@@ -50,12 +50,16 @@ def test_build_component():
             results["tests"].append({"name": name, "status": status, **result})
             logger.info(f"{status}: {name}")
             if result.get("output"):
-                logger.info(f"   Output: {json.dumps(result['output'], indent=2)[:200]}...")
+                logger.info(
+                    f"   Output: {json.dumps(result['output'], indent=2)[:200]}..."
+                )
             if result.get("error"):
                 logger.info(f"   Error: {result['error']}")
         except Exception as e:
             results["failed"] += 1
-            results["tests"].append({"name": name, "status": "❌ EXCEPTION", "error": str(e)})
+            results["tests"].append(
+                {"name": name, "status": "❌ EXCEPTION", "error": str(e)}
+            )
             logger.info(f"❌ EXCEPTION: {name} - {e}")
 
     # =========================================================================
@@ -138,8 +142,18 @@ def test_build_component():
 
     def test_button_list_with_children():
         # Pre-built button children
-        button1 = {"button": {"text": "Button 1", "onClick": {"openLink": {"url": "https://a.com"}}}}
-        button2 = {"button": {"text": "Button 2", "onClick": {"openLink": {"url": "https://b.com"}}}}
+        button1 = {
+            "button": {
+                "text": "Button 1",
+                "onClick": {"openLink": {"url": "https://a.com"}},
+            }
+        }
+        button2 = {
+            "button": {
+                "text": "Button 2",
+                "onClick": {"openLink": {"url": "https://b.com"}},
+            }
+        }
         result = builder._build_component(
             "ButtonList",
             {},
@@ -217,8 +231,10 @@ def test_build_component():
             "DecoratedText", {"text": "Hello"}, wrap_with_key=True
         )
         button_list = builder._build_component(
-            "ButtonList", {}, wrap_with_key=True,
-            children=[{"button": {"text": "Click"}}]
+            "ButtonList",
+            {},
+            wrap_with_key=True,
+            children=[{"button": {"text": "Click"}}],
         )
         # Build section with widgets
         result = builder._build_component(
@@ -236,7 +252,12 @@ def test_build_component():
 
     def test_decorated_text_with_button():
         """Test DecoratedText with inline button (nested child)."""
-        button = {"button": {"text": "Action", "onClick": {"openLink": {"url": "https://example.com"}}}}
+        button = {
+            "button": {
+                "text": "Action",
+                "onClick": {"openLink": {"url": "https://example.com"}},
+            }
+        }
         result = builder._build_component(
             "DecoratedText",
             {"text": "Click the button →"},
@@ -371,12 +392,21 @@ def test_build_component():
             "component": "Section",
             "params": {"header": "Test Section"},
             "children": [
-                {"component": "DecoratedText", "params": {"text": "Item 1", "wrapText": True}},
-                {"component": "DecoratedText", "params": {"text": "Item 2", "wrapText": True}},
+                {
+                    "component": "DecoratedText",
+                    "params": {"text": "Item 1", "wrapText": True},
+                },
+                {
+                    "component": "DecoratedText",
+                    "params": {"text": "Item 2", "wrapText": True},
+                },
                 {
                     "component": "ButtonList",
                     "children": [
-                        {"component": "Button", "params": {"text": "Action", "url": "https://test.com"}},
+                        {
+                            "component": "Button",
+                            "params": {"text": "Action", "url": "https://test.com"},
+                        },
                     ],
                 },
             ],
@@ -401,13 +431,19 @@ def test_build_component():
                         {
                             "component": "Column",
                             "children": [
-                                {"component": "DecoratedText", "params": {"text": "Col 1"}},
+                                {
+                                    "component": "DecoratedText",
+                                    "params": {"text": "Col 1"},
+                                },
                             ],
                         },
                         {
                             "component": "Column",
                             "children": [
-                                {"component": "DecoratedText", "params": {"text": "Col 2"}},
+                                {
+                                    "component": "DecoratedText",
+                                    "params": {"text": "Col 2"},
+                                },
                             ],
                         },
                     ],

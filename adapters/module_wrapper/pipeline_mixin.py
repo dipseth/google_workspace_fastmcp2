@@ -100,7 +100,9 @@ def extract_input_values(component) -> str:
 
 
 def build_compact_relationship_text(
-    component_name: ComponentName, relationships: RelationshipList, component_type: str = "class"
+    component_name: ComponentName,
+    relationships: RelationshipList,
+    component_type: str = "class",
 ) -> str:
     """
     Build compact, structured relationship text for embedding.

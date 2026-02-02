@@ -71,8 +71,12 @@ async def qdrant_lifespan(server: Any):
     qdrant_middleware = _lifespan_state.get("qdrant_middleware")
 
     if qdrant_middleware is None:
-        logger.warning("⚠️ Qdrant lifespan: No middleware registered, skipping initialization")
-        logger.warning("   Call register_qdrant_middleware() from server.py before server starts")
+        logger.warning(
+            "⚠️ Qdrant lifespan: No middleware registered, skipping initialization"
+        )
+        logger.warning(
+            "   Call register_qdrant_middleware() from server.py before server starts"
+        )
         yield {"qdrant_middleware": None}
         return
 

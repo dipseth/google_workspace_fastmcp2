@@ -9,7 +9,6 @@ from typing import Dict, Optional, Set, Tuple
 
 from adapters.module_wrapper.types import ComponentName
 
-
 # =============================================================================
 # GENERIC COMPONENT CONFIGURATION (Fallback Defaults)
 # =============================================================================
@@ -58,7 +57,10 @@ _CONTAINER_CHILD_TYPE_FALLBACK: Dict[ComponentName, ComponentName] = {
 # Form components that require a 'name' field
 # FALLBACK - Use wrapper.is_form_component() when available
 _FORM_COMPONENTS_FALLBACK: Set[ComponentName] = {
-    "TextInput", "DateTimePicker", "SelectionInput", "SwitchControl"
+    "TextInput",
+    "DateTimePicker",
+    "SelectionInput",
+    "SwitchControl",
 }
 
 # Components with no content (just structure)
