@@ -132,8 +132,6 @@ def demo_build_card_from_cache():
     """Build a card using only cached components."""
     from card_framework.v2.card import CardHeader, CardWithId
     from card_framework.v2.message import Message
-
-    # Direct imports for components with complex paths
     from card_framework.v2.widgets.on_click import OnClick, OpenLink
 
     from gchat.card_framework_wrapper import get_card_framework_wrapper

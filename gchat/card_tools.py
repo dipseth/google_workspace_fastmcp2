@@ -521,7 +521,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
             ),
         ] = None,
         card_params: Annotated[
-            Optional[Dict[str, Any]],
+            Optional[Any],
             Field(
                 default=None,
                 description="Explicit overrides: title, subtitle, text, buttons, images. "
@@ -606,6 +606,13 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 )
 
             # Default parameters if not provided
+            # MCP clients may send card_params as a JSON string; coerce to dict.
+            if isinstance(card_params, str):
+                try:
+                    card_params = json.loads(card_params)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"⚠️ Could not parse card_params as JSON: {card_params!r}")
+                    card_params = {}
             if card_params is None:
                 card_params = {}
 
