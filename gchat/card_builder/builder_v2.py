@@ -452,7 +452,7 @@ class SmartCardBuilderV2:
         Query Qdrant for matching instance patterns with caching.
 
         First tries wrapper's SearchMixin methods (search_by_dsl, search_v7_hybrid),
-        then falls back to feedback_loop.query_with_feedback() for negative demotion.
+        then falls back to feedback_loop.query_with_discovery() using Qdrant's Discovery API.
         Results are cached for 5 minutes to improve performance.
 
         Args:
@@ -489,8 +489,8 @@ class SmartCardBuilderV2:
             # symbol-enriched embeddings in Qdrant
             # component_query searches 'components' vector, description searches 'inputs' vector
             class_results, content_patterns, form_patterns = (
-                feedback_loop.query_with_feedback(
-                    component_query=description,  # Use description for component search too
+                feedback_loop.query_with_discovery(
+                    component_query=description,
                     description=description,
                     limit=5,
                 )
@@ -1202,7 +1202,9 @@ class SmartCardBuilderV2:
         decorated_text_extras = {}
         if component_name == "DecoratedText":
             if params.get("icon"):
-                icon_name = params.pop("icon")
+                from gchat.material_icons import resolve_icon_name
+
+                icon_name = resolve_icon_name(params.pop("icon"))
                 decorated_text_extras["startIcon"] = {
                     "materialIcon": {"name": icon_name}
                 }
