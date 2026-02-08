@@ -1,10 +1,14 @@
 """Helper functions and utilities for Google service management."""
 
+import asyncio
 import logging
+import os
+import ssl
 
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
+from googleapiclient.errors import HttpError
 from typing_extensions import Any, Dict, List, Optional, Union
 
 from .context import (
@@ -418,3 +422,95 @@ async def get_tasks_service(
 async def request_tasks_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Tasks service through middleware - convenience alias."""
     return await request_service("tasks", scopes)
+
+
+# ============================================
+# Google API Resilience Helpers
+# ============================================
+
+_DEFAULT_NUM_RETRIES = int(os.environ.get("GOOGLE_API_NUM_RETRIES", "3"))
+_DEFAULT_BATCH_SIZE = int(os.environ.get("GOOGLE_API_BATCH_SIZE", "15"))
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    """Return ``True`` if *error* is a transient/retryable Google API error.
+
+    Covers:
+    - Socket / read timeouts
+    - SSL record-layer failures and other ``ssl.SSLError`` variants
+    - ``ConnectionResetError``
+    - ``HttpError`` with status 429 (rate-limit) or 5xx (server error)
+    """
+    if isinstance(error, (TimeoutError, ConnectionResetError, BrokenPipeError)):
+        return True
+    if isinstance(error, ssl.SSLError):
+        return True
+    if isinstance(error, OSError) and "timed out" in str(error).lower():
+        return True
+    if isinstance(error, HttpError):
+        status = error.resp.status
+        return status == 429 or status >= 500
+    return False
+
+
+async def execute_google_api(
+    request: Any,
+    *,
+    num_retries: Optional[int] = None,
+) -> Any:
+    """Execute a single Google API request with built-in retries.
+
+    Drop-in async replacement for::
+
+        await asyncio.to_thread(service.method(params).execute)
+
+    Usage::
+
+        result = await execute_google_api(service.users().labels().list(userId="me"))
+
+    Args:
+        request: An *un-executed* Google API request object (the return value of
+            e.g. ``service.users().labels().list(...)``).
+        num_retries: Number of retries the underlying HTTP transport will
+            attempt for transient errors.  Defaults to ``_DEFAULT_NUM_RETRIES``.
+
+    Returns:
+        The parsed JSON response from the API.
+    """
+    retries = num_retries if num_retries is not None else _DEFAULT_NUM_RETRIES
+    return await asyncio.to_thread(request.execute, num_retries=retries)
+
+
+async def execute_batch_with_retry(
+    batch: Any,
+    *,
+    max_retries: Optional[int] = None,
+) -> None:
+    """Execute a ``BatchHttpRequest`` with exponential-backoff retry.
+
+    ``BatchHttpRequest.execute()`` does **not** accept a ``num_retries``
+    parameter, so we retry the whole batch ourselves on transient errors.
+
+    Args:
+        batch: A ``BatchHttpRequest`` instance (from ``service.new_batch_http_request()``).
+        max_retries: Maximum number of retry attempts.  Defaults to ``_DEFAULT_NUM_RETRIES``.
+    """
+    retries = max_retries if max_retries is not None else _DEFAULT_NUM_RETRIES
+
+    for attempt in range(retries + 1):
+        try:
+            await asyncio.to_thread(batch.execute)
+            return
+        except Exception as exc:
+            if attempt < retries and _is_retryable_error(exc):
+                delay = min(2**attempt, 16)  # 1, 2, 4, … cap at 16s
+                logger.warning(
+                    "Batch execute failed (attempt %d/%d): %s — retrying in %ds",
+                    attempt + 1,
+                    retries + 1,
+                    exc,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
