@@ -127,6 +127,24 @@ def consume_from_context(
                         component=component_name,
                         field_name="carousel_card",
                     )
+            # For grid items, extract title, subtitle, image
+            elif context_key == "grid_items":
+                params["title"] = resource.get("title", f"Item {current_index + 1}")
+                if resource.get("subtitle"):
+                    params["subtitle"] = resource["subtitle"]
+                if resource.get("image_url"):
+                    params["image_url"] = resource["image_url"]
+                if resource.get("image"):
+                    params["image"] = resource["image"]
+                # Record the consumption in mapping report
+                if mapping_report:
+                    mapping_report.record(
+                        input_type="grid_item",
+                        index=current_index,
+                        value=resource.get("title", ""),
+                        component=component_name,
+                        field_name="grid_item",
+                    )
         context[index_key] = current_index + 1
     else:
         # No more resources - don't use placeholder, let caller handle missing text
@@ -137,6 +155,8 @@ def consume_from_context(
             params["label"] = f"Chip {current_index + 1}"
         elif component_name == "CarouselCard":
             params["title"] = f"Card {current_index + 1}"
+        elif component_name == "GridItem":
+            params["title"] = f"Item {current_index + 1}"
         context[index_key] = current_index + 1
 
     return params

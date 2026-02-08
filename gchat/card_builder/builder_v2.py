@@ -1022,9 +1022,9 @@ class SmartCardBuilderV2:
                     if item.get("icon"):
                         content_entry["icon"] = item["icon"]
                     if item.get("top_label"):
-                        content_entry["top_label"] = item["top_label"]
+                        content_entry["top_label"] = self._format_text_for_chat(item["top_label"])
                     if item.get("bottom_label"):
-                        content_entry["bottom_label"] = item["bottom_label"]
+                        content_entry["bottom_label"] = self._format_text_for_chat(item["bottom_label"])
                     # Always default wrapText to True for DecoratedText items
                     content_entry["wrapText"] = item.get("wrapText", True)
                     content_texts.append(content_entry)
@@ -1037,11 +1037,13 @@ class SmartCardBuilderV2:
                 "chips": chips or [],
                 "carousel_cards": cards
                 or [],  # For carousel DSL (symbols from ModuleWrapper)
+                "grid_items": items or [],  # For grid DSL (GridItem consumption)
                 "image_url": image_url,
                 "content_texts": content_texts,
                 "_button_index": 0,  # Track button consumption
                 "_chip_index": 0,  # Track chip consumption
                 "_carousel_card_index": 0,  # Track carousel card consumption
+                "_grid_item_index": 0,  # Track grid item consumption
                 "_text_index": 0,  # Track text consumption
                 "_mapping_report": InputMappingReport(),  # Track input consumption
             }
@@ -1246,11 +1248,10 @@ class SmartCardBuilderV2:
 
         # Handle Image special case
         if component_name == "Image":
-            img_url = (
-                params.get("imageUrl")
-                or context.get("image_url")
-                or "https://picsum.photos/400/200"
-            )
+            img_url = params.get("imageUrl") or context.get("image_url")
+            if not img_url:
+                logger.debug("Image component has no URL, skipping")
+                return None
             return {json_key: {"imageUrl": img_url}}
 
         # Return None instead of "Item" placeholder if no content
@@ -1301,13 +1302,15 @@ class SmartCardBuilderV2:
                     btn_obj["icon"] = {"materialIcon": {"name": btn_params["icon"]}}
                 built_children.append(btn_obj)
             elif expected_child_type == "GridItem":
-                idx = len(built_children)
-                built_children.append(
-                    {
-                        "title": f"Item {idx + 1}",
-                        "image": {"imageUri": f"https://picsum.photos/200/200?{idx}"},
-                    }
-                )
+                grid_params = self._consume_from_context("GridItem", context)
+                grid_item = {"title": grid_params.get("title", f"Item {len(built_children) + 1}")}
+                if grid_params.get("subtitle"):
+                    grid_item["subtitle"] = grid_params["subtitle"]
+                if grid_params.get("image_url"):
+                    grid_item["image"] = {"imageUri": grid_params["image_url"]}
+                elif grid_params.get("image"):
+                    grid_item["image"] = grid_params["image"]
+                built_children.append(grid_item)
             elif expected_child_type == "Chip":
                 # Consume chip from context (similar to Button)
                 chip_params = self._consume_from_context("Chip", context)
