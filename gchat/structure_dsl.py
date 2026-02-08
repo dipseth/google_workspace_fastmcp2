@@ -51,6 +51,11 @@ COMPONENT_TO_SYMBOL: Dict[str, str] = {}
 # All symbols as a set for quick lookup - populated at runtime
 ALL_SYMBOLS: set = set()
 
+# ASCII letters that are visually confusable with Unicode DSL symbols.
+# Built dynamically at configure time; maps ASCII char → correct Unicode symbol.
+# Example: 'g' → 'ℊ' (SCRIPT SMALL G, U+210A) for Grid
+_ASCII_CONFUSABLES: Dict[str, str] = {}
+
 # Flag to track initialization
 _initialized = False
 
@@ -81,6 +86,8 @@ def configure_symbols_from_generator(generator: "SymbolGenerator") -> None:
 
     ALL_SYMBOLS.clear()
     ALL_SYMBOLS.update(SYMBOL_TO_COMPONENT.keys())
+
+    _build_ascii_confusables()
 
     _initialized = True
     logger.info(f"🔣 Configured {len(SYMBOL_TO_COMPONENT)} symbols from generator")
@@ -114,6 +121,37 @@ def configure_symbols_from_wrapper(
     configure_symbols_from_generator(generator)
 
     return symbols
+
+
+def _build_ascii_confusables() -> None:
+    """
+    Build a map of ASCII chars that are visually confusable with Unicode DSL symbols.
+
+    Scans ALL_SYMBOLS for single-char Unicode symbols whose Unicode name contains
+    a recognizable base letter (e.g. SCRIPT SMALL G → 'g'). If the ASCII letter
+    isn't already a real symbol, it becomes an alias.
+
+    This lets the tokenizer silently correct `g[ǵ×4]` → `ℊ[ǵ×4]`.
+    """
+    import unicodedata
+
+    _ASCII_CONFUSABLES.clear()
+    for symbol in ALL_SYMBOLS:
+        if len(symbol) != 1 or ord(symbol) < 128:
+            continue
+        uname = unicodedata.name(symbol, "")
+        # Match patterns like "SCRIPT SMALL G", "LATIN SMALL LETTER D WITH STROKE"
+        # Extract the base letter from the end of the name
+        parts = uname.split()
+        if len(parts) >= 2 and len(parts[-1]) == 1 and parts[-1].isalpha():
+            ascii_char = parts[-1].lower()
+            # Only add if the ASCII char isn't already a real symbol
+            if ascii_char not in ALL_SYMBOLS:
+                _ASCII_CONFUSABLES[ascii_char] = symbol
+
+    if _ASCII_CONFUSABLES:
+        aliases = ", ".join(f"{k}→{v}" for k, v in sorted(_ASCII_CONFUSABLES.items()))
+        logger.debug(f"🔤 ASCII confusable aliases: {aliases}")
 
 
 def clear_symbols() -> None:
@@ -319,6 +357,12 @@ def _tokenize_structure(s: str) -> List[str]:
         # Symbol (single character from our table)
         if char in ALL_SYMBOLS:
             tokens.append(char)
+            i += 1
+            continue
+
+        # ASCII confusable → Unicode symbol (e.g. 'g' → 'ℊ' for Grid)
+        if char in _ASCII_CONFUSABLES and char not in ALL_SYMBOLS:
+            tokens.append(_ASCII_CONFUSABLES[char])
             i += 1
             continue
 

@@ -623,6 +623,11 @@ def configure_structure_dsl_symbols():
     ALL_SYMBOLS.clear()
     ALL_SYMBOLS.update(SYMBOL_TO_COMPONENT.keys())
 
+    # Build ASCII confusable aliases (e.g. 'g' → 'ℊ')
+    from gchat.structure_dsl import _build_ascii_confusables
+
+    _build_ascii_confusables()
+
     # Mark as initialized
     structure_dsl_module._initialized = True
 

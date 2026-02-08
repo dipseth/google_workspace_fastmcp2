@@ -525,6 +525,8 @@ def setup_card_tools(mcp: FastMCP) -> None:
             Field(
                 default=None,
                 description="Explicit overrides: title, subtitle, text, buttons, images. "
+                "Supports DSL symbol keys (e.g. δ for items, ᵬ for buttons) with optional "
+                "_shared/_items merging: {\"δ\": {\"_shared\": {...}, \"_items\": [...]}}. "
                 "The 'text' field supports Jinja filters ({{ 'text' | success_text }}) "
                 'and raw HTML (<font color="#hex">text</font>). '
                 "Message-level fields: 'message_text' (plain text above card), "
@@ -615,6 +617,16 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     card_params = {}
             if card_params is None:
                 card_params = {}
+
+            # =================================================================
+            # RESOLVE SYMBOL-KEYED card_params (e.g. δ → items, ᵬ → buttons)
+            # =================================================================
+            if _card_framework_wrapper and _card_framework_wrapper.reverse_symbol_mapping:
+                from gchat.card_builder.symbol_params import resolve_symbol_params
+                card_params = resolve_symbol_params(
+                    card_params, _card_framework_wrapper.reverse_symbol_mapping,
+                    wrapper=_card_framework_wrapper,
+                )
 
             # =================================================================
             # EXTRACT MESSAGE-LEVEL PARAMS FROM card_params (early extraction)
@@ -779,7 +791,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     image_titles = (
                         card_params.get("image_titles") if card_params else None
                     )
-                    items = card_params.get("items") if card_params else None
+                    items = (
+                        card_params.get("items") or card_params.get("grid_items")
+                    ) if card_params else None
                     cards = (
                         (card_params.get("cards") or card_params.get("carousel_cards"))
                         if card_params
