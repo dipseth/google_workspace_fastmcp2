@@ -69,6 +69,7 @@ from slides.slides_tools import setup_slides_tools
 from tools.dynamic_instructions import update_mcp_instructions
 from tools.server_tools import setup_server_tools
 from tools.template_macro_tools import setup_template_macro_tools
+from tools.ui_apps import setup_ui_apps
 
 # Authentication setup - choose between Google OAuth and custom JWT
 use_google_oauth = os.getenv("USE_GOOGLE_OAUTH", "true").lower() == "true"
@@ -343,6 +344,10 @@ setup_drive_tools(mcp)
 logger.info("🔧 Registering server management tools...")
 setup_server_tools(mcp)
 logger.info("✅ Server management tools registered")
+
+# Register MCP Apps Phase 1 UI resources
+setup_ui_apps(mcp)
+logger.info("✅ MCP App UI resources registered")
 
 # Register comprehensive Drive tools (search, list, get content, create)
 setup_drive_comprehensive_tools(mcp)
