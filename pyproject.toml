@@ -179,6 +179,10 @@ ignore = [
     "F601",   # Dictionary key repeated (some intentional overwrites)
 ]
 
+[tool.ruff.lint.isort]
+known-third-party = ["card_framework", "google", "googleapiclient", "google_auth_httplib2", "httplib2", "qdrant_client", "fastmcp", "mcp", "pydantic"]
+known-first-party = ["auth", "config", "drive", "gmail", "photos", "middleware", "gcalendar", "gchat", "docs", "forms", "sheets", "slides", "resources", "prompts", "people", "adapters", "tools", "skills", "lifespans"]
+
 [tool.black]
 target-version = ["py311"]
 line-length = 88
