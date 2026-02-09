@@ -263,7 +263,7 @@ class TestUserResources:
 
             # Check for tags in metadata (if present)
             if hasattr(resource, "_meta") and resource._meta:
-                fastmcp_meta = resource._meta.get("_fastmcp", {})
+                fastmcp_meta = resource._meta.get("fastmcp", {})
                 tags = fastmcp_meta.get("tags", [])
                 if tags:
                     tagged_resources.append(resource)

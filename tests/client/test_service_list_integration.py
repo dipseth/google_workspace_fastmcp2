@@ -452,7 +452,7 @@ class TestServiceListResourceBehavior:
 
             # Check for tags if available
             if hasattr(template, "_meta") and template._meta:
-                fastmcp_meta = template._meta.get("_fastmcp", {})
+                fastmcp_meta = template._meta.get("fastmcp", {})
                 if "tags" in fastmcp_meta:
                     tags = fastmcp_meta["tags"]
                     assert "service" in tags
