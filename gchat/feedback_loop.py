@@ -1997,6 +1997,9 @@ class FeedbackLoop:
         3. Find successful patterns by structure (positive form_feedback on 'relationships')
         4. Fuse results with RRF, then demote components associated with negatives
 
+        Note: Prefers wrapper.search_v7_hybrid() when available for better consistency
+        with SearchMixin architecture. Falls back to direct Qdrant queries.
+
         Args:
             component_query: Query for component search (e.g., "v2.widgets.decorated_text.DecoratedText class")
             description: Card description for content pattern matching
