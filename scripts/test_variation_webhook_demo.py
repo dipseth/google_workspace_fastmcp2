@@ -191,6 +191,7 @@ def build_variation_showcase_card(family):
     from card_framework.v2.card import CardHeader, CardWithId
     from card_framework.v2.message import Message
     from card_framework.v2.widgets.text_paragraph import TextParagraph
+
     from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()
@@ -265,6 +266,7 @@ def build_sample_variation_cards(family, max_cards: int = 2):
     from card_framework.v2.message import Message
     from card_framework.v2.widgets.on_click import OnClick, OpenLink
     from card_framework.v2.widgets.text_paragraph import TextParagraph
+
     from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()
@@ -344,6 +346,7 @@ def demo_summary_card(family, generator_stats):
     from card_framework.v2.card import CardHeader, CardWithId
     from card_framework.v2.message import Message
     from card_framework.v2.widgets.text_paragraph import TextParagraph
+
     from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()

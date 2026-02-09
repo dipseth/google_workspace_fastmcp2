@@ -42,12 +42,14 @@ def _collect_tools_json(mcp: FastMCP) -> str:
             if name.startswith("_"):
                 continue
             enabled = _get_tool_enabled_state(comp, mcp)
-            tools.append({
-                "name": name,
-                "enabled": enabled,
-                "isProtected": name in _PROTECTED_TOOLS,
-                "description": getattr(comp, "description", None),
-            })
+            tools.append(
+                {
+                    "name": name,
+                    "enabled": enabled,
+                    "isProtected": name in _PROTECTED_TOOLS,
+                    "description": getattr(comp, "description", None),
+                }
+            )
     except Exception:
         pass
     return json.dumps(tools)

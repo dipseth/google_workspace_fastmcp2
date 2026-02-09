@@ -438,7 +438,8 @@ async def get_google_service(
             discovery_url = f"https://photoslibrary.googleapis.com/$discovery/rest?version={service_version}"
             discovery_doc = requests.get(discovery_url).json()
             service = build_from_document(
-                discovery_doc, http=authorized_http,
+                discovery_doc,
+                http=authorized_http,
                 requestBuilder=RetryHttpRequest,
             )
             logger.debug(
@@ -446,7 +447,9 @@ async def get_google_service(
             )
         else:
             service = build(
-                service_name, service_version, http=authorized_http,
+                service_name,
+                service_version,
+                http=authorized_http,
                 requestBuilder=RetryHttpRequest,
             )
             logger.debug(

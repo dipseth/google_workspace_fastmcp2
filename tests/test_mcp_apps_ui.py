@@ -81,7 +81,9 @@ async def test_resource_serves_html(mcp_with_ui):
         contents = await client.read_resource("ui://manage-tools-dashboard")
         # read_resource returns a list of content items or a string
         if isinstance(contents, list):
-            text = contents[0].text if hasattr(contents[0], "text") else str(contents[0])
+            text = (
+                contents[0].text if hasattr(contents[0], "text") else str(contents[0])
+            )
         else:
             text = str(contents)
         assert "<!DOCTYPE html>" in text

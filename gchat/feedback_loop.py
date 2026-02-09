@@ -1373,7 +1373,9 @@ class FeedbackLoop:
                 return True
 
             except Exception as e:
-                is_grpc_unavailable = "UNAVAILABLE" in str(e) or "Connection reset" in str(e)
+                is_grpc_unavailable = "UNAVAILABLE" in str(
+                    e
+                ) or "Connection reset" in str(e)
                 if is_grpc_unavailable and attempt < max_attempts - 1:
                     logger.warning(
                         f"⚠️ gRPC connection reset on feedback update, retrying... ({e})"
@@ -2317,10 +2319,7 @@ class FeedbackLoop:
             )
             form_results = []
 
-            if (
-                relationship_vector
-                and relationship_vector != [0.0] * RELATIONSHIPS_DIM
-            ):
+            if relationship_vector and relationship_vector != [0.0] * RELATIONSHIPS_DIM:
                 if form_pos_ids or form_neg_ids:
                     context_pairs = self._build_context_pairs(
                         form_pos_ids, form_neg_ids, max_pairs=5
@@ -2407,6 +2406,7 @@ class FeedbackLoop:
         import math
 
         from qdrant_client import models
+
         per_side = max(1, int(math.sqrt(max_pairs)))
         pos_subset = positive_ids[:per_side]
         neg_subset = negative_ids[:per_side]
@@ -2414,9 +2414,7 @@ class FeedbackLoop:
         pairs = []
         for pos_id in pos_subset:
             for neg_id in neg_subset:
-                pairs.append(
-                    models.ContextPair(positive=pos_id, negative=neg_id)
-                )
+                pairs.append(models.ContextPair(positive=pos_id, negative=neg_id))
                 if len(pairs) >= max_pairs:
                     return pairs
 

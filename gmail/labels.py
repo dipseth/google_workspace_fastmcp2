@@ -1068,9 +1068,7 @@ async def _process_single_label(
                 label_object["color"] = color_obj
 
             created_label = await execute_google_api(
-                gmail_service.users()
-                .labels()
-                .create(userId="me", body=label_object)
+                gmail_service.users().labels().create(userId="me", body=label_object)
             )
 
             # Format response with color information

@@ -24,10 +24,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_qdrant_models():
     """Provide real qdrant_client.models for type checking."""
     from qdrant_client import models
+
     return models
 
 
@@ -50,8 +52,10 @@ def mock_client():
 
 class _FakeVector:
     """Mimics a numpy array with .tolist()."""
+
     def __init__(self, values):
         self._values = values
+
     def tolist(self):
         return self._values
 
@@ -185,9 +189,9 @@ class TestQueryWithDiscovery:
         for c in mock_client.query_points.call_args_list:
             query_arg = c.kwargs.get("query")
             if query_arg is not None and hasattr(query_arg, "__class__"):
-                assert not isinstance(query_arg, DiscoverQuery), (
-                    "Should not use DiscoverQuery when no feedback exists"
-                )
+                assert not isinstance(
+                    query_arg, DiscoverQuery
+                ), "Should not use DiscoverQuery when no feedback exists"
 
     def test_discovery_query_with_content_feedback(self, feedback_loop, mock_client):
         """Content feedback IDs should produce a DiscoverQuery on 'inputs' vector."""
@@ -301,7 +305,9 @@ class TestQueryWithDiscovery:
             if isinstance(query_arg, models.DiscoverQuery):
                 search_params = c.kwargs.get("search_params")
                 assert search_params is not None, "search_params should be set"
-                assert search_params.hnsw_ef == 128, f"Expected hnsw_ef=128, got {search_params.hnsw_ef}"
+                assert (
+                    search_params.hnsw_ef == 128
+                ), f"Expected hnsw_ef=128, got {search_params.hnsw_ef}"
 
     def test_context_pairs_use_feedback_ids(self, feedback_loop, mock_client):
         """Context pairs should contain the actual feedback point IDs."""
@@ -330,7 +336,10 @@ class TestQueryWithDiscovery:
         # Find Discovery call on inputs
         for c in mock_client.query_points.call_args_list:
             query_arg = c.kwargs.get("query")
-            if isinstance(query_arg, models.DiscoverQuery) and c.kwargs.get("using") == "inputs":
+            if (
+                isinstance(query_arg, models.DiscoverQuery)
+                and c.kwargs.get("using") == "inputs"
+            ):
                 pairs = query_arg.discover.context
                 pair_pos_ids = {p.positive for p in pairs}
                 pair_neg_ids = {p.negative for p in pairs}

@@ -1022,9 +1022,13 @@ class SmartCardBuilderV2:
                     if item.get("icon"):
                         content_entry["icon"] = item["icon"]
                     if item.get("top_label"):
-                        content_entry["top_label"] = self._format_text_for_chat(item["top_label"])
+                        content_entry["top_label"] = self._format_text_for_chat(
+                            item["top_label"]
+                        )
                     if item.get("bottom_label"):
-                        content_entry["bottom_label"] = self._format_text_for_chat(item["bottom_label"])
+                        content_entry["bottom_label"] = self._format_text_for_chat(
+                            item["bottom_label"]
+                        )
                     # Always default wrapText to True for DecoratedText items
                     content_entry["wrapText"] = item.get("wrapText", True)
                     content_texts.append(content_entry)
@@ -1305,7 +1309,9 @@ class SmartCardBuilderV2:
                 built_children.append(btn_obj)
             elif expected_child_type == "GridItem":
                 grid_params = self._consume_from_context("GridItem", context)
-                grid_item = {"title": grid_params.get("title", f"Item {len(built_children) + 1}")}
+                grid_item = {
+                    "title": grid_params.get("title", f"Item {len(built_children) + 1}")
+                }
                 if grid_params.get("subtitle"):
                     grid_item["subtitle"] = grid_params["subtitle"]
                 if grid_params.get("image_url"):

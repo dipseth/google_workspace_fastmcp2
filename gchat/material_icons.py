@@ -2470,7 +2470,9 @@ def resolve_icon_name(icon_name: str, strict: bool = False) -> str:
     if strict:
         raise ValueError(f"Invalid icon name: '{icon_name}'.{suggestion_text}")
 
-    logger.warning(f"Unrecognized icon name: '{icon_name}'.{suggestion_text} Passing through as-is.")
+    logger.warning(
+        f"Unrecognized icon name: '{icon_name}'.{suggestion_text} Passing through as-is."
+    )
     return normalized
 
 

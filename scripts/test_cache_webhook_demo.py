@@ -133,6 +133,7 @@ def demo_build_card_from_cache():
     from card_framework.v2.card import CardHeader, CardWithId
     from card_framework.v2.message import Message
     from card_framework.v2.widgets.on_click import OnClick, OpenLink
+
     from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     print("\n" + "=" * 60)
@@ -228,6 +229,7 @@ def demo_pattern_caching():
     """Demonstrate pattern caching via FeedbackLoop."""
     from card_framework.v2.card import CardHeader
     from card_framework.v2.widgets.text_paragraph import TextParagraph
+
     from gchat.card_framework_wrapper import get_card_framework_wrapper
     from gchat.feedback_loop import get_feedback_loop
 
@@ -317,6 +319,7 @@ def demo_summary_card(perf_stats: dict):
     from card_framework.v2.message import Message
     from card_framework.v2.widgets.on_click import OnClick, OpenLink
     from card_framework.v2.widgets.text_paragraph import TextParagraph
+
     from gchat.card_framework_wrapper import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()
