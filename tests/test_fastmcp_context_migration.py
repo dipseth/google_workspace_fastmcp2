@@ -1,6 +1,6 @@
 """Test the migration from ContextVar to FastMCP Context."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastmcp import Context, FastMCP
@@ -34,14 +34,15 @@ def mock_context():
     context = Mock(spec=Context)
     context._state = {}
 
-    def get_state(key):
+    async def get_state(key):
         return context._state.get(key)
 
-    def set_state(key, value):
+    async def set_state(key, value):
         context._state[key] = value
 
-    context.get_state = Mock(side_effect=get_state)
-    context.set_state = Mock(side_effect=set_state)
+    context.get_state = AsyncMock(side_effect=get_state)
+    context.set_state = AsyncMock(side_effect=set_state)
+    context.session_id = None
 
     return context
 
@@ -85,7 +86,7 @@ async def test_service_injection_functions(mock_context):
     """Test service injection functions with FastMCP Context."""
     with patch("auth.context.get_context", return_value=mock_context):
         # Test requesting a service
-        service_key = request_google_service(
+        service_key = await request_google_service(
             service_type="drive",
             scopes=["drive.readonly"],
             version="v3",
@@ -105,11 +106,10 @@ async def test_service_injection_functions(mock_context):
         mock_service = Mock()
         await _set_injected_service("drive", mock_service)
         assert mock_context._state["service_requests"]["drive"]["fulfilled"] is True
-        assert (
-            mock_context._state["service_requests"]["drive"]["service"] == mock_service
-        )
+        # Note: service instance is stored in in-memory cache, not in context state
+        assert "service" not in mock_context._state["service_requests"]["drive"]
 
-        # Test getting injected service
+        # Test getting injected service (retrieves from in-memory cache)
         service = await get_injected_service("drive")
         assert service == mock_service
 
@@ -239,11 +239,11 @@ async def test_integration_with_fastmcp():
     async def test_tool(ctx: Context) -> str:
         """Test tool that uses context."""
         # The tool should be able to access context state
-        session_id = ctx.get_state("session_id")
-        user_email = ctx.get_state("user_email")
+        session_id = await ctx.get_state("session_id")
+        user_email = await ctx.get_state("user_email")
 
         # Set some state
-        ctx.set_state("test_value", "Hello from tool")
+        await ctx.set_state("test_value", "Hello from tool")
 
         return f"Session: {session_id}, Email: {user_email}"
 
@@ -252,8 +252,8 @@ async def test_integration_with_fastmcp():
     async def setup_and_call_tool(ctx: Context) -> str:
         """Tool that sets up context and calls another tool."""
         # Simulate what middleware would do
-        ctx.set_state("session_id", "test-session-789")
-        ctx.set_state("user_email", "user@example.com")
+        await ctx.set_state("session_id", "test-session-789")
+        await ctx.set_state("user_email", "user@example.com")
 
         # Now the context functions should work within this request
         with patch("auth.context.get_context", return_value=ctx):
@@ -265,41 +265,53 @@ async def test_integration_with_fastmcp():
 
     # Note: Actually running these tools would require a full FastMCP server setup
     # This test just verifies the structure is correct
-    assert len(mcp.tools) == 2
-    assert any(tool.name == "test_tool" for tool in mcp.tools)
-    assert any(tool.name == "setup_and_call_tool" for tool in mcp.tools)
+    tools = await mcp.list_tools()
+    assert len(tools) == 2
+    assert any(tool.name == "test_tool" for tool in tools)
+    assert any(tool.name == "setup_and_call_tool" for tool in tools)
 
 
 if __name__ == "__main__":
-    # Run basic tests
-    print("Testing FastMCP Context migration...")
+    import asyncio
 
-    # Create mock context
-    mock_ctx = Mock(spec=Context)
-    mock_ctx._state = {}
-    mock_ctx.get_state = lambda key: mock_ctx._state.get(key)
-    mock_ctx.set_state = lambda key, value: mock_ctx._state.__setitem__(key, value)
+    async def run_tests():
+        print("Testing FastMCP Context migration...")
 
-    # Test session context
-    test_session_context_functions(mock_ctx)
-    print("✅ Session context functions work")
+        # Create mock context with async state methods
+        mock_ctx = Mock(spec=Context)
+        mock_ctx._state = {}
 
-    # Test user email context
-    test_user_email_context_functions(mock_ctx)
-    print("✅ User email context functions work")
+        async def _get_state(key):
+            return mock_ctx._state.get(key)
 
-    # Test service injection
-    test_service_injection_functions(mock_ctx)
-    print("✅ Service injection functions work")
+        async def _set_state(key, value):
+            mock_ctx._state[key] = value
 
-    # Test session data storage
-    test_session_data_storage()
-    print("✅ Session data storage works")
+        mock_ctx.get_state = AsyncMock(side_effect=_get_state)
+        mock_ctx.set_state = AsyncMock(side_effect=_set_state)
 
-    # Test session management
-    test_session_management()
-    print("✅ Session management works")
+        # Test session context
+        await test_session_context_functions(mock_ctx)
+        print("✅ Session context functions work")
 
-    print(
-        "\n🎉 All tests passed! Migration from ContextVar to FastMCP Context is successful."
-    )
+        # Test user email context
+        await test_user_email_context_functions(mock_ctx)
+        print("✅ User email context functions work")
+
+        # Test service injection
+        await test_service_injection_functions(mock_ctx)
+        print("✅ Service injection functions work")
+
+        # Test session data storage
+        test_session_data_storage()
+        print("✅ Session data storage works")
+
+        # Test session management
+        test_session_management()
+        print("✅ Session management works")
+
+        print(
+            "\n🎉 All tests passed! Migration from ContextVar to FastMCP Context is successful."
+        )
+
+    asyncio.run(run_tests())

@@ -79,7 +79,7 @@ class TestGmailPrompts:
 
                     # Check for FastMCP metadata
                     if hasattr(prompt, "_meta") and prompt._meta:
-                        fastmcp_meta = prompt._meta.get("_fastmcp", {})
+                        fastmcp_meta = prompt._meta.get("fastmcp", {})
                         if fastmcp_meta:
                             print(f"   Tags: {fastmcp_meta.get('tags', [])}")
                             print(f"   Version: {fastmcp_meta.get('version', 'N/A')}")
@@ -283,7 +283,7 @@ class TestGmailPrompts:
 
         for prompt in prompts:
             if hasattr(prompt, "_meta") and prompt._meta:
-                fastmcp_meta = prompt._meta.get("_fastmcp", {})
+                fastmcp_meta = prompt._meta.get("fastmcp", {})
                 tags = fastmcp_meta.get("tags", [])
 
                 if "gmail" in tags:

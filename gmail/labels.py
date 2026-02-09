@@ -19,6 +19,11 @@ from googleapiclient.errors import HttpError
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
 
+from auth.service_helpers import (
+    _DEFAULT_BATCH_SIZE,
+    execute_batch_with_retry,
+    execute_google_api,
+)
 from config.enhanced_logging import setup_logger
 from tools.common_types import UserGoogleEmail
 
@@ -465,14 +470,14 @@ async def list_gmail_labels(
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
 
         # First, get the basic list of labels
-        response = await asyncio.to_thread(
-            gmail_service.users().labels().list(userId="me").execute
+        response = await execute_google_api(
+            gmail_service.users().labels().list(userId="me")
         )
         labels_data = response.get("labels", [])
 
         # Use batch requests to efficiently get detailed info for all labels
         # Reduced batch size to avoid rate limiting (Gmail has concurrent request limits)
-        BATCH_SIZE = 50  # Reduced from 100 to avoid rate limits
+        BATCH_SIZE = _DEFAULT_BATCH_SIZE
 
         # Store label details indexed by ID for fast lookup
         label_details = {}
@@ -516,7 +521,7 @@ async def list_gmail_labels(
 
             # Execute the batch request
             try:
-                await asyncio.to_thread(batch.execute)
+                await execute_batch_with_retry(batch)
                 logger.info(
                     f"Batch request completed for {len(batch_labels)} labels ({failed_count} failed)"
                 )
@@ -1062,11 +1067,8 @@ async def _process_single_label(
                     color_obj["backgroundColor"] = background_color
                 label_object["color"] = color_obj
 
-            created_label = await asyncio.to_thread(
-                gmail_service.users()
-                .labels()
-                .create(userId="me", body=label_object)
-                .execute
+            created_label = await execute_google_api(
+                gmail_service.users().labels().create(userId="me", body=label_object)
             )
 
             # Format response with color information
@@ -1083,8 +1085,8 @@ async def _process_single_label(
             return "\n".join(response_lines)
 
         elif action == "update":
-            current_label = await asyncio.to_thread(
-                gmail_service.users().labels().get(userId="me", id=label_id).execute
+            current_label = await execute_google_api(
+                gmail_service.users().labels().get(userId="me", id=label_id)
             )
 
             label_object = {
@@ -1113,11 +1115,10 @@ async def _process_single_label(
 
                 label_object["color"] = color_obj
 
-            updated_label = await asyncio.to_thread(
+            updated_label = await execute_google_api(
                 gmail_service.users()
                 .labels()
                 .update(userId="me", id=label_id, body=label_object)
-                .execute
             )
 
             # Format response with color information
@@ -1134,13 +1135,13 @@ async def _process_single_label(
             return "\n".join(response_lines)
 
         elif action == "delete":
-            label = await asyncio.to_thread(
-                gmail_service.users().labels().get(userId="me", id=label_id).execute
+            label = await execute_google_api(
+                gmail_service.users().labels().get(userId="me", id=label_id)
             )
             label_name = label["name"]
 
-            await asyncio.to_thread(
-                gmail_service.users().labels().delete(userId="me", id=label_id).execute
+            await execute_google_api(
+                gmail_service.users().labels().delete(userId="me", id=label_id)
             )
             return f"✅ {index_prefix}Label '{label_name}' (ID: {label_id}) deleted successfully!"
 
@@ -1281,16 +1282,15 @@ async def modify_gmail_message_labels(
         if parsed_remove_label_ids:
             body["removeLabelIds"] = parsed_remove_label_ids
 
-        await asyncio.to_thread(
+        await execute_google_api(
             gmail_service.users()
             .messages()
             .modify(userId="me", id=message_id, body=body)
-            .execute
         )
 
         # Build ID -> name map for labels so we can return human-readable names
-        labels_response = await asyncio.to_thread(
-            gmail_service.users().labels().list(userId="me").execute
+        labels_response = await execute_google_api(
+            gmail_service.users().labels().list(userId="me")
         )
         labels_data = labels_response.get("labels", [])
         id_to_name: Dict[str, str] = {

@@ -207,6 +207,10 @@ class ManageToolsResponse(BaseModel):
         None,
         description="Session-specific tool state (included when scope='session' or action='list')",
     )
+    clientSupportsUI: Optional[bool] = Field(
+        None,
+        description="Whether the connected client supports the MCP Apps UI extension",
+    )
     message: str = Field(..., description="Human-readable summary of the operation")
     errors: Optional[List[str]] = Field(
         None,

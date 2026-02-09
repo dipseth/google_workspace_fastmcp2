@@ -416,6 +416,9 @@ class DSLParser:
         # Build symbol set for fast lookup
         self._all_symbols: Set[str] = set(self._reverse_mapping.keys())
 
+        # Build ASCII confusable map for visually similar symbols (e.g. 'g' → 'ℊ')
+        self._ascii_confusables: Dict[str, str] = self._build_confusables()
+
         # Cache for repeated parses
         self._parse_cache: Dict[str, DSLParseResult] = {}
 
@@ -441,7 +444,29 @@ class DSLParser:
             self._reverse_mapping = self._wrapper.reverse_symbol_mapping
             self._relationships = self._wrapper.relationships
             self._all_symbols = set(self._reverse_mapping.keys())
+            self._ascii_confusables = self._build_confusables()
             self._parse_cache.clear()
+
+    def _build_confusables(self) -> Dict[str, str]:
+        """
+        Build map of ASCII chars visually confusable with Unicode DSL symbols.
+
+        Example: 'g' (ASCII) → 'ℊ' (U+210A SCRIPT SMALL G) for Grid.
+        Only maps ASCII chars that aren't already real symbols.
+        """
+        import unicodedata
+
+        confusables: Dict[str, str] = {}
+        for symbol in self._all_symbols:
+            if len(symbol) != 1 or ord(symbol) < 128:
+                continue
+            uname = unicodedata.name(symbol, "")
+            parts = uname.split()
+            if len(parts) >= 2 and len(parts[-1]) == 1 and parts[-1].isalpha():
+                ascii_char = parts[-1].lower()
+                if ascii_char not in self._all_symbols:
+                    confusables[ascii_char] = symbol
+        return confusables
 
     # =========================================================================
     # TOKENIZATION
@@ -504,6 +529,13 @@ class DSLParser:
             # Known symbol
             if char in self._all_symbols:
                 tokens.append(DSLToken(type="symbol", value=char, position=i))
+                i += 1
+                continue
+
+            # ASCII confusable → Unicode symbol (e.g. 'g' → 'ℊ')
+            if char in self._ascii_confusables and char not in self._all_symbols:
+                resolved = self._ascii_confusables[char]
+                tokens.append(DSLToken(type="symbol", value=resolved, position=i))
                 i += 1
                 continue
 

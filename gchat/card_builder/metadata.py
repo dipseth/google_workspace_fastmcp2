@@ -24,6 +24,7 @@ _CONTEXT_CONSUMERS_FALLBACK: Dict[ComponentName, Tuple[str, str]] = {
     "DecoratedText": ("content_texts", "_text_index"),
     "TextParagraph": ("content_texts", "_text_index"),
     "CarouselCard": ("carousel_cards", "_carousel_card_index"),
+    "GridItem": ("grid_items", "_grid_item_index"),
 }
 
 # Container components: component_name -> children_field

@@ -156,7 +156,7 @@ DEFAULT_COMPONENT_PARAMS: Dict[ComponentName, JsonDict] = {
     },
     # Layout
     "Divider": {},
-    "Image": {"image_url": "https://picsum.photos/400/200"},
+    "Image": {},
     "Grid": {"column_count": 2},
     "GridItem": {"title": "Grid Item"},
     # Buttons and chips

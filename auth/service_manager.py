@@ -1,6 +1,10 @@
 """Generic Google service management for FastMCP2."""
 
 import logging
+import os
+
+import google_auth_httplib2
+import httplib2
 
 from config.enhanced_logging import setup_logger
 
@@ -10,10 +14,54 @@ from datetime import datetime, timedelta
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.http import HttpRequest
 from typing_extensions import Any, Dict, List, Optional, Union
 
 from .context import get_session_context, get_session_data, store_session_data
 from .google_auth import get_valid_credentials, needs_refresh
+
+# Default HTTP timeout (seconds) for all Google API calls
+_DEFAULT_API_TIMEOUT = int(os.environ.get("GOOGLE_API_TIMEOUT", "30"))
+
+# Default retry count for transient errors (5xx, 429, timeouts, SSL).
+# Same env var as service_helpers.execute_google_api() to keep them in sync.
+_DEFAULT_NUM_RETRIES = int(os.environ.get("GOOGLE_API_NUM_RETRIES", "3"))
+
+
+class RetryHttpRequest(HttpRequest):
+    """HttpRequest subclass that defaults num_retries for every .execute() call.
+
+    Passed as ``requestBuilder`` to ``build()`` so all services automatically
+    get retry behavior for transient errors (5xx, 429, timeouts, SSL).
+
+    Callers can still override per-call: ``request.execute(num_retries=0)``
+    """
+
+    _default_num_retries = _DEFAULT_NUM_RETRIES
+
+    def execute(self, http=None, num_retries=None):
+        if num_retries is None:
+            num_retries = self._default_num_retries
+        return super().execute(http=http, num_retries=num_retries)
+
+
+def _create_authorized_http(
+    credentials: "Credentials", timeout: Optional[int] = None
+) -> google_auth_httplib2.AuthorizedHttp:
+    """Create an authorized HTTP transport with a timeout.
+
+    Args:
+        credentials: Google OAuth2 credentials.
+        timeout: HTTP timeout in seconds. Defaults to ``_DEFAULT_API_TIMEOUT``.
+
+    Returns:
+        An ``AuthorizedHttp`` instance that injects credentials into every
+        request and enforces the given timeout.
+    """
+    effective_timeout = timeout if timeout is not None else _DEFAULT_API_TIMEOUT
+    http = httplib2.Http(timeout=effective_timeout)
+    return google_auth_httplib2.AuthorizedHttp(credentials, http=http)
+
 
 # Import compatibility shim for OAuth scope management
 try:
@@ -377,8 +425,10 @@ async def get_google_service(
             f"Required: {resolved_scopes}, Granted: {credentials.scopes}"
         )
 
-    # Build the service
+    # Build the service with a timeout-configured HTTP transport
     try:
+        authorized_http = _create_authorized_http(credentials)
+
         # Special handling for Photos Library API which uses a custom discovery URL
         if service_name == "photoslibrary":
             import requests
@@ -387,12 +437,21 @@ async def get_google_service(
             # Photos Library API uses a custom discovery document
             discovery_url = f"https://photoslibrary.googleapis.com/$discovery/rest?version={service_version}"
             discovery_doc = requests.get(discovery_url).json()
-            service = build_from_document(discovery_doc, credentials=credentials)
+            service = build_from_document(
+                discovery_doc,
+                http=authorized_http,
+                requestBuilder=RetryHttpRequest,
+            )
             logger.debug(
                 f"Created Photos Library service (v{service_version}) for {user_email} using custom discovery"
             )
         else:
-            service = build(service_name, service_version, credentials=credentials)
+            service = build(
+                service_name,
+                service_version,
+                http=authorized_http,
+                requestBuilder=RetryHttpRequest,
+            )
             logger.debug(
                 f"Created {service_type} service (v{service_version}) for {user_email}"
             )

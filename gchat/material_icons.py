@@ -2420,6 +2420,62 @@ def suggest_icons(query: str, limit: int = 10) -> list[str]:
     return all_matches[:limit]
 
 
+def resolve_icon_name(icon_name: str, strict: bool = False) -> str:
+    """Resolve an icon name: normalize case, try semantic lookup, validate.
+
+    Resolution order:
+    1. Lowercase normalize → check MATERIAL_ICONS
+    2. Semantic lookup → SEMANTIC_ICONS
+    3. If strict: raise ValueError with suggestions
+    4. If not strict: return normalized name as-is (let Google API decide)
+
+    Args:
+        icon_name: Raw icon name from card_params (e.g., "FOLDER", "success", "check_circle")
+        strict: If True, raise ValueError for unrecognized icons. If False, log warning.
+
+    Returns:
+        Resolved icon name (always lowercase)
+
+    Raises:
+        ValueError: If strict=True and icon is not recognized
+
+    Examples:
+        >>> resolve_icon_name("FOLDER")
+        "folder"
+        >>> resolve_icon_name("success")
+        "check_circle"
+        >>> resolve_icon_name("check_circle")
+        "check_circle"
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    normalized = icon_name.strip().lower()
+
+    # 1. Direct match in MATERIAL_ICONS
+    if normalized in MATERIAL_ICONS:
+        return normalized
+
+    # 2. Semantic lookup
+    semantic = SEMANTIC_ICONS.get(normalized)
+    if semantic:
+        logger.debug(f"Resolved semantic icon '{icon_name}' → '{semantic}'")
+        return semantic
+
+    # 3. Unrecognized
+    suggestions = suggest_icons(normalized, limit=3)
+    suggestion_text = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
+
+    if strict:
+        raise ValueError(f"Invalid icon name: '{icon_name}'.{suggestion_text}")
+
+    logger.warning(
+        f"Unrecognized icon name: '{icon_name}'.{suggestion_text} Passing through as-is."
+    )
+    return normalized
+
+
 def create_material_icon(icon_name: str, fill: bool = False) -> dict:
     """Create a materialIcon dict for use in Google Chat cards.
 
@@ -2672,6 +2728,7 @@ __all__ = [
     "get_semantic_icon",
     # Utilities
     "suggest_icons",
+    "resolve_icon_name",
     "create_material_icon",
     "create_icon_widget",
     # Color utilities

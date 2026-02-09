@@ -245,6 +245,11 @@ def build_material_icon(
     This uses the card_framework wrapper components to ensure consistency
     and proper rendering of Material Design icons (2,209+ available icons).
 
+    Icon names are resolved through resolve_icon_name() which handles:
+    - Case normalization: "FOLDER" → "folder"
+    - Semantic resolution: "success" → "check_circle"
+    - Validation with helpful suggestions for typos
+
     Args:
         icon_name: Material icon name (e.g., "thumb_up", "check_circle")
         fill: Optional fill style (True for filled, False for outlined)
@@ -259,6 +264,10 @@ def build_material_icon(
         >>> build_material_icon("check_circle", fill=True, weight=400)
         {"materialIcon": {"name": "check_circle", "fill": True, "weight": 400}}
     """
+    from gchat.material_icons import resolve_icon_name
+
+    icon_name = resolve_icon_name(icon_name)
+
     try:
         from card_framework.v2.widgets.icon import Icon
 

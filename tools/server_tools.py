@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 
 from fastmcp import Context, FastMCP
+from fastmcp.server.apps import UI_EXTENSION_ID, ToolUI
 from mcp.types import ToolListChangedNotification
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
@@ -636,6 +637,10 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "idempotentHint": False,
             "openWorldHint": False,
         },
+        ui=ToolUI(
+            resource_uri="ui://manage-tools-dashboard",
+            visibility=["app", "model"],
+        ),
     )
     async def manage_tools_tool(
         ctx: Context,
@@ -863,6 +868,12 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     f", {session_state.sessionDisabledCount} session-disabled"
                 )
 
+            # Detect if client supports MCP Apps UI extension
+            try:
+                client_supports_ui = ctx.client_supports_extension(UI_EXTENSION_ID)
+            except Exception:
+                client_supports_ui = False
+
             return ManageToolsResponse(
                 success=True,
                 action=action,
@@ -873,6 +884,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 toolList=tool_list,
                 protectedTools=list(protected_tools_set),
                 sessionState=session_state,
+                clientSupportsUI=client_supports_ui,
                 message=f"Listed {len(tool_list)} tools ({enabled_count} enabled, {disabled_count} disabled{session_info})",
             )
 
