@@ -9,7 +9,7 @@ Uses metadata fallback (no wrapper) so tests run without the full card framework
 
 import pytest
 
-from gchat.card_builder.symbol_params import resolve_symbol_params, _resolve_param_key
+from gchat.card_builder.symbol_params import _resolve_param_key, resolve_symbol_params
 
 # Realistic reverse_symbol_mapping (symbol → component name)
 REVERSE_SYMBOLS = {

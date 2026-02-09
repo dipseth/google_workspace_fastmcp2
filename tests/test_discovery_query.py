@@ -12,8 +12,8 @@ Validates that:
 
 import os
 import sys
-from unittest.mock import MagicMock, patch, call
 from types import SimpleNamespace
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 

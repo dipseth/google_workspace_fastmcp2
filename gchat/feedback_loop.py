@@ -2402,11 +2402,11 @@ class FeedbackLoop:
         if not positive_ids or not negative_ids:
             return []
 
-        from qdrant_client import models
-
         # Cap IDs so that pos_count * neg_count <= max_pairs
         # Use sqrt distribution: take ~sqrt(max_pairs) from each side
         import math
+
+        from qdrant_client import models
         per_side = max(1, int(math.sqrt(max_pairs)))
         pos_subset = positive_ids[:per_side]
         neg_subset = negative_ids[:per_side]

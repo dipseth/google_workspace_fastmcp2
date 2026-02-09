@@ -5,6 +5,7 @@ import os
 
 import google_auth_httplib2
 import httplib2
+
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()

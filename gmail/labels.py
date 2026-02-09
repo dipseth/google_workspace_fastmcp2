@@ -19,6 +19,11 @@ from googleapiclient.errors import HttpError
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
 
+from auth.service_helpers import (
+    _DEFAULT_BATCH_SIZE,
+    execute_batch_with_retry,
+    execute_google_api,
+)
 from config.enhanced_logging import setup_logger
 from tools.common_types import UserGoogleEmail
 
@@ -28,12 +33,6 @@ from .gmail_types import (
     ManageGmailLabelResponse,
     ModifyGmailMessageLabelsResponse,
 )
-from auth.service_helpers import (
-    _DEFAULT_BATCH_SIZE,
-    execute_batch_with_retry,
-    execute_google_api,
-)
-
 from .service import _get_gmail_service_with_fallback
 from .utils import GMAIL_LABEL_COLORS, _format_label_color_info, _validate_gmail_color
 
