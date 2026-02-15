@@ -604,6 +604,17 @@ class SessionToolFilteringMiddleware(Middleware):
         # If ?service= is provided, skip session restoration entirely
         # This ensures the service filter is always applied fresh
         if not has_explicit_service_filter:
+            # Skip restoration for sessions already processed in this server lifetime.
+            # Once a session is known in-memory (e.g. manage_tools cleared its disabled
+            # set), re-restoring from disk would overwrite those changes.
+            if effective_session_id in self._processed_sessions:
+                if self.enable_debug:
+                    logger.debug(
+                        f"Session {effective_session_id[:8]}... already processed, "
+                        f"using in-memory state (skipping persistence restore)"
+                    )
+                return effective_session_id, False
+
             # Check if this is a known session (returning client)
             if is_known_session(effective_session_id):
                 # Try to restore persisted state
