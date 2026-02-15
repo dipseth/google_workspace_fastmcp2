@@ -20,6 +20,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Union
 
+from pydantic import BaseModel
+
 from config.enhanced_logging import setup_logger
 
 from .client import QdrantClientManager
@@ -123,7 +125,7 @@ def sanitize_for_json(
                 safe_key = str(key) if key is not None else "unknown_key"
                 sanitized[safe_key] = f"[Sanitization failed: {str(e)}]"
         return sanitized
-    elif hasattr(obj, "model_dump"):
+    elif isinstance(obj, BaseModel):
         # Pydantic model - use its built-in serialization
         try:
             return obj.model_dump(mode="json")
@@ -184,10 +186,8 @@ def _extract_response_content(response: Any) -> Any:
         Extracted content with preserved structure
     """
     try:
-        # Handle FastMCP ToolResult objects
-        if hasattr(response, "content"):
-            content = response.content
-
+        content = getattr(response, "content", None)
+        if content is not None:
             # If content is a string, check if it's JSON and parse if needed
             if isinstance(content, str) and _is_json_string(content):
                 try:
@@ -195,19 +195,14 @@ def _extract_response_content(response: Any) -> Any:
                     logger.debug("🔧 Parsed JSON content from ToolResult.content")
                     return parsed_content
                 except json.JSONDecodeError:
-                    # Not valid JSON, return as-is
                     logger.debug("⚠️ Content appeared to be JSON but failed to parse")
                     return content
 
             return content
 
-        # Handle objects with to_dict method
-        elif hasattr(response, "to_dict"):
-            return response.to_dict()
-
-        # Handle generic objects with attributes
-        elif hasattr(response, "__dict__"):
-            return response.__dict__
+        # Handle Pydantic models
+        elif isinstance(response, BaseModel):
+            return response.model_dump()
 
         # Handle already-parsed structured data
         elif isinstance(response, (dict, list)):
@@ -384,16 +379,8 @@ class QdrantStorageManager:
             # Called with MiddlewareContext object
             try:
                 # Extract tool information from context.message (following FastMCP pattern)
-                tool_name = (
-                    getattr(context.message, "name", "unknown_tool")
-                    if hasattr(context, "message")
-                    else "unknown_tool"
-                )
-                arguments = (
-                    getattr(context.message, "arguments", {})
-                    if hasattr(context, "message")
-                    else {}
-                )
+                tool_name = context.message.name
+                arguments = context.message.arguments or {}
 
                 # Extract user information from auth context
                 from auth.context import get_session_context, get_user_email_context
@@ -402,17 +389,14 @@ class QdrantStorageManager:
                 session_id = await get_session_context() or str(uuid.uuid4())
 
                 # Properly serialize response (handle ToolResult objects)
-                if hasattr(response, "content"):
-                    # FastMCP ToolResult object
-                    serialized_response = response.content
-                elif hasattr(response, "to_dict"):
-                    # Object with to_dict method
-                    serialized_response = response.to_dict()
-                elif hasattr(response, "__dict__"):
-                    # Generic object with attributes
-                    serialized_response = response.__dict__
+                content = getattr(response, "content", None)
+                if content is not None:
+                    serialized_response = content
+                elif isinstance(response, BaseModel):
+                    serialized_response = response.model_dump()
+                elif isinstance(response, (dict, list, str)):
+                    serialized_response = response
                 else:
-                    # Convert to string as fallback
                     serialized_response = str(response)
 
                 # Create response payload

@@ -2,7 +2,7 @@
 
 import pytest
 from fastmcp import Client, FastMCP
-from fastmcp.server.apps import ResourceUI, ToolUI
+from fastmcp.server.apps import AppConfig
 
 from tools.ui_apps import _build_manage_tools_html, setup_ui_apps
 
@@ -15,7 +15,7 @@ def mcp_with_ui():
     # Register a tool with ToolUI metadata (mirrors manage_tools)
     @mcp.tool(
         name="manage_tools",
-        ui=ToolUI(
+        app=AppConfig(
             resource_uri="ui://manage-tools-dashboard",
             visibility=["app", "model"],
         ),

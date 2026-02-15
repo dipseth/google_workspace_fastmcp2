@@ -154,7 +154,7 @@ class ModuleWrapperMiddleware(Middleware):
         2. Providing access to module wrapper functionality through context
         3. Handling module-specific operations
         """
-        tool_name = getattr(context.message, "name", "unknown")
+        tool_name = context.message.name
 
         # Check if this is a module wrapper tool
         module_wrapper_tools = {

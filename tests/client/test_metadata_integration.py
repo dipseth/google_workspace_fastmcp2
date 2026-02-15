@@ -208,6 +208,11 @@ class TestMetadataIntegration:
     @pytest.mark.asyncio
     async def test_metadata_error_schemas(self, client):
         """Test that metadata includes error response schemas."""
+        # Enable tools for this session so they can be called
+        await client.call_tool(
+            "manage_tools", {"action": "enable_all", "scope": "session"}
+        )
+
         # Test a tool with invalid parameters to check error metadata
         try:
             result = await client.call_tool(
@@ -254,6 +259,11 @@ class TestMetadataSourceOfTruth:
     @pytest.mark.asyncio
     async def test_metadata_driven_validation(self, client):
         """Test that validation is driven by metadata schemas."""
+        # Enable tools for this session so they can be called
+        await client.call_tool(
+            "manage_tools", {"action": "enable_all", "scope": "session"}
+        )
+
         # Try calling a tool with schema-violating parameters
         test_cases = [
             {

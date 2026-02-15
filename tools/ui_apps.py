@@ -9,7 +9,7 @@ snapshot of tool state injected via ``window.__MCP_TOOLS__``.
 import json
 
 from fastmcp import FastMCP
-from fastmcp.server.apps import ResourceUI
+from fastmcp.server.apps import AppConfig
 
 _TOOLS_PLACEHOLDER = "/*__MCP_TOOLS_DATA__*/"
 
@@ -34,7 +34,7 @@ def _collect_tools_json(mcp: FastMCP) -> str:
 
     tools = []
     try:
-        components = mcp._local_provider._components
+        components = mcp.local_provider._components
         for key, comp in sorted(components.items()):
             if not key.startswith("tool:"):
                 continue
@@ -184,7 +184,7 @@ def setup_ui_apps(mcp: FastMCP) -> None:
         title="Tool Management Dashboard",
         description="Read-only dashboard showing tool enable/disable state",
         tags={"ui", "dashboard", "tools"},
-        ui=ResourceUI(prefers_border=True),
+        app=AppConfig(prefers_border=True),
     )
     def manage_tools_dashboard() -> str:
         return _build_manage_tools_html(_collect_tools_json(mcp))

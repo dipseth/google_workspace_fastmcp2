@@ -286,7 +286,7 @@ logger.info(f"🔧 Qdrant URL: {settings.qdrant_url}")
 logger.info(f"🔧 API Key configured: {bool(settings.qdrant_api_key)}")
 
 # Update sampling middleware with Qdrant integration now that it's initialized
-if sampling_middleware and hasattr(sampling_middleware, "qdrant_middleware"):
+if sampling_middleware:
     sampling_middleware.qdrant_middleware = qdrant_middleware
     logger.info(
         "🔗 Enhanced Sampling Middleware connected to Qdrant for historical context"
@@ -336,6 +336,24 @@ mcp.add_middleware(tag_based_middleware)
 logger.info(
     "✅ TagBasedResourceMiddleware enabled - service:// URIs will be handled via tag-based tool discovery"
 )
+
+# 8. Add ResponseLimitingMiddleware for tool response size control
+if settings.response_limit_max_size > 0:
+    from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
+
+    _rl_tools = (
+        [t.strip() for t in settings.response_limit_tools.split(",") if t.strip()]
+        or None
+    )
+    response_limiting_middleware = ResponseLimitingMiddleware(
+        max_size=settings.response_limit_max_size,
+        tools=_rl_tools,
+    )
+    mcp.add_middleware(response_limiting_middleware)
+    logger.info(
+        f"✅ ResponseLimitingMiddleware enabled — max {settings.response_limit_max_size:,} bytes"
+        + (f" for tools: {_rl_tools}" if _rl_tools else " (all tools)")
+    )
 
 # Register drive upload tools
 setup_drive_tools(mcp)

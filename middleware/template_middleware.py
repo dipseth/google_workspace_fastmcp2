@@ -190,7 +190,7 @@ class EnhancedTemplateMiddleware(Middleware):
         Returns:
             Result from the original tool execution after template resolution
         """
-        tool_name = getattr(context.message, "name", "unknown")
+        tool_name = context.message.name
 
         if self.enable_debug_logging:
             logger.info(f"🔧 Processing tool call: {tool_name}")
@@ -229,7 +229,7 @@ class EnhancedTemplateMiddleware(Middleware):
                 return await call_next(context)
             else:
                 # Get the tool arguments
-                original_args = getattr(context.message, "arguments", {})
+                original_args = context.message.arguments or {}
 
                 if original_args:
                     # Resolve template parameters using the modular template processor
@@ -265,9 +265,9 @@ class EnhancedTemplateMiddleware(Middleware):
         # DEBUG: Check result object structure
         if self.enable_debug_logging:
             logger.info(
-                f"🔍 DEBUG result object for {tool_name}: type={type(result)}, has_structured_content={hasattr(result, 'structured_content') if result else False}"
+                f"🔍 DEBUG result object for {tool_name}: type={type(result)}, has_structured_content={bool(result and result.structured_content)}"
             )
-            if result and hasattr(result, "structured_content"):
+            if result and result.structured_content:
                 logger.info(
                     f"🔍 DEBUG structured_content type: {type(result.structured_content)}"
                 )
@@ -275,7 +275,7 @@ class EnhancedTemplateMiddleware(Middleware):
         # JINJA2 TEMPLATE TRACKING & ERROR INJECTION: Inject into the ACTUAL response content
         if result:
             # Check if this is a FastMCP ToolResult with content (what clients actually receive)
-            if hasattr(result, "content") and isinstance(result.content, dict):
+            if isinstance(result.content, dict):
                 # Transform the actual response content (this is what clients see)
                 result.content = add_middleware_fields_to_response(
                     result.content,
@@ -293,9 +293,7 @@ class EnhancedTemplateMiddleware(Middleware):
                     )
 
             # Also inject into structured_content for internal use
-            elif hasattr(result, "structured_content") and isinstance(
-                result.structured_content, dict
-            ):
+            elif isinstance(result.structured_content, dict):
                 # Use the same helper function for consistency
                 result.structured_content = add_middleware_fields_to_response(
                     result.structured_content,
@@ -407,7 +405,7 @@ class EnhancedTemplateMiddleware(Middleware):
         3. Applies template middleware processing to resolve resource variables
         4. Returns the processed prompt with resolved template variables
         """
-        prompt_name = getattr(context.message, "name", "")
+        prompt_name = context.message.name
 
         if self.enable_debug_logging:
             logger.info(f"🎭 Processing prompt request: {prompt_name}")
@@ -493,11 +491,7 @@ class EnhancedTemplateMiddleware(Middleware):
         Delegates to the macro manager for processing template:// URIs.
         """
         # Get the resource URI from the message
-        resource_uri = (
-            str(context.message.uri)
-            if hasattr(context.message, "uri") and context.message.uri
-            else ""
-        )
+        resource_uri = str(context.message.uri) if context.message.uri else ""
 
         if self.enable_debug_logging:
             logger.info(f"🔍 Checking resource URI: {resource_uri}")

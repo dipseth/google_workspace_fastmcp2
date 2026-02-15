@@ -135,7 +135,7 @@ class ResourceContextManager:
                 logger.debug(f"🔍 Fetching resource: {uri}")
 
             # Use the fastmcp_context to read resources
-            if hasattr(self.fastmcp_context, "read_resource"):
+            if self.fastmcp_context:
                 result = await self.fastmcp_context.read_resource(uri)
                 if result and result.get("contents"):
                     # Extract the content from the resource response
@@ -1040,13 +1040,13 @@ class EnhancedSamplingMiddleware(Middleware):
         2. Transforms the tool to add ctx: Context parameter for sampling
         3. Provides enhanced sampling capabilities when ctx.sample() is called
         """
-        tool_name = getattr(context.message, "name", "unknown")
+        tool_name = context.message.name
 
         if self.enable_debug:
             logger.debug(f"🔧 Processing tool call for elicitation: {tool_name}")
 
         # Check if we have FastMCP context
-        if not hasattr(context, "fastmcp_context") or not context.fastmcp_context:
+        if not context.fastmcp_context:
             if self.enable_debug:
                 logger.debug(f"⚠️ No FastMCP context available for tool: {tool_name}")
             return await call_next(context)
@@ -1180,7 +1180,7 @@ class EnhancedSamplingMiddleware(Middleware):
             """
             try:
                 # Store enhanced context for potential use
-                if hasattr(ctx, "set_state"):
+                if ctx:
                     enhanced_context = await self._create_enhanced_context(
                         ctx, original_tool.name
                     )

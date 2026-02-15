@@ -39,27 +39,10 @@ class MCPMetadataHandler:
             Dictionary of tool name to tool metadata
         """
         try:
-            # Try multiple access patterns for FastMCP tool registry
-            # FastMCP 2.x path
-            if hasattr(self.mcp_server, "_tool_manager") and hasattr(
-                self.mcp_server._tool_manager, "_tools"
-            ):
-                tools = self.mcp_server._tool_manager._tools
-            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-            elif hasattr(self.mcp_server, "_local_provider") and hasattr(
-                self.mcp_server._local_provider, "_components"
-            ):
-                from fastmcp.tools.tool import Tool
+            from fastmcp.tools.tool import Tool
 
-                components = self.mcp_server._local_provider._components
-                tools = {v.name: v for v in components.values() if isinstance(v, Tool)}
-            elif hasattr(self.mcp_server, "tools"):
-                tools = {tool.name: tool for tool in self.mcp_server.tools}
-            elif hasattr(self.mcp_server, "_tools"):
-                tools = self.mcp_server._tools
-            else:
-                self.logger.warning("Could not access MCP tool registry")
-                return {}
+            components = self.mcp_server.local_provider._components
+            tools = {v.name: v for v in components.values() if isinstance(v, Tool)}
 
             self.logger.info(f"Found {len(tools)} registered tools")
             return tools

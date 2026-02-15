@@ -85,7 +85,9 @@ class TestRegistryDiscovery:
         ), f"Registry should have 80+ tools registered, found {initial_count}"
 
         # Enable all tools to check metadata
-        await client.call_tool("manage_tools", {"action": "enable_all"})
+        await client.call_tool(
+            "manage_tools", {"action": "enable_all", "scope": "session"}
+        )
 
         # Now get enabled tools and check their metadata
         enabled_tools = await client.list_tools()
@@ -313,8 +315,11 @@ class TestRegistryIntegration:
         Note: The server starts with only 5 core tools enabled by default.
         This test enables all tools first to test middleware integration.
         """
-        # Enable all tools first
-        await client.call_tool("manage_tools", {"action": "enable_all"})
+        # Enable all tools first (scope='session' needed because session-level filtering
+        # may independently disable tools even when globally enabled)
+        await client.call_tool(
+            "manage_tools", {"action": "enable_all", "scope": "session"}
+        )
 
         # Call a tool that requires middleware (template resolution)
         result = await client.call_tool(
@@ -337,8 +342,11 @@ class TestRegistryIntegration:
         Note: The server starts with only 5 core tools enabled by default.
         This test enables all tools first to test auth patterns.
         """
-        # Enable all tools first
-        await client.call_tool("manage_tools", {"action": "enable_all"})
+        # Enable all tools first (scope='session' needed because session-level filtering
+        # may independently disable tools even when globally enabled)
+        await client.call_tool(
+            "manage_tools", {"action": "enable_all", "scope": "session"}
+        )
 
         # Test tools that require authentication
         auth_required_tools = [
@@ -365,8 +373,10 @@ class TestRegistryIntegration:
         Note: The server starts with only 5 core tools enabled by default.
         This test enables all tools first to test routing.
         """
-        # Enable all tools first
-        await client.call_tool("manage_tools", {"action": "enable_all"})
+        # Enable all tools first (scope='session' to enable at session level)
+        await client.call_tool(
+            "manage_tools", {"action": "enable_all", "scope": "session"}
+        )
 
         # Test tools from different services
         test_cases = [

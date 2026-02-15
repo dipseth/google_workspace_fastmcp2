@@ -223,6 +223,18 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "JINJA_TEMPLATE_STRICT_MODE"},
     )
 
+    # Response Limiting Configuration
+    response_limit_max_size: int = Field(
+        default=500_000,
+        description="Maximum tool response size in bytes before truncation (0 = disabled). Default 500KB.",
+        json_schema_extra={"env": "RESPONSE_LIMIT_MAX_SIZE"},
+    )
+    response_limit_tools: str = Field(
+        default="",
+        description="Comma-separated tool names to limit. Empty = all tools.",
+        json_schema_extra={"env": "RESPONSE_LIMIT_TOOLS"},
+    )
+
     # FastMCP 2.12.0 GoogleProvider Configuration
     fastmcp_server_auth: str = ""
     fastmcp_server_auth_google_client_id: str = ""

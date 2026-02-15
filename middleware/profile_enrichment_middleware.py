@@ -126,7 +126,7 @@ class ProfileEnrichmentMiddleware(Middleware):
             context: Middleware context containing tool call info
             call_next: Next middleware in chain
         """
-        tool_name = getattr(context.message, "name", "unknown")
+        tool_name = context.message.name
         logger.info(f"👤 ProfileEnrichmentMiddleware: Processing tool '{tool_name}'")
 
         # Execute the tool first
@@ -178,7 +178,7 @@ class ProfileEnrichmentMiddleware(Middleware):
     def _extract_user_email(self, context: MiddlewareContext) -> Optional[str]:
         """Extract user email from tool arguments."""
         try:
-            if hasattr(context.message, "arguments") and context.message.arguments:
+            if context.message.arguments:
                 args = context.message.arguments
                 return args.get("user_google_email") or args.get("user_email")
         except Exception as e:
@@ -202,7 +202,7 @@ class ProfileEnrichmentMiddleware(Middleware):
         logger.debug(f"👤 _enrich_response called with result type: {type(result)}")
 
         # Handle ToolResult objects (FastMCP standard response)
-        if hasattr(result, "structured_content") and result.structured_content:
+        if result.structured_content:
             logger.info("👤 Extracting structured_content from ToolResult")
             structured_data = result.structured_content
             logger.debug(f"👤 Structured content type: {type(structured_data)}")

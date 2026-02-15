@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from fastmcp import Context, FastMCP
 from fastmcp.resources import ResourceContent
+from pydantic import BaseModel
 
 from config.enhanced_logging import setup_logger
 
@@ -72,7 +73,7 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, "model_dump"):
+        if isinstance(cached_result, BaseModel):
             return [
                 ResourceContent(
                     cached_result.model_dump(), mime_type="application/json"
@@ -136,7 +137,7 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, "model_dump"):
+        if isinstance(cached_result, BaseModel):
             return [
                 ResourceContent(
                     cached_result.model_dump(), mime_type="application/json"
@@ -202,7 +203,7 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, "model_dump"):
+        if isinstance(cached_result, BaseModel):
             return [
                 ResourceContent(
                     cached_result.model_dump(), mime_type="application/json"
@@ -262,7 +263,7 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, "model_dump"):
+        if isinstance(cached_result, BaseModel):
             return [
                 ResourceContent(
                     cached_result.model_dump(), mime_type="application/json"
@@ -332,7 +333,7 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, "model_dump"):
+        if isinstance(cached_result, BaseModel):
             return [
                 ResourceContent(
                     cached_result.model_dump(), mime_type="application/json"
@@ -390,7 +391,7 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             ]
 
         # Return cached result as ResourceContent
-        if hasattr(cached_result, "model_dump"):
+        if isinstance(cached_result, BaseModel):
             return [
                 ResourceContent(
                     cached_result.model_dump(), mime_type="application/json"
@@ -480,7 +481,7 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
 
         logger.info("✅ Returning cached result from resource handler")
         # Return cached result as ResourceContent
-        if hasattr(cached_result, "model_dump"):
+        if isinstance(cached_result, BaseModel):
             return [
                 ResourceContent(
                     cached_result.model_dump(), mime_type="application/json"
@@ -544,7 +545,7 @@ def setup_qdrant_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             ]
         elif isinstance(cached_result, dict):
             return [ResourceContent(cached_result, mime_type="application/json")]
-        elif hasattr(cached_result, "model_dump"):
+        elif isinstance(cached_result, BaseModel):
             return [
                 ResourceContent(
                     cached_result.model_dump(), mime_type="application/json"
