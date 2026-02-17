@@ -398,8 +398,11 @@ class TemplateProcessor:
                     resolved_data = await self.resource_handler.fetch_resource(
                         uri, fastmcp_context
                     )
-                except TemplateResolutionError:
+                except TemplateResolutionError as tre:
                     # If resource resolution fails, try to extract from existing context
+                    logger.warning(
+                        f"⚠️ Resource fetch failed for '{uri}': {tre}"
+                    )
                     state_key = f"resource_cache_{uri}"
                     resolved_data = await fastmcp_context.get_state(state_key)
                     if not resolved_data:
@@ -408,8 +411,21 @@ class TemplateProcessor:
                             resolved_data = {"email": ""}
                         else:
                             resolved_data = {}
-                        if self.enable_debug_logging:
-                            logger.debug(f"🔄 Using fallback empty data for {uri}")
+                        logger.warning(
+                            f"⚠️ Using fallback empty data for '{uri}' — "
+                            f"resource could not be resolved from any source"
+                        )
+
+                # Log resolved data summary for diagnostics
+                if isinstance(resolved_data, dict):
+                    logger.info(
+                        f"📦 Resolved resource '{uri}' → dict with {len(resolved_data)} keys: "
+                        f"{list(resolved_data.keys())[:5]}"
+                    )
+                else:
+                    logger.info(
+                        f"📦 Resolved resource '{uri}' → {type(resolved_data).__name__}"
+                    )
 
                 # Generate a meaningful variable name from URI
                 # Convert user://current/email → user_current_email

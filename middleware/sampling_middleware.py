@@ -129,23 +129,25 @@ class ResourceContextManager:
         self.enable_debug = enable_debug
 
     async def get_resource_safely(self, uri: str) -> Optional[Dict[str, Any]]:
-        """Safely get a resource with error handling."""
+        """Safely get a resource with error handling.
+
+        Context.read_resource() returns ResourceResult with
+        .contents: list[ResourceContent] where ResourceContent.content is str.
+        """
         try:
             if self.enable_debug:
                 logger.debug(f"🔍 Fetching resource: {uri}")
 
-            # Use the fastmcp_context to read resources
-            if self.fastmcp_context:
-                result = await self.fastmcp_context.read_resource(uri)
-                if result and result.get("contents"):
-                    # Extract the content from the resource response
-                    content = result["contents"][0]
-                    if content.get("text"):
-                        import json
+            if not self.fastmcp_context:
+                return None
 
-                        return json.loads(content["text"])
-                    return content
-            return None
+            # ResourceResult.contents[0].content is the str payload
+            import json
+
+            result = await self.fastmcp_context.read_resource(uri)
+            content_str = result.contents[0].content
+            return json.loads(content_str)
+
         except Exception as e:
             if self.enable_debug:
                 logger.debug(f"⚠️ Failed to fetch resource {uri}: {e}")

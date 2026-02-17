@@ -33,7 +33,8 @@ and macro management for the template processing system.
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -319,8 +320,10 @@ class JinjaEnvironmentManager:
         ):
             return
 
-        # Find all .j2 template files
-        template_files = list(self.templates_dir.glob("*.j2"))
+        # Find all .j2 template files (including dynamic/ subdirectory)
+        template_files = list(self.templates_dir.glob("*.j2")) + list(
+            self.templates_dir.glob("dynamic/*.j2")
+        )
 
         if self.enable_debug_logging:
             logger.debug(
@@ -330,7 +333,8 @@ class JinjaEnvironmentManager:
         # Load each template and make its macros available globally
         for template_file in template_files:
             try:
-                template_name = template_file.name
+                # Use relative path from templates_dir for subdirectory files
+                template_name = str(template_file.relative_to(self.templates_dir))
                 template = self.jinja2_env.get_template(template_name)
 
                 # Import the template module to access its macros
@@ -383,6 +387,8 @@ class JinjaEnvironmentManager:
 
         # Simple functions that work with pre-populated context data
         # These will be accessible as global functions in templates
+        # NOTE: These must include anything macros need (macros loaded via
+        # make_module() only see globals, not render-time template context).
         self.jinja2_env.globals.update(
             {
                 "now": lambda: datetime.now(timezone.utc),
@@ -403,6 +409,10 @@ class JinjaEnvironmentManager:
                 "enumerate": enumerate,
                 "zip": zip,
                 "range": range,
+                # Modules needed by macros (e.g. json.dumps for params-mode output)
+                "json": json,
+                "datetime": datetime,
+                "timedelta": timedelta,
             }
         )
 

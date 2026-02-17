@@ -69,7 +69,7 @@ from slides.slides_tools import setup_slides_tools
 from tools.dynamic_instructions import update_mcp_instructions
 from tools.server_tools import setup_server_tools
 from tools.template_macro_tools import setup_template_macro_tools
-from tools.ui_apps import setup_ui_apps
+from tools.ui_apps import setup_ui_apps, wire_dashboard_to_list_tools
 
 # Authentication setup - choose between Google OAuth and custom JWT
 use_google_oauth = os.getenv("USE_GOOGLE_OAUTH", "true").lower() == "true"
@@ -188,6 +188,7 @@ auth_middleware.enable_service_selection(enabled=True)
 logger.info("✅ Service selection interface enabled for OAuth flows")
 
 mcp.add_middleware(auth_middleware)
+
 
 # Register the AuthMiddleware instance in context for tool access
 from auth.context import set_auth_middleware
@@ -355,6 +356,15 @@ if settings.response_limit_max_size > 0:
         + (f" for tools: {_rl_tools}" if _rl_tools else " (all tools)")
     )
 
+# 9. Dashboard cache middleware — caches list-tool results for ui://data-dashboard.
+# Registered LAST (outermost) so it wraps all other middleware and always sees tool calls,
+# even if an inner middleware (e.g., session tool filter) handles the call directly.
+from middleware.dashboard_cache_middleware import DashboardCacheMiddleware
+
+dashboard_cache_middleware = DashboardCacheMiddleware()
+mcp.add_middleware(dashboard_cache_middleware)
+logger.info("✅ Dashboard cache middleware registered (outermost)")
+
 # Register drive upload tools
 setup_drive_tools(mcp)
 
@@ -499,6 +509,10 @@ setup_service_list_resources(mcp)
 logger.info(
     "✅ Service list resources registered - URIs handled by TagBasedResourceMiddleware"
 )
+
+# Wire data-dashboard UI to all list tools (centralized — no per-tool edits needed)
+patched = wire_dashboard_to_list_tools(mcp)
+logger.info(f"✅ Data dashboard wired to {patched} list tools")
 
 # Setup service recent resources (recent files from Drive-based services)
 setup_service_recent_resources(mcp)

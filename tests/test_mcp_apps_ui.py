@@ -38,14 +38,15 @@ def test_html_is_valid_document():
     assert "<body>" in html
 
 
-def test_html_contains_tool_grid():
+def test_html_contains_groups_container():
     html = _build_manage_tools_html()
-    assert 'id="tool-grid"' in html
+    assert 'id="groups-container"' in html
 
 
 def test_html_contains_phase1_badge():
     html = _build_manage_tools_html()
-    assert "Phase 1: Read-Only" in html
+    assert "Phase 1" in html
+    assert "Read-Only" in html
 
 
 def test_html_contains_mcp_tools_placeholder():

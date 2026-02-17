@@ -479,35 +479,43 @@ class TagBasedResourceMiddleware(Middleware):
         return None, None
 
     def _convert_result_to_serializable(self, result: Any) -> Any:
-        """Convert tool result to serializable format."""
+        """Convert a tool result to a JSON-serializable Python object.
+
+        FastMCP v3 types:
+        - CallToolResult: .content is list[TextContent | ImageContent | ...]
+          where TextContent has .text (str)
+        - ResourceResult: .contents is list[ResourceContent]
+          where ResourceContent has .content (str) and .mime_type
+        """
+        import json as json_module
+
         from pydantic import BaseModel
 
-        content = getattr(result, "content", None)
-        if content is not None:
-            if isinstance(content, (list, tuple)):
-                extracted_content = []
-                for item in content:
-                    text = getattr(item, "text", None)
-                    extracted_content.append(text if text is not None else item)
-                if len(extracted_content) == 1 and isinstance(
-                    extracted_content[0], str
-                ):
-                    try:
-                        import json as json_module
+        # CallToolResult — .content is a list of TextContent items
+        if hasattr(result, "content") and isinstance(result.content, list):
+            texts = [item.text for item in result.content if hasattr(item, "text")]
+            if len(texts) == 1:
+                try:
+                    return json_module.loads(texts[0])
+                except (json_module.JSONDecodeError, TypeError, ValueError):
+                    return texts[0]
+            return texts if texts else result.content
 
-                        return json_module.loads(extracted_content[0])
-                    except Exception:
-                        return extracted_content[0]
-                else:
-                    return extracted_content
-            elif isinstance(content, BaseModel):
-                return content.model_dump()
-            else:
-                return getattr(content, "text", content)
-        elif isinstance(result, BaseModel):
+        # ResourceResult — .contents is a list of ResourceContent items
+        if hasattr(result, "contents") and isinstance(result.contents, list):
+            payloads = [item.content for item in result.contents]
+            if len(payloads) == 1 and isinstance(payloads[0], str):
+                try:
+                    return json_module.loads(payloads[0])
+                except (json_module.JSONDecodeError, TypeError, ValueError):
+                    return payloads[0]
+            return payloads
+
+        # Generic Pydantic fallback
+        if isinstance(result, BaseModel):
             return result.model_dump()
-        else:
-            return result
+
+        return result
 
     async def _handle_service_lists(
         self, service: str, context: MiddlewareContext
