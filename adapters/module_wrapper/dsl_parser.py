@@ -76,40 +76,78 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DSLToken:
-    """A single token from DSL tokenization."""
+    """A single token from DSL tokenization.
 
-    type: str  # 'symbol', 'multiplier', 'open', 'close', 'component_name'
+    Token types:
+    - 'symbol': Unicode symbol (e.g., §, ᵬ, ℊ)
+    - 'multiplier': Repeat notation (e.g., ×3)
+    - 'open': Opening bracket [
+    - 'close': Closing bracket ]
+    - 'component_name': Full component name (e.g., Button)
+    - 'param_open': Opening brace {  (parameterized notation)
+    - 'param_close': Closing brace }  (parameterized notation)
+    - 'equals': Assignment operator =  (parameterized notation)
+    - 'string': Quoted string literal  (parameterized notation)
+    - 'number': Numeric literal         (parameterized notation)
+    - 'boolean': true/false literal     (parameterized notation)
+    - 'null': null/None literal         (parameterized notation)
+    - 'identifier': Bare word param name (parameterized notation)
+    """
+
+    type: str
     value: str
     position: int
 
 
 @dataclass
 class DSLNode:
-    """A node in the parsed DSL tree."""
+    """A node in the parsed DSL tree.
+
+    Supports two modes:
+    - **Positional**: children list (e.g., §[δ×3, Ƀ[ᵬ×2]])
+    - **Parameterized**: params dict (e.g., ƒ{must=[φ{key="x", match=ʋ{value="y"}}]})
+
+    Params values can be primitives (str, int, float, bool, None),
+    other DSLNode objects, or lists thereof.
+    """
 
     symbol: str
     component_name: str
     multiplier: int = 1
     children: List["DSLNode"] = field(default_factory=list)
+    params: Dict[str, Any] = field(default_factory=dict)
     parent: Optional["DSLNode"] = None
     depth: int = 0
 
+    @property
+    def is_parameterized(self) -> bool:
+        """True if this node uses parameterized notation (has params, no positional children)."""
+        return bool(self.params) and not self.children
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result = {
             "symbol": self.symbol,
             "name": self.component_name,
             "multiplier": self.multiplier,
             "depth": self.depth,
             "children": [child.to_dict() for child in self.children],
         }
+        if self.params:
+            result["params"] = _params_to_dict(self.params)
+        return result
 
     def to_compact_dsl(self) -> str:
         """Convert back to compact DSL notation."""
         result = self.symbol
         if self.multiplier > 1:
             result = f"{self.symbol}×{self.multiplier}"
-        if self.children:
+        if self.params:
+            params_str = ", ".join(
+                f"{k}={_param_value_to_dsl(v)}" for k, v in self.params.items()
+            )
+            result = f"{result}{{{params_str}}}"
+        elif self.children:
             children_str = ", ".join(c.to_compact_dsl() for c in self.children)
             result = f"{result}[{children_str}]"
         return result
@@ -119,16 +157,29 @@ class DSLNode:
         result = self.component_name
         if self.multiplier > 1:
             result = f"{self.component_name}×{self.multiplier}"
-        if self.children:
+        if self.params:
+            params_str = ", ".join(
+                f"{k}={_param_value_to_expanded(v)}" for k, v in self.params.items()
+            )
+            result = f"{result}{{{params_str}}}"
+        elif self.children:
             children_str = ", ".join(c.to_expanded_notation() for c in self.children)
             result = f"{result}[{children_str}]"
         return result
 
     def flatten(self) -> List["DSLNode"]:
-        """Flatten tree to list (pre-order traversal)."""
+        """Flatten tree to list (pre-order traversal), including parameterized children."""
         nodes = [self]
         for child in self.children:
             nodes.extend(child.flatten())
+        # Also flatten DSLNode values in params
+        for value in self.params.values():
+            if isinstance(value, DSLNode):
+                nodes.extend(value.flatten())
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, DSLNode):
+                        nodes.extend(item.flatten())
         return nodes
 
     def get_component_counts(self) -> Dict[str, int]:
@@ -139,7 +190,66 @@ class DSLNode:
             child_counts = child.get_component_counts()
             for name, count in child_counts.items():
                 counts[name] += count
+        # Also count parameterized children
+        for value in self.params.values():
+            if isinstance(value, DSLNode):
+                for name, count in value.get_component_counts().items():
+                    counts[name] += count
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, DSLNode):
+                        for name, count in item.get_component_counts().items():
+                            counts[name] += count
         return dict(counts)
+
+
+def _params_to_dict(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert params dict to JSON-serializable form."""
+    result = {}
+    for k, v in params.items():
+        if isinstance(v, DSLNode):
+            result[k] = v.to_dict()
+        elif isinstance(v, list):
+            result[k] = [
+                item.to_dict() if isinstance(item, DSLNode) else item for item in v
+            ]
+        else:
+            result[k] = v
+    return result
+
+
+def _param_value_to_dsl(value: Any) -> str:
+    """Convert a param value to DSL string representation."""
+    if isinstance(value, DSLNode):
+        return value.to_compact_dsl()
+    elif isinstance(value, list):
+        items = ", ".join(_param_value_to_dsl(v) for v in value)
+        return f"[{items}]"
+    elif isinstance(value, str):
+        return f'"{value}"'
+    elif isinstance(value, bool):
+        return "true" if value else "false"
+    elif value is None:
+        return "null"
+    else:
+        return str(value)
+
+
+def _param_value_to_expanded(value: Any) -> str:
+    """Convert a param value to expanded notation string."""
+    if isinstance(value, DSLNode):
+        return value.to_expanded_notation()
+    elif isinstance(value, list):
+        items = ", ".join(_param_value_to_expanded(v) for v in value)
+        return f"[{items}]"
+    elif isinstance(value, str):
+        return f'"{value}"'
+    elif isinstance(value, bool):
+        return "true" if value else "false"
+    elif value is None:
+        return "null"
+    else:
+        return str(value)
 
 
 @dataclass
@@ -476,12 +586,8 @@ class DSLParser:
         """
         Tokenize a DSL string into tokens.
 
-        Token types:
-        - 'symbol': Unicode symbol (e.g., §, ᵬ, ℊ)
-        - 'multiplier': Repeat notation (e.g., ×3)
-        - 'open': Opening bracket [
-        - 'close': Closing bracket ]
-        - 'component_name': Full component name (e.g., Button)
+        Supports both positional notation (§[δ×3]) and parameterized notation
+        (ƒ{must=[φ{key="x"}]}). Both can coexist in the same DSL string.
 
         Args:
             dsl_string: DSL notation string
@@ -501,7 +607,7 @@ class DSLParser:
                 i += 1
                 continue
 
-            # Brackets
+            # Positional brackets
             if char == "[":
                 tokens.append(DSLToken(type="open", value="[", position=i))
                 i += 1
@@ -509,6 +615,23 @@ class DSLParser:
 
             if char == "]":
                 tokens.append(DSLToken(type="close", value="]", position=i))
+                i += 1
+                continue
+
+            # Parameterized braces
+            if char == "{":
+                tokens.append(DSLToken(type="param_open", value="{", position=i))
+                i += 1
+                continue
+
+            if char == "}":
+                tokens.append(DSLToken(type="param_close", value="}", position=i))
+                i += 1
+                continue
+
+            # Equals sign (for parameterized notation)
+            if char == "=":
+                tokens.append(DSLToken(type="equals", value="=", position=i))
                 i += 1
                 continue
 
@@ -526,6 +649,37 @@ class DSLParser:
                 i = j
                 continue
 
+            # String literals (for parameterized notation)
+            if char in ('"', "'"):
+                quote = char
+                j = i + 1
+                while j < len(s) and s[j] != quote:
+                    if s[j] == "\\" and j + 1 < len(s):
+                        j += 2  # skip escaped char
+                    else:
+                        j += 1
+                if j < len(s):
+                    j += 1  # consume closing quote
+                string_val = s[i + 1 : j - 1]
+                tokens.append(DSLToken(type="string", value=string_val, position=i))
+                i = j
+                continue
+
+            # Numeric literals (including negative and float)
+            if char.isdigit() or (
+                char == "-" and i + 1 < len(s) and s[i + 1].isdigit()
+            ):
+                j = i + 1 if char == "-" else i
+                while j < len(s) and s[j].isdigit():
+                    j += 1
+                if j < len(s) and s[j] == ".":
+                    j += 1
+                    while j < len(s) and s[j].isdigit():
+                        j += 1
+                tokens.append(DSLToken(type="number", value=s[i:j], position=i))
+                i = j
+                continue
+
             # Known symbol
             if char in self._all_symbols:
                 tokens.append(DSLToken(type="symbol", value=char, position=i))
@@ -539,23 +693,38 @@ class DSLParser:
                 i += 1
                 continue
 
-            # Component name (alphanumeric)
-            if char.isalpha():
+            # Component name or keyword (alphanumeric)
+            if char.isalpha() or char == "_":
                 j = i
                 while j < len(s) and (s[j].isalnum() or s[j] == "_"):
                     j += 1
                 word = s[i:j]
 
-                # Check if it's a known component name
-                if word in self._symbol_mapping:
-                    # Convert to symbol token for consistency
+                # Check for boolean/null keywords
+                if word in ("true", "True"):
+                    tokens.append(DSLToken(type="boolean", value="true", position=i))
+                elif word in ("false", "False"):
+                    tokens.append(DSLToken(type="boolean", value="false", position=i))
+                elif word in ("null", "None", "none"):
+                    tokens.append(DSLToken(type="null", value="null", position=i))
+                elif word in self._symbol_mapping:
+                    # Known component name → convert to symbol token
                     sym = self._symbol_mapping[word]
                     tokens.append(DSLToken(type="symbol", value=sym, position=i))
                 else:
-                    # Keep as component name (might be unknown)
-                    tokens.append(
-                        DSLToken(type="component_name", value=word, position=i)
-                    )
+                    # Check if it looks like a parameter name (followed by =)
+                    # or an unknown component name
+                    peek = j
+                    while peek < len(s) and s[peek] in " \t":
+                        peek += 1
+                    if peek < len(s) and s[peek] == "=":
+                        tokens.append(
+                            DSLToken(type="identifier", value=word, position=i)
+                        )
+                    else:
+                        tokens.append(
+                            DSLToken(type="component_name", value=word, position=i)
+                        )
                 i = j
                 continue
 
@@ -651,17 +820,25 @@ class DSLParser:
         pos: int,
         depth: int,
     ) -> Tuple[List[DSLNode], int]:
-        """Recursively parse tokens into DSLNode tree."""
+        """Recursively parse tokens into DSLNode tree.
+
+        Handles both positional notation (symbol + [children]) and
+        parameterized notation (symbol + {key=value, ...}).
+        """
         nodes = []
 
         while pos < len(tokens):
             token = tokens[pos]
 
-            # End of current level
+            # End of positional children
             if token.type == "close":
                 return nodes, pos + 1
 
-            # Start of children (should attach to previous node)
+            # End of parameterized block
+            if token.type == "param_close":
+                return nodes, pos + 1
+
+            # Start of positional children (should attach to previous node)
             if token.type == "open":
                 if nodes:
                     children, pos = self._parse_tokens(tokens, pos + 1, depth + 1)
@@ -670,6 +847,16 @@ class DSLParser:
                         child.parent = nodes[-1]
                 else:
                     # Orphan bracket - skip
+                    pos += 1
+                continue
+
+            # Start of parameterized block (should attach to previous node)
+            if token.type == "param_open":
+                if nodes:
+                    params, pos = self._parse_params(tokens, pos + 1, depth + 1)
+                    nodes[-1].params = params
+                else:
+                    # Orphan brace - skip
                     pos += 1
                 continue
 
@@ -704,6 +891,165 @@ class DSLParser:
             pos += 1
 
         return nodes, pos
+
+    def _parse_params(
+        self,
+        tokens: List[DSLToken],
+        pos: int,
+        depth: int,
+    ) -> Tuple[Dict[str, Any], int]:
+        """Parse parameterized block: key=value pairs inside {}.
+
+        Returns:
+            Tuple of (params dict, new position)
+        """
+        params: Dict[str, Any] = {}
+
+        while pos < len(tokens):
+            token = tokens[pos]
+
+            # End of params block
+            if token.type == "param_close":
+                return params, pos + 1
+
+            # Expect identifier = value
+            if token.type == "identifier":
+                key = token.value
+                pos += 1
+
+                # Expect equals
+                if pos < len(tokens) and tokens[pos].type == "equals":
+                    pos += 1
+                else:
+                    # Missing equals — treat as flag param (key=true)
+                    params[key] = True
+                    continue
+
+                # Parse value
+                value, pos = self._parse_param_value(tokens, pos, depth)
+                params[key] = value
+                continue
+
+            # Skip commas and whitespace tokens
+            pos += 1
+
+        return params, pos
+
+    def _parse_param_value(
+        self,
+        tokens: List[DSLToken],
+        pos: int,
+        depth: int,
+    ) -> Tuple[Any, int]:
+        """Parse a single parameter value.
+
+        Values can be:
+        - Primitives: string, number, boolean, null
+        - Component nodes: symbol{...} (recursive)
+        - Arrays: [value, value, ...]
+        """
+        if pos >= len(tokens):
+            return None, pos
+
+        token = tokens[pos]
+
+        # String literal
+        if token.type == "string":
+            return token.value, pos + 1
+
+        # Number literal
+        if token.type == "number":
+            val = token.value
+            if "." in val:
+                return float(val), pos + 1
+            return int(val), pos + 1
+
+        # Boolean literal
+        if token.type == "boolean":
+            return token.value == "true", pos + 1
+
+        # Null literal
+        if token.type == "null":
+            return None, pos + 1
+
+        # Array value [...]
+        if token.type == "open":
+            items, pos = self._parse_param_array(tokens, pos + 1, depth)
+            return items, pos
+
+        # Component node (symbol + { or symbol + [)
+        if token.type in ("symbol", "component_name"):
+            if token.type == "symbol":
+                symbol = token.value
+                component_name = self._reverse_mapping.get(symbol, symbol)
+            else:
+                component_name = token.value
+                symbol = self._symbol_mapping.get(
+                    component_name, component_name[0] if component_name else "?"
+                )
+
+            node = DSLNode(
+                symbol=symbol,
+                component_name=component_name,
+                depth=depth,
+            )
+            pos += 1
+
+            # Check for parameterized block or positional children
+            if pos < len(tokens):
+                if tokens[pos].type == "param_open":
+                    node.params, pos = self._parse_params(tokens, pos + 1, depth + 1)
+                elif tokens[pos].type == "open":
+                    children, pos = self._parse_tokens(tokens, pos + 1, depth + 1)
+                    node.children = children
+                    for child in children:
+                        child.parent = node
+
+            return node, pos
+
+        # Identifier used as value (bare word — treat as string)
+        if token.type == "identifier":
+            return token.value, pos + 1
+
+        # Unknown — skip
+        return None, pos + 1
+
+    def _parse_param_array(
+        self,
+        tokens: List[DSLToken],
+        pos: int,
+        depth: int,
+    ) -> Tuple[List[Any], int]:
+        """Parse an array of parameter values inside [].
+
+        Returns:
+            Tuple of (items list, new position)
+        """
+        items: List[Any] = []
+
+        while pos < len(tokens):
+            token = tokens[pos]
+
+            # End of array
+            if token.type == "close":
+                return items, pos + 1
+
+            # Skip commas
+            if (
+                token.type in ("identifier",)
+                and pos + 1 < len(tokens)
+                and tokens[pos + 1].type == "equals"
+            ):
+                # This is a key=value inside an array — shouldn't happen, skip
+                pos += 1
+                continue
+
+            # Parse value
+            value, pos = self._parse_param_value(tokens, pos, depth)
+            if value is not None:
+                items.append(value)
+
+        return items, pos
 
     def _collect_paths(self, node: DSLNode, paths: List[str]):
         """Collect component paths from node tree."""
@@ -766,15 +1112,15 @@ class DSLParser:
             self._validate_node(child, node, result)
 
     def _get_required_wrapper(self, component_name: str) -> Optional[str]:
-        """Get the wrapper component needed for a component, if any."""
-        wrappers = {
-            "Button": "ButtonList",
-            "Chip": "ChipList",
-            "GridItem": "Grid",
-            "Column": "Columns",
-            "SelectionItem": "SelectionInput",
-        }
-        return wrappers.get(component_name)
+        """Get the wrapper component needed for a component, if any.
+
+        Queries the wrapper's registered metadata (populated by domain-specific
+        wrappers via register_component_metadata_batch). Falls back to empty
+        if no wrapper is configured.
+        """
+        if self._wrapper:
+            return self._wrapper.get_all_wrapper_requirements().get(component_name)
+        return None
 
     # =========================================================================
     # QDRANT QUERY GENERATION

@@ -271,6 +271,8 @@ class ModuleWrapperBase:
         enable_colbert: bool = False,
         colbert_model: str = "colbert-ir/colbertv2.0",
         colbert_collection_name: Optional[str] = None,
+        priority_overrides: Optional[Dict[str, int]] = None,
+        nl_relationship_patterns: Optional[Dict[tuple, str]] = None,
     ):
         """
         Initialize the module wrapper base.
@@ -295,6 +297,10 @@ class ModuleWrapperBase:
             enable_colbert: Enable ColBERT multi-vector embeddings
             colbert_model: ColBERT model to use
             colbert_collection_name: Separate collection for ColBERT
+            priority_overrides: Domain-specific priority score boosts for symbol generation.
+                               Maps component name to priority boost value.
+            nl_relationship_patterns: Domain-specific natural language patterns for relationships.
+                                     Maps (parent, child) tuple to NL description string.
         """
         # Get Qdrant configuration
         env_config = get_qdrant_config_from_env()
@@ -342,6 +348,10 @@ class ModuleWrapperBase:
         self.colbert_embedder = None
         self.colbert_embedding_dim = 128
         self._colbert_initialized = False
+
+        # Domain-specific configuration (passed by wrappers like card_framework_wrapper)
+        self._priority_overrides = priority_overrides
+        self._nl_relationship_patterns = nl_relationship_patterns
 
         # v7 schema detection
         self.use_v7_schema = collection_name.endswith(
@@ -461,7 +471,7 @@ class ModuleWrapperBase:
         return symbols
 
     def _calculate_symbol_priority_scores(self) -> Dict[str, int]:
-        """Calculate symbol priority scores based on hierarchy."""
+        """Calculate symbol priority scores based on hierarchy and configured overrides."""
         priority_scores: Dict[str, int] = {}
 
         try:
@@ -474,21 +484,15 @@ class ModuleWrapperBase:
                 max_depth = max((c.get("depth", 1) for c in children), default=1)
 
                 score = len(unique_children) * 10 + max_depth
-
-                if parent_name in {
-                    "Section",
-                    "Card",
-                    "ButtonList",
-                    "Grid",
-                    "Columns",
-                    "ChipList",
-                }:
-                    score += 100
-
                 priority_scores[parent_name] = score
 
         except Exception as e:
             logger.debug(f"Could not calculate priority scores: {e}")
+
+        # Apply domain-specific priority overrides (configured by wrapper creators)
+        if self._priority_overrides:
+            for name, boost in self._priority_overrides.items():
+                priority_scores[name] = priority_scores.get(name, 0) + boost
 
         return priority_scores
 
@@ -598,7 +602,7 @@ class ModuleWrapperBase:
         return self._dsl_metadata_cache
 
     def _derive_dsl_metadata(self) -> Dict[str, Any]:
-        """Derive DSL metadata from relationships."""
+        """Derive DSL metadata from relationships and registered metadata."""
         rels = self.relationships
         symbols = self.symbol_mapping
 
@@ -611,31 +615,27 @@ class ModuleWrapperBase:
                     child_to_parents[child] = []
                 child_to_parents[child].append(parent)
 
+        # Build item-to-container from registered metadata instead of hardcoded patterns
         items = set()
         item_to_container: Dict[str, str] = {}
 
-        wrapper_patterns = [
-            ("ButtonList", "Button"),
-            ("ChipList", "Chip"),
-            ("SelectionInput", "SelectionItem"),
-            ("Grid", "GridItem"),
-            ("Columns", "Column"),
-        ]
+        registered_wrappers = self.get_all_wrapper_requirements()  # {child: parent}
+        for child, parent in registered_wrappers.items():
+            if parent in containers:
+                items.add(child)
+                item_to_container[child] = parent
 
-        for container, item in wrapper_patterns:
-            if container in containers:
-                items.add(item)
-                item_to_container[item] = container
+        # Build generic grammar from actual symbol mapping
+        grammar = {
+            "container": "ContainerSymbol[items...]",
+            "repeat": "symbol×count",
+            "nesting": "Parent[Child[...]]",
+        }
 
         return {
             "symbols": symbols,
             "reverse_symbols": self.reverse_symbol_mapping,
-            "grammar": {
-                "section": "§[widgets...]",
-                "container": "ContainerSymbol[items...]",
-                "repeat": "symbol×count",
-                "nesting": "Parent[Child[...]]",
-            },
+            "grammar": grammar,
             "containers": containers,
             "items": items,
             "item_to_container": item_to_container,

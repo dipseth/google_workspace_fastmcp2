@@ -155,14 +155,27 @@ class IndexingMixin:
 
     def _is_standard_library(self, module_name: str) -> bool:
         """
-        Check if a module is part of the Python standard library.
+        Check if a module is part of the Python standard library or a known
+        third-party library that should be skipped during submodule crawling.
+
+        The target module (self._module_name) is never skipped — this allows
+        wrapping modules like qdrant_client that appear in THIRD_PARTY_PREFIXES.
 
         Args:
             module_name: Name of the module
 
         Returns:
-            True if the module is part of the standard library
+            True if the module should be skipped
         """
+        # Never skip the target module, its submodules, or its parent modules
+        target = getattr(self, "_module_name", "")
+        if target and (
+            module_name == target
+            or module_name.startswith(f"{target}.")
+            or target.startswith(f"{module_name}.")
+        ):
+            return False
+
         for prefix in STD_LIB_PREFIXES:
             if module_name == prefix or module_name.startswith(f"{prefix}."):
                 return True

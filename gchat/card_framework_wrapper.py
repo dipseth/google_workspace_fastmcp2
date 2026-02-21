@@ -146,6 +146,58 @@ CARD_HETEROGENEOUS_CONTAINERS = {
     "Column",
 }
 
+# Priority overrides for symbol generation — containers get boosted priority
+# so they receive more visually distinct symbols from SymbolGenerator.
+CARD_PRIORITY_OVERRIDES = {
+    "Section": 100,
+    "Card": 100,
+    "ButtonList": 100,
+    "Grid": 100,
+    "Columns": 100,
+    "ChipList": 100,
+}
+
+# Natural language relationship patterns for Google Chat card components.
+# Moved from relationships_mixin.py to keep module_wrapper domain-agnostic.
+GCHAT_NL_RELATIONSHIP_PATTERNS = {
+    # Widget containers
+    ("Section", "Widget"): "section containing widgets",
+    ("Section", "DecoratedText"): "section with decorated text items",
+    ("Section", "TextParagraph"): "section with text paragraphs",
+    ("Section", "ButtonList"): "section with button list",
+    ("Section", "Grid"): "section with grid layout",
+    ("Section", "Image"): "section with image",
+    ("Section", "Columns"): "section with column layout",
+    ("Section", "Divider"): "section with divider",
+    ("Section", "TextInput"): "section with text input field",
+    ("Section", "DateTimePicker"): "section with date/time picker",
+    ("Section", "SelectionInput"): "section with selection input",
+    ("Section", "ChipList"): "section with chip list",
+    # Click actions
+    ("Image", "OnClick"): "clickable image, image with click action",
+    ("Button", "OnClick"): "button click action, button that opens link",
+    ("Chip", "OnClick"): "clickable chip",
+    ("DecoratedText", "OnClick"): "clickable decorated text",
+    ("GridItem", "OnClick"): "clickable grid item",
+    # Button containers
+    ("ButtonList", "Button"): "list of buttons",
+    ("ChipList", "Chip"): "list of chips",
+    # Layout
+    ("Columns", "Column"): "multi-column layout",
+    ("Column", "Widget"): "column containing widgets",
+    ("Grid", "GridItem"): "grid with items",
+    # Icons and styling
+    ("Button", "Icon"): "button with icon",
+    ("Chip", "Icon"): "chip with icon",
+    ("DecoratedText", "Icon"): "decorated text with icon",
+    ("DecoratedText", "Button"): "decorated text with button",
+    ("DecoratedText", "SwitchControl"): "decorated text with switch/toggle",
+    # Card structure
+    ("Card", "Section"): "card with sections",
+    ("Card", "CardHeader"): "card with header",
+    ("Card", "CardFixedFooter"): "card with footer",
+}
+
 
 def _register_card_component_metadata(wrapper) -> None:
     """
@@ -319,70 +371,71 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
         collection_name=settings.card_collection,  # mcp_gchat_cards_v7
-        auto_initialize=False,  # Don't re-index, collection already populated
+        auto_initialize=False,  # We call initialize() manually below
         index_nested=True,
         index_private=False,
         max_depth=5,  # Capture full component hierarchy
         skip_standard_library=True,
+        priority_overrides=CARD_PRIORITY_OVERRIDES,
+        nl_relationship_patterns=GCHAT_NL_RELATIONSHIP_PATTERNS,
+        use_v7_schema=True,
     )
 
-    # Initialize Qdrant client for text index operations
+    # Initialize: populates self.components and symbols synchronously.
+    # If v7 pipeline is needed, it runs in a background thread.
     wrapper.initialize()
 
     component_count = len(wrapper.components) if wrapper.components else 0
     logger.info(f"✅ Singleton ModuleWrapper ready: {component_count} components")
 
-    # Register custom Google Chat API components not in card_framework package
-    # This generates symbols via SymbolGenerator and adds them to the wrapper's mappings,
-    # then persists them to Qdrant for searchability
-    try:
-        # Define custom component metadata for indexing
-        # These are components that need explicit indexing for proper path resolution
-        custom_components_metadata = {
-            # Message-level components (webhook-supported)
-            "Message": {
-                "children": ["CardWithId", "AccessoryWidget", "Thread"],
-                "docstring": "Top-level Google Chat message container. Supports text (fallback for "
-                "notifications), cardsV2 (card content), accessoryWidgets (buttons at "
-                "bottom of message), and thread (for reply threading). Symbol: μ",
-                "json_field": None,  # Message is the root
-                "full_path": "card_framework.v2.message.Message",
-            },
-            "AccessoryWidget": {
-                "children": ["ButtonList"],
-                "docstring": "Widget displayed at the bottom of a message, outside the card. "
-                "Currently only supports ButtonList. Useful for feedback buttons. Symbol: 𝒜",
-                "json_field": "accessoryWidgets",
-                "full_path": "card_framework.v2.message.AccessoryWidget",
-            },
-            "Thread": {
-                "children": [],
-                "docstring": "Thread object for reply threading. Use threadKey to create or "
-                "reply to a specific thread. Symbol: Ʈ",
-                "json_field": "thread",
-                "full_path": "card_framework.v2.message.Thread",
-            },
-            # Carousel components
-            "Carousel": {
-                "children": ["CarouselCard"],
-                "docstring": "Horizontal scrollable carousel of cards in Google Chat. Contains CarouselCard items.",
-                "json_field": "carousel",
-            },
-            "CarouselCard": {
-                "children": ["NestedWidget"],
-                "docstring": "Individual card within a Carousel. Contains NestedWidget for content.",
-                "json_field": "carouselCard",
-            },
-            "NestedWidget": {
-                "children": ["TextParagraph", "ButtonList", "Image"],
-                "docstring": "Container for widgets inside CarouselCard. Limited to "
-                "TextParagraph, ButtonList, and Image only (per Google Chat API).",
-                "json_field": "nestedWidget",
-            },
-        }
+    # === IN-MEMORY OPERATIONS (always sync — no Qdrant writes) ===
 
-        # First register for in-memory symbol generation and create ModuleComponents
-        # This makes custom components appear in wrapper.components like native ones
+    # Custom component metadata for Qdrant indexing (used by deferred callback below)
+    custom_components_metadata = {
+        # Message-level components (webhook-supported)
+        "Message": {
+            "children": ["CardWithId", "AccessoryWidget", "Thread"],
+            "docstring": "Top-level Google Chat message container. Supports text (fallback for "
+            "notifications), cardsV2 (card content), accessoryWidgets (buttons at "
+            "bottom of message), and thread (for reply threading). Symbol: μ",
+            "json_field": None,  # Message is the root
+            "full_path": "card_framework.v2.message.Message",
+        },
+        "AccessoryWidget": {
+            "children": ["ButtonList"],
+            "docstring": "Widget displayed at the bottom of a message, outside the card. "
+            "Currently only supports ButtonList. Useful for feedback buttons. Symbol: 𝒜",
+            "json_field": "accessoryWidgets",
+            "full_path": "card_framework.v2.message.AccessoryWidget",
+        },
+        "Thread": {
+            "children": [],
+            "docstring": "Thread object for reply threading. Use threadKey to create or "
+            "reply to a specific thread. Symbol: Ʈ",
+            "json_field": "thread",
+            "full_path": "card_framework.v2.message.Thread",
+        },
+        # Carousel components
+        "Carousel": {
+            "children": ["CarouselCard"],
+            "docstring": "Horizontal scrollable carousel of cards in Google Chat. Contains CarouselCard items.",
+            "json_field": "carousel",
+        },
+        "CarouselCard": {
+            "children": ["NestedWidget"],
+            "docstring": "Individual card within a Carousel. Contains NestedWidget for content.",
+            "json_field": "carouselCard",
+        },
+        "NestedWidget": {
+            "children": ["TextParagraph", "ButtonList", "Image"],
+            "docstring": "Container for widgets inside CarouselCard. Limited to "
+            "TextParagraph, ButtonList, and Image only (per Google Chat API).",
+            "json_field": "nestedWidget",
+        },
+    }
+
+    # Register custom components IN MEMORY (symbol generation, ModuleComponent creation)
+    try:
         custom_symbols = wrapper.register_custom_components(
             CUSTOM_CHAT_API_RELATIONSHIPS,
             generate_symbols=True,
@@ -393,15 +446,8 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
                 f"🔧 Registered {len(custom_symbols)} custom Chat API components: "
                 f"{list(custom_symbols.keys())}"
             )
-
-        # Then persist truly custom components to Qdrant (ones not in card_framework)
-        # Only index the 3 components that don't exist in card_framework package
-        indexed_count = wrapper.index_custom_components(custom_components_metadata)
-        if indexed_count > 0:
-            logger.info(f"💾 Indexed {indexed_count} custom components to Qdrant")
-
     except Exception as e:
-        logger.warning(f"⚠️ Failed to register/index custom components: {e}")
+        logger.warning(f"⚠️ Failed to register custom components: {e}")
 
     # Register card-specific component metadata (context resources, containers, etc.)
     # This is the SSoT for SmartCardBuilder and DSLParser queries
@@ -416,30 +462,85 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
     except Exception as e:
         logger.warning(f"⚠️ Failed to register skill templates: {e}")
 
-    # Create text indices if requested (idempotent - skips if exists)
-    if ensure_text_indices and wrapper.client:
-        try:
-            logger.info("📝 Ensuring text indices exist...")
-            # Use standalone function from text_indexing module
-            from adapters.module_wrapper.text_indexing import (
-                create_component_text_indices,
-            )
+    # === QDRANT WRITE OPERATIONS ===
+    # If v7 pipeline is running in the background, defer these until it completes.
+    # If pipeline already completed (fast path), they run immediately.
 
-            indices_created = create_component_text_indices(
-                client=wrapper.client,
-                collection_name=wrapper.collection_name,
-                enable_stemming=True,
-                enable_stopwords=True,
-                enable_phrase_matching=True,
-                enable_ascii_folding=True,
-                custom_stopwords=GCHAT_STOPWORDS,
-            )
-            if indices_created > 0:
-                logger.info(f"✅ Created {indices_created} new text indices")
-            else:
-                logger.debug("Text indices already exist")
+    def _post_pipeline_qdrant_writes():
+        """Runs after v7 pipeline creates the collection — indexes custom components + text indices."""
+        try:
+            indexed_count = wrapper.index_custom_components(custom_components_metadata)
+            if indexed_count > 0:
+                logger.info(f"💾 Indexed {indexed_count} custom components to Qdrant")
         except Exception as e:
-            logger.warning(f"⚠️ Failed to create text indices: {e}")
+            logger.warning(f"⚠️ Failed to index custom components: {e}")
+
+        if ensure_text_indices and wrapper.client:
+            try:
+                from adapters.module_wrapper.text_indexing import (
+                    create_component_text_indices,
+                )
+
+                indices_created = create_component_text_indices(
+                    client=wrapper.client,
+                    collection_name=wrapper.collection_name,
+                    enable_stemming=True,
+                    enable_stopwords=True,
+                    enable_phrase_matching=True,
+                    enable_ascii_folding=True,
+                    custom_stopwords=GCHAT_STOPWORDS,
+                )
+                if indices_created > 0:
+                    logger.info(f"✅ Created {indices_created} new text indices")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to create text indices: {e}")
+
+    def _post_pipeline_dag_warmstart():
+        """Generate DAG-based instance patterns to warm-start the collection."""
+        try:
+            _warm_start_with_dag_patterns(wrapper)
+        except Exception as e:
+            logger.warning(f"⚠️ DAG warm-start failed: {e}")
+
+    if wrapper.v7_pipeline_status == "running":
+        # Pipeline is running in background — queue Qdrant writes for when it finishes.
+        # Order matters: custom components first, then DAG warm-start (needs the collection ready).
+        logger.info("📋 V7 pipeline running — queuing Qdrant writes for post-pipeline")
+        wrapper.queue_post_pipeline_callback(_post_pipeline_qdrant_writes)
+        wrapper.queue_post_pipeline_callback(_post_pipeline_dag_warmstart)
+    else:
+        # Pipeline already completed (fast path) — run custom component writes immediately.
+        _post_pipeline_qdrant_writes()
+
+        # Check if instance patterns exist — if not, warm-start even on fast path.
+        # This handles the case where the pipeline ran but warm-start was missed.
+        if wrapper.client:
+            try:
+                from qdrant_client import models as qmodels
+
+                result = wrapper.client.count(
+                    collection_name=wrapper.collection_name,
+                    count_filter=qmodels.Filter(
+                        must=[
+                            qmodels.FieldCondition(
+                                key="type",
+                                match=qmodels.MatchValue(value="instance_pattern"),
+                            )
+                        ]
+                    ),
+                    exact=False,
+                )
+                if result.count == 0:
+                    logger.info(
+                        "🌱 No instance patterns found — running DAG warm-start"
+                    )
+                    _post_pipeline_dag_warmstart()
+                else:
+                    logger.debug(
+                        f"Instance patterns already exist ({result.count}) — skipping warm-start"
+                    )
+            except Exception as e:
+                logger.debug(f"Could not check instance patterns: {e}")
 
     return wrapper
 
@@ -462,6 +563,138 @@ def reset_wrapper():
 
     with _symbols_lock:
         _symbols = None
+
+
+# =============================================================================
+# DAG WARM-START
+# =============================================================================
+
+# Diverse structure recipes for DAG warm-start.
+# Each recipe generates a different card structure pattern.
+_DAG_WARMSTART_RECIPES = [
+    # Basic widget patterns
+    {"root": "Section", "required": ["DecoratedText"], "desc": "Simple text card"},
+    {
+        "root": "Section",
+        "required": ["DecoratedText", "ButtonList"],
+        "desc": "Text with action buttons",
+    },
+    {"root": "Section", "required": ["Grid"], "desc": "Grid layout card"},
+    {"root": "Section", "required": ["Image"], "desc": "Card with image"},
+    {
+        "root": "Section",
+        "required": ["TextParagraph", "ButtonList"],
+        "desc": "Paragraph with buttons",
+    },
+    {
+        "root": "Section",
+        "required": ["DecoratedText", "ChipList"],
+        "desc": "Text with chip filters",
+    },
+    {"root": "Section", "required": ["Columns"], "desc": "Multi-column layout"},
+    {
+        "root": "Section",
+        "required": ["SelectionInput"],
+        "desc": "Form with selection input",
+    },
+    {"root": "Section", "required": ["TextInput"], "desc": "Form with text input"},
+    {
+        "root": "Section",
+        "required": ["DecoratedText", "Image", "ButtonList"],
+        "desc": "Rich content card",
+    },
+    # Carousel patterns
+    {"root": "Carousel", "required": [], "desc": "Carousel of cards"},
+]
+
+
+def _warm_start_with_dag_patterns(wrapper, count_per_recipe: int = 2) -> int:
+    """
+    Generate DAG-based instance patterns and store them in the v7 collection.
+
+    Uses DAGStructureGenerator to create random but valid card structures,
+    then stores them via FeedbackLoop.store_instance_pattern() as positive
+    instance_patterns for warm-starting the search/feedback system.
+
+    Args:
+        wrapper: The initialized ModuleWrapper for card_framework
+        count_per_recipe: Number of random structures per recipe
+
+    Returns:
+        Number of patterns stored
+    """
+    from gchat.feedback_loop import get_feedback_loop
+    from gchat.testing.dag_structure_generator import DAGStructureGenerator
+
+    logger.info(
+        f"🌱 DAG warm-start: generating {len(_DAG_WARMSTART_RECIPES)} recipes "
+        f"× {count_per_recipe} variations..."
+    )
+
+    try:
+        gen = DAGStructureGenerator()
+    except Exception as e:
+        logger.warning(f"⚠️ Could not create DAGStructureGenerator: {e}")
+        return 0
+
+    feedback_loop = get_feedback_loop()
+    stored = 0
+
+    for recipe in _DAG_WARMSTART_RECIPES:
+        root = recipe["root"]
+        required = recipe.get("required", [])
+        desc = recipe["desc"]
+
+        for i in range(count_per_recipe):
+            try:
+                structure = gen.generate_random_structure(
+                    root=root,
+                    required_components=required if required else None,
+                )
+
+                if not structure.is_valid:
+                    logger.debug(
+                        f"   Skipping invalid structure: {structure.validation_issues}"
+                    )
+                    continue
+
+                # Build component paths from the generated structure
+                component_paths = [
+                    f"card_framework.v2.{comp}" if "." not in comp else comp
+                    for comp in structure.components
+                ]
+
+                # Build a natural description
+                card_description = (
+                    f"{desc} with {', '.join(structure.components[:4])}"
+                    f"{' and more' if len(structure.components) > 4 else ''}"
+                )
+
+                point_id = feedback_loop.store_instance_pattern(
+                    card_description=card_description,
+                    component_paths=component_paths,
+                    instance_params={
+                        "dsl": structure.dsl,
+                        "components": structure.components,
+                        "depth": structure.depth,
+                    },
+                    content_feedback="positive",
+                    form_feedback="positive",
+                    user_email="dag-warmstart@system.local",
+                    card_id=f"dag-warmstart-{root.lower()}-{i}",
+                    structure_description=f"DSL: {structure.dsl}",
+                    pattern_type="content",
+                )
+
+                if point_id:
+                    stored += 1
+
+            except Exception as e:
+                logger.debug(f"   Error generating {desc} variant {i}: {e}")
+                continue
+
+    logger.info(f"🌱 DAG warm-start complete: {stored} patterns stored")
+    return stored
 
 
 # =============================================================================
