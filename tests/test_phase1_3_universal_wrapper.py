@@ -21,7 +21,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # =============================================================================
 # Phase 1a: _get_required_wrapper() queries wrapper metadata
 # =============================================================================
