@@ -211,8 +211,7 @@ def _params_to_dict(params: Dict[str, Any]) -> Dict[str, Any]:
             result[k] = v.to_dict()
         elif isinstance(v, list):
             result[k] = [
-                item.to_dict() if isinstance(item, DSLNode) else item
-                for item in v
+                item.to_dict() if isinstance(item, DSLNode) else item for item in v
             ]
         else:
             result[k] = v
@@ -667,7 +666,9 @@ class DSLParser:
                 continue
 
             # Numeric literals (including negative and float)
-            if char.isdigit() or (char == "-" and i + 1 < len(s) and s[i + 1].isdigit()):
+            if char.isdigit() or (
+                char == "-" and i + 1 < len(s) and s[i + 1].isdigit()
+            ):
                 j = i + 1 if char == "-" else i
                 while j < len(s) and s[j].isdigit():
                     j += 1
@@ -1034,7 +1035,11 @@ class DSLParser:
                 return items, pos + 1
 
             # Skip commas
-            if token.type in ("identifier",) and pos + 1 < len(tokens) and tokens[pos + 1].type == "equals":
+            if (
+                token.type in ("identifier",)
+                and pos + 1 < len(tokens)
+                and tokens[pos + 1].type == "equals"
+            ):
                 # This is a key=value inside an array — shouldn't happen, skip
                 pos += 1
                 continue

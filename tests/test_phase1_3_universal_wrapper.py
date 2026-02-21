@@ -165,9 +165,7 @@ class TestPhase1cPriorityOverrides:
 
         from adapters.module_wrapper.core import ModuleWrapperBase
 
-        source = inspect.getsource(
-            ModuleWrapperBase._calculate_symbol_priority_scores
-        )
+        source = inspect.getsource(ModuleWrapperBase._calculate_symbol_priority_scores)
         # Should NOT contain hardcoded component names for boosting
         for name in ["Section", "Card", "ButtonList", "Columns", "ChipList"]:
             # Allow the name if it's in a comment, but not as a string literal
@@ -449,9 +447,7 @@ class TestPhase1gCardFrameworkRegression:
 
         # At least some Section patterns should exist
         section_patterns = {
-            k: v
-            for k, v in GCHAT_NL_RELATIONSHIP_PATTERNS.items()
-            if k[0] == "Section"
+            k: v for k, v in GCHAT_NL_RELATIONSHIP_PATTERNS.items() if k[0] == "Section"
         }
         assert len(section_patterns) > 0, "Should have Section-related NL patterns"
 
@@ -919,9 +915,7 @@ class TestPhase3RoundTrip:
         child2 = DSLNode(
             symbol="Ƀ",
             component_name="ButtonList",
-            children=[
-                DSLNode(symbol="ᵬ", component_name="Button", multiplier=2)
-            ],
+            children=[DSLNode(symbol="ᵬ", component_name="Button", multiplier=2)],
         )
         root = DSLNode(
             symbol="§",
