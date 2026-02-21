@@ -36,46 +36,12 @@ logger = logging.getLogger(__name__)
 
 
 def _get_nl_relationship_patterns() -> Dict[tuple, str]:
-    """Get NL relationship patterns for generating natural language descriptions."""
-    # These patterns describe how parent-child relationships work in Google Chat cards
-    return {
-        # Widget containers
-        ("Section", "Widget"): "section containing widgets",
-        ("Section", "DecoratedText"): "section with decorated text items",
-        ("Section", "TextParagraph"): "section with text paragraphs",
-        ("Section", "ButtonList"): "section with button list",
-        ("Section", "Grid"): "section with grid layout",
-        ("Section", "Image"): "section with image",
-        ("Section", "Columns"): "section with column layout",
-        ("Section", "Divider"): "section with divider",
-        ("Section", "TextInput"): "section with text input field",
-        ("Section", "DateTimePicker"): "section with date/time picker",
-        ("Section", "SelectionInput"): "section with selection input",
-        ("Section", "ChipList"): "section with chip list",
-        # Click actions
-        ("Image", "OnClick"): "clickable image, image with click action",
-        ("Button", "OnClick"): "button click action, button that opens link",
-        ("Chip", "OnClick"): "clickable chip",
-        ("DecoratedText", "OnClick"): "clickable decorated text",
-        ("GridItem", "OnClick"): "clickable grid item",
-        # Button containers
-        ("ButtonList", "Button"): "list of buttons",
-        ("ChipList", "Chip"): "list of chips",
-        # Layout
-        ("Columns", "Column"): "multi-column layout",
-        ("Column", "Widget"): "column containing widgets",
-        ("Grid", "GridItem"): "grid with items",
-        # Icons and styling
-        ("Button", "Icon"): "button with icon",
-        ("Chip", "Icon"): "chip with icon",
-        ("DecoratedText", "Icon"): "decorated text with icon",
-        ("DecoratedText", "Button"): "decorated text with button",
-        ("DecoratedText", "SwitchControl"): "decorated text with switch/toggle",
-        # Card structure
-        ("Card", "Section"): "card with sections",
-        ("Card", "CardHeader"): "card with header",
-        ("Card", "CardFixedFooter"): "card with footer",
-    }
+    """Get NL relationship patterns (empty by default — domain wrappers provide these).
+
+    This function exists for backwards compatibility. Domain-specific patterns
+    should be passed via the nl_relationship_patterns init parameter instead.
+    """
+    return {}
 
 
 # =============================================================================
@@ -102,6 +68,19 @@ class RelationshipsMixin:
     def _is_dataclass_type(self, cls: type) -> bool:
         """Check if a class is a dataclass."""
         return dataclasses.is_dataclass(cls) and isinstance(cls, type)
+
+    def _is_pydantic_type(self, cls: type) -> bool:
+        """Check if a class is a Pydantic BaseModel subclass."""
+        try:
+            from pydantic import BaseModel
+
+            return isinstance(cls, type) and issubclass(cls, BaseModel)
+        except ImportError:
+            return False
+
+    def _is_introspectable_type(self, cls: type) -> bool:
+        """Check if a class can be introspected for relationships (dataclass or Pydantic)."""
+        return self._is_dataclass_type(cls) or self._is_pydantic_type(cls)
 
     def _unwrap_optional(self, field_type: type) -> Tuple[type, bool]:
         """
@@ -167,12 +146,19 @@ class RelationshipsMixin:
         return components[0] + "".join(x.title() for x in components[1:])
 
     def _generate_nl_description(self, parent: str, child: str) -> str:
-        """Generate natural language description for a relationship."""
-        patterns = _get_nl_relationship_patterns()
-        key = (parent, child)
-        if key in patterns:
-            return patterns[key]
+        """Generate natural language description for a relationship.
 
+        Checks domain-specific patterns (configured via nl_relationship_patterns init param)
+        first, then falls back to a generic description.
+        """
+        key = (parent, child)
+
+        # Check domain-specific patterns (set on ModuleWrapperBase)
+        nl_patterns = getattr(self, "_nl_relationship_patterns", None)
+        if nl_patterns and key in nl_patterns:
+            return nl_patterns[key]
+
+        # Generic fallback — works for any module
         return f"{parent.lower()} with {child.lower()}, {parent.lower()} containing {child.lower()}"
 
     def _extract_relationships_from_class(
@@ -256,7 +242,7 @@ class RelationshipsMixin:
                 relationships.append(relationship)
 
                 # Recursively extract from child class
-                if self._is_dataclass_type(inner_type):
+                if self._is_introspectable_type(inner_type):
                     child_relationships = self._extract_relationships_from_class(
                         inner_type,
                         visited=visited.copy(),
@@ -312,7 +298,7 @@ class RelationshipsMixin:
             if cls is None or not inspect.isclass(cls):
                 continue
 
-            if not self._is_dataclass_type(cls):
+            if not self._is_introspectable_type(cls):
                 continue
 
             processed_classes.add(component.name)
