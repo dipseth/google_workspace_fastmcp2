@@ -11,6 +11,7 @@
 - [Quick Installation Instructions](#-quick-installation-instructions)
 - [Service Capabilities](#-service-capabilities)
 - [Middleware Architecture](#-middleware-architecture)
+- [Tool Management Dashboard](#️-tool-management-dashboard)
 - [Template System](#-template-system)
 - [Resource Discovery](#-resource-discovery)
 - [Testing Framework](#-testing-framework)
@@ -20,7 +21,7 @@
 
 ### What is GoogleUnlimited?
 
-GoogleUnlimited provides AI assistants with access to Google Workspace services through the Model Context Protocol (MCP). It supports **90+ tools** across **9 Google services**, enabling seamless integration between AI workflows and Google Workspace applications with revolutionary performance improvements.
+GoogleUnlimited provides AI assistants with access to Google Workspace services through the Model Context Protocol (MCP). It supports **92+ tools** across **9 Google services**, enabling seamless integration between AI workflows and Google Workspace applications with revolutionary performance improvements.
 
 ![Architecture Overview](mermaid-images/architecture-overview.png)
 
@@ -56,46 +57,33 @@ For development or customization:
    uv sync
    ```
 
-2. **Configure Google OAuth:**
+2. **Start the server:**
+   ```bash
+   uv run python server.py
+   ```
 
-   a. Go to [Google Cloud Console](https://console.cloud.google.com/)
+   > The server starts immediately with **zero configuration required**. OAuth credentials are not needed at startup — authentication is handled lazily when you first interact with a Google service.
 
-   b. Create a new project (or select existing)
+3. **Authenticate when ready:**
 
-   c. Enable the APIs you need: Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos
+   When you call any Google Workspace tool, the server will prompt you to authenticate via the `start_google_auth` tool. This opens a browser-based OAuth flow. Once completed, credentials are stored locally and reused across sessions.
 
-   d. Go to **APIs & Services > Credentials > Create Credentials > OAuth client ID**
-
-   e. Select **Web application** as the application type
-
-   f. Under **Authorized redirect URIs**, add:
-      ```
-      http://localhost:8002/oauth2callback
-      ```
-
-   g. Click **Create** and copy your **Client ID** and **Client Secret**
-
-3. **Setup environment:**
+   To pre-configure OAuth credentials (optional), create a `.env` file:
    ```bash
    cp .env.example .env
    ```
 
-   Edit `.env` with your credentials:
+   Then add your Google Cloud Console credentials:
    ```bash
-   # Your OAuth credentials from Google Cloud Console
+   # Option A: Client ID + Secret
    GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=your-client-secret
 
-   # Must match EXACTLY what you set in Google Cloud Console
-   OAUTH_REDIRECT_URI=http://localhost:8002/oauth2callback
+   # Option B: Downloaded JSON credentials file
+   GOOGLE_CLIENT_SECRETS_FILE=credentials.json
    ```
 
-   > **Alternative:** Instead of `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, you can download the JSON file from Google and set `GOOGLE_CLIENT_SECRETS_FILE=credentials.json`
-
-4. **Start the server:**
-   ```bash
-   uv run python server.py
-   ```
+   > See the [Google Cloud Console setup steps](documentation/config/CONFIGURATION_GUIDE.md) for creating OAuth credentials and enabling APIs.
 
 > 📚 **Configuration Resources:**
 > - 🔧 **[Complete Configuration Guide](documentation/config/CONFIGURATION_GUIDE.md)** - Comprehensive environment variables and settings reference
@@ -105,33 +93,64 @@ For development or customization:
 
 ### 📋 Environment Variables Reference
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GOOGLE_CLIENT_ID` | Yes* | - | OAuth 2.0 client ID from Google Cloud Console |
-| `GOOGLE_CLIENT_SECRET` | Yes* | - | OAuth 2.0 client secret from Google Cloud Console |
-| `GOOGLE_CLIENT_SECRETS_FILE` | Yes* | - | Alternative: path to OAuth JSON file |
-| `OAUTH_REDIRECT_URI` | Yes | `http://localhost:8002/oauth2callback` | Must match Google Console exactly |
-| `SERVER_HOST` | No | `localhost` | Server bind address |
-| `SERVER_PORT` | No | `8002` | Server port |
-| `ENABLE_HTTPS` | No | `false` | Enable HTTPS/SSL |
-| `SSL_CERT_FILE` | If HTTPS | - | Path to SSL certificate |
-| `SSL_KEY_FILE` | If HTTPS | - | Path to SSL private key |
-| `CREDENTIAL_STORAGE_MODE` | No | `FILE_ENCRYPTED` | `FILE_ENCRYPTED`, `FILE_PLAINTEXT`, `MEMORY_ONLY` |
-| `CREDENTIALS_DIR` | No | `./credentials` | Directory for stored credentials |
-| `LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `SESSION_TIMEOUT_MINUTES` | No | `60` | Session idle timeout |
-| `GMAIL_ALLOW_LIST` | No | - | Comma-separated allowed email addresses |
-| `QDRANT_URL` | No | `http://localhost:6333` | Qdrant vector database URL |
-| `QDRANT_KEY` | No | `NONE` | Qdrant API key (use `NONE` for no auth) |
-| `QDRANT_AUTO_LAUNCH` | No | `true` | Auto-launch Qdrant via Docker if not reachable |
-| `QDRANT_DOCKER_IMAGE` | No | `qdrant/qdrant:latest` | Docker image for auto-launch |
-| `QDRANT_DOCKER_CONTAINER_NAME` | No | `mcp-qdrant` | Container name for auto-launched Qdrant |
-| `MCP_CHAT_WEBHOOK` | No | - | Default webhook URL for all Google Chat card tools |
-| `FASTMCP_CLOUD` | No | `false` | Enable cloud deployment mode |
-| `MINIMAL_TOOLS_STARTUP` | No | `true` | Start with only 5 protected tools enabled |
-| `MINIMAL_STARTUP_SERVICES` | No | `` | Comma-separated services to enable at startup (e.g., `drive,gmail`) |
+All environment variables are **optional** — the server starts with sensible defaults and no `.env` file required. OAuth credentials are only needed when initiating a new authentication flow via `start_google_auth`.
 
-*Either `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` OR `GOOGLE_CLIENT_SECRETS_FILE` is required.
+**Google OAuth** (needed for first-time authentication):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | _(empty)_ | OAuth 2.0 client ID from Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | _(empty)_ | OAuth 2.0 client secret |
+| `GOOGLE_CLIENT_SECRETS_FILE` | _(empty)_ | Alternative: path to downloaded OAuth JSON file |
+| `OAUTH_REDIRECT_URI` | `http://localhost:8002/oauth2callback` | Must match Google Console redirect URI |
+
+> Provide **either** `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` **or** `GOOGLE_CLIENT_SECRETS_FILE` before your first OAuth flow. Once authenticated, credentials are stored locally and these variables are no longer needed.
+
+**Server:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERVER_HOST` | `localhost` | Server bind address |
+| `SERVER_PORT` | `8002` | Server port |
+| `ENABLE_HTTPS` | `false` | Enable HTTPS/SSL |
+| `SSL_CERT_FILE` | - | Path to SSL certificate (required if HTTPS enabled) |
+| `SSL_KEY_FILE` | - | Path to SSL private key (required if HTTPS enabled) |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+**Security & Sessions:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREDENTIAL_STORAGE_MODE` | `FILE_ENCRYPTED` | `FILE_ENCRYPTED`, `FILE_PLAINTEXT`, `MEMORY_ONLY` |
+| `CREDENTIALS_DIR` | `./credentials` | Directory for stored credentials |
+| `SESSION_TIMEOUT_MINUTES` | `60` | Session idle timeout |
+| `GMAIL_ALLOW_LIST` | _(empty)_ | Comma-separated trusted email addresses |
+
+**Tool Management:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MINIMAL_TOOLS_STARTUP` | `true` | Start with only 5 protected tools enabled |
+| `MINIMAL_STARTUP_SERVICES` | _(empty)_ | Comma-separated services to enable at startup (e.g., `drive,gmail`) |
+| `RESPONSE_LIMIT_MAX_SIZE` | `500000` | Max tool response size in bytes (0 = disabled) |
+| `RESPONSE_LIMIT_TOOLS` | _(empty)_ | Comma-separated tool names to limit (empty = all) |
+
+**Qdrant Vector Database:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant vector database URL |
+| `QDRANT_KEY` | `NONE` | Qdrant API key (use `NONE` for no auth) |
+| `QDRANT_AUTO_LAUNCH` | `true` | Auto-launch Qdrant via Docker if not reachable |
+| `QDRANT_DOCKER_IMAGE` | `qdrant/qdrant:latest` | Docker image for auto-launch |
+| `QDRANT_DOCKER_CONTAINER_NAME` | `mcp-qdrant` | Container name for auto-launched Qdrant |
+
+**Other:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_CHAT_WEBHOOK` | _(empty)_ | Default webhook URL for Google Chat card tools |
+| `FASTMCP_CLOUD` | `false` | Enable cloud deployment mode (auto-switches to `MEMORY_WITH_BACKUP` storage) |
 
 ## 🔗 Client Connections
 
@@ -158,13 +177,13 @@ GoogleUnlimited supports multiple connection methods. Here are the two most popu
 }
 ```
 
-**Option 2: HTTP Streamable** (VS Code Roo, Claude Desktop, etc.):
+**Option 2: HTTP Streamable** (VS Code Roo, Claude Code, Claude Desktop, etc.):
 ```bash
-# 1. Start server in HTTP mode
+# Start server in HTTP mode
 uv run python server.py --transport http --port 8002
-
-# 2. Configure your client with:
 ```
+
+Basic single-connection config:
 ```json
 {
   "google-workspace": {
@@ -175,12 +194,44 @@ uv run python server.py --transport http --port 8002
 }
 ```
 
+**Multi-connection setup** — connect the same client (or multiple clients) to the same server with different tool sets using [URL query parameters](#-url-based-service-filtering-http-transport):
+
+```json
+{
+  "google-email": {
+    "type": "streamable-http",
+    "url": "https://localhost:8002/mcp?service=gmail"
+  },
+  "google-chat": {
+    "type": "streamable-http",
+    "url": "https://localhost:8002/mcp?service=chat"
+  },
+  "google-productivity": {
+    "type": "streamable-http",
+    "url": "https://localhost:8002/mcp?service=drive,docs,sheets,slides"
+  }
+}
+```
+
+Each connection gets its own **isolated session** with only the requested service tools enabled. You can also pin a session ID with `?uuid=` to resume the same session state across reconnects:
+
+```json
+{
+  "google-workspace": {
+    "type": "streamable-http",
+    "url": "https://localhost:8002/mcp?uuid=my-workspace&service=gmail,drive,calendar"
+  }
+}
+```
+
+> See [URL-Based Service Filtering](#-url-based-service-filtering-http-transport) for the full list of query parameters.
+
 ### 📚 Complete Connection Guide
 
 For detailed setup instructions, troubleshooting, and configurations for all supported clients including:
 - Claude Code CLI (HTTP & STDIO)
 - Claude Desktop
-- VS Code/GitHub Copilot
+- VS Code / Roo / GitHub Copilot
 - Claude.ai with Cloudflare Tunnel
 - And more...
 
@@ -203,7 +254,7 @@ GoogleUnlimited supports **9 Google Workspace services** with **90+ specialized 
 | **Photos** | 📷 | 12 | Albums, upload, search, metadata, smart search | [`api-reference/photos/`](documentation/api-reference/photos/) |
 
 > 📚 **API Documentation Resources:**
-> - 🔗 **[Complete API Reference](documentation/api-reference/)** - Comprehensive documentation for all 90+ tools across 9 services
+> - 🔗 **[Complete API Reference](documentation/api-reference/)** - Comprehensive documentation for all 92+ tools across 9 services
 > - 📧 **[Gmail API Guide](documentation/api-reference/gmail/)** - Email management, labels, filters, and search operations
 > - 📁 **[Drive API Guide](documentation/api-reference/drive/)** - File operations, sharing, and Office document handling
 > - 📊 **[Sheets API Guide](documentation/api-reference/sheets/)** - Spreadsheet data manipulation and formatting
@@ -256,7 +307,7 @@ MINIMAL_TOOLS_STARTUP=true
 # Optional: Pre-enable specific services at startup
 MINIMAL_STARTUP_SERVICES=drive,gmail,calendar
 
-# Disable minimal startup (enable all 90+ tools immediately)
+# Disable minimal startup (enable all 92+ tools immediately)
 MINIMAL_TOOLS_STARTUP=false
 ```
 
@@ -318,6 +369,20 @@ manage_tools(action="disable", tool_names=["send_gmail_message"], scope="global"
   "message": "Kept 5 tools, disabled 89 tools for this session"
 }
 ```
+
+### 🖥️ Tool Management Dashboard
+
+GoogleUnlimited includes a built-in **Tool Management Dashboard** served via the MCP Apps `ui://` resource scheme. This provides a visual interface for monitoring and managing tool availability across sessions.
+
+![Tool Management Dashboard](documentation/tool_ui.png)
+
+**Features:**
+- **Service-grouped tool view** — tools organized by Google service (Gmail, Drive, Sheets, etc.) with counts
+- **Session state visibility** — see which tools are enabled, disabled, or session-disabled at a glance
+- **Filter chips** — quickly filter by service to focus on relevant tools
+- **Live data** — powered by `DashboardCacheMiddleware` which caches list-tool results for instant `ui://data-dashboard` resource access
+
+The dashboard is automatically wired to all list tools via `wire_dashboard_to_list_tools()` — no per-tool configuration needed.
 
 ### 🔗 URL-Based Service Filtering (HTTP Transport)
 
@@ -451,11 +516,42 @@ await send_gmail_message(
 )
 ```
 
+**DSL-powered macros** — dynamic macros can also embed [Google Chat card DSL notation](documentation/api-reference/chat/) to generate rich, structured cards. The DSL symbols define the card layout while Jinja2 handles dynamic content:
+
+```jinja2
+{# workspace_dashboard.j2 — a dynamic macro that outputs a Google Chat card #}
+{% macro workspace_dashboard(user_email, stats=None, quick_actions=None) %}
+{% set username = user_email.split('@')[0] if user_email else 'User' %}
+{% set default_stats = stats or [
+    {'label': 'Emails', 'value': '12 unread'},
+    {'label': 'Calendar', 'value': '3 meetings today'},
+    {'label': 'Tasks', 'value': '5 pending'}
+] %}
+
+§[δ×3, ℊ[ǵ×4], §[δ×2, Ƀ[ᵬ×3]]]
+
+Welcome back, {{ username | title }}!
+
+Your Workspace Overview:
+{% for stat in default_stats %}
+- {{ stat.label }}: {{ stat.value }}
+{% endfor %}
+
+Actions:
+- Button: Open Gmail → https://mail.google.com
+- Button: Open Calendar → https://calendar.google.com
+- Button: Open Drive → https://drive.google.com
+{% endmacro %}
+```
+
+The DSL line `§[δ×3, ℊ[ǵ×4], §[δ×2, Ƀ[ᵬ×3]]]` defines the card structure: a Section with 3 DecoratedText widgets, a Grid with 4 items, and a nested Section with 2 DecoratedText widgets and a ButtonList with 3 buttons. The Jinja2 template fills in the content dynamically — and because it's persisted to `templates/dynamic/`, it's immediately available to `send_dynamic_card` and other tools.
+
 **Key Features:**
 - ⚡ **Immediate Availability**: Macros are instantly available after creation
 - 🎯 **Resource Integration**: Automatically available via `template://macros/macro_name`
 - 💾 **Optional Persistence**: Save macros to disk for permanent availability
 - 🔄 **Template Processing**: Full Jinja2 syntax validation and error handling
+- 💬 **DSL Integration**: Macros can output card DSL notation for rich Google Chat cards
 
 ### 🚀 Real-World Usage
 
@@ -537,7 +633,7 @@ GoogleUnlimited includes comprehensive testing with **client tests** that valida
 
 ![Testing Framework](mermaid-images/testing-framework.png)
 
-The **client tests** are the most important component - they provide deterministic testing of MCP operations using real resource integration and standardized patterns across all **90+ tools** and **9 Google services**. These tests validate both explicit email authentication and middleware injection patterns.
+The **client tests** are the most important component - they provide deterministic testing of MCP operations using real resource integration and standardized patterns across all **92+ tools** and **9 Google services**. These tests validate both explicit email authentication and middleware injection patterns.
 
 ### 🚀 Quick Test Commands
 
@@ -572,7 +668,7 @@ Automated testing and publishing via GitHub Actions:
 
 - **CI Workflow**: Runs on every PR and push to main
   - Python 3.11 & 3.12 matrix testing
-  - Linting with `ruff` and formatting with `black`
+  - Linting with `ruff check` and formatting with `ruff format`
   - Full test suite execution
 - **TestPyPI Publishing**: Automated package publishing for testing
 
