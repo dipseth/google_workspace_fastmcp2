@@ -27,9 +27,9 @@ WEBHOOK_URL = os.environ.get(
 
 def send_card(card_payload: dict, description: str = ""):
     """Send a card to the webhook and report result."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"TEST: {description}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Payload:\n{json.dumps(card_payload, indent=2)[:500]}...")
 
     try:

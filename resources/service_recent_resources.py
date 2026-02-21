@@ -301,30 +301,18 @@ async def _get_recent_photos_items(
     """
     try:
         # Use FastMCP context to find tools dynamically (following middleware pattern)
-        if not ctx or not hasattr(ctx, "fastmcp") or not ctx.fastmcp:
+        if not ctx or not ctx.fastmcp:
             return {
                 "error": "FastMCP context not available for photos tool discovery",
                 "service": service,
                 "timestamp": datetime.now().isoformat(),
             }
 
-        # Access the tool registry (supports FastMCP 2.x and 3.0.0b1+)
         mcp_server = ctx.fastmcp
-        tools_dict = {}
+        from fastmcp.tools.tool import Tool
 
-        # FastMCP 2.x path
-        if hasattr(mcp_server, "_tool_manager") and hasattr(
-            mcp_server._tool_manager, "_tools"
-        ):
-            tools_dict = mcp_server._tool_manager._tools
-        # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-        elif hasattr(mcp_server, "_local_provider") and hasattr(
-            mcp_server._local_provider, "_components"
-        ):
-            from fastmcp.tools.tool import Tool
-
-            components = mcp_server._local_provider._components
-            tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
+        components = mcp_server.local_provider._components
+        tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
 
         if not tools_dict:
             return {
@@ -351,19 +339,7 @@ async def _get_recent_photos_items(
         # Get the tool and call it (following middleware pattern)
         tool_instance = tools_dict[tool_name]
 
-        # Get the actual callable function from the tool
-        if hasattr(tool_instance, "fn"):
-            tool_func = tool_instance.fn
-        elif hasattr(tool_instance, "func"):
-            tool_func = tool_instance.func
-        elif hasattr(tool_instance, "__call__"):
-            tool_func = tool_instance
-        else:
-            return {
-                "error": f"Tool '{tool_name}' is not callable",
-                "service": service,
-                "timestamp": datetime.now().isoformat(),
-            }
+        tool_func = tool_instance.fn
 
         # Call the tool with parameters
         tool_params = {
@@ -377,7 +353,7 @@ async def _get_recent_photos_items(
             albums_result = tool_func(**tool_params)
 
         # Handle the structured response
-        if hasattr(albums_result, "error") and albums_result.error:
+        if getattr(albums_result, "error", None):
             return {
                 "error": albums_result.error,
                 "service": service,
@@ -386,11 +362,7 @@ async def _get_recent_photos_items(
             }
 
         # Extract albums from the structured response
-        albums = (
-            getattr(albums_result, "albums", [])
-            if hasattr(albums_result, "albums")
-            else []
-        )
+        albums = getattr(albums_result, "albums", [])
 
         # Convert albums to enhanced format similar to files
         enhanced_items = []

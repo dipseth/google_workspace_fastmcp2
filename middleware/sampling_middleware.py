@@ -129,23 +129,25 @@ class ResourceContextManager:
         self.enable_debug = enable_debug
 
     async def get_resource_safely(self, uri: str) -> Optional[Dict[str, Any]]:
-        """Safely get a resource with error handling."""
+        """Safely get a resource with error handling.
+
+        Context.read_resource() returns ResourceResult with
+        .contents: list[ResourceContent] where ResourceContent.content is str.
+        """
         try:
             if self.enable_debug:
                 logger.debug(f"🔍 Fetching resource: {uri}")
 
-            # Use the fastmcp_context to read resources
-            if hasattr(self.fastmcp_context, "read_resource"):
-                result = await self.fastmcp_context.read_resource(uri)
-                if result and result.get("contents"):
-                    # Extract the content from the resource response
-                    content = result["contents"][0]
-                    if content.get("text"):
-                        import json
+            if not self.fastmcp_context:
+                return None
 
-                        return json.loads(content["text"])
-                    return content
-            return None
+            # ResourceResult.contents[0].content is the str payload
+            import json
+
+            result = await self.fastmcp_context.read_resource(uri)
+            content_str = result.contents[0].content
+            return json.loads(content_str)
+
         except Exception as e:
             if self.enable_debug:
                 logger.debug(f"⚠️ Failed to fetch resource {uri}: {e}")
@@ -1040,13 +1042,13 @@ class EnhancedSamplingMiddleware(Middleware):
         2. Transforms the tool to add ctx: Context parameter for sampling
         3. Provides enhanced sampling capabilities when ctx.sample() is called
         """
-        tool_name = getattr(context.message, "name", "unknown")
+        tool_name = context.message.name
 
         if self.enable_debug:
             logger.debug(f"🔧 Processing tool call for elicitation: {tool_name}")
 
         # Check if we have FastMCP context
-        if not hasattr(context, "fastmcp_context") or not context.fastmcp_context:
+        if not context.fastmcp_context:
             if self.enable_debug:
                 logger.debug(f"⚠️ No FastMCP context available for tool: {tool_name}")
             return await call_next(context)
@@ -1180,7 +1182,7 @@ class EnhancedSamplingMiddleware(Middleware):
             """
             try:
                 # Store enhanced context for potential use
-                if hasattr(ctx, "set_state"):
+                if ctx:
                     enhanced_context = await self._create_enhanced_context(
                         ctx, original_tool.name
                     )

@@ -99,9 +99,9 @@ class TestUnifiedCardTool:
             content = result.content[0].text
 
             # Check result
-            assert (
-                "successfully" in content.lower() or "sent" in content.lower()
-            ), f"Failed to send card: {content}"
+            assert "successfully" in content.lower() or "sent" in content.lower(), (
+                f"Failed to send card: {content}"
+            )
             print(f"Simple card sending result: {content}")
         except Exception as e:
             # Handle server errors gracefully
@@ -139,9 +139,9 @@ class TestUnifiedCardTool:
             content = result.content[0].text
 
             # Check result
-            assert (
-                "successfully" in content.lower() or "sent" in content.lower()
-            ), f"Failed to send card with image: {content}"
+            assert "successfully" in content.lower() or "sent" in content.lower(), (
+                f"Failed to send card with image: {content}"
+            )
             print(f"Card with image sending result: {content}")
         except Exception as e:
             # Handle server errors gracefully
@@ -181,9 +181,9 @@ class TestUnifiedCardTool:
             content = result.content[0].text
 
             # Check result
-            assert (
-                "successfully" in content.lower() or "sent" in content.lower()
-            ), f"Failed to send interactive card: {content}"
+            assert "successfully" in content.lower() or "sent" in content.lower(), (
+                f"Failed to send interactive card: {content}"
+            )
             print(f"Interactive card sending result: {content}")
         except Exception as e:
             # Handle server errors gracefully
@@ -227,9 +227,9 @@ class TestUnifiedCardTool:
             content = result.content[0].text
 
             # Check result
-            assert (
-                "successfully" in content.lower() or "sent" in content.lower()
-            ), f"Failed to send card with natural language: {content}"
+            assert "successfully" in content.lower() or "sent" in content.lower(), (
+                f"Failed to send card with natural language: {content}"
+            )
             print(f"Natural language card sending result: {content}")
         except Exception as e:
             # Handle server errors gracefully

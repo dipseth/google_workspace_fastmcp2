@@ -4,6 +4,11 @@ Resource helpers for client tests to fetch real IDs from service:// resources.
 This module provides utilities to fetch real IDs from the service resource system
 instead of using hardcoded fake IDs in tests. This makes tests more realistic
 and helps validate the actual resource system.
+
+MCP client types:
+- client.read_resource() → ReadResourceResult
+  - .contents: list[TextResourceContents | BlobResourceContents]
+    - TextResourceContents: .text (str), .uri, .mimeType
 """
 
 import json
@@ -43,17 +48,9 @@ class ResourceIDFetcher:
             resource_uri = f"service://{service}/{list_type}"
             logger.info(f"📡 Fetching real IDs from {resource_uri}")
 
-            content = await self.client.read_resource(resource_uri)
-
-            if not content or len(content) == 0:
-                logger.warning(f"No content returned from {resource_uri}")
-                return None
-
-            # Parse the JSON content
-            text_content = (
-                content[0].text if hasattr(content[0], "text") else str(content[0])
-            )
-            data = json.loads(text_content)
+            # ReadResourceResult.contents[0] is TextResourceContents with .text
+            result = await self.client.read_resource(resource_uri)
+            data = json.loads(result.contents[0].text)
 
             # Extract first ID from various response formats
             first_id = self._extract_first_id(data, list_type)
@@ -160,19 +157,14 @@ class ResourceIDFetcher:
         try:
             # Try to get from messages list
             resource_uri = "service://gmail/messages"
-            content = await self.client.read_resource(resource_uri)
+            result = await self.client.read_resource(resource_uri)
+            data = json.loads(result.contents[0].text)
 
-            if content and len(content) > 0:
-                text_content = (
-                    content[0].text if hasattr(content[0], "text") else str(content[0])
-                )
-                data = json.loads(text_content)
-
-                # Look for message ID in response
-                if isinstance(data, dict) and "result" in data:
-                    result = data["result"]
-                    if "messages" in result and result["messages"]:
-                        return result["messages"][0].get("id")
+            # Look for message ID in response
+            if isinstance(data, dict) and "result" in data:
+                messages = data["result"].get("messages", [])
+                if messages:
+                    return messages[0].get("id")
 
             return None
         except Exception as e:
@@ -201,27 +193,18 @@ class ResourceIDFetcher:
         try:
             # Try to find a folder in Drive items
             resource_uri = "service://drive/items"
-            content = await self.client.read_resource(resource_uri)
+            result = await self.client.read_resource(resource_uri)
+            data = json.loads(result.contents[0].text)
 
-            if content and len(content) > 0:
-                text_content = (
-                    content[0].text if hasattr(content[0], "text") else str(content[0])
-                )
-                data = json.loads(text_content)
-
-                # Look for folders in the response
-                if isinstance(data, dict) and "result" in data:
-                    result = data["result"]
-                    if "files" in result:
-                        for file in result["files"]:
-                            if (
-                                file.get("mimeType")
-                                == "application/vnd.google-apps.folder"
-                            ):
-                                return file.get("id")
-                        # If no folders found, use first item
-                        if result["files"]:
-                            return result["files"][0].get("id")
+            # Look for folders in the response
+            if isinstance(data, dict) and "result" in data:
+                files = data["result"].get("files", [])
+                for file in files:
+                    if file.get("mimeType") == "application/vnd.google-apps.folder":
+                        return file.get("id")
+                # If no folders found, use first item
+                if files:
+                    return files[0].get("id")
 
             return None
         except Exception as e:

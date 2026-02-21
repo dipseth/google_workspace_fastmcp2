@@ -224,7 +224,7 @@ class AuthMiddleware(Middleware):
         """
         from .context import get_session_data, store_session_data
 
-        tool_name = getattr(context.message, "name", "unknown")
+        tool_name = context.message.name
         logger.debug(f"Processing tool call: {tool_name}")
 
         # PHASE 1 FIX: Get session from instance tracking (reliable and early-access safe)
@@ -382,7 +382,7 @@ class AuthMiddleware(Middleware):
         """
         from .context import get_session_data, store_session_data
 
-        resource_uri = getattr(context, "uri", "unknown")
+        resource_uri = str(context.message.uri) if context.message.uri else "unknown"
         logger.debug(f"Processing resource access: {resource_uri}")
 
         # PHASE 1 FIX: Get session from instance tracking (reliable and context-independent)
@@ -499,7 +499,7 @@ class AuthMiddleware(Middleware):
         """
         try:
             # Get arguments from the message
-            if hasattr(context.message, "arguments") and context.message.arguments:
+            if context.message.arguments:
                 args = context.message.arguments
 
                 # Try common user email parameter names
@@ -1068,12 +1068,6 @@ class AuthMiddleware(Middleware):
         """
         try:
             # Standard FastMCP pattern: arguments are in context.message.arguments
-            if not hasattr(context, "message") or not hasattr(
-                context.message, "arguments"
-            ):
-                logger.debug("No arguments to inject for context")
-                return
-
             args = context.message.arguments
             if not isinstance(args, dict):
                 logger.debug(f"Arguments is not a dict: {type(args)}")
@@ -1116,8 +1110,25 @@ class AuthMiddleware(Middleware):
                         "⚠️ No email to inject - leaving parameter unset (tool will fail clearly)"
                     )
             else:
+                # user_google_email is already set to a real email — validate it
+                # matches the authenticated user (skip for start_google_auth which
+                # needs to accept any email to initiate authentication)
+                tool_name = context.message.name
+                if (
+                    final_email
+                    and tool_name != "start_google_auth"
+                    and current_value.lower().strip() != final_email.lower().strip()
+                ):
+                    raise ValueError(
+                        f"Email mismatch: you are authenticated as '{final_email}' "
+                        f"but tool '{tool_name}' was called with '{current_value}'. "
+                        f"Use your authenticated email or 'me'/'myself' instead."
+                    )
                 logger.debug(f"user_google_email already set: {current_value}")
 
+        except ValueError:
+            # Re-raise email mismatch errors — these should not be silenced
+            raise
         except Exception as e:
             logger.warning(f"Could not auto-inject email parameter: {e}")
 

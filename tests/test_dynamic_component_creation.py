@@ -225,15 +225,15 @@ class TestComponentLoading:
         assert SelectionItem is not None, "SelectionItem should be loadable"
 
         # SelectionType is a nested enum - access via SelectionInput
-        assert hasattr(
-            SelectionInput, "SelectionType"
-        ), "SelectionInput should have SelectionType enum"
+        assert hasattr(SelectionInput, "SelectionType"), (
+            "SelectionInput should have SelectionType enum"
+        )
         SelectionType = SelectionInput.SelectionType
 
         # Available types: SWITCH, CHECK_BOX, RADIO_BUTTON, DROPDOWN
-        assert hasattr(
-            SelectionType, "CHECK_BOX"
-        ), "SelectionType should have CHECK_BOX"
+        assert hasattr(SelectionType, "CHECK_BOX"), (
+            "SelectionType should have CHECK_BOX"
+        )
         assert hasattr(SelectionType, "DROPDOWN"), "SelectionType should have DROPDOWN"
         print(f"\n✅ SelectionType enum values: {[m.name for m in SelectionType]}")
 
@@ -419,9 +419,9 @@ class TestRelationshipQueries:
         children = rels["child_classes"]
 
         # SelectionInput should have SelectionType
-        assert (
-            "SelectionType" in children
-        ), "SelectionInput should have SelectionType relationship"
+        assert "SelectionType" in children, (
+            "SelectionInput should have SelectionType relationship"
+        )
 
         print(f"\n✅ SelectionInput relationships: {children}")
 

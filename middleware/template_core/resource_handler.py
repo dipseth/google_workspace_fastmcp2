@@ -3,6 +3,12 @@ Resource fetching and processing for template middleware.
 
 Handles fetching resources from FastMCP context, extracting data from responses,
 and providing fallback mechanisms for common resource types.
+
+FastMCP v3 types:
+- Context.read_resource() → ResourceResult (Pydantic model)
+  - .contents: list[ResourceContent]
+    - .content: str | bytes
+    - .mime_type: str | None
 """
 
 import json
@@ -15,6 +21,16 @@ from .cache_manager import CacheManager
 from .utils import TemplateResolutionError
 
 logger = setup_logger()
+
+
+def _parse_json_content(text: str) -> Any:
+    """Parse a string as JSON, returning the original string on failure."""
+    if text.strip().startswith(("{", "[")):
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return text
 
 
 class ResourceHandler:
@@ -95,39 +111,23 @@ class ResourceHandler:
             if self.enable_debug_logging:
                 logger.debug(f"🔍 Fetching resource via FastMCP: {resource_uri}")
 
-            # Use the proper FastMCP resource access pattern
-            content_list = await fastmcp_context.read_resource(resource_uri)
+            # Context.read_resource() returns ResourceResult with .contents: list[ResourceContent]
+            result = await fastmcp_context.read_resource(resource_uri)
+            resource_content = result.contents[0]
 
-            if content_list and len(content_list) > 0:
-                resource_result = content_list[0]
+            if self.enable_debug_logging:
+                logger.debug(f"📦 Raw resource type: {type(resource_content).__name__}")
 
-                # Extract data from the resource response structure
-                if self.enable_debug_logging:
-                    logger.debug(
-                        f"📦 Raw resource type: {type(resource_result).__name__}"
-                    )
+            resource_data = self.extract_resource_data(resource_content)
 
-                resource_data = self.extract_resource_data(resource_result)
+            if self.enable_debug_logging:
+                logger.debug(f"📄 Extracted data type: {type(resource_data).__name__}")
 
-                if self.enable_debug_logging:
-                    logger.debug(
-                        f"📄 Extracted data type: {type(resource_data).__name__}"
-                    )
+            # Store in context state and cache
+            await fastmcp_context.set_state(state_key, resource_data)
+            self.cache_manager.cache_resource(resource_uri, resource_data)
 
-                # Store in context state and cache
-                await fastmcp_context.set_state(state_key, resource_data)
-                self.cache_manager.cache_resource(resource_uri, resource_data)
-
-                return resource_data
-            else:
-                # No content returned
-                if self.enable_debug_logging:
-                    logger.debug(
-                        f"❌ No content returned from FastMCP for: {resource_uri}"
-                    )
-                raise TemplateResolutionError(
-                    f"No content returned for resource: {resource_uri}"
-                )
+            return resource_data
 
         except Exception as e:
             logger.error(f"❌ Failed to fetch resource '{resource_uri}': {e}")
@@ -196,16 +196,13 @@ class ResourceHandler:
 
     def extract_resource_data(self, resource_result: Any, depth: int = 0) -> Any:
         """
-        Extract the actual data from the resource response structure.
+        Extract the actual data from a resource response.
 
-        Handles:
-        - Pydantic models (converts to dict for template compatibility)
-        - ReadResourceContents dataclass
-        - Standard MCP resource response structure
-        - Plain dicts and nested structures
+        The primary path: ResourceContent (Pydantic) → model_dump() →
+        {"content": "{JSON}", "mime_type": "application/json"} → parsed JSON dict.
 
         Args:
-            resource_result: Raw resource result from FastMCP
+            resource_result: Raw resource result (ResourceContent, dict, str, etc.)
             depth: Current recursion depth (for safety)
 
         Returns:
@@ -221,8 +218,7 @@ class ResourceHandler:
         try:
             extracted = None
 
-            # Handle Pydantic models FIRST - convert to dict for template compatibility
-            # This prevents Jinja2 syntax errors from colons in JSON fields
+            # Pydantic models (ResourceContent, etc.) → convert to dict first
             try:
                 from pydantic import BaseModel
 
@@ -231,58 +227,56 @@ class ResourceHandler:
                         logger.debug(
                             f"🔄 Converting Pydantic model to dict: {type(resource_result).__name__}"
                         )
-                    extracted = resource_result.model_dump()
-                    # Recursively extract to ensure nested Pydantic models are also converted
-                    return self.extract_resource_data(extracted, depth + 1)
+                    return self.extract_resource_data(
+                        resource_result.model_dump(), depth + 1
+                    )
             except ImportError:
-                pass  # Pydantic not available, continue with other handlers
+                pass
 
-            # Handle ReadResourceContents dataclass
-            if hasattr(resource_result, "content"):
-                content = resource_result.content
-                mime_type = getattr(resource_result, "mime_type", None)
-
-                if isinstance(content, str):
-                    if (
-                        mime_type == "application/json"
-                        or content.strip().startswith("{")
-                        or content.strip().startswith("[")
-                    ):
-                        try:
-                            extracted = json.loads(content)
-                        except json.JSONDecodeError:
-                            extracted = content
+            if isinstance(resource_result, dict):
+                # ResourceContent.model_dump() → {"content": str, "mime_type": str, "meta": ...}
+                if "content" in resource_result and "mime_type" in resource_result:
+                    content_val = resource_result["content"]
+                    mime = resource_result["mime_type"]
+                    if isinstance(content_val, str):
+                        if mime == "application/json" or content_val.strip().startswith(
+                            ("{", "[")
+                        ):
+                            try:
+                                extracted = json.loads(content_val)
+                            except (json.JSONDecodeError, TypeError):
+                                extracted = content_val
+                        else:
+                            extracted = content_val
                     else:
-                        extracted = content
-                else:
-                    extracted = content
+                        extracted = content_val
 
-            # Handle standard MCP resource response structure
-            elif hasattr(resource_result, "contents") and resource_result.contents:
-                content_item = resource_result.contents[0]
+                # TextResourceContents.model_dump() → {"text": str, "mimeType": str, "uri": ...}
+                elif "text" in resource_result and "uri" in resource_result:
+                    text_val = resource_result["text"]
+                    mime = resource_result.get("mimeType", "")
+                    if isinstance(text_val, str):
+                        if mime == "application/json" or text_val.strip().startswith(
+                            ("{", "[")
+                        ):
+                            try:
+                                extracted = json.loads(text_val)
+                            except (json.JSONDecodeError, TypeError):
+                                extracted = text_val
+                        else:
+                            extracted = text_val
+                    else:
+                        extracted = text_val
 
-                if hasattr(content_item, "text") and content_item.text:
-                    try:
-                        extracted = json.loads(content_item.text)
-                    except json.JSONDecodeError:
-                        extracted = content_item.text
-                elif hasattr(content_item, "blob") and content_item.blob:
-                    extracted = content_item.blob
-                else:
-                    extracted = content_item
-
-            elif isinstance(resource_result, dict):
-                if "contents" in resource_result and resource_result["contents"]:
+                # ReadResourceResult.model_dump() → {"contents": [{"text": ...}, ...]}
+                elif "contents" in resource_result and resource_result["contents"]:
                     content_item = resource_result["contents"][0]
                     if "text" in content_item:
-                        try:
-                            extracted = json.loads(content_item["text"])
-                        except (json.JSONDecodeError, TypeError):
-                            extracted = content_item["text"]
+                        extracted = _parse_json_content(content_item["text"])
                     else:
                         extracted = content_item
                 else:
-                    # Plain dict - check if we should unwrap it first
+                    # Plain dict - check if single-key wrapper to unwrap
                     if self._should_unwrap_dict(resource_result, depth):
                         if self.enable_debug_logging:
                             logger.debug(f"🔄 Unwrapping plain dict at depth {depth}")
@@ -290,6 +284,10 @@ class ResourceHandler:
                         extracted = resource_result[key]
                     else:
                         extracted = resource_result
+
+            elif isinstance(resource_result, str):
+                extracted = _parse_json_content(resource_result)
+
             else:
                 extracted = resource_result
 

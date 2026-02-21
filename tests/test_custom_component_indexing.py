@@ -373,7 +373,7 @@ class TestCustomComponentQdrantIntegration:
             carousel_found = "Carousel" in names2 or "CarouselCard" in names2
 
         assert carousel_found, (
-            f"Carousel not found via search. " f"DSL search names: {names}"
+            f"Carousel not found via search. DSL search names: {names}"
         )
 
     def test_custom_components_in_v7_hybrid_search(self, wrapper):
@@ -393,9 +393,9 @@ class TestCustomComponentQdrantIntegration:
 
         # Custom components should be indexed and searchable
         # May not always return Carousel directly, but should have valid results
-        assert (
-            len(class_results) > 0 or len(patterns) > 0
-        ), "V7 hybrid search returned no results"
+        assert len(class_results) > 0 or len(patterns) > 0, (
+            "V7 hybrid search returned no results"
+        )
 
         # Log what was found for debugging
         if class_names:

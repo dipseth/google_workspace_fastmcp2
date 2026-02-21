@@ -756,7 +756,9 @@ class InstancePatternMixin:
                 var_type = (
                     "original"
                     if struct_idx == 0 and param_idx == 0
-                    else "structure" if struct_idx > 0 else "parameter"
+                    else "structure"
+                    if struct_idx > 0
+                    else "parameter"
                 )
 
                 variation = PatternVariation(

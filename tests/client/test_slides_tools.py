@@ -384,9 +384,9 @@ class TestSlidesTools:
             local_file_path = file_path_match.group(1).strip()
 
             # Verify file exists
-            assert os.path.exists(
-                local_file_path
-            ), f"Downloaded file does not exist at: {local_file_path}"
+            assert os.path.exists(local_file_path), (
+                f"Downloaded file does not exist at: {local_file_path}"
+            )
 
             # Verify file has reasonable size (> 0 bytes)
             file_size = os.path.getsize(local_file_path)
@@ -403,9 +403,9 @@ class TestSlidesTools:
             size_match = re.search(r"File Size: ([\d,]+) bytes", content)
             if size_match:
                 reported_size = int(size_match.group(1).replace(",", ""))
-                assert (
-                    reported_size == file_size
-                ), f"Reported size {reported_size} != actual size {file_size}"
+                assert reported_size == file_size, (
+                    f"Reported size {reported_size} != actual size {file_size}"
+                )
 
             # Clean up downloaded file
             try:
@@ -480,9 +480,9 @@ class TestSlidesTools:
         assert result is not None and result.content
         content = result.content[0].text
         # Should return error about invalid format
-        assert (
-            "invalid export format" in content.lower()
-        ), f"Expected invalid format error, got: {content}"
+        assert "invalid export format" in content.lower(), (
+            f"Expected invalid format error, got: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_export_presentation_invalid_format(

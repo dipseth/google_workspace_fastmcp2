@@ -46,9 +46,9 @@ class TestQdrantUnifiedSearch:
 
         for query in test_queries:
             result = await client.call_tool("search", {"query": query})
-            assert (
-                result is not None
-            ), f"Search with query '{query}' should return a result"
+            assert result is not None, (
+                f"Search with query '{query}' should return a result"
+            )
 
             # Check response format (OpenAI MCP standard)
             content = (
@@ -57,9 +57,9 @@ class TestQdrantUnifiedSearch:
 
             try:
                 data = json.loads(content)
-                assert (
-                    "results" in data
-                ), "Response should have 'results' field (MCP standard)"
+                assert "results" in data, (
+                    "Response should have 'results' field (MCP standard)"
+                )
                 assert isinstance(data["results"], list), "Results should be a list"
 
                 # For analytics queries, results might be formatted differently
@@ -70,9 +70,9 @@ class TestQdrantUnifiedSearch:
                     assert "url" in result_item, "Each result should have a 'url'"
             except json.JSONDecodeError:
                 # If not JSON, it might be an error message
-                assert (
-                    "error" in content.lower() or "qdrant" in content.lower()
-                ), f"Non-JSON response should be an error message, got: {content}"
+                assert "error" in content.lower() or "qdrant" in content.lower(), (
+                    f"Non-JSON response should be an error message, got: {content}"
+                )
 
     @pytest.mark.asyncio
     async def test_search_service_history_capability(self, client):
@@ -88,9 +88,9 @@ class TestQdrantUnifiedSearch:
 
         for query in test_queries:
             result = await client.call_tool("search", {"query": query})
-            assert (
-                result is not None
-            ), f"Service history query '{query}' should return a result"
+            assert result is not None, (
+                f"Service history query '{query}' should return a result"
+            )
 
             content = (
                 result.content[0].text if hasattr(result, "content") else str(result)
@@ -108,9 +108,9 @@ class TestQdrantUnifiedSearch:
                     has_icon = any(
                         ord(c) > 127 for c in title
                     )  # Check for Unicode characters
-                    assert (
-                        has_icon or "unknown" in title.lower()
-                    ), f"Title should contain service icon or indicate unknown service: {title}"
+                    assert has_icon or "unknown" in title.lower(), (
+                        f"Title should contain service icon or indicate unknown service: {title}"
+                    )
             except json.JSONDecodeError:
                 # Acceptable if Qdrant is not available
                 assert "error" in content.lower() or "not available" in content.lower()
@@ -128,9 +128,9 @@ class TestQdrantUnifiedSearch:
 
         for query in test_queries:
             result = await client.call_tool("search", {"query": query})
-            assert (
-                result is not None
-            ), f"General search query '{query}' should return a result"
+            assert result is not None, (
+                f"General search query '{query}' should return a result"
+            )
 
             content = (
                 result.content[0].text if hasattr(result, "content") else str(result)
@@ -146,9 +146,9 @@ class TestQdrantUnifiedSearch:
                     assert "id" in result_item, "Each result should have an 'id'"
                     assert "title" in result_item, "Each result should have a 'title'"
                     assert "url" in result_item, "Each result should have a 'url'"
-                    assert result_item["url"].startswith(
-                        "qdrant://"
-                    ), f"URL should start with qdrant://: {result_item['url']}"
+                    assert result_item["url"].startswith("qdrant://"), (
+                        f"URL should start with qdrant://: {result_item['url']}"
+                    )
             except json.JSONDecodeError:
                 # Acceptable if Qdrant is not available
                 assert "error" in content.lower() or "not available" in content.lower()
@@ -231,9 +231,9 @@ class TestQdrantUnifiedSearch:
             "query_type"
         )
         if query_type is not None:
-            assert (
-                query_type == "recommend"
-            ), f"Expected query_type 'recommend', got {query_type}"
+            assert query_type == "recommend", (
+                f"Expected query_type 'recommend', got {query_type}"
+            )
 
         if not data["results"]:
             return
@@ -248,9 +248,9 @@ class TestQdrantUnifiedSearch:
                 assert tool_name == "list_gmail_labels"
             score = item.get("score")
             if score is not None:
-                assert isinstance(
-                    score, (int, float)
-                ), "Score must be numeric when present"
+                assert isinstance(score, (int, float)), (
+                    "Score must be numeric when present"
+                )
 
     @pytest.mark.asyncio
     async def test_search_indexed_service_history_query(self, client):
@@ -266,18 +266,18 @@ class TestQdrantUnifiedSearch:
             # Acceptable if Qdrant or analytics index is unavailable
             return
 
-        assert (
-            "results" in data
-        ), "Response should have 'results' field for indexed service history query"
+        assert "results" in data, (
+            "Response should have 'results' field for indexed service history query"
+        )
         assert isinstance(data["results"], list)
 
         query_type = data.get("query_type") or data.get("metadata", {}).get(
             "query_type"
         )
         if query_type is not None:
-            assert (
-                query_type == "service_history"
-            ), f"Expected query_type 'service_history', got {query_type}"
+            assert query_type == "service_history", (
+                f"Expected query_type 'service_history', got {query_type}"
+            )
 
         if not data["results"]:
             # No matches is acceptable depending on live data
@@ -323,14 +323,14 @@ class TestQdrantUnifiedSearch:
                 # Optional metadata structure
                 metadata = first_result.get("metadata")
                 if metadata is not None:
-                    assert isinstance(
-                        metadata, dict
-                    ), "Metadata must be a dictionary when present"
+                    assert isinstance(metadata, dict), (
+                        "Metadata must be a dictionary when present"
+                    )
         except json.JSONDecodeError:
             # If Qdrant is not available, should still return valid JSON error
-            assert (
-                "{" in content and "}" in content
-            ), "Error response should be valid JSON"
+            assert "{" in content and "}" in content, (
+                "Error response should be valid JSON"
+            )
 
 
 @pytest.mark.service("qdrant")
@@ -400,9 +400,9 @@ class TestQdrantUnifiedFetch:
             assert fetch_data["id"] == valid_id, "Fetched ID should match requested ID"
 
             # Check metadata structure
-            assert isinstance(
-                fetch_data["metadata"], dict
-            ), "Metadata should be a dictionary"
+            assert isinstance(fetch_data["metadata"], dict), (
+                "Metadata should be a dictionary"
+            )
 
         except json.JSONDecodeError:
             # Acceptable if Qdrant is not available
@@ -444,17 +444,19 @@ class TestQdrantUnifiedFetch:
                     or "unknown" in title_lower
                     or "no point" in title_lower
                     or "no id" in title_lower
-                ), f"Title should indicate error, not found, unknown, or no IDs: {data['title']}"
+                ), (
+                    f"Title should indicate error, not found, unknown, or no IDs: {data['title']}"
+                )
 
                 # ID in the error doc should still echo the requested ID when provided
-                assert (
-                    data["id"] == invalid_id
-                ), "ID should match requested ID even for errors"
+                assert data["id"] == invalid_id, (
+                    "ID should match requested ID even for errors"
+                )
 
             except json.JSONDecodeError:
-                assert (
-                    "error" in content.lower()
-                ), "Non-JSON response should indicate error"
+                assert "error" in content.lower(), (
+                    "Non-JSON response should indicate error"
+                )
 
     @pytest.mark.asyncio
     async def test_fetch_batch_with_ordering(self, client):
@@ -534,17 +536,17 @@ class TestQdrantUnifiedFetch:
         assert actual_id is not None, "Response should have an id"
         # If ordering worked correctly, it should be one of the requested IDs
         all_ids = [primary_id] + extra_ids
-        assert (
-            actual_id in all_ids or expected_first_id == actual_id
-        ), f"Response id {actual_id} should be one of the requested IDs"
+        assert actual_id in all_ids or expected_first_id == actual_id, (
+            f"Response id {actual_id} should be one of the requested IDs"
+        )
 
         text = fetch_data.get("text", "")
         if text:
             # Text should contain one block per document
             doc_marker = "=== QDRANT DOCUMENT ==="
-            assert (
-                text.count(doc_marker) >= len(extra_ids) + 1
-            ), "Batch fetch text should contain multiple QDRANT DOCUMENT blocks"
+            assert text.count(doc_marker) >= len(extra_ids) + 1, (
+                "Batch fetch text should contain multiple QDRANT DOCUMENT blocks"
+            )
 
     @pytest.mark.asyncio
     async def test_fetch_response_format_compliance(self, client):
@@ -574,9 +576,9 @@ class TestQdrantUnifiedFetch:
 
         except json.JSONDecodeError:
             # If Qdrant is not available, should still return valid JSON error
-            assert (
-                "{" in content and "}" in content
-            ), "Error response should be valid JSON"
+            assert "{" in content and "}" in content, (
+                "Error response should be valid JSON"
+            )
 
 
 @pytest.mark.service("qdrant")
@@ -643,12 +645,12 @@ class TestQdrantBackwardCompatibility:
 
             # Legacy has different format but both should have results
             if "results" in legacy_data:
-                assert isinstance(
-                    legacy_data["results"], list
-                ), "Legacy results should be list"
-            assert isinstance(
-                unified_data["results"], list
-            ), "Unified results should be list"
+                assert isinstance(legacy_data["results"], list), (
+                    "Legacy results should be list"
+                )
+            assert isinstance(unified_data["results"], list), (
+                "Unified results should be list"
+            )
 
         except json.JSONDecodeError:
             # Both might fail with Qdrant unavailable, that's ok
@@ -710,9 +712,9 @@ class TestQdrantServiceIntegration:
                     has_service_indicator = any(
                         indicator in title for indicator in service_indicators
                     )
-                    assert (
-                        has_service_indicator or "unknown" in title.lower()
-                    ), f"Title should have service indicator: {title}"
+                    assert has_service_indicator or "unknown" in title.lower(), (
+                        f"Title should have service indicator: {title}"
+                    )
         except json.JSONDecodeError:
             # Acceptable if Qdrant is not available
             pass
@@ -749,9 +751,9 @@ class TestQdrantServiceIntegration:
 
                 # Check metadata includes service information
                 metadata = fetch_data.get("metadata", {})
-                assert (
-                    "service" in metadata or "tool_name" in metadata
-                ), "Metadata should include service or tool information"
+                assert "service" in metadata or "tool_name" in metadata, (
+                    "Metadata should include service or tool information"
+                )
 
                 # Check title includes service context
                 title = fetch_data.get("title", "")
@@ -804,9 +806,9 @@ class TestQdrantErrorHandling:
 
         for query in malformed_queries[:3]:  # Test first 3 to avoid timeout
             result = await client.call_tool("search", {"query": query})
-            assert (
-                result is not None
-            ), f"Malformed query '{query[:50]}...' should not crash"
+            assert result is not None, (
+                f"Malformed query '{query[:50]}...' should not crash"
+            )
 
             content = (
                 result.content[0].text if hasattr(result, "content") else str(result)
@@ -814,13 +816,13 @@ class TestQdrantErrorHandling:
 
             try:
                 data = json.loads(content)
-                assert (
-                    "results" in data
-                ), "Should return valid structure even for malformed queries"
+                assert "results" in data, (
+                    "Should return valid structure even for malformed queries"
+                )
             except json.JSONDecodeError:
-                assert (
-                    "error" in content.lower()
-                ), "Should return error for malformed queries"
+                assert "error" in content.lower(), (
+                    "Should return error for malformed queries"
+                )
 
 
 @pytest.mark.service("qdrant")
@@ -841,9 +843,9 @@ class TestQdrantPerformance:
             elapsed_time = time.time() - start_time
 
             assert result is not None, f"Query '{query}' should return result"
-            assert (
-                elapsed_time < 5.0
-            ), f"Query '{query}' took {elapsed_time:.2f}s, should be < 5s"
+            assert elapsed_time < 5.0, (
+                f"Query '{query}' took {elapsed_time:.2f}s, should be < 5s"
+            )
 
     @pytest.mark.asyncio
     @pytest.mark.slow

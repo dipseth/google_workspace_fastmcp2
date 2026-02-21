@@ -125,9 +125,9 @@ class TestGmailPrompts:
         # The prompt copy has evolved; accept either "Simple" wording or "Zero-Configuration"
         # variants.
         normalized = content.lower().replace("-", " ")
-        assert (
-            "simple" in normalized or "zero configuration" in normalized
-        ), "Prompt should communicate that it's a simple/zero-config demo."
+        assert "simple" in normalized or "zero configuration" in normalized, (
+            "Prompt should communicate that it's a simple/zero-config demo."
+        )
 
         # Should include resource templating examples or resolved resource URIs
         # The Template Parameter Middleware may resolve {{...}} to single braces {resource://...}
@@ -135,9 +135,9 @@ class TestGmailPrompts:
         has_template_syntax = ("{{" in content and "}}" in content) or (
             "{" in content and "://" in content
         )
-        assert (
-            has_template_syntax
-        ), "Prompt should contain template expressions or resource URIs"
+        assert has_template_syntax, (
+            "Prompt should contain template expressions or resource URIs"
+        )
         assert "gmail" in content.lower() or "email" in content.lower()
 
         print("✅ quick_email_demo prompt test passed")
@@ -392,9 +392,9 @@ class TestGmailPrompts:
             and ("id" in content or "name" in content)
         )
 
-        assert (
-            has_resource_evidence
-        ), f"No evidence of resource access in content: {content[:500]}"
+        assert has_resource_evidence, (
+            f"No evidence of resource access in content: {content[:500]}"
+        )
         print("✅ Resource context test passed")
 
 

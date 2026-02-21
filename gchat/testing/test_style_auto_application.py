@@ -146,9 +146,9 @@ def test_style_application_methods():
     print(f"\n  Input params: {params4}")
     print(f"  Style metadata: {style_metadata4}")
     print(f"  Result: {result4}")
-    assert (
-        result4["text"] == "Random text here"
-    ), "Should not apply style without matching keywords"
+    assert result4["text"] == "Random text here", (
+        "Should not apply style without matching keywords"
+    )
     print("  PASSED: Did NOT apply style when no keywords match")
 
     # Info styling as fallback

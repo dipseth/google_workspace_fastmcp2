@@ -72,9 +72,9 @@ class TestUserResources:
 
         found_uris = [str(r.uri) for r in resources]
         for expected_uri in expected_uris:
-            assert (
-                expected_uri in found_uris
-            ), f"Expected resource {expected_uri} not found. Available: {found_uris}"
+            assert expected_uri in found_uris, (
+                f"Expected resource {expected_uri} not found. Available: {found_uris}"
+            )
 
     @pytest.mark.asyncio
     async def test_list_resource_templates(self, client):
@@ -98,9 +98,9 @@ class TestUserResources:
         ]
 
         for expected_template in expected_templates:
-            assert (
-                expected_template in template_uris
-            ), f"Expected template {expected_template} not found"
+            assert expected_template in template_uris, (
+                f"Expected template {expected_template} not found"
+            )
 
     @pytest.mark.asyncio
     async def test_read_current_user_email_resource(self, client):
@@ -144,9 +144,9 @@ class TestUserResources:
                 # Should be JSON with profile info
                 profile_text = first_content.text
                 profile = json.loads(profile_text)
-                assert (
-                    "email" in profile or "status" in profile
-                ), f"Expected profile data, got: {profile}"
+                assert "email" in profile or "status" in profile, (
+                    f"Expected profile data, got: {profile}"
+                )
                 logger.info("Successfully read user profile")
 
         except Exception as e:
@@ -198,9 +198,9 @@ class TestUserResources:
             if hasattr(first_content, "text"):
                 # Should be just the email string
                 email = first_content.text
-                assert (
-                    "@" in email or "not authenticated" in email.lower()
-                ), f"Unexpected content: {email}"
+                assert "@" in email or "not authenticated" in email.lower(), (
+                    f"Unexpected content: {email}"
+                )
                 logger.info(f"Template resource returned: {email}")
 
         except Exception as e:
@@ -228,12 +228,12 @@ class TestUserResources:
                 # Should be JSON with profile info
                 profile_text = first_content.text
                 profile = json.loads(profile_text)
-                assert (
-                    "email" in profile
-                ), f"Expected profile with email, got: {profile}"
-                assert (
-                    profile["email"] == test_email
-                ), f"Expected email {test_email}, got: {profile.get('email')}"
+                assert "email" in profile, (
+                    f"Expected profile with email, got: {profile}"
+                )
+                assert profile["email"] == test_email, (
+                    f"Expected email {test_email}, got: {profile.get('email')}"
+                )
                 logger.info(f"Successfully read profile for {test_email}")
 
         except Exception as e:
@@ -270,9 +270,9 @@ class TestUserResources:
                     logger.info(f"Found tagged resource: {uri_str} with tags: {tags}")
 
         # We should have either tagged resources or auth-related resources
-        assert (
-            len(auth_resources) > 0 or len(tagged_resources) > 0
-        ), f"No auth-related or tagged resources found. Total resources: {len(resources)}"
+        assert len(auth_resources) > 0 or len(tagged_resources) > 0, (
+            f"No auth-related or tagged resources found. Total resources: {len(resources)}"
+        )
 
         # Log summary
         logger.info(
@@ -302,9 +302,9 @@ class TestEnhancedTools:
         ]
 
         for expected_tool in expected_tools:
-            assert (
-                expected_tool in tool_names
-            ), f"Enhanced tool {expected_tool} not found"
+            assert expected_tool in tool_names, (
+                f"Enhanced tool {expected_tool} not found"
+            )
 
     @pytest.mark.asyncio
     async def test_list_my_drive_files_tool(self, client):

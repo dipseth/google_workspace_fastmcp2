@@ -1,8 +1,8 @@
-"""Tests for MCP Apps Phase 1 — ui:// resource and ToolUI metadata."""
+"""Tests for MCP Apps Phase 1 — ui:// resource and AppConfig metadata."""
 
 import pytest
 from fastmcp import Client, FastMCP
-from fastmcp.server.apps import ResourceUI, ToolUI
+from fastmcp.server.apps import AppConfig
 
 from tools.ui_apps import _build_manage_tools_html, setup_ui_apps
 
@@ -15,7 +15,7 @@ def mcp_with_ui():
     # Register a tool with ToolUI metadata (mirrors manage_tools)
     @mcp.tool(
         name="manage_tools",
-        ui=ToolUI(
+        app=AppConfig(
             resource_uri="ui://manage-tools-dashboard",
             visibility=["app", "model"],
         ),
@@ -38,14 +38,15 @@ def test_html_is_valid_document():
     assert "<body>" in html
 
 
-def test_html_contains_tool_grid():
+def test_html_contains_groups_container():
     html = _build_manage_tools_html()
-    assert 'id="tool-grid"' in html
+    assert 'id="groups-container"' in html
 
 
 def test_html_contains_phase1_badge():
     html = _build_manage_tools_html()
-    assert "Phase 1: Read-Only" in html
+    assert "Phase 1" in html
+    assert "Read-Only" in html
 
 
 def test_html_contains_mcp_tools_placeholder():

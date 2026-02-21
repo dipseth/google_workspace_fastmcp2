@@ -170,9 +170,9 @@ def get_components() -> WrappedComponents:
 
 def send_message(message, description: str = "") -> bool:
     """Render message and send to webhook."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"TEST: {description}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # Render and convert to camelCase
     rendered = message.render()

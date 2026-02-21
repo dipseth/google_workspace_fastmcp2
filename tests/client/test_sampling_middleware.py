@@ -300,6 +300,12 @@ class TestSamplingMiddleware:
         """Integration test to verify sampling middleware is working end-to-end."""
         logger.info("🧪 Running sampling middleware integration test")
 
+        # Enable all tools for this session so tool calls don't fail with
+        # "tool disabled for session" errors during the stability check below.
+        await client.call_tool(
+            "manage_tools", {"action": "enable_all", "scope": "session"}
+        )
+
         runner = ToolTestRunner(client, TEST_EMAIL)
 
         # Test basic server functionality - check registered tools via manage_tools

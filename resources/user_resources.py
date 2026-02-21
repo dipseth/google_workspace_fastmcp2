@@ -1221,84 +1221,13 @@ def setup_user_resources(mcp: FastMCP) -> None:
             await ctx.debug(f"FastMCP server type: {type(fastmcp_server)}")
             await ctx.debug(f"FastMCP server attributes: {dir(fastmcp_server)}")
 
-            # Try to access tools via the documented fastmcp.tools attribute
-            tools_list = None
-            registered_tools = {}
+            from fastmcp.tools.tool import Tool
 
-            if hasattr(fastmcp_server, "tools"):
-                tools_list = fastmcp_server.tools
-                await ctx.info(f"✅ Found fastmcp.tools attribute: {type(tools_list)}")
-                await ctx.debug(
-                    f"Tools list length: {len(tools_list) if hasattr(tools_list, '__len__') else 'unknown'}"
-                )
-
-                # Convert tools list to dictionary if it's a list
-                if isinstance(tools_list, list):
-                    for tool in tools_list:
-                        if hasattr(tool, "name"):
-                            registered_tools[tool.name] = tool
-                        else:
-                            await ctx.warning(
-                                f"Tool in list has no name attribute: {tool}"
-                            )
-                elif hasattr(tools_list, "items"):
-                    # It's already a dict-like object
-                    registered_tools = dict(tools_list.items())
-                else:
-                    await ctx.warning(
-                        f"Tools attribute is not list or dict: {type(tools_list)}"
-                    )
-
-            # Fallback to tool manager if tools attribute doesn't work
-            if not registered_tools and hasattr(fastmcp_server, "_tool_manager"):
-                await ctx.info("Falling back to _tool_manager")
-                if hasattr(fastmcp_server._tool_manager, "_tools"):
-                    registered_tools = fastmcp_server._tool_manager._tools
-                    await ctx.info(
-                        f"✅ Found {len(registered_tools)} tools via _tool_manager"
-                    )
-                elif hasattr(fastmcp_server._tool_manager, "tools"):
-                    registered_tools = fastmcp_server._tool_manager.tools
-                    await ctx.info(
-                        f"✅ Found {len(registered_tools)} tools via _tool_manager.tools"
-                    )
-
-            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-            if not registered_tools and hasattr(fastmcp_server, "_local_provider"):
-                await ctx.info("Falling back to _local_provider (FastMCP 3.0+)")
-                if hasattr(fastmcp_server._local_provider, "_components"):
-                    from fastmcp.tools.tool import Tool
-
-                    components = fastmcp_server._local_provider._components
-                    registered_tools = {
-                        v.name: v for v in components.values() if isinstance(v, Tool)
-                    }
-                    await ctx.info(
-                        f"✅ Found {len(registered_tools)} tools via _local_provider"
-                    )
-
-            if not registered_tools:
-                await ctx.warning(
-                    "Could not access tools from FastMCP server - trying alternative methods"
-                )
-                # Try other common attributes
-                for attr_name in ["_tools", "tool_registry", "registry"]:
-                    if hasattr(fastmcp_server, attr_name):
-                        attr_value = getattr(fastmcp_server, attr_name)
-                        await ctx.debug(
-                            f"Found attribute {attr_name}: {type(attr_value)}"
-                        )
-                        if hasattr(attr_value, "items"):
-                            registered_tools = dict(attr_value.items())
-                            break
-                        elif hasattr(attr_value, "__len__") and len(attr_value) > 0:
-                            # Convert list to dict
-                            for item in attr_value:
-                                if hasattr(item, "name"):
-                                    registered_tools[item.name] = item
-                            break
-
-            await ctx.info(f"🔍 Final tool count: {len(registered_tools)}")
+            components = fastmcp_server.local_provider._components
+            registered_tools = {
+                v.name: v for v in components.values() if isinstance(v, Tool)
+            }
+            await ctx.info(f"🔍 Found {len(registered_tools)} tools via local_provider")
 
             # Categorize tools dynamically based on their names and tags
             categories = {
@@ -1401,33 +1330,18 @@ def setup_user_resources(mcp: FastMCP) -> None:
                     "detailed": False,
                 }
 
-                # Safely get description
-                if hasattr(tool_instance, "description") and tool_instance.description:
+                if tool_instance.description:
                     tool_info["description"] = tool_instance.description
-                elif hasattr(tool_instance, "doc") and tool_instance.doc:
-                    tool_info["description"] = tool_instance.doc
 
-                # Safely get tags
-                if hasattr(tool_instance, "tags") and tool_instance.tags:
-                    if isinstance(tool_instance.tags, (set, list, tuple)):
-                        tool_info["tags"] = list(tool_instance.tags)
-                    else:
-                        tool_info["tags"] = [str(tool_instance.tags)]
+                if tool_instance.tags:
+                    tool_info["tags"] = list(tool_instance.tags)
 
-                # Extract parameters from tool schema if available
+                # Extract parameter names from the tool's parameters schema
                 parameter_names = []
-                if hasattr(tool_instance, "schema") and tool_instance.schema:
-                    schema = tool_instance.schema
-                    if isinstance(schema, dict) and "parameters" in schema:
-                        params = schema["parameters"]
-                        if isinstance(params, dict) and "properties" in params:
-                            parameter_names = list(params["properties"].keys())
-                            tool_info["parameters"] = parameter_names
-                elif hasattr(tool_instance, "parameters"):
-                    # Some tools might have a direct parameters attribute
-                    if hasattr(tool_instance.parameters, "keys"):
-                        parameter_names = list(tool_instance.parameters.keys())
-                        tool_info["parameters"] = parameter_names
+                params_schema = tool_instance.parameters
+                if isinstance(params_schema, dict) and "properties" in params_schema:
+                    parameter_names = list(params_schema["properties"].keys())
+                    tool_info["parameters"] = parameter_names
 
                 # Check if it's an detailed tool (no user_google_email parameter)
                 is_detailed = "user_google_email" not in parameter_names
@@ -1645,39 +1559,12 @@ def setup_user_resources(mcp: FastMCP) -> None:
             # Access the FastMCP server instance through context
             fastmcp_server = ctx.fastmcp
 
-            # Try to access tools via the documented fastmcp.tools attribute first
-            tools_list = None
-            registered_tools = {}
+            from fastmcp.tools.tool import Tool
 
-            if hasattr(fastmcp_server, "tools"):
-                tools_list = fastmcp_server.tools
-                await ctx.debug(f"Found fastmcp.tools: {type(tools_list)}")
-
-                # Convert tools list to dictionary if it's a list
-                if isinstance(tools_list, list):
-                    for tool in tools_list:
-                        if hasattr(tool, "name"):
-                            registered_tools[tool.name] = tool
-                elif hasattr(tools_list, "items"):
-                    # It's already a dict-like object
-                    registered_tools = dict(tools_list.items())
-
-            # Fallback to tool manager if tools attribute doesn't work
-            if not registered_tools and hasattr(fastmcp_server, "_tool_manager"):
-                if hasattr(fastmcp_server._tool_manager, "_tools"):
-                    registered_tools = fastmcp_server._tool_manager._tools
-                elif hasattr(fastmcp_server._tool_manager, "tools"):
-                    registered_tools = fastmcp_server._tool_manager.tools
-
-            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-            if not registered_tools and hasattr(fastmcp_server, "_local_provider"):
-                if hasattr(fastmcp_server._local_provider, "_components"):
-                    from fastmcp.tools.tool import Tool
-
-                    components = fastmcp_server._local_provider._components
-                    registered_tools = {
-                        v.name: v for v in components.values() if isinstance(v, Tool)
-                    }
+            components = fastmcp_server.local_provider._components
+            registered_tools = {
+                v.name: v for v in components.values() if isinstance(v, Tool)
+            }
 
             if not registered_tools:
                 await ctx.warning("Could not access tools from FastMCP server")
@@ -1697,42 +1584,34 @@ def setup_user_resources(mcp: FastMCP) -> None:
             detailed_tools = []
 
             for tool_name, tool_instance in registered_tools.items():
-                # Get tool parameters safely
+                # Get tool parameters from the parameters schema
                 parameters = {}
                 parameter_names = []
 
-                # Try to get parameters from schema
-                if hasattr(tool_instance, "schema") and tool_instance.schema:
-                    schema = tool_instance.schema
-                    if isinstance(schema, dict) and "parameters" in schema:
-                        params = schema["parameters"]
-                        if isinstance(params, dict) and "properties" in params:
-                            parameter_names = list(params["properties"].keys())
-                            # Build parameter descriptions
-                            for param_name, param_info in params["properties"].items():
-                                if isinstance(param_info, dict):
-                                    parameters[param_name] = param_info.get(
-                                        "description", f"{param_name} parameter"
-                                    )
-                                else:
-                                    parameters[param_name] = f"{param_name} parameter"
+                params_schema = tool_instance.parameters
+                if isinstance(params_schema, dict) and "properties" in params_schema:
+                    parameter_names = list(params_schema["properties"].keys())
+                    for param_name, param_info in params_schema["properties"].items():
+                        if isinstance(param_info, dict):
+                            parameters[param_name] = param_info.get(
+                                "description", f"{param_name} parameter"
+                            )
+                        else:
+                            parameters[param_name] = f"{param_name} parameter"
 
-                # Check if it's an detailed tool (no user_google_email parameter)
+                # Check if it's a detailed tool (no user_google_email parameter)
                 is_detailed = "user_google_email" not in parameter_names
 
                 # Include tools that are clearly "detailed" based on naming or characteristics
                 if is_detailed and (
                     any(keyword in tool_name for keyword in ["my_", "_my", "get_my_"])
-                    or ("template" in getattr(tool_instance, "tags", set()))
-                    or ("detailed" in getattr(tool_instance, "tags", set()))
+                    or "template" in tool_instance.tags
+                    or "detailed" in tool_instance.tags
                 ):
-                    # Safely get description
-                    description = "Detailed tool with automatic authentication"
-                    if (
-                        hasattr(tool_instance, "description")
-                        and tool_instance.description
-                    ):
-                        description = tool_instance.description
+                    description = (
+                        tool_instance.description
+                        or "Detailed tool with automatic authentication"
+                    )
 
                     # Create a more meaningful example
                     example = f"{tool_name}()"

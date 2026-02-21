@@ -122,7 +122,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 )
 
             # Cache miss - fetch fresh data using FastMCP tool registry (following middleware pattern)
-            if not hasattr(ctx, "fastmcp") or not ctx.fastmcp:
+            if not ctx.fastmcp:
                 return json.dumps(
                     {
                         "error": "FastMCP context not available",
@@ -131,25 +131,11 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                     }
                 )
 
-            # Access the tool registry (supports FastMCP 2.x and 3.0.0b1+)
             mcp_server = ctx.fastmcp
-            tools_dict = {}
+            from fastmcp.tools.tool import Tool
 
-            # FastMCP 2.x path
-            if hasattr(mcp_server, "_tool_manager") and hasattr(
-                mcp_server._tool_manager, "_tools"
-            ):
-                tools_dict = mcp_server._tool_manager._tools
-            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-            elif hasattr(mcp_server, "_local_provider") and hasattr(
-                mcp_server._local_provider, "_components"
-            ):
-                from fastmcp.tools.tool import Tool
-
-                components = mcp_server._local_provider._components
-                tools_dict = {
-                    v.name: v for v in components.values() if isinstance(v, Tool)
-                }
+            components = mcp_server.local_provider._components
+            tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
 
             if not tools_dict:
                 return json.dumps(
@@ -174,21 +160,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             # Get the tool and call it (following middleware pattern)
             tool_instance = tools_dict[tool_name]
 
-            # Get the actual callable function from the tool
-            if hasattr(tool_instance, "fn"):
-                tool_func = tool_instance.fn
-            elif hasattr(tool_instance, "func"):
-                tool_func = tool_instance.func
-            elif hasattr(tool_instance, "__call__"):
-                tool_func = tool_instance
-            else:
-                return json.dumps(
-                    {
-                        "error": f"Tool '{tool_name}' is not callable",
-                        "cached": False,
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
+            tool_func = tool_instance.fn
 
             # Call the tool with parameters
             tool_params = {
@@ -203,7 +175,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 messages_result = tool_func(**tool_params)
 
             # Handle the structured response from the Gmail tool
-            if hasattr(messages_result, "error") and messages_result.error:
+            if getattr(messages_result, "error", None):
                 return json.dumps(
                     {
                         "error": f"Gmail tool error: {messages_result.error}",
@@ -213,11 +185,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 )
 
             # Extract messages from the structured response
-            messages = (
-                getattr(messages_result, "messages", [])
-                if hasattr(messages_result, "messages")
-                else []
-            )
+            messages = getattr(messages_result, "messages", [])
 
             # Format for the resource response
             formatted_messages = []

@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 
 from fastmcp import Context, FastMCP
-from fastmcp.server.apps import UI_EXTENSION_ID, ToolUI
+from fastmcp.server.apps import UI_EXTENSION_ID, AppConfig
 from mcp.types import ToolListChangedNotification
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
@@ -445,9 +445,7 @@ def _get_tool_registry(mcp: FastMCP) -> Dict[str, Any]:
     """
     Internal helper to access the FastMCP tool registry.
 
-    Supports both FastMCP 2.x and 3.0.0b1+ internal structures:
-    - FastMCP 2.x: mcp._tool_manager._tools
-    - FastMCP 3.0.0b1+: mcp._local_provider._components (filtered to tools)
+    Uses FastMCP v3 local_provider._components, filtered to Tool instances.
 
     Args:
         mcp: FastMCP server instance
@@ -455,20 +453,10 @@ def _get_tool_registry(mcp: FastMCP) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary mapping tool names to tool instances
     """
-    # FastMCP 2.x path
-    if hasattr(mcp, "_tool_manager") and hasattr(mcp._tool_manager, "_tools"):
-        return mcp._tool_manager._tools
+    from fastmcp.tools.tool import Tool
 
-    # FastMCP 3.0.0b1+ path - tools are in _local_provider._components
-    if hasattr(mcp, "_local_provider") and hasattr(mcp._local_provider, "_components"):
-        from fastmcp.tools.tool import Tool
-
-        components = mcp._local_provider._components
-        # Filter to only Tool instances and rekey by tool name
-        return {v.name: v for v in components.values() if isinstance(v, Tool)}
-
-    logger.error("❌ Cannot access FastMCP tool manager; tool registry unavailable")
-    return {}
+    components = mcp.local_provider._components
+    return {v.name: v for v in components.values() if isinstance(v, Tool)}
 
 
 def _get_globally_disabled_tools(mcp: FastMCP) -> set:
@@ -486,13 +474,11 @@ def _get_globally_disabled_tools(mcp: FastMCP) -> set:
     """
     disabled_names = set()
     try:
-        if hasattr(mcp, "_transforms"):
-            for transform in mcp._transforms:
-                # Check if this is a disable Visibility transform
-                transform_repr = repr(transform)
-                if "Visibility(disable" in transform_repr:
-                    if hasattr(transform, "names") and transform.names:
-                        disabled_names.update(transform.names)
+        for transform in mcp._transforms:
+            transform_repr = repr(transform)
+            if "Visibility(disable" in transform_repr:
+                if transform.names:
+                    disabled_names.update(transform.names)
     except Exception as e:
         logger.debug(f"Error checking global disabled tools: {e}")
     return disabled_names
@@ -514,22 +500,15 @@ def _get_tool_enabled_state(tool_instance: Any, mcp: FastMCP = None) -> bool:
         bool: True if enabled or state unknown, False if explicitly disabled
     """
     try:
-        # FastMCP 2.x: Check instance attribute
-        if hasattr(tool_instance, "enabled"):
-            return bool(getattr(tool_instance, "enabled"))
-
-        # FastMCP 3.0+: Check global transforms if mcp provided
+        # Check global transforms if mcp provided
         if mcp is not None:
-            tool_name = getattr(tool_instance, "name", None)
-            if tool_name:
-                disabled_tools = _get_globally_disabled_tools(mcp)
-                if tool_name in disabled_tools:
-                    return False
+            disabled_tools = _get_globally_disabled_tools(mcp)
+            if tool_instance.name in disabled_tools:
+                return False
 
-        # Some implementations may expose state via meta/annotations
-        if hasattr(tool_instance, "meta") and isinstance(tool_instance.meta, dict):
-            if "enabled" in tool_instance.meta:
-                return bool(tool_instance.meta["enabled"])
+        # Check meta dict for explicit enabled state
+        if isinstance(tool_instance.meta, dict) and "enabled" in tool_instance.meta:
+            return bool(tool_instance.meta["enabled"])
     except Exception:
         pass
     return True
@@ -637,7 +616,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "idempotentHint": False,
             "openWorldHint": False,
         },
-        ui=ToolUI(
+        app=AppConfig(
             resource_uri="ui://manage-tools-dashboard",
             visibility=["app", "model"],
         ),

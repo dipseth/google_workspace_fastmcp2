@@ -68,9 +68,9 @@ class SkillsMixin:
         self._skills_cache: Dict[str, SkillDocument] = {}
         self._skills_directory: Optional[Path] = None
         self._skill_templates: Dict[str, Callable] = {}  # Pluggable templates
-        self._skill_examples: Dict[str, List[str]] = (
-            {}
-        )  # Example content per skill type
+        self._skill_examples: Dict[
+            str, List[str]
+        ] = {}  # Example content per skill type
         self._skill_metadata: Dict[str, Dict[str, Any]] = {}  # Additional metadata
 
     # =========================================================================

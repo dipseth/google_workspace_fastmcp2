@@ -604,6 +604,17 @@ class SessionToolFilteringMiddleware(Middleware):
         # If ?service= is provided, skip session restoration entirely
         # This ensures the service filter is always applied fresh
         if not has_explicit_service_filter:
+            # Skip restoration for sessions already processed in this server lifetime.
+            # Once a session is known in-memory (e.g. manage_tools cleared its disabled
+            # set), re-restoring from disk would overwrite those changes.
+            if effective_session_id in self._processed_sessions:
+                if self.enable_debug:
+                    logger.debug(
+                        f"Session {effective_session_id[:8]}... already processed, "
+                        f"using in-memory state (skipping persistence restore)"
+                    )
+                return effective_session_id, False
+
             # Check if this is a known session (returning client)
             if is_known_session(effective_session_id):
                 # Try to restore persisted state
@@ -773,14 +784,14 @@ class SessionToolFilteringMiddleware(Middleware):
         # Supports: ?service=drive,gmail, ?uuid=xyz123, ?minimal=false
         # Try to get request from middleware context first (FastMCP v3 pattern)
         http_params = None
-        if hasattr(context, "fastmcp_context") and context.fastmcp_context:
+        if context.fastmcp_context:
             ctx = context.fastmcp_context
             logger.debug(
                 f"🔍 fastmcp_context available, request_context: {ctx.request_context}"
             )
-            if ctx.request_context and hasattr(ctx.request_context, "request"):
+            if ctx.request_context and ctx.request_context.request:
                 request = ctx.request_context.request
-                if request and hasattr(request, "query_params"):
+                if hasattr(request, "query_params"):
                     logger.info(
                         f"🔍 Got request from fastmcp_context, query_params: {dict(request.query_params)}"
                     )
@@ -891,14 +902,8 @@ class SessionToolFilteringMiddleware(Middleware):
         Raises:
             ValueError: If the tool is disabled for this session.
         """
-        # Extract tool name from the request
-        tool_name = None
-        if hasattr(context, "message") and hasattr(context.message, "params"):
-            params = context.message.params
-            if hasattr(params, "name"):
-                tool_name = params.name
-            elif isinstance(params, dict):
-                tool_name = params.get("name")
+        # Extract tool name from the request (context.message is CallToolRequestParams in v3)
+        tool_name = context.message.name
 
         if not tool_name:
             # Can't determine tool name - let it through
@@ -965,25 +970,12 @@ def setup_session_tool_filtering_middleware(
 
     # Create callback to get all tool names from the MCP server
     def get_all_tools() -> List[str]:
-        """Get all registered tool names from the MCP server (FastMCP 2.x and 3.0.0b1+)."""
+        """Get all registered tool names from the MCP server."""
         try:
-            # FastMCP 2.x path
-            if hasattr(mcp, "_tool_manager") and mcp._tool_manager:
-                if hasattr(mcp._tool_manager, "_tools"):
-                    return list(mcp._tool_manager._tools.keys())
-            # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-            if hasattr(mcp, "_local_provider") and hasattr(
-                mcp._local_provider, "_components"
-            ):
-                from fastmcp.tools.tool import Tool
+            from fastmcp.tools.tool import Tool
 
-                components = mcp._local_provider._components
-                return [v.name for v in components.values() if isinstance(v, Tool)]
-            # Alternative access pattern
-            if hasattr(mcp, "tools"):
-                return list(mcp.tools.keys())
-            logger.warning("Could not access tool manager to get tool names")
-            return []
+            components = mcp.local_provider._components
+            return [v.name for v in components.values() if isinstance(v, Tool)]
         except Exception as e:
             logger.error(f"Error getting tool names: {e}")
             return []

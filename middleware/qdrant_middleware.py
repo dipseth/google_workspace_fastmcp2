@@ -254,8 +254,8 @@ class QdrantUnifiedMiddleware(Middleware):
             return await call_next(context)
 
         # Extract tool information
-        tool_name = getattr(context.message, "name", "unknown")
-        tool_args = getattr(context.message, "arguments", {})
+        tool_name = context.message.name
+        tool_args = context.message.arguments or {}
 
         # Record start time for execution tracking
         start_time = time.time()
@@ -347,7 +347,7 @@ class QdrantUnifiedMiddleware(Middleware):
             # Cache the result for the registered resource handlers to access
             # Use FastMCP context pattern (same as TagBasedResourceMiddleware)
             cache_key = f"qdrant_resource_{uri}"
-            if hasattr(context, "fastmcp_context") and context.fastmcp_context:
+            if context.fastmcp_context:
                 await context.fastmcp_context.set_state(cache_key, result)
                 logger.info(f"✅ Cached Qdrant resource result for key: {cache_key}")
                 logger.debug(f"📦 Cached result type: {type(result).__name__}")
@@ -526,9 +526,7 @@ class QdrantUnifiedMiddleware(Middleware):
                             logger.info(
                                 "🏗️ Performing complete collection rebuild due to significant changes"
                             )
-                            result = (
-                                await self.client_manager.rebuild_collection_completely()
-                            )
+                            result = await self.client_manager.rebuild_collection_completely()
                         else:
                             logger.info("🔧 Performing standard collection reindexing")
                             result = await self.storage_manager.reindex_collection(
@@ -569,9 +567,7 @@ class QdrantUnifiedMiddleware(Middleware):
                             logger.info(
                                 "🚀 Running periodic collection optimization (preventive maintenance)"
                             )
-                            result = (
-                                await self.client_manager.optimize_collection_performance()
-                            )
+                            result = await self.client_manager.optimize_collection_performance()
 
                             if result.get("status") == "completed":
                                 logger.info("✅ Periodic optimization completed")

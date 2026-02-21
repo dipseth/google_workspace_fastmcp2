@@ -266,10 +266,7 @@ class TagBasedResourceMiddleware(Middleware):
 
     def _get_service_metadata(self, available_tools: Set[str] = None) -> Dict[str, Any]:
         """Get service metadata, building it dynamically if not cached."""
-        if (
-            not hasattr(self, "_cached_service_metadata")
-            or self._cached_service_metadata is None
-        ):
+        if self._cached_service_metadata is None:
             self._cached_service_metadata = self._build_service_metadata_from_registry(
                 available_tools
             )
@@ -326,11 +323,7 @@ class TagBasedResourceMiddleware(Middleware):
             Resource content or passes through to next middleware
         """
         # Get the resource URI from the message - for resource reads, context.message contains ReadResourceRequestParams
-        resource_uri = (
-            str(context.message.uri)
-            if hasattr(context.message, "uri") and context.message.uri
-            else ""
-        )
+        resource_uri = str(context.message.uri) if context.message.uri else ""
 
         if self.enable_debug_logging:
             logger.debug(f"🔍 Checking resource URI: {resource_uri}")
@@ -435,10 +428,8 @@ class TagBasedResourceMiddleware(Middleware):
             Tool result
         """
         # Extract tool information
-        tool_name = context.message.name if hasattr(context.message, "name") else None
-        params = (
-            context.message.arguments if hasattr(context.message, "arguments") else {}
-        )
+        tool_name = context.message.name
+        params = context.message.arguments or {}
 
         # Call the tool first
         result = await call_next(context)
@@ -488,42 +479,43 @@ class TagBasedResourceMiddleware(Middleware):
         return None, None
 
     def _convert_result_to_serializable(self, result: Any) -> Any:
-        """Convert tool result to serializable format."""
-        # Same logic as in _handle_list_items
-        if hasattr(result, "content"):
-            content = result.content
-            if hasattr(content, "text"):
-                return content.text
-            elif hasattr(content, "__iter__") and not isinstance(content, (str, bytes)):
-                extracted_content = []
-                for item in content:
-                    if hasattr(item, "text"):
-                        extracted_content.append(item.text)
-                    else:
-                        extracted_content.append(item)
-                if len(extracted_content) == 1 and isinstance(
-                    extracted_content[0], str
-                ):
-                    try:
-                        import json as json_module
+        """Convert a tool result to a JSON-serializable Python object.
 
-                        return json_module.loads(extracted_content[0])
-                    except:
-                        return extracted_content[0]
-                else:
-                    return extracted_content
-            elif hasattr(content, "model_dump"):
-                return content.model_dump()
-            elif hasattr(content, "dict"):
-                return content.dict()
-            else:
-                return content
-        elif hasattr(result, "model_dump"):
+        FastMCP v3 types:
+        - CallToolResult: .content is list[TextContent | ImageContent | ...]
+          where TextContent has .text (str)
+        - ResourceResult: .contents is list[ResourceContent]
+          where ResourceContent has .content (str) and .mime_type
+        """
+        import json as json_module
+
+        from pydantic import BaseModel
+
+        # CallToolResult — .content is a list of TextContent items
+        if hasattr(result, "content") and isinstance(result.content, list):
+            texts = [item.text for item in result.content if hasattr(item, "text")]
+            if len(texts) == 1:
+                try:
+                    return json_module.loads(texts[0])
+                except (json_module.JSONDecodeError, TypeError, ValueError):
+                    return texts[0]
+            return texts if texts else result.content
+
+        # ResourceResult — .contents is a list of ResourceContent items
+        if hasattr(result, "contents") and isinstance(result.contents, list):
+            payloads = [item.content for item in result.contents]
+            if len(payloads) == 1 and isinstance(payloads[0], str):
+                try:
+                    return json_module.loads(payloads[0])
+                except (json_module.JSONDecodeError, TypeError, ValueError):
+                    return payloads[0]
+            return payloads
+
+        # Generic Pydantic fallback
+        if isinstance(result, BaseModel):
             return result.model_dump()
-        elif hasattr(result, "dict"):
-            return result.dict()
-        else:
-            return result
+
+        return result
 
     async def _handle_service_lists(
         self, service: str, context: MiddlewareContext
@@ -1042,26 +1034,14 @@ class TagBasedResourceMiddleware(Middleware):
             Set of available tool names
         """
         try:
-            if hasattr(context, "fastmcp_context") and context.fastmcp_context:
-                # Access the tool registry (supports FastMCP 2.x and 3.0.0b1+)
+            if context.fastmcp_context:
                 mcp_server = context.fastmcp_context.fastmcp
-                tools_dict = {}
+                from fastmcp.tools.tool import Tool
 
-                # FastMCP 2.x path
-                if hasattr(mcp_server, "_tool_manager") and hasattr(
-                    mcp_server._tool_manager, "_tools"
-                ):
-                    tools_dict = mcp_server._tool_manager._tools
-                # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-                elif hasattr(mcp_server, "_local_provider") and hasattr(
-                    mcp_server._local_provider, "_components"
-                ):
-                    from fastmcp.tools.tool import Tool
-
-                    components = mcp_server._local_provider._components
-                    tools_dict = {
-                        v.name: v for v in components.values() if isinstance(v, Tool)
-                    }
+                components = mcp_server.local_provider._components
+                tools_dict = {
+                    v.name: v for v in components.values() if isinstance(v, Tool)
+                }
 
                 if tools_dict:
                     tool_names = set(tools_dict.keys())
@@ -1098,7 +1078,7 @@ class TagBasedResourceMiddleware(Middleware):
         Raises:
             RuntimeError: If FastMCP context is not available or tool call fails
         """
-        if not hasattr(context, "fastmcp_context") or not context.fastmcp_context:
+        if not context.fastmcp_context:
             raise RuntimeError("FastMCP context not available for tool calling")
 
         # Special handling for search_gmail_messages: inject default query if not provided
@@ -1116,23 +1096,11 @@ class TagBasedResourceMiddleware(Middleware):
         if self.enable_debug_logging:
             logger.debug(f"🔧 Calling tool {tool_name} with parameters: {parameters}")
 
-        # Get the tool from the registry (supports FastMCP 2.x and 3.0.0b1+)
         mcp_server = context.fastmcp_context.fastmcp
-        tools_dict = {}
+        from fastmcp.tools.tool import Tool
 
-        # FastMCP 2.x path
-        if hasattr(mcp_server, "_tool_manager") and hasattr(
-            mcp_server._tool_manager, "_tools"
-        ):
-            tools_dict = mcp_server._tool_manager._tools
-        # FastMCP 3.0.0b1+ path - tools in _local_provider._components
-        elif hasattr(mcp_server, "_local_provider") and hasattr(
-            mcp_server._local_provider, "_components"
-        ):
-            from fastmcp.tools.tool import Tool
-
-            components = mcp_server._local_provider._components
-            tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
+        components = mcp_server.local_provider._components
+        tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
 
         if not tools_dict:
             raise RuntimeError("Cannot access tool registry from FastMCP server")
@@ -1142,25 +1110,7 @@ class TagBasedResourceMiddleware(Middleware):
 
         tool_instance = tools_dict[tool_name]
 
-        # Get the actual callable function from the tool
-        # Tools might be wrapped in different ways depending on middleware processing
-        if hasattr(tool_instance, "fn"):
-            # Tool has a fn attribute that contains the actual function
-            tool_func = tool_instance.fn
-        elif hasattr(tool_instance, "func"):
-            # Tool has a func attribute
-            tool_func = tool_instance.func
-        elif hasattr(tool_instance, "__call__"):
-            # Tool is directly callable
-            tool_func = tool_instance
-        else:
-            # Try to find the actual function
-            logger.error(
-                f"Tool structure: {type(tool_instance)}, attributes: {dir(tool_instance)}"
-            )
-            raise RuntimeError(
-                f"Tool '{tool_name}' is not callable - unable to find callable function"
-            )
+        tool_func = tool_instance.fn
 
         # Call the tool's function with parameters
         try:

@@ -471,9 +471,9 @@ def test_search_v7_include_classes_flag():
     print(f"   include_classes=False: {len(classes2)} classes")
 
     assert len(classes) > 0, "Expected classes with include_classes=True"
-    assert (
-        len(classes2) == 0
-    ), f"Expected 0 classes with include_classes=False, got {len(classes2)}"
+    assert len(classes2) == 0, (
+        f"Expected 0 classes with include_classes=False, got {len(classes2)}"
+    )
 
     print("\n✓ include_classes flag tests passed")
 

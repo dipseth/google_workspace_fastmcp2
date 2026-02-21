@@ -393,9 +393,9 @@ class TestCardFrameworkWrapper:
             )
 
             # Check response
-            assert (
-                response.status_code == 200
-            ), f"Failed to send card: {response.status_code} - {response.text}"
+            assert response.status_code == 200, (
+                f"Failed to send card: {response.status_code} - {response.text}"
+            )
             logger.info(f"Card sent successfully! Status: {response.status_code}")
 
             # Now try to find card components in the card_framework module

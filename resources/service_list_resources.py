@@ -54,7 +54,7 @@ Examples:
 from typing import List
 
 from fastmcp import Context, FastMCP
-from pydantic import Field
+from pydantic import BaseModel, Field
 from typing_extensions import Annotated
 
 from auth.context import get_user_email_context
@@ -211,7 +211,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
             f"📦 Retrieved cached ServiceListsResponse for {service} from FastMCP context state"
         )
         # FastMCP 3.0: Handle both Pydantic models and dicts from cache
-        if hasattr(cached_result, "model_dump_json"):
+        if isinstance(cached_result, BaseModel):
             return cached_result.model_dump_json()
         elif isinstance(cached_result, dict):
             import json
@@ -326,7 +326,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
             f"📦 Retrieved cached result for {service}/{list_type} from FastMCP context state"
         )
         # FastMCP 3.0: Handle both Pydantic models and dicts from cache
-        if hasattr(cached_result, "model_dump_json"):
+        if isinstance(cached_result, BaseModel):
             return cached_result.model_dump_json()
         elif isinstance(cached_result, dict):
             import json
@@ -465,7 +465,7 @@ This resource is handled by TagBasedResourceMiddleware.""",
             f"📦 Retrieved cached ServiceItemDetailsResponse for {service}/{list_type}/{item_id} from FastMCP context state"
         )
         # FastMCP 3.0: Handle both Pydantic models and dicts from cache
-        if hasattr(cached_result, "model_dump_json"):
+        if isinstance(cached_result, BaseModel):
             return cached_result.model_dump_json()
         elif isinstance(cached_result, dict):
             import json

@@ -135,15 +135,15 @@ class GraphMixin:
         self._graph_built = False
 
         # Component metadata registries (populated by domain-specific wrappers)
-        self._context_resources: Dict[str, Tuple[str, str]] = (
-            {}
-        )  # component → (context_key, index_key)
-        self._container_children_field: Dict[str, str] = (
-            {}
-        )  # container → json_field_name
-        self._container_child_type: Dict[str, str] = (
-            {}
-        )  # container → expected_child_type
+        self._context_resources: Dict[
+            str, Tuple[str, str]
+        ] = {}  # component → (context_key, index_key)
+        self._container_children_field: Dict[
+            str, str
+        ] = {}  # container → json_field_name
+        self._container_child_type: Dict[
+            str, str
+        ] = {}  # container → expected_child_type
         self._required_wrappers: Dict[str, str] = {}  # child → required_wrapper_parent
         self._widget_types: Set[str] = (
             set()

@@ -18,9 +18,7 @@ def _get_tool_registry(mcp_server: FastMCP) -> Dict[str, Any]:
     """
     Internal helper to access the FastMCP tool registry.
 
-    Supports both FastMCP 2.x and 3.0.0b1+ internal structures:
-    - FastMCP 2.x: mcp._tool_manager._tools
-    - FastMCP 3.0.0b1+: mcp._local_provider._components (filtered to tools)
+    Uses FastMCP v3 local_provider._components, filtered to Tool instances.
 
     Args:
         mcp_server: FastMCP server instance
@@ -28,24 +26,10 @@ def _get_tool_registry(mcp_server: FastMCP) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary mapping tool names to tool instances
     """
-    # FastMCP 2.x path
-    if hasattr(mcp_server, "_tool_manager") and hasattr(
-        mcp_server._tool_manager, "_tools"
-    ):
-        return mcp_server._tool_manager._tools
+    from fastmcp.tools.tool import Tool
 
-    # FastMCP 3.0.0b1+ path - tools are in _local_provider._components
-    if hasattr(mcp_server, "_local_provider") and hasattr(
-        mcp_server._local_provider, "_components"
-    ):
-        from fastmcp.tools.tool import Tool
-
-        components = mcp_server._local_provider._components
-        # Filter to only Tool instances and rekey by tool name
-        return {v.name: v for v in components.values() if isinstance(v, Tool)}
-
-    logger.error("❌ Cannot access FastMCP tool manager; tool registry unavailable")
-    return {}
+    components = mcp_server.local_provider._components
+    return {v.name: v for v in components.values() if isinstance(v, Tool)}
 
 
 def get_tools_for_service(
@@ -70,13 +54,11 @@ def get_tools_for_service(
         # Use naming convention and tags to identify service
         if (
             service_name in tool_name.lower()
-            or (hasattr(tool_instance, "tags") and service_name in tool_instance.tags)
+            or service_name in tool_instance.tags
             or tool_name.startswith(f"list_{service_name}")
             or tool_name.startswith(f"{service_name}_")
         ):
-            service_tools[tool_name] = (
-                tool_instance.fn if hasattr(tool_instance, "fn") else tool_instance
-            )
+            service_tools[tool_name] = tool_instance.fn
             logger.debug(f"Found {service_name} tool: {tool_name}")
 
     return service_tools
@@ -99,7 +81,7 @@ def get_tool_by_name(mcp_server: FastMCP, tool_name: str) -> Optional[Callable]:
 
     if tool_name in registered_tools:
         tool_instance = registered_tools[tool_name]
-        return tool_instance.fn if hasattr(tool_instance, "fn") else tool_instance
+        return tool_instance.fn
 
     logger.warning(f"Tool '{tool_name}' not found in registry")
     return None
@@ -138,10 +120,7 @@ def categorize_tools_by_service(mcp_server: FastMCP) -> Dict[str, List[str]]:
                 service in tool_name.lower()
                 or tool_name.startswith(f"list_{service}")
                 or tool_name.startswith(f"{service}_")
-                or (
-                    hasattr(tool_instance, "tags")
-                    and service in getattr(tool_instance, "tags", [])
-                )
+                or service in tool_instance.tags
             ):
                 service_categories[service].append(tool_name)
                 break

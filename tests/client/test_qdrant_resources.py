@@ -73,9 +73,9 @@ class TestQdrantResources:
 
         template_uris = [t.uriTemplate for t in templates]
         for expected_template in expected_templates:
-            assert (
-                expected_template in template_uris
-            ), f"Expected template {expected_template} not found"
+            assert expected_template in template_uris, (
+                f"Expected template {expected_template} not found"
+            )
 
     @pytest.mark.asyncio
     async def test_list_qdrant_static_resources(self, client):
@@ -105,9 +105,9 @@ class TestQdrantResources:
 
         found_uris = [str(r.uri) for r in resources]
         for expected_uri in expected_uris:
-            assert (
-                expected_uri in found_uris
-            ), f"Expected resource {expected_uri} not found"
+            assert expected_uri in found_uris, (
+                f"Expected resource {expected_uri} not found"
+            )
 
     @pytest.mark.asyncio
     async def test_read_qdrant_status_resource(self, client):
@@ -128,9 +128,9 @@ class TestQdrantResources:
                 status = json.loads(status_text)
 
                 # Should have middleware status information
-                assert (
-                    "middleware_active" in status or "client_available" in status
-                ), f"Expected status data, got: {status}"
+                assert "middleware_active" in status or "client_available" in status, (
+                    f"Expected status data, got: {status}"
+                )
 
                 logger.info(
                     f"✅ Qdrant status: middleware_active={status.get('middleware_active', False)}"
@@ -159,9 +159,9 @@ class TestQdrantResources:
                 data = json.loads(collections_text)
 
                 # Should have collections data
-                assert (
-                    "collections" in data or "total_collections" in data
-                ), f"Expected collections data, got: {data}"
+                assert "collections" in data or "total_collections" in data, (
+                    f"Expected collections data, got: {data}"
+                )
 
                 if "collections" in data:
                     logger.info(
@@ -199,9 +199,9 @@ class TestQdrantResources:
                 info = json.loads(info_text)
 
                 # Should have collection information
-                assert (
-                    "collection_exists" in info or "error" in info
-                ), f"Expected collection info, got: {info}"
+                assert "collection_exists" in info or "error" in info, (
+                    f"Expected collection info, got: {info}"
+                )
 
                 if info.get("collection_exists"):
                     logger.info(f"✅ Collection {collection_name} exists:")
@@ -572,14 +572,14 @@ class TestQdrantMiddlewareIntegration:
 
                 # Verify we got valid content, not an error tuple
                 first_content = content[0]
-                assert hasattr(
-                    first_content, "text"
-                ), f"Content missing 'text' attribute for {uri}"
+                assert hasattr(first_content, "text"), (
+                    f"Content missing 'text' attribute for {uri}"
+                )
 
                 # Ensure it's not returning a tuple (the original error)
-                assert not isinstance(
-                    first_content.text, tuple
-                ), f"❌ Got tuple instead of text for {uri} - middleware caching issue!"
+                assert not isinstance(first_content.text, tuple), (
+                    f"❌ Got tuple instead of text for {uri} - middleware caching issue!"
+                )
 
                 successful_reads += 1
                 logger.info(f"✅ Successfully read {uri}")
@@ -592,9 +592,9 @@ class TestQdrantMiddlewareIntegration:
                 raise
 
         # All test URIs should work
-        assert successful_reads == len(
-            test_cases
-        ), f"Only {successful_reads}/{len(test_cases)} URIs worked - middleware issue persists"
+        assert successful_reads == len(test_cases), (
+            f"Only {successful_reads}/{len(test_cases)} URIs worked - middleware issue persists"
+        )
 
         logger.info(
             f"\n✅ All {successful_reads} middleware resource chains working correctly!"
@@ -654,9 +654,9 @@ class TestQdrantMiddlewareIntegration:
         data2 = json.loads(text2)
 
         # Both should have the same keys (consistent response structure)
-        assert set(data1.keys()) == set(
-            data2.keys()
-        ), "Inconsistent response structure between calls - caching issue"
+        assert set(data1.keys()) == set(data2.keys()), (
+            "Inconsistent response structure between calls - caching issue"
+        )
 
         logger.info("✅ Direct middleware access and caching working consistently")
 

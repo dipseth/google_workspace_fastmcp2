@@ -436,9 +436,9 @@ class TestCardFrameworkWrapper:
             )
 
             # Check response
-            assert (
-                response.status_code == 200
-            ), f"Failed to send card: {response.status_code} - {response.text}"
+            assert response.status_code == 200, (
+                f"Failed to send card: {response.status_code} - {response.text}"
+            )
             logger.info(f"Card sent successfully! Status: {response.status_code}")
 
             # For comparison, also create a card directly using the Google Chat API format
@@ -747,9 +747,9 @@ class TestCardFrameworkWrapper:
             )
 
             # Check response for direct card
-            assert (
-                direct_response.status_code == 200
-            ), f"Failed to send direct card: {direct_response.status_code} - {direct_response.text}"
+            assert direct_response.status_code == 200, (
+                f"Failed to send direct card: {direct_response.status_code} - {direct_response.text}"
+            )
             logger.info(
                 f"Direct card sent successfully! Status: {direct_response.status_code}"
             )
@@ -874,9 +874,9 @@ class TestCardFrameworkWrapper:
             )
 
             # Check response
-            assert (
-                response.status_code == 200
-            ), f"Failed to send complex card: {response.status_code} - {response.text}"
+            assert response.status_code == 200, (
+                f"Failed to send complex card: {response.status_code} - {response.text}"
+            )
             logger.info(
                 f"Complex card sent successfully! Status: {response.status_code}"
             )

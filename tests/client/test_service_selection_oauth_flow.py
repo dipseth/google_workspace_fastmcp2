@@ -29,19 +29,19 @@ class TestServiceSelectionOAuthFlow:
         # Validate service structure
         for service_key, service_info in catalog.items():
             assert "name" in service_info, f"Service {service_key} should have name"
-            assert (
-                "description" in service_info
-            ), f"Service {service_key} should have description"
-            assert (
-                "category" in service_info
-            ), f"Service {service_key} should have category"
-            assert (
-                "required" in service_info
-            ), f"Service {service_key} should have required flag"
+            assert "description" in service_info, (
+                f"Service {service_key} should have description"
+            )
+            assert "category" in service_info, (
+                f"Service {service_key} should have category"
+            )
+            assert "required" in service_info, (
+                f"Service {service_key} should have required flag"
+            )
             assert "scopes" in service_info, f"Service {service_key} should have scopes"
-            assert isinstance(
-                service_info["scopes"], list
-            ), f"Service {service_key} scopes should be a list"
+            assert isinstance(service_info["scopes"], list), (
+                f"Service {service_key} scopes should be a list"
+            )
 
     @pytest.mark.asyncio
     async def test_scopes_for_services_combination(self, client):
@@ -59,9 +59,9 @@ class TestServiceSelectionOAuthFlow:
         # Should include base scopes (required)
         base_scopes = ScopeRegistry.resolve_scope_group("base")
         for base_scope in base_scopes:
-            assert (
-                base_scope in combined_scopes
-            ), f"Base scope {base_scope} should be included"
+            assert base_scope in combined_scopes, (
+                f"Base scope {base_scope} should be included"
+            )
 
     @pytest.mark.asyncio
     @pytest.mark.auth_required
@@ -123,13 +123,13 @@ class TestServiceSelectionOAuthFlow:
 
             # Validate URL structure
             assert isinstance(selection_url, str), "Selection URL should be a string"
-            assert (
-                "/auth/services/select" in selection_url
-            ), "URL should contain service selection path"
+            assert "/auth/services/select" in selection_url, (
+                "URL should contain service selection path"
+            )
             assert "state=" in selection_url, "URL should contain state parameter"
-            assert (
-                "flow_type=" in selection_url
-            ), "URL should contain flow_type parameter"
+            assert "flow_type=" in selection_url, (
+                "URL should contain flow_type parameter"
+            )
 
             print("✅ Service selection URL structure validated")
 
@@ -141,9 +141,9 @@ class TestServiceSelectionOAuthFlow:
             )
 
             # Should return service selection URL when no services pre-selected
-            assert (
-                "/auth/services/select" in oauth_url
-            ), "Should return service selection URL"
+            assert "/auth/services/select" in oauth_url, (
+                "Should return service selection URL"
+            )
             print(f"✓ OAuth flow returns service selection URL: {oauth_url[:80]}...")
 
             # Test OAuth flow with pre-selected services
@@ -155,9 +155,9 @@ class TestServiceSelectionOAuthFlow:
             )
 
             # Should return Google OAuth URL when services pre-selected
-            assert (
-                "accounts.google.com" in oauth_url_direct
-            ), "Should return Google OAuth URL for pre-selected services"
+            assert "accounts.google.com" in oauth_url_direct, (
+                "Should return Google OAuth URL for pre-selected services"
+            )
             print("✓ OAuth flow with pre-selected services returns Google URL")
             print("✅ Service selection flow functional test passed")
 
@@ -184,9 +184,9 @@ class TestServiceSelectionOAuthFlow:
         set_google_provider(test_provider)
 
         retrieved_provider = get_google_provider()
-        assert (
-            retrieved_provider == test_provider
-        ), "Should retrieve the same GoogleProvider instance"
+        assert retrieved_provider == test_provider, (
+            "Should retrieve the same GoogleProvider instance"
+        )
         print("✓ GoogleProvider context management works")
 
         # Test AuthMiddleware service selection methods
@@ -194,14 +194,14 @@ class TestServiceSelectionOAuthFlow:
 
         # Test enable/disable service selection
         middleware.enable_service_selection(True)
-        assert (
-            middleware._enable_service_selection == True
-        ), "Service selection should be enabled"
+        assert middleware._enable_service_selection == True, (
+            "Service selection should be enabled"
+        )
 
         middleware.enable_service_selection(False)
-        assert (
-            middleware._enable_service_selection == False
-        ), "Service selection should be disabled"
+        assert middleware._enable_service_selection == False, (
+            "Service selection should be disabled"
+        )
 
         print("✓ AuthMiddleware service selection methods work")
 

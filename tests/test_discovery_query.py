@@ -189,9 +189,9 @@ class TestQueryWithDiscovery:
         for c in mock_client.query_points.call_args_list:
             query_arg = c.kwargs.get("query")
             if query_arg is not None and hasattr(query_arg, "__class__"):
-                assert not isinstance(
-                    query_arg, DiscoverQuery
-                ), "Should not use DiscoverQuery when no feedback exists"
+                assert not isinstance(query_arg, DiscoverQuery), (
+                    "Should not use DiscoverQuery when no feedback exists"
+                )
 
     def test_discovery_query_with_content_feedback(self, feedback_loop, mock_client):
         """Content feedback IDs should produce a DiscoverQuery on 'inputs' vector."""
@@ -305,9 +305,9 @@ class TestQueryWithDiscovery:
             if isinstance(query_arg, models.DiscoverQuery):
                 search_params = c.kwargs.get("search_params")
                 assert search_params is not None, "search_params should be set"
-                assert (
-                    search_params.hnsw_ef == 128
-                ), f"Expected hnsw_ef=128, got {search_params.hnsw_ef}"
+                assert search_params.hnsw_ef == 128, (
+                    f"Expected hnsw_ef=128, got {search_params.hnsw_ef}"
+                )
 
     def test_context_pairs_use_feedback_ids(self, feedback_loop, mock_client):
         """Context pairs should contain the actual feedback point IDs."""
