@@ -342,10 +342,9 @@ logger.info(
 if settings.response_limit_max_size > 0:
     from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 
-    _rl_tools = (
-        [t.strip() for t in settings.response_limit_tools.split(",") if t.strip()]
-        or None
-    )
+    _rl_tools = [
+        t.strip() for t in settings.response_limit_tools.split(",") if t.strip()
+    ] or None
     response_limiting_middleware = ResponseLimitingMiddleware(
         max_size=settings.response_limit_max_size,
         tools=_rl_tools,

@@ -943,7 +943,9 @@ async def clear_session_disabled_tools(session_id: str = None) -> bool:
     # Persist to disk so the cleared state survives across requests
     # (prevents _handle_session_connection from re-restoring stale state)
     persist_session_tool_states()
-    logger.debug(f"Cleared all session-disabled tools for session {session_id} (persisted)")
+    logger.debug(
+        f"Cleared all session-disabled tools for session {session_id} (persisted)"
+    )
     return True
 
 
@@ -970,7 +972,9 @@ def clear_session_disabled_tools_sync(session_id: str) -> bool:
     # Persist to disk so the cleared state survives across requests
     # (prevents _handle_session_connection from re-restoring stale state)
     persist_session_tool_states()
-    logger.debug(f"Cleared all session-disabled tools for session {session_id} (sync, persisted)")
+    logger.debug(
+        f"Cleared all session-disabled tools for session {session_id} (sync, persisted)"
+    )
     return True
 
 

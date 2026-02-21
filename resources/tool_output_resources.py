@@ -135,9 +135,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
             from fastmcp.tools.tool import Tool
 
             components = mcp_server.local_provider._components
-            tools_dict = {
-                v.name: v for v in components.values() if isinstance(v, Tool)
-            }
+            tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
 
             if not tools_dict:
                 return json.dumps(
@@ -187,9 +185,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 )
 
             # Extract messages from the structured response
-            messages = (
-                getattr(messages_result, "messages", [])
-            )
+            messages = getattr(messages_result, "messages", [])
 
             # Format for the resource response
             formatted_messages = []

@@ -400,9 +400,7 @@ class TemplateProcessor:
                     )
                 except TemplateResolutionError as tre:
                     # If resource resolution fails, try to extract from existing context
-                    logger.warning(
-                        f"⚠️ Resource fetch failed for '{uri}': {tre}"
-                    )
+                    logger.warning(f"⚠️ Resource fetch failed for '{uri}': {tre}")
                     state_key = f"resource_cache_{uri}"
                     resolved_data = await fastmcp_context.get_state(state_key)
                     if not resolved_data:

@@ -109,7 +109,9 @@ class DashboardCacheMiddleware(Middleware):
                     f"structured_content type={type(response.structured_content).__name__}"
                 )
         except Exception as exc:
-            logger.warning(f"📊 Dashboard cache: extraction error for {tool_name}: {exc}")
+            logger.warning(
+                f"📊 Dashboard cache: extraction error for {tool_name}: {exc}"
+            )
 
         return response
 

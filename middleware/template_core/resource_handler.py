@@ -116,16 +116,12 @@ class ResourceHandler:
             resource_content = result.contents[0]
 
             if self.enable_debug_logging:
-                logger.debug(
-                    f"📦 Raw resource type: {type(resource_content).__name__}"
-                )
+                logger.debug(f"📦 Raw resource type: {type(resource_content).__name__}")
 
             resource_data = self.extract_resource_data(resource_content)
 
             if self.enable_debug_logging:
-                logger.debug(
-                    f"📄 Extracted data type: {type(resource_data).__name__}"
-                )
+                logger.debug(f"📄 Extracted data type: {type(resource_data).__name__}")
 
             # Store in context state and cache
             await fastmcp_context.set_state(state_key, resource_data)
@@ -243,7 +239,9 @@ class ResourceHandler:
                     content_val = resource_result["content"]
                     mime = resource_result["mime_type"]
                     if isinstance(content_val, str):
-                        if mime == "application/json" or content_val.strip().startswith(("{", "[")):
+                        if mime == "application/json" or content_val.strip().startswith(
+                            ("{", "[")
+                        ):
                             try:
                                 extracted = json.loads(content_val)
                             except (json.JSONDecodeError, TypeError):
@@ -258,7 +256,9 @@ class ResourceHandler:
                     text_val = resource_result["text"]
                     mime = resource_result.get("mimeType", "")
                     if isinstance(text_val, str):
-                        if mime == "application/json" or text_val.strip().startswith(("{", "[")):
+                        if mime == "application/json" or text_val.strip().startswith(
+                            ("{", "[")
+                        ):
                             try:
                                 extracted = json.loads(text_val)
                             except (json.JSONDecodeError, TypeError):

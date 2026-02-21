@@ -1,4 +1,4 @@
-"""Tests for MCP Apps Phase 1 — ui:// resource and ToolUI metadata."""
+"""Tests for MCP Apps Phase 1 — ui:// resource and AppConfig metadata."""
 
 import pytest
 from fastmcp import Client, FastMCP

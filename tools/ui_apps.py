@@ -28,7 +28,7 @@ def _collect_tools_json(mcp: FastMCP) -> str:
     Reuses the same enabled-state logic as ``manage_tools(action="list")``:
     global disabled state is read from FastMCP transforms, and the protected
     tools set mirrors ``server_tools.py``.
-    
+
     Also includes session-specific state and service grouping for the UI.
     """
     # Import here to avoid circular imports at module level
@@ -47,7 +47,7 @@ def _collect_tools_json(mcp: FastMCP) -> str:
             session_disabled = get_session_disabled_tools_sync(session_id)
     except Exception:
         pass
-    
+
     try:
         components = mcp.local_provider._components
         for key, comp in sorted(components.items()):
@@ -59,7 +59,7 @@ def _collect_tools_json(mcp: FastMCP) -> str:
             globally_enabled = _get_tool_enabled_state(comp, mcp)
             is_session_disabled = name in session_disabled
             service = extract_service_from_tool(name)
-            
+
             tools.append(
                 {
                     "name": name,
@@ -72,13 +72,15 @@ def _collect_tools_json(mcp: FastMCP) -> str:
             )
     except Exception:
         pass
-    
+
     result = {
         "tools": tools,
         "sessionState": {
             "sessionDisabledCount": len(session_disabled),
             "sessionAvailable": has_session,
-        } if has_session else None
+        }
+        if has_session
+        else None,
     }
     return json.dumps(result)
 
@@ -432,6 +434,8 @@ def setup_ui_apps(mcp: FastMCP) -> None:
         config = get_data_dashboard_config(tool_name)
         payload = json.dumps({"data": cached, "config": config})
         return _build_data_dashboard_html(payload)
+
+
 # ---------------------------------------------------------------------------
 # Generic Data Dashboard — shared template for all list-tool UIs
 # ---------------------------------------------------------------------------

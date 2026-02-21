@@ -1,4 +1,5 @@
 """Quick test: parameterized resource template registration."""
+
 import asyncio
 
 from fastmcp import FastMCP
