@@ -531,7 +531,9 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
                     exact=False,
                 )
                 if result.count == 0:
-                    logger.info("🌱 No instance patterns found — running DAG warm-start")
+                    logger.info(
+                        "🌱 No instance patterns found — running DAG warm-start"
+                    )
                     _post_pipeline_dag_warmstart()
                 else:
                     logger.debug(
@@ -572,15 +574,35 @@ def reset_wrapper():
 _DAG_WARMSTART_RECIPES = [
     # Basic widget patterns
     {"root": "Section", "required": ["DecoratedText"], "desc": "Simple text card"},
-    {"root": "Section", "required": ["DecoratedText", "ButtonList"], "desc": "Text with action buttons"},
+    {
+        "root": "Section",
+        "required": ["DecoratedText", "ButtonList"],
+        "desc": "Text with action buttons",
+    },
     {"root": "Section", "required": ["Grid"], "desc": "Grid layout card"},
     {"root": "Section", "required": ["Image"], "desc": "Card with image"},
-    {"root": "Section", "required": ["TextParagraph", "ButtonList"], "desc": "Paragraph with buttons"},
-    {"root": "Section", "required": ["DecoratedText", "ChipList"], "desc": "Text with chip filters"},
+    {
+        "root": "Section",
+        "required": ["TextParagraph", "ButtonList"],
+        "desc": "Paragraph with buttons",
+    },
+    {
+        "root": "Section",
+        "required": ["DecoratedText", "ChipList"],
+        "desc": "Text with chip filters",
+    },
     {"root": "Section", "required": ["Columns"], "desc": "Multi-column layout"},
-    {"root": "Section", "required": ["SelectionInput"], "desc": "Form with selection input"},
+    {
+        "root": "Section",
+        "required": ["SelectionInput"],
+        "desc": "Form with selection input",
+    },
     {"root": "Section", "required": ["TextInput"], "desc": "Form with text input"},
-    {"root": "Section", "required": ["DecoratedText", "Image", "ButtonList"], "desc": "Rich content card"},
+    {
+        "root": "Section",
+        "required": ["DecoratedText", "Image", "ButtonList"],
+        "desc": "Rich content card",
+    },
     # Carousel patterns
     {"root": "Carousel", "required": [], "desc": "Carousel of cards"},
 ]

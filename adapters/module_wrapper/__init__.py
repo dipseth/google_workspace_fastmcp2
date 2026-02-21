@@ -385,7 +385,9 @@ class ModuleWrapper(
                 self._index_module_components()
 
                 if self.enable_colbert:
-                    logger.info("ColBERT mode enabled - initializing ColBERT embedder...")
+                    logger.info(
+                        "ColBERT mode enabled - initializing ColBERT embedder..."
+                    )
                     self._initialize_colbert_embedder()
                     self._ensure_colbert_collection()
                     self._index_components_colbert()
@@ -435,9 +437,14 @@ class ModuleWrapper(
 
                 # Collection exists but needs recreation (wrong schema, empty, or force_reindex).
                 # Delete it so the staging step can create a fresh single-vector collection.
-                reason = "wrong schema (single vector)" if not is_v7 else (
-                    "force_reindex requested" if self.force_reindex else
-                    f"empty ({info.points_count} points)"
+                reason = (
+                    "wrong schema (single vector)"
+                    if not is_v7
+                    else (
+                        "force_reindex requested"
+                        if self.force_reindex
+                        else f"empty ({info.points_count} points)"
+                    )
                 )
                 logger.warning(
                     f"Collection {v7_name} exists but {reason}. Deleting for recreation."
@@ -561,9 +568,7 @@ class ModuleWrapper(
         except Exception as e:
             self._v7_pipeline_error = str(e)
             self._v7_pipeline_status = "failed"
-            logger.error(
-                f"[BG] V7 pipeline failed for {v7_name}: {e}", exc_info=True
-            )
+            logger.error(f"[BG] V7 pipeline failed for {v7_name}: {e}", exc_info=True)
 
     def queue_post_pipeline_callback(self, callback: callable):
         """Queue a callback to run after the v7 pipeline completes.
@@ -579,7 +584,9 @@ class ModuleWrapper(
             if self._v7_pipeline_status == "completed":
                 # Pipeline already done — run immediately
                 callback_name = getattr(callback, "__name__", str(callback))
-                logger.info(f"Pipeline already complete, running callback: {callback_name}")
+                logger.info(
+                    f"Pipeline already complete, running callback: {callback_name}"
+                )
                 callback()
             elif self._v7_pipeline_status == "failed":
                 logger.warning(
