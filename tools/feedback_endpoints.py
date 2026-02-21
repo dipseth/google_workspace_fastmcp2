@@ -241,7 +241,9 @@ def _render_feedback_page(
     accent_color = (
         "#4ade80"
         if feedback == "positive"
-        else "#f87171" if feedback == "negative" else "#60a5fa"
+        else "#f87171"
+        if feedback == "negative"
+        else "#60a5fa"
     )
 
     emoji = ""

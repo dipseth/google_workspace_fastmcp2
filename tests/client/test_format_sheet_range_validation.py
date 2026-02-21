@@ -94,9 +94,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Cell formatting response should be valid: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Cell formatting response should be valid: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_number_format_validation_fixed(self, client, test_spreadsheet_id):
@@ -128,9 +128,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Valid number format should work: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Valid number format should work: {content}"
+        )
 
         # Test with only type (should fail with validation error)
         result = await client.call_tool(
@@ -165,9 +165,9 @@ class TestFormatSheetRangeValidation:
                     "numberformat" in content.lower() and "both" in content.lower()
                 ),  # API validation variant
             ]
-            assert any(
-                validation_indicators
-            ), f"Should get validation error for incomplete number format: {content}"
+            assert any(validation_indicators), (
+                f"Should get validation error for incomplete number format: {content}"
+            )
 
     @pytest.mark.asyncio
     async def test_wrap_strategy_validation_fixed(self, client, test_spreadsheet_id):
@@ -198,9 +198,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Valid wrap strategy should work: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Valid wrap strategy should work: {content}"
+        )
 
         # Note: We can't easily test OVERFLOW rejection at the client level since
         # the parameter validation happens at the Sheets API level, but the
@@ -243,9 +243,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Border formatting response should be valid: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Border formatting response should be valid: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_conditional_formatting_replacement(
@@ -286,9 +286,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Conditional formatting response should be valid: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Conditional formatting response should be valid: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_merge_cells_replacement(self, client, test_spreadsheet_id):
@@ -319,9 +319,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Cell merging response should be valid: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Cell merging response should be valid: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_comprehensive_formatting_combination(
@@ -384,16 +384,16 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Comprehensive formatting response should be valid: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Comprehensive formatting response should be valid: {content}"
+        )
 
         # If successful, should mention multiple operations
         if "successfully applied" in content.lower():
             # Should have applied multiple formatting operations
-            assert any(
-                num in content for num in ["2", "3", "4", "5", "6", "7"]
-            ), f"Should apply multiple formatting operations: {content}"
+            assert any(num in content for num in ["2", "3", "4", "5", "6", "7"]), (
+                f"Should apply multiple formatting operations: {content}"
+            )
 
     @pytest.mark.asyncio
     async def test_format_sheet_range_response_structure(
@@ -505,9 +505,9 @@ class TestFormatSheetRangeValidation:
         )
 
         # Should handle both auth patterns properly
-        assert (
-            results["backward_compatible"] or results["middleware_supported"]
-        ), "Should support at least one authentication pattern"
+        assert results["backward_compatible"] or results["middleware_supported"], (
+            "Should support at least one authentication pattern"
+        )
 
     @pytest.mark.asyncio
     async def test_json_string_color_parameters(self, client, test_spreadsheet_id):
@@ -533,9 +533,9 @@ class TestFormatSheetRangeValidation:
         content = result.content[0].text
 
         # Should NOT get validation errors about dict types
-        assert (
-            "input should be a valid dictionary" not in content.lower()
-        ), f"Should accept JSON string color parameters: {content}"
+        assert "input should be a valid dictionary" not in content.lower(), (
+            f"Should accept JSON string color parameters: {content}"
+        )
 
         valid_responses = [
             "successfully applied",
@@ -545,9 +545,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"JSON string colors should work: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"JSON string colors should work: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_json_string_border_parameters(self, client, test_spreadsheet_id):
@@ -574,9 +574,9 @@ class TestFormatSheetRangeValidation:
         content = result.content[0].text
 
         # Should NOT get validation errors
-        assert (
-            "input should be a valid dictionary" not in content.lower()
-        ), f"Should accept JSON string border parameters: {content}"
+        assert "input should be a valid dictionary" not in content.lower(), (
+            f"Should accept JSON string border parameters: {content}"
+        )
 
         valid_responses = [
             "successfully applied",
@@ -586,9 +586,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"JSON string borders should work: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"JSON string borders should work: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_json_string_conditional_format_parameters(
@@ -617,9 +617,9 @@ class TestFormatSheetRangeValidation:
         content = result.content[0].text
 
         # Should NOT get validation errors
-        assert (
-            "input should be a valid dictionary" not in content.lower()
-        ), f"Should accept JSON string conditional format colors: {content}"
+        assert "input should be a valid dictionary" not in content.lower(), (
+            f"Should accept JSON string conditional format colors: {content}"
+        )
 
         valid_responses = [
             "successfully applied",
@@ -629,9 +629,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"JSON string conditional colors should work: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"JSON string conditional colors should work: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_mixed_dict_and_json_parameters(self, client, test_spreadsheet_id):
@@ -657,9 +657,9 @@ class TestFormatSheetRangeValidation:
         content = result.content[0].text
 
         # Should handle both formats in same call
-        assert (
-            "input should be a valid dictionary" not in content.lower()
-        ), f"Should handle mixed dict/JSON formats: {content}"
+        assert "input should be a valid dictionary" not in content.lower(), (
+            f"Should handle mixed dict/JSON formats: {content}"
+        )
 
         valid_responses = [
             "successfully applied",
@@ -669,9 +669,9 @@ class TestFormatSheetRangeValidation:
             "no valid credentials",
             "❌",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Mixed format parameters should work: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Mixed format parameters should work: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_error_handling_robustness(self, client):
@@ -694,9 +694,9 @@ class TestFormatSheetRangeValidation:
 
         # Should get proper error handling
         error_indicators = ["error", "not found", "invalid", "authentication", "failed"]
-        assert any(
-            indicator in content.lower() for indicator in error_indicators
-        ), f"Should handle invalid spreadsheet ID gracefully: {content}"
+        assert any(indicator in content.lower() for indicator in error_indicators), (
+            f"Should handle invalid spreadsheet ID gracefully: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_invalid_json_string_handling(self, client, test_spreadsheet_id):
@@ -721,9 +721,9 @@ class TestFormatSheetRangeValidation:
 
         # Should get helpful JSON parsing error
         error_indicators = ["invalid json", "json", "parse", "error"]
-        assert any(
-            indicator in content.lower() for indicator in error_indicators
-        ), f"Should provide helpful error for invalid JSON: {content}"
+        assert any(indicator in content.lower() for indicator in error_indicators), (
+            f"Should provide helpful error for invalid JSON: {content}"
+        )
 
 
 @pytest.mark.service("sheets")
@@ -792,9 +792,9 @@ class TestFormatSheetRangeIntegration:
             "❌",
         ]
 
-        assert any(
-            keyword in write_content.lower() for keyword in valid_responses
-        ), f"Data write should respond appropriately: {write_content}"
-        assert any(
-            keyword in format_content.lower() for keyword in valid_responses
-        ), f"Formatting should respond appropriately: {format_content}"
+        assert any(keyword in write_content.lower() for keyword in valid_responses), (
+            f"Data write should respond appropriately: {write_content}"
+        )
+        assert any(keyword in format_content.lower() for keyword in valid_responses), (
+            f"Formatting should respond appropriately: {format_content}"
+        )

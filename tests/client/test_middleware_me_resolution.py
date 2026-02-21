@@ -34,9 +34,9 @@ class TestMiddlewareMeResolution:
         is_valid_auth = validator.is_valid_auth_response(content)
         is_success = validator.is_success_response(content)
 
-        assert (
-            is_valid_auth or is_success
-        ), f"Should get valid auth response or success, got: {content[:200]}"
+        assert is_valid_auth or is_success, (
+            f"Should get valid auth response or success, got: {content[:200]}"
+        )
 
     @pytest.mark.asyncio
     async def test_me_keyword_resolution(self, client):
@@ -68,12 +68,12 @@ class TestMiddlewareMeResolution:
             and "'me'" in content.lower()
         )
 
-        assert (
-            has_actual_email or has_resolved_indicator
-        ), f"Middleware should inject actual email, got: {content[:300]}"
-        assert (
-            not has_invalid_me_error
-        ), f"Should not have 'invalid email' error for 'me', got: {content[:300]}"
+        assert has_actual_email or has_resolved_indicator, (
+            f"Middleware should inject actual email, got: {content[:300]}"
+        )
+        assert not has_invalid_me_error, (
+            f"Should not have 'invalid email' error for 'me', got: {content[:300]}"
+        )
 
     @pytest.mark.asyncio
     async def test_myself_keyword_resolution(self, client):
@@ -105,12 +105,12 @@ class TestMiddlewareMeResolution:
             and "'myself'" in content.lower()
         )
 
-        assert (
-            has_actual_email or has_resolved_indicator
-        ), f"Middleware should inject actual email, got: {content[:300]}"
-        assert (
-            not has_invalid_myself_error
-        ), f"Should not have 'invalid email' error for 'myself', got: {content[:300]}"
+        assert has_actual_email or has_resolved_indicator, (
+            f"Middleware should inject actual email, got: {content[:300]}"
+        )
+        assert not has_invalid_myself_error, (
+            f"Should not have 'invalid email' error for 'myself', got: {content[:300]}"
+        )
 
     @pytest.mark.asyncio
     async def test_auth_pattern_consistency(self, client):
@@ -121,9 +121,9 @@ class TestMiddlewareMeResolution:
         results = await runner.test_auth_patterns("list_gmail_labels", {})
 
         # Explicit email should always work (backward compatible)
-        assert results[
-            "backward_compatible"
-        ], "Explicit email pattern must remain backward compatible"
+        assert results["backward_compatible"], (
+            "Explicit email pattern must remain backward compatible"
+        )
 
         # Log middleware injection results
         middleware_result = results["middleware_injection"]
@@ -197,9 +197,9 @@ class TestCalendarWithMiddleware:
         if not middleware_success:
             # If middleware injection failed, it should be a valid auth error
             validator = TestResponseValidator()
-            assert validator.is_valid_auth_response(
-                middleware_content
-            ), f"Middleware failure should give valid auth error, got: {middleware_content[:200]}"
+            assert validator.is_valid_auth_response(middleware_content), (
+                f"Middleware failure should give valid auth error, got: {middleware_content[:200]}"
+            )
 
 
 class TestMiddlewareServerIntegration:

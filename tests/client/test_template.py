@@ -44,9 +44,9 @@ class TestTemplateService:
 
         # At least some tools should be available
         available_count = sum(1 for tool in expected_tools if tool in tool_names)
-        assert (
-            available_count > 0
-        ), f"Expected at least some tools from {expected_tools}"
+        assert available_count > 0, (
+            f"Expected at least some tools from {expected_tools}"
+        )
         print(f"   📊 {available_count}/{len(expected_tools)} tools available")
 
     @pytest.mark.asyncio
@@ -113,9 +113,9 @@ class TestTemplateService:
         print_test_result(f"{tool_name} execution", result)
 
         # Should get either success or valid auth error
-        assert (
-            result["success"] or result["is_auth_related"]
-        ), f"Tool should execute or give auth error. Content: {result['content'][:200]}"
+        assert result["success"] or result["is_auth_related"], (
+            f"Tool should execute or give auth error. Content: {result['content'][:200]}"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.auth_required
@@ -209,9 +209,9 @@ class TestExampleServiceTools:
             is_gmail_response = TestResponseValidator.validate_service_response(
                 result["content"], "gmail"
             )
-            assert (
-                is_gmail_response or result["is_auth_related"]
-            ), "Should get Gmail-specific response or auth error"
+            assert is_gmail_response or result["is_auth_related"], (
+                "Should get Gmail-specific response or auth error"
+            )
 
         print("✅ Gmail labels test completed")
 

@@ -225,16 +225,16 @@ def test_wrapper_provides_relationships():
     """Verify wrapper provides parent->child relationships."""
     relationships = get_all_relationships_from_wrapper()
 
-    assert (
-        len(relationships) > 5
-    ), f"Expected 5+ relationships, got {len(relationships)}"
+    assert len(relationships) > 5, (
+        f"Expected 5+ relationships, got {len(relationships)}"
+    )
 
     # Section should have children
     assert "Section" in relationships, "Section not in relationships"
     section_children = relationships["Section"]
-    assert (
-        len(section_children) > 5
-    ), f"Section should have 5+ children, got {len(section_children)}"
+    assert len(section_children) > 5, (
+        f"Section should have 5+ children, got {len(section_children)}"
+    )
 
     print(f"\nSection children: {section_children}")
 
@@ -299,9 +299,9 @@ def test_render_random_widget_components():
     print(f"\n📊 Successfully rendered {rendered}/{len(to_test)} components")
 
     # At least half should render
-    assert (
-        rendered >= len(to_test) // 2
-    ), f"Too many render failures: {rendered}/{len(to_test)}"
+    assert rendered >= len(to_test) // 2, (
+        f"Too many render failures: {rendered}/{len(to_test)}"
+    )
 
 
 def test_generate_and_render_random_structure():
@@ -314,7 +314,7 @@ def test_generate_and_render_random_structure():
         structure = generate_random_valid_structure(max_widgets=4)
         dsl = build_dsl_from_structure(structure)
 
-        print(f"\n  Structure {i+1}: {structure}")
+        print(f"\n  Structure {i + 1}: {structure}")
         print(f"  DSL: {dsl}")
 
         # Try to render each widget in the structure

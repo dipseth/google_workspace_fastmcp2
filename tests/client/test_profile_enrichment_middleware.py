@@ -120,9 +120,9 @@ class TestProfileEnrichmentMiddleware:
 
                 first_message = data["messages"][0]
                 assert "senderName" in first_message, "Message should have senderName"
-                assert (
-                    "senderEmail" in first_message
-                ), "Message should have senderEmail field"
+                assert "senderEmail" in first_message, (
+                    "Message should have senderEmail field"
+                )
 
                 enriched_count = sum(
                     1
@@ -614,6 +614,6 @@ class TestProfileEnrichmentIntegration:
             # Test passes - the middleware is working correctly, just no enrichable users
         else:
             # Some users were enriched - verify the count is reasonable
-            assert (
-                len(enriched_users) >= 0
-            ), "Enriched user count should be non-negative"
+            assert len(enriched_users) >= 0, (
+                "Enriched user count should be non-negative"
+            )

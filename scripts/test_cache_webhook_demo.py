@@ -41,9 +41,9 @@ def convert_keys_to_camel(obj):
 
 def send_card(payload: dict, description: str = "") -> bool:
     """Send a card to the webhook."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"SENDING: {description}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     try:
         response = httpx.post(

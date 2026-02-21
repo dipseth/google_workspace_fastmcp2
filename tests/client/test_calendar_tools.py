@@ -115,9 +115,9 @@ class TestCalendarTools:
             "successfully listed",
             "calendar service",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_list_events(self, client):
@@ -158,9 +158,9 @@ class TestCalendarTools:
             "calendar service",
             "unable to get",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_list_events_without_timemax(self, client):
@@ -192,9 +192,9 @@ class TestCalendarTools:
             content = str(result)
 
         # The response should NOT contain the specific error about 'None' being invalid
-        assert (
-            "timeMax: 'None'" not in content
-        ), "Bug detected: timeMax is being passed as string 'None' instead of being omitted"
+        assert "timeMax: 'None'" not in content, (
+            "Bug detected: timeMax is being passed as string 'None' instead of being omitted"
+        )
 
         # Should get a valid response (either events or auth error)
         valid_responses = [
@@ -208,9 +208,9 @@ class TestCalendarTools:
             "calendar service",
             "unable to get",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_list_events_structured_error_response(self, client):
@@ -242,9 +242,9 @@ class TestCalendarTools:
 
         # The error should be returned as structured content, not a raw error string
         # Check that we don't get the old ValueError about structured_content
-        assert (
-            "ValueError: structured_content must be a dict or None" not in content
-        ), "Bug detected: Error responses are not being returned as structured EventListResponse"
+        assert "ValueError: structured_content must be a dict or None" not in content, (
+            "Bug detected: Error responses are not being returned as structured EventListResponse"
+        )
 
         # The response should contain error information
         assert any(
@@ -296,9 +296,9 @@ class TestCalendarTools:
             "unable to get",  # Service unavailable
             "calendar service",  # Service-related error
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_event(self, client, future_datetime, cleanup_tracker):
@@ -357,9 +357,9 @@ class TestCalendarTools:
             "calendar service",
             "unable to get",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_all_day_event(self, client, cleanup_tracker):
@@ -414,9 +414,9 @@ class TestCalendarTools:
             "calendar service",
             "unable to get",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_event_with_attendees(
@@ -472,9 +472,9 @@ class TestCalendarTools:
             "calendar service",
             "unable to get",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_event_with_attachments(
@@ -533,9 +533,9 @@ class TestCalendarTools:
             "calendar service",
             "unable to get",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_bulk_events(self, client, future_datetime, cleanup_tracker):
@@ -695,9 +695,9 @@ class TestCalendarTools:
             "bulk event creation",
             "success",
         ]
-        assert any(
-            keyword in content_str.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected bulk pattern: {content_str}"
+        assert any(keyword in content_str.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected bulk pattern: {content_str}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_bulk_events_comprehensive(self, client, cleanup_tracker):
@@ -781,9 +781,9 @@ class TestCalendarTools:
             "calendar service",
             "unable to get",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected comprehensive bulk pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected comprehensive bulk pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_bulk_events_parameter_validation(self, client):
@@ -913,9 +913,9 @@ class TestCalendarTools:
             pass
 
         # Check that we don't get the schema validation error
-        assert (
-            "is not valid under any of the given schemas" not in content_str
-        ), "Bug detected: Events JSON string is not being parsed before validation"
+        assert "is not valid under any of the given schemas" not in content_str, (
+            "Bug detected: Events JSON string is not being parsed before validation"
+        )
 
         # Should get either success or auth error (not schema validation error)
         valid_responses = [
@@ -930,9 +930,9 @@ class TestCalendarTools:
             "unable to get",
             "success",
         ]
-        assert any(
-            keyword in content_str.lower() for keyword in valid_responses
-        ), f"Response didn't match expected patterns: {content_str}"
+        assert any(keyword in content_str.lower() for keyword in valid_responses), (
+            f"Response didn't match expected patterns: {content_str}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_bulk_events_backward_compatibility(
@@ -988,9 +988,9 @@ class TestCalendarTools:
             "calendar service",
             "unable to get",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Backward compatibility broken: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Backward compatibility broken: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_create_bulk_events_parameter_conflict_validation(
@@ -1061,9 +1061,9 @@ class TestCalendarTools:
             "calendar service",
             "unable to get",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Parameter conflict not handled correctly: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Parameter conflict not handled correctly: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_modify_event(self, client, real_calendar_event_id):
@@ -1109,9 +1109,9 @@ class TestCalendarTools:
             "unable to get",
             "updated",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_modify_event_missing_fields(self, client, real_calendar_event_id):
@@ -1186,9 +1186,9 @@ class TestCalendarTools:
             "unable to get",
             "not found",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_delete_event(self, client, real_calendar_event_id):
@@ -1228,9 +1228,9 @@ class TestCalendarTools:
             "unable to get",
             "removed",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_calendar_tools_parameter_validation(self, client):
@@ -1385,9 +1385,9 @@ class TestCalendarTools:
 
         # The error should be returned as structured content, not a raw error string
         # Check that we don't get the old ValueError about structured_content
-        assert (
-            "ValueError: structured_content must be a dict or None" not in content
-        ), "Bug detected: Error responses are not being returned as structured CalendarListResponse"
+        assert "ValueError: structured_content must be a dict or None" not in content, (
+            "Bug detected: Error responses are not being returned as structured CalendarListResponse"
+        )
 
         # The response should contain error information
         assert any(

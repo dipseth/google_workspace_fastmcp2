@@ -66,9 +66,9 @@ def test_extract_paths():
     }
     result3 = builder._extract_paths_from_pattern(pattern3)
     print(f"\n3. relationship_text: {result3}")
-    assert (
-        "Section" in result3 and "DecoratedText" in result3
-    ), f"Expected to extract component names, got {result3}"
+    assert "Section" in result3 and "DecoratedText" in result3, (
+        f"Expected to extract component names, got {result3}"
+    )
     print("   ✅ PASS")
 
     # Test 4: Real Qdrant pattern format (from our ad-hoc test)
@@ -90,9 +90,9 @@ def test_extract_paths():
     }
     result5 = builder._extract_paths_from_pattern(pattern5)
     print(f"\n5. Pattern with multipliers: {result5}")
-    assert (
-        "Section" in result5 and "DecoratedText" in result5
-    ), f"Expected Section and DecoratedText, got {result5}"
+    assert "Section" in result5 and "DecoratedText" in result5, (
+        f"Expected Section and DecoratedText, got {result5}"
+    )
     print("   ✅ PASS")
 
     print("\n" + "=" * 60)

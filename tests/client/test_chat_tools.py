@@ -181,9 +181,9 @@ class TestChatTools:
             "chat spaces",
             "spaces",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_list_messages(self, client):
@@ -213,9 +213,9 @@ class TestChatTools:
             "messages found",
             "permission denied",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_send_message(self, client):
@@ -248,9 +248,9 @@ class TestChatTools:
             "not yet fulfilled",
             "permission denied",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_search_messages(self, client):
@@ -279,9 +279,9 @@ class TestChatTools:
             "query",
             "results",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_send_card_message(self, client):
@@ -316,9 +316,9 @@ class TestChatTools:
             "not yet fulfilled",
             "permission denied",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_send_simple_card(self, client):
@@ -355,9 +355,9 @@ class TestChatTools:
             "fallback",
             "simple card",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_send_interactive_card(self, client):
@@ -406,9 +406,9 @@ class TestChatTools:
             "fallback",
             "interactive card",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_send_form_card(self, client):
@@ -466,9 +466,9 @@ class TestChatTools:
             "fallback",
             "form card",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_send_rich_card(self, client):
@@ -528,9 +528,9 @@ class TestChatTools:
             "card framework not available",
             "cannot send rich cards",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_send_dynamic_card(self, client):
@@ -566,9 +566,9 @@ class TestChatTools:
             "dynamic card",
             "card message sent",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
     @pytest.mark.asyncio
     async def test_send_message_with_threading(self, client):
@@ -602,9 +602,9 @@ class TestChatTools:
             "not yet fulfilled",
             "permission denied",
         ]
-        assert any(
-            keyword in content.lower() for keyword in valid_responses
-        ), f"Response didn't match any expected pattern: {content}"
+        assert any(keyword in content.lower() for keyword in valid_responses), (
+            f"Response didn't match any expected pattern: {content}"
+        )
 
 
 # Integration tests using webhook if available
@@ -752,13 +752,13 @@ class TestChatToolsIntegration:
 
         # The test passes if either the threading worked OR we got an expected error
         # What we're testing is that thread_key processing doesn't cause crashes
-        assert (
-            is_success or is_expected_error
-        ), f"Threading test failed - unexpected response: {content}"
+        assert is_success or is_expected_error, (
+            f"Threading test failed - unexpected response: {content}"
+        )
 
         # If it's a success, verify that the thread information was logged
         if is_success:
             # The response should indicate threading was processed
-            assert (
-                "thread" in content.lower() or "webhook" in content.lower()
-            ), f"Success response should mention threading or webhook: {content}"
+            assert "thread" in content.lower() or "webhook" in content.lower(), (
+                f"Success response should mention threading or webhook: {content}"
+            )

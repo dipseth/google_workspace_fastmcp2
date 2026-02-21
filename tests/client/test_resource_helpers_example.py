@@ -63,9 +63,9 @@ class TestResourceHelpersExample:
         #     "body": "This is a test reply with a REAL message ID!"
         # })
 
-        assert (
-            real_gmail_message_id is not None
-        ), "Should have a real message ID or fallback"
+        assert real_gmail_message_id is not None, (
+            "Should have a real message ID or fallback"
+        )
 
         # The ID will be either:
         # 1. A real Gmail message ID fetched from service://gmail/messages
@@ -85,9 +85,9 @@ class TestResourceHelpersExample:
         #     "document_id": real_drive_document_id
         # })
 
-        assert (
-            real_drive_document_id is not None
-        ), "Should have a real document ID or fallback"
+        assert real_drive_document_id is not None, (
+            "Should have a real document ID or fallback"
+        )
         print("✅ Test using real Drive document ID completed")
 
     @pytest.mark.asyncio
@@ -103,9 +103,9 @@ class TestResourceHelpersExample:
         #     "event_id": real_calendar_event_id
         # })
 
-        assert (
-            real_calendar_event_id is not None
-        ), "Should have a real event ID or fallback"
+        assert real_calendar_event_id is not None, (
+            "Should have a real event ID or fallback"
+        )
         print("✅ Test using real Calendar event ID completed")
 
     @pytest.mark.asyncio

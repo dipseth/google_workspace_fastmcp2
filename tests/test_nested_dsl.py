@@ -892,9 +892,9 @@ def test_dynamic_component_discovery():
 
     # Verify relationships exist
     assert len(components["relationships"]) > 0, "Should have relationships"
-    assert (
-        "DecoratedText" in components["relationships"]
-    ), "DecoratedText should have children"
+    assert "DecoratedText" in components["relationships"], (
+        "DecoratedText should have children"
+    )
 
 
 def test_random_dsl_generation():
@@ -907,7 +907,7 @@ def test_random_dsl_generation():
     for i in range(10):
         dsl = build_random_dsl_structure(components)
         generated.add(dsl)
-        print(f"   {i+1}. {dsl}")
+        print(f"   {i + 1}. {dsl}")
 
     print(f"\n   Generated {len(generated)} unique structures from 10 attempts")
     assert len(generated) >= 3, "Should generate variety of structures"
@@ -931,7 +931,7 @@ def test_random_dsl_cards_build_successfully():
         try:
             card = builder.build(
                 description=dsl,
-                title=f"Random Card #{i+1}",
+                title=f"Random Card #{i + 1}",
                 buttons=[
                     {"text": f"Action {j}", "url": f"https://example.com/{j}"}
                     for j in range(1, test_random.randint(2, 5))
@@ -941,14 +941,14 @@ def test_random_dsl_cards_build_successfully():
             if card and "sections" in card and len(card["sections"]) > 0:
                 successes += 1
                 widget_count = sum(len(s.get("widgets", [])) for s in card["sections"])
-                print(f"   ✅ {i+1}. {dsl[:40]}... → {widget_count} widgets")
+                print(f"   ✅ {i + 1}. {dsl[:40]}... → {widget_count} widgets")
             else:
                 failures.append((i, dsl, "Empty card"))
-                print(f"   ⚠️ {i+1}. {dsl[:40]}... → Empty")
+                print(f"   ⚠️ {i + 1}. {dsl[:40]}... → Empty")
 
         except Exception as e:
             failures.append((i, dsl, str(e)))
-            print(f"   ❌ {i+1}. {dsl[:40]}... → {str(e)[:30]}")
+            print(f"   ❌ {i + 1}. {dsl[:40]}... → {str(e)[:30]}")
 
     print(f"\n📊 Results: {successes}/{iterations} built successfully")
 
@@ -1007,7 +1007,7 @@ def test_webhook_random_dsl_cards():
 
         card = builder.build(
             description=dsl,
-            title=f"Random DSL #{i+1}",
+            title=f"Random DSL #{i + 1}",
             buttons=[
                 {"text": f"Option {j}", "url": f"https://example.com/opt{j}"}
                 for j in range(1, test_random.randint(2, 4))
@@ -1019,7 +1019,7 @@ def test_webhook_random_dsl_cards():
             if "sections" in card and len(card["sections"]) > 1:
                 card["sections"] = card["sections"][:1]
 
-            card_id = f"random-dsl-{i+1}"
+            card_id = f"random-dsl-{i + 1}"
             success, message = send_card_to_webhook(card, card_id)
 
             widget_count = sum(
@@ -1042,9 +1042,9 @@ def test_webhook_random_dsl_cards():
     print(f"\n📊 Results: {successes}/{num_cards} sent successfully")
 
     # Be flexible - random DSL may generate structures that don't work with all API contexts
-    assert (
-        successes >= 1
-    ), f"At least one random DSL card should send successfully, got {successes}/{num_cards}"
+    assert successes >= 1, (
+        f"At least one random DSL card should send successfully, got {successes}/{num_cards}"
+    )
 
 
 @webhook
@@ -1119,7 +1119,7 @@ def test_webhook_random_nested_structures():
         if card and "sections" in card:
             card["sections"] = card["sections"][:1]  # Keep only main content
 
-        card_id = f"nested-random-{int(time.time())}-{test_random.randint(1,999)}"
+        card_id = f"nested-random-{int(time.time())}-{test_random.randint(1, 999)}"
         success, message = send_card_to_webhook(card, card_id)
 
         status = "✅" if success else "❌"

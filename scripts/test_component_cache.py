@@ -224,9 +224,9 @@ def test_cache_persistence():
     print(f"   Cache2: L1={len(cache2._l1)}, L2={len(cache2._l2_index)}")
 
     # L2 should have same items
-    assert (
-        len(cache2._l2_index) == l2_count
-    ), f"L2 index not persisted: expected {l2_count}, got {len(cache2._l2_index)}"
+    assert len(cache2._l2_index) == l2_count, (
+        f"L2 index not persisted: expected {l2_count}, got {len(cache2._l2_index)}"
+    )
 
     # Retrieve an evicted item from L2
     print("\n3️⃣  Retrieving item from persisted L2...")
@@ -343,9 +343,9 @@ def test_cache_stats_and_hit_rate():
 
     assert stats["l1_hits"] == 9, f"Expected 9 L1 hits, got {stats['l1_hits']}"
     assert stats["misses"] == 2, f"Expected 2 misses, got {stats['misses']}"
-    assert (
-        stats["hit_rate"] > 0.8
-    ), f"Expected hit rate > 80%, got {stats['hit_rate']:.1%}"
+    assert stats["hit_rate"] > 0.8, (
+        f"Expected hit rate > 80%, got {stats['hit_rate']:.1%}"
+    )
 
     # Cleanup
     shutil.rmtree(cache_dir)

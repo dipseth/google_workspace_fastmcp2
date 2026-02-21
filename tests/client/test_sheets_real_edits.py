@@ -96,6 +96,6 @@ class TestSheetsRealEdits:
                 f"Sheets read auth not configured: {read_result.content[0].text}"
             )
         # The server may return structured or text; the marker should appear in the payload.
-        assert (
-            marker.lower() in content
-        ), f"Expected marker '{marker}' to be present in readback: {content}"
+        assert marker.lower() in content, (
+            f"Expected marker '{marker}' to be present in readback: {content}"
+        )

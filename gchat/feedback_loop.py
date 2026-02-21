@@ -2892,9 +2892,9 @@ class FeedbackLoop:
                             ]
                         ),
                     )
-                    stats[feedback_category][
-                        f"{feedback_value}_count"
-                    ] = count_result.count
+                    stats[feedback_category][f"{feedback_value}_count"] = (
+                        count_result.count
+                    )
 
             # Calculate legacy totals (max of content/form for each)
             stats["positive_count"] = max(

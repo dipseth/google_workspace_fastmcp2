@@ -119,13 +119,11 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-mock>=3.12.0",
-    "black>=24.0.0",
     "ruff>=0.1.0"
 ]
 
 [dependency-groups]
 dev = [
-    "black>=25.1.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-mock>=3.12.0",
@@ -182,10 +180,6 @@ ignore = [
 [tool.ruff.lint.isort]
 known-third-party = ["card_framework", "google", "googleapiclient", "google_auth_httplib2", "httplib2", "qdrant_client", "fastmcp", "mcp", "pydantic"]
 known-first-party = ["auth", "config", "drive", "gmail", "photos", "middleware", "gcalendar", "gchat", "docs", "forms", "sheets", "slides", "resources", "prompts", "people", "adapters", "tools", "skills", "lifespans"]
-
-[tool.black]
-target-version = ["py311"]
-line-length = 88
 
 [tool.hatch.build.targets.wheel]
 packages = ["auth", "config", "drive", "gmail", "photos", "middleware", "gcalendar", "gchat", "docs", "forms", "sheets", "slides", "resources", "prompts", "people", "adapters", "tools"]
