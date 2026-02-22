@@ -141,7 +141,7 @@ class ToolOptimizationHelper:
     # Protected tools that should always remain available
     PROTECTED_TOOLS: Set[str] = {
         "manage_tools",
-        "manage_tools_by_analytics",
+        "search",
         "health_check",
         "start_google_auth",
         "check_drive_auth",
