@@ -329,7 +329,7 @@ async def get_registered_tools(client: Client) -> List[str]:
     - check_drive_auth
     - health_check
     - manage_tools
-    - manage_tools_by_analytics
+    - search
 
     Other tools are registered but disabled by default.
     """
