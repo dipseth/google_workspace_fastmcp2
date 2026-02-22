@@ -62,7 +62,9 @@ Tools Provided:
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Optional
+
+from pydantic import Field
 
 from config.enhanced_logging import setup_logger
 
@@ -81,7 +83,73 @@ from . import (
     parse_unified_query,
 )
 
+if TYPE_CHECKING:
+    from middleware.qdrant_core.dsl_executor import SearchV2Executor
+    from middleware.qdrant_core.dsl_query_builder import QueryBuilder
+    from middleware.qdrant_core.dsl_types import SearchV2Response
+
 logger = setup_logger()
+
+
+def _build_grammar_description(symbols: Dict[str, str]) -> str:
+    """Build a human-readable grammar description for the DSL."""
+    filter_symbols = {}
+    query_symbols = {}
+    for name, symbol in symbols.items():
+        lower = name.lower()
+        if any(
+            k in lower
+            for k in ("filter", "fieldcondition", "matchvalue", "matchtext", "range",
+                       "matchany", "hasidcondition", "isnullcondition", "isemptycondition")
+        ):
+            filter_symbols[name] = symbol
+        elif any(
+            k in lower
+            for k in ("recommend", "discover", "fusion", "prefetch", "orderby",
+                       "context", "searchparams")
+        ):
+            query_symbols[name] = symbol
+
+    lines = [
+        "Parameterized DSL Grammar:",
+        "  symbol{param1=value1, param2=value2}",
+        "",
+        "Values can be:",
+        '  - Strings: "hello"',
+        "  - Numbers: 42, 3.14",
+        "  - Booleans: true, false",
+        "  - Null: null",
+        "  - Nested symbols: symbol{...}",
+        "  - Lists: [item1, item2, ...]",
+        "",
+        "Key filter symbols (used in 'dsl' param):",
+    ]
+    for name, symbol in sorted(filter_symbols.items()):
+        lines.append(f"  {symbol} = {name}")
+
+    if query_symbols:
+        lines.append("")
+        lines.append("Advanced query symbols (used in 'query_dsl'/'prefetch_dsl' params):")
+        lines.append("  (Types without Unicode symbols use full class names as identifiers)")
+        for name, symbol in sorted(query_symbols.items()):
+            lines.append(f"  {symbol} = {name}")
+
+    return "\n".join(lines)
+
+
+def _convert_v2_to_search_results(v2_response: "SearchV2Response") -> List[Dict[str, Any]]:
+    """Convert SearchV2Response results to the dict format expected by the search tool."""
+    raw_results = []
+    for item in v2_response.results:
+        raw_results.append({
+            "id": item.id,
+            "score": item.score if item.score is not None else 0.0,
+            "tool_name": item.tool_name or item.payload.get("tool_name", "unknown_tool"),
+            "timestamp": item.timestamp or item.payload.get("timestamp", "unknown"),
+            "user_email": item.user_email or item.payload.get("user_email", "unknown"),
+            "payload": item.payload,
+        })
+    return raw_results
 
 
 def setup_enhanced_qdrant_tools(
@@ -127,9 +195,70 @@ def setup_enhanced_qdrant_tools(
             "Either middleware or both client_manager and search_manager must be provided"
         )
 
+    # Lazy-init DSL executor and builder for DSL search mode
+    _dsl_wrapper = None
+    _dsl_builder: Optional["QueryBuilder"] = None
+    _dsl_executor: Optional["SearchV2Executor"] = None
+
+    def _get_dsl_builder() -> "QueryBuilder":
+        nonlocal _dsl_wrapper, _dsl_builder
+        if _dsl_builder is None:
+            if _dsl_wrapper is None:
+                from middleware.qdrant_core.qdrant_models_wrapper import (
+                    get_qdrant_models_wrapper,
+                )
+                _dsl_wrapper = get_qdrant_models_wrapper()
+            from middleware.qdrant_core.dsl_query_builder import QueryBuilder
+            _dsl_builder = QueryBuilder(_dsl_wrapper)
+        return _dsl_builder
+
+    def _get_dsl_executor() -> "SearchV2Executor":
+        nonlocal _dsl_executor
+        if _dsl_executor is None:
+            from middleware.qdrant_core.dsl_executor import SearchV2Executor
+            _dsl_executor = SearchV2Executor(_client_manager, _get_dsl_builder())
+        return _dsl_executor
+
+    # Build DSL description dynamically from wrapper symbols at registration time
+    def _get_dsl_description_suffix() -> str:
+        """Build DSL grammar section for the search tool description."""
+        try:
+            builder = _get_dsl_builder()
+            w = builder.wrapper
+            symbols = dict(w.symbol_mapping) if w.symbol_mapping else {}
+            grammar = _build_grammar_description(symbols)
+            examples = (
+                "Examples: "
+                'ƒ{must=[ʄ{key="tool_name", match=☆{value="search"}}]} '
+                "(filter by tool_name), "
+                'ƒ{must=[ʄ{key="tool_name", match=ɱ{any=["send_dynamic_card", "send_gmail_message"]}}]} '
+                "(match any of multiple values)."
+            )
+            return f"\n\n{grammar}\n\n{examples}"
+        except Exception:
+            # Fallback if wrapper isn't available yet
+            return (
+                "\n\nDSL Grammar: symbol{param=value}. "
+                "Key filter symbols: ƒ=Filter, ʄ=FieldCondition, ☆=MatchValue, "
+                "ɱ=MatchAny, ṁ=MatchText, ř=Range, ℏ=HasIdCondition. "
+                "Advanced query symbols: φ=FusionQuery, R_4=RecommendQuery, "
+                "D_2=DiscoverQuery, ¶=Prefetch, ø=OrderBy, ɵ=OrderByQuery."
+            )
+
+    _dsl_suffix = _get_dsl_description_suffix()
+
     @mcp.tool(
         name="search",
-        description="Search through Qdrant vector database using natural language queries, filters, or point IDs. Supports semantic search, service-specific filtering, analytics queries, recommendation-style example search, and direct point lookup. Returns structured search results with relevance scores and metadata.",
+        description=(
+            "Search through Qdrant vector database using natural language queries, "
+            "filters, point IDs, or DSL filter notation. Supports semantic search, "
+            "service-specific filtering, analytics queries, recommendation-style "
+            "example search, direct point lookup, and advanced DSL queries. "
+            "When filter_dsl is provided, routes to the DSL executor for precise "
+            "filter-based search. "
+            "Returns structured search results with relevance scores and metadata."
+            + _dsl_suffix
+        ),
         tags={
             "qdrant",
             "search",
@@ -138,6 +267,8 @@ def setup_enhanced_qdrant_tools(
             "database",
             "analytics",
             "recommend",
+            "dsl",
+            "filter",
         },
         annotations={
             "title": "Qdrant Vector Search Tool",
@@ -153,6 +284,11 @@ def setup_enhanced_qdrant_tools(
         score_threshold: float = 0.3,
         positive_point_ids: Optional[List[str]] = None,
         negative_point_ids: Optional[List[str]] = None,
+        filter_dsl: Optional[str] = None,
+        query_dsl: Optional[str] = None,
+        prefetch_dsl: Optional[str] = None,
+        dry_run: bool = False,
+        collection: Annotated[Optional[str], Field(default=None, description="Optional Qdrant collection name to search. If not provided, uses the server's default collection.")] = None,
         user_google_email: UserGoogleEmail = None,
     ) -> QdrantToolSearchResponse:
         """
@@ -165,14 +301,21 @@ def setup_enhanced_qdrant_tools(
         - Point Lookup: "id:12345" or "point:abc-def-123"
         - Filtered Search: "user_email:test@gmail.com document creation"
         - Index Search: "tool_name:search_gmail_messages" or "service:gmail"
-        - Example-based recommend: positive/negative point ID lists (see docs/qdrant_explore_data.md)
+        - Example-based recommend: positive/negative point ID lists
+        - DSL Filter: Set filter_dsl to a DSL string (grammar is in the tool description).
+          query becomes the semantic text when filter_dsl is set.
 
         Args:
-            query: Search query string (supports natural language and filters)
+            query: Search query string (natural language, filters, or semantic text for DSL mode)
             limit: Maximum number of results to return (1-100)
             score_threshold: Minimum similarity score (0.0-1.0)
             positive_point_ids: Optional list of point IDs to use as positive examples
             negative_point_ids: Optional list of point IDs to use as negative examples
+            filter_dsl: Optional DSL filter string (e.g., 'ƒ{must=[...]}')
+            query_dsl: Optional advanced query DSL (RecommendQuery, FusionQuery, OrderByQuery)
+            prefetch_dsl: Optional multi-stage Prefetch DSL
+            dry_run: If True with filter_dsl, parse+build without executing
+            collection: Optional collection name override
             user_google_email: User's Google email for access control
 
         Returns:
@@ -195,11 +338,52 @@ def setup_enhanced_qdrant_tools(
                     error="Qdrant client not available - database may not be running",
                 )
 
+            target_collection = collection or _client_manager.config.collection_name
             raw_results: List[Dict[str, Any]] = []
 
+            # 0) DSL filter mode — route to SearchV2Executor
+            if filter_dsl is not None:
+                query_type = "dsl"
+                logger.info(
+                    f"🔧 Qdrant DSL search: filter_dsl='{filter_dsl[:80]}...', "
+                    f"query_text='{query}', dry_run={dry_run}"
+                )
+                executor = _get_dsl_executor()
+                v2_response = await executor.execute_dsl(
+                    dsl=filter_dsl,
+                    collection=target_collection,
+                    query_text=query if query.strip() else None,
+                    query_dsl=query_dsl,
+                    prefetch_dsl=prefetch_dsl,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    dry_run=dry_run,
+                )
+
+                # Convert V2 results to unified format
+                raw_results = _convert_v2_to_search_results(v2_response)
+                dsl_input = v2_response.dsl_input
+                built_filter_repr = v2_response.built_filter_repr
+
+                if v2_response.error:
+                    processing_time = (time.time() - start_time) * 1000
+                    return QdrantToolSearchResponse(
+                        results=[],
+                        query=query,
+                        query_type="dsl_error",
+                        total_results=0,
+                        processing_time_ms=processing_time,
+                        collection_name=target_collection,
+                        error=v2_response.error,
+                        dsl_input=dsl_input,
+                        built_filter_repr=built_filter_repr,
+                    )
+
             # 1) Example-based recommendation mode (bypasses text query)
-            if positive_point_ids or negative_point_ids:
+            elif positive_point_ids or negative_point_ids:
                 query_type = "recommend"
+                dsl_input = None
+                built_filter_repr = None
                 logger.info(
                     f"🧲 Qdrant recommend search: "
                     f"positive={positive_point_ids}, negative={negative_point_ids}"
@@ -210,10 +394,14 @@ def setup_enhanced_qdrant_tools(
                     score_threshold=score_threshold,
                     positive_point_ids=positive_point_ids,
                     negative_point_ids=negative_point_ids,
+                    query_type="recommend",
+                    collection=target_collection,
                 )
 
             # 2) Query-based modes (overview / service_history / general)
             else:
+                dsl_input = None
+                built_filter_repr = None
                 parsed_query = parse_unified_query(query)
                 query_type = parsed_query["capability"]
 
@@ -257,6 +445,8 @@ def setup_enhanced_qdrant_tools(
                         search_query,
                         limit=limit,
                         score_threshold=score_threshold,
+                        query_type="service_history",
+                        collection=target_collection,
                     )
 
                 else:
@@ -265,6 +455,8 @@ def setup_enhanced_qdrant_tools(
                         query,
                         limit=limit,
                         score_threshold=score_threshold,
+                        query_type="general",
+                        collection=target_collection,
                     )
 
             # 3) Format results with service metadata
@@ -297,16 +489,22 @@ def setup_enhanced_qdrant_tools(
                     service_icon = "🔧"
                     service_display = service_name.title()
 
+                # Include raw payload for non-default collections where
+                # the standard fields (tool_name, timestamp, etc.) won't exist
+                is_non_default = target_collection != _client_manager.config.collection_name
+                raw_payload = result.get("payload") if is_non_default else None
+
                 formatted_results.append(
                     QdrantSearchResultItem(
                         id=result_id,
                         title=f"{service_icon} {service_display} - {tool_name}",
-                        url=f"qdrant://{_client_manager.config.collection_name}?{result_id}",
+                        url=f"qdrant://{target_collection}?{result_id}",
                         score=score,
                         tool_name=tool_name,
                         service=service_name,
                         timestamp=timestamp,
                         user_email=user_email,
+                        payload=raw_payload,
                     )
                 )
 
@@ -318,7 +516,9 @@ def setup_enhanced_qdrant_tools(
                 query_type=query_type,
                 total_results=len(formatted_results),
                 processing_time_ms=processing_time,
-                collection_name=_client_manager.config.collection_name,
+                collection_name=target_collection,
+                dsl_input=dsl_input,
+                built_filter_repr=built_filter_repr,
             )
 
         except Exception as e:
@@ -974,3 +1174,4 @@ def setup_enhanced_qdrant_tools(
                 },
                 indent=2,
             )
+

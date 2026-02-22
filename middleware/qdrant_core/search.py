@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from config.enhanced_logging import setup_logger
 
 from .client import QdrantClientManager
+from .config import CollectionSchema
 from .lazy_imports import get_qdrant_imports
 from .query_parser import (
     format_search_results,
@@ -120,8 +121,29 @@ class QdrantSearchManager:
         """Check if search manager is fully initialized."""
         return self.client_manager.is_initialized
 
+    def _select_search_vector(self, query_type: str) -> Optional[str]:
+        """Select the named vector to search based on query type (v7 schema only).
+
+        Args:
+            query_type: One of 'overview', 'service_history', 'general', 'recommend'
+
+        Returns:
+            Named vector name for v7 schema, or None for v1 (single vector).
+        """
+        if self.config.collection_schema != CollectionSchema.V7_NAMED_VECTORS:
+            return None
+
+        routing = {
+            "overview": "components",
+            "service_history": "relationships",
+            "general": "inputs",
+            "recommend": "relationships",
+        }
+        return routing.get(query_type, "inputs")
+
     async def _execute_semantic_search(
-        self, query_embedding, qdrant_filter=None, limit=None, score_threshold=None
+        self, query_embedding, qdrant_filter=None, limit=None, score_threshold=None,
+        using=None, collection=None,
     ):
         """
         Execute semantic search using query_points (new Qdrant API).
@@ -131,6 +153,8 @@ class QdrantSearchManager:
             qdrant_filter: Optional Qdrant filter
             limit: Maximum number of results
             score_threshold: Minimum similarity score
+            using: Optional named vector to search (for v7 schema). None uses default vector.
+            collection: Optional collection name override. Uses default if not provided.
 
         Returns:
             List of ScoredPoint objects from Qdrant
@@ -142,14 +166,21 @@ class QdrantSearchManager:
         if not self.client_manager.is_available:
             raise RuntimeError("Qdrant client not available")
 
+        target_collection = collection or self.config.collection_name
+        kwargs = {
+            "collection_name": target_collection,
+            "query": query_embedding.tolist(),
+            "query_filter": qdrant_filter,
+            "limit": limit or self.config.default_search_limit,
+            "score_threshold": score_threshold or self.config.score_threshold,
+            "with_payload": True,
+        }
+        if using:
+            kwargs["using"] = using
+
         search_response = await asyncio.to_thread(
             self.client_manager.client.query_points,
-            collection_name=self.config.collection_name,
-            query=query_embedding.tolist(),
-            query_filter=qdrant_filter,
-            limit=limit or self.config.default_search_limit,
-            score_threshold=score_threshold or self.config.score_threshold,
-            with_payload=True,
+            **kwargs,
         )
         return search_response.points  # Extract points from response
 
@@ -160,6 +191,8 @@ class QdrantSearchManager:
         score_threshold: float = None,
         positive_point_ids: Optional[List[str]] = None,
         negative_point_ids: Optional[List[str]] = None,
+        query_type: Optional[str] = None,
+        collection: Optional[str] = None,
     ) -> List[Dict]:
         """
         Advanced search with query parsing support.
@@ -174,6 +207,9 @@ class QdrantSearchManager:
             query: Search query (supports filters and semantic search)
             limit: Maximum number of results
             score_threshold: Minimum similarity score
+            query_type: Optional hint for named vector routing in v7 schema
+                        ('overview', 'service_history', 'general', 'recommend')
+            collection: Optional collection name override. Uses default if not provided.
 
         Returns:
             List of matching responses with scores and metadata
@@ -185,7 +221,14 @@ class QdrantSearchManager:
         if not self.client_manager.client or not self.client_manager.embedder:
             raise RuntimeError("Qdrant client or embedding model not available")
 
+        target_collection = collection or self.config.collection_name
+
         try:
+            # Resolve named vector for v7 schema
+            using = self._select_search_vector(
+                query_type or ("recommend" if positive_point_ids else "general")
+            )
+
             # Short-circuit: recommendation-style search using positive/negative examples
             if positive_point_ids or negative_point_ids:
                 logger.debug(
@@ -198,6 +241,8 @@ class QdrantSearchManager:
                     negative_ids=negative_point_ids or [],
                     limit=limit,
                     score_threshold=score_threshold,
+                    using=using,
+                    collection=target_collection,
                 )
             else:
                 # Parse the query to extract filters and semantic components
@@ -225,7 +270,7 @@ class QdrantSearchManager:
 
                             points = await asyncio.to_thread(
                                 self.client_manager.client.retrieve,
-                                collection_name=self.config.collection_name,
+                                collection_name=target_collection,
                                 ids=[search_id],
                                 with_payload=True,
                             )
@@ -314,6 +359,8 @@ class QdrantSearchManager:
                                     qdrant_filter=qdrant_filter,
                                     limit=limit,
                                     score_threshold=score_threshold,
+                                    using=using,
+                                    collection=target_collection,
                                 )
 
                                 logger.debug(
@@ -364,6 +411,8 @@ class QdrantSearchManager:
                                                 qdrant_filter=None,
                                                 limit=limit,
                                                 score_threshold=score_threshold,
+                                                using=using,
+                                                collection=target_collection,
                                             )
                                         )
 
@@ -388,7 +437,7 @@ class QdrantSearchManager:
                             # Scroll with filter to get filtered results
                             scroll_result = await asyncio.to_thread(
                                 self.client_manager.client.scroll,
-                                collection_name=self.config.collection_name,
+                                collection_name=target_collection,
                                 scroll_filter=qdrant_filter,
                                 limit=limit or self.config.default_search_limit,
                                 with_payload=True,
@@ -432,6 +481,8 @@ class QdrantSearchManager:
                                 query_embedding=query_embedding,
                                 limit=limit,
                                 score_threshold=score_threshold,
+                                using=using,
+                                collection=target_collection,
                             )
 
                             logger.debug(
@@ -527,6 +578,7 @@ class QdrantSearchManager:
                         "session_id": payload.get("session_id"),
                         "response_data": response_data,
                         "payload_type": payload.get("payload_type", "unknown"),
+                        "payload": payload,
                     }
                 )
 
@@ -866,6 +918,8 @@ class QdrantSearchManager:
         negative_ids: List[str],
         limit: Optional[int] = None,
         score_threshold: Optional[float] = None,
+        using: Optional[str] = None,
+        collection: Optional[str] = None,
     ):
         """
         Execute recommendation-style search using positive/negative example point IDs.
@@ -894,14 +948,20 @@ class QdrantSearchManager:
 
         recommend_query = models.RecommendQuery(recommend=recommend_input)
 
-        # Execute query_points with recommendation query
+        target_collection = collection or self.config.collection_name
+        kwargs = {
+            "collection_name": target_collection,
+            "query": recommend_query,
+            "limit": limit or self.config.default_search_limit,
+            "score_threshold": score_threshold or self.config.score_threshold,
+            "with_payload": True,
+        }
+        if using:
+            kwargs["using"] = using
+
         search_response = await asyncio.to_thread(
             self.client_manager.client.query_points,
-            collection_name=self.config.collection_name,
-            query=recommend_query,
-            limit=limit or self.config.default_search_limit,
-            score_threshold=score_threshold or self.config.score_threshold,
-            with_payload=True,
+            **kwargs,
         )
 
         return search_response.points

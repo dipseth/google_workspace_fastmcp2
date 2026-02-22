@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 
 from config.enhanced_logging import setup_logger
 
-from .config import QdrantConfig
+from .config import CollectionSchema, QdrantConfig
 from .lazy_imports import get_fastembed, get_qdrant_imports
 
 logger = setup_logger()
@@ -312,8 +312,18 @@ class QdrantClientManager:
                 logger.error(f"❌ Failed to load FastEmbed model: {e}")
                 raise RuntimeError(f"Failed to load FastEmbed model: {e}")
 
+    # Standard filterable fields for all collection schemas
+    _FILTERABLE_FIELDS = [
+        "tool_name", "user_email", "user_id", "session_id",
+        "payload_type", "label", "timestamp", "execution_time_ms",
+        "compressed", "user", "service", "tool", "email", "type",
+    ]
+
     async def _ensure_collection(self):
-        """Ensure the Qdrant collection exists with proper configuration and indexes."""
+        """Ensure the Qdrant collection exists with proper configuration and indexes.
+
+        Dispatches to v1 (single vector) or v7 (named vectors) based on config.collection_schema.
+        """
         if not self.client:
             return
 
@@ -325,122 +335,128 @@ class QdrantClientManager:
             collection_names = [c.name for c in collections.collections]
 
             if self.config.collection_name not in collection_names:
-                # Get optimization parameters based on profile
-                optimization_params = self.config.get_optimization_params()
+                if self.config.collection_schema == CollectionSchema.V7_NAMED_VECTORS:
+                    await self._create_collection_v7(qdrant_models)
+                else:
+                    await self._create_collection_v1(qdrant_models)
 
-                # Vector configuration based on optimization profile
-                vector_config = qdrant_models["VectorParams"](
-                    size=self.embedding_dim,
-                    distance=getattr(
-                        qdrant_models["Distance"], self.config.distance.upper()
-                    ),
-                    **optimization_params["vector_config"],
-                )
-
-                # HNSW configuration based on optimization profile
-                hnsw_config = qdrant_models["HnswConfigDiff"](
-                    **optimization_params["hnsw_config"]
-                )
-
-                # Optimizer configuration based on optimization profile
-                optimizer_config = qdrant_models["OptimizersConfigDiff"](
-                    **optimization_params["optimizer_config"]
-                )
-
-                await asyncio.to_thread(
-                    self.client.create_collection,
-                    collection_name=self.config.collection_name,
-                    vectors_config=vector_config,
-                    hnsw_config=hnsw_config,
-                    optimizers_config=optimizer_config,
-                )
-
-                profile_name = self.config.optimization_profile.value
-                description = optimization_params["description"]
-                logger.info(
-                    f"✅ Created Qdrant collection: {self.config.collection_name}"
-                )
-                logger.info(f"🚀 Optimization Profile: {profile_name}")
-                logger.info(f"📊 Profile Description: {description}")
-
-                # Create keyword indexes for filterable fields using KeywordIndexParams
-                filterable_fields = [
-                    # Core indexed fields
-                    "tool_name",
-                    "user_email",
-                    "user_id",
-                    "session_id",
-                    "payload_type",
-                    "label",
-                    # Additional fields for comprehensive search support
-                    "timestamp",
-                    "execution_time_ms",
-                    "compressed",
-                    # Common search aliases
-                    "user",
-                    "service",
-                    "tool",
-                    "email",
-                    "type",
-                ]
-
-                # Create indexes in parallel for faster initialization
+                # Create payload indexes for all schemas
                 await self._create_indexes_parallel(
-                    filterable_fields, qdrant_models, log_prefix="Created"
+                    self._FILTERABLE_FIELDS, qdrant_models, log_prefix="Created"
                 )
-
             else:
                 logger.info(
                     f"✅ Using existing collection: {self.config.collection_name}"
                 )
-                # Check if indexes exist and create them if missing
-                try:
-                    collection_info = await asyncio.to_thread(
-                        self.client.get_collection, self.config.collection_name
-                    )
-
-                    # Get existing payload indexes
-                    existing_indexes = set()
-                    if (
-                        hasattr(collection_info, "payload_schema")
-                        and collection_info.payload_schema
-                    ):
-                        existing_indexes = set(collection_info.payload_schema.keys())
-
-                    # Create missing indexes - comprehensive list with KeywordIndexParams
-                    filterable_fields = [
-                        # Core indexed fields
-                        "tool_name",
-                        "user_email",
-                        "user_id",
-                        "session_id",
-                        "payload_type",
-                        "label",
-                        # Additional fields for comprehensive search support
-                        "timestamp",
-                        "execution_time_ms",
-                        "compressed",
-                        # Common search aliases
-                        "user",
-                        "service",
-                        "tool",
-                        "email",
-                        "type",
-                    ]
-                    # Filter to only missing fields and create in parallel
-                    missing_fields = [
-                        f for f in filterable_fields if f not in existing_indexes
-                    ]
-                    if missing_fields:
-                        await self._create_indexes_parallel(
-                            missing_fields, qdrant_models, log_prefix="Created missing"
-                        )
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not check existing indexes: {e}")
+                await self._ensure_missing_indexes(qdrant_models)
 
         except Exception as e:
             logger.error(f"❌ Failed to ensure collection exists: {e}")
             raise
+
+    async def _create_collection_v1(self, qdrant_models: dict):
+        """Create collection with single vector (v1 schema)."""
+        optimization_params = self.config.get_optimization_params()
+
+        vector_config = qdrant_models["VectorParams"](
+            size=self.embedding_dim,
+            distance=getattr(
+                qdrant_models["Distance"], self.config.distance.upper()
+            ),
+            **optimization_params["vector_config"],
+        )
+
+        hnsw_config = qdrant_models["HnswConfigDiff"](
+            **optimization_params["hnsw_config"]
+        )
+
+        optimizer_config = qdrant_models["OptimizersConfigDiff"](
+            **optimization_params["optimizer_config"]
+        )
+
+        await asyncio.to_thread(
+            self.client.create_collection,
+            collection_name=self.config.collection_name,
+            vectors_config=vector_config,
+            hnsw_config=hnsw_config,
+            optimizers_config=optimizer_config,
+        )
+
+        profile_name = self.config.optimization_profile.value
+        description = optimization_params["description"]
+        logger.info(f"✅ Created Qdrant collection (v1): {self.config.collection_name}")
+        logger.info(f"🚀 Optimization Profile: {profile_name}")
+        logger.info(f"📊 Profile Description: {description}")
+
+    async def _create_collection_v7(self, qdrant_models: dict):
+        """Create collection with 3 named vectors (v7 RIC schema).
+
+        Named vectors:
+          - components (384-dim MiniLM): Tool identity embedding
+          - inputs (384-dim MiniLM): Arguments + response content embedding
+          - relationships (384-dim MiniLM): Service graph + user context embedding
+        """
+        optimization_params = self.config.get_optimization_params()
+        distance = getattr(qdrant_models["Distance"], self.config.distance.upper())
+
+        # All 3 vectors use same MiniLM model (384-dim)
+        vector_params = qdrant_models["VectorParams"](
+            size=self.embedding_dim,
+            distance=distance,
+            **optimization_params["vector_config"],
+        )
+
+        vectors_config = {
+            "components": vector_params,
+            "inputs": vector_params,
+            "relationships": vector_params,
+        }
+
+        hnsw_config = qdrant_models["HnswConfigDiff"](
+            **optimization_params["hnsw_config"]
+        )
+        optimizer_config = qdrant_models["OptimizersConfigDiff"](
+            **optimization_params["optimizer_config"]
+        )
+
+        await asyncio.to_thread(
+            self.client.create_collection,
+            collection_name=self.config.collection_name,
+            vectors_config=vectors_config,
+            hnsw_config=hnsw_config,
+            optimizers_config=optimizer_config,
+        )
+
+        profile_name = self.config.optimization_profile.value
+        description = optimization_params["description"]
+        logger.info(f"✅ Created Qdrant collection (v7 RIC): {self.config.collection_name}")
+        logger.info(f"🚀 Optimization Profile: {profile_name}")
+        logger.info(f"📊 Profile Description: {description}")
+        logger.info("📐 Named vectors: components, inputs, relationships (384-dim each)")
+
+    async def _ensure_missing_indexes(self, qdrant_models: dict):
+        """Check existing indexes and create any missing ones."""
+        try:
+            collection_info = await asyncio.to_thread(
+                self.client.get_collection, self.config.collection_name
+            )
+
+            existing_indexes = set()
+            if (
+                hasattr(collection_info, "payload_schema")
+                and collection_info.payload_schema
+            ):
+                existing_indexes = set(collection_info.payload_schema.keys())
+
+            missing_fields = [
+                f for f in self._FILTERABLE_FIELDS if f not in existing_indexes
+            ]
+            if missing_fields:
+                await self._create_indexes_parallel(
+                    missing_fields, qdrant_models, log_prefix="Created missing"
+                )
+        except Exception as e:
+            logger.warning(f"⚠️ Could not check existing indexes: {e}")
 
     async def _create_indexes_parallel(
         self,

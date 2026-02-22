@@ -23,6 +23,13 @@ class PayloadType(Enum):
     GENERIC = "generic"
 
 
+class CollectionSchema(Enum):
+    """Schema variants for Qdrant collection vector configuration."""
+
+    V1_SINGLE_VECTOR = "v1"  # Single 384-dim vector (legacy default)
+    V7_NAMED_VECTORS = "v7"  # 3 named vectors: components, inputs, relationships (RIC)
+
+
 class OptimizationProfile(Enum):
     """Optimization profiles for different deployment scenarios."""
 
@@ -63,6 +70,11 @@ class QdrantConfig:
 
     # Data retention settings
     cache_retention_days: int = 14
+
+    # Schema settings
+    collection_schema: CollectionSchema = CollectionSchema.V1_SINGLE_VECTOR
+    dual_write: bool = False  # Write to both v1 and v7 schemas during migration
+    v7_collection_name: str = ""  # Explicit v7 collection name (auto-derived if empty)
 
     # Optimization settings
     optimization_profile: OptimizationProfile = OptimizationProfile.CLOUD_LOW_LATENCY
@@ -146,19 +158,29 @@ class QdrantConfig:
             "verbose_param": self.verbose_param,
             "enabled": self.enabled,
             "cache_retention_days": self.cache_retention_days,
+            "collection_schema": self.collection_schema.value,
+            "dual_write": self.dual_write,
+            "v7_collection_name": self.v7_collection_name,
             "optimization_profile": self.optimization_profile.value,
         }
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> "QdrantConfig":
         """Create configuration from dictionary."""
+        config_dict = config_dict.copy()
         # Handle optimization_profile conversion from string to enum
         if "optimization_profile" in config_dict and isinstance(
             config_dict["optimization_profile"], str
         ):
-            config_dict = config_dict.copy()
             config_dict["optimization_profile"] = OptimizationProfile(
                 config_dict["optimization_profile"]
+            )
+        # Handle collection_schema conversion from string to enum
+        if "collection_schema" in config_dict and isinstance(
+            config_dict["collection_schema"], str
+        ):
+            config_dict["collection_schema"] = CollectionSchema(
+                config_dict["collection_schema"]
             )
         return cls(**config_dict)
 
@@ -299,6 +321,24 @@ def load_config_from_settings() -> QdrantConfig:
                 # Invalid profile name, keep default
                 pass
 
+        if os.getenv("QDRANT_COLLECTION_SCHEMA"):
+            try:
+                config.collection_schema = CollectionSchema(
+                    os.getenv("QDRANT_COLLECTION_SCHEMA")
+                )
+            except ValueError:
+                pass
+
+        if os.getenv("QDRANT_DUAL_WRITE"):
+            config.dual_write = os.getenv("QDRANT_DUAL_WRITE").lower() in [
+                "true",
+                "1",
+                "yes",
+            ]
+
+        if os.getenv("QDRANT_V7_COLLECTION"):
+            config.v7_collection_name = os.getenv("QDRANT_V7_COLLECTION")
+
         return config
 
     except ImportError:
@@ -342,5 +382,20 @@ def load_config_from_env() -> QdrantConfig:
         except ValueError:
             # Invalid profile name, keep default
             pass
+
+    if os.getenv("QDRANT_COLLECTION_SCHEMA"):
+        try:
+            config.collection_schema = CollectionSchema(
+                os.getenv("QDRANT_COLLECTION_SCHEMA")
+            )
+        except ValueError:
+            pass
+
+    if os.getenv("QDRANT_DUAL_WRITE"):
+        config.dual_write = os.getenv("QDRANT_DUAL_WRITE").lower() in [
+            "true",
+            "1",
+            "yes",
+        ]
 
     return config
