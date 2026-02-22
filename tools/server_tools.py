@@ -34,18 +34,16 @@ from auth.context import (
 from auth.middleware import CredentialStorageMode
 from config.enhanced_logging import setup_logger
 from config.settings import settings
-from tools.common_types import UserGoogleEmail
+from tools.common_types import GoogleServiceType, UserGoogleEmail
 from tools.dynamic_instructions import refresh_instructions_for_session
 from tools.server_types import (
     CredentialInfo,
     HealthCheckResponse,
     ManageCredentialsResponse,
-    ManageToolsByAnalyticsResponse,
     ManageToolsResponse,
     OAuthFlowStatus,
     SessionToolState,
     ToolInfo,
-    ToolUsageInfo,
 )
 
 logger = setup_logger()
@@ -606,7 +604,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
         name="manage_tools",
         description=(
             "List, enable, or disable FastMCP tools at runtime. Supports both global scope "
-            "(affects all clients) and session scope (affects only current session)."
+            "(affects all clients) and session scope (affects only current session). "
+            "Use service_filter to target all tools for a service (e.g., 'gmail', 'chat', 'drive') "
+            "without needing to know individual tool names."
         ),
         tags={"server", "tools", "feature_flag", "management"},
         annotations={
@@ -653,6 +653,16 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 )
             ),
         ] = "global",
+        service_filter: Annotated[
+            Optional[GoogleServiceType],
+            Field(
+                description=(
+                    "Filter tools by service name (e.g., 'gmail', 'chat', 'drive'). "
+                    "When provided, automatically resolves matching tool names from the registry "
+                    "using extract_service_from_tool(). Can be used instead of tool_names."
+                )
+            ),
+        ] = None,
         include_internal: Annotated[
             bool,
             Field(
@@ -715,7 +725,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
         # Protect critical tools from being disabled
         protected_tools_set = {
             "manage_tools",
-            "manage_tools_by_analytics",
+            "search",
             "health_check",
             "start_google_auth",
             "check_drive_auth",
@@ -899,6 +909,36 @@ def setup_server_tools(mcp: FastMCP) -> None:
             return deduped
 
         target_names = _normalize_tool_names(tool_names)
+
+        # Resolve tool names from service_filter if provided and no explicit tool_names
+        if service_filter and not target_names:
+            from middleware.qdrant_core import extract_service_from_tool
+
+            svc = service_filter.lower().strip()
+            target_names = [
+                name
+                for name in registry.keys()
+                if extract_service_from_tool(name).lower() == svc
+                and name not in protected_tools_set
+                and not name.startswith("_")
+            ]
+            if not target_names:
+                return ManageToolsResponse(
+                    success=False,
+                    action=action,
+                    scope=scope_normalized,
+                    totalTools=total_tools,
+                    enabledCount=enabled_count,
+                    disabledCount=disabled_count,
+                    protectedTools=list(protected_tools_set),
+                    sessionState=(
+                        _get_session_state()
+                        if scope_normalized == "session"
+                        else None
+                    ),
+                    message=f"No tools found matching service '{service_filter}'",
+                    error=f"No registered tools belong to service '{service_filter}'",
+                )
 
         # For some actions, we require at least one concrete tool name
         if (
@@ -1301,336 +1341,6 @@ def setup_server_tools(mcp: FastMCP) -> None:
             error="Unexpected code path reached",
         )
 
-    @mcp.tool(
-        name="manage_tools_by_analytics",
-        description=(
-            "Intelligently disable tools based on Qdrant usage analytics. Query historical "
-            "tool usage data and selectively disable tools matching service filters (e.g., 'gmail', 'chat') "
-            "with configurable usage thresholds. Supports dry-run preview mode before making changes."
-        ),
-        tags={"server", "tools", "qdrant", "analytics", "automation", "management"},
-        annotations={
-            "title": "Qdrant Analytics-Based Tool Management",
-            "readOnlyHint": False,
-            "destructiveHint": True,
-            "idempotentHint": False,
-            "openWorldHint": False,
-        },
-    )
-    async def manage_tools_by_analytics_tool(
-        action: Annotated[
-            Literal["preview", "disable", "enable"],
-            Field(
-                description="Action: 'preview' (show what would be affected), 'disable' (disable matched tools), 'enable' (re-enable matched tools)"
-            ),
-        ],
-        service_filter: Annotated[
-            Optional[str],
-            Field(
-                description="Filter tools by service name (e.g., 'gmail', 'chat', 'drive'). Uses extract_service_from_tool() for matching. Leave empty for all services."
-            ),
-        ] = None,
-        limit: Annotated[
-            int,
-            Field(
-                description="Maximum number of tools to affect (top N by usage count). Default: 10"
-            ),
-        ] = 10,
-        min_usage_count: Annotated[
-            int,
-            Field(
-                description="Minimum usage count threshold - only affect tools with at least this many historical uses. Default: 1"
-            ),
-        ] = 1,
-        min_score: Annotated[
-            Optional[float],
-            Field(
-                description="Minimum relevance score (0.0-1.0) for semantic filtering. Only used with semantic queries. Default: 0.3"
-            ),
-        ] = None,
-        user_google_email: UserGoogleEmail = None,
-    ) -> ManageToolsByAnalyticsResponse:
-        """
-        Manage tools based on Qdrant usage analytics with intelligent filtering.
-
-        This tool leverages Qdrant's historical tool response data to identify
-        and manage tools based on actual usage patterns. Supports service-based
-        filtering and usage thresholds.
-
-        Args:
-            action: Operation to perform - 'preview', 'disable', or 'enable'
-            service_filter: Optional service name filter (gmail, chat, drive, etc.)
-            limit: Maximum number of tools to affect (top N by usage)
-            min_usage_count: Minimum historical usage count threshold
-            min_score: Minimum semantic search relevance score (optional)
-            user_google_email: User's email for access control
-
-        Returns:
-            ManageToolsByAnalyticsResponse with operation results and usage analytics
-        """
-        try:
-            # Import Qdrant components
-            from middleware.qdrant_core.client import get_or_create_client_manager
-            from middleware.qdrant_core.config import load_config_from_settings
-            from middleware.qdrant_core.query_parser import extract_service_from_tool
-            from middleware.qdrant_core.search import QdrantSearchManager
-
-            # Initialize or reuse a shared Qdrant client manager using the same URL/API key
-            config = load_config_from_settings()
-            client_manager = get_or_create_client_manager(
-                config=config,
-                qdrant_api_key=settings.qdrant_api_key,
-                qdrant_url=settings.qdrant_url,
-                auto_discovery=True,
-            )
-            search_manager = QdrantSearchManager(client_manager)
-
-            # Ensure Qdrant is initialized
-            if not client_manager.is_initialized:
-                await client_manager.initialize()
-
-            if not client_manager.is_available:
-                return ManageToolsByAnalyticsResponse(
-                    success=False,
-                    action=action,
-                    serviceFilter=service_filter,
-                    minUsageCount=min_usage_count,
-                    limit=limit,
-                    toolsMatched=0,
-                    message="Qdrant not available - cannot analyze tool usage data",
-                    error="Qdrant is not running or not accessible",
-                )
-
-            # Get analytics grouped by tool_name
-            logger.info("📊 Fetching Qdrant analytics for tool management...")
-            analytics = await search_manager.get_analytics(group_by="tool_name")
-
-            if "error" in analytics:
-                return ManageToolsByAnalyticsResponse(
-                    success=False,
-                    action=action,
-                    serviceFilter=service_filter,
-                    minUsageCount=min_usage_count,
-                    limit=limit,
-                    toolsMatched=0,
-                    message="Failed to retrieve analytics data",
-                    error=str(analytics["error"]),
-                )
-
-            if not analytics.get("groups"):
-                return ManageToolsByAnalyticsResponse(
-                    success=True,
-                    action=action,
-                    serviceFilter=service_filter,
-                    minUsageCount=min_usage_count,
-                    limit=limit,
-                    toolsMatched=0,
-                    message="No tool usage data found in Qdrant. Analytics database may be empty.",
-                )
-
-            # Filter and rank tools based on criteria
-            matched_tools = []
-
-            for tool_name, tool_data in analytics["groups"].items():
-                usage_count = tool_data.get("count", 0)
-
-                # Skip if below usage threshold
-                if usage_count < min_usage_count:
-                    continue
-
-                # Apply service filter if specified
-                if service_filter:
-                    tool_service = extract_service_from_tool(tool_name)
-                    if tool_service.lower() != service_filter.lower():
-                        continue
-
-                matched_tools.append(
-                    {
-                        "tool_name": tool_name,
-                        "usage_count": usage_count,
-                        "service": extract_service_from_tool(tool_name),
-                        "unique_users": tool_data.get("unique_users", 0),
-                        "error_rate": tool_data.get("error_rate", 0.0),
-                        "recent_activity": tool_data.get("recent_activity", {}),
-                        "sample_point_ids": tool_data.get("point_ids", [])[
-                            :3
-                        ],  # First 3 point IDs
-                    }
-                )
-
-            # Sort by usage count (descending) and limit
-            matched_tools.sort(key=lambda x: x["usage_count"], reverse=True)
-            matched_tools = matched_tools[:limit]
-
-            if not matched_tools:
-                filter_desc = (
-                    f" matching service '{service_filter}'" if service_filter else ""
-                )
-                return ManageToolsByAnalyticsResponse(
-                    success=True,
-                    action=action,
-                    serviceFilter=service_filter,
-                    minUsageCount=min_usage_count,
-                    limit=limit,
-                    toolsMatched=0,
-                    message=f"No tools found{filter_desc} with usage count >= {min_usage_count}",
-                )
-
-            # Get current tool registry
-            registry = _get_tool_registry(mcp)
-            if not registry:
-                return ManageToolsByAnalyticsResponse(
-                    success=False,
-                    action=action,
-                    serviceFilter=service_filter,
-                    minUsageCount=min_usage_count,
-                    limit=limit,
-                    toolsMatched=len(matched_tools),
-                    message="Unable to access FastMCP tool registry",
-                    error="Tool registry not available",
-                )
-
-            # Build ToolUsageInfo objects for all matched tools
-            usage_analytics = [
-                ToolUsageInfo(
-                    name=t["tool_name"],
-                    usageCount=t["usage_count"],
-                    service=t["service"],
-                    lastUsed=(
-                        t["recent_activity"].get("last_used")
-                        if t["recent_activity"]
-                        else None
-                    ),
-                    currentlyEnabled=t["tool_name"] in registry,
-                )
-                for t in matched_tools
-            ]
-
-            # Build results based on action
-            if action == "preview":
-                return ManageToolsByAnalyticsResponse(
-                    success=True,
-                    action=action,
-                    serviceFilter=service_filter,
-                    minUsageCount=min_usage_count,
-                    limit=limit,
-                    toolsMatched=len(matched_tools),
-                    usageAnalytics=usage_analytics,
-                    message=f"Preview: Found {len(matched_tools)} tool(s) matching criteria. Use action='disable' or 'enable' to modify.",
-                )
-
-            elif action in ["disable", "enable"]:
-                # Extract tool names to manage
-                target_names = [t["tool_name"] for t in matched_tools]
-
-                # Filter out tools not in registry
-                available_targets = [name for name in target_names if name in registry]
-                missing_targets = [
-                    name for name in target_names if name not in registry
-                ]
-
-                if not available_targets:
-                    return ManageToolsByAnalyticsResponse(
-                        success=False,
-                        action=action,
-                        serviceFilter=service_filter,
-                        minUsageCount=min_usage_count,
-                        limit=limit,
-                        toolsMatched=len(matched_tools),
-                        usageAnalytics=usage_analytics,
-                        message="None of the matched tools are currently registered in FastMCP",
-                        error="No available targets in registry",
-                    )
-
-                # Check for protected tools
-                protected_tools = {
-                    "manage_tools",
-                    "manage_tools_by_analytics",
-                    "health_check",
-                    "start_google_auth",
-                    "check_drive_auth",
-                }
-
-                protected_in_targets = [
-                    name for name in available_targets if name in protected_tools
-                ]
-                safe_targets = [
-                    name for name in available_targets if name not in protected_tools
-                ]
-
-                affected_tools: List[str] = []
-                skipped_tools: List[str] = list(protected_in_targets)
-                errors: List[str] = []
-
-                # Execute action on safe targets (FastMCP 3.0+ API)
-                if action == "disable":
-                    for name in safe_targets:
-                        try:
-                            # FastMCP 3.0: Use server-level disable with names parameter
-                            mcp.disable(names={name})
-                            affected_tools.append(name)
-                        except Exception as e:
-                            logger.error(
-                                f"Error disabling tool {name}: {e}", exc_info=True
-                            )
-                            errors.append(f"Failed to disable '{name}': {e}")
-
-                elif action == "enable":
-                    for name in safe_targets:
-                        try:
-                            # FastMCP 3.0: Use server-level enable with names parameter
-                            mcp.enable(names={name})
-                            affected_tools.append(name)
-                        except Exception as e:
-                            logger.error(
-                                f"Error enabling tool {name}: {e}", exc_info=True
-                            )
-                            errors.append(f"Failed to enable '{name}': {e}")
-
-                # Add missing targets to skipped
-                skipped_tools.extend(missing_targets)
-
-                return ManageToolsByAnalyticsResponse(
-                    success=len(errors) == 0,
-                    action=action,
-                    serviceFilter=service_filter,
-                    minUsageCount=min_usage_count,
-                    limit=limit,
-                    toolsMatched=len(matched_tools),
-                    toolsAffected=affected_tools if affected_tools else None,
-                    toolsSkipped=skipped_tools if skipped_tools else None,
-                    usageAnalytics=usage_analytics,
-                    message=f"Successfully {action}d {len(affected_tools)} tool(s). {len(skipped_tools)} skipped (protected or missing).",
-                    errors=errors if errors else None,
-                )
-
-            else:
-                return ManageToolsByAnalyticsResponse(
-                    success=False,
-                    action=action,
-                    serviceFilter=service_filter,
-                    minUsageCount=min_usage_count,
-                    limit=limit,
-                    toolsMatched=0,
-                    message=f"Invalid action '{action}'",
-                    error="Valid actions are: preview, disable, enable",
-                )
-
-        except Exception as e:
-            logger.error(
-                f"❌ Analytics-based tool management failed: {e}", exc_info=True
-            )
-            return ManageToolsByAnalyticsResponse(
-                success=False,
-                action=action,
-                serviceFilter=service_filter,
-                minUsageCount=min_usage_count,
-                limit=limit,
-                toolsMatched=0,
-                message="Tool management by analytics failed",
-                error=str(e),
-            )
-
     logger.info(
-        "✅ Server management tools registered: health_check, server_info, manage_credentials, manage_tools, manage_tools_by_analytics"
+        "✅ Server management tools registered: health_check, server_info, manage_credentials, manage_tools"
     )

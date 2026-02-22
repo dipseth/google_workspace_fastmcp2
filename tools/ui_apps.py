@@ -15,7 +15,7 @@ _TOOLS_PLACEHOLDER = "/*__MCP_TOOLS_DATA__*/"
 
 _PROTECTED_TOOLS = {
     "manage_tools",
-    "manage_tools_by_analytics",
+    "search",
     "health_check",
     "start_google_auth",
     "check_drive_auth",

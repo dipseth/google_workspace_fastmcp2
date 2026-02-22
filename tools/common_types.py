@@ -14,7 +14,7 @@ with the middleware's auto-injection mechanism.
 from typing import Optional
 
 from pydantic import Field
-from typing_extensions import Annotated, Literal
+from typing_extensions import Annotated
 
 # Custom annotated type for user_google_email parameter
 # This type is used across all Google service MCP tools to ensure consistent
@@ -99,25 +99,8 @@ UserGoogleEmailGeneric = Annotated[
     ),
 ]
 
-# ServiceType literal based on auth/scope_registry.py GOOGLE_API_SCOPES keys
-# This provides type safety for service parameters in resource and tool functions
-GoogleServiceType = Literal[
-    "base",  # Base OAuth scopes
-    "drive",  # Google Drive
-    "gmail",  # Gmail
-    "calendar",  # Google Calendar
-    "docs",  # Google Docs
-    "sheets",  # Google Sheets
-    "chat",  # Google Chat
-    "forms",  # Google Forms
-    "slides",  # Google Slides
-    "photos",  # Google Photos
-    "admin",  # Admin Directory API
-    "cloud",  # Google Cloud Platform
-    "tasks",  # Google Tasks
-    "youtube",  # YouTube
-    "script",  # Google Apps Script
-]
+# Re-export the canonical service type from auth/service_types.py
+from auth.service_types import GoogleServiceType  # noqa: E402
 
 # Annotated service type for tool parameters
 ServiceTypeAnnotated = Annotated[

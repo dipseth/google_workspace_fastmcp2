@@ -2,7 +2,7 @@
 Type definitions for server management tool responses.
 
 These Pydantic BaseModel classes define the structure of data returned by server
-management tools (health_check, manage_credentials, manage_tools, manage_tools_by_analytics),
+management tools (health_check, manage_credentials, manage_tools),
 enabling FastMCP to automatically generate JSON schemas with rich field descriptions
 for better MCP client integration.
 """
