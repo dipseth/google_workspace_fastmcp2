@@ -141,6 +141,15 @@ class QdrantUnifiedMiddleware(Middleware):
             self.client_manager, self.search_manager
         )
 
+        # Wire RIC provider for v7 tool response storage
+        self._tool_relationship_graph = None
+        try:
+            from middleware.qdrant_core.tool_response_provider import ToolResponseProvider
+            provider = ToolResponseProvider(tool_graph=self._tool_relationship_graph)
+            self.storage_manager.set_ric_provider(provider)
+        except Exception as e:
+            logger.debug(f"Could not set up ToolResponseProvider: {e}")
+
         # Store original parameters for compatibility
         self.qdrant_host = qdrant_host
         self.qdrant_port = qdrant_port
@@ -217,7 +226,9 @@ class QdrantUnifiedMiddleware(Middleware):
                 f"🚀 Starting background middleware initialization from {context_name} (embedding model and reindexing)"
             )
             # Start full middleware initialization in background - don't wait for it
-            asyncio.create_task(self.initialize_middleware_and_reindexing())
+            # Track via client_manager so it's cancelled on shutdown
+            init_task = asyncio.create_task(self.initialize_middleware_and_reindexing())
+            self.client_manager._track_task(init_task)
 
     async def on_list_tools(self, context, call_next):
         """
@@ -267,6 +278,21 @@ class QdrantUnifiedMiddleware(Middleware):
             # Calculate execution time
             execution_time_ms = int((time.time() - start_time) * 1000)
 
+            # Record in tool relationship graph (non-blocking)
+            if self._tool_relationship_graph is not None:
+                try:
+                    from middleware.qdrant_core.query_parser import extract_service_from_tool
+                    service = extract_service_from_tool(tool_name)
+                    session_id_for_graph = await get_session_context() or ""
+                    self._tool_relationship_graph.record_tool_call(
+                        tool_name=tool_name,
+                        service=service,
+                        session_id=session_id_for_graph,
+                        execution_time_ms=execution_time_ms,
+                    )
+                except Exception as e:
+                    logger.debug(f"Tool graph recording failed: {e}")
+
             # Enhanced user email extraction with priority order
             user_email = None
 
@@ -299,8 +325,9 @@ class QdrantUnifiedMiddleware(Middleware):
             session_id = await get_session_context()
 
             # Store response in Qdrant asynchronously (non-blocking via storage manager)
+            # Track the task via client_manager so it can be cancelled on shutdown
             logger.info(f"📝 Storing response for tool: {tool_name}")
-            asyncio.create_task(
+            store_task = asyncio.create_task(
                 self.storage_manager._store_response_with_params(
                     tool_name=tool_name,
                     tool_args=tool_args,
@@ -310,6 +337,7 @@ class QdrantUnifiedMiddleware(Middleware):
                     user_email=user_email,
                 )
             )
+            self.client_manager._track_task(store_task)
 
             return response
 
@@ -387,6 +415,25 @@ class QdrantUnifiedMiddleware(Middleware):
 
             # Let the registered resource handler process with cached error
             return await call_next(context)
+
+    def set_tool_relationship_graph(self, graph) -> None:
+        """Set the tool relationship graph for co-occurrence tracking.
+
+        When set, tool calls are recorded in the graph via on_call_tool,
+        and the ToolResponseProvider uses it for richer relationship text.
+
+        Args:
+            graph: A ToolRelationshipGraph instance
+        """
+        self._tool_relationship_graph = graph
+        # Update the provider with the graph
+        try:
+            from middleware.qdrant_core.tool_response_provider import ToolResponseProvider
+            provider = ToolResponseProvider(tool_graph=graph)
+            self.storage_manager.set_ric_provider(provider)
+            logger.info("Updated ToolResponseProvider with relationship graph")
+        except Exception as e:
+            logger.warning(f"Could not update ToolResponseProvider: {e}")
 
     # Public API methods that delegate to managers
     async def search(

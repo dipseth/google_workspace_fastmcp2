@@ -165,6 +165,7 @@ class QdrantSearchResultItem(BaseModel):
     service: str = Field(description="Service name (gmail, drive, etc.)")
     timestamp: str = Field(description="When the response was stored")
     user_email: str = Field(description="User email associated with the response")
+    payload: Optional[Dict[str, Any]] = Field(default=None, description="Raw point payload (included when searching non-default collections)")
 
 
 class QdrantDocumentMetadata(BaseModel):
@@ -203,13 +204,23 @@ class QdrantToolSearchResponse(BaseModel):
     results: List[QdrantSearchResultItem] = Field(description="Search results")
     query: str = Field(description="The search query used")
     query_type: str = Field(
-        description="Type of query (semantic, service_history, etc.)"
+        description="Type of query (semantic, service_history, dsl, etc.)"
     )
     total_results: int = Field(description="Number of results found")
     processing_time_ms: float = Field(description="Time taken to process the search")
     collection_name: str = Field(description="Qdrant collection name")
     error: Optional[str] = Field(
         default=None, description="Error message if search failed"
+    )
+    dsl_input: Optional[str] = Field(
+        default=None, description="DSL filter string when using DSL search mode"
+    )
+    built_filter_repr: Optional[str] = Field(
+        default=None, description="Debug repr of built filter object"
+    )
+    search_vector: Optional[str] = Field(
+        default=None,
+        description="Named vector used for search (e.g., 'components', 'inputs', 'relationships')",
     )
 
 
