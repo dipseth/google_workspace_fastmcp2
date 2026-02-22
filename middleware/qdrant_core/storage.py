@@ -1436,8 +1436,9 @@ class QdrantStorageManager:
                     logger.warning(f"⚠️ Background reindexing error (will retry): {e}")
                     # Continue the loop despite errors
 
-        # Start the background task
-        asyncio.create_task(background_reindex_loop())
+        # Start the background task — track it so it can be cancelled on shutdown
+        task = asyncio.create_task(background_reindex_loop())
+        self.client_manager._track_task(task)
 
     def get_storage_info(self) -> Dict[str, Any]:
         """

@@ -26,6 +26,16 @@ services:
       # Override specific environment variables if needed
       - PYTHONUNBUFFERED=1
       - SERVER_HOST=0.0.0.0
+    # Memory limits prevent runaway consumption from embedding models or cache growth
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    # Ensure Python receives SIGTERM for graceful lifespan shutdown
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
     restart: unless-stopped
     networks:
       - fastmcp-network
@@ -33,7 +43,9 @@ services:
       qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      # Use lightweight /ready endpoint (not /health which runs full diagnostics)
+      # This avoids triggering expensive health_check() every 30s in the container
+      test: ["CMD", "curl", "-f", "http://localhost:8002/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
