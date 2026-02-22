@@ -598,6 +598,7 @@ class DSLParser:
         tokens = []
         i = 0
         s = dsl_string.strip()
+        brace_depth = 0  # Track {…} nesting for parameterized context
 
         while i < len(s):
             char = s[i]
@@ -620,11 +621,13 @@ class DSLParser:
 
             # Parameterized braces
             if char == "{":
+                brace_depth += 1
                 tokens.append(DSLToken(type="param_open", value="{", position=i))
                 i += 1
                 continue
 
             if char == "}":
+                brace_depth = max(0, brace_depth - 1)
                 tokens.append(DSLToken(type="param_close", value="}", position=i))
                 i += 1
                 continue
@@ -680,7 +683,49 @@ class DSLParser:
                 i = j
                 continue
 
-            # Known symbol
+            # Multi-char ASCII word check — MUST come before symbol/confusable
+            # checks to prevent consuming the first char of identifiers like
+            # "RecommendQuery", "value", "match", etc. as an ASCII-confusable
+            # symbol (e.g., 'v' → 'ỽ' for VectorDataConfig, 'R' → Range sym).
+            # Works at ALL brace depths (root level and inside {…}).
+            if char.isalpha() or char == "_":
+                j = i
+                while j < len(s) and (s[j].isalnum() or s[j] == "_"):
+                    j += 1
+                word = s[i:j]
+
+                # Multi-char words are always identifiers/keywords, not symbols
+                if len(word) > 1:
+                    if word in ("true", "True"):
+                        tokens.append(
+                            DSLToken(type="boolean", value="true", position=i)
+                        )
+                    elif word in ("false", "False"):
+                        tokens.append(
+                            DSLToken(type="boolean", value="false", position=i)
+                        )
+                    elif word in ("null", "None", "none"):
+                        tokens.append(DSLToken(type="null", value="null", position=i))
+                    elif word in self._symbol_mapping:
+                        sym = self._symbol_mapping[word]
+                        tokens.append(DSLToken(type="symbol", value=sym, position=i))
+                    else:
+                        peek = j
+                        while peek < len(s) and s[peek] in " \t":
+                            peek += 1
+                        if peek < len(s) and s[peek] == "=":
+                            tokens.append(
+                                DSLToken(type="identifier", value=word, position=i)
+                            )
+                        else:
+                            tokens.append(
+                                DSLToken(type="component_name", value=word, position=i)
+                            )
+                    i = j
+                    continue
+                # Single char — fall through to symbol/confusable checks below
+
+            # Known Unicode symbol (single char)
             if char in self._all_symbols:
                 tokens.append(DSLToken(type="symbol", value=char, position=i))
                 i += 1
@@ -691,41 +736,6 @@ class DSLParser:
                 resolved = self._ascii_confusables[char]
                 tokens.append(DSLToken(type="symbol", value=resolved, position=i))
                 i += 1
-                continue
-
-            # Component name or keyword (alphanumeric)
-            if char.isalpha() or char == "_":
-                j = i
-                while j < len(s) and (s[j].isalnum() or s[j] == "_"):
-                    j += 1
-                word = s[i:j]
-
-                # Check for boolean/null keywords
-                if word in ("true", "True"):
-                    tokens.append(DSLToken(type="boolean", value="true", position=i))
-                elif word in ("false", "False"):
-                    tokens.append(DSLToken(type="boolean", value="false", position=i))
-                elif word in ("null", "None", "none"):
-                    tokens.append(DSLToken(type="null", value="null", position=i))
-                elif word in self._symbol_mapping:
-                    # Known component name → convert to symbol token
-                    sym = self._symbol_mapping[word]
-                    tokens.append(DSLToken(type="symbol", value=sym, position=i))
-                else:
-                    # Check if it looks like a parameter name (followed by =)
-                    # or an unknown component name
-                    peek = j
-                    while peek < len(s) and s[peek] in " \t":
-                        peek += 1
-                    if peek < len(s) and s[peek] == "=":
-                        tokens.append(
-                            DSLToken(type="identifier", value=word, position=i)
-                        )
-                    else:
-                        tokens.append(
-                            DSLToken(type="component_name", value=word, position=i)
-                        )
-                i = j
                 continue
 
             # Unknown character - skip with warning

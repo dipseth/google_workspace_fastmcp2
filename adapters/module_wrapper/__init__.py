@@ -89,7 +89,7 @@ from adapters.module_wrapper.embedding_mixin import (
 from adapters.module_wrapper.graph_mixin import (
     ComponentMetadataProvider,
     GraphMixin,
-    _get_networkx,
+    _get_rustworkx,
 )
 from adapters.module_wrapper.indexing_mixin import (
     STD_LIB_PREFIXES,
@@ -105,6 +105,7 @@ from adapters.module_wrapper.instance_pattern_mixin import (
     VariationFamily,
 )
 from adapters.module_wrapper.pipeline_mixin import PipelineMixin
+from adapters.module_wrapper.ric_provider import IntrospectionProvider, RICTextProvider
 
 # =============================================================================
 # MIXINS
@@ -535,12 +536,43 @@ class ModuleWrapper(
         _ = self.symbol_mapping
 
     def _run_v7_pipeline_background(self, v7_name: str):
-        """Run the v7 ingestion pipeline in a background thread."""
+        """Run the v7 ingestion pipeline in a background thread.
+
+        NOTE: force_recreate=False because _initialize_v7() already handles
+        collection deletion when the schema is wrong or force_reindex is set.
+        Using force_recreate=True here was causing a full re-index on every
+        server restart, pegging CPU for several minutes while ColBERT embeds
+        900+ components unnecessarily.
+        """
         try:
+            # Safety guard: re-check if collection already has data.
+            # Between _initialize_v7() scheduling this thread and the thread
+            # actually starting, Qdrant may have finished loading persisted data
+            # (especially in Docker where depends_on: qdrant is used).
+            try:
+                collections = self.client.get_collections()
+                collection_names = [c.name for c in collections.collections]
+                if v7_name in collection_names:
+                    info = self.client.get_collection(v7_name)
+                    vectors_config = info.config.params.vectors
+                    is_v7 = isinstance(vectors_config, dict)
+                    if is_v7 and info.points_count > 0 and not self.force_reindex:
+                        logger.info(
+                            f"[BG] V7 collection {v7_name} already has "
+                            f"{info.points_count} points — skipping expensive pipeline"
+                        )
+                        # Still load components into memory if not already loaded
+                        if not self.components:
+                            self._load_existing_components_v7(v7_name)
+                        self._v7_pipeline_status = "completed"
+                        return
+            except Exception as e:
+                logger.debug(f"[BG] Pre-flight check failed (proceeding with pipeline): {e}")
+
             logger.info(f"[BG] V7 pipeline starting for {v7_name}...")
             result = self.run_ingestion_pipeline(
                 collection_name=v7_name,
-                force_recreate=True,
+                force_recreate=False,
                 include_instance_patterns=False,
             )
             component_count = result.get("components", 0)
@@ -664,7 +696,6 @@ class ModuleWrapper(
                 docstring=payload.get("docstring", ""),
                 source=payload.get("source", ""),
                 parent=None,
-                children={},
             )
             self.components[full_path] = component
 
@@ -715,6 +746,9 @@ __all__ = [
     "SymbolsMixin",
     "SkillsMixin",
     "PipelineMixin",
+    # RIC provider system
+    "RICTextProvider",
+    "IntrospectionProvider",
     "GraphMixin",
     "ComponentMetadataProvider",
     "CacheMixin",
@@ -735,7 +769,7 @@ __all__ = [
     "_get_numpy",
     "_get_fastembed",
     "_get_colbert_embed",
-    "_get_networkx",
+    "_get_rustworkx",
     # Symbol generation
     "SymbolGenerator",
     "StyleRule",

@@ -19,6 +19,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
+from adapters.module_wrapper.ric_provider import IntrospectionProvider, RICTextProvider
 from adapters.module_wrapper.types import (
     COLBERT_DIM as _COLBERT_DIM,
 )
@@ -234,6 +235,77 @@ class PipelineMixin:
     _colbert_embedder: Any = None
     _relationships_embedder: Any = None
 
+    # RIC provider registry
+    _ric_providers: Dict[str, RICTextProvider] = {}
+    _default_ric_provider: Optional[RICTextProvider] = None
+
+    def register_ric_provider(self, provider: RICTextProvider) -> None:
+        """Register a RIC text provider for a component type.
+
+        Args:
+            provider: A RICTextProvider implementation
+        """
+        self._ric_providers[provider.component_type] = provider
+        logger.info(f"Registered RIC provider for component_type={provider.component_type!r}")
+
+    def get_ric_provider(self, component_type: str) -> RICTextProvider:
+        """Get the RIC text provider for a component type.
+
+        Falls back to the default IntrospectionProvider if no specific
+        provider is registered for the given type.
+
+        Args:
+            component_type: e.g. "class", "function", "tool_response"
+
+        Returns:
+            The matching RICTextProvider
+        """
+        if component_type in self._ric_providers:
+            return self._ric_providers[component_type]
+        if self._default_ric_provider is None:
+            self._default_ric_provider = IntrospectionProvider()
+        return self._default_ric_provider
+
+    def _build_provider_metadata(
+        self,
+        component,
+        relationships_by_parent: Dict[str, list],
+        structure_validator=None,
+    ) -> Dict[str, Any]:
+        """Build the metadata dict that providers consume.
+
+        Constructs a flat dict from a ModuleComponent + pipeline context
+        so providers don't need to know about ModuleComponent internals.
+
+        Args:
+            component: A ModuleComponent instance
+            relationships_by_parent: Pre-computed relationship map
+            structure_validator: Optional StructureValidator for enriched text
+
+        Returns:
+            Dict with all fields providers may need
+        """
+        comp_name = component.name
+        comp_type = component.component_type
+        rels = (
+            relationships_by_parent.get(comp_name, [])
+            if comp_type == "class"
+            else []
+        )
+        symbols = getattr(self, "symbol_mapping", {}) or {}
+
+        return {
+            "component": component,
+            "component_type": comp_type,
+            "full_path": component.full_path,
+            "module_path": component.module_path,
+            "docstring": component.docstring or "",
+            "source": component.source or "",
+            "relationships": rels,
+            "structure_validator": structure_validator,
+            "symbols": getattr(structure_validator, "symbols", {}) if structure_validator else symbols,
+        }
+
     def get_v7_collection_name(self) -> str:
         """Get the v7 collection name for this module."""
         if self._v7_collection_name:
@@ -429,41 +501,25 @@ class PipelineMixin:
 
         for i, (path, component) in enumerate(self.components.items()):
             try:
-                # Build component text with symbol wrapping
-                component_text = f"Name: {component.name}\nType: {component.component_type}\nPath: {component.full_path}"
-                if component.docstring:
-                    component_text += f"\nDocumentation: {component.docstring[:500]}"
+                # Provider-dispatched text generation
+                provider = self.get_ric_provider(component.component_type)
+                metadata = self._build_provider_metadata(
+                    component, relationships_by_parent, structure_validator
+                )
 
+                # Generate raw text via provider
+                component_text = provider.component_text(component.name, metadata)
+                inputs_text = provider.inputs_text(component.name, metadata)
+                relationship_text = provider.relationships_text(component.name, metadata)
+
+                # Symbol wrapping for ColBERT vectors (not for MiniLM relationships)
                 component_symbol = self.get_symbol_for_component(component.name)
                 component_text = self.get_symbol_wrapped_text(
                     component.name, component_text
                 )
-
-                # Build inputs text
-                inputs_text = extract_input_values(component)
                 inputs_text = self.get_symbol_wrapped_text(component.name, inputs_text)
 
-                # Build relationships text
-                rels = (
-                    relationships_by_parent.get(component.name, [])
-                    if component.component_type == "class"
-                    else []
-                )
-                if (
-                    structure_validator
-                    and component.component_type == "class"
-                    and component.name in getattr(structure_validator, "symbols", {})
-                ):
-                    relationship_text = (
-                        structure_validator.get_enriched_relationship_text(
-                            component.name
-                        )
-                    )
-                else:
-                    relationship_text = build_compact_relationship_text(
-                        component.name, rels, component.component_type
-                    )
-
+                rels = metadata["relationships"]
                 child_classes = (
                     list(set(r["child_class"] for r in rels)) if rels else []
                 )
@@ -759,4 +815,6 @@ __all__ = [
     "format_instance_params",
     "COLBERT_DIM",
     "RELATIONSHIPS_DIM",
+    "RICTextProvider",
+    "IntrospectionProvider",
 ]
