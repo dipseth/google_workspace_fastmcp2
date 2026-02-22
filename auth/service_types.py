@@ -48,19 +48,30 @@ def _get_service_names_literal():
 # Get the actual service names at import time
 _AVAILABLE_SERVICES = _get_service_names_literal()
 
-# Dynamic Literal type based on actual available services from scope registry
-GoogleServiceName = Literal[
-    "drive",
-    "gmail",
-    "calendar",
-    "docs",
-    "sheets",
-    "chat",
-    "forms",
-    "slides",
-    "photos",
-    "tasks",
+# Canonical service type — the single source of truth for all service names.
+# Combines core services (from ScopeRegistry.SERVICE_METADATA) with additional
+# scope-level services (from GOOGLE_API_SCOPES) for comprehensive type safety.
+GoogleServiceType = Literal[
+    "base",      # Base OAuth scopes
+    "drive",     # Google Drive
+    "gmail",     # Gmail
+    "calendar",  # Google Calendar
+    "docs",      # Google Docs
+    "sheets",    # Google Sheets
+    "chat",      # Google Chat
+    "forms",     # Google Forms
+    "slides",    # Google Slides
+    "photos",    # Google Photos
+    "people",    # Google People / Contacts
+    "tasks",     # Google Tasks
+    "admin",     # Admin Directory API
+    "cloud",     # Google Cloud Platform
+    "youtube",   # YouTube
+    "script",    # Google Apps Script
 ]
+
+# Backward-compatible alias
+GoogleServiceName = GoogleServiceType
 
 # Service display names dynamically constructed from scope registry metadata
 GoogleServiceDisplayName = Literal[
