@@ -300,6 +300,43 @@ def print_test_result(test_name: str, result: Dict, verbose: bool = True):
             print(f"   Middleware injection: {middleware_status}")
 
 
+async def ensure_tools_enabled(
+    client: Client,
+    tool_names: Optional[List[str]] = None,
+    service_filter: Optional[str] = None,
+) -> bool:
+    """Enable specific tools or all tools for the current session.
+
+    Useful for tests that depend on tools which are disabled by default
+    in minimal startup mode.
+
+    Args:
+        client: The MCP client.
+        tool_names: Specific tool names to enable. Mutually exclusive with service_filter.
+        service_filter: Enable all tools for a service (e.g., 'gmail', 'drive').
+        If neither is provided, enables all tools.
+
+    Returns:
+        True on success, False on failure (logs a warning instead of raising).
+    """
+    try:
+        params: Dict[str, Any] = {"action": "enable", "scope": "session"}
+        if tool_names:
+            params["tool_names"] = tool_names
+        elif service_filter:
+            params["service_filter"] = service_filter
+        else:
+            params["action"] = "enable_all"
+
+        await client.call_tool("manage_tools", params)
+        return True
+    except Exception as e:
+        import warnings
+
+        warnings.warn(f"Could not enable tools for test: {e}", stacklevel=2)
+        return False
+
+
 def get_common_test_tools(service: str) -> List[str]:
     """Get list of common tools to test for each service."""
     service_tools = {

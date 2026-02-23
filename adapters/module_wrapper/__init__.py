@@ -108,6 +108,16 @@ from adapters.module_wrapper.pipeline_mixin import PipelineMixin
 from adapters.module_wrapper.ric_provider import IntrospectionProvider, RICTextProvider
 
 # =============================================================================
+# RELATIONSHIP STRATEGIES & TOOL GRAPH
+# =============================================================================
+from adapters.module_wrapper.behavioral_relationships import (
+    BehavioralRelationshipStrategy,
+    RelationshipStrategy,
+    StructuralRelationshipStrategy,
+)
+from adapters.module_wrapper.tool_relationship_graph import ToolRelationshipGraph
+
+# =============================================================================
 # MIXINS
 # =============================================================================
 from adapters.module_wrapper.qdrant_mixin import (
@@ -749,6 +759,11 @@ __all__ = [
     # RIC provider system
     "RICTextProvider",
     "IntrospectionProvider",
+    # Relationship strategies & tool graph
+    "RelationshipStrategy",
+    "StructuralRelationshipStrategy",
+    "BehavioralRelationshipStrategy",
+    "ToolRelationshipGraph",
     "GraphMixin",
     "ComponentMetadataProvider",
     "CacheMixin",

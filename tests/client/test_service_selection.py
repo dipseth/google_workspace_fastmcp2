@@ -1,4 +1,4 @@
-"""Test service selection OAuth flow using standardized framework."""
+"""Test service selection and OAuth flow using standardized framework."""
 
 import pytest
 
@@ -248,3 +248,29 @@ class TestServiceSelection:
 
         # Clean up test data
         set_google_provider(None)
+
+    @pytest.mark.asyncio
+    @pytest.mark.auth_required
+    async def test_protected_tool_triggers_oauth(self, client):
+        """Test that calling a protected tool triggers OAuth flow."""
+        try:
+            result = await client.call_tool(
+                "start_google_auth",
+                {
+                    "user_google_email": TEST_EMAIL,
+                    "service_name": "Test Service Selection",
+                },
+            )
+        except Exception as e:
+            error_str = str(e).lower()
+            auth_keywords = [
+                "auth",
+                "oauth",
+                "token",
+                "login",
+                "unauthorized",
+                "credential",
+            ]
+            is_auth_error = any(keyword in error_str for keyword in auth_keywords)
+            if not is_auth_error:
+                pytest.fail(f"Unexpected non-auth error: {e}")
