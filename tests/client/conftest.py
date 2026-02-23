@@ -182,6 +182,14 @@ async def _cleanup_resources(client) -> dict[str, Any]:
 
     Returns a summary of cleanup operations performed.
     """
+    # Enable all tools so cleanup operations work even in minimal startup mode
+    try:
+        await client.call_tool(
+            "manage_tools", {"action": "enable_all", "scope": "session"}
+        )
+    except Exception as e:
+        print(f"⚠️ Could not enable tools for cleanup: {e}")
+
     tracker = get_cleanup_tracker()
     results = {
         "calendar_events_deleted": 0,

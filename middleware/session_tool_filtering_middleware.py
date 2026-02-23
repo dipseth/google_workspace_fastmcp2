@@ -344,7 +344,7 @@ class SessionToolFilteringMiddleware(Middleware):
         """
         self.protected_tools = protected_tools or {
             "manage_tools",
-            "manage_tools_by_analytics",
+            "search",
             "health_check",
             "start_google_auth",
             "check_drive_auth",

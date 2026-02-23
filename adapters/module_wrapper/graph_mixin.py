@@ -2,7 +2,7 @@
 Graph-Based Relationship Mixin
 
 Provides DAG (Directed Acyclic Graph) representation of component relationships
-using NetworkX. This complements the existing dict-based relationships with
+using Rustworkx. This complements the existing dict-based relationships with
 proper graph traversal capabilities.
 
 Key Features:
@@ -31,6 +31,7 @@ Usage:
 
 import json
 import logging
+from collections import deque
 from typing import Any, Dict, List, Optional, Protocol, Set, Tuple, runtime_checkable
 
 from adapters.module_wrapper.types import (
@@ -88,23 +89,26 @@ class ComponentMetadataProvider(Protocol):
         ...
 
 
-# Lazy import for NetworkX
-_networkx = None
+# Lazy import for Rustworkx
+_rustworkx = None
+
+# Type alias for graph return types
+GraphType = Any  # rx.PyDiGraph at runtime
 
 
-def _get_networkx():
-    """Lazy load NetworkX to avoid import overhead."""
-    global _networkx
-    if _networkx is None:
+def _get_rustworkx():
+    """Lazy load Rustworkx to avoid import overhead."""
+    global _rustworkx
+    if _rustworkx is None:
         try:
-            import networkx as nx
+            import rustworkx as rx
 
-            _networkx = nx
-            logger.debug("NetworkX loaded successfully")
+            _rustworkx = rx
+            logger.debug("Rustworkx loaded successfully")
         except ImportError:
-            logger.warning("NetworkX not installed. Install with: pip install networkx")
+            logger.warning("Rustworkx not installed. Install with: pip install rustworkx")
             raise
-    return _networkx
+    return _rustworkx
 
 
 class GraphMixin:
@@ -134,6 +138,10 @@ class GraphMixin:
         self._relationship_graph = None
         self._graph_built = False
 
+        # Bidirectional name↔index mappings for Rustworkx
+        self._name_to_idx: Dict[str, int] = {}
+        self._idx_to_name: Dict[int, str] = {}
+
         # Component metadata registries (populated by domain-specific wrappers)
         self._context_resources: Dict[
             str, Tuple[str, str]
@@ -155,12 +163,75 @@ class GraphMixin:
         self._empty_components: Set[str] = set()  # components with no content params
 
     # =========================================================================
+    # INTERNAL HELPERS (name↔index mapping, BFS utilities)
+    # =========================================================================
+
+    def _add_graph_node(self, graph, name: str, **attrs) -> int:
+        """Add a node to the graph and update bidirectional mappings.
+
+        If the node already exists, returns its existing index.
+        """
+        if name in self._name_to_idx:
+            return self._name_to_idx[name]
+        idx = graph.add_node({"name": name, **attrs})
+        self._name_to_idx[name] = idx
+        self._idx_to_name[idx] = name
+        return idx
+
+    def _get_idx(self, name: str) -> Optional[int]:
+        """Get node index for a component name."""
+        return self._name_to_idx.get(name)
+
+    def _get_name(self, idx: int) -> Optional[str]:
+        """Get component name for a node index."""
+        return self._idx_to_name.get(idx)
+
+    def _bfs_with_depth_limit(self, graph, start_idx: int, max_depth: int) -> Set[int]:
+        """BFS traversal following successors with depth limit.
+
+        Returns set of reachable node indices (including start).
+        """
+        visited = {start_idx}
+        queue = deque([(start_idx, 0)])
+        while queue:
+            node, depth = queue.popleft()
+            if depth >= max_depth:
+                continue
+            for successor in graph.successor_indices(node):
+                if successor not in visited:
+                    visited.add(successor)
+                    queue.append((successor, depth + 1))
+        return visited
+
+    def _undirected_bfs_within_radius(
+        self, graph, start_idx: int, radius: int
+    ) -> Set[int]:
+        """BFS on both successors and predecessors within radius.
+
+        Returns set of reachable node indices (including start).
+        """
+        visited = {start_idx}
+        queue = deque([(start_idx, 0)])
+        while queue:
+            node, dist = queue.popleft()
+            if dist >= radius:
+                continue
+            neighbors = set(graph.successor_indices(node)) | set(
+                graph.predecessor_indices(node)
+            )
+            for neighbor in neighbors:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, dist + 1))
+        return visited
+
+    # =========================================================================
     # GRAPH CONSTRUCTION
     # =========================================================================
 
-    def build_relationship_graph(self, force: bool = False) -> "nx.DiGraph":
+    def build_relationship_graph(self, force: bool = False) -> GraphType:
         """
-        Build a NetworkX DiGraph from the existing relationships dict.
+        Build a Rustworkx PyDiGraph from the existing relationships dict.
 
         The graph represents containment relationships where an edge from
         A → B means "A can contain B".
@@ -169,15 +240,17 @@ class GraphMixin:
             force: Rebuild even if graph already exists
 
         Returns:
-            NetworkX DiGraph with component nodes and containment edges
+            Rustworkx PyDiGraph with component nodes and containment edges
         """
         if self._graph_built and not force:
             return self._relationship_graph
 
-        nx = _get_networkx()
+        rx = _get_rustworkx()
 
-        # Create directed graph
-        self._relationship_graph = nx.DiGraph()
+        # Reset mappings and create fresh graph
+        self._name_to_idx = {}
+        self._idx_to_name = {}
+        self._relationship_graph = rx.PyDiGraph()
 
         # Get relationships (may need to extract if not already done)
         relationships = getattr(self, "relationships", {})
@@ -201,7 +274,6 @@ class GraphMixin:
         for comp_name in all_components:
             # Get component metadata
             node_attrs = {
-                "name": comp_name,
                 "symbol": symbol_mapping.get(comp_name, ""),
             }
 
@@ -213,22 +285,20 @@ class GraphMixin:
                     node_attrs["docstring"] = (comp.docstring or "")[:200]
                     break
 
-            self._relationship_graph.add_node(comp_name, **node_attrs)
+            self._add_graph_node(self._relationship_graph, comp_name, **node_attrs)
 
         # Second pass: add edges (containment relationships)
         for parent, children in relationships.items():
+            p_idx = self._name_to_idx[parent]
             for child in children:
-                self._relationship_graph.add_edge(
-                    parent,
-                    child,
-                    type="contains",
-                )
+                c_idx = self._name_to_idx[child]
+                self._relationship_graph.add_edge(p_idx, c_idx, {"type": "contains"})
 
         self._graph_built = True
 
         logger.info(
-            f"Built relationship graph: {self._relationship_graph.number_of_nodes()} nodes, "
-            f"{self._relationship_graph.number_of_edges()} edges"
+            f"Built relationship graph: {self._relationship_graph.num_nodes()} nodes, "
+            f"{self._relationship_graph.num_edges()} edges"
         )
 
         return self._relationship_graph
@@ -266,25 +336,27 @@ class GraphMixin:
 
         for parent, children in relationships.items():
             # Ensure parent node exists
-            if parent not in graph:
-                graph.add_node(
+            if parent not in self._name_to_idx:
+                self._add_graph_node(
+                    graph,
                     parent,
-                    name=parent,
                     symbol=symbol_mapping.get(parent, ""),
                 )
+            p_idx = self._name_to_idx[parent]
 
             for child in children:
                 # Ensure child node exists
-                if child not in graph:
-                    graph.add_node(
+                if child not in self._name_to_idx:
+                    self._add_graph_node(
+                        graph,
                         child,
-                        name=child,
                         symbol=symbol_mapping.get(child, ""),
                     )
+                c_idx = self._name_to_idx[child]
 
                 # Add edge if it doesn't exist
-                if not graph.has_edge(parent, child):
-                    graph.add_edge(parent, child, type=edge_type)
+                if not graph.has_edge(p_idx, c_idx):
+                    graph.add_edge(p_idx, c_idx, {"type": edge_type})
                     edges_added += 1
 
         if edges_added > 0:
@@ -292,12 +364,12 @@ class GraphMixin:
 
         return edges_added
 
-    def get_relationship_graph(self) -> "nx.DiGraph":
+    def get_relationship_graph(self) -> GraphType:
         """
         Get the relationship graph, building it if necessary.
 
         Returns:
-            NetworkX DiGraph
+            Rustworkx PyDiGraph
         """
         if not self._graph_built:
             self.build_relationship_graph()
@@ -330,19 +402,23 @@ class GraphMixin:
             >>> wrapper.get_descendants("Section", depth=2)
             ['DecoratedText', 'ButtonList', 'Image', 'Button', 'Icon', ...]
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
-        if node not in graph:
+        if node not in self._name_to_idx:
             logger.warning(f"Node '{node}' not found in relationship graph")
             return []
 
+        n_idx = self._name_to_idx[node]
+
         if depth is not None:
             # BFS with depth limit
-            descendants = list(nx.bfs_tree(graph, node, depth_limit=depth).nodes())
+            reachable = self._bfs_with_depth_limit(graph, n_idx, depth)
+            descendants = [self._idx_to_name[idx] for idx in reachable]
         else:
             # All descendants
-            descendants = [node] + list(nx.descendants(graph, node))
+            desc_indices = rx.descendants(graph, n_idx)
+            descendants = [node] + [self._idx_to_name[idx] for idx in desc_indices]
 
         if not include_self and node in descendants:
             descendants.remove(node)
@@ -370,14 +446,15 @@ class GraphMixin:
             >>> wrapper.get_ancestors("Button")
             ['ButtonList', 'DecoratedText', 'Section', 'Card']
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
-        if node not in graph:
+        if node not in self._name_to_idx:
             logger.warning(f"Node '{node}' not found in relationship graph")
             return []
 
-        ancestors = list(nx.ancestors(graph, node))
+        n_idx = self._name_to_idx[node]
+        ancestors = [self._idx_to_name[idx] for idx in rx.ancestors(graph, n_idx)]
 
         if include_self:
             ancestors = [node] + ancestors
@@ -396,10 +473,11 @@ class GraphMixin:
         """
         graph = self.get_relationship_graph()
 
-        if node not in graph:
+        if node not in self._name_to_idx:
             return []
 
-        return list(graph.successors(node))
+        n_idx = self._name_to_idx[node]
+        return [self._idx_to_name[idx] for idx in graph.successor_indices(n_idx)]
 
     def get_parents(self, node: ComponentName) -> List[ComponentName]:
         """
@@ -413,10 +491,11 @@ class GraphMixin:
         """
         graph = self.get_relationship_graph()
 
-        if node not in graph:
+        if node not in self._name_to_idx:
             return []
 
-        return list(graph.predecessors(node))
+        n_idx = self._name_to_idx[node]
+        return [self._idx_to_name[idx] for idx in graph.predecessor_indices(n_idx)]
 
     # =========================================================================
     # PATH QUERIES
@@ -441,15 +520,23 @@ class GraphMixin:
             >>> wrapper.get_path("Section", "Icon")
             ['Section', 'DecoratedText', 'Icon']
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
-        if source not in graph or target not in graph:
+        if source not in self._name_to_idx or target not in self._name_to_idx:
             return []
 
+        s_idx = self._name_to_idx[source]
+        t_idx = self._name_to_idx[target]
+
         try:
-            return nx.shortest_path(graph, source, target)
-        except nx.NetworkXNoPath:
+            paths = rx.dijkstra_shortest_paths(
+                graph, s_idx, target=t_idx, weight_fn=lambda _: 1.0
+            )
+            if t_idx in paths:
+                return [self._idx_to_name[idx] for idx in paths[t_idx]]
+            return []
+        except Exception:
             return []
 
     def get_all_paths(
@@ -466,7 +553,7 @@ class GraphMixin:
         Args:
             source: Starting component (container)
             target: Ending component (contained)
-            max_depth: Maximum path length to prevent infinite loops
+            max_depth: Maximum path length (edges) to prevent infinite loops
 
         Returns:
             List of paths, where each path is a list of component names
@@ -479,16 +566,25 @@ class GraphMixin:
                 ['Section', 'Chip', 'Icon'],
             ]
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
-        if source not in graph or target not in graph:
+        if source not in self._name_to_idx or target not in self._name_to_idx:
             return []
 
+        s_idx = self._name_to_idx[source]
+        t_idx = self._name_to_idx[target]
+
         try:
-            paths = list(nx.all_simple_paths(graph, source, target, cutoff=max_depth))
+            all_paths_indices = rx.all_simple_paths(graph, s_idx, t_idx)
+            paths = []
+            for path_indices in all_paths_indices:
+                # Filter by max_depth (number of edges = len(path) - 1)
+                if max_depth is not None and len(path_indices) - 1 > max_depth:
+                    continue
+                paths.append([self._idx_to_name[idx] for idx in path_indices])
             return paths
-        except nx.NetworkXNoPath:
+        except Exception:
             return []
 
     def get_path_with_symbols(self, source: str, target: str) -> str:
@@ -550,13 +646,15 @@ class GraphMixin:
         graph = self.get_relationship_graph()
 
         # Check graph-based containment
-        container_in_graph = container in graph
-        component_in_graph = component in graph
+        container_in_graph = container in self._name_to_idx
+        component_in_graph = component in self._name_to_idx
 
         if direct_only:
             # Direct containment: check graph edge or heterogeneous container
             if container_in_graph and component_in_graph:
-                if graph.has_edge(container, component):
+                c_idx = self._name_to_idx[container]
+                comp_idx = self._name_to_idx[component]
+                if graph.has_edge(c_idx, comp_idx):
                     return True
             # Heterogeneous containers can directly contain widget types
             if (
@@ -588,7 +686,7 @@ class GraphMixin:
         # 4. Check if any widget type that container can hold can itself contain component
         if container in self._heterogeneous_containers:
             for widget_type in self._widget_types:
-                if widget_type in graph and component_in_graph:
+                if widget_type in self._name_to_idx and component_in_graph:
                     if component in self.get_descendants(widget_type):
                         return True
 
@@ -610,7 +708,7 @@ class GraphMixin:
             >>> wrapper.get_common_ancestors("Button", "Image")
             ['Section', 'Card']
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
         if not nodes:
@@ -619,8 +717,12 @@ class GraphMixin:
         # Get ancestors for each node
         ancestor_sets = []
         for node in nodes:
-            if node in graph:
-                ancestor_sets.append(set(nx.ancestors(graph, node)))
+            if node in self._name_to_idx:
+                n_idx = self._name_to_idx[node]
+                ancestor_names = {
+                    self._idx_to_name[idx] for idx in rx.ancestors(graph, n_idx)
+                }
+                ancestor_sets.append(ancestor_names)
             else:
                 return []  # Node not found
 
@@ -639,7 +741,7 @@ class GraphMixin:
         self,
         root: str,
         depth: Optional[int] = None,
-    ) -> "nx.DiGraph":
+    ) -> GraphType:
         """
         Extract a subgraph starting from a root node.
 
@@ -650,22 +752,25 @@ class GraphMixin:
             depth: Maximum depth (None = full subtree)
 
         Returns:
-            NetworkX DiGraph containing the subgraph
+            Rustworkx PyDiGraph containing the subgraph
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
-        if root not in graph:
-            return nx.DiGraph()
+        if root not in self._name_to_idx:
+            return rx.PyDiGraph()
 
         descendants = self.get_descendants(root, depth=depth, include_self=True)
-        return graph.subgraph(descendants).copy()
+        desc_indices = [
+            self._name_to_idx[n] for n in descendants if n in self._name_to_idx
+        ]
+        return graph.subgraph(desc_indices)
 
     def get_component_neighborhood(
         self,
         node: str,
         radius: int = 1,
-    ) -> "nx.DiGraph":
+    ) -> GraphType:
         """
         Get the neighborhood around a component (both parents and children).
 
@@ -674,21 +779,17 @@ class GraphMixin:
             radius: How many hops in each direction
 
         Returns:
-            NetworkX DiGraph of the neighborhood
+            Rustworkx PyDiGraph of the neighborhood
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
-        if node not in graph:
-            return nx.DiGraph()
+        if node not in self._name_to_idx:
+            return rx.PyDiGraph()
 
-        # Get nodes within radius (undirected for neighborhood)
-        undirected = graph.to_undirected()
-        neighborhood_nodes = nx.single_source_shortest_path_length(
-            undirected, node, cutoff=radius
-        ).keys()
-
-        return graph.subgraph(neighborhood_nodes).copy()
+        n_idx = self._name_to_idx[node]
+        neighborhood_indices = self._undirected_bfs_within_radius(graph, n_idx, radius)
+        return graph.subgraph(list(neighborhood_indices))
 
     # =========================================================================
     # VALIDATION
@@ -737,30 +838,27 @@ class GraphMixin:
         Returns:
             True if cycles exist (invalid state)
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
-        try:
-            nx.find_cycle(graph)
-            return True
-        except nx.NetworkXNoCycle:
-            return False
+        return not rx.is_directed_acyclic_graph(graph)
 
-    def find_cycles(self) -> List[List[str]]:
+    def find_cycles(self) -> List[List[Tuple[str, str]]]:
         """
         Find all cycles in the relationship graph.
 
         Returns:
-            List of cycles, where each cycle is a list of edges
+            List of cycles, where each cycle is a list of edge tuples (source, target)
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
-        try:
-            cycle = nx.find_cycle(graph)
-            return [list(cycle)]
-        except nx.NetworkXNoCycle:
-            return []
+        cycle = rx.digraph_find_cycle(graph)
+        if cycle:
+            return [
+                [(self._idx_to_name[u], self._idx_to_name[v]) for u, v in cycle]
+            ]
+        return []
 
     # =========================================================================
     # GRAPH ANALYSIS
@@ -774,7 +872,11 @@ class GraphMixin:
             List of root component names (e.g., ["Card"])
         """
         graph = self.get_relationship_graph()
-        return [node for node in graph.nodes() if graph.in_degree(node) == 0]
+        return [
+            self._idx_to_name[idx]
+            for idx in graph.node_indices()
+            if graph.in_degree(idx) == 0
+        ]
 
     def get_leaf_components(self) -> List[str]:
         """
@@ -784,7 +886,11 @@ class GraphMixin:
             List of leaf component names (e.g., ["Icon", "Divider"])
         """
         graph = self.get_relationship_graph()
-        return [node for node in graph.nodes() if graph.out_degree(node) == 0]
+        return [
+            self._idx_to_name[idx]
+            for idx in graph.node_indices()
+            if graph.out_degree(idx) == 0
+        ]
 
     def get_hub_components(self, min_connections: int = 5) -> List[Tuple[str, int]]:
         """
@@ -799,10 +905,10 @@ class GraphMixin:
         graph = self.get_relationship_graph()
         hubs = []
 
-        for node in graph.nodes():
-            degree = graph.in_degree(node) + graph.out_degree(node)
+        for idx in graph.node_indices():
+            degree = graph.in_degree(idx) + graph.out_degree(idx)
             if degree >= min_connections:
-                hubs.append((node, degree))
+                hubs.append((self._idx_to_name[idx], degree))
 
         return sorted(hubs, key=lambda x: x[1], reverse=True)
 
@@ -813,18 +919,25 @@ class GraphMixin:
         Returns:
             Dict with graph statistics
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
         graph = self.get_relationship_graph()
 
+        num_nodes = graph.num_nodes()
+        num_edges = graph.num_edges()
+
         return {
-            "nodes": graph.number_of_nodes(),
-            "edges": graph.number_of_edges(),
+            "nodes": num_nodes,
+            "edges": num_edges,
             "roots": len(self.get_root_components()),
             "leaves": len(self.get_leaf_components()),
-            "is_dag": nx.is_directed_acyclic_graph(graph),
-            "density": nx.density(graph),
-            "avg_out_degree": sum(d for _, d in graph.out_degree())
-            / max(graph.number_of_nodes(), 1),
+            "is_dag": rx.is_directed_acyclic_graph(graph),
+            "density": num_edges / (num_nodes * (num_nodes - 1))
+            if num_nodes > 1
+            else 0,
+            "avg_out_degree": sum(
+                graph.out_degree(idx) for idx in graph.node_indices()
+            )
+            / max(num_nodes, 1),
         }
 
     # =========================================================================
@@ -838,14 +951,19 @@ class GraphMixin:
         Returns:
             Dict representation suitable for JSON serialization
         """
-        nx = _get_networkx()
         graph = self.get_relationship_graph()
 
         return {
-            "nodes": [{"name": node, **graph.nodes[node]} for node in graph.nodes()],
+            "nodes": [
+                {**graph.get_node_data(idx)} for idx in graph.node_indices()
+            ],
             "edges": [
-                {"source": u, "target": v, **graph.edges[u, v]}
-                for u, v in graph.edges()
+                {
+                    "source": self._idx_to_name[u],
+                    "target": self._idx_to_name[v],
+                    **data,
+                }
+                for u, v, data in graph.weighted_edge_list()
             ],
             "stats": self.get_graph_stats(),
         }
@@ -862,7 +980,7 @@ class GraphMixin:
         """
         return json.dumps(self.graph_to_dict(), indent=indent, default=str)
 
-    def load_graph_from_dict(self, data: Dict[str, Any]) -> "nx.DiGraph":
+    def load_graph_from_dict(self, data: Dict[str, Any]) -> GraphType:
         """
         Load a relationship graph from a dictionary.
 
@@ -870,20 +988,25 @@ class GraphMixin:
             data: Dict with "nodes" and "edges" keys
 
         Returns:
-            NetworkX DiGraph
+            Rustworkx PyDiGraph
         """
-        nx = _get_networkx()
+        rx = _get_rustworkx()
 
-        self._relationship_graph = nx.DiGraph()
+        # Reset mappings and create fresh graph
+        self._name_to_idx = {}
+        self._idx_to_name = {}
+        self._relationship_graph = rx.PyDiGraph()
 
         for node_data in data.get("nodes", []):
             name = node_data.pop("name")
-            self._relationship_graph.add_node(name, **node_data)
+            self._add_graph_node(self._relationship_graph, name, **node_data)
 
         for edge_data in data.get("edges", []):
             source = edge_data.pop("source")
             target = edge_data.pop("target")
-            self._relationship_graph.add_edge(source, target, **edge_data)
+            s_idx = self._name_to_idx[source]
+            t_idx = self._name_to_idx[target]
+            self._relationship_graph.add_edge(s_idx, t_idx, edge_data)
 
         self._graph_built = True
         return self._relationship_graph
@@ -927,7 +1050,13 @@ class GraphMixin:
             display = symbol_mapping.get(node, node) if use_symbols else node
             lines.append(f"{prefix}{display}")
 
-            children = list(graph.successors(node))
+            n_idx = self._name_to_idx.get(node)
+            if n_idx is None:
+                return
+
+            children = [
+                self._idx_to_name[idx] for idx in graph.successor_indices(n_idx)
+            ]
             for i, child in enumerate(children):
                 is_last = i == len(children) - 1
                 child_prefix = prefix.replace("├── ", "│   ").replace("└── ", "    ")
@@ -1292,5 +1421,5 @@ class GraphMixin:
 __all__ = [
     "GraphMixin",
     "ComponentMetadataProvider",
-    "_get_networkx",
+    "_get_rustworkx",
 ]

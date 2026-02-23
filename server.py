@@ -556,6 +556,11 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Could not register Qdrant tools and resources: {e}")
 
+# NOTE: Qdrant Search V2 DSL tools (qdrant_search_v2, qdrant_search_v2_natural,
+# qdrant_search_v2_symbols) have been merged into the unified 'search' and
+# 'search_symbols' tools registered via setup_enhanced_qdrant_tools above.
+# The DSL library code (executor, query_builder, types) lives in middleware/qdrant_core/.
+
 # 8. Dynamic MCP instructions are now handled by dynamic_instructions_lifespan
 # This avoids blocking asyncio.run() at module load time and ensures proper async context
 logger.info("📋 Dynamic MCP instructions will be updated via lifespan on server start")

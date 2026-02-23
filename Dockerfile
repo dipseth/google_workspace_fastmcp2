@@ -40,5 +40,9 @@ EXPOSE 8002
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8002/ready || exit 1
 
-# Run the server using uv
-CMD ["uv", "run", "python", "server.py"]
+# Ensure SIGTERM is forwarded to Python for graceful lifespan shutdown
+# (Docker sends STOPSIGNAL to PID 1 — uv must forward it to the child process)
+STOPSIGNAL SIGTERM
+
+# Run the server using uv with exec form for proper signal handling
+CMD ["uv", "run", "python", "-u", "server.py"]

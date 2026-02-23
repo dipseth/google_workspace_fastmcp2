@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from config.enhanced_logging import setup_logger
 
 from .client import QdrantClientManager
-from .config import PayloadType
+from .config import CollectionSchema, PayloadType
 from .lazy_imports import get_qdrant_imports
 from .query_parser import extract_service_from_tool
 
@@ -325,8 +325,22 @@ class QdrantStorageManager:
         """
         self.client_manager = client_manager
         self.config = client_manager.config
+        self._ric_provider = None  # Optional RICTextProvider for v7 text generation
 
         logger.debug("🗃️ QdrantStorageManager initialized")
+
+    def set_ric_provider(self, provider) -> None:
+        """Set the RIC text provider for v7 storage.
+
+        When set, _store_point_v7 delegates text generation to the provider
+        instead of using inline hardcoded text. The provider must implement
+        the RICTextProvider protocol.
+
+        Args:
+            provider: A RICTextProvider implementation
+        """
+        self._ric_provider = provider
+        logger.info(f"Set RIC provider: {type(provider).__name__}")
 
     async def store_response(self, context=None, response=None, **kwargs):
         """
@@ -501,7 +515,8 @@ class QdrantStorageManager:
     ):
         """
         Store tool response in Qdrant with embedding using individual parameters.
-        This method incorporates execution time tracking and enhanced metadata.
+        Dispatches to v1 (single vector) or v7 (named vectors) based on config.
+        Supports dual_write mode for migration.
 
         Args:
             tool_name: Name of the tool being called
@@ -530,123 +545,201 @@ class QdrantStorageManager:
 
             # Create response payload with execution time (enhanced metadata) and Unix timestamp
             now_dt = datetime.now(timezone.utc)
+            resolved_session = session_id or str(uuid.uuid4())
+            resolved_email = user_email or "unknown"
             response_data = {
                 "tool_name": tool_name,
                 "arguments": tool_args,
                 "response": serialized_response,
                 "timestamp": now_dt.isoformat(),
-                "timestamp_unix": int(
-                    now_dt.timestamp()
-                ),  # Unix timestamp for efficient range queries
-                "user_id": user_email or "unknown",
-                "user_email": user_email or "unknown",
-                "session_id": session_id or str(uuid.uuid4()),
+                "timestamp_unix": int(now_dt.timestamp()),
+                "user_id": resolved_email,
+                "user_email": resolved_email,
+                "session_id": resolved_session,
                 "payload_type": PayloadType.TOOL_RESPONSE.value,
-                "execution_time_ms": execution_time_ms,  # Enhanced metadata
+                "execution_time_ms": execution_time_ms,
             }
 
-            # Sanitize data while preserving structure to prevent UTF-8 errors and avoid triple serialization
+            # Sanitize data while preserving structure
             sanitized_data = sanitize_for_json(response_data, preserve_structure=True)
 
-            # Smart serialization - only convert to JSON string when compression is needed
-            if self.client_manager._should_compress(
-                json.dumps(sanitized_data, default=str)
-            ):
-                json_data = json.dumps(sanitized_data, default=str)
-                logger.debug("🔧 Serialized to JSON for compression")
-            else:
-                # Store as structured data - avoid unnecessary JSON string conversion
-                json_data = None
-                logger.debug("🔧 Storing structured data without JSON serialization")
+            # Prepare common payload fields
+            service_name = extract_service_from_tool(tool_name)
+            _, qdrant_models = get_qdrant_imports()
 
-            # Generate text for embedding
-            embed_text = f"Tool: {tool_name}\nArguments: {json.dumps(tool_args)}\nResponse: {str(response)[:1000]}"
+            # Smart serialization for compression
+            json_str = json.dumps(sanitized_data, default=str)
+            needs_compression = self.client_manager._should_compress(json_str)
 
-            # Check if embedder is available
-            if self.client_manager.embedder is None:
-                logger.warning("⚠️ Embedder not available, skipping storage")
-                return
-
-            # Generate embedding using FastEmbed
-            embedding_list = await asyncio.to_thread(
-                lambda q: list(self.client_manager.embedder.embed([q])), embed_text
-            )
-            embedding = embedding_list[0] if embedding_list else None
-
-            if embedding is None:
-                logger.error(
-                    f"Failed to generate embedding for text: {embed_text[:100]}..."
-                )
-                return
-
-            # Smart compression and storage handling
-            if json_data is not None:
-                # Compression needed - use JSON string
+            if needs_compression:
                 compressed = True
-                stored_data = self.client_manager._compress_data(json_data)
+                stored_data = self.client_manager._compress_data(json_str)
                 logger.debug(
-                    f"📦 Compressed response: {len(json_data)} -> {len(stored_data)} bytes"
+                    f"📦 Compressed response: {len(json_str)} -> {len(stored_data)} bytes"
                 )
             else:
-                # No compression needed - store structured data directly
                 compressed = False
                 stored_data = sanitized_data
                 logger.debug("📄 Storing structured response data directly")
 
-            # Create point for Qdrant (use proper UUID format and validated payload)
-            _, qdrant_models = get_qdrant_imports()
-            point_id = str(uuid.uuid4())  # Generate UUID and convert to string
-
-            # Extract service name from tool_name for filtering
-            service_name = extract_service_from_tool(tool_name)
-
-            # Create payload with sanitized data including Unix timestamp - avoid storing JSON strings unnecessarily
             raw_payload = {
                 "tool_name": tool_name,
-                "service": service_name,  # Add service field for filtering
+                "service": service_name,
                 "timestamp": sanitized_data["timestamp"],
                 "timestamp_unix": sanitized_data["timestamp_unix"],
                 "user_id": sanitized_data["user_id"],
                 "user_email": sanitized_data["user_email"],
                 "session_id": sanitized_data["session_id"],
                 "payload_type": PayloadType.TOOL_RESPONSE.value,
-                "execution_time_ms": execution_time_ms,  # Enhanced metadata
+                "execution_time_ms": execution_time_ms,
                 "compressed": compressed,
             }
 
-            # Store data based on compression status - preserve structure when possible
             if compressed:
                 raw_payload["compressed_data"] = stored_data
                 raw_payload["data"] = None
             else:
-                # Store the full structured data directly in the response field
                 raw_payload["response_data"] = stored_data
                 raw_payload["data"] = None
                 raw_payload["compressed_data"] = None
 
-            # Validate payload specifically for Qdrant compatibility
             validated_payload = validate_qdrant_payload(raw_payload)
 
-            point = qdrant_models["PointStruct"](
-                id=point_id,  # Use UUID string for Qdrant compatibility
-                vector=embedding.tolist(),
-                payload=validated_payload,
-            )
+            schema = self.config.collection_schema
 
-            # Store in Qdrant
-            await asyncio.to_thread(
-                self.client_manager.client.upsert,
-                collection_name=self.config.collection_name,
-                points=[point],
-            )
+            # v1 path (default or dual_write)
+            if schema == CollectionSchema.V1_SINGLE_VECTOR or self.config.dual_write:
+                await self._store_point_v1(
+                    tool_name, tool_args, response, validated_payload, qdrant_models
+                )
 
-            logger.debug(
-                f"✅ Stored response for tool: {tool_name} (ID: {point_id}, execution: {execution_time_ms}ms)"
-            )
+            # v7 path (named vectors or dual_write)
+            if schema == CollectionSchema.V7_NAMED_VECTORS or self.config.dual_write:
+                await self._store_point_v7(
+                    tool_name, tool_args, response, validated_payload,
+                    service_name, resolved_email, resolved_session, qdrant_models,
+                )
 
         except Exception as e:
             logger.error(f"❌ Failed to store response with params: {e}")
             raise
+
+    async def _store_point_v1(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        response: Any,
+        validated_payload: dict,
+        qdrant_models: dict,
+    ):
+        """Store a point with single vector (v1 schema)."""
+        embed_text = (
+            f"Tool: {tool_name}\nArguments: {json.dumps(tool_args)}\n"
+            f"Response: {str(response)[:1000]}"
+        )
+
+        embedding_list = await asyncio.to_thread(
+            lambda q: list(self.client_manager.embedder.embed([q])), embed_text
+        )
+        embedding = embedding_list[0] if embedding_list else None
+
+        if embedding is None:
+            logger.error(f"Failed to generate v1 embedding for: {embed_text[:100]}...")
+            return
+
+        point_id = str(uuid.uuid4())
+        point = qdrant_models["PointStruct"](
+            id=point_id,
+            vector=embedding.tolist(),
+            payload=validated_payload,
+        )
+
+        await asyncio.to_thread(
+            self.client_manager.client.upsert,
+            collection_name=self.config.collection_name,
+            points=[point],
+        )
+
+        logger.debug(
+            f"✅ Stored v1 response for tool: {tool_name} (ID: {point_id})"
+        )
+
+    async def _store_point_v7(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        response: Any,
+        validated_payload: dict,
+        service_name: str,
+        user_email: str,
+        session_id: str,
+        qdrant_models: dict,
+    ):
+        """Store a point with 3 named vectors (v7 RIC schema).
+
+        Generates 3 text representations and embeds them in one batch call:
+          - components_text: Tool identity
+          - inputs_text: Arguments + response content
+          - relationships_text: Service graph + user context
+
+        If a RIC provider is set, delegates text generation to it.
+        Otherwise falls back to the original inline text generation.
+        """
+        if self._ric_provider is not None:
+            metadata = {
+                "service": service_name,
+                "tool_args": tool_args,
+                "response": response,
+                "user_email": user_email,
+                "session_id": session_id,
+            }
+            components_text = self._ric_provider.component_text(tool_name, metadata)
+            inputs_text = self._ric_provider.inputs_text(tool_name, metadata)
+            relationships_text = self._ric_provider.relationships_text(tool_name, metadata)
+        else:
+            # Legacy inline text generation (backward compat)
+            components_text = (
+                f"Tool: {tool_name}\nService: {service_name}\nType: tool_response"
+            )
+            inputs_text = (
+                f"Arguments: {json.dumps(tool_args)}\n"
+                f"Response: {str(response)[:1000]}"
+            )
+            relationships_text = (
+                f"{tool_name} belongs to {service_name}. "
+                f"User: {user_email}. Session: {session_id}."
+            )
+
+        # Batch embed all 3 texts in one call for efficiency
+        texts = [components_text, inputs_text, relationships_text]
+        embeddings_list = await asyncio.to_thread(
+            lambda ts: list(self.client_manager.embedder.embed(ts)), texts
+        )
+
+        if len(embeddings_list) < 3:
+            logger.error("Failed to generate all 3 v7 embeddings")
+            return
+
+        point_id = str(uuid.uuid4())
+        point = qdrant_models["PointStruct"](
+            id=point_id,
+            vector={
+                "components": embeddings_list[0].tolist(),
+                "inputs": embeddings_list[1].tolist(),
+                "relationships": embeddings_list[2].tolist(),
+            },
+            payload=validated_payload,
+        )
+
+        await asyncio.to_thread(
+            self.client_manager.client.upsert,
+            collection_name=self.config.collection_name,
+            points=[point],
+        )
+
+        logger.debug(
+            f"✅ Stored v7 response for tool: {tool_name} (ID: {point_id})"
+        )
 
     async def store_custom_payload(
         self,
@@ -1436,8 +1529,9 @@ class QdrantStorageManager:
                     logger.warning(f"⚠️ Background reindexing error (will retry): {e}")
                     # Continue the loop despite errors
 
-        # Start the background task
-        asyncio.create_task(background_reindex_loop())
+        # Start the background task — track it so it can be cancelled on shutdown
+        task = asyncio.create_task(background_reindex_loop())
+        self.client_manager._track_task(task)
 
     def get_storage_info(self) -> Dict[str, Any]:
         """

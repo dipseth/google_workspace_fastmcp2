@@ -18,6 +18,7 @@ from .client import (
     QdrantClientManager,
 )
 from .config import (
+    CollectionSchema,
     PayloadType,
     QdrantConfig,
     get_default_config,
@@ -58,6 +59,9 @@ from .search import (
 from .storage import (
     QdrantStorageManager,
 )
+from .tool_response_provider import (
+    ToolResponseProvider,
+)
 from .tools import (
     setup_enhanced_qdrant_tools,
 )
@@ -79,6 +83,7 @@ __all__ = [
     "reset_imports",
     "get_import_status",
     # Configuration classes
+    "CollectionSchema",
     "PayloadType",
     "QdrantConfig",
     "get_default_config",
@@ -87,6 +92,8 @@ __all__ = [
     "QdrantClientManager",
     # Storage management
     "QdrantStorageManager",
+    # RIC provider
+    "ToolResponseProvider",
     # Search management
     "QdrantSearchManager",
     # Resource handling

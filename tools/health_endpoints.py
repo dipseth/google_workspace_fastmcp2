@@ -49,13 +49,21 @@ def setup_health_endpoints(
                 user_google_email=None,
             )
 
+            # health_status is a HealthCheckResponse Pydantic model —
+            # must call .model_dump() to get a JSON-serializable dict
+            details = (
+                health_status.model_dump()
+                if hasattr(health_status, "model_dump")
+                else str(health_status)
+            )
+
             return JSONResponse(
                 status_code=200,
                 content={
                     "status": "healthy",
                     "service": settings.server_name,
                     "version": "1.0.0",
-                    "details": health_status,
+                    "details": details,
                 },
             )
         except Exception as e:

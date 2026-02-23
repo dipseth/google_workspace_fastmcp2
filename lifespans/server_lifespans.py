@@ -22,6 +22,7 @@ Usage:
     )
 """
 
+import gc
 from typing import Any, Dict, Optional
 
 from fastmcp.server.lifespan import ContextManagerLifespan, lifespan
@@ -90,10 +91,16 @@ async def qdrant_lifespan(server: Any):
     try:
         yield {"qdrant_middleware": qdrant_middleware}
     finally:
-        # Graceful shutdown
+        # Graceful shutdown — stop background tasks and release all resources
         logger.info("🔄 Qdrant lifespan: Starting shutdown...")
         await qdrant_middleware.stop_background_reindexing()
-        logger.info("✅ Qdrant lifespan shutdown complete (reindexing stopped)")
+
+        # Close the Qdrant client connection, cancel tracked background tasks,
+        # and release the embedding model memory
+        from middleware.qdrant_core.client import close_global_client_manager
+
+        await close_global_client_manager()
+        logger.info("✅ Qdrant lifespan shutdown complete (reindexing stopped, client closed, memory released)")
 
 
 @lifespan
@@ -257,8 +264,18 @@ async def dynamic_instructions_lifespan(server: Any):
     try:
         yield {"instructions_updated": instructions_updated}
     finally:
-        # No cleanup needed for instructions
-        pass
+        # Clear module-level lifespan state to break reference cycles.
+        # This lifespan exits first (rightmost in composition), so clearing here
+        # ensures middleware references don't pin objects in memory after shutdown.
+        logger.info("🧹 Clearing module-level lifespan state...")
+        _lifespan_state.clear()
+
+        # Force a garbage collection cycle to reclaim any reference cycles
+        # that were broken by clearing the state above (e.g., middleware objects
+        # holding references to each other via _lifespan_state).
+        collected = gc.collect()
+        if collected:
+            logger.info(f"🗑️ GC collected {collected} unreachable objects during shutdown")
 
 
 def register_profile_middleware(middleware: Any) -> None:

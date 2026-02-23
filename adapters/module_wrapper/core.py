@@ -183,7 +183,7 @@ class ModuleComponent:
             name: Name of the component
             obj: The actual object
             module_path: Full import path of the module
-            component_type: Type of component (class, function, variable)
+            component_type: Type of component (class, function, variable, tool)
             docstring: Component's docstring
             source: Source code of the component
             parent: Parent component (for nested components)

@@ -58,12 +58,40 @@ class RelationshipsMixin:
     - client: Qdrant client
     - collection_name: str
     - embedder, colbert_embedder: Embedding models
+
+    Supports pluggable relationship strategies:
+    - StructuralRelationshipStrategy: Type-hint based (classes, default)
+    - BehavioralRelationshipStrategy: Graph-based (tools)
     """
 
     # Cached properties
     _cached_relationships: Optional[Dict[str, List[str]]] = None
     _cached_raw_relationships: Optional[List[Dict[str, Any]]] = None
     _cached_raw_relationships_depth: Optional[int] = None
+
+    def get_relationship_strategy(self, component_type: str = "class"):
+        """Get the appropriate relationship strategy for a component type.
+
+        Args:
+            component_type: "class" for structural, "tool" for behavioral
+
+        Returns:
+            A RelationshipStrategy instance, or None if no strategy applies.
+        """
+        if component_type == "tool":
+            tool_graph = getattr(self, "_tool_relationship_graph", None)
+            if tool_graph is not None:
+                from adapters.module_wrapper.behavioral_relationships import (
+                    BehavioralRelationshipStrategy,
+                )
+                return BehavioralRelationshipStrategy(tool_graph)
+            return None
+
+        # Default: structural (existing type-hint based logic)
+        from adapters.module_wrapper.behavioral_relationships import (
+            StructuralRelationshipStrategy,
+        )
+        return StructuralRelationshipStrategy(self)
 
     def _is_dataclass_type(self, cls: type) -> bool:
         """Check if a class is a dataclass."""
@@ -306,6 +334,14 @@ class RelationshipsMixin:
                 cls, max_depth=max_depth
             )
             all_relationships.extend(relationships)
+
+        # Also extract behavioral relationships for tool components (if graph exists)
+        tool_graph = getattr(self, "_tool_relationship_graph", None)
+        if tool_graph is not None:
+            strategy = self.get_relationship_strategy("tool")
+            if strategy is not None:
+                tool_rels = strategy.extract(self.components)
+                all_relationships.extend(tool_rels)
 
         logger.info(f"Extracted {len(all_relationships)} relationships")
 
