@@ -106,7 +106,9 @@ def _get_rustworkx():
             _rustworkx = rx
             logger.debug("Rustworkx loaded successfully")
         except ImportError:
-            logger.warning("Rustworkx not installed. Install with: pip install rustworkx")
+            logger.warning(
+                "Rustworkx not installed. Install with: pip install rustworkx"
+            )
             raise
     return _rustworkx
 
@@ -855,9 +857,7 @@ class GraphMixin:
 
         cycle = rx.digraph_find_cycle(graph)
         if cycle:
-            return [
-                [(self._idx_to_name[u], self._idx_to_name[v]) for u, v in cycle]
-            ]
+            return [[(self._idx_to_name[u], self._idx_to_name[v]) for u, v in cycle]]
         return []
 
     # =========================================================================
@@ -934,9 +934,7 @@ class GraphMixin:
             "density": num_edges / (num_nodes * (num_nodes - 1))
             if num_nodes > 1
             else 0,
-            "avg_out_degree": sum(
-                graph.out_degree(idx) for idx in graph.node_indices()
-            )
+            "avg_out_degree": sum(graph.out_degree(idx) for idx in graph.node_indices())
             / max(num_nodes, 1),
         }
 
@@ -954,9 +952,7 @@ class GraphMixin:
         graph = self.get_relationship_graph()
 
         return {
-            "nodes": [
-                {**graph.get_node_data(idx)} for idx in graph.node_indices()
-            ],
+            "nodes": [{**graph.get_node_data(idx)} for idx in graph.node_indices()],
             "edges": [
                 {
                     "source": self._idx_to_name[u],

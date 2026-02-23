@@ -29,6 +29,7 @@ from middleware.qdrant_core.tool_response_provider import ToolResponseProvider
 @dataclasses.dataclass
 class FakeDataclass:
     """A simple dataclass for testing extract_input_values."""
+
     name: str = "default"
     count: int = 10
     optional: Optional[str] = None
@@ -168,8 +169,18 @@ class TestIntrospectionProvider:
 
     def test_relationships_text_with_rels(self):
         rels = [
-            {"child_class": "Button", "field_name": "button", "is_optional": True, "depth": 1},
-            {"child_class": "Icon", "field_name": "icon", "is_optional": False, "depth": 1},
+            {
+                "child_class": "Button",
+                "field_name": "button",
+                "is_optional": True,
+                "depth": 1,
+            },
+            {
+                "child_class": "Icon",
+                "field_name": "icon",
+                "is_optional": False,
+                "depth": 1,
+            },
         ]
         metadata = {
             "component_type": "class",
@@ -190,7 +201,12 @@ class TestIntrospectionProvider:
         )
 
         rels = [
-            {"child_class": "Button", "field_name": "button", "is_optional": True, "depth": 1},
+            {
+                "child_class": "Button",
+                "field_name": "button",
+                "is_optional": True,
+                "depth": 1,
+            },
         ]
 
         # What the old inline code produced:
@@ -373,7 +389,12 @@ class TestBuildProviderMetadata:
 
         relationships_by_parent = {
             "MyClass": [
-                {"child_class": "Child", "field_name": "child", "is_optional": True, "depth": 1}
+                {
+                    "child_class": "Child",
+                    "field_name": "child",
+                    "is_optional": True,
+                    "depth": 1,
+                }
             ]
         }
 
@@ -393,7 +414,9 @@ class TestBuildProviderMetadata:
         component = FakeComponent(name="my_func", component_type="function")
 
         relationships_by_parent = {
-            "my_func": [{"child_class": "X", "field_name": "x", "is_optional": True, "depth": 1}]
+            "my_func": [
+                {"child_class": "X", "field_name": "x", "is_optional": True, "depth": 1}
+            ]
         }
 
         metadata = mixin._build_provider_metadata(component, relationships_by_parent)

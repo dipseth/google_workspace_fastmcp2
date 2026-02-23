@@ -246,7 +246,9 @@ class PipelineMixin:
             provider: A RICTextProvider implementation
         """
         self._ric_providers[provider.component_type] = provider
-        logger.info(f"Registered RIC provider for component_type={provider.component_type!r}")
+        logger.info(
+            f"Registered RIC provider for component_type={provider.component_type!r}"
+        )
 
     def get_ric_provider(self, component_type: str) -> RICTextProvider:
         """Get the RIC text provider for a component type.
@@ -288,9 +290,7 @@ class PipelineMixin:
         comp_name = component.name
         comp_type = component.component_type
         rels = (
-            relationships_by_parent.get(comp_name, [])
-            if comp_type == "class"
-            else []
+            relationships_by_parent.get(comp_name, []) if comp_type == "class" else []
         )
         symbols = getattr(self, "symbol_mapping", {}) or {}
 
@@ -303,7 +303,9 @@ class PipelineMixin:
             "source": component.source or "",
             "relationships": rels,
             "structure_validator": structure_validator,
-            "symbols": getattr(structure_validator, "symbols", {}) if structure_validator else symbols,
+            "symbols": getattr(structure_validator, "symbols", {})
+            if structure_validator
+            else symbols,
         }
 
     def get_v7_collection_name(self) -> str:
@@ -510,7 +512,9 @@ class PipelineMixin:
                 # Generate raw text via provider
                 component_text = provider.component_text(component.name, metadata)
                 inputs_text = provider.inputs_text(component.name, metadata)
-                relationship_text = provider.relationships_text(component.name, metadata)
+                relationship_text = provider.relationships_text(
+                    component.name, metadata
+                )
 
                 # Symbol wrapping for ColBERT vectors (not for MiniLM relationships)
                 component_symbol = self.get_symbol_for_component(component.name)

@@ -291,10 +291,10 @@ class TestRelationshipExtraction:
         # At least some children should be present (Geo types, ValuesCount, etc.)
         assert len(fc_children) > 0, "No children extracted for FieldCondition"
         child_names_str = str(fc_children)
-        geo_found = any(
-            kw in child_names_str for kw in ("Geo", "ValuesCount", "Range")
+        geo_found = any(kw in child_names_str for kw in ("Geo", "ValuesCount", "Range"))
+        assert geo_found, (
+            f"Expected Geo/ValuesCount in FieldCondition children: {fc_children}"
         )
-        assert geo_found, f"Expected Geo/ValuesCount in FieldCondition children: {fc_children}"
 
 
 # =============================================================================
@@ -753,8 +753,8 @@ class TestAdvancedQueryTypes:
 
         builder = QueryBuilder(wrapper)
         dsl = (
-            f"Prefetch{{filter={f_sym}{{must=[{fc_sym}{{key=\"service\", "
-            f"match={mv_sym}{{value=\"gmail\"}}}}]}}, limit=5}}"
+            f'Prefetch{{filter={f_sym}{{must=[{fc_sym}{{key="service", '
+            f'match={mv_sym}{{value="gmail"}}}}]}}, limit=5}}'
         )
         obj = builder.parse_and_build(dsl)
 
@@ -862,7 +862,7 @@ class TestAdvancedQueryTypes:
         response = asyncio.get_event_loop().run_until_complete(
             executor.execute_dsl(
                 dsl=f'{f_sym}{{must=[{fc_sym}{{key="tool_name", match={mv_sym}{{value="search"}}}}]}}',
-                query_dsl='RecommendQuery{recommend=RecommendInput{positive=[1, 2, 3]}}',
+                query_dsl="RecommendQuery{recommend=RecommendInput{positive=[1, 2, 3]}}",
                 dry_run=True,
             )
         )

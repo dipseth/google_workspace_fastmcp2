@@ -52,22 +52,22 @@ _AVAILABLE_SERVICES = _get_service_names_literal()
 # Combines core services (from ScopeRegistry.SERVICE_METADATA) with additional
 # scope-level services (from GOOGLE_API_SCOPES) for comprehensive type safety.
 GoogleServiceType = Literal[
-    "base",      # Base OAuth scopes
-    "drive",     # Google Drive
-    "gmail",     # Gmail
+    "base",  # Base OAuth scopes
+    "drive",  # Google Drive
+    "gmail",  # Gmail
     "calendar",  # Google Calendar
-    "docs",      # Google Docs
-    "sheets",    # Google Sheets
-    "chat",      # Google Chat
-    "forms",     # Google Forms
-    "slides",    # Google Slides
-    "photos",    # Google Photos
-    "people",    # Google People / Contacts
-    "tasks",     # Google Tasks
-    "admin",     # Admin Directory API
-    "cloud",     # Google Cloud Platform
-    "youtube",   # YouTube
-    "script",    # Google Apps Script
+    "docs",  # Google Docs
+    "sheets",  # Google Sheets
+    "chat",  # Google Chat
+    "forms",  # Google Forms
+    "slides",  # Google Slides
+    "photos",  # Google Photos
+    "people",  # Google People / Contacts
+    "tasks",  # Google Tasks
+    "admin",  # Admin Directory API
+    "cloud",  # Google Cloud Platform
+    "youtube",  # YouTube
+    "script",  # Google Apps Script
 ]
 
 # Backward-compatible alias

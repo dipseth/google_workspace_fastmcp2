@@ -165,7 +165,10 @@ class QdrantSearchResultItem(BaseModel):
     service: str = Field(description="Service name (gmail, drive, etc.)")
     timestamp: str = Field(description="When the response was stored")
     user_email: str = Field(description="User email associated with the response")
-    payload: Optional[Dict[str, Any]] = Field(default=None, description="Raw point payload (included when searching non-default collections)")
+    payload: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Raw point payload (included when searching non-default collections)",
+    )
 
 
 class QdrantDocumentMetadata(BaseModel):

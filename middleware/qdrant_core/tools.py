@@ -99,14 +99,30 @@ def _build_grammar_description(symbols: Dict[str, str]) -> str:
         lower = name.lower()
         if any(
             k in lower
-            for k in ("filter", "fieldcondition", "matchvalue", "matchtext", "range",
-                       "matchany", "hasidcondition", "isnullcondition", "isemptycondition")
+            for k in (
+                "filter",
+                "fieldcondition",
+                "matchvalue",
+                "matchtext",
+                "range",
+                "matchany",
+                "hasidcondition",
+                "isnullcondition",
+                "isemptycondition",
+            )
         ):
             filter_symbols[name] = symbol
         elif any(
             k in lower
-            for k in ("recommend", "discover", "fusion", "prefetch", "orderby",
-                       "context", "searchparams")
+            for k in (
+                "recommend",
+                "discover",
+                "fusion",
+                "prefetch",
+                "orderby",
+                "context",
+                "searchparams",
+            )
         ):
             query_symbols[name] = symbol
 
@@ -129,26 +145,36 @@ def _build_grammar_description(symbols: Dict[str, str]) -> str:
 
     if query_symbols:
         lines.append("")
-        lines.append("Advanced query symbols (used in 'query_dsl'/'prefetch_dsl' params):")
-        lines.append("  (Types without Unicode symbols use full class names as identifiers)")
+        lines.append(
+            "Advanced query symbols (used in 'query_dsl'/'prefetch_dsl' params):"
+        )
+        lines.append(
+            "  (Types without Unicode symbols use full class names as identifiers)"
+        )
         for name, symbol in sorted(query_symbols.items()):
             lines.append(f"  {symbol} = {name}")
 
     return "\n".join(lines)
 
 
-def _convert_v2_to_search_results(v2_response: "SearchV2Response") -> List[Dict[str, Any]]:
+def _convert_v2_to_search_results(
+    v2_response: "SearchV2Response",
+) -> List[Dict[str, Any]]:
     """Convert SearchV2Response results to the dict format expected by the search tool."""
     raw_results = []
     for item in v2_response.results:
-        raw_results.append({
-            "id": item.id,
-            "score": item.score if item.score is not None else 0.0,
-            "tool_name": item.tool_name or item.payload.get("tool_name", "unknown_tool"),
-            "timestamp": item.timestamp or item.payload.get("timestamp", "unknown"),
-            "user_email": item.user_email or item.payload.get("user_email", "unknown"),
-            "payload": item.payload,
-        })
+        raw_results.append(
+            {
+                "id": item.id,
+                "score": item.score if item.score is not None else 0.0,
+                "tool_name": item.tool_name
+                or item.payload.get("tool_name", "unknown_tool"),
+                "timestamp": item.timestamp or item.payload.get("timestamp", "unknown"),
+                "user_email": item.user_email
+                or item.payload.get("user_email", "unknown"),
+                "payload": item.payload,
+            }
+        )
     return raw_results
 
 
@@ -207,8 +233,10 @@ def setup_enhanced_qdrant_tools(
                 from middleware.qdrant_core.qdrant_models_wrapper import (
                     get_qdrant_models_wrapper,
                 )
+
                 _dsl_wrapper = get_qdrant_models_wrapper()
             from middleware.qdrant_core.dsl_query_builder import QueryBuilder
+
             _dsl_builder = QueryBuilder(_dsl_wrapper)
         return _dsl_builder
 
@@ -216,6 +244,7 @@ def setup_enhanced_qdrant_tools(
         nonlocal _dsl_executor
         if _dsl_executor is None:
             from middleware.qdrant_core.dsl_executor import SearchV2Executor
+
             _dsl_executor = SearchV2Executor(_client_manager, _get_dsl_builder())
         return _dsl_executor
 
@@ -288,7 +317,13 @@ def setup_enhanced_qdrant_tools(
         query_dsl: Optional[str] = None,
         prefetch_dsl: Optional[str] = None,
         dry_run: bool = False,
-        collection: Annotated[Optional[str], Field(default=None, description="Optional Qdrant collection name to search. If not provided, uses the server's default collection.")] = None,
+        collection: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description="Optional Qdrant collection name to search. If not provided, uses the server's default collection.",
+            ),
+        ] = None,
         user_google_email: UserGoogleEmail = None,
     ) -> QdrantToolSearchResponse:
         """
@@ -491,7 +526,9 @@ def setup_enhanced_qdrant_tools(
 
                 # Include raw payload for non-default collections where
                 # the standard fields (tool_name, timestamp, etc.) won't exist
-                is_non_default = target_collection != _client_manager.config.collection_name
+                is_non_default = (
+                    target_collection != _client_manager.config.collection_name
+                )
                 raw_payload = result.get("payload") if is_non_default else None
 
                 formatted_results.append(
@@ -1174,4 +1211,3 @@ def setup_enhanced_qdrant_tools(
                 },
                 indent=2,
             )
-

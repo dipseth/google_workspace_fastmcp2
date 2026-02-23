@@ -100,7 +100,9 @@ async def qdrant_lifespan(server: Any):
         from middleware.qdrant_core.client import close_global_client_manager
 
         await close_global_client_manager()
-        logger.info("✅ Qdrant lifespan shutdown complete (reindexing stopped, client closed, memory released)")
+        logger.info(
+            "✅ Qdrant lifespan shutdown complete (reindexing stopped, client closed, memory released)"
+        )
 
 
 @lifespan
@@ -275,7 +277,9 @@ async def dynamic_instructions_lifespan(server: Any):
         # holding references to each other via _lifespan_state).
         collected = gc.collect()
         if collected:
-            logger.info(f"🗑️ GC collected {collected} unreachable objects during shutdown")
+            logger.info(
+                f"🗑️ GC collected {collected} unreachable objects during shutdown"
+            )
 
 
 def register_profile_middleware(middleware: Any) -> None:

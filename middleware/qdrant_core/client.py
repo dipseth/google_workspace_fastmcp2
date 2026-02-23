@@ -314,9 +314,20 @@ class QdrantClientManager:
 
     # Standard filterable fields for all collection schemas
     _FILTERABLE_FIELDS = [
-        "tool_name", "user_email", "user_id", "session_id",
-        "payload_type", "label", "timestamp", "execution_time_ms",
-        "compressed", "user", "service", "tool", "email", "type",
+        "tool_name",
+        "user_email",
+        "user_id",
+        "session_id",
+        "payload_type",
+        "label",
+        "timestamp",
+        "execution_time_ms",
+        "compressed",
+        "user",
+        "service",
+        "tool",
+        "email",
+        "type",
     ]
 
     async def _ensure_collection(self):
@@ -360,9 +371,7 @@ class QdrantClientManager:
 
         vector_config = qdrant_models["VectorParams"](
             size=self.embedding_dim,
-            distance=getattr(
-                qdrant_models["Distance"], self.config.distance.upper()
-            ),
+            distance=getattr(qdrant_models["Distance"], self.config.distance.upper()),
             **optimization_params["vector_config"],
         )
 
@@ -429,10 +438,14 @@ class QdrantClientManager:
 
         profile_name = self.config.optimization_profile.value
         description = optimization_params["description"]
-        logger.info(f"✅ Created Qdrant collection (v7 RIC): {self.config.collection_name}")
+        logger.info(
+            f"✅ Created Qdrant collection (v7 RIC): {self.config.collection_name}"
+        )
         logger.info(f"🚀 Optimization Profile: {profile_name}")
         logger.info(f"📊 Profile Description: {description}")
-        logger.info("📐 Named vectors: components, inputs, relationships (384-dim each)")
+        logger.info(
+            "📐 Named vectors: components, inputs, relationships (384-dim each)"
+        )
 
     async def _ensure_missing_indexes(self, qdrant_models: dict):
         """Check existing indexes and create any missing ones."""

@@ -86,6 +86,7 @@ class IntrospectionProvider:
         component = metadata.get("component")
         if component is not None:
             from adapters.module_wrapper.pipeline_mixin import extract_input_values
+
             return extract_input_values(component)
 
         # Fallback for non-live components (e.g. Qdrant payload reconstruction)
@@ -104,11 +105,7 @@ class IntrospectionProvider:
         comp_type = metadata.get("component_type", "class")
         symbols = metadata.get("symbols", {})
 
-        if (
-            structure_validator
-            and comp_type == "class"
-            and name in symbols
-        ):
+        if structure_validator and comp_type == "class" and name in symbols:
             return structure_validator.get_enriched_relationship_text(name)
 
         # Fall back to compact relationship text

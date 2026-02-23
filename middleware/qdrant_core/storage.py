@@ -616,8 +616,14 @@ class QdrantStorageManager:
             # v7 path (named vectors or dual_write)
             if schema == CollectionSchema.V7_NAMED_VECTORS or self.config.dual_write:
                 await self._store_point_v7(
-                    tool_name, tool_args, response, validated_payload,
-                    service_name, resolved_email, resolved_session, qdrant_models,
+                    tool_name,
+                    tool_args,
+                    response,
+                    validated_payload,
+                    service_name,
+                    resolved_email,
+                    resolved_session,
+                    qdrant_models,
                 )
 
         except Exception as e:
@@ -660,9 +666,7 @@ class QdrantStorageManager:
             points=[point],
         )
 
-        logger.debug(
-            f"✅ Stored v1 response for tool: {tool_name} (ID: {point_id})"
-        )
+        logger.debug(f"✅ Stored v1 response for tool: {tool_name} (ID: {point_id})")
 
     async def _store_point_v7(
         self,
@@ -695,15 +699,16 @@ class QdrantStorageManager:
             }
             components_text = self._ric_provider.component_text(tool_name, metadata)
             inputs_text = self._ric_provider.inputs_text(tool_name, metadata)
-            relationships_text = self._ric_provider.relationships_text(tool_name, metadata)
+            relationships_text = self._ric_provider.relationships_text(
+                tool_name, metadata
+            )
         else:
             # Legacy inline text generation (backward compat)
             components_text = (
                 f"Tool: {tool_name}\nService: {service_name}\nType: tool_response"
             )
             inputs_text = (
-                f"Arguments: {json.dumps(tool_args)}\n"
-                f"Response: {str(response)[:1000]}"
+                f"Arguments: {json.dumps(tool_args)}\nResponse: {str(response)[:1000]}"
             )
             relationships_text = (
                 f"{tool_name} belongs to {service_name}. "
@@ -737,9 +742,7 @@ class QdrantStorageManager:
             points=[point],
         )
 
-        logger.debug(
-            f"✅ Stored v7 response for tool: {tool_name} (ID: {point_id})"
-        )
+        logger.debug(f"✅ Stored v7 response for tool: {tool_name} (ID: {point_id})")
 
     async def store_custom_payload(
         self,

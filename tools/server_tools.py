@@ -932,9 +932,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     disabledCount=disabled_count,
                     protectedTools=list(protected_tools_set),
                     sessionState=(
-                        _get_session_state()
-                        if scope_normalized == "session"
-                        else None
+                        _get_session_state() if scope_normalized == "session" else None
                     ),
                     message=f"No tools found matching service '{service_filter}'",
                     error=f"No registered tools belong to service '{service_filter}'",

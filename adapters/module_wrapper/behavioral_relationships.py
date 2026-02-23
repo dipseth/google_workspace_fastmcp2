@@ -123,6 +123,7 @@ class BehavioralRelationshipStrategy:
         from adapters.module_wrapper.tool_relationship_graph import (
             ToolRelationshipGraph,
         )
+
         self._graph: ToolRelationshipGraph = tool_graph
 
     def extract(self, components: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -154,22 +155,30 @@ class BehavioralRelationshipStrategy:
                 elif service:
                     nl_desc += f" (within {service})"
 
-                relationships.append({
-                    "parent_class": tool_name,
-                    "parent_module": f"tools.{service}" if service else "tools",
-                    "parent_path": f"tools.{service}.{tool_name}" if service else f"tools.{tool_name}",
-                    "child_class": succ_name,
-                    "child_module": f"tools.{succ_service}" if succ_service else "tools",
-                    "child_path": f"tools.{succ_service}.{succ_name}" if succ_service else f"tools.{succ_name}",
-                    "field_name": "successor",
-                    "is_optional": True,
-                    "depth": 1,
-                    "relationship_path": f"{tool_name}.successor.{succ_name}",
-                    "json_path": f"{tool_name}.successor.{succ_name}",
-                    "nl_description": nl_desc,
-                    "co_occurrence_count": count,
-                    "relationship_type": "behavioral",
-                })
+                relationships.append(
+                    {
+                        "parent_class": tool_name,
+                        "parent_module": f"tools.{service}" if service else "tools",
+                        "parent_path": f"tools.{service}.{tool_name}"
+                        if service
+                        else f"tools.{tool_name}",
+                        "child_class": succ_name,
+                        "child_module": f"tools.{succ_service}"
+                        if succ_service
+                        else "tools",
+                        "child_path": f"tools.{succ_service}.{succ_name}"
+                        if succ_service
+                        else f"tools.{succ_name}",
+                        "field_name": "successor",
+                        "is_optional": True,
+                        "depth": 1,
+                        "relationship_path": f"{tool_name}.successor.{succ_name}",
+                        "json_path": f"{tool_name}.successor.{succ_name}",
+                        "nl_description": nl_desc,
+                        "co_occurrence_count": count,
+                        "relationship_type": "behavioral",
+                    }
+                )
 
         return relationships
 

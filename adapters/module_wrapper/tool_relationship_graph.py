@@ -32,6 +32,7 @@ def _get_rustworkx():
     global _rustworkx
     if _rustworkx is None:
         import rustworkx as rx
+
         _rustworkx = rx
     return _rustworkx
 
@@ -174,7 +175,7 @@ class ToolRelationshipGraph:
             history = self._session_history[session_id]
 
             # Link from each recent predecessor to this tool
-            window = history[-self.PREDECESSOR_WINDOW:]
+            window = history[-self.PREDECESSOR_WINDOW :]
             for prev_name, prev_ts in window:
                 if prev_name == tool_name:
                     continue  # Skip self-loops
@@ -183,7 +184,7 @@ class ToolRelationshipGraph:
                     continue
                 edge_data = self._ensure_edge(prev_idx, idx)
                 edge_data.co_occurrence_count += 1
-                edge_data.total_time_delta_ms += (now - prev_ts)
+                edge_data.total_time_delta_ms += now - prev_ts
                 edge_data.sessions_seen_in.add(session_id)
 
             # Append to session history

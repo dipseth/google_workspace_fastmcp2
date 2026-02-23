@@ -84,6 +84,7 @@ class RelationshipsMixin:
                 from adapters.module_wrapper.behavioral_relationships import (
                     BehavioralRelationshipStrategy,
                 )
+
                 return BehavioralRelationshipStrategy(tool_graph)
             return None
 
@@ -91,6 +92,7 @@ class RelationshipsMixin:
         from adapters.module_wrapper.behavioral_relationships import (
             StructuralRelationshipStrategy,
         )
+
         return StructuralRelationshipStrategy(self)
 
     def _is_dataclass_type(self, cls: type) -> bool:

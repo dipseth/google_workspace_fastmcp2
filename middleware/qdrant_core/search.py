@@ -142,8 +142,13 @@ class QdrantSearchManager:
         return routing.get(query_type, "inputs")
 
     async def _execute_semantic_search(
-        self, query_embedding, qdrant_filter=None, limit=None, score_threshold=None,
-        using=None, collection=None,
+        self,
+        query_embedding,
+        qdrant_filter=None,
+        limit=None,
+        score_threshold=None,
+        using=None,
+        collection=None,
     ):
         """
         Execute semantic search using query_points (new Qdrant API).

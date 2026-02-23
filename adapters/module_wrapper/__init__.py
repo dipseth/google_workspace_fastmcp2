@@ -576,7 +576,9 @@ class ModuleWrapper(
                         self._v7_pipeline_status = "completed"
                         return
             except Exception as e:
-                logger.debug(f"[BG] Pre-flight check failed (proceeding with pipeline): {e}")
+                logger.debug(
+                    f"[BG] Pre-flight check failed (proceeding with pipeline): {e}"
+                )
 
             logger.info(f"[BG] V7 pipeline starting for {v7_name}...")
             result = self.run_ingestion_pipeline(

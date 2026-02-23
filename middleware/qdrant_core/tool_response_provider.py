@@ -58,7 +58,9 @@ class ToolResponseProvider:
         tool_args = metadata.get("tool_args", {})
         response = metadata.get("response", "")
 
-        args_str = json.dumps(tool_args) if isinstance(tool_args, dict) else str(tool_args)
+        args_str = (
+            json.dumps(tool_args) if isinstance(tool_args, dict) else str(tool_args)
+        )
         response_str = str(response)[:1000]
 
         return f"Arguments: {args_str}\nResponse: {response_str}"

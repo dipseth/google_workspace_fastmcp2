@@ -193,20 +193,32 @@ class SearchV2Executor:
             if query_dsl and query_object:
                 # Advanced query mode: pass built query object directly
                 results, query_type = await self._execute_query_object(
-                    query_object, qdrant_filter, collection, limit,
-                    score_threshold, prefetch_objects,
+                    query_object,
+                    qdrant_filter,
+                    collection,
+                    limit,
+                    score_threshold,
+                    prefetch_objects,
                 )
             elif query_text:
                 results, query_type = await self._execute_semantic(
-                    qdrant_filter, query_text, collection, limit,
-                    score_threshold, prefetch_objects,
+                    qdrant_filter,
+                    query_text,
+                    collection,
+                    limit,
+                    score_threshold,
+                    prefetch_objects,
                 )
             elif prefetch_objects:
                 # Prefetch-only mode (no query object or text — use None query
                 # with prefetch, common with FusionQuery as query_dsl)
                 results, query_type = await self._execute_query_object(
-                    None, qdrant_filter, collection, limit,
-                    score_threshold, prefetch_objects,
+                    None,
+                    qdrant_filter,
+                    collection,
+                    limit,
+                    score_threshold,
+                    prefetch_objects,
                 )
             else:
                 results, query_type = await self._execute_scroll(
