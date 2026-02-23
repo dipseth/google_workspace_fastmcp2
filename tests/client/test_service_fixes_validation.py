@@ -12,20 +12,12 @@ the underlying tools and return real data instead of errors or example data.
 """
 
 import json
-import os
 
 import pytest
 import pytest_asyncio
 
+from .base_test_config import TEST_EMAIL
 from .test_helpers import assert_tools_registered
-
-# Server configuration - Updated for HTTPS
-SERVER_HOST = os.getenv("MCP_SERVER_HOST", "localhost")
-SERVER_PORT = os.getenv("MCP_SERVER_PORT", os.getenv("SERVER_PORT", "8000"))
-SERVER_URL = os.getenv("MCP_SERVER_URL", f"https://{SERVER_HOST}:{SERVER_PORT}/mcp/")
-
-# Test email address
-TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_user@example.com")
 
 
 class TestServiceListResourceFixes:

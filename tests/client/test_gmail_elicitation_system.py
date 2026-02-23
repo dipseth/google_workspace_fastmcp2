@@ -17,19 +17,11 @@ Tests are designed to run against a running MCP server instance.
 
 import asyncio
 import json
-import os
 import sys
 
 import pytest
 
-# Server configuration from environment variables with defaults
-SERVER_HOST = os.getenv("MCP_SERVER_HOST", "localhost")
-SERVER_PORT = os.getenv("MCP_SERVER_PORT", os.getenv("SERVER_PORT", "8002"))
-# Force HTTP for now as server is running on HTTP
-SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://{SERVER_HOST}:{SERVER_PORT}/mcp/")
-
-# Test email address from environment variable
-TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_user@example.com")
+from .base_test_config import TEST_EMAIL
 
 
 class TestGmailElicitationSystem:

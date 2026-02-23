@@ -112,7 +112,9 @@ class IntrospectionProvider:
             return structure_validator.get_enriched_relationship_text(name)
 
         # Fall back to compact relationship text
-        from adapters.module_wrapper.pipeline_mixin import build_compact_relationship_text
+        from adapters.module_wrapper.pipeline_mixin import (
+            build_compact_relationship_text,
+        )
 
         rels = metadata.get("relationships", [])
         return build_compact_relationship_text(name, rels, comp_type)

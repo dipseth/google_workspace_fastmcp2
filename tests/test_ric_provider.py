@@ -21,7 +21,6 @@ from adapters.module_wrapper.ric_provider import (
 )
 from middleware.qdrant_core.tool_response_provider import ToolResponseProvider
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -186,7 +185,9 @@ class TestIntrospectionProvider:
     def test_relationships_text_matches_inline_code(self):
         """Verify that IntrospectionProvider produces identical output
         to the previous inline code in run_ingestion_pipeline."""
-        from adapters.module_wrapper.pipeline_mixin import build_compact_relationship_text
+        from adapters.module_wrapper.pipeline_mixin import (
+            build_compact_relationship_text,
+        )
 
         rels = [
             {"child_class": "Button", "field_name": "button", "is_optional": True, "depth": 1},
@@ -408,7 +409,9 @@ class TestBuildProviderMetadata:
 class TestToolGraphIntegration:
     def test_graph_enriches_relationship_text(self):
         """Record some tool calls, then verify the provider uses graph data."""
-        from adapters.module_wrapper.tool_relationship_graph import ToolRelationshipGraph
+        from adapters.module_wrapper.tool_relationship_graph import (
+            ToolRelationshipGraph,
+        )
 
         graph = ToolRelationshipGraph()
         graph.record_tool_call("list_spaces", "chat", session_id="s1")

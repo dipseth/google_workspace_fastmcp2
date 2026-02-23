@@ -1,19 +1,12 @@
 """Test suite for Phase 3.3: Routing Middleware Improvements using FastMCP Client SDK."""
 
 import asyncio
-import os
 import time
 
 import pytest
-from dotenv import load_dotenv
 
+from .base_test_config import TEST_EMAIL
 from .test_helpers import assert_tools_registered, get_registered_tools
-
-# Load environment variables
-load_dotenv()
-
-# Test configuration
-TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test@example.com")
 
 
 class TestRoutingImprovements:

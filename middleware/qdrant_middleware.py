@@ -144,7 +144,9 @@ class QdrantUnifiedMiddleware(Middleware):
         # Wire RIC provider for v7 tool response storage
         self._tool_relationship_graph = None
         try:
-            from middleware.qdrant_core.tool_response_provider import ToolResponseProvider
+            from middleware.qdrant_core.tool_response_provider import (
+                ToolResponseProvider,
+            )
             provider = ToolResponseProvider(tool_graph=self._tool_relationship_graph)
             self.storage_manager.set_ric_provider(provider)
         except Exception as e:
@@ -281,7 +283,9 @@ class QdrantUnifiedMiddleware(Middleware):
             # Record in tool relationship graph (non-blocking)
             if self._tool_relationship_graph is not None:
                 try:
-                    from middleware.qdrant_core.query_parser import extract_service_from_tool
+                    from middleware.qdrant_core.query_parser import (
+                        extract_service_from_tool,
+                    )
                     service = extract_service_from_tool(tool_name)
                     session_id_for_graph = await get_session_context() or ""
                     self._tool_relationship_graph.record_tool_call(
@@ -428,7 +432,9 @@ class QdrantUnifiedMiddleware(Middleware):
         self._tool_relationship_graph = graph
         # Update the provider with the graph
         try:
-            from middleware.qdrant_core.tool_response_provider import ToolResponseProvider
+            from middleware.qdrant_core.tool_response_provider import (
+                ToolResponseProvider,
+            )
             provider = ToolResponseProvider(tool_graph=graph)
             self.storage_manager.set_ric_provider(provider)
             logger.info("Updated ToolResponseProvider with relationship graph")

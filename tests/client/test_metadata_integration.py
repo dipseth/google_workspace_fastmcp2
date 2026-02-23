@@ -1,17 +1,9 @@
 """Test suite for Phase 3.2: MCP Metadata Integration using FastMCP Client SDK."""
 
-import os
-
 import pytest
-from dotenv import load_dotenv
 
+from .base_test_config import TEST_EMAIL
 from .test_helpers import assert_tools_registered
-
-# Load environment variables
-load_dotenv()
-
-# Test configuration
-TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test@example.com")
 
 
 class TestMetadataIntegration:

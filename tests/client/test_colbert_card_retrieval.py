@@ -14,27 +14,16 @@ Key areas tested:
 import json
 import logging
 import os
-import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pytest
-from dotenv import load_dotenv
+
+from .base_test_config import TEST_EMAIL
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Load environment variables
-load_dotenv()
-
-# Add project root to path for imports
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
-
-# Test configuration
-TEST_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test@example.com")
 TEST_WEBHOOK_URL = os.getenv("TEST_CHAT_WEBHOOK", "")
 TEST_SPACE_ID = "AAAAWvjq2HE"
 

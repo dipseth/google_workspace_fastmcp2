@@ -41,6 +41,14 @@ logger = logging.getLogger(__name__)
 # TYPE DEFINITIONS (Import First for Use by Other Modules)
 # =============================================================================
 
+# =============================================================================
+# RELATIONSHIP STRATEGIES & TOOL GRAPH
+# =============================================================================
+from adapters.module_wrapper.behavioral_relationships import (
+    BehavioralRelationshipStrategy,
+    RelationshipStrategy,
+    StructuralRelationshipStrategy,
+)
 from adapters.module_wrapper.cache_mixin import CacheMixin
 
 # =============================================================================
@@ -105,17 +113,6 @@ from adapters.module_wrapper.instance_pattern_mixin import (
     VariationFamily,
 )
 from adapters.module_wrapper.pipeline_mixin import PipelineMixin
-from adapters.module_wrapper.ric_provider import IntrospectionProvider, RICTextProvider
-
-# =============================================================================
-# RELATIONSHIP STRATEGIES & TOOL GRAPH
-# =============================================================================
-from adapters.module_wrapper.behavioral_relationships import (
-    BehavioralRelationshipStrategy,
-    RelationshipStrategy,
-    StructuralRelationshipStrategy,
-)
-from adapters.module_wrapper.tool_relationship_graph import ToolRelationshipGraph
 
 # =============================================================================
 # MIXINS
@@ -126,6 +123,7 @@ from adapters.module_wrapper.qdrant_mixin import (
     _get_qdrant_imports,
 )
 from adapters.module_wrapper.relationships_mixin import RelationshipsMixin
+from adapters.module_wrapper.ric_provider import IntrospectionProvider, RICTextProvider
 from adapters.module_wrapper.search_mixin import (
     COLBERT_DIM,
     RELATIONSHIPS_DIM,
@@ -179,6 +177,7 @@ from adapters.module_wrapper.text_indexing import (
     search_components_by_relationship,
     search_within_module,
 )
+from adapters.module_wrapper.tool_relationship_graph import ToolRelationshipGraph
 from adapters.module_wrapper.types import (
     # Constants (also available from core, but centralized here)
     COLBERT_DIM as TYPES_COLBERT_DIM,

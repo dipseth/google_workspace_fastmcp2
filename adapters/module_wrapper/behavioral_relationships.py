@@ -76,7 +76,9 @@ class StructuralRelationshipStrategy:
 
     def get_relationship_text(self, component_name: str) -> str:
         """Build compact relationship text from structural relationships."""
-        from adapters.module_wrapper.pipeline_mixin import build_compact_relationship_text
+        from adapters.module_wrapper.pipeline_mixin import (
+            build_compact_relationship_text,
+        )
 
         by_parent = self._mixin.extract_relationships_by_parent()
         rels = by_parent.get(component_name, [])
@@ -118,7 +120,9 @@ class BehavioralRelationshipStrategy:
         Args:
             tool_graph: A ToolRelationshipGraph instance
         """
-        from adapters.module_wrapper.tool_relationship_graph import ToolRelationshipGraph
+        from adapters.module_wrapper.tool_relationship_graph import (
+            ToolRelationshipGraph,
+        )
         self._graph: ToolRelationshipGraph = tool_graph
 
     def extract(self, components: Dict[str, Any]) -> List[Dict[str, Any]]:
