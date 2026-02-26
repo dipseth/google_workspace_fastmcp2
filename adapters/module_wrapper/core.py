@@ -250,6 +250,47 @@ class ModuleWrapperBase:
     - Search capabilities
     """
 
+    # --- Mixin dependency contract ---
+    _MIXIN_PROVIDES = frozenset({
+        "module",
+        "module_name",
+        "components",
+        "root_components",
+        "symbol_mapping",
+        "reverse_symbol_mapping",
+        "collection_name",
+        "embedding_model_name",
+        "index_nested",
+        "index_private",
+        "max_depth",
+        "skip_standard_library",
+        "include_modules",
+        "exclude_modules",
+        "force_reindex",
+        "clear_collection",
+        "enable_colbert",
+        "colbert_model_name",
+        "colbert_collection_name",
+        "qdrant_host",
+        "qdrant_port",
+        "qdrant_url",
+        "qdrant_api_key",
+        "qdrant_use_https",
+        "qdrant_prefer_grpc",
+        "get_component_by_path",
+        "get_symbol_for_component",
+        "get_component_for_symbol",
+        "get_structure_validator",
+        "validate_structure",
+        "get_dsl_parser",
+        "parse_dsl",
+        "dsl_metadata",
+        "generate_component_symbols",
+        "invalidate_caches",
+    })
+    _MIXIN_REQUIRES = frozenset()  # Root — no dependencies
+    _MIXIN_INIT_ORDER = 0
+
     def __init__(
         self,
         module_or_name: Union[str, Any],

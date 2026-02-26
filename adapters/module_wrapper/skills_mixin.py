@@ -62,6 +62,26 @@ class SkillsMixin:
     templates and examples.
     """
 
+    # --- Mixin dependency contract ---
+    _MIXIN_PROVIDES = frozenset({
+        "generate_all_skills",
+        "generate_symbol_reference",
+        "generate_component_docs",
+        "generate_containment_rules",
+        "generate_main_skill",
+        "export_skills_to_directory",
+        "get_skill_manifest",
+        "register_skill_template",
+        "register_skill_examples",
+    })
+    _MIXIN_REQUIRES = frozenset({
+        "symbol_mapping",
+        "components",
+        "relationships",
+        "module_name",
+    })
+    _MIXIN_INIT_ORDER = 60
+
     def __init__(self, *args, **kwargs):
         """Initialize skills-related attributes."""
         super().__init__(*args, **kwargs)

@@ -64,6 +64,27 @@ class RelationshipsMixin:
     - BehavioralRelationshipStrategy: Graph-based (tools)
     """
 
+    # --- Mixin dependency contract ---
+    _MIXIN_PROVIDES = frozenset({
+        "relationships",
+        "extract_relationships",
+        "extract_relationships_by_parent",
+        "extract_relationships_by_child",
+        "enrich_components_with_relationships",
+        "get_relationship_tree",
+        "get_field_for_child",
+        "register_custom_components",
+        "index_custom_components",
+        "relationship_metadata",
+    })
+    _MIXIN_REQUIRES = frozenset({
+        "components",
+        "client",
+        "collection_name",
+        "embedder",
+    })
+    _MIXIN_INIT_ORDER = 35
+
     # Cached properties
     _cached_relationships: Optional[Dict[str, List[str]]] = None
     _cached_raw_relationships: Optional[List[Dict[str, Any]]] = None

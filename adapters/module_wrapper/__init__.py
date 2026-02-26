@@ -112,6 +112,15 @@ from adapters.module_wrapper.instance_pattern_mixin import (
     StructureVariator,
     VariationFamily,
 )
+from adapters.module_wrapper.mixin_meta import (
+    MixinContract,
+    check_runtime_dependencies,
+    generate_mermaid_dependency_graph,
+    generate_provides_requires_table,
+    get_all_contracts,
+    requires_deps,
+    validate_mixin_dependencies,
+)
 from adapters.module_wrapper.pipeline_mixin import PipelineMixin
 
 # =============================================================================
@@ -404,6 +413,12 @@ class ModuleWrapper(
 
             self._initialized = True
             logger.info(f"ModuleWrapper initialized for {self.module_name}")
+
+            # Optional strict-mode validation
+            import os
+
+            if os.environ.get("MODULE_WRAPPER_STRICT") == "1":
+                self.validate_dependencies(strict=True)
 
         except Exception as e:
             logger.error(f"Failed to initialize ModuleWrapper: {e}", exc_info=True)
@@ -732,6 +747,38 @@ class ModuleWrapper(
         except (ImportError, AttributeError):
             return None
 
+    def validate_dependencies(self, strict: bool = False) -> list[str]:
+        """Validate mixin dependency contracts.
+
+        Args:
+            strict: If True, raise RuntimeError on any issue.
+
+        Returns:
+            List of issue descriptions. Empty = all good.
+        """
+        from adapters.module_wrapper.mixin_meta import (
+            check_runtime_dependencies,
+            validate_mixin_dependencies,
+        )
+
+        # Static check (MRO-level)
+        issues = validate_mixin_dependencies(type(self))
+
+        # Runtime check (attribute-level)
+        issues.extend(check_runtime_dependencies(self))
+
+        if issues:
+            msg = (
+                f"ModuleWrapper dependency issues:\n"
+                + "\n".join(f"  - {i}" for i in issues)
+            )
+            if strict:
+                raise RuntimeError(msg)
+            else:
+                logger.warning(msg)
+
+        return issues
+
 
 # =============================================================================
 # EXPORTS
@@ -834,6 +881,14 @@ __all__ = [
     # Search constants
     "COLBERT_DIM",
     "RELATIONSHIPS_DIM",
+    # Mixin dependency contracts
+    "MixinContract",
+    "validate_mixin_dependencies",
+    "check_runtime_dependencies",
+    "generate_mermaid_dependency_graph",
+    "generate_provides_requires_table",
+    "get_all_contracts",
+    "requires_deps",
 ]
 
 __version__ = "2.0.0"

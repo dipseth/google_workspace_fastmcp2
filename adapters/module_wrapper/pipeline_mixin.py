@@ -230,6 +230,30 @@ class PipelineMixin:
     - get_symbol_for_component: method
     """
 
+    # --- Mixin dependency contract ---
+    _MIXIN_PROVIDES = frozenset({
+        "run_ingestion_pipeline",
+        "create_v7_collection",
+        "verify_pipeline_results",
+        "register_ric_provider",
+        "get_ric_provider",
+        "get_v7_collection_name",
+        "set_v7_collection_name",
+        "_ensure_pipeline_embedders",
+    })
+    _MIXIN_REQUIRES = frozenset({
+        "module_name",
+        "components",
+        "symbol_mapping",
+        "client",
+        "collection_name",
+        "extract_relationships_by_parent",
+        "get_structure_validator",
+        "get_symbol_wrapped_text",
+        "get_symbol_for_component",
+    })
+    _MIXIN_INIT_ORDER = 55
+
     # Pipeline state
     _v7_collection_name: Optional[str] = None
     _colbert_embedder: Any = None
