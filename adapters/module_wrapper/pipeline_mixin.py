@@ -5,10 +5,10 @@ Make sure pipeline can support a paramter for warming up in intitiating.  this i
 
 Ingestion Pipeline Mixin
 
-Provides the v7 ingestion pipeline for creating/updating Qdrant collections
+Provides the ingestion pipeline for creating/updating Qdrant collections
 with component, input, and relationship vectors.
 
-This consolidates the logic from scripts/initialize_v7_collection.py into
+This consolidates the collection initialization logic into
 the ModuleWrapper class so the pipeline can be run programmatically.
 """
 
@@ -216,7 +216,7 @@ def format_instance_params(params: dict) -> str:
 
 class PipelineMixin:
     """
-    Mixin providing v7 ingestion pipeline functionality.
+    Mixin providing ingestion pipeline functionality.
 
     Expects the following attributes on self:
     - module_name: str
@@ -234,12 +234,12 @@ class PipelineMixin:
     _MIXIN_PROVIDES = frozenset(
         {
             "run_ingestion_pipeline",
-            "create_v7_collection",
+            "create_collection",
             "verify_pipeline_results",
             "register_ric_provider",
             "get_ric_provider",
-            "get_v7_collection_name",
-            "set_v7_collection_name",
+            "get_collection_name",
+            "set_collection_name",
             "_ensure_pipeline_embedders",
         }
     )
@@ -259,7 +259,7 @@ class PipelineMixin:
     _MIXIN_INIT_ORDER = 55
 
     # Pipeline state
-    _v7_collection_name: Optional[str] = None
+    _collection_name: Optional[str] = None
     _colbert_embedder: Any = None
     _relationships_embedder: Any = None
 
@@ -336,26 +336,26 @@ class PipelineMixin:
             else symbols,
         }
 
-    def get_v7_collection_name(self) -> str:
-        """Get the v7 collection name for this module."""
-        if self._v7_collection_name:
-            return self._v7_collection_name
+    def get_collection_name(self) -> str:
+        """Get the pipeline collection name for this module."""
+        if self._collection_name:
+            return self._collection_name
 
         # Default naming convention
         base = self.module_name.replace(".", "_")
-        return f"mcp_{base}_v7"
+        return f"mcp_{base}"
 
-    def set_v7_collection_name(self, name: str):
-        """Set a custom v7 collection name."""
-        self._v7_collection_name = name
+    def set_collection_name(self, name: str):
+        """Set a custom pipeline collection name."""
+        self._collection_name = name
 
-    def create_v7_collection(
+    def create_collection(
         self,
         collection_name: Optional[str] = None,
         force_recreate: bool = False,
     ) -> bool:
         """
-        Create the v7 collection with three named vectors.
+        Create the collection with three named vectors.
 
         Args:
             collection_name: Collection name (uses default if not provided)
@@ -378,8 +378,8 @@ class PipelineMixin:
             logger.error("Cannot create collection: Qdrant client not available")
             return False
 
-        target_name = collection_name or self.get_v7_collection_name()
-        self._v7_collection_name = target_name
+        target_name = collection_name or self.get_collection_name()
+        self._collection_name = target_name
 
         collections = self.client.get_collections()
         collection_names = [c.name for c in collections.collections]
@@ -474,13 +474,13 @@ class PipelineMixin:
         batch_size: int = 20,
     ) -> Dict[str, int]:
         """
-        Run the full v7 ingestion pipeline.
+        Run the full ingestion pipeline.
 
-        This is the main entry point for indexing a module into v7 format with
-        three vectors: components, inputs, and relationships.
+        This is the main entry point for indexing a module into named-vectors format
+        with three vectors: components, inputs, and relationships.
 
         Args:
-            collection_name: Target v7 collection name
+            collection_name: Target collection name
             force_recreate: If True, recreate the collection from scratch
             include_instance_patterns: If True, also migrate instance_patterns
             source_collection: Source collection for instance_patterns (if different)
@@ -492,12 +492,12 @@ class PipelineMixin:
         from qdrant_client.models import PointStruct
 
         logger.info("=" * 60)
-        logger.info(f"RUNNING V7 INGESTION PIPELINE FOR {self.module_name}")
+        logger.info(f"RUNNING INGESTION PIPELINE FOR {self.module_name}")
         logger.info("=" * 60)
 
         # Step 1: Create collection
-        target_name = collection_name or self.get_v7_collection_name()
-        if not self.create_v7_collection(target_name, force_recreate):
+        target_name = collection_name or self.get_collection_name()
+        if not self.create_collection(target_name, force_recreate):
             return {
                 "components": 0,
                 "instance_patterns": 0,
@@ -632,7 +632,7 @@ class PipelineMixin:
         # Step 6: Index instance patterns (optional)
         pattern_count = 0
         if include_instance_patterns:
-            pattern_count = self._index_instance_patterns_v7(
+            pattern_count = self._index_instance_patterns(
                 target_name,
                 source_collection or self.collection_name,
                 batch_size,
@@ -655,17 +655,17 @@ class PipelineMixin:
             "total": total,
         }
 
-    def _index_instance_patterns_v7(
+    def _index_instance_patterns(
         self,
         target_collection: str,
         source_collection: str,
         batch_size: int = 20,
     ) -> int:
         """
-        Index instance_patterns from source collection into v7.
+        Index instance_patterns from source collection into named-vectors collection.
 
         Args:
-            target_collection: Target v7 collection
+            target_collection: Target collection
             source_collection: Source collection with instance_patterns
             batch_size: Points to process per batch
 
@@ -794,7 +794,7 @@ class PipelineMixin:
         collection_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Verify the v7 collection after pipeline run.
+        Verify the collection after pipeline run.
 
         Args:
             collection_name: Collection to verify
@@ -802,7 +802,7 @@ class PipelineMixin:
         Returns:
             Dict with verification results
         """
-        target_name = collection_name or self.get_v7_collection_name()
+        target_name = collection_name or self.get_collection_name()
 
         if not self.client:
             return {"error": "No Qdrant client"}

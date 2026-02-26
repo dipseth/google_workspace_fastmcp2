@@ -11,7 +11,7 @@ we can leverage Qdrant's full-text indexing features to enable:
 
 ## Current Architecture
 
-Our `mcp_gchat_cards_v7` collection has these payload fields that could benefit:
+Our `mcp_gchat_cards` collection has these payload fields that could benefit:
 
 | Field | Current Type | Content Example | Text Index Candidate? |
 |-------|-------------|-----------------|----------------------|
@@ -35,7 +35,7 @@ Our `mcp_gchat_cards_v7` collection has these payload fields that could benefit:
 ```python
 # On docstring and nl_descriptions fields
 client.create_payload_index(
-    collection_name="mcp_gchat_cards_v7",
+    collection_name="mcp_gchat_cards",
     field_name="docstring",
     field_schema=models.TextIndexParams(
         type=models.TextIndexType.TEXT,
@@ -62,7 +62,7 @@ client.create_payload_index(
 ```python
 # On docstring and nl_descriptions for natural language search
 client.create_payload_index(
-    collection_name="mcp_gchat_cards_v7",
+    collection_name="mcp_gchat_cards",
     field_name="relationships.nl_descriptions",
     field_schema=models.TextIndexParams(
         type=models.TextIndexType.TEXT,
@@ -91,7 +91,7 @@ components that have "click" in their relationships.
 **Where to apply**:
 ```python
 client.create_payload_index(
-    collection_name="mcp_gchat_cards_v7",
+    collection_name="mcp_gchat_cards",
     field_name="docstring",
     field_schema=models.TextIndexParams(
         type=models.TextIndexType.TEXT,
@@ -124,7 +124,7 @@ client.create_payload_index(
 **Where to apply**:
 ```python
 client.create_payload_index(
-    collection_name="mcp_gchat_cards_v7",
+    collection_name="mcp_gchat_cards",
     field_name="name",  # Component names
     field_schema=models.TextIndexParams(
         type=models.TextIndexType.TEXT,
@@ -136,7 +136,7 @@ client.create_payload_index(
 
 # Search with phrase:
 client.scroll(
-    collection_name="mcp_gchat_cards_v7",
+    collection_name="mcp_gchat_cards",
     scroll_filter=models.Filter(
         must=[
             models.FieldCondition(
@@ -216,8 +216,8 @@ For supporting multiple modules (Gmail, Sheets, etc.), we should:
    - Already supported by SymbolGenerator's prefix system
 
 2. **Create separate collections** per module:
-   - `mcp_gchat_cards_v7`
-   - `mcp_gmail_messages_v7`
+   - `mcp_gchat_cards`
+   - `mcp_gmail_messages`
    - Keeps indices focused and performant
 
 3. **Or use filtered searches** with a `module` field:
@@ -248,7 +248,7 @@ For supporting multiple modules (Gmail, Sheets, etc.), we should:
 
 ## Next Steps
 
-1. Add text index creation to `scripts/initialize_v7_collection.py`
+1. Add text index creation to `scripts/initialize_collection.py`
 2. Test phrase search for component lookup
 3. Benchmark stemmed vs non-stemmed NL queries
 4. Plan multi-module collection strategy

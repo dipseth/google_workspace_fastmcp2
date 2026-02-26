@@ -352,7 +352,7 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
         module_or_name="card_framework",
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
-        collection_name=settings.card_collection,  # mcp_gchat_cards_v7
+        collection_name=settings.card_collection,
         auto_initialize=False,  # We call initialize() manually below
         index_nested=True,
         index_private=False,
@@ -360,11 +360,10 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
         skip_standard_library=True,
         priority_overrides=CARD_PRIORITY_OVERRIDES,
         nl_relationship_patterns=GCHAT_NL_RELATIONSHIP_PATTERNS,
-        use_v7_schema=True,
     )
 
     # Initialize: populates self.components and symbols synchronously.
-    # If v7 pipeline is needed, it runs in a background thread.
+    # If the pipeline is needed, it runs in a background thread.
     wrapper.initialize()
 
     component_count = len(wrapper.components) if wrapper.components else 0
@@ -445,11 +444,11 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
         logger.warning(f"⚠️ Failed to register skill templates: {e}")
 
     # === QDRANT WRITE OPERATIONS ===
-    # If v7 pipeline is running in the background, defer these until it completes.
+    # If pipeline is running in the background, defer these until it completes.
     # If pipeline already completed (fast path), they run immediately.
 
     def _post_pipeline_qdrant_writes():
-        """Runs after v7 pipeline creates the collection — indexes custom components + text indices."""
+        """Runs after pipeline creates the collection — indexes custom components + text indices."""
         try:
             indexed_count = wrapper.index_custom_components(custom_components_metadata)
             if indexed_count > 0:
@@ -484,10 +483,10 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
         except Exception as e:
             logger.warning(f"⚠️ DAG warm-start failed: {e}")
 
-    if wrapper.v7_pipeline_status == "running":
+    if wrapper.pipeline_status == "running":
         # Pipeline is running in background — queue Qdrant writes for when it finishes.
         # Order matters: custom components first, then DAG warm-start (needs the collection ready).
-        logger.info("📋 V7 pipeline running — queuing Qdrant writes for post-pipeline")
+        logger.info("📋 Pipeline running — queuing Qdrant writes for post-pipeline")
         wrapper.queue_post_pipeline_callback(_post_pipeline_qdrant_writes)
         wrapper.queue_post_pipeline_callback(_post_pipeline_dag_warmstart)
     else:

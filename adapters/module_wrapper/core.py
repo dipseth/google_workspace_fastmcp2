@@ -396,10 +396,6 @@ class ModuleWrapperBase:
         self._priority_overrides = priority_overrides
         self._nl_relationship_patterns = nl_relationship_patterns
 
-        # v7 schema detection
-        self.use_v7_schema = collection_name.endswith(
-            "_v7"
-        ) or collection_name.endswith("v7")
         self.relationships_embedder = None
         self.relationships_embedding_dim = 384
 

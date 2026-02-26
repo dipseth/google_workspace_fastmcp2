@@ -263,7 +263,7 @@ class ModuleWrapper(
     - Search functionality (SearchMixin)
     - Relationship extraction (RelationshipsMixin)
     - Symbol generation and DSL (SymbolsMixin)
-    - V7 ingestion pipeline (PipelineMixin)
+    - Ingestion pipeline (PipelineMixin)
     - Graph-based relationship DAG (GraphMixin)
     - Tiered component caching (CacheMixin)
     - Instance pattern storage and variation (InstancePatternMixin)
@@ -317,7 +317,6 @@ class ModuleWrapper(
         colbert_collection_name: Optional[str] = None,
         priority_overrides: Optional[Dict[str, int]] = None,
         nl_relationship_patterns: Optional[Dict[tuple, str]] = None,
-        use_v7_schema: bool = False,
     ):
         """
         Initialize the ModuleWrapper.
@@ -344,15 +343,12 @@ class ModuleWrapper(
             colbert_collection_name: Separate collection for ColBERT
             priority_overrides: Domain-specific priority score boosts for symbol generation
             nl_relationship_patterns: Domain-specific NL patterns for relationships
-            use_v7_schema: Use v7 3-vector schema (components, inputs, relationships)
-                instead of single-vector. Collection name defaults to mcp_{module}_v7.
         """
-        self._use_v7_schema = use_v7_schema
-        self._v7_pipeline_thread: Optional[threading.Thread] = None
-        self._v7_pipeline_status: str = "idle"  # idle, running, completed, failed
-        self._v7_pipeline_error: Optional[str] = None
-        self._v7_post_pipeline_callbacks: List[callable] = []
-        self._v7_pipeline_lock = threading.Lock()
+        self._pipeline_thread: Optional[threading.Thread] = None
+        self._pipeline_status: str = "idle"  # idle, running, completed, failed
+        self._pipeline_error: Optional[str] = None
+        self._post_pipeline_callbacks: List[callable] = []
+        self._pipeline_lock = threading.Lock()
 
         # Initialize base class (sets up all configuration)
         super().__init__(
@@ -394,22 +390,8 @@ class ModuleWrapper(
             # Initialize embedding model (from EmbeddingMixin)
             self._initialize_embedder()
 
-            if self._use_v7_schema:
-                # V7 path: 3 named vectors (components, inputs, relationships)
-                self._initialize_v7()
-            else:
-                # Legacy path: single flat vector
-                self._ensure_collection()
-                self.ensure_symbol_index()
-                self._index_module_components()
-
-                if self.enable_colbert:
-                    logger.info(
-                        "ColBERT mode enabled - initializing ColBERT embedder..."
-                    )
-                    self._initialize_colbert_embedder()
-                    self._ensure_colbert_collection()
-                    self._index_components_colbert()
+            # Named vectors path: 3 named vectors (components, inputs, relationships)
+            self._initialize_collection()
 
             self._initialized = True
             logger.info(f"ModuleWrapper initialized for {self.module_name}")
@@ -424,47 +406,47 @@ class ModuleWrapper(
             logger.error(f"Failed to initialize ModuleWrapper: {e}", exc_info=True)
             raise
 
-    def _initialize_v7(self):
-        """Initialize using v7 3-vector schema via PipelineMixin.
+    def _initialize_collection(self):
+        """Initialize using 3-vector named-vectors schema via PipelineMixin.
 
-        Fast path: If v7 collection exists with data, loads components from
+        Fast path: If collection exists with data, loads components from
         Qdrant synchronously. The wrapper is fully ready when this returns.
 
         Slow path: If collection needs (re)creation, does module introspection
         synchronously (populating self.components and symbols), then runs the
-        v7 pipeline in a background thread. The wrapper is usable immediately
+        pipeline in a background thread. The wrapper is usable immediately
         for in-memory operations (DSL parsing, symbol lookup, etc.) while
         the pipeline indexes to Qdrant in the background.
         """
-        v7_name = self.collection_name
-        logger.info(f"Using v7 schema for collection: {v7_name}")
+        coll_name = self.collection_name
+        logger.info(f"Using named-vectors schema for collection: {coll_name}")
 
-        # Check if v7 collection already exists with data
+        # Check if collection already exists with data
         try:
             collections = self.client.get_collections()
             collection_names = [c.name for c in collections.collections]
 
-            if v7_name in collection_names:
-                info = self.client.get_collection(v7_name)
+            if coll_name in collection_names:
+                info = self.client.get_collection(coll_name)
                 vectors_config = info.config.params.vectors
 
-                # Verify it's actually a v7 schema (named vectors dict, not single)
-                is_v7 = isinstance(vectors_config, dict)
+                # Verify it uses named vectors (dict, not single)
+                is_named = isinstance(vectors_config, dict)
 
-                if is_v7 and info.points_count > 0 and not self.force_reindex:
+                if is_named and info.points_count > 0 and not self.force_reindex:
                     logger.info(
-                        f"V7 collection {v7_name} exists with {info.points_count} points "
+                        f"Collection {coll_name} exists with {info.points_count} points "
                         f"and correct schema — loading existing components"
                     )
-                    self._load_existing_components_v7(v7_name)
-                    self._v7_pipeline_status = "completed"
+                    self._load_existing_components(coll_name)
+                    self._pipeline_status = "completed"
                     return
 
                 # Collection exists but needs recreation (wrong schema, empty, or force_reindex).
-                # Delete it so the staging step can create a fresh single-vector collection.
+                # Delete it so the staging step can create a fresh collection.
                 reason = (
                     "wrong schema (single vector)"
-                    if not is_v7
+                    if not is_named
                     else (
                         "force_reindex requested"
                         if self.force_reindex
@@ -472,35 +454,35 @@ class ModuleWrapper(
                     )
                 )
                 logger.warning(
-                    f"Collection {v7_name} exists but {reason}. Deleting for recreation."
+                    f"Collection {coll_name} exists but {reason}. Deleting for recreation."
                 )
-                self.client.delete_collection(v7_name)
-                logger.info(f"Deleted collection: {v7_name}")
+                self.client.delete_collection(coll_name)
+                logger.info(f"Deleted collection: {coll_name}")
         except Exception as e:
             logger.warning(f"Error checking existing collection: {e}")
 
         # === SYNC: Module introspection (populate self.components in memory) ===
-        # Skip Qdrant storage — the pipeline will handle all writes to the v7 collection.
-        self._v7_introspect_module()
+        # Skip Qdrant storage — the pipeline will handle all writes to the collection.
+        self._introspect_module()
 
-        # === BACKGROUND: Run v7 pipeline (slow — ColBERT embeddings) ===
+        # === BACKGROUND: Run pipeline (slow — ColBERT embeddings) ===
         logger.info(
-            f"Starting v7 pipeline in background for {v7_name} "
+            f"Starting pipeline in background for {coll_name} "
             f"({len(self.components)} components)..."
         )
-        self._v7_pipeline_status = "running"
-        self._v7_pipeline_thread = threading.Thread(
-            target=self._run_v7_pipeline_background,
-            args=(v7_name,),
-            name=f"v7-pipeline-{self.module_name}",
+        self._pipeline_status = "running"
+        self._pipeline_thread = threading.Thread(
+            target=self._run_pipeline_background,
+            args=(coll_name,),
+            name=f"pipeline-{self.module_name}",
             daemon=True,
         )
-        self._v7_pipeline_thread.start()
+        self._pipeline_thread.start()
 
-    def _v7_introspect_module(self):
+    def _introspect_module(self):
         """Introspect module to populate self.components without writing to Qdrant.
 
-        This is the sync-only part of v7 initialization: fast module walking
+        This is the sync-only part of initialization: fast module walking
         that populates self.components and triggers symbol generation.
         """
         import inspect
@@ -559,10 +541,10 @@ class ModuleWrapper(
         # Trigger lazy symbol generation so symbols are ready immediately
         _ = self.symbol_mapping
 
-    def _run_v7_pipeline_background(self, v7_name: str):
-        """Run the v7 ingestion pipeline in a background thread.
+    def _run_pipeline_background(self, coll_name: str):
+        """Run the ingestion pipeline in a background thread.
 
-        NOTE: force_recreate=False because _initialize_v7() already handles
+        NOTE: force_recreate=False because _initialize_collection() already handles
         collection deletion when the schema is wrong or force_reindex is set.
         Using force_recreate=True here was causing a full re-index on every
         server restart, pegging CPU for several minutes while ColBERT embeds
@@ -570,47 +552,47 @@ class ModuleWrapper(
         """
         try:
             # Safety guard: re-check if collection already has data.
-            # Between _initialize_v7() scheduling this thread and the thread
+            # Between _initialize_collection() scheduling this thread and the thread
             # actually starting, Qdrant may have finished loading persisted data
             # (especially in Docker where depends_on: qdrant is used).
             try:
                 collections = self.client.get_collections()
                 collection_names = [c.name for c in collections.collections]
-                if v7_name in collection_names:
-                    info = self.client.get_collection(v7_name)
+                if coll_name in collection_names:
+                    info = self.client.get_collection(coll_name)
                     vectors_config = info.config.params.vectors
-                    is_v7 = isinstance(vectors_config, dict)
-                    if is_v7 and info.points_count > 0 and not self.force_reindex:
+                    is_named = isinstance(vectors_config, dict)
+                    if is_named and info.points_count > 0 and not self.force_reindex:
                         logger.info(
-                            f"[BG] V7 collection {v7_name} already has "
+                            f"[BG] Collection {coll_name} already has "
                             f"{info.points_count} points — skipping expensive pipeline"
                         )
                         # Still load components into memory if not already loaded
                         if not self.components:
-                            self._load_existing_components_v7(v7_name)
-                        self._v7_pipeline_status = "completed"
+                            self._load_existing_components(coll_name)
+                        self._pipeline_status = "completed"
                         return
             except Exception as e:
                 logger.debug(
                     f"[BG] Pre-flight check failed (proceeding with pipeline): {e}"
                 )
 
-            logger.info(f"[BG] V7 pipeline starting for {v7_name}...")
+            logger.info(f"[BG] Pipeline starting for {coll_name}...")
             result = self.run_ingestion_pipeline(
-                collection_name=v7_name,
+                collection_name=coll_name,
                 force_recreate=False,
                 include_instance_patterns=False,
             )
             component_count = result.get("components", 0)
             logger.info(
-                f"[BG] V7 pipeline complete for {v7_name}: "
+                f"[BG] Pipeline complete for {coll_name}: "
                 f"{component_count} components indexed"
             )
 
             # Run any queued post-pipeline callbacks (e.g. index_custom_components)
-            with self._v7_pipeline_lock:
-                callbacks = list(self._v7_post_pipeline_callbacks)
-                self._v7_post_pipeline_callbacks.clear()
+            with self._pipeline_lock:
+                callbacks = list(self._post_pipeline_callbacks)
+                self._post_pipeline_callbacks.clear()
 
             for callback in callbacks:
                 try:
@@ -620,71 +602,81 @@ class ModuleWrapper(
                 except Exception as e:
                     logger.warning(f"[BG] Post-pipeline callback failed: {e}")
 
-            self._v7_pipeline_status = "completed"
-            logger.info(f"[BG] V7 initialization fully complete for {v7_name}")
+            self._pipeline_status = "completed"
+            logger.info(f"[BG] Initialization fully complete for {coll_name}")
 
         except Exception as e:
-            self._v7_pipeline_error = str(e)
-            self._v7_pipeline_status = "failed"
-            logger.error(f"[BG] V7 pipeline failed for {v7_name}: {e}", exc_info=True)
+            self._pipeline_error = str(e)
+            self._pipeline_status = "failed"
+            logger.error(f"[BG] Pipeline failed for {coll_name}: {e}", exc_info=True)
 
     def queue_post_pipeline_callback(self, callback: callable):
-        """Queue a callback to run after the v7 pipeline completes.
+        """Queue a callback to run after the pipeline completes.
 
         If the pipeline has already completed, the callback is run immediately.
-        Use this for Qdrant write operations that depend on the v7 collection
+        Use this for Qdrant write operations that depend on the collection
         being ready (e.g. index_custom_components, create_text_indices).
 
         Args:
             callback: Zero-argument callable to run after pipeline completion.
         """
-        with self._v7_pipeline_lock:
-            if self._v7_pipeline_status == "completed":
+        with self._pipeline_lock:
+            if self._pipeline_status == "completed":
                 # Pipeline already done — run immediately
                 callback_name = getattr(callback, "__name__", str(callback))
                 logger.info(
                     f"Pipeline already complete, running callback: {callback_name}"
                 )
                 callback()
-            elif self._v7_pipeline_status == "failed":
+            elif self._pipeline_status == "failed":
                 logger.warning(
                     "Pipeline failed — skipping callback. "
-                    f"Error: {self._v7_pipeline_error}"
+                    f"Error: {self._pipeline_error}"
                 )
             else:
                 # Pipeline still running — queue for later
-                self._v7_post_pipeline_callbacks.append(callback)
+                self._post_pipeline_callbacks.append(callback)
                 logger.info(
                     f"Queued post-pipeline callback "
-                    f"({len(self._v7_post_pipeline_callbacks)} pending)"
+                    f"({len(self._post_pipeline_callbacks)} pending)"
                 )
 
     @property
+    def pipeline_status(self) -> str:
+        """Status of the background pipeline: idle, running, completed, failed."""
+        return self._pipeline_status
+
+    @property
     def v7_pipeline_status(self) -> str:
-        """Status of the background v7 pipeline: idle, running, completed, failed."""
-        return self._v7_pipeline_status
+        """Deprecated: use pipeline_status instead."""
+        return self._pipeline_status
+
+    @property
+    def pipeline_ready(self) -> bool:
+        """Whether the collection is fully indexed and ready for search."""
+        return self._pipeline_status in ("completed", "idle")
 
     @property
     def v7_pipeline_ready(self) -> bool:
-        """Whether the v7 collection is fully indexed and ready for search."""
-        return self._v7_pipeline_status in ("completed", "idle")
+        """Deprecated: use pipeline_ready instead."""
+        return self._pipeline_status in ("completed", "idle")
 
     def _ensure_collection_for_indexing(self):
-        """Ensure a temporary collection for component indexing (v7 path).
+        """Ensure a temporary collection for component indexing.
 
-        When using v7 schema, we still need _ensure_collection for the
-        IndexingMixin to load/index components, but we don't want it to
-        be the final collection. Use the legacy collection as a staging area.
+        We still need _ensure_collection for the IndexingMixin to load/index
+        components, but we don't want it to be the final collection.
+        Use the legacy collection as a staging area.
         """
         self._ensure_collection()
         self.ensure_symbol_index()
 
-    def _load_existing_components_v7(self, collection_name: str):
-        """Load components from an existing v7 collection."""
+    def _load_existing_components(self, collection_name: str):
+        """Load components from an existing named-vectors collection."""
         from adapters.module_wrapper.indexing_mixin import IndexingMixin
 
         # Use the same scroll-based loading as IndexingMixin
-        logger.info(f"Loading components from v7 collection {collection_name}...")
+        logger.info(f"Loading components from collection {collection_name}...")
 
         all_points = []
         offset = None
@@ -725,7 +717,7 @@ class ModuleWrapper(
             )
             self.components[full_path] = component
 
-        logger.info(f"Loaded {len(all_points)} components from v7 collection")
+        logger.info(f"Loaded {len(all_points)} components from collection")
 
         # Trigger lazy symbol generation from loaded components
         if self.components:

@@ -52,7 +52,7 @@ _DAG_WARMSTART_RECIPES = [
 
 def _warm_start_with_dag_patterns(wrapper, count_per_recipe: int = 2) -> int:
     """
-    Generate DAG-based instance patterns and store them in the v7 collection.
+    Generate DAG-based instance patterns and store them in the collection.
 
     Uses DAGStructureGenerator to create random but valid card structures,
     then stores them via FeedbackLoop.store_instance_pattern() as positive

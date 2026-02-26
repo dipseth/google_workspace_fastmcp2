@@ -176,12 +176,12 @@ class Settings(BaseSettings):
     )
 
     # Google Chat Card Collection Configuration
-    # v7 collection has three named vectors:
+    # Collection uses three named vectors:
     #   - components: Identity (Name + Type + Path + Docstring)
     #   - inputs: Values (defaults, enums, instance_params)
     #   - relationships: Graph (parent-child connections)
     card_collection: str = Field(
-        default="mcp_gchat_cards_v7",
+        default="mcp_gchat_cards",
         description="Qdrant collection for Google Chat card components, templates, and feedback patterns",
         json_schema_extra={"env": "CARD_COLLECTION"},
     )

@@ -2,7 +2,7 @@
 RIC Text Provider Protocol
 
 Defines the contract for generating the 3 RIC (Rich Information Content) text
-representations used by the v7 embedding pipeline:
+representations used by the embedding pipeline:
 
   1. component_text  -> "What IS this?"        -> components vector (ColBERT 128d)
   2. inputs_text     -> "What does it accept?"  -> inputs vector    (ColBERT 128d)

@@ -312,10 +312,10 @@ def search_patterns_for_card(
         result["patterns"] = pattern_results
         result["classes"] = class_results
     else:
-        # Use hybrid V7 search
+        # Use hybrid search
         feedback_filter = "positive" if require_positive_feedback else None
 
-        class_results, content_patterns, form_patterns = wrapper.search_v7_hybrid(
+        class_results, content_patterns, form_patterns = wrapper.search_hybrid(
             description=description,
             component_paths=None,
             limit=limit,

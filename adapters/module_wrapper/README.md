@@ -38,7 +38,7 @@ classDiagram
     class ModuleWrapper {
         +search(query)
         +get_component_by_path(path)
-        +search_v7_hybrid(description)
+        +search_hybrid(description)
     }
 
     class ModuleWrapperBase {
@@ -67,8 +67,8 @@ classDiagram
 
     class SearchMixin {
         +search()
-        +search_v7()
-        +search_v7_hybrid()
+        +search_named_vector()
+        +search_hybrid()
         +search_by_dsl()
     }
 
@@ -84,8 +84,8 @@ classDiagram
     }
 
     class PipelineMixin {
-        +ingest_v7()
-        +_build_v7_payload()
+        +run_ingestion_pipeline()
+        +_build_payload()
     }
 
     class GraphMixin {
@@ -121,11 +121,11 @@ classDiagram
 
 ## Multi-Vector Embedding Schema
 
-The V7 collection uses three named vectors for different search strategies:
+The collection uses three named vectors for different search strategies:
 
 ```mermaid
 graph TB
-    subgraph "V7 Collection Schema"
+    subgraph "Collection Schema (Named Vectors)"
         subgraph "Named Vectors"
             C["components<br/>ColBERT 128D"]
             I["inputs<br/>ColBERT 128D"]
@@ -206,7 +206,7 @@ sequenceDiagram
     participant EmbeddingMixin
     participant Qdrant
 
-    User->>SearchMixin: search_v7_hybrid("§[δ] status card")
+    User->>SearchMixin: search_hybrid("§[δ] status card")
     SearchMixin->>DSLParser: extract_dsl_from_text()
     DSLParser-->>SearchMixin: {dsl: "§[δ]", description: "status card"}
 
@@ -323,10 +323,10 @@ entry = wrapper.get_cached_entry("status_card_v1")
 | `QdrantMixin` | Qdrant client management | `_initialize_qdrant()`, `_ensure_collection()` |
 | `EmbeddingMixin` | MiniLM + ColBERT embeddings | `_embed_with_colbert()`, `_embed_with_minilm()` |
 | `IndexingMixin` | Component extraction & indexing | `_index_module_components()` |
-| `SearchMixin` | Multi-vector semantic search | `search()`, `search_v7_hybrid()`, `search_by_dsl()` |
+| `SearchMixin` | Multi-vector semantic search | `search()`, `search_hybrid()`, `search_by_dsl()` |
 | `RelationshipsMixin` | Type-hint relationship extraction | `extract_relationships()` |
 | `SymbolsMixin` | DSL symbol generation & parsing | `parse_dsl_to_components()`, `build_dsl_from_paths()` |
-| `PipelineMixin` | V7 collection ingestion | `ingest_v7()` |
+| `PipelineMixin` | Collection ingestion pipeline | `run_ingestion_pipeline()` |
 | `GraphMixin` | NetworkX DAG operations | `get_descendants()`, `get_all_paths()` |
 | `CacheMixin` | Tiered component caching | `cache_pattern()`, `get_cached_class()` |
 | `InstancePatternMixin` | Pattern storage & variation | `store_instance_pattern()`, `generate_variations()` |
@@ -360,7 +360,7 @@ from adapters.module_wrapper.types import (
 )
 
 # Example: Use SearchResult for consistent API
-results: List[SearchResult] = wrapper.search_v7_hybrid("status card")
+results: List[SearchResult] = wrapper.search_hybrid("status card")
 for r in results:
     print(f"{r.name} ({r.symbol}): {r.score:.3f}")
 ```

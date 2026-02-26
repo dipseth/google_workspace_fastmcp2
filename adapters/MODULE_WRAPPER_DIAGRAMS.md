@@ -24,7 +24,7 @@ graph TD
   MW --> SE[SearchMixin]
   MW --> RE[RelationshipsMixin]
   MW --> SY[SymbolsMixin]
-  MW --> PI[PipelineMixin v7]
+  MW --> PI[PipelineMixin]
   MW --> BA[ModuleWrapperBase]
 
   QB --> Q[Qdrant client and collections]
@@ -33,7 +33,7 @@ graph TD
   SE --> S[vector search and direct lookup]
   RE --> R[dataclass type hint relationships]
   SY --> D[component symbols and DSL metadata]
-  PI --> V7[v7 ingestion three vector schema]
+  PI --> NV[ingestion three vector schema]
   BA --> Cfg[config and caches and module resolution]
 ```
 
@@ -258,9 +258,9 @@ sequenceDiagram
 
 ---
 
-## 7) v7 ingestion pipeline (advanced indexing path)
+## 7) Ingestion pipeline (advanced indexing path)
 
-Separately from the “classic” single-vector collection, a v7 pipeline exists in [`adapters.module_wrapper.pipeline_mixin.PipelineMixin`](module_wrapper/pipeline_mixin.py:199).
+Separately from the “classic” single-vector collection, a multi-vector pipeline exists in [`adapters.module_wrapper.pipeline_mixin.PipelineMixin`](module_wrapper/pipeline_mixin.py:199).
 
 It creates a **3-vector** schema:
 
@@ -280,4 +280,4 @@ This is a richer indexing flow used for structural composition and instance-patt
 - **Collection**: Qdrant collection storing vectors + payload (e.g. `mcp_module_card_framework_v2`)
 - **Direct lookup**: name-based match that bypasses vector search
 - **Symbol**: Unicode shorthand for a component/class used in DSL
-- **v7**: multi-vector schema designed for better retrieval across “components vs inputs vs relationships"
+- **Named vectors**: multi-vector schema designed for better retrieval across “components vs inputs vs relationships”

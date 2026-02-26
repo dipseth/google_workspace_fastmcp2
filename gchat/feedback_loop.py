@@ -7,8 +7,8 @@ This module implements a feedback-driven learning system that:
 3. Links feedback to existing component classes via parent_path
 4. Supports dual feedback: content (values) and form (structure)
 
-Architecture (v7):
-- Single collection: mcp_gchat_cards_v7
+Architecture:
+- Single collection: mcp_gchat_cards (set via CARD_COLLECTION env var)
 - Three named vectors per point:
   - components: Component identity (Name + Type + Path + Docstring)
   - inputs: Parameter values (defaults, enums, instance_params)
@@ -576,7 +576,7 @@ class FeedbackLoop:
             logger.info(f"   ColBERT ({COLBERT_DIM}d): components, inputs")
             logger.info(f"   MiniLM ({RELATIONSHIPS_DIM}d): relationships")
 
-            # Create collection with v7 named vectors (all three)
+            # Create collection with named vectors (all three)
             client.create_collection(
                 collection_name=COLLECTION_NAME,
                 vectors_config={
@@ -936,7 +936,7 @@ class FeedbackLoop:
                     self._description_vector_ready = True
                     return True
                 elif has_inputs:
-                    # Legacy v7 without relationships - still usable
+                    # Named vectors without relationships - still usable
                     logger.warning(
                         "⚠️ relationships vector not found, form feedback will be limited"
                     )
@@ -1032,7 +1032,7 @@ class FeedbackLoop:
         try:
             from qdrant_client.models import PointStruct
 
-            # Create the point with all three v7 vectors
+            # Create the point with all three named vectors
             point = PointStruct(
                 id=point_id,
                 vector={
@@ -1888,7 +1888,7 @@ class FeedbackLoop:
         """
         Query using wrapper's SearchMixin methods (preferred when available).
 
-        Uses wrapper.search_v7_hybrid() with feedback filters for cleaner
+        Uses wrapper.search_hybrid() with feedback filters for cleaner
         code and better consistency with the SearchMixin architecture.
 
         Returns:
@@ -1899,8 +1899,8 @@ class FeedbackLoop:
             return None
 
         try:
-            # Use wrapper's search_v7_hybrid with positive feedback filters
-            class_results, content_patterns, form_patterns = wrapper.search_v7_hybrid(
+            # Use wrapper's search_hybrid with positive feedback filters
+            class_results, content_patterns, form_patterns = wrapper.search_hybrid(
                 description=description,
                 component_paths=component_paths,
                 limit=limit,
@@ -1965,7 +1965,7 @@ class FeedbackLoop:
         3. Find successful patterns by structure (positive form_feedback on 'relationships')
         4. Fuse results with RRF, then demote components associated with negatives
 
-        Note: Prefers wrapper.search_v7_hybrid() when available for better consistency
+        Note: Prefers wrapper.search_hybrid() when available for better consistency
         with SearchMixin architecture. Falls back to direct Qdrant queries.
 
         Args:
@@ -2014,7 +2014,7 @@ class FeedbackLoop:
 
             # Build prefetch list
             prefetch_list = [
-                # Prefetch 1: Component classes by path (v7 components vector)
+                # Prefetch 1: Component classes by path (components vector)
                 models.Prefetch(
                     query=component_vectors,
                     using="components",
@@ -2577,7 +2577,7 @@ class FeedbackLoop:
             results = client.query_points(
                 collection_name=COLLECTION_NAME,
                 query=vectors,
-                using="components",  # v7 identity vector
+                using="components",  # identity vector
                 query_filter=models.Filter(
                     must=[
                         models.FieldCondition(

@@ -349,17 +349,17 @@ def test_search_by_dsl_hybrid():
         print(f"   {r['name']:<25} score={r['score']:.3f} - {desc}...")
 
 
-def test_search_v7_hybrid_with_feedback_filters():
-    """Test search_v7_hybrid with content/form feedback filters."""
+def test_search_hybrid_with_feedback_filters():
+    """Test search_hybrid with content/form feedback filters."""
     print("\n" + "=" * 60)
-    print("TEST: search_v7_hybrid() with feedback filters")
+    print("TEST: search_hybrid() with feedback filters")
     print("=" * 60)
 
     wrapper = get_card_framework_wrapper()
 
     # Test with positive content feedback filter
     print("\n🔍 Testing with content_feedback='positive'...")
-    classes, patterns, rels = wrapper.search_v7_hybrid(
+    classes, patterns, rels = wrapper.search_hybrid(
         description="A status card with buttons",
         limit=5,
         content_feedback="positive",
@@ -380,7 +380,7 @@ def test_search_v7_hybrid_with_feedback_filters():
 
     # Test without feedback filters for comparison
     print("\n🔍 Testing without feedback filters...")
-    classes2, patterns2, rels2 = wrapper.search_v7_hybrid(
+    classes2, patterns2, rels2 = wrapper.search_hybrid(
         description="A status card with buttons",
         limit=5,
     )
@@ -440,14 +440,14 @@ def test_search_patterns_for_card():
 def test_search_v7_include_classes_flag():
     """Test include_classes parameter."""
     print("\n" + "=" * 60)
-    print("TEST: search_v7_hybrid() with include_classes flag")
+    print("TEST: search_hybrid() with include_classes flag")
     print("=" * 60)
 
     wrapper = get_card_framework_wrapper()
 
     # With classes
     print("\n🔍 Testing with include_classes=True...")
-    classes, patterns, _ = wrapper.search_v7_hybrid(
+    classes, patterns, _ = wrapper.search_hybrid(
         description="Button widget",
         include_classes=True,
         limit=5,
@@ -458,7 +458,7 @@ def test_search_v7_include_classes_flag():
 
     # Without classes
     print("\n🔍 Testing with include_classes=False...")
-    classes2, patterns2, _ = wrapper.search_v7_hybrid(
+    classes2, patterns2, _ = wrapper.search_hybrid(
         description="Button widget",
         include_classes=False,
         limit=5,
@@ -490,7 +490,7 @@ if __name__ == "__main__":
         test_search_by_dsl_with_truncation()
         test_search_by_dsl_hybrid()
         # New tests for feedback filters and convenience functions
-        test_search_v7_hybrid_with_feedback_filters()
+        test_search_hybrid_with_feedback_filters()
         test_search_patterns_for_card()
         test_search_v7_include_classes_flag()
         print("\n✅ New method tests complete!")
@@ -503,6 +503,6 @@ if __name__ == "__main__":
         test_search_by_dsl_with_truncation()
         test_search_by_dsl_hybrid()
         # New tests for feedback filters and convenience functions
-        test_search_v7_hybrid_with_feedback_filters()
+        test_search_hybrid_with_feedback_filters()
         test_search_patterns_for_card()
         test_search_v7_include_classes_flag()

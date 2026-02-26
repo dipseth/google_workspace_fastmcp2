@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Initialize mcp_gchat_cards_v7 Collection
+Initialize Card Collection
 
-This script creates the v7 collection with three named vectors:
+This script creates the collection with three named vectors:
 1. components (128d) - Component identity: Name + Type + Path + Docstring + Symbol
 2. inputs (128d) - Input values: Literals, defaults, enum values / instance_params
 3. relationships (384d) - Graph: Parent-child connections, NL descriptions
@@ -13,7 +13,7 @@ Symbol embedding is integrated during ingestion:
 - Queries containing symbols (like "ᵬ[ᵬ×2]") match the right components
 
 Usage:
-    python scripts/initialize_v7_collection.py
+    python scripts/initialize_collection.py
 """
 
 import os
@@ -28,7 +28,7 @@ load_dotenv()
 
 
 # Collection configuration
-V7_COLLECTION_NAME = "mcp_gchat_cards_v7"
+COLLECTION_NAME = "mcp_gchat_cards"
 
 # Vector dimensions
 COLBERT_DIM = 128  # ColBERT multi-vector
@@ -44,7 +44,7 @@ RELATIONSHIPS_DIM = 384  # MiniLM dense vector
 #   G → ["ℊ", "ǵ", "ǧ", "γ", "ɠ"]  (for Grid, GridItem)
 #
 # These overrides are only needed if you want specific symbol assignments.
-# Uncomment and import in index_components_v7() if needed.
+# Uncomment and import in index_components() if needed.
 #
 # Symbol overrides are NOT used - we rely on auto-generation based on:
 # 1. Hierarchy priority (components with more children get priority)
@@ -52,8 +52,8 @@ RELATIONSHIPS_DIM = 384  # MiniLM dense vector
 # This ensures intuitive mappings like §=Section, ᵬ=Button automatically.
 
 
-def create_v7_collection(force_recreate: bool = False):
-    """Create the v7 collection with three named vectors and optimized HNSW configs."""
+def create_collection(force_recreate: bool = False):
+    """Create the collection with three named vectors and optimized HNSW configs."""
     from qdrant_client.models import (
         Distance,
         HnswConfigDiff,
@@ -73,14 +73,14 @@ def create_v7_collection(force_recreate: bool = False):
     collections = client.get_collections()
     collection_names = [c.name for c in collections.collections]
 
-    if V7_COLLECTION_NAME in collection_names:
-        info = client.get_collection(V7_COLLECTION_NAME)
-        print(f"Collection {V7_COLLECTION_NAME} exists with {info.points_count} points")
+    if COLLECTION_NAME in collection_names:
+        info = client.get_collection(COLLECTION_NAME)
+        print(f"Collection {COLLECTION_NAME} exists with {info.points_count} points")
 
         if force_recreate:
-            print(f"Force recreate enabled - deleting {V7_COLLECTION_NAME}...")
-            client.delete_collection(V7_COLLECTION_NAME)
-            collection_names.remove(V7_COLLECTION_NAME)
+            print(f"Force recreate enabled - deleting {COLLECTION_NAME}...")
+            client.delete_collection(COLLECTION_NAME)
+            collection_names.remove(COLLECTION_NAME)
         else:
             # Show vector config
             vectors = info.config.params.vectors
@@ -92,7 +92,7 @@ def create_v7_collection(force_recreate: bool = False):
                     print(f"  {name}: size={config.size}{hnsw_str}")
             return True
 
-    print(f"Creating {V7_COLLECTION_NAME} with three named vectors...")
+    print(f"Creating {COLLECTION_NAME} with three named vectors...")
 
     # HNSW Configuration Strategy:
     # - components/inputs: ColBERT multi-vector with MAX_SIM aggregation
@@ -102,7 +102,7 @@ def create_v7_collection(force_recreate: bool = False):
 
     # Create collection with all three vectors
     client.create_collection(
-        collection_name=V7_COLLECTION_NAME,
+        collection_name=COLLECTION_NAME,
         vectors_config={
             # Component identity: Name + Type + Path + Docstring
             "components": VectorParams(
@@ -141,7 +141,7 @@ def create_v7_collection(force_recreate: bool = False):
         },
     )
 
-    print(f"Created {V7_COLLECTION_NAME}")
+    print(f"Created {COLLECTION_NAME}")
 
     # Create payload indexes for efficient filtering
     # Note: is_principal only available for numeric types (integer, float, datetime)
@@ -152,7 +152,7 @@ def create_v7_collection(force_recreate: bool = False):
 
     # name - Primary filter field for component lookups
     client.create_payload_index(
-        collection_name=V7_COLLECTION_NAME,
+        collection_name=COLLECTION_NAME,
         field_name="name",
         field_schema=KeywordIndexParams(
             type=KeywordIndexType.KEYWORD,
@@ -162,7 +162,7 @@ def create_v7_collection(force_recreate: bool = False):
 
     # type - Filter by component type (class, function, instance_pattern)
     client.create_payload_index(
-        collection_name=V7_COLLECTION_NAME,
+        collection_name=COLLECTION_NAME,
         field_name="type",
         field_schema=KeywordIndexParams(
             type=KeywordIndexType.KEYWORD,
@@ -172,7 +172,7 @@ def create_v7_collection(force_recreate: bool = False):
 
     # module_path - Filter by module
     client.create_payload_index(
-        collection_name=V7_COLLECTION_NAME,
+        collection_name=COLLECTION_NAME,
         field_name="module_path",
         field_schema=KeywordIndexParams(
             type=KeywordIndexType.KEYWORD,
@@ -182,7 +182,7 @@ def create_v7_collection(force_recreate: bool = False):
 
     # full_path - Exact path matching
     client.create_payload_index(
-        collection_name=V7_COLLECTION_NAME,
+        collection_name=COLLECTION_NAME,
         field_name="full_path",
         field_schema=KeywordIndexParams(
             type=KeywordIndexType.KEYWORD,
@@ -192,7 +192,7 @@ def create_v7_collection(force_recreate: bool = False):
 
     # symbol - Fast symbol → component lookup (DSL resolution)
     client.create_payload_index(
-        collection_name=V7_COLLECTION_NAME,
+        collection_name=COLLECTION_NAME,
         field_name="symbol",
         field_schema=KeywordIndexParams(
             type=KeywordIndexType.KEYWORD,
@@ -202,7 +202,7 @@ def create_v7_collection(force_recreate: bool = False):
 
     # symbol_dsl - Fast lookup by "ᵬ=Button" format
     client.create_payload_index(
-        collection_name=V7_COLLECTION_NAME,
+        collection_name=COLLECTION_NAME,
         field_name="symbol_dsl",
         field_schema=KeywordIndexParams(
             type=KeywordIndexType.KEYWORD,
@@ -211,7 +211,7 @@ def create_v7_collection(force_recreate: bool = False):
     print("  ✅ symbol_dsl (keyword)")
 
     # Verify
-    info = client.get_collection(V7_COLLECTION_NAME)
+    info = client.get_collection(COLLECTION_NAME)
     vectors = info.config.params.vectors
     print("\nNamed vectors configured:")
     for name, config in vectors.items():
@@ -415,8 +415,8 @@ def build_compact_structure_text(
     return wrapper.build_dsl_from_paths(component_paths, structure_description)
 
 
-def index_components_v7():
-    """Index card_framework components into v7 with deterministic symbol-wrapped embeddings."""
+def index_components():
+    """Index card_framework components with deterministic symbol-wrapped embeddings."""
     import hashlib
 
     from fastembed import LateInteractionTextEmbedding, TextEmbedding
@@ -427,7 +427,7 @@ def index_components_v7():
     from config.qdrant_client import get_qdrant_client
 
     print("\n" + "=" * 60)
-    print("INDEXING COMPONENTS INTO V7 (WITH SYMBOL-ENRICHED EMBEDDINGS)")
+    print("INDEXING COMPONENTS (WITH SYMBOL-ENRICHED EMBEDDINGS)")
     print("=" * 60)
 
     # Initialize wrapper - use existing v6 to discover components
@@ -540,13 +540,13 @@ def index_components_v7():
         rel_vec = rel_emb.tolist() if hasattr(rel_emb, "tolist") else list(rel_emb)
 
         # Generate deterministic ID
-        id_string = f"{V7_COLLECTION_NAME}:{path}"
+        id_string = f"{COLLECTION_NAME}:{path}"
         hash_hex = hashlib.sha256(id_string.encode()).hexdigest()
         point_id = f"{hash_hex[:8]}-{hash_hex[8:12]}-{hash_hex[12:16]}-{hash_hex[16:20]}-{hash_hex[20:32]}"
 
         # Build payload
         payload = component.to_dict()
-        payload["indexed_at"] = "v7_symbol_wrapped"  # Deterministic symbol wrapping
+        payload["indexed_at"] = "symbol_wrapped"  # Deterministic symbol wrapping
         payload["inputs_text"] = (
             inputs_text  # Store for debugging (includes symbol wrapping)
         )
@@ -586,17 +586,17 @@ def index_components_v7():
 
         # Batch upsert
         if len(points) >= batch_size:
-            client.upsert(collection_name=V7_COLLECTION_NAME, points=points)
+            client.upsert(collection_name=COLLECTION_NAME, points=points)
             print(f"  Indexed {i + 1} components...")
             points = []
 
     # Final batch
     if points:
-        client.upsert(collection_name=V7_COLLECTION_NAME, points=points)
+        client.upsert(collection_name=COLLECTION_NAME, points=points)
 
     # Verify
-    info = client.get_collection(V7_COLLECTION_NAME)
-    print(f"\n✅ Indexed {info.points_count} points into {V7_COLLECTION_NAME}")
+    info = client.get_collection(COLLECTION_NAME)
+    print(f"\n✅ Indexed {info.points_count} points into {COLLECTION_NAME}")
 
     return info.points_count
 
@@ -656,9 +656,9 @@ def format_instance_params(params: dict) -> str:
     return ", ".join(parts) if parts else "basic card"
 
 
-def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=None):
+def index_instance_patterns(colbert_embedder=None, relationships_embedder=None):
     """
-    Index instance_patterns from v6 into v7.
+    Index instance_patterns from source collection.
 
     Uses the same three-vector structure as components:
     - components: Identity (name, type, description, parent components)
@@ -673,7 +673,7 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
     from config.qdrant_client import get_qdrant_client
 
     print("\n" + "=" * 60)
-    print("INDEXING INSTANCE PATTERNS INTO V7")
+    print("INDEXING INSTANCE PATTERNS")
     print("=" * 60)
 
     client = get_qdrant_client()
@@ -758,12 +758,12 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
         rel_vec = rel_emb.tolist() if hasattr(rel_emb, "tolist") else list(rel_emb)
 
         # Generate deterministic ID (consistent with components)
-        id_string = f"{V7_COLLECTION_NAME}:instance_pattern:{p.id}"
+        id_string = f"{COLLECTION_NAME}:instance_pattern:{p.id}"
         hash_hex = hashlib.sha256(id_string.encode()).hexdigest()
         point_id = f"{hash_hex[:8]}-{hash_hex[8:12]}-{hash_hex[12:16]}-{hash_hex[16:20]}-{hash_hex[20:32]}"
 
         # Update payload
-        payload["indexed_at"] = "v7_dsl_enriched"
+        payload["indexed_at"] = "dsl_enriched"
         payload["inputs_text"] = inputs_text
         payload["relationship_text"] = (
             relationship_text  # DSL notation for semantic search
@@ -782,29 +782,29 @@ def index_instance_patterns_v7(colbert_embedder=None, relationships_embedder=Non
         points.append(point)
 
         if len(points) >= batch_size:
-            client.upsert(collection_name=V7_COLLECTION_NAME, points=points)
+            client.upsert(collection_name=COLLECTION_NAME, points=points)
             print(f"  Indexed {i + 1} instance_patterns...")
             points = []
 
     # Final batch
     if points:
-        client.upsert(collection_name=V7_COLLECTION_NAME, points=points)
+        client.upsert(collection_name=COLLECTION_NAME, points=points)
 
     # Verify
-    info = client.get_collection(V7_COLLECTION_NAME)
-    print(f"\n✅ v7 now has {info.points_count} total points")
+    info = client.get_collection(COLLECTION_NAME)
+    print(f"\n✅ Collection now has {info.points_count} total points")
 
     return len(instance_patterns)
 
 
-def test_v7_search():
+def test_search():
     """Test searching with all three vectors."""
     from fastembed import LateInteractionTextEmbedding, TextEmbedding
 
     from config.qdrant_client import get_qdrant_client
 
     print("\n" + "=" * 60)
-    print("TESTING V7 SEARCH (ALL VECTORS)")
+    print("TESTING SEARCH (ALL VECTORS)")
     print("=" * 60)
 
     client = get_qdrant_client()
@@ -817,7 +817,7 @@ def test_v7_search():
         emb = list(colbert.embed([query]))[0]
         vec = emb.tolist() if hasattr(emb, "tolist") else [list(v) for v in emb]
         results = client.query_points(
-            collection_name=V7_COLLECTION_NAME,
+            collection_name=COLLECTION_NAME,
             query=vec,
             using="components",
             limit=2,
@@ -831,7 +831,7 @@ def test_v7_search():
         emb = list(colbert.embed([query]))[0]
         vec = emb.tolist() if hasattr(emb, "tolist") else [list(v) for v in emb]
         results = client.query_points(
-            collection_name=V7_COLLECTION_NAME,
+            collection_name=COLLECTION_NAME,
             query=vec,
             using="inputs",
             limit=2,
@@ -848,7 +848,7 @@ def test_v7_search():
         emb = list(minilm.embed([query]))[0]
         vec = emb.tolist() if hasattr(emb, "tolist") else list(emb)
         results = client.query_points(
-            collection_name=V7_COLLECTION_NAME,
+            collection_name=COLLECTION_NAME,
             query=vec,
             using="relationships",
             limit=2,
@@ -866,7 +866,7 @@ def test_v7_search():
         emb = list(minilm.embed([query]))[0]
         vec = emb.tolist() if hasattr(emb, "tolist") else list(emb)
         results = client.query_points(
-            collection_name=V7_COLLECTION_NAME,
+            collection_name=COLLECTION_NAME,
             query=vec,
             using="relationships",
             limit=2,
@@ -883,26 +883,26 @@ def test_v7_search():
 
 def main():
     print("=" * 60)
-    print("V7 COLLECTION INITIALIZATION")
+    print("COLLECTION INITIALIZATION")
     print("=" * 60)
 
     # Step 1: Create collection with HNSW configs
     print("\nStep 1: Creating collection...")
-    if not create_v7_collection(force_recreate=True):
+    if not create_collection(force_recreate=True):
         return
 
     # Step 2: Index module components
     print("\nStep 2: Indexing module components...")
-    component_count = index_components_v7()
+    component_count = index_components()
 
     # Step 3: Index instance patterns (from v6)
     print("\nStep 3: Indexing instance patterns...")
-    pattern_count = index_instance_patterns_v7()
+    pattern_count = index_instance_patterns()
 
     if component_count > 0 or pattern_count > 0:
         # Step 4: Test search
         print("\nStep 4: Testing search...")
-        test_v7_search()
+        test_search()
 
     print("\n" + "=" * 60)
     print("SUMMARY")

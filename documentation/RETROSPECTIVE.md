@@ -407,7 +407,7 @@ into the wrapper itself.
 
 11 mixins. Each one is testable in isolation. Each one adds a capability.
 But the composition means **any method can call any other mixin's method**
-through `self`. The call graph is implicit. When `SearchMixin.search_v7_hybrid()`
+through `self`. The call graph is implicit. When `SearchMixin.search_hybrid()`
 calls `self.embed_text()` (from `EmbeddingMixin`) and `self.client` (from
 `QdrantMixin`), the dependency is invisible at the file level.
 
@@ -685,7 +685,7 @@ send_dynamic_card("§[δ, Ƀ[ᵬ×2]]", card_params={δ: {text: "Hi"}, ᵬ: [{te
 │  │
 │  ├─ _query_wrapper_patterns()                  [builder_v2.py:~340]
 │  │  └─ TWO parallel Qdrant searches (ThreadPoolExecutor):
-│  │     ├─ search_v7_hybrid(inputs + relationships vectors)
+│  │     ├─ search_hybrid(inputs + relationships vectors)
 │  │     │  └─ ColBERT on inputs, MiniLM on relationships
 │  │     │  └─ Filters: content_feedback="positive", form_feedback="positive"
 │  │     │  └─ Returns: style_metadata (colors, jinja_filters, semantic_styles)
@@ -764,7 +764,7 @@ Even when DSL is provided explicitly, the builder runs parallel Qdrant
 searches to find **styling metadata** from similar past cards. Two
 searches run in a ThreadPoolExecutor:
 
-- **Hybrid search** (`search_v7_hybrid`): queries both the `inputs`
+- **Hybrid search** (`search_hybrid`): queries both the `inputs`
   vector (ColBERT embeddings of card content) and `relationships` vector
   (MiniLM embeddings of card structure). Filters for positive feedback
   only. Returns `style_metadata`: colors, Jinja filters, semantic styles.

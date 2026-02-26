@@ -87,7 +87,7 @@ class ToolResponseProvider:
                 session_id=session_id,
             )
 
-        # Basic fallback (matches current _store_point_v7 inline text)
+        # Basic fallback (matches current _store_point_named_vectors inline text)
         parts = [f"{name} belongs to {service}."]
         if user_email:
             parts.append(f"User: {user_email}.")

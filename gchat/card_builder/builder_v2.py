@@ -353,7 +353,7 @@ class SmartCardBuilderV2:
             with ThreadPoolExecutor(max_workers=2) as executor:
                 # Always submit hybrid search for style_metadata extraction
                 hybrid_future = executor.submit(
-                    wrapper.search_v7_hybrid,
+                    wrapper.search_hybrid,
                     description=description,
                     component_paths=None,
                     limit=5,
@@ -452,7 +452,7 @@ class SmartCardBuilderV2:
         """
         Query Qdrant for matching instance patterns with caching.
 
-        First tries wrapper's SearchMixin methods (search_by_dsl, search_v7_hybrid),
+        First tries wrapper's SearchMixin methods (search_by_dsl, search_hybrid),
         then falls back to feedback_loop.query_with_discovery() using Qdrant's Discovery API.
         Results are cached for 5 minutes to improve performance.
 

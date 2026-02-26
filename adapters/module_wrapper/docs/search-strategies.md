@@ -12,8 +12,8 @@ This document will cover the various search methods available in ModuleWrapper.
 |--------|-----------|----------|
 | `search()` | MiniLM | Basic semantic search |
 | `colbert_search()` | ColBERT | Token-level matching |
-| `search_v7()` | Single named | Targeted vector search |
-| `search_v7_hybrid()` | All 3 + RRF | Best overall results |
+| `search_named_vector()` | Single named | Targeted vector search |
+| `search_hybrid()` | All 3 + RRF | Best overall results |
 | `search_by_dsl()` | ColBERT | DSL-aware queries |
 | `query_by_symbol()` | None (filter) | Exact symbol lookup |
 
@@ -45,18 +45,18 @@ results = wrapper.search_by_dsl_hybrid("§[δ] notification card")
 - DSL + description embedding
 - Class vs pattern filtering
 
-### V7 Multi-Vector Searches
+### Named-Vector Multi-Vector Searches
 
 ```python
 # Search specific vector
-results = wrapper.search_v7(
+results = wrapper.search_named_vector(
     query="button with icon",
     vector_name="components",  # or "inputs", "relationships"
     limit=10,
 )
 
 # Hybrid search with RRF fusion
-classes, patterns, relationships = wrapper.search_v7_hybrid(
+classes, patterns, relationships = wrapper.search_hybrid(
     description="status card with action button",
     component_paths=["Section", "DecoratedText"],
     content_feedback="positive",  # Filter by feedback
@@ -70,7 +70,7 @@ classes, patterns, relationships = wrapper.search_v7_hybrid(
 | "Find Button class" | `components` | Component identity |
 | "card with status text" | `inputs` | Content/parameter matching |
 | "Section containing Button" | `relationships` | Structural patterns |
-| Complex queries | `search_v7_hybrid` | RRF combines all |
+| Complex queries | `search_hybrid` | RRF combines all |
 
 ### RRF Fusion
 
@@ -88,13 +88,13 @@ RRF_score = Σ (1 / (k + rank))
 
 ```python
 # Filter by content feedback
-classes, patterns, _ = wrapper.search_v7_hybrid(
+classes, patterns, _ = wrapper.search_hybrid(
     description="notification card",
     content_feedback="positive",  # Only positive content matches
 )
 
 # Filter by form/structure feedback
-_, _, relationships = wrapper.search_v7_hybrid(
+_, _, relationships = wrapper.search_hybrid(
     description="grid layout",
     form_feedback="positive",  # Only positive structure matches
 )
@@ -129,8 +129,8 @@ Before vector search, methods check for exact matches:
 
 - Use `token_ratio` < 1.0 for faster ColBERT searches
 - Use `query_by_symbol()` for known symbols (fastest)
-- Use `search_v7()` with specific vector for targeted queries
-- Use `search_v7_hybrid()` when unsure which vector is best
+- Use `search_named_vector()` with specific vector for targeted queries
+- Use `search_hybrid()` when unsure which vector is best
 
 ## Related Files
 

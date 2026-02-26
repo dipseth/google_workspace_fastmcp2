@@ -27,7 +27,9 @@ class CollectionSchema(Enum):
     """Schema variants for Qdrant collection vector configuration."""
 
     V1_SINGLE_VECTOR = "v1"  # Single 384-dim vector (legacy default)
-    V7_NAMED_VECTORS = "v7"  # 3 named vectors: components, inputs, relationships (RIC)
+    NAMED_VECTORS = (
+        "named_vectors"  # 3 named vectors: components, inputs, relationships (RIC)
+    )
 
 
 class OptimizationProfile(Enum):
@@ -73,8 +75,12 @@ class QdrantConfig:
 
     # Schema settings
     collection_schema: CollectionSchema = CollectionSchema.V1_SINGLE_VECTOR
-    dual_write: bool = False  # Write to both v1 and v7 schemas during migration
-    v7_collection_name: str = ""  # Explicit v7 collection name (auto-derived if empty)
+    dual_write: bool = (
+        False  # Write to both v1 and named_vectors schemas during migration
+    )
+    named_vectors_collection_name: str = (
+        ""  # Explicit named-vectors collection name (auto-derived if empty)
+    )
 
     # Optimization settings
     optimization_profile: OptimizationProfile = OptimizationProfile.CLOUD_LOW_LATENCY
@@ -160,7 +166,7 @@ class QdrantConfig:
             "cache_retention_days": self.cache_retention_days,
             "collection_schema": self.collection_schema.value,
             "dual_write": self.dual_write,
-            "v7_collection_name": self.v7_collection_name,
+            "named_vectors_collection_name": self.named_vectors_collection_name,
             "optimization_profile": self.optimization_profile.value,
         }
 
@@ -337,7 +343,7 @@ def load_config_from_settings() -> QdrantConfig:
             ]
 
         if os.getenv("QDRANT_V7_COLLECTION"):
-            config.v7_collection_name = os.getenv("QDRANT_V7_COLLECTION")
+            config.named_vectors_collection_name = os.getenv("QDRANT_V7_COLLECTION")
 
         return config
 
