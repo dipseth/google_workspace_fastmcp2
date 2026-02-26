@@ -1154,11 +1154,12 @@ class FeedbackLoop:
                 f"deleting {to_delete} oldest"
             )
 
-            # Scroll through instance_patterns sorted by timestamp (oldest first)
-            # We prioritize keeping patterns with positive feedback
+            # Get all instance_patterns, then sort to delete expendable ones first.
+            # Uses only the 'type' field filter (always indexed) to avoid
+            # dependency on content_feedback/form_feedback keyword indices
+            # which may not exist yet.
             patterns_to_delete = []
 
-            # First pass: get patterns without positive feedback (delete these first)
             results, _ = client.scroll(
                 collection_name=COLLECTION_NAME,
                 scroll_filter=models.Filter(
@@ -1168,67 +1169,27 @@ class FeedbackLoop:
                             match=models.MatchValue(value="instance_pattern"),
                         )
                     ],
-                    must_not=[
-                        models.FieldCondition(
-                            key="content_feedback",
-                            match=models.MatchValue(value="positive"),
-                        ),
-                        models.FieldCondition(
-                            key="form_feedback",
-                            match=models.MatchValue(value="positive"),
-                        ),
-                    ],
                 ),
-                limit=to_delete + 100,  # Get extra in case we need more
-                with_payload=["timestamp", "card_id"],
+                limit=to_delete + 200,
+                with_payload=["timestamp", "card_id", "content_feedback", "form_feedback"],
             )
 
-            # Sort by timestamp (oldest first) and take what we need
-            sorted_results = sorted(
-                results,
-                key=lambda p: (
-                    p.payload.get("timestamp", "2000-01-01")
-                    if p.payload
-                    else "2000-01-01"
-                ),
-            )
+            # Sort: patterns WITHOUT positive feedback first (expendable),
+            # then by timestamp oldest-first within each group
+            def _delete_priority(p):
+                payload = p.payload or {}
+                has_positive = (
+                    payload.get("content_feedback") == "positive"
+                    or payload.get("form_feedback") == "positive"
+                )
+                # 0 = no positive feedback (delete first), 1 = has positive (keep longer)
+                return (
+                    1 if has_positive else 0,
+                    payload.get("timestamp", "2000-01-01"),
+                )
+
+            sorted_results = sorted(results, key=_delete_priority)
             patterns_to_delete = [p.id for p in sorted_results[:to_delete]]
-
-            # If we still need more, get patterns with positive feedback (oldest first)
-            if len(patterns_to_delete) < to_delete:
-                remaining = to_delete - len(patterns_to_delete)
-                results, _ = client.scroll(
-                    collection_name=COLLECTION_NAME,
-                    scroll_filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="type",
-                                match=models.MatchValue(value="instance_pattern"),
-                            )
-                        ],
-                        should=[
-                            models.FieldCondition(
-                                key="content_feedback",
-                                match=models.MatchValue(value="positive"),
-                            ),
-                            models.FieldCondition(
-                                key="form_feedback",
-                                match=models.MatchValue(value="positive"),
-                            ),
-                        ],
-                    ),
-                    limit=remaining + 50,
-                    with_payload=["timestamp", "card_id"],
-                )
-                sorted_results = sorted(
-                    results,
-                    key=lambda p: (
-                        p.payload.get("timestamp", "2000-01-01")
-                        if p.payload
-                        else "2000-01-01"
-                    ),
-                )
-                patterns_to_delete.extend([p.id for p in sorted_results[:remaining]])
 
             # Delete the patterns in batches (Qdrant has limits on batch size)
             deleted_count = 0

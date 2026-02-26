@@ -1169,6 +1169,13 @@ class SmartCardBuilderV2:
         for k, v in consumed.items():
             params.setdefault(k, v)
 
+        # 2.5 Ensure text-bearing components have a text field
+        # When content_texts is empty (no explicit text/items provided), DecoratedText
+        # and TextParagraph would render without text. Use a non-breaking space as
+        # minimal content so the widget is valid for Google Chat API.
+        if component_name in ("DecoratedText", "TextParagraph") and "text" not in params:
+            params["text"] = "\u00a0"  # non-breaking space — valid minimal content
+
         # 3. Container components - build children recursively
         children_field = get_children_field(component_name, wrapper)
         if children_field:

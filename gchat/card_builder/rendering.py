@@ -333,8 +333,25 @@ def build_button_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
     OnClick = wrapper.get_cached_class("OnClick")
     OpenLink = wrapper.get_cached_class("OpenLink")
 
+    # Fallback to direct imports if cache misses (OnClick path resolution can fail)
+    if not OnClick:
+        try:
+            from card_framework.v2.widgets.on_click import OnClick
+        except ImportError:
+            pass
+    if not OpenLink:
+        try:
+            from card_framework.v2.widgets.open_link import OpenLink
+        except ImportError:
+            pass
+    if not Button:
+        try:
+            from card_framework.v2.widgets.button import Button
+        except ImportError:
+            pass
+
     if not all([Button, OnClick, OpenLink]):
-        logger.debug("Could not get Button/OnClick/OpenLink classes from cache")
+        logger.debug("Could not get Button/OnClick/OpenLink classes from cache or import")
         return None
 
     try:
