@@ -102,7 +102,9 @@ def scan_file(rel_path: Path) -> list[tuple[int, int, str, str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show scanned file list")
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show scanned file list"
+    )
     args = parser.parse_args()
 
     targets = [Path(p) for p in TARGET_FILES]

@@ -135,29 +135,33 @@ class GraphMixin:
     """
 
     # --- Mixin dependency contract ---
-    _MIXIN_PROVIDES = frozenset({
-        "build_relationship_graph",
-        "get_relationship_graph",
-        "get_descendants",
-        "get_ancestors",
-        "get_children",
-        "get_parents",
-        "can_contain",
-        "get_root_components",
-        "get_leaf_components",
-        "get_graph_stats",
-        "get_all_wrapper_requirements",
-        "get_all_context_resources",
-        "get_all_containers",
-        "get_heterogeneous_containers",
-        "register_component_metadata_batch",
-    })
-    _MIXIN_REQUIRES = frozenset({
-        "relationships",
-        "symbol_mapping",
-        "reverse_symbol_mapping",
-        "components",
-    })
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "build_relationship_graph",
+            "get_relationship_graph",
+            "get_descendants",
+            "get_ancestors",
+            "get_children",
+            "get_parents",
+            "can_contain",
+            "get_root_components",
+            "get_leaf_components",
+            "get_graph_stats",
+            "get_all_wrapper_requirements",
+            "get_all_context_resources",
+            "get_all_containers",
+            "get_heterogeneous_containers",
+            "register_component_metadata_batch",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "relationships",
+            "symbol_mapping",
+            "reverse_symbol_mapping",
+            "components",
+        }
+    )
     _MIXIN_INIT_ORDER = 50
 
     def __init__(self, *args, **kwargs):

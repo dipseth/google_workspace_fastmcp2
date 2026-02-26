@@ -635,12 +635,18 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     for url in urls:
                         # Derive button label from URL path
                         path_parts = url.rstrip("/").split("/")
-                        label = path_parts[-1] if len(path_parts) > 3 else url.split("//")[1].split("/")[0]
+                        label = (
+                            path_parts[-1]
+                            if len(path_parts) > 3
+                            else url.split("//")[1].split("/")[0]
+                        )
                         extracted_buttons.append({"text": label, "url": url})
                     card_params.setdefault("buttons", extracted_buttons)
                     # Use description (minus URLs) as text if no text provided
                     if not card_params.get("text"):
-                        clean_desc = re.sub(r"https?://[^\s,\)]+", "", card_description).strip()
+                        clean_desc = re.sub(
+                            r"https?://[^\s,\)]+", "", card_description
+                        ).strip()
                         clean_desc = re.sub(r"\s+", " ", clean_desc).strip(" .,;:")
                         if clean_desc:
                             card_params["text"] = clean_desc
@@ -879,8 +885,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     if sections and isinstance(sections, list) and len(sections) > 0:
                         # Check if sections contain actual widget structures
                         has_widgets = any(
-                            isinstance(s, dict) and s.get("widgets")
-                            for s in sections
+                            isinstance(s, dict) and s.get("widgets") for s in sections
                         )
                         if has_widgets:
                             logger.info(

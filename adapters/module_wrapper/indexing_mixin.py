@@ -150,28 +150,32 @@ class IndexingMixin:
     """
 
     # --- Mixin dependency contract ---
-    _MIXIN_PROVIDES = frozenset({
-        "_index_module_components",
-        "_load_components_from_collection",
-        "_create_component",
-        "_index_nested_components",
-        "_index_submodule",
-        "_index_widgets_module",
-        "_store_components_in_qdrant",
-        "_index_components_colbert",
-    })
-    _MIXIN_REQUIRES = frozenset({
-        "module",
-        "components",
-        "root_components",
-        "client",
-        "embedder",
-        "collection_name",
-        "index_nested",
-        "max_depth",
-        "skip_standard_library",
-        "collection_needs_indexing",
-    })
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "_index_module_components",
+            "_load_components_from_collection",
+            "_create_component",
+            "_index_nested_components",
+            "_index_submodule",
+            "_index_widgets_module",
+            "_store_components_in_qdrant",
+            "_index_components_colbert",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "module",
+            "components",
+            "root_components",
+            "client",
+            "embedder",
+            "collection_name",
+            "index_nested",
+            "max_depth",
+            "skip_standard_library",
+            "collection_needs_indexing",
+        }
+    )
     _MIXIN_INIT_ORDER = 30
 
     # Tracking state

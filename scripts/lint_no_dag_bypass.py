@@ -35,9 +35,7 @@ TARGET_FILES: list[str] = [
 
 # Pattern: `if component_name ==` or `if component_name in`
 # Also matches `elif component_name ==` / `elif component_name in`
-DAG_BYPASS_RE = re.compile(
-    r"\b(?:el)?if\s+component_name\s+(?:==|in\b)"
-)
+DAG_BYPASS_RE = re.compile(r"\b(?:el)?if\s+component_name\s+(?:==|in\b)")
 
 
 def scan_file(rel_path: Path) -> list[tuple[int, str]]:
@@ -93,9 +91,7 @@ def main() -> int:
     for rel_path in scannable:
         hits = scan_file(rel_path)
         for lineno, line in hits:
-            print(
-                f"{rel_path}:{lineno}: DSL002 DAG-bypass pattern: {line}"
-            )
+            print(f"{rel_path}:{lineno}: DSL002 DAG-bypass pattern: {line}")
             total += 1
 
     if total:

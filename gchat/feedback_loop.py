@@ -1171,7 +1171,12 @@ class FeedbackLoop:
                     ],
                 ),
                 limit=to_delete + 200,
-                with_payload=["timestamp", "card_id", "content_feedback", "form_feedback"],
+                with_payload=[
+                    "timestamp",
+                    "card_id",
+                    "content_feedback",
+                    "form_feedback",
+                ],
             )
 
             # Sort: patterns WITHOUT positive feedback first (expendable),

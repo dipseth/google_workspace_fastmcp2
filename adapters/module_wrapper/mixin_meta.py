@@ -123,8 +123,7 @@ def validate_mixin_dependencies(cls: Type) -> List[str]:
         unsatisfied = contract.requires - all_provides
         if unsatisfied:
             issues.append(
-                f"{name} requires {sorted(unsatisfied)} "
-                f"but no mixin provides them"
+                f"{name} requires {sorted(unsatisfied)} but no mixin provides them"
             )
 
     # Check for init order conflicts: a mixin requiring something
@@ -173,13 +172,9 @@ def check_runtime_dependencies(
 
         for attr in contract.requires:
             if not hasattr(instance, attr):
-                issues.append(
-                    f"{contract.name}: required attribute '{attr}' missing"
-                )
+                issues.append(f"{contract.name}: required attribute '{attr}' missing")
             elif getattr(instance, attr) is None:
-                issues.append(
-                    f"{contract.name}: required attribute '{attr}' is None"
-                )
+                issues.append(f"{contract.name}: required attribute '{attr}' is None")
 
     return issues
 
@@ -211,7 +206,7 @@ def generate_mermaid_dependency_graph(cls: Type) -> str:
             f"order={contract.init_order}\\n"
             f"+{provides_count} provides / -{requires_count} requires"
         )
-        lines.append(f"    {contract.name}[\"{label}\"]")
+        lines.append(f'    {contract.name}["{label}"]')
 
     lines.append("")
 
@@ -265,8 +260,7 @@ def generate_provides_requires_table(cls: Type) -> str:
         provides = ", ".join(sorted(contract.provides)) or "(none)"
         requires = ", ".join(sorted(contract.requires)) or "(none)"
         lines.append(
-            f"| {contract.name} | {contract.init_order} "
-            f"| {provides} | {requires} |"
+            f"| {contract.name} | {contract.init_order} | {provides} | {requires} |"
         )
 
     return "\n".join(lines)

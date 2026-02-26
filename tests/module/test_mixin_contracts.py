@@ -84,8 +84,8 @@ class TestDependencySatisfaction:
         issues = validate_mixin_dependencies(ModuleWrapper)
         # Filter to only unsatisfied-requires issues (not init-order warnings)
         unsatisfied = [i for i in issues if "but no mixin provides them" in i]
-        assert unsatisfied == [], (
-            f"Unsatisfied dependencies:\n" + "\n".join(unsatisfied)
+        assert unsatisfied == [], f"Unsatisfied dependencies:\n" + "\n".join(
+            unsatisfied
         )
 
     def test_no_self_dependency(self):
@@ -93,9 +93,7 @@ class TestDependencySatisfaction:
         contracts = get_all_contracts(ModuleWrapper)
         for name, contract in contracts.items():
             overlap = contract.provides & contract.requires
-            assert overlap == set(), (
-                f"{name} both provides and requires: {overlap}"
-            )
+            assert overlap == set(), f"{name} both provides and requires: {overlap}"
 
 
 class TestInitOrder:
@@ -123,12 +121,17 @@ class TestInitOrder:
     def test_qdrant_before_indexing(self):
         """QdrantMixin must init before IndexingMixin."""
         contracts = get_all_contracts(ModuleWrapper)
-        assert contracts["QdrantMixin"].init_order < contracts["IndexingMixin"].init_order
+        assert (
+            contracts["QdrantMixin"].init_order < contracts["IndexingMixin"].init_order
+        )
 
     def test_embedding_before_indexing(self):
         """EmbeddingMixin must init before IndexingMixin."""
         contracts = get_all_contracts(ModuleWrapper)
-        assert contracts["EmbeddingMixin"].init_order < contracts["IndexingMixin"].init_order
+        assert (
+            contracts["EmbeddingMixin"].init_order
+            < contracts["IndexingMixin"].init_order
+        )
 
 
 class TestProvidesCorrespondToReal:

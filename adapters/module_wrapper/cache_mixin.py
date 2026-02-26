@@ -50,23 +50,27 @@ class CacheMixin:
     """
 
     # --- Mixin dependency contract ---
-    _MIXIN_PROVIDES = frozenset({
-        "get_cached_class",
-        "get_cached_classes",
-        "get_cached_entry",
-        "cache_pattern",
-        "cache_from_qdrant_pattern",
-        "invalidate_cache",
-        "cache_stats",
-        "_get_component_cache",
-    })
-    _MIXIN_REQUIRES = frozenset({
-        "module_name",
-        "components",
-        "get_component_by_path",
-        "symbol_mapping",
-        "build_dsl_from_paths",
-    })
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "get_cached_class",
+            "get_cached_classes",
+            "get_cached_entry",
+            "cache_pattern",
+            "cache_from_qdrant_pattern",
+            "invalidate_cache",
+            "cache_stats",
+            "_get_component_cache",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "module_name",
+            "components",
+            "get_component_by_path",
+            "symbol_mapping",
+            "build_dsl_from_paths",
+        }
+    )
     _MIXIN_INIT_ORDER = 50
 
     _component_cache = None

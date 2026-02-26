@@ -102,31 +102,35 @@ class SearchMixin:
     """
 
     # --- Mixin dependency contract ---
-    _MIXIN_PROVIDES = frozenset({
-        "search",
-        "search_async",
-        "colbert_search",
-        "search_v7",
-        "search_v7_hybrid",
-        "get_component_info",
-        "list_components",
-        "get_component_source",
-        "create_card_component",
-        "query_by_symbol",
-        "search_by_text",
-        "search_by_dsl",
-        "extract_dsl_from_text",
-    })
-    _MIXIN_REQUIRES = frozenset({
-        "client",
-        "embedder",
-        "collection_name",
-        "components",
-        "module",
-        "symbol_mapping",
-        "reverse_symbol_mapping",
-        "relationships",
-    })
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "search",
+            "search_async",
+            "colbert_search",
+            "search_v7",
+            "search_v7_hybrid",
+            "get_component_info",
+            "list_components",
+            "get_component_source",
+            "create_card_component",
+            "query_by_symbol",
+            "search_by_text",
+            "search_by_dsl",
+            "extract_dsl_from_text",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "client",
+            "embedder",
+            "collection_name",
+            "components",
+            "module",
+            "symbol_mapping",
+            "reverse_symbol_mapping",
+            "relationships",
+        }
+    )
     _MIXIN_INIT_ORDER = 40
 
     # =========================================================================

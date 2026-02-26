@@ -353,12 +353,22 @@ def build_button_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
             pass
 
     if not all([Button, OnClick, OpenLink]):
-        missing = [n for n, c in [("Button", Button), ("OnClick", OnClick), ("OpenLink", OpenLink)] if not c]
+        missing = [
+            n
+            for n, c in [
+                ("Button", Button),
+                ("OnClick", OnClick),
+                ("OpenLink", OpenLink),
+            ]
+            if not c
+        ]
         warn_strict(
             f"build_button_via_wrapper(): missing classes {missing}. "
             f"Button will not render."
         )
-        logger.debug("Could not get Button/OnClick/OpenLink classes from cache or import")
+        logger.debug(
+            "Could not get Button/OnClick/OpenLink classes from cache or import"
+        )
         return None
 
     try:
@@ -477,7 +487,9 @@ def build_onclick_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
     OpenLink = wrapper.get_cached_class("OpenLink")
 
     if not all([OnClick, OpenLink]):
-        missing = [n for n, c in [("OnClick", OnClick), ("OpenLink", OpenLink)] if not c]
+        missing = [
+            n for n, c in [("OnClick", OnClick), ("OpenLink", OpenLink)] if not c
+        ]
         warn_strict(
             f"build_onclick_via_wrapper(): missing classes {missing}. "
             f"OnClick will not render."

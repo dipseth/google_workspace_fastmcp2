@@ -475,24 +475,28 @@ class InstancePatternMixin:
     """
 
     # --- Mixin dependency contract ---
-    _MIXIN_PROVIDES = frozenset({
-        "store_instance_pattern",
-        "generate_pattern_variations",
-        "get_variation_family",
-        "get_random_variation",
-        "get_cached_variation",
-        "configure_patterns",
-        "pattern_stats",
-    })
-    _MIXIN_REQUIRES = frozenset({
-        "client",
-        "collection_name",
-        "relationships",
-        "symbol_mapping",
-        "build_dsl_from_paths",
-        "get_component_by_path",
-        "embedder",
-    })
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "store_instance_pattern",
+            "generate_pattern_variations",
+            "get_variation_family",
+            "get_random_variation",
+            "get_cached_variation",
+            "configure_patterns",
+            "pattern_stats",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "client",
+            "collection_name",
+            "relationships",
+            "symbol_mapping",
+            "build_dsl_from_paths",
+            "get_component_by_path",
+            "embedder",
+        }
+    )
     _MIXIN_INIT_ORDER = 60
 
     # Configuration

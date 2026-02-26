@@ -71,21 +71,25 @@ class EmbeddingMixin:
     """
 
     # --- Mixin dependency contract ---
-    _MIXIN_PROVIDES = frozenset({
-        "embedder",
-        "embedding_dim",
-        "colbert_embedder",
-        "colbert_embedding_dim",
-        "_colbert_initialized",
-        "_initialize_embedder",
-        "_initialize_colbert_embedder",
-        "embedding_metadata",
-    })
-    _MIXIN_REQUIRES = frozenset({
-        "embedding_model_name",
-        "enable_colbert",
-        "colbert_model_name",
-    })
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "embedder",
+            "embedding_dim",
+            "colbert_embedder",
+            "colbert_embedding_dim",
+            "_colbert_initialized",
+            "_initialize_embedder",
+            "_initialize_colbert_embedder",
+            "embedding_metadata",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "embedding_model_name",
+            "enable_colbert",
+            "colbert_model_name",
+        }
+    )
     _MIXIN_INIT_ORDER = 20
 
     # Attributes to be set by __init__ in the composed class

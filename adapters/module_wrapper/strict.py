@@ -17,9 +17,11 @@ import traceback
 
 logger = logging.getLogger("card_builder.strict")
 
-CARD_BUILDER_STRICT: bool = os.environ.get(
-    "CARD_BUILDER_STRICT", ""
-).lower() in ("1", "true", "yes")
+CARD_BUILDER_STRICT: bool = os.environ.get("CARD_BUILDER_STRICT", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 
 def warn_strict(message: str) -> None:

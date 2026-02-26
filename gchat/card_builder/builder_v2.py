@@ -1174,7 +1174,10 @@ class SmartCardBuilderV2:
         # When content_texts is empty (no explicit text/items provided), DecoratedText
         # and TextParagraph would render without text. Use a non-breaking space as
         # minimal content so the widget is valid for Google Chat API.
-        if component_name in ("DecoratedText", "TextParagraph") and "text" not in params:
+        if (
+            component_name in ("DecoratedText", "TextParagraph")
+            and "text" not in params
+        ):
             params["text"] = "\u00a0"  # non-breaking space — valid minimal content
 
         # 3. Container components - build children recursively

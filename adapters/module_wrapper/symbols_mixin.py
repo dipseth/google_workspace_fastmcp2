@@ -43,27 +43,31 @@ class SymbolsMixin:
     """
 
     # --- Mixin dependency contract ---
-    _MIXIN_PROVIDES = frozenset({
-        "get_symbol_table_text",
-        "build_dsl_from_paths",
-        "get_dsl_for_component",
-        "parse_dsl_to_components",
-        "instantiate_from_dsl",
-        "get_symbol_wrapped_text",
-        "get_embedding_text",
-        "backfill_symbols",
-        "print_dsl_summary",
-        "get_styling_registry",
-    })
-    _MIXIN_REQUIRES = frozenset({
-        "symbol_mapping",
-        "reverse_symbol_mapping",
-        "components",
-        "relationships",
-        "client",
-        "collection_name",
-        "module_name",
-    })
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "get_symbol_table_text",
+            "build_dsl_from_paths",
+            "get_dsl_for_component",
+            "parse_dsl_to_components",
+            "instantiate_from_dsl",
+            "get_symbol_wrapped_text",
+            "get_embedding_text",
+            "backfill_symbols",
+            "print_dsl_summary",
+            "get_styling_registry",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "symbol_mapping",
+            "reverse_symbol_mapping",
+            "components",
+            "relationships",
+            "client",
+            "collection_name",
+            "module_name",
+        }
+    )
     _MIXIN_INIT_ORDER = 45
 
     def get_symbol_table_text(

@@ -768,9 +768,8 @@ class ModuleWrapper(
         issues.extend(check_runtime_dependencies(self))
 
         if issues:
-            msg = (
-                f"ModuleWrapper dependency issues:\n"
-                + "\n".join(f"  - {i}" for i in issues)
+            msg = f"ModuleWrapper dependency issues:\n" + "\n".join(
+                f"  - {i}" for i in issues
             )
             if strict:
                 raise RuntimeError(msg)
