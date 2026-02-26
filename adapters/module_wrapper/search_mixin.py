@@ -30,9 +30,9 @@ Search Strategy Overview:
         search_by_dsl()          - DSL + ColBERT
         search_by_dsl_hybrid()   - DSL + multi-vector
 
-    V7 MULTI-VECTOR SEARCHES
-        search_v7()         - Named vector search
-        search_v7_hybrid()  - 3-vector with RRF fusion
+    NAMED-VECTOR MULTI-VECTOR SEARCHES
+        search_named_vector()  - Named vector search
+        search_hybrid()        - 3-vector with RRF fusion
 
     RESULT PROCESSING
         _process_search_results()
@@ -100,6 +100,38 @@ class SearchMixin:
     - reverse_symbol_mapping: Dict[str, str] (symbol → component)
     - relationships: Dict[str, List[str]]
     """
+
+    # --- Mixin dependency contract ---
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "search",
+            "search_async",
+            "colbert_search",
+            "search_named_vector",
+            "search_hybrid",
+            "get_component_info",
+            "list_components",
+            "get_component_source",
+            "create_card_component",
+            "query_by_symbol",
+            "search_by_text",
+            "search_by_dsl",
+            "extract_dsl_from_text",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "client",
+            "embedder",
+            "collection_name",
+            "components",
+            "module",
+            "symbol_mapping",
+            "reverse_symbol_mapping",
+            "relationships",
+        }
+    )
+    _MIXIN_INIT_ORDER = 40
 
     # =========================================================================
     # EMBEDDING HELPERS (Private)
@@ -1325,10 +1357,10 @@ class SearchMixin:
         }
 
     # =========================================================================
-    # V7 MULTI-VECTOR SEARCHES
+    # NAMED-VECTOR MULTI-VECTOR SEARCHES
     # =========================================================================
 
-    def search_v7(
+    def search_named_vector(
         self,
         query: str,
         vector_name: str = "components",
@@ -1338,9 +1370,9 @@ class SearchMixin:
         type_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Search V7 collection using a specific named vector.
+        Search collection using a specific named vector.
 
-        The V7 collection has three named vectors:
+        The collection has three named vectors:
         - components: ColBERT multi-vector for component identity
         - inputs: ColBERT multi-vector for parameter values
         - relationships: MiniLM single-vector for graph connections
@@ -1368,13 +1400,13 @@ class SearchMixin:
                 # Use MiniLM for relationships vector
                 query_vector = self._embed_with_minilm(query)
                 if not query_vector:
-                    logger.warning("MiniLM embedding failed for V7 search")
+                    logger.warning("MiniLM embedding failed for named-vector search")
                     return []
             else:
                 # Use ColBERT for components/inputs vectors
                 query_vector = self._embed_with_colbert(query, token_ratio)
                 if not query_vector:
-                    logger.warning("ColBERT embedding failed for V7 search")
+                    logger.warning("ColBERT embedding failed for named-vector search")
                     return []
 
             # Build filter
@@ -1421,15 +1453,15 @@ class SearchMixin:
                 )
 
             logger.info(
-                f"V7 search found {len(processed)} results (vector={vector_name})"
+                f"Named-vector search found {len(processed)} results (vector={vector_name})"
             )
             return processed
 
         except Exception as e:
-            logger.error(f"V7 search failed: {e}")
+            logger.error(f"Named-vector search failed: {e}")
             return []
 
-    def search_v7_hybrid(
+    def search_hybrid(
         self,
         description: str,
         component_paths: Optional[List[str]] = None,
@@ -1440,7 +1472,7 @@ class SearchMixin:
         include_classes: bool = True,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Hybrid V7 search using all three vectors with RRF fusion.
+        Hybrid search using all three named vectors with RRF fusion.
 
         Searches against:
         1. components vector - for component classes
@@ -1473,7 +1505,7 @@ class SearchMixin:
             description_vectors = self._embed_with_colbert(description, token_ratio)
 
             if not component_vectors or not description_vectors:
-                logger.warning("Embedding failed for V7 hybrid search")
+                logger.warning("Embedding failed for hybrid search")
                 return [], [], []
 
             # Generate relationship vector
@@ -1616,7 +1648,7 @@ class SearchMixin:
             filter_str = f" [{', '.join(filter_info)}]" if filter_info else ""
 
             logger.info(
-                f"V7 hybrid search{filter_str}: {len(class_results)} classes, "
+                f"Hybrid search{filter_str}: {len(class_results)} classes, "
                 f"{len(pattern_results)} patterns, {len(relationship_results)} relationships"
             )
 
@@ -1627,7 +1659,7 @@ class SearchMixin:
             )
 
         except Exception as e:
-            logger.error(f"V7 hybrid search failed: {e}")
+            logger.error(f"Hybrid search failed: {e}")
             return [], [], []
 
     # =========================================================================

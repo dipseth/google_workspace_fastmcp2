@@ -524,7 +524,7 @@ class TimestampedMixin:
 # =============================================================================
 # Shared constants used across multiple modules.
 
-# Vector dimensions for v7 schema (used by pipeline_mixin.py and search_mixin.py)
+# Vector dimensions for named-vectors schema (used by pipeline_mixin.py and search_mixin.py)
 COLBERT_DIM: int = 128
 """ColBERT multi-vector embedding dimension."""
 

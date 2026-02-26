@@ -12,7 +12,7 @@ Usage:
     from adapters.text_indexing import create_component_text_indices
 
     client = get_qdrant_client()
-    create_component_text_indices(client, "mcp_gchat_cards_v7")
+    create_component_text_indices(client, "mcp_gchat_cards")
 """
 
 import logging

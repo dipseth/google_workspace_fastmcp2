@@ -1,0 +1,31 @@
+<mjml>
+<mj-head>
+<mj-attributes>
+<mj-all font-family="Inter, Arial, sans-serif" />
+<mj-button background-color="#2563EB" color="#ffffff" border-radius="8px" />
+</mj-attributes>
+</mj-head>
+<mj-body background-color="#F8FAFC">
+<mj-section padding="0">
+<mj-column>
+<mj-text font-size="1px" color="#F8FAFC" height="0" line-height="1px" padding="0">Thanks for joining</mj-text>
+</mj-column>
+</mj-section>
+<mj-wrapper padding="0">
+<mj-section background-color="#FFFFFF" padding="24px">
+<mj-column>
+<mj-text font-size="28px" font-weight="700" padding="0 0 8px 0">Welcome to RiversUnlimited</mj-text>
+<mj-text font-size="16px" color="#334155" padding="0 0 16px 0">We’re glad you’re here.</mj-text>
+<mj-button href="https://example.com/start" padding="0 0 8px 0">Get started</mj-button>
+<mj-spacer height="8px" />
+<mj-text font-size="16px" color="#0f172a" padding="0 0 12px 0">This email was generated from an EmailSpec.</mj-text>
+<mj-divider border-color="#E2E8F0" padding="16px 0" />
+<mj-text font-size="12px" color="#64748B" padding="0">You received this because you signed up.</mj-text>
+<mj-text font-size="12px" color="#64748B" padding="8px 0 0 0">
+  <a href="https://example.com/unsub" style="color:#64748B">Unsubscribe</a>
+</mj-text>
+</mj-column>
+</mj-section>
+</mj-wrapper>
+</mj-body>
+</mjml>

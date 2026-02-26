@@ -16,8 +16,8 @@ Usage (standalone functions):
     )
 
     client = get_qdrant_client()
-    create_component_text_indices(client, "mcp_gchat_cards_v7")
-    results = search_by_text(client, "mcp_gchat_cards_v7", "name", "Button")
+    create_component_text_indices(client, "mcp_gchat_cards")
+    results = search_by_text(client, "mcp_gchat_cards", "name", "Button")
 
 Usage (via ModuleWrapper - preferred):
     wrapper = ModuleWrapper("card_framework.v2", auto_initialize=True)

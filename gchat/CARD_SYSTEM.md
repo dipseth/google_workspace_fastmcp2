@@ -518,7 +518,7 @@ Used by:
 
 ## Qdrant Storage
 
-### Collection: `mcp_gchat_cards_v7`
+### Collection: `mcp_gchat_cards`
 
 #### Instance Pattern Payload:
 ```python
@@ -562,7 +562,7 @@ This creates ~4,000+ structural combinations for training data variety.
 ```bash
 ENABLE_CARD_FEEDBACK=true          # Enable/disable feedback buttons
 MAX_INSTANCE_PATTERNS=500          # Max patterns to keep in Qdrant
-CARD_COLLECTION=mcp_gchat_cards_v7 # Qdrant collection name
+CARD_COLLECTION=mcp_gchat_cards    # Qdrant collection name
 ```
 
 ### Settings:

@@ -324,13 +324,13 @@ def test_full_flow_store_and_retrieve():
     # Step 3: Search for similar pattern (simulating what SmartCardBuilder does)
     print(f"\n[Step 3] Searching for similar pattern...")
 
-    # Use the wrapper's search_v7_hybrid to find the pattern
+    # Use the wrapper's search_hybrid to find the pattern
     try:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
 
         wrapper = get_card_framework_wrapper()
         if wrapper:
-            class_results, content_patterns, form_patterns = wrapper.search_v7_hybrid(
+            class_results, content_patterns, form_patterns = wrapper.search_hybrid(
                 description="Service status running",  # Similar description
                 component_paths=None,
                 limit=5,

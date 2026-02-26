@@ -382,7 +382,7 @@ class TestCustomComponentQdrantIntegration:
             pytest.skip("Qdrant not available")
 
         # Search for carousel-related content
-        class_results, patterns, rels = wrapper.search_v7_hybrid(
+        class_results, patterns, rels = wrapper.search_hybrid(
             description="A carousel with multiple cards",
             limit=10,
             include_classes=True,

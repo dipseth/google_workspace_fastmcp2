@@ -621,6 +621,40 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 card_params = {}
 
             # =================================================================
+            # AUTO-EXTRACT URLs FROM DESCRIPTION
+            # When the description contains URLs but no buttons in card_params,
+            # extract them as buttons so the DSL suggestion can include ButtonList.
+            # This allows callers to just pass URLs without worrying about DSL.
+            # =================================================================
+            if card_description and not card_params.get("buttons"):
+                import re
+
+                urls = re.findall(r"https?://[^\s,\)]+", card_description)
+                if urls:
+                    extracted_buttons = []
+                    for url in urls:
+                        # Derive button label from URL path
+                        path_parts = url.rstrip("/").split("/")
+                        label = (
+                            path_parts[-1]
+                            if len(path_parts) > 3
+                            else url.split("//")[1].split("/")[0]
+                        )
+                        extracted_buttons.append({"text": label, "url": url})
+                    card_params.setdefault("buttons", extracted_buttons)
+                    # Use description (minus URLs) as text if no text provided
+                    if not card_params.get("text"):
+                        clean_desc = re.sub(
+                            r"https?://[^\s,\)]+", "", card_description
+                        ).strip()
+                        clean_desc = re.sub(r"\s+", " ", clean_desc).strip(" .,;:")
+                        if clean_desc:
+                            card_params["text"] = clean_desc
+                    logger.info(
+                        f"🔗 Auto-extracted {len(extracted_buttons)} URL(s) as buttons from description"
+                    )
+
+            # =================================================================
             # RESOLVE SYMBOL-KEYED card_params (e.g. δ → items, ᵬ → buttons)
             # =================================================================
             if (
@@ -762,6 +796,37 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 except Exception as suggest_err:
                     logger.warning(f"⚠️ DSL suggestion failed: {suggest_err}")
 
+            # =============================================================
+            # QDRANT INSTANCE PATTERN REUSE
+            # When no DSL and no suggested_dsl yet, search Qdrant for similar
+            # previously-built cards and reuse their DSL structure.
+            # Searches the 'inputs' vector for instance_patterns, then
+            # extracts DSL from the relationship_text field.
+            # =============================================================
+            if not dsl_string and not suggested_dsl:
+                try:
+                    if _card_framework_wrapper:
+                        pattern_results = _card_framework_wrapper.search_by_dsl(
+                            text=card_description,
+                            limit=5,
+                            score_threshold=0.1,
+                            vector_name="inputs",
+                            type_filter="instance_pattern",
+                        )
+                        for pattern in pattern_results:
+                            rel_text = pattern.get("relationship_text", "")
+                            if rel_text:
+                                pattern_dsl = extract_dsl_from_description(rel_text)
+                                if pattern_dsl:
+                                    suggested_dsl = pattern_dsl
+                                    logger.info(
+                                        f"🔍 Reusing DSL from similar instance pattern: "
+                                        f"{suggested_dsl} (score={pattern.get('score', 0):.1f})"
+                                    )
+                                    break
+                except Exception as reuse_err:
+                    logger.debug(f"Instance pattern reuse search failed: {reuse_err}")
+
             # =================================================================
             # SMART CARD BUILDER - PRIMARY PATH (Natural Language)
             # SmartCardBuilder is the primary card building path for NL because it:
@@ -808,6 +873,31 @@ def setup_card_tools(mcp: FastMCP) -> None:
                         if card_params
                         else None
                     )
+                    sections = card_params.get("sections") if card_params else None
+
+                    # =============================================================
+                    # PRE-BUILT SECTIONS PASSTHROUGH
+                    # When card_params contains fully structured 'sections' with
+                    # widget JSON, use them directly instead of building from scratch.
+                    # This supports callers who provide complete card structures.
+                    # =============================================================
+                    card_dict = None
+                    if sections and isinstance(sections, list) and len(sections) > 0:
+                        # Check if sections contain actual widget structures
+                        has_widgets = any(
+                            isinstance(s, dict) and s.get("widgets") for s in sections
+                        )
+                        if has_widgets:
+                            logger.info(
+                                f"📋 Using pre-built sections passthrough: {len(sections)} section(s)"
+                            )
+                            card_dict = {"sections": sections}
+                            # Add header if title provided
+                            if title:
+                                header = {"title": title}
+                                if subtitle:
+                                    header["subtitle"] = subtitle
+                                card_dict["header"] = header
 
                     # Convert grid images to items for DSL building
                     grid_items = None
@@ -831,18 +921,29 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     if cards:
                         logger.info(f"🎠 Carousel: {len(cards)} card(s)")
 
-                    # Build card via unified DSL/DAG pipeline
-                    card_dict = builder.build(
-                        description=card_description,
-                        title=title,
-                        subtitle=subtitle,
-                        buttons=buttons,
-                        chips=chips,
-                        image_url=image_url,
-                        text=text,
-                        items=grid_items or items,
-                        cards=cards,
-                    )
+                    # Build card via unified DSL/DAG pipeline (skip if pre-built)
+                    if not card_dict:
+                        # When description has no DSL but we have a suggested DSL
+                        # from card_params, use it as the build description so the
+                        # builder can create proper widget structure.
+                        build_description = card_description
+                        if suggested_dsl and not dsl_string:
+                            build_description = suggested_dsl
+                            logger.info(
+                                f"💡 Using suggested DSL as build description: {suggested_dsl}"
+                            )
+
+                        card_dict = builder.build(
+                            description=build_description,
+                            title=title,
+                            subtitle=subtitle,
+                            buttons=buttons,
+                            chips=chips,
+                            image_url=image_url,
+                            text=text,
+                            items=grid_items or items,
+                            cards=cards,
+                        )
 
                     # Wrap in cardsV2 format for Google Chat API
                     if card_dict:

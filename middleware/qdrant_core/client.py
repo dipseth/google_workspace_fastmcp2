@@ -333,7 +333,7 @@ class QdrantClientManager:
     async def _ensure_collection(self):
         """Ensure the Qdrant collection exists with proper configuration and indexes.
 
-        Dispatches to v1 (single vector) or v7 (named vectors) based on config.collection_schema.
+        Dispatches to v1 (single vector) or named vectors based on config.collection_schema.
         """
         if not self.client:
             return
@@ -346,8 +346,8 @@ class QdrantClientManager:
             collection_names = [c.name for c in collections.collections]
 
             if self.config.collection_name not in collection_names:
-                if self.config.collection_schema == CollectionSchema.V7_NAMED_VECTORS:
-                    await self._create_collection_v7(qdrant_models)
+                if self.config.collection_schema == CollectionSchema.NAMED_VECTORS:
+                    await self._create_collection_named_vectors(qdrant_models)
                 else:
                     await self._create_collection_v1(qdrant_models)
 
@@ -397,8 +397,8 @@ class QdrantClientManager:
         logger.info(f"🚀 Optimization Profile: {profile_name}")
         logger.info(f"📊 Profile Description: {description}")
 
-    async def _create_collection_v7(self, qdrant_models: dict):
-        """Create collection with 3 named vectors (v7 RIC schema).
+    async def _create_collection_named_vectors(self, qdrant_models: dict):
+        """Create collection with 3 named vectors (RIC schema).
 
         Named vectors:
           - components (384-dim MiniLM): Tool identity embedding
@@ -439,7 +439,7 @@ class QdrantClientManager:
         profile_name = self.config.optimization_profile.value
         description = optimization_params["description"]
         logger.info(
-            f"✅ Created Qdrant collection (v7 RIC): {self.config.collection_name}"
+            f"✅ Created Qdrant collection (named vectors RIC): {self.config.collection_name}"
         )
         logger.info(f"🚀 Optimization Profile: {profile_name}")
         logger.info(f"📊 Profile Description: {description}")

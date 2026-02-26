@@ -174,10 +174,10 @@ def test_dsl_extraction_in_search():
         print("\n✗ Some DSL extraction tests failed")
 
 
-def test_wrapper_search_v7_hybrid_filters():
-    """Test that search_v7_hybrid correctly applies feedback filters."""
+def test_wrapper_search_hybrid_filters():
+    """Test that search_hybrid correctly applies feedback filters."""
     print("\n" + "=" * 60)
-    print("TEST: search_v7_hybrid feedback filter application")
+    print("TEST: search_hybrid feedback filter application")
     print("=" * 60)
 
     from gchat.card_framework_wrapper import get_card_framework_wrapper
@@ -186,7 +186,7 @@ def test_wrapper_search_v7_hybrid_filters():
 
     # Test with positive filters
     print("\n🔍 Testing with content_feedback='positive', form_feedback='positive'...")
-    classes, content_patterns, form_patterns = wrapper.search_v7_hybrid(
+    classes, content_patterns, form_patterns = wrapper.search_hybrid(
         description="A dashboard card",
         limit=10,
         content_feedback="positive",
@@ -215,7 +215,7 @@ def test_wrapper_search_v7_hybrid_filters():
 
     # Test with no filters
     print("\n🔍 Testing without feedback filters...")
-    classes2, content_patterns2, form_patterns2 = wrapper.search_v7_hybrid(
+    classes2, content_patterns2, form_patterns2 = wrapper.search_hybrid(
         description="A dashboard card",
         limit=10,
         include_classes=True,
@@ -231,7 +231,7 @@ def test_wrapper_search_v7_hybrid_filters():
     else:
         print(f"   ⚠️ Fewer results without filters (unexpected)")
 
-    print("\n✓ search_v7_hybrid filter test complete")
+    print("\n✓ search_hybrid filter test complete")
 
 
 if __name__ == "__main__":
@@ -242,7 +242,7 @@ if __name__ == "__main__":
     test_smart_card_builder_wrapper_search()
     test_feedback_loop_wrapper_delegation()
     test_dsl_extraction_in_search()
-    test_wrapper_search_v7_hybrid_filters()
+    test_wrapper_search_hybrid_filters()
 
     print("\n" + "=" * 60)
     print("✅ ALL INTEGRATION TESTS COMPLETE")

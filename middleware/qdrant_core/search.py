@@ -122,15 +122,15 @@ class QdrantSearchManager:
         return self.client_manager.is_initialized
 
     def _select_search_vector(self, query_type: str) -> Optional[str]:
-        """Select the named vector to search based on query type (v7 schema only).
+        """Select the named vector to search based on query type (named-vectors schema only).
 
         Args:
             query_type: One of 'overview', 'service_history', 'general', 'recommend'
 
         Returns:
-            Named vector name for v7 schema, or None for v1 (single vector).
+            Named vector name for named-vectors schema, or None for v1 (single vector).
         """
-        if self.config.collection_schema != CollectionSchema.V7_NAMED_VECTORS:
+        if self.config.collection_schema != CollectionSchema.NAMED_VECTORS:
             return None
 
         routing = {
@@ -158,7 +158,7 @@ class QdrantSearchManager:
             qdrant_filter: Optional Qdrant filter
             limit: Maximum number of results
             score_threshold: Minimum similarity score
-            using: Optional named vector to search (for v7 schema). None uses default vector.
+            using: Optional named vector to search (for named-vectors schema). None uses default vector.
             collection: Optional collection name override. Uses default if not provided.
 
         Returns:
@@ -212,7 +212,7 @@ class QdrantSearchManager:
             query: Search query (supports filters and semantic search)
             limit: Maximum number of results
             score_threshold: Minimum similarity score
-            query_type: Optional hint for named vector routing in v7 schema
+            query_type: Optional hint for named vector routing in named-vectors schema
                         ('overview', 'service_history', 'general', 'recommend')
             collection: Optional collection name override. Uses default if not provided.
 
@@ -229,7 +229,7 @@ class QdrantSearchManager:
         target_collection = collection or self.config.collection_name
 
         try:
-            # Resolve named vector for v7 schema
+            # Resolve named vector for named-vectors schema
             using = self._select_search_vector(
                 query_type or ("recommend" if positive_point_ids else "general")
             )

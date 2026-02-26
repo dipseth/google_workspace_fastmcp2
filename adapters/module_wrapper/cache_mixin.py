@@ -23,6 +23,7 @@ Usage:
 import logging
 from typing import Any, Dict, List, Optional, Type
 
+from adapters.module_wrapper.strict import warn_strict
 from adapters.module_wrapper.types import (
     CacheKey,
     ComponentPath,
@@ -47,6 +48,30 @@ class CacheMixin:
     - symbol_mapping: Dict[str, str]
     - build_dsl_from_paths: Callable
     """
+
+    # --- Mixin dependency contract ---
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "get_cached_class",
+            "get_cached_classes",
+            "get_cached_entry",
+            "cache_pattern",
+            "cache_from_qdrant_pattern",
+            "invalidate_cache",
+            "cache_stats",
+            "_get_component_cache",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "module_name",
+            "components",
+            "get_component_by_path",
+            "symbol_mapping",
+            "build_dsl_from_paths",
+        }
+    )
+    _MIXIN_INIT_ORDER = 50
 
     _component_cache = None
 
@@ -302,11 +327,19 @@ class CacheMixin:
         # Not in cache - resolve path and get class
         path = self._resolve_component_path(component_name)
         if not path:
+            warn_strict(
+                f"get_cached_class('{component_name}'): path resolution failed. "
+                f"Component will be missing from the card."
+            )
             logger.debug(f"Could not resolve path for: {component_name}")
             return None
 
         cls = self.get_component_by_path(path)
         if not cls:
+            warn_strict(
+                f"get_cached_class('{component_name}'): class lookup failed for path '{path}'. "
+                f"Component will be missing from the card."
+            )
             logger.debug(f"get_component_by_path returned None for: {path}")
             return None
 

@@ -88,6 +88,33 @@ class QdrantMixin:
     - enable_colbert, colbert_collection_name, colbert_embedding_dim
     """
 
+    # --- Mixin dependency contract ---
+    _MIXIN_PROVIDES = frozenset(
+        {
+            "client",
+            "collection_needs_indexing",
+            "_initialize_qdrant",
+            "_ensure_collection",
+            "_ensure_colbert_collection",
+            "ensure_symbol_index",
+            "collection_metadata",
+        }
+    )
+    _MIXIN_REQUIRES = frozenset(
+        {
+            "qdrant_host",
+            "qdrant_port",
+            "qdrant_url",
+            "qdrant_api_key",
+            "collection_name",
+            "force_reindex",
+            "clear_collection",
+            "enable_colbert",
+            "colbert_collection_name",
+        }
+    )
+    _MIXIN_INIT_ORDER = 10
+
     # Attributes to be set by __init__ in the composed class
     client: Any = None
     collection_needs_indexing: bool = True

@@ -325,16 +325,18 @@ class QdrantStorageManager:
         """
         self.client_manager = client_manager
         self.config = client_manager.config
-        self._ric_provider = None  # Optional RICTextProvider for v7 text generation
+        self._ric_provider = (
+            None  # Optional RICTextProvider for named-vectors text generation
+        )
 
         logger.debug("🗃️ QdrantStorageManager initialized")
 
     def set_ric_provider(self, provider) -> None:
-        """Set the RIC text provider for v7 storage.
+        """Set the RIC text provider for named-vectors storage.
 
-        When set, _store_point_v7 delegates text generation to the provider
-        instead of using inline hardcoded text. The provider must implement
-        the RICTextProvider protocol.
+        When set, _store_point_named_vectors delegates text generation to the
+        provider instead of using inline hardcoded text. The provider must
+        implement the RICTextProvider protocol.
 
         Args:
             provider: A RICTextProvider implementation
@@ -515,7 +517,7 @@ class QdrantStorageManager:
     ):
         """
         Store tool response in Qdrant with embedding using individual parameters.
-        Dispatches to v1 (single vector) or v7 (named vectors) based on config.
+        Dispatches to v1 (single vector) or named vectors based on config.
         Supports dual_write mode for migration.
 
         Args:
@@ -613,9 +615,9 @@ class QdrantStorageManager:
                     tool_name, tool_args, response, validated_payload, qdrant_models
                 )
 
-            # v7 path (named vectors or dual_write)
-            if schema == CollectionSchema.V7_NAMED_VECTORS or self.config.dual_write:
-                await self._store_point_v7(
+            # Named vectors path (or dual_write)
+            if schema == CollectionSchema.NAMED_VECTORS or self.config.dual_write:
+                await self._store_point_named_vectors(
                     tool_name,
                     tool_args,
                     response,
@@ -668,7 +670,7 @@ class QdrantStorageManager:
 
         logger.debug(f"✅ Stored v1 response for tool: {tool_name} (ID: {point_id})")
 
-    async def _store_point_v7(
+    async def _store_point_named_vectors(
         self,
         tool_name: str,
         tool_args: Dict[str, Any],
@@ -679,7 +681,7 @@ class QdrantStorageManager:
         session_id: str,
         qdrant_models: dict,
     ):
-        """Store a point with 3 named vectors (v7 RIC schema).
+        """Store a point with 3 named vectors (RIC schema).
 
         Generates 3 text representations and embeds them in one batch call:
           - components_text: Tool identity
@@ -722,7 +724,7 @@ class QdrantStorageManager:
         )
 
         if len(embeddings_list) < 3:
-            logger.error("Failed to generate all 3 v7 embeddings")
+            logger.error("Failed to generate all 3 named-vector embeddings")
             return
 
         point_id = str(uuid.uuid4())
@@ -742,7 +744,9 @@ class QdrantStorageManager:
             points=[point],
         )
 
-        logger.debug(f"✅ Stored v7 response for tool: {tool_name} (ID: {point_id})")
+        logger.debug(
+            f"✅ Stored named-vectors response for tool: {tool_name} (ID: {point_id})"
+        )
 
     async def store_custom_payload(
         self,

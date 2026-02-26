@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Pre-commit hook: runs ruff lint + format on staged Python files.
+# Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Or:      ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+
+set -e
+
+# Get staged Python files (excluding deleted files)
+STAGED_PY=$(git diff --cached --name-only --diff-filter=d -- '*.py')
+
+if [ -z "$STAGED_PY" ]; then
+    exit 0
+fi
+
+echo "pre-commit: checking ${STAGED_PY##*$'\n'} ($(echo "$STAGED_PY" | wc -l | tr -d ' ') file(s))"
+
+# Lint check (import sorting, unused imports, etc.)
+echo "$STAGED_PY" | xargs uv run ruff check --fix
+# Re-stage any auto-fixed files
+echo "$STAGED_PY" | xargs git add
+
+# Format check
+echo "$STAGED_PY" | xargs uv run ruff format
+# Re-stage any reformatted files
+echo "$STAGED_PY" | xargs git add
+
+echo "pre-commit: all checks passed"

@@ -129,3 +129,4 @@ aesthetics_conversations_anthropic_v3.db
 .idea/**
 .component_cache/_index.pkl
 adapters/discovery_manager.py
+.component_cache/*

@@ -37,6 +37,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
 
 from dotenv import load_dotenv
 
+from adapters.module_wrapper.strict import warn_strict
 from config.settings import settings as _settings
 from middleware.filters import register_all_filters
 from middleware.filters.styling_filters import SEMANTIC_COLORS
@@ -352,7 +353,7 @@ class SmartCardBuilderV2:
             with ThreadPoolExecutor(max_workers=2) as executor:
                 # Always submit hybrid search for style_metadata extraction
                 hybrid_future = executor.submit(
-                    wrapper.search_v7_hybrid,
+                    wrapper.search_hybrid,
                     description=description,
                     component_paths=None,
                     limit=5,
@@ -451,7 +452,7 @@ class SmartCardBuilderV2:
         """
         Query Qdrant for matching instance patterns with caching.
 
-        First tries wrapper's SearchMixin methods (search_by_dsl, search_v7_hybrid),
+        First tries wrapper's SearchMixin methods (search_by_dsl, search_hybrid),
         then falls back to feedback_loop.query_with_discovery() using Qdrant's Discovery API.
         Results are cached for 5 minutes to improve performance.
 
@@ -1169,6 +1170,16 @@ class SmartCardBuilderV2:
         for k, v in consumed.items():
             params.setdefault(k, v)
 
+        # 2.5 Ensure text-bearing components have a text field
+        # When content_texts is empty (no explicit text/items provided), DecoratedText
+        # and TextParagraph would render without text. Use a non-breaking space as
+        # minimal content so the widget is valid for Google Chat API.
+        if (
+            component_name in ("DecoratedText", "TextParagraph")
+            and "text" not in params
+        ):
+            params["text"] = "\u00a0"  # non-breaking space — valid minimal content
+
         # 3. Container components - build children recursively
         children_field = get_children_field(component_name, wrapper)
         if children_field:
@@ -1262,7 +1273,13 @@ class SmartCardBuilderV2:
 
         # Return None instead of "Item" placeholder if no content
         # This ensures only explicitly provided content is rendered
-        return {json_key: widget_content} if widget_content else None
+        if not widget_content:
+            warn_strict(
+                f"_build_widget_generic('{component_name}'): widget_content is empty. "
+                f"Widget will be omitted from the card."
+            )
+            return None
+        return {json_key: widget_content}
 
     def _build_container_generic(
         self,
@@ -1438,6 +1455,10 @@ class SmartCardBuilderV2:
                 continue
 
         if not built_children:
+            warn_strict(
+                f"_build_container_generic('{component_name}'): no children built successfully. "
+                f"Container will be omitted from the card."
+            )
             logger.debug(f"🎠 No children built for {component_name}")
             return None
 
@@ -2098,6 +2119,11 @@ class SmartCardBuilderV2:
             if child_widget is not None:
                 params[json_field_name] = child_widget
                 logger.debug(f"Mapped {child_name} to {parent_name}.{json_field_name}")
+            else:
+                warn_strict(
+                    f"_map_children_to_params('{parent_name}'): child '{child_name}' "
+                    f"built to None, skipped in parent params."
+                )
 
         return params
 

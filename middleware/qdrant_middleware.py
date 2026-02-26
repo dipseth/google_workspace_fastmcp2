@@ -141,7 +141,7 @@ class QdrantUnifiedMiddleware(Middleware):
             self.client_manager, self.search_manager
         )
 
-        # Wire RIC provider for v7 tool response storage
+        # Wire RIC provider for named-vectors tool response storage
         self._tool_relationship_graph = None
         try:
             from middleware.qdrant_core.tool_response_provider import (

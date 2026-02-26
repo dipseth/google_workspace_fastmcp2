@@ -1139,7 +1139,7 @@ class DSLParser:
     def to_qdrant_queries(
         self,
         result: DSLParseResult,
-        collection_name: str = "mcp_gchat_cards_v7",
+        collection_name: str = "mcp_gchat_cards",
         search_strategy: str = "auto",
     ) -> List[QdrantQuery]:
         """
@@ -1630,7 +1630,7 @@ class DSLParser:
 def parse_dsl_to_qdrant_query(
     dsl_string: str,
     symbol_mapping: Dict[str, str],
-    collection_name: str = "mcp_gchat_cards_v7",
+    collection_name: str = "mcp_gchat_cards",
 ) -> List[Dict[str, Any]]:
     """
     Standalone function to parse DSL and generate Qdrant queries.

@@ -128,7 +128,7 @@ When building cards from matched patterns:
 
 ### Retrieval
 
-- `search_v7_hybrid()` with feedback filters
+- `search_hybrid()` with feedback filters
 - `get_cached_variation()` - Fast variation lookup
 - Pattern similarity scoring
 

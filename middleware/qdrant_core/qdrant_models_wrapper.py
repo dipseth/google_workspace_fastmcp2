@@ -61,14 +61,13 @@ def _create_wrapper() -> "ModuleWrapper":
         module_or_name="qdrant_client.models",
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
-        collection_name="mcp_qdrant_client_models_v7",
+        collection_name="mcp_qdrant_client_models",
         auto_initialize=True,
         index_nested=True,
         index_private=False,
         max_depth=2,
         skip_standard_library=True,
         include_modules=["qdrant_client"],
-        use_v7_schema=True,
     )
 
     component_count = len(wrapper.components) if wrapper.components else 0
