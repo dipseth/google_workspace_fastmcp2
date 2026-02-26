@@ -35,3 +35,6 @@ jobs:
 
       - name: Format check (ruff)
         run: uv run ruff format --check .
+
+      - name: Check for hardcoded DSL symbols
+        run: uv run python scripts/lint_no_hardcoded_symbols.py
