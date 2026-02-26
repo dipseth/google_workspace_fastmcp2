@@ -37,10 +37,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
 
 from dotenv import load_dotenv
 
+from adapters.module_wrapper.strict import warn_strict
 from config.settings import settings as _settings
 from middleware.filters import register_all_filters
 from middleware.filters.styling_filters import SEMANTIC_COLORS
-from adapters.module_wrapper.strict import warn_strict
 from middleware.template_core.jinja_environment import JinjaEnvironmentManager
 
 # NOTE: Rendering utilities are imported lazily to avoid circular imports

@@ -23,6 +23,7 @@ Usage:
 import logging
 from typing import Any, Dict, List, Optional, Type
 
+from adapters.module_wrapper.strict import warn_strict
 from adapters.module_wrapper.types import (
     CacheKey,
     ComponentPath,
@@ -32,8 +33,6 @@ from adapters.module_wrapper.types import (
     SymbolMapping,
     WrapperGetter,
 )
-
-from adapters.module_wrapper.strict import warn_strict
 
 logger = logging.getLogger(__name__)
 
