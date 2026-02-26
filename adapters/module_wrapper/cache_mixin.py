@@ -33,6 +33,8 @@ from adapters.module_wrapper.types import (
     WrapperGetter,
 )
 
+from adapters.module_wrapper.strict import warn_strict
+
 logger = logging.getLogger(__name__)
 
 
@@ -322,11 +324,19 @@ class CacheMixin:
         # Not in cache - resolve path and get class
         path = self._resolve_component_path(component_name)
         if not path:
+            warn_strict(
+                f"get_cached_class('{component_name}'): path resolution failed. "
+                f"Component will be missing from the card."
+            )
             logger.debug(f"Could not resolve path for: {component_name}")
             return None
 
         cls = self.get_component_by_path(path)
         if not cls:
+            warn_strict(
+                f"get_cached_class('{component_name}'): class lookup failed for path '{path}'. "
+                f"Component will be missing from the card."
+            )
             logger.debug(f"get_component_by_path returned None for: {path}")
             return None
 

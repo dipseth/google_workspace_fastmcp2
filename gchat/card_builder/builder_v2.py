@@ -40,6 +40,7 @@ from dotenv import load_dotenv
 from config.settings import settings as _settings
 from middleware.filters import register_all_filters
 from middleware.filters.styling_filters import SEMANTIC_COLORS
+from adapters.module_wrapper.strict import warn_strict
 from middleware.template_core.jinja_environment import JinjaEnvironmentManager
 
 # NOTE: Rendering utilities are imported lazily to avoid circular imports
@@ -1269,7 +1270,13 @@ class SmartCardBuilderV2:
 
         # Return None instead of "Item" placeholder if no content
         # This ensures only explicitly provided content is rendered
-        return {json_key: widget_content} if widget_content else None
+        if not widget_content:
+            warn_strict(
+                f"_build_widget_generic('{component_name}'): widget_content is empty. "
+                f"Widget will be omitted from the card."
+            )
+            return None
+        return {json_key: widget_content}
 
     def _build_container_generic(
         self,
@@ -1445,6 +1452,10 @@ class SmartCardBuilderV2:
                 continue
 
         if not built_children:
+            warn_strict(
+                f"_build_container_generic('{component_name}'): no children built successfully. "
+                f"Container will be omitted from the card."
+            )
             logger.debug(f"🎠 No children built for {component_name}")
             return None
 
@@ -2105,6 +2116,11 @@ class SmartCardBuilderV2:
             if child_widget is not None:
                 params[json_field_name] = child_widget
                 logger.debug(f"Mapped {child_name} to {parent_name}.{json_field_name}")
+            else:
+                warn_strict(
+                    f"_map_children_to_params('{parent_name}'): child '{child_name}' "
+                    f"built to None, skipped in parent params."
+                )
 
         return params
 

@@ -3,6 +3,46 @@ Context consumption utilities for card building.
 
 This module provides functions for consuming resources from a shared context
 during card building (buttons, texts, chips, carousel cards).
+
+Design rationale — why sequential consumption is correct
+========================================================
+
+Resources (buttons, texts, chips, grid items, carousel cards) are consumed
+sequentially: the first Button widget in the DSL tree gets buttons[0], the
+second gets buttons[1], and so on. Each consumption increments an index
+counter (_button_index, _text_index, etc.) in the shared context dict.
+
+This was a deliberate design choice. Alternatives were considered and
+rejected:
+
+1. **Semantic matching** (match button text to widget context via NLP or
+   string similarity) — Ambiguous when multiple candidates score similarly.
+   Impossible to debug when the wrong match is selected. Requires NLP
+   infrastructure where none should be needed. A DSL that needs AI to
+   interpret defeats the purpose of having a DSL.
+
+2. **Named slots** (explicit mapping like ``button_0 -> widget_3``) —
+   Adds syntax complexity to the DSL for minimal benefit. The structure
+   tree already encodes the allocation: ``§[δ[ᵬ], Ƀ[ᵬ×2]]`` with 3
+   buttons means the first goes to DecoratedText, the next two to
+   ButtonList. The structure IS the allocation.
+
+3. **Type-based dispatch** (route by param schema compatibility) —
+   All buttons have the same schema, so this reduces to sequential anyway.
+   For mixed types it introduces ordering ambiguity.
+
+Sequential consumption is:
+- **Deterministic**: same DSL + same params = same card, always.
+- **Debuggable**: if button 2 is wrong, look at buttons[1] in card_params.
+- **Composable**: nested components consume from the same pool without
+  coordination. A Button inside a DecoratedText and a Button inside a
+  ButtonList both just call consume_from_context("Button") and get the
+  next available item.
+- **Simple**: ~30 lines of code vs unbounded complexity.
+
+If you're reading this and thinking about making consumption "smarter",
+the answer is almost certainly to fix the DSL structure or card_params
+ordering instead. The sequential model respects DSL author intent.
 """
 
 from typing import Any, Dict, Optional, Tuple

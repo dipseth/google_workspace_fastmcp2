@@ -38,3 +38,6 @@ jobs:
 
       - name: Check for hardcoded DSL symbols
         run: uv run python scripts/lint_no_hardcoded_symbols.py
+
+      - name: Check for DAG-bypass patterns (advisory)
+        run: uv run python scripts/lint_no_dag_bypass.py
