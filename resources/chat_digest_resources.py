@@ -243,16 +243,18 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
         return result.model_dump_json()
 
     @mcp.resource(
-        uri="chat://digest/space/{space_id}{?hours,limit}",
+        uri="chat://digest/space/{space_code}{?hours,limit}",
         name="Chat Digest (Single Space)",
         description=(
             "Get a digest of recent messages from a specific Google Chat space.\n\n"
+            "The space_code is the alphanumeric ID portion of the space name\n"
+            "(e.g., 'AAAAWvjq2HE' from 'spaces/AAAAWvjq2HE').\n\n"
             "Query parameters:\n"
             "  - hours: Hours of history to include (1-168, default 24)\n"
             "  - limit: Max messages to return (1-50, default 10)\n\n"
             "Examples:\n"
-            "  - chat://digest/space/spaces/AAAA1234 → Last 24 hours\n"
-            "  - chat://digest/space/spaces/AAAA1234?hours=4&limit=5"
+            "  - chat://digest/space/AAAAWvjq2HE → Last 24 hours\n"
+            "  - chat://digest/space/AAAAWvjq2HE?hours=4&limit=5"
         ),
         mime_type="application/json",
         tags={"chat", "digest", "messages", "recent", "google", "space"},
@@ -264,11 +266,11 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
     )
     async def get_chat_digest_space(
         ctx: Context,
-        space_id: Annotated[
+        space_code: Annotated[
             str,
             Field(
-                description="Full space resource name",
-                examples=["spaces/AAAA1234", "spaces/AAAAWvjq2HE"],
+                description="Alphanumeric space ID (the part after 'spaces/')",
+                examples=["AAAAWvjq2HE", "AAAA1234"],
             ),
         ],
         hours: Annotated[
@@ -300,6 +302,7 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
                 },
             )
 
+        space_id = f"spaces/{space_code}"
         result = await _build_digest(
             user_email, hours_back=hours, limit=limit, space_id_filter=space_id
         )
@@ -308,5 +311,5 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
     logger.debug(
         "Chat digest resources registered: "
         "chat://digest{?hours,limit}, "
-        "chat://digest/space/{space_id}{?hours,limit}"
+        "chat://digest/space/{space_code}{?hours,limit}"
     )
