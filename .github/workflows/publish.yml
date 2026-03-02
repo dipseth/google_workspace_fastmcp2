@@ -2,35 +2,75 @@ name: Publish to PyPI
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-
+    # Only publish when the version in pyproject.toml has changed
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need previous commit to detect version change
+
+      - name: Check for version change
+        id: version
+        run: |
+          CURRENT=$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          PREVIOUS=$(git show HEAD~1:pyproject.toml 2>/dev/null | grep '^version' | head -1 | sed 's/.*"\(.*\)"/\1/' || echo "")
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
+          if [ "$CURRENT" != "$PREVIOUS" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version changed: $PREVIOUS -> $CURRENT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version unchanged: $CURRENT"
+          fi
 
       - name: Set up Python
+        if: steps.version.outputs.changed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install uv
+        if: steps.version.outputs.changed == 'true'
         uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
 
       - name: Build
+        if: steps.version.outputs.changed == 'true'
         run: uv build
 
       - name: Publish to PyPI
+        if: steps.version.outputs.changed == 'true'
         env:
           UV_PUBLISH_USERNAME: "__token__"
           UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: uv publish
+
+      - name: Create Git tag
+        if: steps.version.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.current }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.current }}
+        run: |
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --generate-notes
