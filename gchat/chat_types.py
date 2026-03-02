@@ -5,6 +5,8 @@ These TypedDict classes define the structure of data returned by Chat tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
+from pydantic import BaseModel
+from pydantic import Field as PydanticField
 from typing_extensions import List, NotRequired, Optional, TypedDict
 
 
@@ -246,3 +248,93 @@ class SendRichCardResponse(TypedDict):
     userEmail: str
     message: str
     error: NotRequired[Optional[str]]
+
+
+class DigestMessageInfo(TypedDict):
+    """Simplified message info for chat digest responses."""
+
+    id: str
+    text: str
+    sender_name: str
+    sender_email: Optional[str]
+    create_time: str
+    thread_id: Optional[str]
+
+
+class DigestSpaceEntry(TypedDict):
+    """Per-space entry in a chat digest response."""
+
+    space_id: str
+    display_name: str
+    space_type: str
+    message_count: int
+    messages: List[DigestMessageInfo]
+
+
+class ChatDigestResponse(TypedDict):
+    """Response structure for chat digest resources."""
+
+    user_email: str
+    hours_back: int
+    total_messages: int
+    total_spaces_with_activity: int
+    spaces_checked: int
+    spaces: List[DigestSpaceEntry]
+    timestamp: str
+    error: NotRequired[Optional[str]]
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models for Chat Digest resources (FastMCP 3.0+ pattern)
+# ---------------------------------------------------------------------------
+
+
+class DigestMessage(BaseModel):
+    """A single message in a chat digest."""
+
+    id: str = PydanticField(description="Full message resource name")
+    text: str = PydanticField(description="Message text content")
+    sender_name: str = PydanticField(description="Display name of the sender")
+    sender_email: Optional[str] = PydanticField(
+        default=None, description="Email of the sender if available"
+    )
+    create_time: str = PydanticField(description="ISO 8601 creation timestamp")
+    thread_id: Optional[str] = PydanticField(
+        default=None, description="Thread resource name for threaded conversations"
+    )
+
+
+class DigestSpace(BaseModel):
+    """Per-space entry in a chat digest."""
+
+    space_id: str = PydanticField(description="Full space resource name")
+    display_name: str = PydanticField(description="Human-readable space name")
+    space_type: str = PydanticField(
+        description="Space type: SPACE, GROUP_CHAT, DIRECT_MESSAGE"
+    )
+    message_count: int = PydanticField(description="Number of messages in this space")
+    messages: List[DigestMessage] = PydanticField(
+        description="Recent messages ordered by createTime desc"
+    )
+
+
+class ChatDigest(BaseModel):
+    """Aggregated digest of recent Google Chat messages across spaces."""
+
+    user_email: str = PydanticField(description="Authenticated user email")
+    hours_back: int = PydanticField(description="Hours of history included")
+    limit: int = PydanticField(description="Max messages per space")
+    total_messages: int = PydanticField(description="Total messages across all spaces")
+    total_spaces_with_activity: int = PydanticField(
+        description="Number of spaces with at least one message"
+    )
+    spaces_checked: int = PydanticField(
+        description="Total spaces scanned (including empty ones)"
+    )
+    spaces: List[DigestSpace] = PydanticField(
+        description="Spaces with recent activity, sorted by most recent message"
+    )
+    timestamp: str = PydanticField(description="ISO 8601 timestamp of the digest")
+    error: Optional[str] = PydanticField(
+        default=None, description="Error message if the digest could not be built"
+    )

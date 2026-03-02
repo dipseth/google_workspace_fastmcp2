@@ -59,6 +59,7 @@ from prompts.gmail_prompts import setup_gmail_prompts
 from prompts.structured_response_demo_prompts import (
     setup_structured_response_demo_prompts,
 )
+from resources.chat_digest_resources import setup_chat_digest_resources
 from resources.service_list_resources import setup_service_list_resources
 from resources.service_recent_resources import setup_service_recent_resources
 from resources.template_resources import register_template_resources
@@ -515,6 +516,9 @@ logger.info(f"✅ Data dashboard wired to {patched} list tools")
 
 # Setup service recent resources (recent files from Drive-based services)
 setup_service_recent_resources(mcp)
+
+# Setup chat digest resources (aggregated recent messages across Chat spaces)
+setup_chat_digest_resources(mcp)
 
 # Setup template macro resources (discovery and usage examples)
 logger.info("📚 Registering template macro resources...")
