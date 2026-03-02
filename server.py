@@ -146,7 +146,7 @@ logger.info("  No transaction ID conflicts")
 mcp = FastMCP(
     name=settings.server_name,
     version=__version__,
-    list_page_size=25,  # Paginate tools/resources/prompts listing to reduce initial context
+    list_page_size=settings.list_page_size or None,  # 0/None = no pagination
     lifespan=combined_server_lifespan,  # Composed lifespans for server lifecycle
     instructions="""Google Workspace MCP Server - Comprehensive access to Google services.
 

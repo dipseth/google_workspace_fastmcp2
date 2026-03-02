@@ -255,6 +255,7 @@ ENABLE_RESOURCE_TEMPLATING=true
 | `FASTMCP_SERVER_AUTH_GOOGLE_BASE_URL` | No | - | FastMCP GoogleProvider base URL |
 | `FASTMCP_CLOUD` | No | `false` | Enable cloud deployment mode |
 | `MCP_REQUIRE_EXISTING_CREDENTIALS` | No | `true` | Require pre-existing credentials for remote access |
+| `LIST_PAGE_SIZE` | No | `0` | Page size for MCP list operations (0 = no pagination) |
 
 *Either `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` OR `GOOGLE_CLIENT_SECRETS_FILE` is required.
 
@@ -269,6 +270,7 @@ ENABLE_RESOURCE_TEMPLATING=true
 | `SERVER_PORT` | integer | 8002 | Server port | No |
 | `BASE_URL` | string | Auto-generated | Base URL for callbacks | No |
 | `LOG_LEVEL` | string | "INFO" | Logging level (DEBUG, INFO, WARNING, ERROR) | No |
+| `LIST_PAGE_SIZE` | integer | 0 | Page size for MCP list operations (tools, resources, prompts). 0 = no pagination. Must be larger than the number of enabled tools per session or clients may miss tools on later pages. | No |
 
 ### Google OAuth Settings
 

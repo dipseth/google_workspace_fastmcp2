@@ -124,6 +124,17 @@ class Settings(BaseSettings):
     # Sampling Tools Configuration
     sampling_tools: bool = False  # Enable sampling middleware tools (default: False)
 
+    # MCP List Page Size Configuration
+    # Controls pagination of tools/resources/prompts listing responses.
+    # Set to 0 or None to disable pagination (return all items in one response).
+    # IMPORTANT: If this value is smaller than the number of enabled tools for a
+    # session, clients that don't handle MCP pagination will miss tools on later pages.
+    list_page_size: int = Field(
+        default=0,
+        description="Page size for MCP list operations (tools, resources, prompts). 0 = no pagination.",
+        json_schema_extra={"env": "LIST_PAGE_SIZE"},
+    )
+
     # Minimal Tools Startup Configuration
     # When enabled, server starts with only essential tools (protected infra tools)
     # Clients can enable tools as needed, and their state persists across reconnects
