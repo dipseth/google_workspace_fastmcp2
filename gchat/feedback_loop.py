@@ -551,6 +551,49 @@ class FeedbackLoop:
             logger.warning(f"Failed to check collections: {e}")
             return False
 
+    def _ensure_payload_indexes(self, client) -> None:
+        """Ensure required payload indexes exist on an already-created collection.
+
+        The card_id index (and others) are created when the collection is first
+        built by _create_collection_with_vectors(), but if the collection was
+        provisioned by the init script or an older code path the indexes may be
+        missing.  This method is idempotent — Qdrant silently succeeds if the
+        index already exists.
+        """
+        from qdrant_client.models import PayloadSchemaType
+
+        required_indexes = {
+            "type": PayloadSchemaType.KEYWORD,
+            "card_id": PayloadSchemaType.KEYWORD,
+            "feedback": PayloadSchemaType.KEYWORD,
+            "content_feedback": PayloadSchemaType.KEYWORD,
+            "form_feedback": PayloadSchemaType.KEYWORD,
+        }
+
+        # Check which indexes already exist
+        try:
+            collection_info = client.get_collection(COLLECTION_NAME)
+            existing = (
+                set(collection_info.payload_schema.keys())
+                if collection_info.payload_schema
+                else set()
+            )
+        except Exception:
+            existing = set()
+
+        for field, schema in required_indexes.items():
+            if field in existing:
+                continue
+            try:
+                client.create_payload_index(
+                    collection_name=COLLECTION_NAME,
+                    field_name=field,
+                    field_schema=schema,
+                )
+                logger.info(f"   ✅ Created missing payload index: {field}")
+            except Exception as e:
+                logger.warning(f"   ⚠️ Could not create index for {field}: {e}")
+
     def _create_collection_with_vectors(self) -> bool:
         """
         Create the collection with both named vectors (colbert + inputs).
@@ -933,6 +976,7 @@ class FeedbackLoop:
                     logger.debug(
                         "✅ inputs and relationships vectors exist in collection"
                     )
+                    self._ensure_payload_indexes(client)
                     self._description_vector_ready = True
                     return True
                 elif has_inputs:
@@ -940,6 +984,7 @@ class FeedbackLoop:
                     logger.warning(
                         "⚠️ relationships vector not found, form feedback will be limited"
                     )
+                    self._ensure_payload_indexes(client)
                     self._description_vector_ready = True
                     return True
 
