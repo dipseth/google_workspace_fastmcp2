@@ -8,15 +8,16 @@ Uses the Chat API directly via _get_chat_service_with_fallback() rather than goi
 through the tool registry.
 
 Resource URIs (RFC 6570):
-    chat://digest{?hours,limit}          — all spaces, optional hours/limit
-    chat://digest/space/{space_id}{?hours,limit}  — single space
+    chat://digest{?hours,limit}                    — all spaces, optional hours/limit
+    chat://digest/space/{space_code}{?hours,limit}  — single space
 """
 
 import asyncio
-import json
 from datetime import datetime, timedelta, timezone
 
 from fastmcp import Context, FastMCP
+from fastmcp.resources import ResourceContent, ResourceResult
+from fastmcp.server.tasks import TaskConfig
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Optional
 
@@ -202,6 +203,7 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
         mime_type="application/json",
         tags={"chat", "digest", "messages", "recent", "google"},
         annotations={"readOnlyHint": True, "idempotentHint": False},
+        task=TaskConfig(mode="optional"),
         meta={
             "version": "1.0",
             "category": "digest",
@@ -228,19 +230,32 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
                 examples=[5, 10, 25],
             ),
         ] = DEFAULT_LIMIT,
-    ) -> str:
+    ) -> ResourceResult:
         """Recent chat messages across all spaces."""
         user_email = await get_user_email_context()
         if not user_email:
-            return json.dumps(
-                {
-                    "error": "No authenticated user found",
-                    "suggestion": "Use start_google_auth tool to authenticate first",
-                },
+            return ResourceResult(
+                contents=[
+                    ResourceContent(
+                        content={
+                            "error": "No authenticated user found",
+                            "suggestion": "Use start_google_auth tool to authenticate first",
+                        },
+                        mime_type="application/json",
+                    )
+                ]
             )
 
         result = await _build_digest(user_email, hours_back=hours, limit=limit)
-        return result.model_dump_json()
+        return ResourceResult(
+            contents=[ResourceContent(content=result, mime_type="application/json")],
+            meta={
+                "total_messages": result.total_messages,
+                "total_spaces_with_activity": result.total_spaces_with_activity,
+                "spaces_checked": result.spaces_checked,
+                "has_error": result.error is not None,
+            },
+        )
 
     @mcp.resource(
         uri="chat://digest/space/{space_code}{?hours,limit}",
@@ -259,6 +274,7 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
         mime_type="application/json",
         tags={"chat", "digest", "messages", "recent", "google", "space"},
         annotations={"readOnlyHint": True, "idempotentHint": False},
+        task=TaskConfig(mode="optional"),
         meta={
             "version": "1.0",
             "category": "digest",
@@ -291,22 +307,36 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
                 examples=[5, 10, 25],
             ),
         ] = DEFAULT_LIMIT,
-    ) -> str:
+    ) -> ResourceResult:
         """Recent chat messages from a specific space."""
         user_email = await get_user_email_context()
         if not user_email:
-            return json.dumps(
-                {
-                    "error": "No authenticated user found",
-                    "suggestion": "Use start_google_auth tool to authenticate first",
-                },
+            return ResourceResult(
+                contents=[
+                    ResourceContent(
+                        content={
+                            "error": "No authenticated user found",
+                            "suggestion": "Use start_google_auth tool to authenticate first",
+                        },
+                        mime_type="application/json",
+                    )
+                ]
             )
 
         space_id = f"spaces/{space_code}"
         result = await _build_digest(
             user_email, hours_back=hours, limit=limit, space_id_filter=space_id
         )
-        return result.model_dump_json()
+        return ResourceResult(
+            contents=[ResourceContent(content=result, mime_type="application/json")],
+            meta={
+                "total_messages": result.total_messages,
+                "total_spaces_with_activity": result.total_spaces_with_activity,
+                "spaces_checked": result.spaces_checked,
+                "space_id": space_id,
+                "has_error": result.error is not None,
+            },
+        )
 
     logger.debug(
         "Chat digest resources registered: "
