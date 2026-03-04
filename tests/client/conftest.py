@@ -187,6 +187,7 @@ async def _cleanup_resources(client) -> dict[str, Any]:
         await client.call_tool(
             "manage_tools", {"action": "enable_all", "scope": "session"}
         )
+        await client.list_tools()  # Refresh client cache after enabling
     except Exception as e:
         print(f"⚠️ Could not enable tools for cleanup: {e}")
 

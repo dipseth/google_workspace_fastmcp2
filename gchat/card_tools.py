@@ -97,12 +97,101 @@ def _process_thread_key_for_webhook_url(
     webhook_url: str, thread_key: Optional[str] = None
 ) -> str:
     """Process thread key for webhook URL (returns modified URL with thread params)."""
+    import urllib.parse
+
     thread_id = _extract_thread_id(thread_key)
     if not thread_id:
         return webhook_url
 
+    # URL-encode thread_id to prevent injection via crafted thread keys
+    safe_thread_id = urllib.parse.quote(thread_id, safe="")
     separator = "&" if "?" in webhook_url else "?"
-    return f"{webhook_url}{separator}threadKey={thread_id}&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
+    return f"{webhook_url}{separator}threadKey={safe_thread_id}&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
+
+
+# ---------------------------------------------------------------------------
+# Webhook SSRF protection
+# ---------------------------------------------------------------------------
+
+# Private / reserved IP ranges that must never be targeted by webhooks
+import ipaddress
+import os
+import urllib.parse
+
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+# Configurable allowlist; defaults to Google Chat webhook host
+_WEBHOOK_DOMAIN_ALLOWLIST: list[str] | None = None
+
+
+def _get_webhook_domain_allowlist() -> list[str] | None:
+    """Return domain allowlist from env, or None if unrestricted."""
+    global _WEBHOOK_DOMAIN_ALLOWLIST
+    if _WEBHOOK_DOMAIN_ALLOWLIST is not None:
+        return _WEBHOOK_DOMAIN_ALLOWLIST if _WEBHOOK_DOMAIN_ALLOWLIST else None
+
+    raw = os.getenv("WEBHOOK_DOMAIN_ALLOWLIST", "chat.googleapis.com")
+    if raw.strip().lower() in ("", "*", "any"):
+        _WEBHOOK_DOMAIN_ALLOWLIST = []  # empty → unrestricted
+        return None
+    _WEBHOOK_DOMAIN_ALLOWLIST = [d.strip().lower() for d in raw.split(",") if d.strip()]
+    return _WEBHOOK_DOMAIN_ALLOWLIST
+
+
+def _validate_webhook_url(url: str) -> None:
+    """Validate a webhook URL against SSRF risks.
+
+    Raises ``ValueError`` if the URL fails validation.
+    """
+    import socket
+
+    parsed = urllib.parse.urlparse(url)
+
+    # 1. Require HTTPS (allow HTTP only for local dev)
+    allow_http = os.getenv("ALLOW_HTTP_WEBHOOKS", "false").lower() in ("true", "1")
+    if parsed.scheme not in ("https",) and not (allow_http and parsed.scheme == "http"):
+        raise ValueError(
+            f"Webhook URL must use HTTPS (got {parsed.scheme}). "
+            "Set ALLOW_HTTP_WEBHOOKS=true to allow HTTP in local dev."
+        )
+
+    # 2. Domain allowlist check
+    allowlist = _get_webhook_domain_allowlist()
+    hostname = (parsed.hostname or "").lower()
+    if allowlist and hostname not in allowlist:
+        raise ValueError(
+            f"Webhook host '{hostname}' not in allowed domains: {allowlist}"
+        )
+
+    # 3. Block private / reserved IP ranges
+    try:
+        for addr_info in socket.getaddrinfo(hostname, None):
+            ip = ipaddress.ip_address(addr_info[4][0])
+            for net in _BLOCKED_NETWORKS:
+                if ip in net:
+                    raise ValueError(
+                        f"Webhook URL resolves to private/reserved IP {ip} — blocked for SSRF protection."
+                    )
+    except socket.gaierror:
+        # DNS resolution failed — allow through (Qdrant/Google might be on private DNS)
+        pass
+
+
+def _redact_webhook_url(url: str) -> str:
+    """Return a redacted URL suitable for INFO-level logging (strip query params)."""
+    parsed = urllib.parse.urlparse(url)
+    return urllib.parse.urlunparse(
+        (parsed.scheme, parsed.netloc, parsed.path, "", "", "")
+    )
 
 
 # Try to import Card Framework with graceful fallback
@@ -1270,12 +1359,26 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
                 import requests
 
-                # Log the request details
+                # Validate webhook URL against SSRF before sending
+                _validate_webhook_url(webhook_url)
+
+                # Log the request details — redact query params at INFO level
                 logger.info("🌐 Making POST request to webhook:")
-                logger.info(f"  URL: {webhook_url}")
+                logger.info(f"  URL: {_redact_webhook_url(webhook_url)}")
+                logger.debug(f"  Full URL (debug only): {webhook_url}")
                 logger.info("  Headers: {'Content-Type': 'application/json'}")
                 logger.info(
                     f"  Payload size: {len(json.dumps(webhook_message_body))} characters"
+                )
+
+                from auth.audit import log_security_event
+
+                log_security_event(
+                    "webhook_request",
+                    details={
+                        "host": urllib.parse.urlparse(webhook_url).hostname,
+                        "payload_size": len(json.dumps(webhook_message_body)),
+                    },
                 )
 
                 response = requests.post(

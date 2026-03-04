@@ -15,8 +15,13 @@ from pathlib import Path
 
 from typing_extensions import Any, Dict, List, Literal, Optional, Tuple
 
-# Allow insecure transport for local development
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+# Allow insecure transport ONLY when HTTPS is disabled (local dev).
+# In production with enable_https=True this must NOT be set — oauthlib will
+# rightfully reject plain-HTTP redirect URIs.
+from config.settings import settings
+
+if not settings.enable_https:
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
@@ -25,7 +30,6 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 from config.enhanced_logging import setup_logger
-from config.settings import settings
 
 from .context import get_session_context, get_session_data, store_session_data
 from .pkce_utils import pkce_manager

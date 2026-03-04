@@ -32,6 +32,7 @@ from .query_parser import (
     parse_search_query,
     parse_unified_query,
 )
+from .tenant import merge_tenant_filter, verify_point_ownership
 
 logger = setup_logger()
 
@@ -198,6 +199,7 @@ class QdrantSearchManager:
         negative_point_ids: Optional[List[str]] = None,
         query_type: Optional[str] = None,
         collection: Optional[str] = None,
+        user_email: Optional[str] = None,
     ) -> List[Dict]:
         """
         Advanced search with query parsing support.
@@ -215,6 +217,7 @@ class QdrantSearchManager:
             query_type: Optional hint for named vector routing in named-vectors schema
                         ('overview', 'service_history', 'general', 'recommend')
             collection: Optional collection name override. Uses default if not provided.
+            user_email: Authenticated user email for mandatory tenant filtering.
 
         Returns:
             List of matching responses with scores and metadata
@@ -241,6 +244,10 @@ class QdrantSearchManager:
                     f"positive={positive_point_ids}, negative={negative_point_ids}"
                 )
 
+                # Build tenant filter for recommendation searches
+                rec_filter = (
+                    merge_tenant_filter(None, user_email) if user_email else None
+                )
                 search_results = await self._execute_recommend_search(
                     positive_ids=positive_point_ids or [],
                     negative_ids=negative_point_ids or [],
@@ -248,6 +255,7 @@ class QdrantSearchManager:
                     score_threshold=score_threshold,
                     using=using,
                     collection=target_collection,
+                    qdrant_filter=rec_filter,
                 )
             else:
                 # Parse the query to extract filters and semantic components
@@ -282,13 +290,23 @@ class QdrantSearchManager:
 
                             if points:
                                 point = points[0]
-                                search_results = [
-                                    {
-                                        "id": str(point.id),
-                                        "score": 1.0,  # Perfect match for direct lookup
-                                        "payload": point.payload,
-                                    }
-                                ]
+                                # Post-filter: ensure the point belongs to the
+                                # authenticated user when tenant filtering is active.
+                                if user_email and not verify_point_ownership(
+                                    point.payload, user_email
+                                ):
+                                    logger.warning(
+                                        f"🚫 ID lookup blocked: point {point.id} "
+                                        f"does not belong to {user_email}"
+                                    )
+                                else:
+                                    search_results = [
+                                        {
+                                            "id": str(point.id),
+                                            "score": 1.0,  # Perfect match for direct lookup
+                                            "payload": point.payload,
+                                        }
+                                    ]
                             logger.debug(
                                 f"📍 ID lookup found {len(search_results)} results"
                             )
@@ -335,6 +353,12 @@ class QdrantSearchManager:
                                     f"⚠️ Failed to build filter, falling back to simple search: {e}"
                                 )
                                 qdrant_filter = None
+
+                        # Inject mandatory tenant filter when user_email is provided
+                        if user_email:
+                            qdrant_filter = merge_tenant_filter(
+                                qdrant_filter, user_email
+                            )
 
                         # Perform semantic search if there's a semantic query
                         if parsed_query["semantic_query"]:
@@ -409,11 +433,16 @@ class QdrantSearchManager:
                                             )
                                             return []
 
-                                        # Retry without filters
+                                        # Retry without user filters — but KEEP tenant filter
+                                        fallback_filter = (
+                                            merge_tenant_filter(None, user_email)
+                                            if user_email
+                                            else None
+                                        )
                                         search_results = (
                                             await self._execute_semantic_search(
                                                 query_embedding=fallback_embedding,
-                                                qdrant_filter=None,
+                                                qdrant_filter=fallback_filter,
                                                 limit=limit,
                                                 score_threshold=score_threshold,
                                                 using=using,
@@ -639,7 +668,11 @@ class QdrantSearchManager:
             return []
 
     async def get_analytics(
-        self, start_date=None, end_date=None, group_by="tool_name"
+        self,
+        start_date=None,
+        end_date=None,
+        group_by="tool_name",
+        user_email: Optional[str] = None,
     ) -> Dict:
         """
         Get comprehensive analytics on stored tool responses including point IDs and detailed metrics.
@@ -648,6 +681,7 @@ class QdrantSearchManager:
             start_date: Start date filter (datetime object)
             end_date: End date filter (datetime object)
             group_by: Field to group results by (tool_name, user_email, etc.)
+            user_email: Authenticated user email for mandatory tenant filtering.
 
         Returns:
             Enhanced analytics data dictionary with point_ids and detailed metrics
@@ -663,18 +697,28 @@ class QdrantSearchManager:
             # Get all points from the collection
             _, qdrant_models = get_qdrant_imports()
 
+            # Build tenant filter for analytics when user_email is provided
+            analytics_filter = (
+                merge_tenant_filter(None, user_email) if user_email else None
+            )
+
             # Scroll through all points in the collection (get more if needed)
             all_points = []
             next_page_offset = None
 
             # Paginate through all points
             while True:
+                scroll_kwargs = {
+                    "collection_name": self.config.collection_name,
+                    "limit": 1000,
+                    "offset": next_page_offset,
+                    "with_payload": True,
+                }
+                if analytics_filter:
+                    scroll_kwargs["scroll_filter"] = analytics_filter
                 points_result = await asyncio.to_thread(
                     self.client_manager.client.scroll,
-                    collection_name=self.config.collection_name,
-                    limit=1000,
-                    offset=next_page_offset,
-                    with_payload=True,
+                    **scroll_kwargs,
                 )
 
                 points_batch = points_result[0]
@@ -925,6 +969,7 @@ class QdrantSearchManager:
         score_threshold: Optional[float] = None,
         using: Optional[str] = None,
         collection: Optional[str] = None,
+        qdrant_filter=None,
     ):
         """
         Execute recommendation-style search using positive/negative example point IDs.
@@ -963,6 +1008,8 @@ class QdrantSearchManager:
         }
         if using:
             kwargs["using"] = using
+        if qdrant_filter:
+            kwargs["query_filter"] = qdrant_filter
 
         search_response = await asyncio.to_thread(
             self.client_manager.client.query_points,

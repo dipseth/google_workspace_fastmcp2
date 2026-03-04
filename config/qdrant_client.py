@@ -176,6 +176,67 @@ def is_qdrant_available() -> bool:
         return False
 
 
+def get_tenant_client(user_email: str) -> Optional["QdrantClient"]:
+    """Return a QdrantClient authenticated with a per-user JWT (Layer 2 defence).
+
+    When Qdrant JWT RBAC is enabled (``QDRANT_JWT_RBAC=true`` in env and a valid
+    ``QDRANT_KEY`` is set), this generates a short-lived JWT scoped to
+    *user_email* so Qdrant enforces isolation server-side.
+
+    Falls back to the shared singleton when JWT RBAC is not configured.
+
+    Args:
+        user_email: Authenticated user's email address.
+
+    Returns:
+        A tenant-scoped QdrantClient, or the shared singleton.
+    """
+    import os
+
+    jwt_rbac_enabled = os.getenv("QDRANT_JWT_RBAC", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    if not jwt_rbac_enabled:
+        return get_qdrant_client()
+
+    from config.settings import settings
+
+    api_key = settings.qdrant_api_key
+    if not api_key:
+        logger.warning(
+            "QDRANT_JWT_RBAC enabled but no QDRANT_KEY set — falling back to shared client"
+        )
+        return get_qdrant_client()
+
+    try:
+        from qdrant_client import QdrantClient
+
+        from middleware.qdrant_core.tenant import generate_tenant_jwt
+
+        collection = os.getenv("QDRANT_COLLECTION", "mcp_tool_responses")
+        token = generate_tenant_jwt(user_email, api_key, collection)
+
+        if settings.qdrant_url:
+            return QdrantClient(
+                url=settings.qdrant_url,
+                api_key=token,
+                prefer_grpc=settings.qdrant_prefer_grpc,
+            )
+        else:
+            return QdrantClient(
+                host=settings.qdrant_host or "localhost",
+                port=settings.qdrant_port or 6333,
+                api_key=token,
+            )
+    except Exception as e:
+        logger.warning(
+            f"Failed to create tenant client for {user_email}: {e} — falling back to shared client"
+        )
+        return get_qdrant_client()
+
+
 def get_qdrant_status() -> dict:
     """
     Get comprehensive Qdrant status including Docker info.

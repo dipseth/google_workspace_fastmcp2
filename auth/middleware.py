@@ -1097,11 +1097,11 @@ class AuthMiddleware(Middleware):
                     )
 
             # Only inject if we have a real email address (not None, not "unknown")
+            # FIX: explicit parentheses to avoid operator-precedence bug
+            # (previously `and ... or ...` let the `or` branch bypass checks)
             if (
-                final_email
-                and current_value in ["me", "myself", None]
-                or "user_google_email" not in args
-            ):
+                final_email and current_value in ["me", "myself", None]
+            ) or "user_google_email" not in args:
                 if final_email:  # Double-check we have something real
                     args["user_google_email"] = final_email
                     logger.debug(f"✅ Auto-injected user_google_email={final_email}")
@@ -1114,11 +1114,65 @@ class AuthMiddleware(Middleware):
                 # matches the authenticated user (skip for start_google_auth which
                 # needs to accept any email to initiate authentication)
                 tool_name = context.message.name
-                if (
-                    final_email
-                    and tool_name != "start_google_auth"
-                    and current_value.lower().strip() != final_email.lower().strip()
-                ):
+
+                # Allow registered secondary accounts through the dual-auth bridge
+                is_secondary = (
+                    current_value
+                    and self._dual_auth_bridge.is_secondary_account(
+                        current_value.lower().strip()
+                    )
+                )
+
+                if tool_name == "start_google_auth":
+                    # start_google_auth must accept any email to begin auth
+                    pass
+                elif not final_email:
+                    # Cannot determine the authenticated user — refuse to let
+                    # an arbitrary email through silently.
+                    from .audit import log_security_event
+
+                    log_security_event(
+                        "email_mismatch_rejected",
+                        user_email=current_value,
+                        details={
+                            "reason": "final_email_unknown",
+                            "tool": tool_name,
+                        },
+                    )
+                    raise ValueError(
+                        f"Cannot verify identity: authenticated user is unknown "
+                        f"but tool '{tool_name}' was called with '{current_value}'. "
+                        f"Please authenticate first using start_google_auth."
+                    )
+                elif current_value.lower().strip() == final_email.lower().strip():
+                    # Exact match — user passed their own email explicitly, all good
+                    pass
+                elif is_secondary:
+                    from .audit import log_security_event
+
+                    log_security_event(
+                        "email_mismatch_allowed_secondary",
+                        user_email=final_email,
+                        details={
+                            "secondary_email": current_value,
+                            "tool": tool_name,
+                        },
+                    )
+                    logger.debug(
+                        f"✅ Allowed secondary account: {current_value} "
+                        f"(primary: {final_email})"
+                    )
+                elif current_value.lower().strip() != final_email.lower().strip():
+                    from .audit import log_security_event
+
+                    log_security_event(
+                        "email_mismatch_rejected",
+                        user_email=final_email,
+                        details={
+                            "requested_email": current_value,
+                            "tool": tool_name,
+                        },
+                    )
                     raise ValueError(
                         f"Email mismatch: you are authenticated as '{final_email}' "
                         f"but tool '{tool_name}' was called with '{current_value}'. "

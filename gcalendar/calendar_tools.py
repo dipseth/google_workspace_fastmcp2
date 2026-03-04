@@ -12,6 +12,7 @@ import re
 from datetime import timedelta, timezone
 from functools import wraps
 from typing import Union
+from zoneinfo import ZoneInfo
 
 from fastmcp import Context, FastMCP
 from googleapiclient.errors import HttpError
@@ -65,17 +66,29 @@ __all__ = [
 
 
 def _correct_time_format_for_api(
-    time_str: Optional[str], param_name: str
+    time_str: Optional[str],
+    param_name: str,
+    timezone: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Helper function to ensure time strings for API calls are correctly formatted.
+    Ensure time strings for the Google Calendar API carry correct timezone offsets.
+
+    - **Date-only** (``YYYY-MM-DD``): returned as-is so callers can route to
+      ``{"date": …}`` for all-day events.
+    - **Naive datetime** (``YYYY-MM-DDTHH:MM:SS``): localized to *timezone*
+      (or ``settings.default_timezone``) and returned with a UTC offset
+      (e.g. ``2025-03-03T15:55:00-05:00``).
+    - **Offset-aware datetime** (ends with ``Z`` or ``±HH:MM``): passed through
+      unchanged.
 
     Args:
-        time_str: Time string to format
-        param_name: Name of the parameter for logging
+        time_str: Time string to format.
+        param_name: Name of the parameter (for logging).
+        timezone: Optional IANA timezone name (e.g. ``America/Chicago``).
+            Falls back to ``settings.default_timezone`` when *None*.
 
     Returns:
-        Correctly formatted time string or None
+        Correctly formatted time string, or *None* if *time_str* is falsy.
     """
     if not time_str:
         return None
@@ -84,48 +97,55 @@ def _correct_time_format_for_api(
         f"_correct_time_format_for_api: Processing {param_name} with value '{time_str}'"
     )
 
-    # Handle date-only format (YYYY-MM-DD)
+    # --- Date-only (YYYY-MM-DD) → return as-is for all-day events ---
     if len(time_str) == 10 and time_str.count("-") == 2:
         try:
-            # Validate it's a proper date
             datetime.datetime.strptime(time_str, "%Y-%m-%d")
-            # For date-only, append T00:00:00Z to make it RFC3339 compliant
-            formatted = f"{time_str}T00:00:00Z"
             logger.info(
-                f"Formatting date-only {param_name} '{time_str}' to RFC3339: '{formatted}'"
+                f"{param_name} '{time_str}' is date-only, returning as-is for all-day event."
             )
-            return formatted
+            return time_str
         except ValueError:
             logger.warning(
                 f"{param_name} '{time_str}' looks like a date but is not valid YYYY-MM-DD. Using as is."
             )
             return time_str
 
-    # Specifically address YYYY-MM-DDTHH:MM:SS by appending 'Z'
-    if (
-        len(time_str) == 19
-        and time_str[10] == "T"
-        and time_str.count(":") == 2
-        and not (
-            time_str.endswith("Z") or ("+" in time_str[10:]) or ("-" in time_str[10:])
+    # --- Already has an explicit offset (Z or ±HH:MM) → pass through ---
+    if time_str.endswith("Z") or re.search(r"[+-]\d{2}:\d{2}$", time_str):
+        logger.info(
+            f"{param_name} '{time_str}' already has timezone offset, using as is."
         )
-    ):
-        try:
-            # Validate the format before appending 'Z'
-            datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S")
-            logger.info(
-                f"Formatting {param_name} '{time_str}' by appending 'Z' for UTC."
-            )
-            return time_str + "Z"
-        except ValueError:
-            logger.warning(
-                f"{param_name} '{time_str}' looks like it needs 'Z' but is not valid YYYY-MM-DDTHH:MM:SS. Using as is."
-            )
-            return time_str
+        return time_str
 
-    # If it already has timezone info or doesn't match our patterns, return as is
-    logger.info(f"{param_name} '{time_str}' doesn't need formatting, using as is.")
-    return time_str
+    # --- Naive datetime → localize with ZoneInfo ---
+    try:
+        naive_dt = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        # Not a recognizable format — return as-is and let the API decide
+        logger.warning(
+            f"{param_name} '{time_str}' is not a recognized datetime format. Using as is."
+        )
+        return time_str
+
+    # Resolve the effective timezone
+    from config.settings import settings
+
+    tz_name = timezone or settings.default_timezone
+    try:
+        tz = ZoneInfo(tz_name)
+    except (KeyError, Exception) as exc:
+        logger.warning(
+            f"Invalid timezone '{tz_name}' for {param_name}, falling back to UTC: {exc}"
+        )
+        tz = ZoneInfo("UTC")
+
+    aware_dt = naive_dt.replace(tzinfo=tz)
+    formatted = aware_dt.isoformat()
+    logger.info(
+        f"Localized naive {param_name} '{time_str}' to '{formatted}' (tz={tz_name})."
+    )
+    return formatted
 
 
 # ============================================================================
@@ -301,11 +321,16 @@ async def _batch_create_events(
 
         try:
             # Apply automatic timezone correction to timestamps
+            event_timezone = event_data.get("timezone")
             corrected_start_time = _correct_time_format_for_api(
-                event_data.get("start_time"), f"event[{idx}].start_time"
+                event_data.get("start_time"),
+                f"event[{idx}].start_time",
+                timezone=event_timezone,
             )
             corrected_end_time = _correct_time_format_for_api(
-                event_data.get("end_time"), f"event[{idx}].end_time"
+                event_data.get("end_time"),
+                f"event[{idx}].end_time",
+                timezone=event_timezone,
             )
 
             # Build event body with corrected timestamps
@@ -337,6 +362,8 @@ async def _batch_create_events(
                 event_body["attendees"] = [
                     {"email": email} for email in event_data["attendees"]
                 ]
+            if event_data.get("recurrence"):
+                event_body["recurrence"] = event_data["recurrence"]
 
             # Handle attachments
             if event_data.get("attachments") and drive_service:
@@ -958,7 +985,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="create_event",
-        description="Create single or multiple events in Google Calendar. Supports both individual event creation (backward compatible) and bulk event creation for efficient batch operations. When creating multiple events, provides detailed success/failure reporting similar to the batch delete functionality.",
+        description="Create single or multiple events in Google Calendar. TIMEZONE: Always pass the timezone parameter or include UTC offsets in start_time/end_time (e.g., '2025-03-03T15:00:00-05:00') to avoid times being interpreted incorrectly. Supports both individual event creation (backward compatible) and bulk event creation for efficient batch operations.",
         tags={"calendar", "event", "create", "bulk", "google"},
         annotations={
             "title": "Create Calendar Event(s)",
@@ -999,14 +1026,21 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             Optional[str],
             Field(
                 default=None,
-                description="Event start time. Accepts: RFC3339 with timezone (e.g., '2025-01-01T10:00:00Z', '2025-01-01T10:00:00-05:00'), datetime without timezone (e.g., '2025-01-01T10:00:00' - will be treated as UTC), or date only for all-day events (e.g., '2025-01-01'). Missing timezone is automatically corrected to UTC. Legacy mode only",
+                description="Event start time. IMPORTANT: Always specify timezone to avoid time offset issues. Preferred: datetime with offset (e.g., '2025-01-01T10:00:00-05:00') or UTC ('2025-01-01T10:00:00Z'). Naive datetimes are localized using the timezone param or server default. Date only for all-day events (e.g., '2025-01-01'). Legacy mode only",
             ),
         ] = None,
         end_time: Annotated[
             Optional[str],
             Field(
                 default=None,
-                description="Event end time. Accepts: RFC3339 with timezone (e.g., '2025-01-01T11:00:00Z', '2025-01-01T11:00:00-05:00'), datetime without timezone (e.g., '2025-01-01T11:00:00' - will be treated as UTC), or date only for all-day events (e.g., '2025-01-02'). Missing timezone is automatically corrected to UTC. Legacy mode only",
+                description="Event end time. Required unless 'duration' is provided. IMPORTANT: Always specify timezone to avoid time offset issues. Preferred: datetime with offset (e.g., '2025-01-01T11:00:00-05:00') or UTC ('2025-01-01T11:00:00Z'). Naive datetimes are localized using the timezone param or server default. Date only for all-day events (e.g., '2025-01-02'). Legacy mode only",
+            ),
+        ] = None,
+        duration: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description="Event duration as alternative to end_time. Format: a number + unit — '30s', '5m', '2h', '1.5d', '1w'. Ignored if end_time is also provided. Legacy mode only",
             ),
         ] = None,
         description: Annotated[
@@ -1037,8 +1071,15 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             Optional[str],
             Field(
                 default=None,
-                description="Timezone for the event (e.g., 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'UTC'). Applied to both start and end times. If not specified, times are interpreted as UTC (legacy mode only)",
-                pattern="^[A-Za-z]+/[A-Za-z_]+$",
+                description="STRONGLY RECOMMENDED when using naive datetimes. IANA timezone name (e.g., 'America/New_York', 'America/Chicago'). Naive datetimes in start_time/end_time will be interpreted in this timezone. Without this, the server's DEFAULT_TIMEZONE setting is used. Has no effect when times already contain an offset (Z or ±HH:MM). Legacy mode only",
+                pattern=r"^[A-Za-z]+/[A-Za-z_]+(/[A-Za-z_]+)?$",
+            ),
+        ] = None,
+        recurrence: Annotated[
+            Optional[List[str]],
+            Field(
+                default=None,
+                description="List of RRULE, EXRULE, RDATE, or EXDATE strings for recurring events (e.g., ['RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR']). See RFC 5545. Legacy mode only",
             ),
         ] = None,
         attachments: Annotated[
@@ -1177,26 +1218,20 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                         f"Could not get Drive service for bulk operation: {e}"
                     )
 
-                # Convert EventData Pydantic models to internal format with timezone correction
+                # Convert EventData Pydantic models to internal format
+                # Note: timezone correction is handled in _batch_create_events
                 events_data = []
                 for i, event in enumerate(events):
-                    # Apply automatic timezone correction
-                    corrected_start = _correct_time_format_for_api(
-                        event.start_time, f"events[{i}].start_time"
-                    )
-                    corrected_end = _correct_time_format_for_api(
-                        event.end_time, f"events[{i}].end_time"
-                    )
-
                     events_data.append(
                         {
                             "summary": event.summary,
-                            "start_time": corrected_start,
-                            "end_time": corrected_end,
+                            "start_time": event.start_time,
+                            "end_time": event.end_time,
                             "description": event.description,
                             "location": event.location,
                             "attendees": event.attendees,
                             "timezone": event.timezone,
+                            "recurrence": event.recurrence,
                             "attachments": event.attachments,
                         }
                     )
@@ -1275,7 +1310,31 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 )
 
         # LEGACY MODE: Single event creation (backward compatibility)
-        elif summary and start_time and end_time:
+        elif summary and start_time and (end_time or duration):
+            # Resolve duration → end_time if needed
+            if not end_time and duration:
+                from .calendar_types import parse_duration, resolve_end_time
+
+                try:
+                    dur = parse_duration(duration)
+                    end_time = resolve_end_time(start_time, dur)
+                    logger.info(
+                        f"[create_event] Resolved duration '{duration}' → end_time '{end_time}'"
+                    )
+                except ValueError as e:
+                    return CreateEventResponse(
+                        success=False,
+                        eventId=None,
+                        summary=summary,
+                        htmlLink=None,
+                        start=start_time,
+                        end=None,
+                        calendarId=calendar_id,
+                        userEmail=user_google_email,
+                        message=f"❌ Invalid duration: {e}",
+                        error=str(e),
+                    )
+
             logger.info(
                 f"[create_event] Legacy mode: Single event '{summary}' for {user_google_email}"
             )
@@ -1296,9 +1355,11 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
 
                 # Apply automatic timezone correction to timestamps
                 corrected_start_time = _correct_time_format_for_api(
-                    start_time, "start_time"
+                    start_time, "start_time", timezone=timezone
                 )
-                corrected_end_time = _correct_time_format_for_api(end_time, "end_time")
+                corrected_end_time = _correct_time_format_for_api(
+                    end_time, "end_time", timezone=timezone
+                )
 
                 event_body: Dict[str, Any] = {
                     "summary": summary,
@@ -1324,6 +1385,8 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                         event_body["end"]["timeZone"] = timezone
                 if attendees:
                     event_body["attendees"] = [{"email": email} for email in attendees]
+                if recurrence:
+                    event_body["recurrence"] = recurrence
 
                 if attachments:
                     # Accept both file URLs and file IDs. If a URL, extract the fileId.
@@ -1471,7 +1534,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="modify_event",
-        description="Modifies an existing event in Google Calendar",
+        description="Modifies an existing event in Google Calendar. TIMEZONE: Always pass the timezone parameter or include UTC offsets in start_time/end_time to avoid time offset issues. Uses PATCH semantics — only specified fields are changed, unspecified fields (including recurrence rules) are preserved.",
         tags={"calendar", "event", "modify", "update", "google"},
         annotations={
             "title": "Modify Calendar Event",
@@ -1497,14 +1560,21 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             Optional[str],
             Field(
                 default=None,
-                description="New start time. Accepts: RFC3339 with timezone (e.g., '2023-10-27T10:00:00-07:00'), datetime without timezone (e.g., '2023-10-27T10:00:00' - will be treated as UTC), or date only for all-day events (e.g., '2023-10-27'). Missing timezone is automatically corrected to UTC",
+                description="New start time. IMPORTANT: Always specify timezone to avoid time offset issues. Preferred: datetime with offset (e.g., '2023-10-27T10:00:00-07:00') or UTC ('2023-10-27T10:00:00Z'). Naive datetimes are localized using the timezone param or server default. Date only for all-day events (e.g., '2023-10-27').",
             ),
         ] = None,
         end_time: Annotated[
             Optional[str],
             Field(
                 default=None,
-                description="New end time. Accepts: RFC3339 with timezone (e.g., '2023-10-27T11:00:00-07:00'), datetime without timezone (e.g., '2023-10-27T11:00:00' - will be treated as UTC), or date only for all-day events (e.g., '2023-10-28'). Missing timezone is automatically corrected to UTC",
+                description="New end time. Required unless 'duration' is provided alongside start_time. IMPORTANT: Always specify timezone to avoid time offset issues. Preferred: datetime with offset (e.g., '2023-10-27T11:00:00-07:00') or UTC ('2023-10-27T11:00:00Z'). Naive datetimes are localized using the timezone param or server default. Date only for all-day events (e.g., '2023-10-28').",
+            ),
+        ] = None,
+        duration: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description="Event duration as alternative to end_time (requires start_time). Format: a number + unit — '30s', '5m', '2h', '1.5d', '1w'. Ignored if end_time is also provided.",
             ),
         ] = None,
         description: Annotated[
@@ -1522,11 +1592,18 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             Optional[List[str]],
             Field(default=None, description="New list of attendee email addresses"),
         ] = None,
+        recurrence: Annotated[
+            Optional[List[str]],
+            Field(
+                default=None,
+                description="List of RRULE, EXRULE, RDATE, or EXDATE strings for recurring events (e.g., ['RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR']). See RFC 5545.",
+            ),
+        ] = None,
         timezone: Annotated[
             Optional[str],
             Field(
                 default=None,
-                description="New timezone for the event (e.g., 'America/New_York', 'UTC'). Applied to both start and end times",
+                description="STRONGLY RECOMMENDED when using naive datetimes. IANA timezone name (e.g., 'America/New_York', 'America/Chicago'). Naive datetimes in start_time/end_time will be interpreted in this timezone. Without this, the server's DEFAULT_TIMEZONE setting is used.",
             ),
         ] = None,
     ) -> ModifyEventResponse:
@@ -1573,6 +1650,29 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 user_google_email
             )
 
+            # Resolve duration → end_time if start_time is given but end_time is not
+            if start_time is not None and end_time is None and duration is not None:
+                from .calendar_types import parse_duration, resolve_end_time
+
+                try:
+                    dur = parse_duration(duration)
+                    end_time = resolve_end_time(start_time, dur)
+                    logger.info(
+                        f"[modify_event] Resolved duration '{duration}' → end_time '{end_time}'"
+                    )
+                except ValueError as e:
+                    return ModifyEventResponse(
+                        success=False,
+                        eventId=event_id,
+                        summary=summary,
+                        htmlLink=None,
+                        calendarId=calendar_id,
+                        userEmail=user_google_email,
+                        fieldsModified=[],
+                        message=f"❌ Invalid duration: {e}",
+                        error=str(e),
+                    )
+
             # Build the event body with only the fields that are provided
             event_body: Dict[str, Any] = {}
             fields_modified = []
@@ -1583,7 +1683,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             if start_time is not None:
                 # Apply automatic timezone correction
                 corrected_start_time = _correct_time_format_for_api(
-                    start_time, "start_time"
+                    start_time, "start_time", timezone=timezone
                 )
                 event_body["start"] = (
                     {"date": corrected_start_time}
@@ -1595,7 +1695,9 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 fields_modified.append("start_time")
             if end_time is not None:
                 # Apply automatic timezone correction
-                corrected_end_time = _correct_time_format_for_api(end_time, "end_time")
+                corrected_end_time = _correct_time_format_for_api(
+                    end_time, "end_time", timezone=timezone
+                )
                 event_body["end"] = (
                     {"date": corrected_end_time}
                     if "T" not in corrected_end_time
@@ -1613,6 +1715,9 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             if attendees is not None:
                 event_body["attendees"] = [{"email": email} for email in attendees]
                 fields_modified.append("attendees")
+            if recurrence is not None:
+                event_body["recurrence"] = recurrence
+                fields_modified.append("recurrence")
             if (
                 timezone is not None
                 and "start" not in event_body
@@ -1678,10 +1783,11 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                         f"[modify_event] Error during pre-update verification, but proceeding with update: {get_error}"
                     )
 
-            # Proceed with the update
+            # Use patch() instead of update() so unspecified fields
+            # (including recurrence rules) are preserved.
             updated_event = await asyncio.to_thread(
                 lambda: calendar_service.events()
-                .update(calendarId=calendar_id, eventId=event_id, body=event_body)
+                .patch(calendarId=calendar_id, eventId=event_id, body=event_body)
                 .execute()
             )
 

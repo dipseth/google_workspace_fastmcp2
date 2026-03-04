@@ -28,6 +28,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
 from ..test_auth_utils import get_client_auth_config
+from .test_helpers import AutoRefreshTaskHandler
 
 # NOTE on TLS for local tests:
 # - `localhost+2.pem` is a *server* (leaf) cert. Clients generally need the *issuing CA/root*.
@@ -182,6 +183,10 @@ async def create_test_client(test_email: str = TEST_EMAIL):
             else:
                 # HTTP fallback uses default transport inference
                 test_client = Client(test_url, auth=auth_config, timeout=30.0)
+
+            # Install handler that auto-refreshes tool cache on list_changed
+            handler = AutoRefreshTaskHandler(test_client)
+            test_client._session_kwargs["message_handler"] = handler
 
             # Verify connection by entering context, listing tools, then exiting
             # The caller (conftest fixture) will re-enter the context for actual use

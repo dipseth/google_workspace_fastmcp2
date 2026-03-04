@@ -152,11 +152,8 @@ class TestQdrantSemanticSearch:
         # Generate some diverse tool responses
         test_queries = [
             ("check_drive_auth", {"user_google_email": "user1@example.com"}),
-            (
-                "start_google_auth",
-                {"user_google_email": "user2@example.com", "service_name": "Test"},
-            ),
             ("health_check", {}),
+            ("manage_tools", {"action": "list"}),
         ]
 
         for tool_name, params in test_queries:
