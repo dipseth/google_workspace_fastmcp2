@@ -213,6 +213,11 @@ class EnhancedTemplateMiddleware(Middleware):
                 "remove_template_macro",
             }
 
+            # CodeMode meta-tools pass through raw code/content that may contain
+            # Jinja2 syntax (e.g. macro definitions via execute). Template resolution
+            # should only happen on the inner tool calls, not the outer wrapper.
+            _code_mode_tools = {"tags", "search", "get_schema", "execute"}
+
             if tool_name in template_macro_tools:
                 # Store reference in module-level registry (not context state to avoid serialization issues)
                 _middleware_instance_registry["instance"] = self
@@ -225,6 +230,13 @@ class EnhancedTemplateMiddleware(Middleware):
                 if self.enable_debug_logging:
                     logger.info(
                         f"⚠️ Skipping template processing for template macro tool: {tool_name}"
+                    )
+                return await call_next(context)
+            elif tool_name in _code_mode_tools:
+                # Skip template processing for CodeMode meta-tools
+                if self.enable_debug_logging:
+                    logger.info(
+                        f"⚠️ Skipping template processing for CodeMode tool: {tool_name}"
                     )
                 return await call_next(context)
             else:

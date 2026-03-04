@@ -136,7 +136,7 @@ class TestQdrantServiceFieldIndexing:
 
         for query in test_queries:
             try:
-                result = await client.call_tool("search", {"query": query})
+                result = await client.call_tool("qdrant_search", {"query": query})
                 assert result is not None, (
                     f"Search with service filter '{query}' should return a result"
                 )
@@ -297,7 +297,9 @@ class TestQdrantServiceFilterIntegration:
 
         for scenario in test_scenarios:
             try:
-                result = await client.call_tool("search", {"query": scenario["query"]})
+                result = await client.call_tool(
+                    "qdrant_search", {"query": scenario["query"]}
+                )
 
                 assert result is not None, (
                     f"Search should return result for {scenario['description']}"
@@ -332,7 +334,7 @@ class TestQdrantServiceFilterIntegration:
 
         for query in combined_queries:
             try:
-                result = await client.call_tool("search", {"query": query})
+                result = await client.call_tool("qdrant_search", {"query": query})
                 assert result is not None, f"Combined filter query should work: {query}"
 
                 content = (
@@ -367,7 +369,7 @@ class TestQdrantServiceIndexPerformance:
 
         start_time = time.time()
         try:
-            result = await client.call_tool("search", {"query": query})
+            result = await client.call_tool("qdrant_search", {"query": query})
             response_time = time.time() - start_time
 
             assert result is not None

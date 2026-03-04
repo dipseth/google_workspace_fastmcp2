@@ -139,7 +139,7 @@ class TestQdrantRefactoredTools:
         """Test that Qdrant tools are available with refactored middleware."""
         expected_tools = [
             # New unified tools
-            "search",
+            "qdrant_search",
             "fetch",
             # Legacy tools (backward compatibility)
             "search_tool_history",
@@ -167,7 +167,7 @@ class TestQdrantRefactoredTools:
         ]
 
         for query in test_queries:
-            result = await client.call_tool("search", {"query": query})
+            result = await client.call_tool("qdrant_search", {"query": query})
             assert result is not None, (
                 f"Search with query '{query}' should return a result"
             )
@@ -558,7 +558,7 @@ class TestQdrantRefactoredPerformance:
 
         for query in test_queries:
             start_time = time.time()
-            result = await client.call_tool("search", {"query": query})
+            result = await client.call_tool("qdrant_search", {"query": query})
             response_time = time.time() - start_time
 
             assert result is not None
@@ -954,7 +954,7 @@ class TestQdrantRefactoredPerformance:
 
             for query in test_queries:
                 try:
-                    result = await client.call_tool("search", {"query": query})
+                    result = await client.call_tool("qdrant_search", {"query": query})
                     assert result is not None, (
                         f"SEARCH should return result for query: {query}"
                     )

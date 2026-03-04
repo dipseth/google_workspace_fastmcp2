@@ -725,10 +725,15 @@ def setup_server_tools(mcp: FastMCP) -> None:
         # Protect critical tools from being disabled
         protected_tools_set = {
             "manage_tools",
-            "search",
+            "qdrant_search",
             "health_check",
             "start_google_auth",
             "check_drive_auth",
+            # CodeMode meta-tools (FastMCP 3.1.0+)
+            "tags",
+            "search",
+            "get_schema",
+            "execute",
         }
 
         # Helper to get current session state (uses sync versions to avoid async in sync helper)

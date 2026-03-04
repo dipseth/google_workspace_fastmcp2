@@ -277,7 +277,7 @@ def setup_enhanced_qdrant_tools(
     _dsl_suffix = _get_dsl_description_suffix()
 
     @mcp.tool(
-        name="search",
+        name="qdrant_search",
         description=(
             "Search through Qdrant vector database using natural language queries, "
             "filters, point IDs, or DSL filter notation. Supports semantic search, "

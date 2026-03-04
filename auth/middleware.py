@@ -1052,6 +1052,10 @@ class AuthMiddleware(Middleware):
         except Exception as e:
             logger.warning(f"⚠️ Could not bridge credentials for {user_email}: {e}")
 
+    # CodeMode meta-tools use strict Pydantic schemas — skip user_google_email injection.
+    # Actual tool names: tags, search, get_schema, execute
+    _CODE_MODE_TOOLS = frozenset({"tags", "search", "get_schema", "execute"})
+
     async def _auto_inject_email_parameter(
         self, context: MiddlewareContext, user_email: str
     ) -> None:
@@ -1067,6 +1071,10 @@ class AuthMiddleware(Middleware):
             user_email: User's email address to inject (can be None)
         """
         try:
+            # Skip injection for CodeMode meta-tools (strict Pydantic schemas)
+            if context.message.name in self._CODE_MODE_TOOLS:
+                return
+
             # Standard FastMCP pattern: arguments are in context.message.arguments
             args = context.message.arguments
             if not isinstance(args, dict):

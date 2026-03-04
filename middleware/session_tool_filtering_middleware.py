@@ -344,10 +344,15 @@ class SessionToolFilteringMiddleware(Middleware):
         """
         self.protected_tools = protected_tools or {
             "manage_tools",
-            "search",
+            "qdrant_search",
             "health_check",
             "start_google_auth",
             "check_drive_auth",
+            # CodeMode meta-tools (FastMCP 3.1.0+)
+            "tags",
+            "search",
+            "get_schema",
+            "execute",
         }
         self.enable_debug = enable_debug
         self.minimal_startup = minimal_startup

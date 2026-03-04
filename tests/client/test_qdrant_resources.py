@@ -415,7 +415,7 @@ class TestQdrantTools:
     async def test_qdrant_tools_available(self, client):
         """Test that Qdrant tools are available."""
         expected_tools = [
-            "search",  # Semantic search
+            "qdrant_search",  # Semantic search
             "fetch",  # Fetch point by ID
             "search_tool_history",  # Search historical responses
             "get_tool_analytics",  # Get analytics
@@ -429,7 +429,8 @@ class TestQdrantTools:
         try:
             # Call the search tool
             result = await client.call_tool(
-                "search", {"query": "test search", "limit": 5, "score_threshold": 0.1}
+                "qdrant_search",
+                {"query": "test search", "limit": 5, "score_threshold": 0.1},
             )
 
             # Should return a result
