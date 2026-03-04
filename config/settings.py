@@ -241,6 +241,15 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "JINJA_TEMPLATE_STRICT_MODE"},
     )
 
+    # Code Mode Configuration
+    # When enabled, replaces the full tool catalog with BM25 search + sandboxed execution
+    # LLMs discover tools via search instead of loading all schemas upfront
+    enable_code_mode: bool = Field(
+        default=False,
+        description="Enable CodeMode transform for BM25 tool discovery",
+        json_schema_extra={"env": "ENABLE_CODE_MODE"},
+    )
+
     # Response Limiting Configuration
     response_limit_max_size: int = Field(
         default=500_000,

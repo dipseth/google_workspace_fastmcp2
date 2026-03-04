@@ -15,10 +15,15 @@ _TOOLS_PLACEHOLDER = "/*__MCP_TOOLS_DATA__*/"
 
 _PROTECTED_TOOLS = {
     "manage_tools",
-    "search",
+    "qdrant_search",
     "health_check",
     "start_google_auth",
     "check_drive_auth",
+    # CodeMode meta-tools (FastMCP 3.1.0+)
+    "tags",
+    "search",
+    "get_schema",
+    "execute",
 }
 
 

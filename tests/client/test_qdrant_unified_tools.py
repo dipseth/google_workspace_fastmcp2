@@ -22,7 +22,7 @@ class TestQdrantUnifiedSearch:
         """Test that the new search tool is available."""
         expected_tools = [
             # New unified tools
-            "search",
+            "qdrant_search",
             "fetch",
             # Legacy tools (backward compatibility)
             "search_tool_history",
@@ -45,7 +45,7 @@ class TestQdrantUnifiedSearch:
         ]
 
         for query in test_queries:
-            result = await client.call_tool("search", {"query": query})
+            result = await client.call_tool("qdrant_search", {"query": query})
             assert result is not None, (
                 f"Search with query '{query}' should return a result"
             )
@@ -87,7 +87,7 @@ class TestQdrantUnifiedSearch:
         ]
 
         for query in test_queries:
-            result = await client.call_tool("search", {"query": query})
+            result = await client.call_tool("qdrant_search", {"query": query})
             assert result is not None, (
                 f"Service history query '{query}' should return a result"
             )
@@ -127,7 +127,7 @@ class TestQdrantUnifiedSearch:
         ]
 
         for query in test_queries:
-            result = await client.call_tool("search", {"query": query})
+            result = await client.call_tool("qdrant_search", {"query": query})
             assert result is not None, (
                 f"General search query '{query}' should return a result"
             )
@@ -205,7 +205,7 @@ class TestQdrantUnifiedSearch:
             )
 
         result = await client.call_tool(
-            "search",
+            "qdrant_search",
             {
                 "query": "",
                 "positive_point_ids": positive_ids,
@@ -256,7 +256,7 @@ class TestQdrantUnifiedSearch:
     async def test_search_indexed_service_history_query(self, client):
         """Test service history queries using indexed tool_name/user_email fields."""
         query = f"tool_name:send_gmail_message user_email:{TEST_EMAIL}"
-        result = await client.call_tool("search", {"query": query})
+        result = await client.call_tool("qdrant_search", {"query": query})
         content = result.content[0].text if hasattr(result, "content") else str(result)
         print("Qdrant indexed service_history raw response:", content[:1000])
 
@@ -297,7 +297,7 @@ class TestQdrantUnifiedSearch:
     @pytest.mark.asyncio
     async def test_search_response_format_compliance(self, client):
         """Test that search tool responses comply with OpenAI MCP standard."""
-        result = await client.call_tool("search", {"query": "test compliance"})
+        result = await client.call_tool("qdrant_search", {"query": "test compliance"})
         content = result.content[0].text if hasattr(result, "content") else str(result)
 
         try:
@@ -347,13 +347,16 @@ class TestQdrantUnifiedFetch:
         """Test fetching a document with a valid ID."""
         # First, verify that fetch tool is registered in the server
         await assert_tools_registered(
-            client, ["fetch", "search"], context="Qdrant tools"
+            client, ["fetch", "qdrant_search"], context="Qdrant tools"
         )
 
         # Enable the tools needed for this test
         await client.call_tool(
             "manage_tools",
-            {"action": "enable", "tool_names": ["fetch", "search", "health_check"]},
+            {
+                "action": "enable",
+                "tool_names": ["fetch", "qdrant_search", "health_check"],
+            },
         )
 
         # First, create some data by calling tools (ignore errors, just need execution)
@@ -365,7 +368,7 @@ class TestQdrantUnifiedFetch:
         await asyncio.sleep(1)
 
         # Search to get a valid ID
-        search_result = await client.call_tool("search", {"query": "health"})
+        search_result = await client.call_tool("qdrant_search", {"query": "health"})
         search_content = (
             search_result.content[0].text
             if hasattr(search_result, "content")
@@ -627,7 +630,7 @@ class TestQdrantBackwardCompatibility:
         )
 
         # Call unified tool
-        unified_result = await client.call_tool("search", {"query": test_query})
+        unified_result = await client.call_tool("qdrant_search", {"query": test_query})
         unified_content = (
             unified_result.content[0].text
             if hasattr(unified_result, "content")
@@ -680,7 +683,7 @@ class TestQdrantServiceIntegration:
         await asyncio.sleep(2)
 
         # Search for Gmail-specific content
-        result = await client.call_tool("search", {"query": "service:gmail"})
+        result = await client.call_tool("qdrant_search", {"query": "service:gmail"})
         content = result.content[0].text if hasattr(result, "content") else str(result)
 
         try:
@@ -727,7 +730,7 @@ class TestQdrantServiceIntegration:
         await asyncio.sleep(1)
 
         # Search for it
-        search_result = await client.call_tool("search", {"query": "gmail"})
+        search_result = await client.call_tool("qdrant_search", {"query": "gmail"})
         search_content = (
             search_result.content[0].text
             if hasattr(search_result, "content")
@@ -771,7 +774,7 @@ class TestQdrantErrorHandling:
     @pytest.mark.asyncio
     async def test_search_with_empty_query(self, client):
         """Test search with empty query."""
-        result = await client.call_tool("search", {"query": ""})
+        result = await client.call_tool("qdrant_search", {"query": ""})
         assert result is not None, "Empty query should return a result"
 
         content = result.content[0].text if hasattr(result, "content") else str(result)
@@ -805,7 +808,7 @@ class TestQdrantErrorHandling:
         ]
 
         for query in malformed_queries[:3]:  # Test first 3 to avoid timeout
-            result = await client.call_tool("search", {"query": query})
+            result = await client.call_tool("qdrant_search", {"query": query})
             assert result is not None, (
                 f"Malformed query '{query[:50]}...' should not crash"
             )
@@ -839,7 +842,7 @@ class TestQdrantPerformance:
 
         for query in queries:
             start_time = time.time()
-            result = await client.call_tool("search", {"query": query})
+            result = await client.call_tool("qdrant_search", {"query": query})
             elapsed_time = time.time() - start_time
 
             assert result is not None, f"Query '{query}' should return result"

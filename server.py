@@ -176,6 +176,27 @@ logger.info("🔐 FastMCP running with legacy OAuth system")
 logger.info("  All existing OAuth endpoints active")
 logger.info("  MCP Inspector discovery available")
 
+# --- Code Mode Transform (opt-in) ---
+if settings.enable_code_mode:
+    from fastmcp.experimental.transforms.code_mode import (
+        CodeMode,
+        GetSchemas,
+        GetTags,
+        Search,
+    )
+
+    code_mode = CodeMode(
+        discovery_tools=[
+            GetTags(),  # Stage 1: Browse by service category
+            Search(default_limit=10),  # Stage 2: BM25 search names + descriptions
+            GetSchemas(),  # Stage 3: Get param details for selected tools
+        ],
+    )
+    mcp.add_transform(code_mode)
+    logger.info("Code Mode enabled — LLMs will use BM25 search + sandboxed execution")
+else:
+    logger.info("Code Mode disabled — set ENABLE_CODE_MODE=true in .env to enable")
+
 # PHASE 1 & 2 FIXES APPLIED: AuthMiddleware re-enabled with improved session management
 from auth.middleware import create_enhanced_auth_middleware
 
