@@ -23,7 +23,23 @@ Note: This is a framework support file providing reusable test utilities.
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
+import mcp.types
 from fastmcp import Client
+from fastmcp.client.tasks import TaskNotificationHandler
+
+
+class AutoRefreshTaskHandler(TaskNotificationHandler):
+    """Auto-refreshes the client tool cache on list_changed notifications."""
+
+    async def on_tool_list_changed(
+        self, notification: mcp.types.ToolListChangedNotification
+    ) -> None:
+        client = self._client_ref()
+        if client is not None and client.is_connected():
+            try:
+                await client.list_tools()
+            except Exception:
+                pass  # Best-effort; explicit list_tools() is the primary mechanism
 
 
 class TestResponseValidator:
@@ -329,6 +345,8 @@ async def ensure_tools_enabled(
             params["action"] = "enable_all"
 
         await client.call_tool("manage_tools", params)
+        # Refresh the client's tool cache so newly-enabled tools are visible
+        await client.list_tools()
         return True
     except Exception as e:
         import warnings

@@ -61,26 +61,12 @@ class TestOAuthSessionContext:
         assert client.is_connected()
 
     @pytest.mark.asyncio
-    async def test_user_email_resource_after_start_google_auth(self, client):
-        """Test that user email context works after using start_google_auth tool."""
-        # First, check if start_google_auth tool is available
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+    async def test_user_email_resource_after_auth(self, client):
+        """Test that user email context works when already authenticated.
 
-        if "start_google_auth" not in tool_names:
-            pytest.skip("start_google_auth tool not available")
-
-        # Call start_google_auth (this sets user email in tool arguments)
-        try:
-            result = await client.call_tool(
-                "start_google_auth", arguments={"user_email": TEST_EMAIL}
-            )
-            print(f"✅ start_google_auth called for {TEST_EMAIL}")
-        except Exception as e:
-            print(
-                f"⚠️ start_google_auth failed (expected if already authenticated): {e}"
-            )
-
+        Auth is established by the server session (no need to call
+        start_google_auth again — that opens a browser OAuth flow).
+        """
         # Now test if user resources work
         resources = await client.list_resources()
         resource_uris = [str(r.uri) for r in resources]  # Convert AnyUrl to string

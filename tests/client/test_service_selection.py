@@ -251,14 +251,13 @@ class TestServiceSelection:
 
     @pytest.mark.asyncio
     @pytest.mark.auth_required
-    async def test_protected_tool_triggers_oauth(self, client):
-        """Test that calling a protected tool triggers OAuth flow."""
+    async def test_protected_tool_checks_auth(self, client):
+        """Test that calling a protected tool checks authentication."""
         try:
             result = await client.call_tool(
-                "start_google_auth",
+                "check_drive_auth",
                 {
                     "user_google_email": TEST_EMAIL,
-                    "service_name": "Test Service Selection",
                 },
             )
         except Exception as e:
