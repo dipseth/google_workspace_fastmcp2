@@ -490,13 +490,20 @@ class QdrantClientManager:
         if not fields:
             return
 
+        # Fields that serve as tenant keys — Qdrant optimises internal
+        # data partitioning for these (is_tenant=True).
+        _TENANT_FIELDS = {"user_email"}
+
         async def create_single_index(field: str) -> tuple[str, bool, str]:
             """Create a single index, return (field, success, error_msg)."""
             try:
-                keyword_index = qdrant_models["KeywordIndexParams"](
-                    type=qdrant_models["KeywordIndexType"].KEYWORD,
-                    on_disk=False,  # Keep frequently accessed fields in memory
-                )
+                kwargs = {
+                    "type": qdrant_models["KeywordIndexType"].KEYWORD,
+                    "on_disk": False,  # Keep frequently accessed fields in memory
+                }
+                if field in _TENANT_FIELDS:
+                    kwargs["is_tenant"] = True
+                keyword_index = qdrant_models["KeywordIndexParams"](**kwargs)
                 await asyncio.to_thread(
                     self.client.create_payload_index,
                     collection_name=self.config.collection_name,

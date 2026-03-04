@@ -227,6 +227,13 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "AUTH_SECURITY_LEVEL"},
     )
 
+    # Calendar Configuration
+    default_timezone: str = Field(
+        default="UTC",
+        description="Default IANA timezone for calendar events when no timezone is specified (e.g., 'America/Chicago')",
+        json_schema_extra={"env": "DEFAULT_TIMEZONE"},
+    )
+
     # Template Configuration
     jinja_template_strict_mode: bool = Field(
         default=True,

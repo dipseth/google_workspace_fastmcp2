@@ -38,6 +38,7 @@ from middleware.qdrant_core.dsl_types import (
     SearchV2Response,
     SearchV2ResultItem,
 )
+from middleware.qdrant_core.tenant import merge_tenant_filter
 
 if TYPE_CHECKING:
     from middleware.qdrant_core.client import QdrantClientManager
@@ -67,6 +68,7 @@ class SearchV2Executor:
         limit: int = 10,
         score_threshold: float = 0.3,
         dry_run: bool = False,
+        user_email: Optional[str] = None,
     ) -> SearchV2Response:
         """Parse DSL, build filter, execute query, return results.
 
@@ -118,6 +120,10 @@ class SearchV2Executor:
                 error=f"Build error: {e}",
                 processing_time_ms=_elapsed_ms(start),
             )
+
+        # Merge mandatory tenant filter so DSL cannot bypass user isolation
+        if user_email:
+            qdrant_filter = merge_tenant_filter(qdrant_filter, user_email)
 
         filter_repr = repr(qdrant_filter)
 

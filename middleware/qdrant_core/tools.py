@@ -376,6 +376,18 @@ def setup_enhanced_qdrant_tools(
             target_collection = collection or _client_manager.config.collection_name
             raw_results: List[Dict[str, Any]] = []
 
+            # Audit log for search operations
+            from auth.audit import log_security_event
+
+            log_security_event(
+                "qdrant_search",
+                user_email=user_google_email,
+                details={
+                    "collection": target_collection,
+                    "has_dsl": filter_dsl is not None,
+                },
+            )
+
             # 0) DSL filter mode — route to SearchV2Executor
             if filter_dsl is not None:
                 query_type = "dsl"
@@ -393,6 +405,7 @@ def setup_enhanced_qdrant_tools(
                     limit=limit,
                     score_threshold=score_threshold,
                     dry_run=dry_run,
+                    user_email=user_google_email,
                 )
 
                 # Convert V2 results to unified format
@@ -431,6 +444,7 @@ def setup_enhanced_qdrant_tools(
                     negative_point_ids=negative_point_ids,
                     query_type="recommend",
                     collection=target_collection,
+                    user_email=user_google_email,
                 )
 
             # 2) Query-based modes (overview / service_history / general)
@@ -448,7 +462,9 @@ def setup_enhanced_qdrant_tools(
                 if query_type == "overview":
                     # Get analytics/overview data and adapt to search result format
                     try:
-                        analytics = await _search_manager.get_analytics()
+                        analytics = await _search_manager.get_analytics(
+                            user_email=user_google_email,
+                        )
                         if analytics and "groups" in analytics:
                             for group_name, group_data in list(
                                 analytics["groups"].items()
@@ -482,6 +498,7 @@ def setup_enhanced_qdrant_tools(
                         score_threshold=score_threshold,
                         query_type="service_history",
                         collection=target_collection,
+                        user_email=user_google_email,
                     )
 
                 else:
@@ -492,6 +509,7 @@ def setup_enhanced_qdrant_tools(
                         score_threshold=score_threshold,
                         query_type="general",
                         collection=target_collection,
+                        user_email=user_google_email,
                     )
 
             # 3) Format results with service metadata
