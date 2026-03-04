@@ -5,8 +5,87 @@ These TypedDict classes define the structure of data returned by Calendar tools,
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from pydantic import BaseModel, Field
+import datetime as _dt
+import re
+from datetime import timedelta
+
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 from typing_extensions import Annotated, List, NotRequired, Optional, TypedDict
+
+# ---------------------------------------------------------------------------
+# Duration parsing  (accepts str, int/float seconds, or existing timedelta)
+# ---------------------------------------------------------------------------
+_DURATION_UNITS = {
+    "s": "seconds",
+    "m": "minutes",
+    "h": "hours",
+    "d": "days",
+    "w": "weeks",
+}
+
+
+def parse_duration(v: object) -> timedelta:
+    """Convert a human-friendly value into a :class:`~datetime.timedelta`.
+
+    Accepted inputs:
+        * ``timedelta`` — returned as-is
+        * ``int | float`` — treated as **seconds**
+        * ``str`` — a number followed by a unit letter:
+          ``s`` (seconds), ``m`` (minutes), ``h`` (hours),
+          ``d`` (days), ``w`` (weeks).  Floats are supported
+          (e.g. ``'1.5h'``).
+
+    Examples::
+
+        parse_duration('30m')    # timedelta(minutes=30)
+        parse_duration('1.5h')   # timedelta(hours=1.5)
+        parse_duration('2d')     # timedelta(days=2)
+        parse_duration(3600)     # timedelta(seconds=3600)
+
+    Raises :class:`ValueError` on unrecognised input.
+    """
+    if isinstance(v, timedelta):
+        return v
+    if isinstance(v, (int, float)):
+        return timedelta(seconds=v)
+    if isinstance(v, str):
+        if m := re.fullmatch(r"(\d+(?:\.\d+)?)\s*([smhdw])", v.strip()):
+            return timedelta(**{_DURATION_UNITS[m[2]]: float(m[1])})
+    raise ValueError(
+        f"Invalid duration: {v!r}  (expected e.g. '30s', '5m', '2h', '1.5d', '1w')"
+    )
+
+
+#: Pydantic-aware Duration type.  Use as a field type in BaseModel classes
+#: when you need a ``timedelta`` that also accepts human strings / raw seconds.
+Duration = Annotated[timedelta, BeforeValidator(parse_duration)]
+
+
+def resolve_end_time(start_time: str, dur: timedelta) -> str:
+    """Compute *end_time* from *start_time* + *dur*.
+
+    Preserves the same format as *start_time*:
+    * date-only (``YYYY-MM-DD``) → date-only (rounds up to whole days, minimum 1)
+    * datetime with offset/Z → datetime with same suffix
+    * naive datetime → naive datetime
+    """
+    # Date-only → date-only
+    if len(start_time) == 10 and start_time.count("-") == 2:
+        start_date = _dt.datetime.strptime(start_time, "%Y-%m-%d").date()
+        total_days = max(int(-(-dur.total_seconds() // 86400)), 1)  # ceiling, min 1
+        return (start_date + _dt.timedelta(days=total_days)).strftime("%Y-%m-%d")
+
+    # Split datetime from offset suffix
+    base, suffix = start_time, ""
+    if base.endswith("Z"):
+        base, suffix = base[:-1], "Z"
+    elif re.search(r"[+-]\d{2}:\d{2}$", base):
+        suffix = base[-6:]
+        base = base[:-6]
+
+    start_dt = _dt.datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
+    end_dt = start_dt + dur
+    return end_dt.strftime("%Y-%m-%dT%H:%M:%S") + suffix
 
 
 class CalendarInfo(TypedDict):
@@ -185,15 +264,23 @@ class EventData(BaseModel):
     start_time: Annotated[
         str,
         Field(
-            description="Event start time. Accepts: RFC3339 with timezone (e.g., '2025-01-01T10:00:00Z', '2025-01-01T10:00:00-05:00'), datetime without timezone (e.g., '2025-01-01T10:00:00' - will be automatically corrected to UTC by appending 'Z'), or date only for all-day events (e.g., '2025-01-01')"
+            description="Event start time. IMPORTANT: Always specify timezone to avoid time offset issues. Preferred formats: (1) datetime with offset: '2025-01-01T10:00:00-05:00', (2) datetime with Z for UTC: '2025-01-01T10:00:00Z', (3) date only for all-day events: '2025-01-01'. Naive datetimes (e.g., '2025-01-01T10:00:00') will be localized using the timezone field or the server's default timezone."
         ),
     ]
     end_time: Annotated[
-        str,
+        Optional[str],
         Field(
-            description="Event end time. Accepts: RFC3339 with timezone (e.g., '2025-01-01T11:00:00Z', '2025-01-01T11:00:00-05:00'), datetime without timezone (e.g., '2025-01-01T11:00:00' - will be automatically corrected to UTC by appending 'Z'), or date only for all-day events (e.g., '2025-01-02')"
+            None,
+            description="Event end time. Required unless 'duration' is provided. IMPORTANT: Always specify timezone to avoid time offset issues. Preferred formats: (1) datetime with offset: '2025-01-01T11:00:00-05:00', (2) datetime with Z for UTC: '2025-01-01T11:00:00Z', (3) date only for all-day events: '2025-01-02'. Naive datetimes (e.g., '2025-01-01T11:00:00') will be localized using the timezone field or the server's default timezone.",
         ),
-    ]
+    ] = None
+    duration: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description="Event duration as alternative to end_time. Format: a number + unit — '30s', '5m', '2h', '1.5d', '1w'. Ignored if end_time is also provided.",
+        ),
+    ] = None
     description: Annotated[
         Optional[str], Field(None, description="Event description/details")
     ] = None
@@ -205,7 +292,14 @@ class EventData(BaseModel):
         Optional[str],
         Field(
             None,
-            description="Timezone for the event (e.g., 'America/New_York', 'UTC'). Applied to both start and end times if they include time components. Note: If start_time/end_time don't include timezone info, they will be treated as UTC automatically",
+            description="STRONGLY RECOMMENDED when using naive datetimes. IANA timezone name (e.g., 'America/New_York', 'America/Chicago', 'UTC'). Naive datetimes in start_time/end_time will be interpreted in this timezone. Without this, the server's DEFAULT_TIMEZONE setting is used. Has no effect when start_time/end_time already contain an offset (Z or ±HH:MM).",
+        ),
+    ] = None
+    recurrence: Annotated[
+        Optional[List[str]],
+        Field(
+            None,
+            description="List of RRULE, EXRULE, RDATE, or EXDATE strings for recurring events (e.g., ['RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR']). See RFC 5545 for format details.",
         ),
     ] = None
     attachments: Annotated[
@@ -215,6 +309,19 @@ class EventData(BaseModel):
             description="List of Google Drive file URLs or file IDs to attach to the event",
         ),
     ] = None
+
+    @model_validator(mode="after")
+    def _resolve_end_time(self) -> "EventData":
+        """Compute end_time from start_time + duration when end_time is absent."""
+        if self.end_time:
+            return self  # explicit end_time takes precedence
+
+        if not self.duration:
+            raise ValueError("Either 'end_time' or 'duration' must be provided.")
+
+        dur = parse_duration(self.duration)
+        self.end_time = resolve_end_time(self.start_time, dur)
+        return self
 
 
 class BulkEventResult(TypedDict):
