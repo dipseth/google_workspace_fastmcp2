@@ -692,6 +692,18 @@ class Settings(BaseSettings):
         return "https" if self.enable_https else "http"
 
     @property
+    def feedback_base_url(self) -> str:
+        """Get the base URL for feedback webhook callbacks.
+
+        Uses FEEDBACK_BASE_URL env var if set, otherwise falls back to base_url.
+        Useful when BASE_URL points to a proxy that doesn't forward /card-feedback.
+        """
+        explicit = os.getenv("FEEDBACK_BASE_URL")
+        if explicit:
+            return explicit
+        return self.base_url
+
+    @property
     def base_url(self) -> str:
         """Get the base URL for the server."""
         # For OAuth flows, always use localhost if OAUTH_REDIRECT_URI points to localhost

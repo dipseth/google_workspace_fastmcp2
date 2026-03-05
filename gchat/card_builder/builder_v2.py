@@ -2324,8 +2324,10 @@ class SmartCardBuilderV2:
         Uses the server's base_url with /card-feedback endpoint.
         Falls back to placeholder only if base_url is not configured.
         """
-        # Use the server's base_url (e.g., https://localhost:8002)
-        base_url = getattr(_settings, "base_url", "")
+        # Use feedback_base_url which can be separate from the proxy-facing base_url
+        base_url = getattr(_settings, "feedback_base_url", "") or getattr(
+            _settings, "base_url", ""
+        )
         if base_url:
             return f"{base_url}/card-feedback"
         return "https://feedback.example.com"
