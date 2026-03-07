@@ -34,10 +34,10 @@ _symbols_lock = threading.Lock()
 # =============================================================================
 
 # Google Chat Card API Limits
-GCHAT_CARD_MAX_BYTES = 20_000  # Maximum card payload size
+GCHAT_CARD_MAX_BYTES = 32_000  # Empirically determined webhook payload limit (~32KB)
 GCHAT_TEXT_MAX_CHARS = 18_000  # Maximum text message length
 GCHAT_SAFE_LIMIT_RATIO = 0.75  # Recommended operating ratio (75% of max)
-GCHAT_SAFE_CARD_BYTES = int(GCHAT_CARD_MAX_BYTES * GCHAT_SAFE_LIMIT_RATIO)  # ~15KB
+GCHAT_SAFE_CARD_BYTES = int(GCHAT_CARD_MAX_BYTES * GCHAT_SAFE_LIMIT_RATIO)  # ~24KB
 
 # Domain-specific stopwords for gchat card search
 GCHAT_STOPWORDS = [

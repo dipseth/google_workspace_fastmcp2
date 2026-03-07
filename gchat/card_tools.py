@@ -1312,261 +1312,16 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 # Re-generate DSL notation after fix
                 rendered_dsl = builder.generate_dsl_notation(google_format_card)
 
-            # Choose delivery method based on webhook_url
-            if webhook_url:
-                await progress.set_message("Sending card via webhook...")
-                # CRITICAL FIX: Process thread key for webhook URL to enable proper threading
-                if thread_key:
-                    logger.info(
-                        f"🧵 THREADING FIX: Processing thread key for webhook: {thread_key}"
-                    )
-                    webhook_url = _process_thread_key_for_webhook_url(
-                        webhook_url, thread_key
-                    )
-                    logger.info(
-                        "🧵 THREADING FIX: Updated webhook URL with thread parameters"
-                    )
+            # --- Deliver via card_delivery module (handles split + retry) ---
+            from gchat.card_delivery import deliver_card_message
 
-                # Strip internal fields (like _card_id) that shouldn't be sent to the API
-                # NOTE: Do NOT convert field names - Google Chat webhook API expects camelCase
-                # for widget fields (onClick, imageUri, etc.). SmartCardBuilder already
-                # produces correctly formatted cards.
-                webhook_message_body = builder._clean_card_metadata(message_body)
+            delivery_method = "webhook" if webhook_url else "api"
+            await progress.set_message(f"Sending card via {delivery_method}...")
 
-                # NOTE: Threading for webhooks is handled via URL params (threadKey, messageReplyOption)
-                # added in _process_thread_key_for_webhook_url(). Do NOT add thread.name to body
-                # as it expects a full resource name which we don't have for new threads.
-
-                # ENHANCED DEBUGGING: Log everything before sending
-                logger.info(
-                    f"🔄 ENHANCED DEBUG - Sending via webhook URL: {webhook_url}"
-                )
-                logger.info("🧪 CARD DEBUG INFO:")
-                logger.info(f"  - Description: '{card_description}'")
-                logger.info(f"  - Params keys: {list(card_params.keys())}")
-                logger.info(f"  - Card source: {best_match.get('type', 'unknown')}")
-                logger.info(
-                    f"  - Best match: {best_match.get('name', 'N/A')} (score: {best_match.get('score', 0):.3f})"
-                )
-                logger.info(f"  - Card type: {best_match.get('type', 'unknown')}")
-
-                # Log original card structure
-                logger.info("📊 ORIGINAL CARD STRUCTURE:")
-                logger.info(
-                    f"   Keys: {list(google_format_card.keys()) if isinstance(google_format_card, dict) else 'Not a dict'}"
-                )
-                if (
-                    isinstance(google_format_card, dict)
-                    and "card" in google_format_card
-                ):
-                    card_content = google_format_card["card"]
-                    logger.info(
-                        f"   Card keys: {list(card_content.keys()) if isinstance(card_content, dict) else 'Not a dict'}"
-                    )
-                    if isinstance(card_content, dict):
-                        if "header" in card_content:
-                            header = card_content["header"]
-                            logger.info(
-                                f"   Header: title='{header.get('title', 'N/A')}', subtitle='{header.get('subtitle', 'N/A')}'"
-                            )
-                        if "sections" in card_content and isinstance(
-                            card_content["sections"], list
-                        ):
-                            logger.info(
-                                f"   Sections: {len(card_content['sections'])} section(s)"
-                            )
-                            for i, section in enumerate(card_content["sections"]):
-                                if isinstance(section, dict) and "widgets" in section:
-                                    widgets = section["widgets"]
-                                    logger.info(
-                                        f"     Section {i}: {len(widgets) if isinstance(widgets, list) else 0} widget(s)"
-                                    )
-                                    if isinstance(widgets, list):
-                                        for j, widget in enumerate(widgets):
-                                            if isinstance(widget, dict):
-                                                widget_type = (
-                                                    next(iter(widget.keys()))
-                                                    if widget
-                                                    else "empty"
-                                                )
-                                                logger.info(
-                                                    f"       Widget {j}: type={widget_type}"
-                                                )
-
-                # Log final webhook payload
-                logger.info("🔧 FINAL WEBHOOK PAYLOAD:")
-                logger.info(
-                    f"📋 Message JSON: {json.dumps(webhook_message_body, indent=2)}"
-                )
-
-                import requests
-
-                # Validate webhook URL against SSRF before sending
-                _validate_webhook_url(webhook_url)
-
-                # Log the request details — redact query params at INFO level
-                logger.info("🌐 Making POST request to webhook:")
-                logger.info(f"  URL: {_redact_webhook_url(webhook_url)}")
-                logger.debug(f"  Full URL (debug only): {webhook_url}")
-                logger.info("  Headers: {'Content-Type': 'application/json'}")
-                logger.info(
-                    f"  Payload size: {len(json.dumps(webhook_message_body))} characters"
-                )
-
-                from auth.audit import log_security_event
-
-                log_security_event(
-                    "webhook_request",
-                    details={
-                        "host": urllib.parse.urlparse(webhook_url).hostname,
-                        "payload_size": len(json.dumps(webhook_message_body)),
-                    },
-                )
-
-                response = requests.post(
-                    webhook_url,
-                    json=webhook_message_body,
-                    headers={"Content-Type": "application/json"},
-                )
-
-                # Enhanced response logging
-                logger.info(f"🔍 WEBHOOK RESPONSE - Status: {response.status_code}")
-                logger.info(f"🔍 WEBHOOK RESPONSE - Headers: {dict(response.headers)}")
-                logger.info(f"🔍 WEBHOOK RESPONSE - Body: {response.text}")
-
-                # Build component info for response
-                component_info = ComponentSearchInfo(
-                    componentFound=bool(best_match.get("name")),
-                    componentName=best_match.get("name"),
-                    componentPath=best_match.get("path"),
-                    componentType=best_match.get("type"),
-                    searchScore=best_match.get("score"),
-                    extractedFromModule=best_match.get("extracted_from_module"),
-                )
-
-                # ANALYZE RESPONSE for content issues
-                if response.status_code == 200:
-                    # Check if response indicates content issues
-                    response_text = response.text.lower()
-                    if any(
-                        keyword in response_text
-                        for keyword in ["empty", "blank", "no content", "invalid"]
-                    ):
-                        logger.warning(
-                            f"⚠️ SUCCESS but possible content issue - Response: {response.text}"
-                        )
-                        return SendDynamicCardResponse(
-                            success=True,
-                            spaceId=space_id,
-                            deliveryMethod="webhook",
-                            cardType=best_match.get("type", "unknown"),
-                            componentInfo=component_info,
-                            cardDescription=card_description,
-                            threadKey=thread_key,
-                            webhookUrl=webhook_url,
-                            userEmail=user_google_email,
-                            httpStatus=200,
-                            validationPassed=True,
-                            dslDetected=dsl_detected,
-                            jinjaTemplateApplied=jinja_template_applied,
-                            dslValidation=dsl_validation_result,
-                            inputMapping=input_mapping_info,
-                            expectedParams=expected_params_info,
-                            suggestedDsl=suggested_dsl,
-                            message=f"Card sent (Status 200) but may appear blank. Response: {response.text}",
-                        )
-                    else:
-                        logger.info(
-                            f"✅ Card sent successfully via webhook. Status: {response.status_code}"
-                        )
-                        return SendDynamicCardResponse(
-                            success=True,
-                            spaceId=space_id,
-                            deliveryMethod="webhook",
-                            cardType=best_match.get("type", "unknown"),
-                            componentInfo=component_info,
-                            cardDescription=card_description,
-                            threadKey=thread_key,
-                            webhookUrl=webhook_url,
-                            userEmail=user_google_email,
-                            httpStatus=200,
-                            validationPassed=True,
-                            validationIssues=content_issues if content_issues else None,
-                            dslDetected=dsl_detected,
-                            renderedDslNotation=rendered_dsl,
-                            jinjaTemplateApplied=jinja_template_applied,
-                            dslValidation=dsl_validation_result,
-                            inputMapping=input_mapping_info,
-                            expectedParams=expected_params_info,
-                            suggestedDsl=suggested_dsl,
-                            alternativeDsl=_generate_alternative_dsl(rendered_dsl),
-                            message="Card message sent successfully via webhook",
-                        )
-                elif response.status_code == 429:
-                    # Handle rate limiting with helpful message
-                    logger.warning(
-                        "⚠️ Rate limited by Google Chat API. This indicates successful card formatting but too many requests."
-                    )
-                    return SendDynamicCardResponse(
-                        success=False,
-                        spaceId=space_id,
-                        deliveryMethod="webhook",
-                        cardType=best_match.get("type", "unknown"),
-                        componentInfo=component_info,
-                        cardDescription=card_description,
-                        threadKey=thread_key,
-                        webhookUrl=webhook_url,
-                        userEmail=user_google_email,
-                        httpStatus=429,
-                        validationPassed=True,
-                        dslDetected=dsl_detected,
-                        jinjaTemplateApplied=jinja_template_applied,
-                        dslValidation=dsl_validation_result,
-                        inputMapping=input_mapping_info,
-                        expectedParams=expected_params_info,
-                        suggestedDsl=suggested_dsl,
-                        message="Rate limited (429) - Card format is correct but hitting quota limits",
-                        error="Too many requests - reduce request frequency",
-                    )
-                else:
-                    error_details = {
-                        "status": response.status_code,
-                        "headers": dict(response.headers),
-                        "body": response.text,
-                        "message_sent": message_body,
-                        "card_validation_issues": (
-                            content_issues if not is_valid_content else []
-                        ),
-                    }
-                    logger.error(
-                        f"❌ Failed to send card via webhook: {json.dumps(error_details, indent=2)}"
-                    )
-                    return SendDynamicCardResponse(
-                        success=False,
-                        spaceId=space_id,
-                        deliveryMethod="webhook",
-                        cardType=best_match.get("type", "unknown"),
-                        componentInfo=component_info,
-                        cardDescription=card_description,
-                        threadKey=thread_key,
-                        webhookUrl=webhook_url,
-                        userEmail=user_google_email,
-                        httpStatus=response.status_code,
-                        validationPassed=True,
-                        dslDetected=dsl_detected,
-                        jinjaTemplateApplied=jinja_template_applied,
-                        dslValidation=dsl_validation_result,
-                        inputMapping=input_mapping_info,
-                        expectedParams=expected_params_info,
-                        suggestedDsl=suggested_dsl,
-                        message=f"Webhook delivery failed with status {response.status_code}",
-                        error=response.text,
-                    )
-            else:
-                # Send via API
-                await progress.set_message("Sending card via Google Chat API...")
+            # For API path, obtain the chat service first
+            chat_service = None
+            if not webhook_url:
                 chat_service = await _get_chat_service_with_fallback(user_google_email)
-
                 if not chat_service:
                     return SendDynamicCardResponse(
                         success=False,
@@ -1582,50 +1337,69 @@ def setup_card_tools(mcp: FastMCP) -> None:
                         error="Chat service authentication failed",
                     )
 
-                # Add thread key if provided
-                # Strip internal fields (like _card_id) before sending to API
-                api_message_body = builder._clean_card_metadata(message_body)
-                request_params = {"parent": space_id, "body": api_message_body}
-                _process_thread_key_for_request(request_params, thread_key)
+            # Pass message_body BEFORE _clean_card_metadata so split can detect feedback sections
+            delivery = await deliver_card_message(
+                message_body=message_body,
+                webhook_url=webhook_url,
+                chat_service=chat_service,
+                space_id=space_id,
+                thread_key=thread_key,
+                builder=builder,
+            )
 
-                message = await asyncio.to_thread(
-                    chat_service.spaces().messages().create(**request_params).execute
+            # Build response — common fields shared by success and failure
+            component_info = ComponentSearchInfo(
+                componentFound=bool(best_match.get("name")),
+                componentName=best_match.get("name"),
+                componentPath=best_match.get("path"),
+                componentType=best_match.get("type"),
+                searchScore=best_match.get("score"),
+                extractedFromModule=best_match.get("extracted_from_module"),
+            )
+            parts_sent = delivery.parts_sent if delivery.parts_sent > 1 else None
+            split_thread = delivery.thread_key if delivery.parts_sent > 1 else None
+
+            base_response = dict(
+                spaceId=space_id,
+                deliveryMethod=delivery_method,
+                cardType=best_match.get("type", "unknown"),
+                componentInfo=component_info,
+                cardDescription=card_description,
+                threadKey=delivery.thread_key or thread_key,
+                webhookUrl=webhook_url,
+                userEmail=user_google_email,
+                httpStatus=delivery.status_code,
+                validationPassed=True,
+                dslDetected=dsl_detected,
+                jinjaTemplateApplied=jinja_template_applied,
+                dslValidation=dsl_validation_result,
+                inputMapping=input_mapping_info,
+                expectedParams=expected_params_info,
+                suggestedDsl=suggested_dsl,
+                partsSent=parts_sent,
+                splitThreadKey=split_thread,
+            )
+
+            if delivery.success:
+                msg = (
+                    f"Card message sent successfully via {delivery_method}"
+                    if webhook_url
+                    else f"Card message sent successfully to space '{space_id}'"
                 )
-
-                message_name = message.get("name", "")
-                create_time = message.get("createTime", "")
-
-                # Build component info for response
-                component_info = ComponentSearchInfo(
-                    componentFound=bool(best_match.get("name")),
-                    componentName=best_match.get("name"),
-                    componentPath=best_match.get("path"),
-                    componentType=best_match.get("type"),
-                    searchScore=best_match.get("score"),
-                    extractedFromModule=best_match.get("extracted_from_module"),
-                )
-
                 return SendDynamicCardResponse(
                     success=True,
-                    messageId=message_name,
-                    spaceId=space_id,
-                    deliveryMethod="api",
-                    cardType=best_match.get("type", "unknown"),
-                    componentInfo=component_info,
-                    cardDescription=card_description,
-                    threadKey=thread_key,
-                    createTime=create_time,
-                    userEmail=user_google_email,
-                    validationPassed=True,
-                    dslDetected=dsl_detected,
+                    validationIssues=content_issues if content_issues else None,
                     renderedDslNotation=rendered_dsl,
-                    jinjaTemplateApplied=jinja_template_applied,
-                    dslValidation=dsl_validation_result,
-                    inputMapping=input_mapping_info,
-                    expectedParams=expected_params_info,
-                    suggestedDsl=suggested_dsl,
                     alternativeDsl=_generate_alternative_dsl(rendered_dsl),
-                    message=f"Card message sent successfully to space '{space_id}'",
+                    message=msg,
+                    **base_response,
+                )
+            else:
+                return SendDynamicCardResponse(
+                    success=False,
+                    message=delivery.error or f"Delivery failed via {delivery_method}",
+                    error=delivery.error,
+                    **base_response,
                 )
 
         except Exception as e:
