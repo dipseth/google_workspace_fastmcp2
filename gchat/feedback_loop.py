@@ -515,6 +515,32 @@ class FeedbackLoop:
             names = [p.split(".")[-1] if "." in p else p for p in component_paths]
             return f"§[...] | {' '.join(names)}"
 
+    def _build_component_identity_text(self, component_paths: List[str]) -> str:
+        """
+        Build component identity text for the components vector.
+
+        Uses Name/Type/Path format per component, matching ric_provider.py's
+        IntrospectionProvider.component_text() so instance_pattern component
+        vectors occupy the same embedding space as module class vectors.
+
+        Note: pipeline_mixin.py (line 710-715) uses a different format that
+        includes card_description in component_text — but that causes overlap
+        with the inputs vector. This format keeps them cleanly separated.
+
+        Args:
+            component_paths: List of fully-qualified component paths
+
+        Returns:
+            Formatted identity text (Name/Type/Path blocks joined by ---)
+        """
+        if not component_paths:
+            return "instance_pattern"
+        parts = []
+        for path in component_paths:
+            name = path.split(".")[-1] if "." in path else path
+            parts.append(f"Name: {name}\nType: class\nPath: {path}")
+        return "\n---\n".join(parts)
+
     def _get_dsl_symbols(self) -> Dict[str, str]:
         """
         Get DSL symbol mappings from ModuleWrapper.
@@ -1046,15 +1072,23 @@ class FeedbackLoop:
         if not client:
             return None
 
-        # Embed the description for inputs vector (content)
-        description_vectors = self._embed_description(card_description)
-        if not description_vectors:
-            logger.warning("Cannot store pattern: failed to embed description")
+        # COMPONENTS VECTOR: Component identity from paths
+        component_identity_text = self._build_component_identity_text(component_paths)
+        component_vectors = self._embed_description(component_identity_text)
+        if not component_vectors:
+            logger.warning("Cannot store pattern: failed to embed component identity")
             return None
 
-        # Get ColBERT vectors for component identity
-        # For now, we'll use the description vectors (simplified)
-        colbert_vectors = description_vectors
+        # INPUTS VECTOR: Parameter values + card description
+        from adapters.module_wrapper.pipeline_mixin import format_instance_params
+
+        inputs_text = format_instance_params(instance_params)
+        if card_description:
+            inputs_text = f"{inputs_text} | {card_description}"
+        inputs_vectors = self._embed_description(inputs_text)
+        if not inputs_vectors:
+            logger.warning("Cannot store pattern: failed to embed inputs")
+            return None
 
         # Build DSL notation for searchability and embedding
         dsl_relationship_text = self._build_compact_structure_text(
@@ -1081,8 +1115,8 @@ class FeedbackLoop:
             point = PointStruct(
                 id=point_id,
                 vector={
-                    "components": colbert_vectors,
-                    "inputs": description_vectors,
+                    "components": component_vectors,
+                    "inputs": inputs_vectors,
                     "relationships": relationship_vector,
                 },
                 payload={
@@ -1092,6 +1126,8 @@ class FeedbackLoop:
                     "parent_paths": component_paths,  # Links to existing class points
                     "instance_params": instance_params,
                     "card_description": card_description,
+                    "component_identity_text": component_identity_text,
+                    "inputs_text": inputs_text,
                     # DSL notation for text search (e.g., "§[δ×3, Ƀ[ᵬ×2]] | Section DecoratedText×3...")
                     "relationship_text": dsl_relationship_text,
                     # Dual feedback fields
@@ -1400,6 +1436,215 @@ class FeedbackLoop:
                     continue
                 logger.error(f"❌ Failed to update feedback: {e}")
                 return False
+
+    def get_pattern_dashboard_data(self, card_id: str) -> Optional[Dict]:
+        """
+        Fetch enriched data for the feedback dashboard visualization.
+
+        Retrieves the full Qdrant point (with vectors and payload), computes
+        vector statistics, finds similar patterns, and returns a structured
+        dict for client-side rendering.
+
+        Args:
+            card_id: The card_id to look up
+
+        Returns:
+            Dict with payload, vector stats, similar patterns, and symbol map,
+            or None if the point cannot be found.
+        """
+        client = self._get_client()
+        if not client:
+            return None
+
+        try:
+            from qdrant_client import models
+
+            # Fetch the point with vectors
+            results, _ = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="card_id",
+                            match=models.MatchValue(value=card_id),
+                        ),
+                        models.FieldCondition(
+                            key="type",
+                            match=models.MatchValue(value="instance_pattern"),
+                        ),
+                    ]
+                ),
+                limit=1,
+                with_payload=True,
+                with_vectors=True,
+            )
+
+            if not results:
+                logger.warning(f"Dashboard: no pattern found for {card_id[:8]}...")
+                return None
+
+            point = results[0]
+            payload = point.payload or {}
+            vectors = point.vector or {}
+
+            # Compute vector stats for each named vector
+            vector_stats = {}
+            for name in ("components", "inputs", "relationships"):
+                vec_data = vectors.get(name)
+                if vec_data is not None:
+                    is_multi = name in ("components", "inputs")
+                    vector_stats[name] = self._compute_vector_stats(
+                        vec_data, is_multivector=is_multi
+                    )
+
+            # Find 5 nearest neighbors using the relationships vector (384d)
+            similar_patterns = []
+            rel_vec = vectors.get("relationships")
+            if rel_vec is not None:
+                try:
+                    nn_results = client.query_points(
+                        collection_name=COLLECTION_NAME,
+                        query=rel_vec,
+                        using="relationships",
+                        query_filter=models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="type",
+                                    match=models.MatchValue(value="instance_pattern"),
+                                ),
+                            ],
+                            must_not=[
+                                models.FieldCondition(
+                                    key="card_id",
+                                    match=models.MatchValue(value=card_id),
+                                ),
+                            ],
+                        ),
+                        limit=5,
+                        with_payload=True,
+                    )
+                    for p in nn_results.points:
+                        pp = p.payload or {}
+                        similar_patterns.append(
+                            {
+                                "score": round(p.score, 4),
+                                "card_description": pp.get("card_description", ""),
+                                "relationship_text": pp.get("relationship_text", ""),
+                                "parent_paths": pp.get("parent_paths", []),
+                                "content_feedback": pp.get("content_feedback", ""),
+                                "form_feedback": pp.get("form_feedback", ""),
+                            }
+                        )
+                except Exception as e:
+                    logger.warning(f"Dashboard: similar pattern search failed: {e}")
+
+            # Get DSL symbol map
+            symbol_map = self._get_dsl_symbols()
+
+            return {
+                "card_id": card_id,
+                "payload": {
+                    "card_description": payload.get("card_description", ""),
+                    "parent_paths": payload.get("parent_paths", []),
+                    "relationship_text": payload.get("relationship_text", ""),
+                    "instance_params": payload.get("instance_params", ""),
+                    "content_feedback": payload.get("content_feedback", ""),
+                    "form_feedback": payload.get("form_feedback", ""),
+                    "timestamp": payload.get("timestamp", ""),
+                    "pattern_type": payload.get("type", "instance_pattern"),
+                },
+                "vectors": vector_stats,
+                "similar_patterns": similar_patterns,
+                "symbol_map": symbol_map,
+            }
+
+        except Exception as e:
+            logger.error(f"Dashboard data fetch failed: {e}")
+            return None
+
+    @staticmethod
+    def _compute_vector_stats(
+        vector_data, is_multivector: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Compute summary statistics for an embedding vector.
+
+        For single vectors (relationships, 384d): L2 norm, mean, max, sparsity,
+        entropy, and top-20 activated dimensions.
+
+        For ColBERT multi-vectors (components/inputs): aggregate stats across
+        token vectors — mean of norms, token count, average sparsity/entropy.
+
+        Args:
+            vector_data: A list of floats (single) or list of lists (multi-vector)
+            is_multivector: True for ColBERT multi-vectors
+
+        Returns:
+            Dict of computed statistics
+        """
+        import math
+
+        def _single_stats(vec):
+            n = len(vec)
+            if n == 0:
+                return {"norm": 0, "mean": 0, "max": 0, "sparsity": 1.0, "entropy": 0}
+            sq_sum = sum(v * v for v in vec)
+            norm = math.sqrt(sq_sum)
+            mean_val = sum(vec) / n
+            max_val = max(abs(v) for v in vec)
+            sparse_count = sum(1 for v in vec if abs(v) < 0.01)
+            sparsity = round(sparse_count / n, 4)
+
+            # Shannon entropy on absolute values (normalized)
+            abs_vals = [abs(v) for v in vec]
+            total = sum(abs_vals) or 1.0
+            entropy = 0.0
+            for a in abs_vals:
+                p = a / total
+                if p > 0:
+                    entropy -= p * math.log2(p)
+
+            return {
+                "norm": round(norm, 4),
+                "mean": round(mean_val, 6),
+                "max": round(max_val, 4),
+                "sparsity": sparsity,
+                "entropy": round(entropy, 4),
+            }
+
+        if not is_multivector:
+            stats = _single_stats(vector_data)
+            # Top-20 activated dimensions
+            indexed = sorted(
+                enumerate(vector_data), key=lambda x: abs(x[1]), reverse=True
+            )
+            stats["top_activations"] = [
+                (idx, round(val, 4)) for idx, val in indexed[:20]
+            ]
+            return stats
+        else:
+            # Multi-vector: aggregate across token vectors
+            if not vector_data or not isinstance(vector_data[0], (list, tuple)):
+                return {
+                    "norm": 0,
+                    "mean": 0,
+                    "max": 0,
+                    "sparsity": 1.0,
+                    "entropy": 0,
+                    "token_count": 0,
+                }
+            token_count = len(vector_data)
+            per_token = [_single_stats(tv) for tv in vector_data]
+            return {
+                "norm": round(sum(s["norm"] for s in per_token) / token_count, 4),
+                "mean": round(sum(s["mean"] for s in per_token) / token_count, 6),
+                "max": round(max(s["max"] for s in per_token), 4),
+                "sparsity": round(
+                    sum(s["sparsity"] for s in per_token) / token_count, 4
+                ),
+                "entropy": round(sum(s["entropy"] for s in per_token) / token_count, 4),
+                "token_count": token_count,
+            }
 
     def _check_and_promote(self, point) -> bool:
         """

@@ -706,16 +706,17 @@ class PipelineMixin:
                     parent_paths = payload.get("parent_paths", []) or []
                     instance_params = payload.get("instance_params", {}) or {}
 
-                    # Component text
+                    # Component text — identity only, no card_description
+                    # (card_description belongs in the inputs vector)
                     component_text = f"Name: {name}\nType: instance_pattern"
-                    if card_desc:
-                        component_text += f"\nDescription: {card_desc}"
                     if parent_paths:
                         component_names = [pp.split(".")[-1] for pp in parent_paths[:5]]
                         component_text += f"\nComponents: {', '.join(component_names)}"
 
-                    # Inputs text
+                    # Inputs text — params + card description for semantic richness
                     inputs_text = format_instance_params(instance_params)
+                    if card_desc:
+                        inputs_text = f"{inputs_text} | {card_desc}"
 
                     # Relationships text with DSL
                     if parent_paths:

@@ -98,15 +98,29 @@ def setup_feedback_endpoints(mcp: FastMCP):
                     f"✅ Feedback updated: {card_id[:8]}... -> {feedback} ({feedback_label})"
                 )
                 emoji = "👍" if feedback == "positive" else "👎"
-                return HTMLResponse(
-                    status_code=200,
-                    content=_render_feedback_page(
+                message = f"Thanks for your {feedback_label} feedback! {emoji}"
+
+                # Try to render rich dashboard; fall back to simple page
+                try:
+                    dashboard_data = feedback_loop.get_pattern_dashboard_data(card_id)
+                except Exception:
+                    dashboard_data = None
+
+                if dashboard_data:
+                    from tools.feedback_dashboard import render_dashboard_page
+
+                    html = render_dashboard_page(
+                        dashboard_data, feedback, feedback_type, message
+                    )
+                else:
+                    html = _render_feedback_page(
                         success=True,
-                        message=f"Thanks for your {feedback_label} feedback! {emoji}",
+                        message=message,
                         feedback=feedback,
                         feedback_type=feedback_type,
-                    ),
-                )
+                    )
+
+                return HTMLResponse(status_code=200, content=html)
             else:
                 # Card ID not found - might be from before feedback loop was enabled
                 # Still thank the user but note we couldn't find the card
