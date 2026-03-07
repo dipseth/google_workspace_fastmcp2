@@ -21,7 +21,10 @@ except PackageNotFoundError:
 # Now import the rest of the modules
 from fastmcp import FastMCP
 
-from auth.fastmcp_oauth_endpoints import setup_oauth_endpoints_fastmcp
+from auth.fastmcp_oauth_endpoints import (
+    setup_oauth_endpoints_fastmcp,
+    setup_service_selection_routes,
+)
 
 # MCPAuthMiddleware removed - deprecated due to architectural mismatch (see auth/mcp_auth_middleware.py)
 from auth.jwt_auth import setup_jwt_auth  # Keep for fallback
@@ -768,6 +771,10 @@ if google_auth_provider:
             )
 
         logger.info("  ✅ Supplemental /oauth/status endpoint registered")
+
+        # Service selection routes are needed by start_google_auth scope-upgrade flow
+        setup_service_selection_routes(mcp)
+        logger.info("  ✅ Service selection routes registered (/auth/services/select)")
     except Exception as e:
         logger.warning(f"⚠️ Could not register supplemental OAuth endpoints: {e}")
 
