@@ -1315,39 +1315,55 @@ class SmartCardBuilderV2:
         built_children = []
         for _ in range(expected_count):
             if expected_child_type == "Button":
-                # Consume button from context
                 btn_params = self._consume_from_context("Button", context)
-                btn_obj = {"text": btn_params.get("text", "Button")}
-                if btn_params.get("url"):
-                    btn_obj["onClick"] = {"openLink": {"url": btn_params["url"]}}
-                # Add Material Icon if provided (e.g., "add_circle", "share")
-                if btn_params.get("icon"):
-                    btn_obj["icon"] = {"materialIcon": {"name": btn_params["icon"]}}
+                btn_obj = self._build_feedback_button_item(
+                    text=btn_params.get("text", "Button"),
+                    url=btn_params.get("url", ""),
+                    material_icon=btn_params.get("icon"),
+                )
                 built_children.append(btn_obj)
             elif expected_child_type == "GridItem":
                 grid_params = self._consume_from_context("GridItem", context)
-                grid_item = {
-                    "title": grid_params.get("title", f"Item {len(built_children) + 1}")
-                }
-                if grid_params.get("subtitle"):
-                    grid_item["subtitle"] = grid_params["subtitle"]
-                if grid_params.get("image_url"):
-                    grid_item["image"] = {"imageUri": grid_params["image_url"]}
-                elif grid_params.get("image"):
-                    grid_item["image"] = grid_params["image"]
-                built_children.append(grid_item)
+                grid_item = self._build_component(
+                    "GridItem",
+                    {
+                        "title": grid_params.get(
+                            "title", f"Item {len(built_children) + 1}"
+                        ),
+                        "subtitle": grid_params.get("subtitle"),
+                        "image": grid_params.get("image"),
+                    },
+                )
+                if grid_item:
+                    # Add image_url if provided (GridItem uses imageUri)
+                    if grid_params.get("image_url") and "image" not in grid_item:
+                        grid_item["image"] = {"imageUri": grid_params["image_url"]}
+                    built_children.append(grid_item)
+                else:
+                    # Fallback if wrapper unavailable
+                    fallback = {
+                        "title": grid_params.get(
+                            "title", f"Item {len(built_children) + 1}"
+                        )
+                    }
+                    if grid_params.get("subtitle"):
+                        fallback["subtitle"] = grid_params["subtitle"]
+                    if grid_params.get("image_url"):
+                        fallback["image"] = {"imageUri": grid_params["image_url"]}
+                    elif grid_params.get("image"):
+                        fallback["image"] = grid_params["image"]
+                    built_children.append(fallback)
             elif expected_child_type == "Chip":
-                # Consume chip from context (similar to Button)
                 chip_params = self._consume_from_context("Chip", context)
-                chip_obj = {
-                    "label": chip_params.get("label")
-                    or chip_params.get("text", f"Chip {len(built_children) + 1}")
-                }
-                if chip_params.get("url"):
-                    chip_obj["onClick"] = {"openLink": {"url": chip_params["url"]}}
-                # Add icon if provided
+                label = chip_params.get("label") or chip_params.get(
+                    "text", f"Chip {len(built_children) + 1}"
+                )
+                url = chip_params.get("url", "")
+                chip_obj = self._build_feedback_chip_item(
+                    label, url or "https://example.com"
+                )
                 if chip_params.get("icon"):
-                    chip_obj["icon"] = {"materialIcon": {"name": chip_params["icon"]}}
+                    chip_obj["icon"] = self._build_material_icon(chip_params["icon"])
                 built_children.append(chip_obj)
             elif expected_child_type == "CarouselCard":
                 # Consume carousel card from context and build via wrapper
@@ -2594,9 +2610,13 @@ class SmartCardBuilderV2:
             # Fallback to simple text paragraph
             config = TEXT_CONFIGS["text_paragraph"]
 
-        # Handle direct dict components (chip_text)
+        # Handle direct dict components (chip_text — display-only prompt chip)
+        # Google Chat requires onClick on every chip — omitting it silently drops the card.
+        # Build chip via wrapper (_build_feedback_chip_item) then disable it.
         if config.get("direct_dict"):
-            return {"chipList": {"chips": [{"label": text, "enabled": False}]}}
+            chip_item = self._build_feedback_chip_item(text, "https://example.com")
+            chip_item["enabled"] = False
+            return {"chipList": {"chips": [chip_item]}}
 
         # Apply text formatting if configured
         format_fn = config.get("format_text")
@@ -3175,7 +3195,10 @@ class SmartCardBuilderV2:
 
         logger.debug(f"🎲 Feedback assembly: {assembly_metadata}")
 
-        # Build section with collapsible style and custom expand/collapse buttons
+        # Build section with collapsible style and custom expand/collapse buttons.
+        # NOTE: collapseControl buttons are structural UI chrome — NOT interactive
+        # card widgets. They don't use onClick; the Chat client manages the toggle.
+        # Using _build_material_icon for icon dicts.
         section = {
             "widgets": widgets,
             "collapsible": True,
@@ -3184,16 +3207,12 @@ class SmartCardBuilderV2:
                 "horizontalAlignment": "START",
                 "expandButton": {
                     "text": "Share Card Feedback",
-                    "icon": {
-                        "materialIcon": {"name": "arrow_cool_down"},
-                    },
+                    "icon": self._build_material_icon("arrow_cool_down"),
                     "type": "BORDERLESS",
                 },
                 "collapseButton": {
                     "text": "Hide Feedback",
-                    "icon": {
-                        "materialIcon": {"name": "keyboard_double_arrow_up"},
-                    },
+                    "icon": self._build_material_icon("keyboard_double_arrow_up"),
                     "type": "BORDERLESS",
                 },
             },

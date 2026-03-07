@@ -346,10 +346,10 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
     from config.settings import settings
     from gchat.wrapper_dag import _warm_start_with_dag_patterns
 
-    logger.info("🔧 Creating singleton ModuleWrapper for card_framework...")
+    logger.info("🔧 Creating singleton ModuleWrapper for card_framework.v2...")
 
     wrapper = ModuleWrapper(
-        module_or_name="card_framework",
+        module_or_name="card_framework.v2",
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
         collection_name=settings.card_collection,

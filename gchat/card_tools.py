@@ -1270,6 +1270,44 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
             logger.info("✅ Pre-send validation passed - card has renderable content")
 
+            # Structural validation — fix silent-failure patterns (e.g. buttons without onClick)
+            from gchat.card_builder.validation import fix_structure, validate_structure
+
+            is_valid_structure, structure_issues = validate_structure(final_card)
+            if not is_valid_structure:
+                logger.warning(
+                    f"⚠️ Structural issues detected ({len(structure_issues)}), auto-repairing..."
+                )
+                for issue in structure_issues:
+                    logger.warning(f"  - {issue}")
+
+                # Auto-repair: strip invalid children so the rest of the card renders
+                fixed_card, fixes_applied = fix_structure(final_card)
+                for fix in fixes_applied:
+                    logger.info(f"  🔧 {fix}")
+
+                # Replace the card in google_format_card (for DSL regeneration)
+                if (
+                    isinstance(google_format_card, dict)
+                    and "card" in google_format_card
+                ):
+                    google_format_card["card"] = fixed_card
+
+                # Also fix in message_body (the actual payload sent to webhook)
+                cards_v2 = message_body.get("cardsV2", [])
+                for card_wrapper in cards_v2:
+                    if isinstance(card_wrapper, dict) and "card" in card_wrapper:
+                        card_wrapper["card"] = fixed_card
+                        break
+
+                # Append structural fixes to content_issues for the response
+                content_issues = (content_issues or []) + [
+                    f"[auto-fixed] {f}" for f in fixes_applied
+                ]
+
+                # Re-generate DSL notation after fix
+                rendered_dsl = builder.generate_dsl_notation(google_format_card)
+
             # Choose delivery method based on webhook_url
             if webhook_url:
                 await progress.set_message("Sending card via webhook...")
@@ -1449,6 +1487,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             userEmail=user_google_email,
                             httpStatus=200,
                             validationPassed=True,
+                            validationIssues=content_issues if content_issues else None,
                             dslDetected=dsl_detected,
                             renderedDslNotation=rendered_dsl,
                             jinjaTemplateApplied=jinja_template_applied,
