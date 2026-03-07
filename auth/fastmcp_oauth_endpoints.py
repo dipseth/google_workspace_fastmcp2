@@ -582,7 +582,6 @@ def setup_service_selection_routes(mcp) -> None:
     of whether GoogleProvider or the legacy OAuth system is active.  Extracted
     so that ``server.py`` can call this independently.
     """
-    from auth.google_auth import _generate_service_selection_html
 
     @mcp.custom_route("/auth/services/select", methods=["GET", "OPTIONS"])
     async def show_service_selection(request: Any):
