@@ -1127,10 +1127,13 @@ class SmartCardBuilderV2:
         component_name: str,
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Consume resource from context. Delegates to card_builder.context."""
+        """Consume resource from context. Delegates to mixin or card_builder.context."""
+        wrapper = self._get_wrapper()
+        if wrapper and hasattr(wrapper, "consume_from_context"):
+            return wrapper.consume_from_context(component_name, context)
         from gchat.card_builder.context import consume_from_context
 
-        return consume_from_context(component_name, context, self._get_wrapper())
+        return consume_from_context(component_name, context, wrapper)
 
     def _build_widget_generic(
         self,

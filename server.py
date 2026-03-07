@@ -1,6 +1,6 @@
-"""FastMCP2 Google Drive Upload Server.
+"""FastMCP2 Google Workspace MCP Server.
 
-A focused MCP server for uploading files to Google Drive with OAuth authentication.
+A comprehensive MCP server for Google Workspace integration with OAuth 2.1 authentication.
 """
 
 import os
@@ -27,6 +27,21 @@ from auth.fastmcp_oauth_endpoints import setup_oauth_endpoints_fastmcp
 from auth.jwt_auth import setup_jwt_auth  # Keep for fallback
 from auth.middleware import CredentialStorageMode
 from config.settings import settings
+
+# ─── SSL CA Bundle Fix (must be AFTER settings import) ───
+# Python 3.11 on macOS/Homebrew often can't find system CA certificates for outgoing
+# HTTPS connections. This causes authlib/httpx token exchange with Google to fail:
+#   "SSL: CERTIFICATE_VERIFY_FAILED - unable to get local issuer certificate"
+# Fix: Always set SSL_CERT_FILE to certifi's CA bundle for outgoing connections.
+# Uvicorn's server-side SSL uses ssl_certfile/ssl_keyfile kwargs (not this env var).
+try:
+    import certifi
+
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+    logger.info(f"🔒 SSL_CERT_FILE set to certifi CA bundle: {certifi.where()}")
+except ImportError:
+    logger.warning("⚠️ certifi not installed — outgoing HTTPS may fail on macOS")
+
 from docs.docs_tools import setup_docs_tools
 from drive.drive_tools import setup_drive_comprehensive_tools
 from drive.file_management_tools import setup_file_management_tools
@@ -131,15 +146,99 @@ from lifespans import (
     register_template_middleware,
 )
 
-# Temporary: Disable GoogleProvider to fix MCP Inspector OAuth conflicts
+# ─── GoogleProvider Setup (OAuth 2.1 for Claude.ai / Desktop / MCP Inspector) ───
+# When FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID and SECRET are set, we use FastMCP's
+# built-in GoogleProvider which auto-registers RFC 9728/8414 compliant discovery
+# endpoints. This makes the server work seamlessly with Claude.ai, Claude Desktop,
+# and any MCP client that follows the OAuth 2.1 + DCR specification.
+#
+# When those env vars are NOT set, we fall back to the legacy custom OAuth proxy
+# system (which requires manual endpoint registration and doesn't work with
+# Claude.ai's expected discovery flow).
 google_auth_provider = None
 
-logger.info("🔄 GoogleProvider temporarily disabled for MCP Inspector compatibility")
-logger.info("  Using proven legacy OAuth system")
-logger.info("  All discovery endpoints will be available")
-logger.info("  No transaction ID conflicts")
+# Check if FastMCP GoogleProvider credentials are configured
+_fastmcp_google_client_id = settings.fastmcp_server_auth_google_client_id or os.getenv(
+    "FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID", ""
+)
+_fastmcp_google_client_secret = (
+    settings.fastmcp_server_auth_google_client_secret
+    or os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET", "")
+)
 
-# Removed modern_google_provider imports - using existing auth system
+if _fastmcp_google_client_id and _fastmcp_google_client_secret:
+    try:
+        from fastmcp.server.auth.providers.google import GoogleProvider
+
+        # The GoogleProvider handles:
+        # - /.well-known/oauth-protected-resource (RFC 9728)
+        # - /.well-known/oauth-authorization-server (RFC 8414)
+        # - /authorize (OAuth authorization)
+        # - /token (token exchange)
+        # - /auth/callback (OAuth redirect)
+        # - Dynamic Client Registration (RFC 7591)
+        # - PKCE (S256) automatically
+        # - Bearer token validation on /mcp endpoint
+        google_auth_provider = GoogleProvider(
+            client_id=_fastmcp_google_client_id,
+            client_secret=_fastmcp_google_client_secret,
+            base_url=settings.base_url,
+            required_scopes=["openid", "email", "profile"],
+            redirect_path="/auth/callback",  # FastMCP default
+        )
+
+        # ─── API Key Bypass for non-OAuth clients (e.g., Roo Code) ───
+        # MCP_API_KEY allows pre-shared static tokens to bypass the full OAuth flow.
+        # Clients send: Authorization: Bearer <MCP_API_KEY>
+        # When matched, we return a synthetic AccessToken without calling Google.
+        _mcp_api_key = os.getenv("MCP_API_KEY", "") or getattr(
+            settings, "mcp_api_key", ""
+        )
+        if _mcp_api_key:
+            from fastmcp.server.auth.auth import AccessToken as _FastMCPAccessToken
+
+            _original_load_access_token = google_auth_provider.load_access_token
+
+            async def _load_access_token_with_api_key(token: str):
+                """Check for API key before delegating to OAuth validation."""
+                if token == _mcp_api_key:
+                    logger.debug("🔑 API key authentication — bypassing OAuth")
+                    return _FastMCPAccessToken(
+                        token=token,
+                        client_id="api-key-client",
+                        scopes=["openid", "email", "profile"],
+                        expires_at=None,  # Never expires
+                        claims={"sub": "api-key-user", "auth_method": "api_key"},
+                    )
+                return await _original_load_access_token(token)
+
+            google_auth_provider.load_access_token = _load_access_token_with_api_key
+            logger.info("  🔑 API key bypass: enabled (MCP_API_KEY set)")
+        else:
+            logger.info("  🔑 API key bypass: disabled (no MCP_API_KEY)")
+
+        logger.info("✅ GoogleProvider configured for OAuth 2.1 (MCP protocol auth)")
+        logger.info(f"  🌐 Base URL: {settings.base_url}")
+        logger.info("  🔐 PKCE: Automatic (S256)")
+        logger.info("  📋 DCR: Built-in (RFC 7591)")
+        logger.info("  🔍 Discovery: Auto-registered (RFC 9728 + RFC 8414)")
+        logger.info("  🎯 Callback: /auth/callback")
+        logger.info("  ✅ Compatible with: Claude.ai, Claude Desktop, MCP Inspector")
+
+    except ImportError as e:
+        logger.warning(f"⚠️ GoogleProvider not available (FastMCP version issue): {e}")
+        logger.info("  Falling back to legacy OAuth system")
+    except Exception as e:
+        logger.error(f"❌ Failed to create GoogleProvider: {e}", exc_info=True)
+        logger.info("  Falling back to legacy OAuth system")
+else:
+    logger.info(
+        "🔄 GoogleProvider not configured (no FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID)"
+    )
+    logger.info("  Using legacy OAuth proxy system")
+    logger.info("  ⚠️ Claude.ai / Claude Desktop may not work seamlessly")
+    logger.info("  💡 To enable: set FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID and")
+    logger.info("     FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET in .env")
 
 # Create FastMCP instance with composed lifespans for proper lifecycle management
 # Lifespans handle: Qdrant init/shutdown, ColBERT init, session state persistence,
@@ -152,6 +251,10 @@ mcp = FastMCP(
     instructions="""Google Workspace MCP Server - Comprehensive access to Google services.
 
 ## Authentication
+This server uses OAuth 2.1 for authentication. When connecting from Claude.ai
+or Claude Desktop, authentication is handled automatically via the MCP protocol.
+
+For manual/legacy auth:
 1. Call `start_google_auth` with your email to begin OAuth flow
 2. Complete authentication in browser
 3. Call `check_drive_auth` to verify credentials
@@ -169,12 +272,18 @@ mcp = FastMCP(
 
 ## Tool Management
 Use `manage_tools` to list, enable, or disable tools at runtime.""",
-    auth=None,  # No GoogleProvider - use legacy OAuth system
+    auth=google_auth_provider,  # GoogleProvider when configured, None for legacy fallback
 )
 
-logger.info("🔐 FastMCP running with legacy OAuth system")
-logger.info("  All existing OAuth endpoints active")
-logger.info("  MCP Inspector discovery available")
+if google_auth_provider:
+    logger.info("🔐 FastMCP running with GoogleProvider OAuth 2.1")
+    logger.info("  ✅ RFC 9728 Protected Resource Metadata: auto-registered")
+    logger.info("  ✅ RFC 8414 Authorization Server Metadata: auto-registered")
+    logger.info("  ✅ RFC 7591 Dynamic Client Registration: auto-registered")
+    logger.info("  ✅ Bearer token validation: active on /mcp endpoint")
+else:
+    logger.info("🔐 FastMCP running with legacy OAuth system (no GoogleProvider)")
+    logger.info("  Custom OAuth endpoints will be registered below")
 
 # --- Code Mode Transform (opt-in) ---
 if settings.enable_code_mode:
@@ -202,10 +311,10 @@ from auth.middleware import create_enhanced_auth_middleware
 
 auth_middleware = create_enhanced_auth_middleware(
     storage_mode=credential_storage_mode,
-    google_provider=None,  # No GoogleProvider - use legacy system
+    google_provider=google_auth_provider,  # Pass GoogleProvider for unified auth when available
 )
 # Enable service selection for existing OAuth system
-logger.info("🔧 Configuring service selection for legacy OAuth system")
+logger.info("🔧 Configuring service selection for OAuth system")
 auth_middleware.enable_service_selection(enabled=True)
 logger.info("✅ Service selection interface enabled for OAuth flows")
 
@@ -591,52 +700,132 @@ except Exception as e:
 logger.info("📋 Dynamic MCP instructions will be updated via lifespan on server start")
 
 
-# Setup OAuth endpoints (now using legacy system)
-logger.info("🔍 Setting up OAuth discovery endpoints...")
-try:
-    setup_oauth_endpoints_fastmcp(mcp)
-    logger.info("✅ OAuth discovery endpoints configured")
+# ─── OAuth Endpoint Setup ───
+# When GoogleProvider is active, FastMCP auto-registers all RFC-compliant OAuth
+# discovery and operational endpoints. Custom endpoints are ONLY needed when
+# GoogleProvider is not available (legacy mode).
+if google_auth_provider:
+    # GoogleProvider is active — it already registered all discovery endpoints.
+    # Only register supplemental endpoints that don't conflict (status, service selection).
     logger.info(
-        f"  Discovery: {settings.base_url}/.well-known/oauth-protected-resource/mcp"
-    )
-    logger.info(
-        f"  Authorization: {settings.base_url}/.well-known/oauth-authorization-server"
-    )
-    logger.info(f"  Registration: {settings.base_url}/oauth/register")
-    logger.info(f"  Callback: {settings.base_url}/oauth2callback")
-
-except Exception as e:
-    logger.error(f"❌ Failed to setup OAuth endpoints: {e}", exc_info=True)
-
-# Authentication System Setup with Access Control
-if use_google_oauth:
-    # Setup Google OAuth with ACCESS CONTROL enforcement
-    from auth.token_validator import create_access_controlled_auth_provider
-
-    jwt_auth_provider = create_access_controlled_auth_provider(
-        jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
-        issuer="https://accounts.google.com",
-        required_scopes=["openid", "email"],
-    )
-    mcp._auth = jwt_auth_provider
-    logger.info(
-        "🔐 Google OAuth Bearer Token authentication enabled WITH ACCESS CONTROL"
+        "🔍 GoogleProvider active — RFC-compliant OAuth endpoints auto-registered"
     )
     logger.info(
-        "🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs"
+        f"  ✅ Protected Resource:  {settings.base_url}/.well-known/oauth-protected-resource"
     )
-    logger.info("🎯 OAuth issuer: https://accounts.google.com")
-    logger.info("🔒 Access enforcement: Only users with stored credentials can connect")
+    logger.info(
+        f"  ✅ Auth Server Metadata: {settings.base_url}/.well-known/oauth-authorization-server"
+    )
+    logger.info(f"  ✅ Authorization:        {settings.base_url}/authorize")
+    logger.info(f"  ✅ Token Exchange:       {settings.base_url}/token")
+    logger.info(f"  ✅ Callback:             {settings.base_url}/auth/callback")
+    logger.info(f"  ✅ MCP Endpoint:         {settings.base_url}/mcp")
 
-elif enable_jwt_auth:
-    # Fallback to custom JWT for development/testing
-    jwt_auth_provider = setup_jwt_auth()
-    mcp._auth = jwt_auth_provider
-    logger.info("🔐 Custom JWT Bearer Token authentication enabled (development mode)")
-    logger.info("⚠️  No access control on JWT tokens - for testing only")
+    # Register supplemental status/service-selection endpoints that don't conflict
+    # with GoogleProvider's built-in routes
+    try:
+        # Only register non-conflicting custom routes (status check, service selection page)
+        @mcp.custom_route("/oauth/status", methods=["GET", "OPTIONS"])
+        async def oauth_status_check_gp(request):
+            """OAuth authentication status polling endpoint (supplemental)."""
+            from starlette.responses import JSONResponse, Response
+
+            if request.method == "OPTIONS":
+                return Response(
+                    status_code=200, headers={"Access-Control-Allow-Origin": "*"}
+                )
+            import json
+            from datetime import datetime
+            from pathlib import Path as _Path
+
+            oauth_data_path = (
+                _Path(settings.credentials_dir) / ".oauth_authentication.json"
+            )
+            if oauth_data_path.exists():
+                with open(oauth_data_path, "r") as f:
+                    oauth_data = json.load(f)
+                authenticated_email = oauth_data.get("authenticated_email")
+                if authenticated_email:
+                    return JSONResponse(
+                        content={
+                            "authenticated": True,
+                            "user_email": authenticated_email,
+                        },
+                        headers={
+                            "Access-Control-Allow-Origin": "*",
+                            "Cache-Control": "no-store",
+                        },
+                    )
+            return JSONResponse(
+                content={
+                    "authenticated": False,
+                    "message": "No authentication data found",
+                },
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "no-store",
+                },
+            )
+
+        logger.info("  ✅ Supplemental /oauth/status endpoint registered")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not register supplemental OAuth endpoints: {e}")
+
+    # Do NOT set mcp._auth — GoogleProvider already handles Bearer token validation
+    logger.info(
+        "🔐 Authentication: Handled by GoogleProvider (no manual _auth override)"
+    )
 
 else:
-    logger.info("⚠️ Authentication DISABLED (for testing)")
+    # Legacy mode: register all custom OAuth discovery + operational endpoints
+    logger.info("🔍 Setting up legacy OAuth discovery endpoints...")
+    try:
+        setup_oauth_endpoints_fastmcp(mcp)
+        logger.info("✅ Legacy OAuth discovery endpoints configured")
+        logger.info(
+            f"  Discovery: {settings.base_url}/.well-known/oauth-protected-resource/mcp"
+        )
+        logger.info(
+            f"  Authorization: {settings.base_url}/.well-known/oauth-authorization-server"
+        )
+        logger.info(f"  Registration: {settings.base_url}/oauth/register")
+        logger.info(f"  Callback: {settings.base_url}/oauth2callback")
+    except Exception as e:
+        logger.error(f"❌ Failed to setup legacy OAuth endpoints: {e}", exc_info=True)
+
+    # Legacy Authentication System Setup with Access Control
+    if use_google_oauth:
+        # Setup Google OAuth with ACCESS CONTROL enforcement
+        from auth.token_validator import create_access_controlled_auth_provider
+
+        jwt_auth_provider = create_access_controlled_auth_provider(
+            jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+            issuer="https://accounts.google.com",
+            required_scopes=["openid", "email"],
+        )
+        mcp._auth = jwt_auth_provider
+        logger.info(
+            "🔐 Legacy Google OAuth Bearer Token authentication enabled WITH ACCESS CONTROL"
+        )
+        logger.info(
+            "🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs"
+        )
+        logger.info("🎯 OAuth issuer: https://accounts.google.com")
+        logger.info(
+            "🔒 Access enforcement: Only users with stored credentials can connect"
+        )
+
+    elif enable_jwt_auth:
+        # Fallback to custom JWT for development/testing
+        jwt_auth_provider = setup_jwt_auth()
+        mcp._auth = jwt_auth_provider
+        logger.info(
+            "🔐 Custom JWT Bearer Token authentication enabled (development mode)"
+        )
+        logger.info("⚠️  No access control on JWT tokens - for testing only")
+
+    else:
+        logger.info("⚠️ Authentication DISABLED (for testing)")
 
 
 def main():

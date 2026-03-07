@@ -750,13 +750,18 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 _card_framework_wrapper
                 and _card_framework_wrapper.reverse_symbol_mapping
             ):
-                from gchat.card_builder.symbol_params import resolve_symbol_params
+                if hasattr(_card_framework_wrapper, "resolve_symbol_params"):
+                    card_params = _card_framework_wrapper.resolve_symbol_params(
+                        card_params
+                    )
+                else:
+                    from gchat.card_builder.symbol_params import resolve_symbol_params
 
-                card_params = resolve_symbol_params(
-                    card_params,
-                    _card_framework_wrapper.reverse_symbol_mapping,
-                    wrapper=_card_framework_wrapper,
-                )
+                    card_params = resolve_symbol_params(
+                        card_params,
+                        _card_framework_wrapper.reverse_symbol_mapping,
+                        wrapper=_card_framework_wrapper,
+                    )
 
             # =================================================================
             # EXTRACT MESSAGE-LEVEL PARAMS FROM card_params (early extraction)

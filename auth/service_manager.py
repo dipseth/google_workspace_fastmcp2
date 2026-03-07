@@ -140,38 +140,6 @@ def _get_scope_groups() -> Dict[str, str]:
     """
     Get scope groups dictionary from centralized registry.
 
-    This function provides backward compatibility for legacy _FALLBACK_SCOPE_GROUPS usage
-    while automatically redirecting to the new centralized scope registry.
-    Falls back to empty dict if the registry is unavailable.
-
-    Returns:
-        Dictionary mapping legacy scope names to scope URLs
-    """
-    if _COMPATIBILITY_AVAILABLE:
-        try:
-            # Use scope registry to get legacy scope mappings
-            legacy_mappings = {}
-
-            # Build legacy mappings from scope registry
-            for service, scopes in ScopeRegistry.GOOGLE_API_SCOPES.items():
-                for scope_name, scope_url in scopes.items():
-                    legacy_key = f"{service}_{scope_name}"
-                    legacy_mappings[legacy_key] = scope_url
-
-            return legacy_mappings
-        except Exception as e:
-            logger.warning(
-                f"Error getting scope groups from registry, using fallback: {e}"
-            )
-            return {}
-    else:
-        return {}
-
-
-def _get_scope_groups() -> Dict[str, str]:
-    """
-    Get scope groups dictionary from centralized registry.
-
     This function provides backward compatibility for legacy SCOPE_GROUPS usage
     while automatically redirecting to the new centralized scope registry.
     Falls back to the original hardcoded scopes if the registry is unavailable.
@@ -413,6 +381,25 @@ async def get_google_service(
     # Get valid credentials
     credentials = get_valid_credentials(user_email)
     if not credentials:
+        # Check if user is authenticated via GoogleProvider (identity-only)
+        # and just needs a scope upgrade for API access
+        try:
+            from .dual_auth_bridge import get_dual_auth_bridge
+
+            bridge = get_dual_auth_bridge()
+            if bridge.is_primary_account(user_email):
+                raise GoogleServiceError(
+                    f"**Scope Upgrade Required for {service_type.title()}**\n\n"
+                    f"You're authenticated as {user_email} (via Google sign-in), "
+                    f"but this only verifies your identity. To access Google {service_type.title()}, "
+                    f"you need to grant API permissions.\n\n"
+                    f"**Run:** `start_google_auth` with your email ({user_email})\n\n"
+                    f"This is a one-time step — once completed, all Google services "
+                    f"will work automatically."
+                )
+        except ImportError:
+            pass
+
         raise GoogleServiceError(
             f"No valid credentials found for {user_email}. "
             f"Please authenticate first using the start_google_auth tool."

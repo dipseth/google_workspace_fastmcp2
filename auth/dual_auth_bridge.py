@@ -113,6 +113,43 @@ class DualAuthBridge:
         """Check if an email is a secondary account."""
         return user_email in self._secondary_accounts
 
+    def needs_scope_upgrade(self, user_email: str) -> bool:
+        """Check if a user has identity auth but no API credentials.
+
+        Returns True when the user authenticated via GoogleProvider (identity-only
+        scopes: openid, email, profile) but has no file-based OAuth credentials
+        with Google API scopes (Drive, Gmail, etc.).
+
+        This is the trigger for the scope upgrade flow — the user needs to run
+        start_google_auth to obtain API-level credentials.
+        """
+        if not user_email:
+            return False
+
+        # User must be known to the bridge (authenticated via some flow)
+        is_known = self.is_primary_account(user_email) or self.is_secondary_account(
+            user_email
+        )
+        if not is_known:
+            return False
+
+        # Check if file-based API credentials exist
+        from .google_auth import get_valid_credentials
+
+        credentials = get_valid_credentials(user_email)
+        if credentials and not credentials.expired:
+            return False  # Has valid API credentials
+
+        # User is authenticated (identity) but has no API credentials
+        return True
+
+    def is_identity_only(self, user_email: str) -> bool:
+        """Check if user only has identity-level auth (GoogleProvider) without API credentials.
+
+        Alias for needs_scope_upgrade — more descriptive for conditional checks.
+        """
+        return self.needs_scope_upgrade(user_email)
+
     def get_active_account(self) -> Optional[str]:
         """
         Get the currently active account.

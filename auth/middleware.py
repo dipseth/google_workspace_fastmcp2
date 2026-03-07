@@ -1018,6 +1018,10 @@ class AuthMiddleware(Middleware):
         with GoogleProvider authentication. This is a key part of the unified
         OAuth architecture that maintains backward compatibility.
 
+        When the user has identity-only auth (GoogleProvider) but no API credentials,
+        this is detected and logged — the user will get a clear "scope upgrade"
+        message when they try to use a Google API tool.
+
         Args:
             user_email: User's email address
         """
@@ -1028,7 +1032,15 @@ class AuthMiddleware(Middleware):
             existing_credentials = get_valid_credentials(user_email)
             if existing_credentials and not existing_credentials.expired:
                 logger.debug(
-                    f"✅ User {user_email} has valid legacy credentials, no bridging needed"
+                    f"✅ User {user_email} has valid API credentials, no bridging needed"
+                )
+                return
+
+            # Check if this is an identity-only user (GoogleProvider without API creds)
+            if self._dual_auth_bridge.needs_scope_upgrade(user_email):
+                logger.info(
+                    f"🔑 User {user_email} authenticated via GoogleProvider (identity-only). "
+                    f"API tools will prompt for scope upgrade via start_google_auth."
                 )
                 return
 
