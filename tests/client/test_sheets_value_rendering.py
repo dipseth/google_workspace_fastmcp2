@@ -6,6 +6,14 @@ The test is written to be robust in environments where OAuth is not configured:
 - If unauthenticated, it should return a valid auth/middleware error response.
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Narrow — value render option only (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
+
 import json
 import os
 

@@ -1,5 +1,12 @@
 """Test suite for Phase 3.2: MCP Metadata Integration using FastMCP Client SDK."""
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Phase-specific: Phase 3.2 validation, overlaps registry_discovery (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import pytest
 
 from .base_test_config import TEST_EMAIL

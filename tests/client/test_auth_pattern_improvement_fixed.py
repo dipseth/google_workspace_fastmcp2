@@ -18,6 +18,14 @@
 - Serves as the foundational pattern that other tests should follow
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Superseded by standardized framework — every test now tests auth patterns (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
+
 import os
 
 import httpx

@@ -4,6 +4,13 @@ Simple test for the refactored service list resources using FastMCP Client SDK.
 This tests the new tag-based discovery and forward() pattern implementation.
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Overlaps test_tag_based_resource_middleware_integration (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import json
 
 import pytest

@@ -11,6 +11,14 @@ These tests verify that service://{service}/{list_type} resources properly call
 the underlying tools and return real data instead of errors or example data.
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "One-time regression validation — bug fixes now covered by service tests (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
+
 import json
 
 import pytest

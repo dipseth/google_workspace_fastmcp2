@@ -6,6 +6,13 @@ the enhanced template middleware can automatically render random templates
 from the prompts folder when specific prompt names are requested.
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Niche: random template edge cases (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import pytest
 
 

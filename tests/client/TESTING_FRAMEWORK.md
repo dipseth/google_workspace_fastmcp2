@@ -563,6 +563,16 @@ uv run pytest tests/client/test_gmail_tools.py -v -s
 
 ## 📊 Environment Variables
 
+### Authentication (Important!)
+
+- `MCP_API_KEY`: **Pre-shared API key for test auth** (preferred). When set, tests send
+  `Authorization: Bearer <MCP_API_KEY>` which the server's API key bypass accepts without
+  OAuth. This is the recommended method when GoogleProvider is active.
+  Generate with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+  Must match the same `MCP_API_KEY` in the server's `.env`.
+- `ENABLE_JWT_AUTH`: Legacy JWT auth toggle (default: true). When true AND `test_tokens.json`
+  exists, tests use JWT tokens from that file. Rarely needed now.
+
 ### Required
 
 - `TEST_EMAIL_ADDRESS`: Email address for testing (default: test_example@gmail.com)
@@ -582,6 +592,8 @@ uv run pytest tests/client/test_gmail_tools.py -v -s
 - `ENABLE_HTTPS`: Enable HTTPS mode
 - `SSL_CERT_FILE`: SSL certificate file path
 - `SSL_KEY_FILE`: SSL key file path
+- `MCP_CA_BUNDLE`: Path to CA bundle for TLS verification in tests (e.g., mkcert rootCA.pem)
+- `MCP_TEST_TLS_VERIFY`: Set to `true` to enable TLS verification in test client (default: false)
 
 ## 🎨 Customization
 

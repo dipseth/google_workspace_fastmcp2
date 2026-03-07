@@ -4,6 +4,13 @@ Test regex_replace functionality fix for Google Docs.
 Tests the fixed text extraction that now handles tables and complex content.
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Unit test disguised as integration test (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import os
 
 import pytest

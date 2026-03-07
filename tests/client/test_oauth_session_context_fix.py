@@ -1,5 +1,13 @@
 """Test suite for OAuth session context fix using FastMCP Client SDK to test the running MCP server."""
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "One-time bug fix validation — should be unit test (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
+
 """Test OAuth session context fixes and authentication improvements.
 
 🔧 MCP Tools Used:

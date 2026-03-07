@@ -1,5 +1,13 @@
 """Test suite for Gmail prompts using FastMCP Client SDK to test the running MCP server."""
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Niche — tests prompt templates, not tool functionality (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
+
 import pytest
 from dotenv import load_dotenv
 

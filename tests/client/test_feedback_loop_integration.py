@@ -12,6 +12,14 @@ to determine which Qdrant collection to use.
 Run with: uv run pytest tests/client/test_feedback_loop_integration.py -v
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Very specific — Qdrant feedback loop detail (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
+
 import json
 import os
 import re

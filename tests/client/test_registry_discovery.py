@@ -1,5 +1,12 @@
 """Test suite for Phase 3.1: Registry-based Tool Discovery using FastMCP Client SDK."""
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Overlaps test_list_tools and manage_tools tests (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import pytest
 
 from .base_test_config import TEST_EMAIL
