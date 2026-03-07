@@ -150,8 +150,10 @@ def consume_from_context(
                 params["title"] = resource.get("title", f"Card {current_index + 1}")
                 if resource.get("subtitle"):
                     params["subtitle"] = resource["subtitle"]
-                if resource.get("image_url"):
-                    params["image_url"] = resource["image_url"]
+                # Accept both "image_url" and "image" keys for image URLs
+                img = resource.get("image_url") or resource.get("image")
+                if img:
+                    params["image_url"] = img
                 if resource.get("text"):
                     params["text"] = resource["text"]
                 if resource.get("buttons"):

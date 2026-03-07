@@ -19,8 +19,10 @@ from adapters.module_wrapper.types import (
 from gchat.card_builder.constants import COMPONENT_PARAMS
 from gchat.card_builder.metadata import (
     get_children_field,
+    get_context_resource,
     is_empty_component,
 )
+from gchat.card_builder.rendering import get_json_key
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +253,17 @@ class PreparedPattern:
         buttons_consumed = False
         image_consumed = False
 
+        def _track_consumption(name: ComponentName) -> None:
+            """Track what input category was consumed using metadata."""
+            nonlocal text_consumed, buttons_consumed, image_consumed
+            category = self._get_consumption_category(name)
+            if category == "content_texts":
+                text_consumed = True
+            elif category == "buttons":
+                buttons_consumed = True
+            elif name == "Image":
+                image_consumed = True
+
         for comp_name in self.component_paths:
             if comp_name in ("Section",):
                 continue
@@ -271,13 +284,7 @@ class PreparedPattern:
                     widget = instance.render()
                     if widget:
                         widgets.append(widget)
-                        # Track consumption based on component type
-                        if comp_name in ("DecoratedText", "TextParagraph"):
-                            text_consumed = True
-                        elif comp_name == "ButtonList":
-                            buttons_consumed = True
-                        elif comp_name == "Image":
-                            image_consumed = True
+                        _track_consumption(comp_name)
                         continue
 
             # Fallback: manual widget construction for components that failed
@@ -286,12 +293,7 @@ class PreparedPattern:
             )
             if widget:
                 widgets.append(widget)
-                if comp_name in ("DecoratedText", "TextParagraph"):
-                    text_consumed = True
-                elif comp_name == "ButtonList":
-                    buttons_consumed = True
-                elif comp_name == "Image":
-                    image_consumed = True
+                _track_consumption(comp_name)
 
         # Build card structure
         card = {"sections": [{"widgets": widgets}]} if widgets else {"sections": []}
@@ -306,8 +308,18 @@ class PreparedPattern:
 
     def _build_empty_widget(self, comp_name: ComponentName) -> JsonDict:
         """Build an empty widget (like Divider)."""
-        json_key = comp_name[0].lower() + comp_name[1:]  # camelCase
-        return {json_key: {}}
+        return {get_json_key(comp_name): {}}
+
+    def _get_consumption_category(self, comp_name: ComponentName) -> Optional[str]:
+        """Get the context consumption category for a component.
+
+        Returns the context_key (e.g., "content_texts", "buttons", "image_url")
+        which indicates what kind of input this component consumes.
+        """
+        resource = get_context_resource(comp_name, self.wrapper)
+        if resource:
+            return resource[0]  # context_key
+        return None
 
     def _build_fallback_widget(
         self,
@@ -318,21 +330,32 @@ class PreparedPattern:
     ) -> Optional[JsonDict]:
         """Build widget manually when component class rendering fails.
 
-        Uses COMPONENT_PARAMS to understand expected fields.
+        Uses get_json_key() for JSON keys and get_children_field() for
+        container child fields instead of hardcoded values.
         """
-        if comp_name == "DecoratedText" and not text_consumed:
+        json_key = get_json_key(comp_name)
+        category = self._get_consumption_category(comp_name)
+
+        # Empty components (Divider, etc.)
+        if is_empty_component(comp_name, self.wrapper):
+            return {json_key: {}}
+
+        # Text-consuming components (DecoratedText, TextParagraph)
+        if category == "content_texts" and not text_consumed:
             text = self.params.get("text") or self.params.get("description", "")
             if text:
-                return {"decoratedText": {"text": text, "wrapText": True}}
+                content = {"text": text}
+                if comp_name == "DecoratedText":
+                    content["wrapText"] = True
+                return {json_key: content}
 
-        elif comp_name == "TextParagraph" and not text_consumed:
-            text = self.params.get("text") or self.params.get("description", "")
-            if text:
-                return {"textParagraph": {"text": text}}
-
-        elif comp_name == "ButtonList" and not buttons_consumed:
+        # Button-consuming containers (ButtonList, ChipList)
+        elif category == "buttons" and not buttons_consumed:
             buttons = self.params.get("buttons", [])
             if buttons:
+                children_field = (
+                    get_children_field(comp_name, self.wrapper) or "buttons"
+                )
                 btn_list = []
                 for btn in buttons:
                     if isinstance(btn, dict):
@@ -341,15 +364,13 @@ class PreparedPattern:
                             btn_obj["onClick"] = {"openLink": {"url": btn["url"]}}
                         btn_list.append(btn_obj)
                 if btn_list:
-                    return {"buttonList": {"buttons": btn_list}}
+                    return {json_key: {children_field: btn_list}}
 
+        # Image component
         elif comp_name == "Image" and not image_consumed:
             image_url = self.params.get("image_url") or self.params.get("imageUrl")
             if image_url:
-                return {"image": {"imageUrl": image_url}}
-
-        elif comp_name == "Divider":
-            return {"divider": {}}
+                return {json_key: {"imageUrl": image_url}}
 
         return None
 

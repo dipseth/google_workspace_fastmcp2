@@ -1367,6 +1367,20 @@ class SmartCardBuilderV2:
                         widgets = []
                         idx = len(built_children)
 
+                        # Add image FIRST if provided (hero image at top of card)
+                        image_url = card_params.get("image_url") or card_params.get(
+                            "image"
+                        )
+                        if image_url:
+                            image_widget = self._build_component(
+                                "Image",
+                                {"image_url": image_url},
+                                wrapper=wrapper,
+                                wrap_with_key=True,
+                            )
+                            if image_widget:
+                                widgets.append(image_widget)
+
                         # Add title as bold text paragraph using wrapper
                         title = card_params.get("title", f"Card {idx + 1}")
                         if title:
@@ -1418,20 +1432,6 @@ class SmartCardBuilderV2:
                                 )
                                 if btn_list_widget:
                                     widgets.append(btn_list_widget)
-
-                        # Add image if provided
-                        image_url = card_params.get("image_url") or card_params.get(
-                            "image"
-                        )
-                        if image_url:
-                            image_widget = self._build_component(
-                                "Image",
-                                {"image_url": image_url},
-                                wrapper=wrapper,
-                                wrap_with_key=True,
-                            )
-                            if image_widget:
-                                widgets.append(image_widget)
 
                         built_children.append({"widgets": widgets})
                         logger.debug(
@@ -1715,9 +1715,9 @@ class SmartCardBuilderV2:
                             build_params["on_click"] = {"open_link": {"url": url}}
 
                 if child_instances:
-                    # Map child instances to appropriate param names based on component type
+                    # Map child instances to the container's children field.
+                    # Card is special — it has both header and sections as children.
                     if component_name == "Card":
-                        # Card expects: header (CardHeader), sections (List[Section])
                         headers = [
                             c
                             for c in child_instances
@@ -1730,21 +1730,17 @@ class SmartCardBuilderV2:
                             build_params["header"] = headers[0]
                         if sections:
                             build_params["sections"] = sections
-                    elif component_name == "Section":
-                        # Section expects: widgets (List[Widget])
-                        build_params["widgets"] = child_instances
-                    elif component_name in ("ButtonList", "ChipList"):
-                        # Container expects: buttons/chips list
-                        build_params[children_field or "buttons"] = child_instances
-                    elif component_name == "Columns":
-                        # Columns expects: columnItems (List[Column])
-                        build_params["column_items"] = child_instances
-                    elif component_name == "Grid":
-                        # Grid expects: items (List[GridItem])
-                        build_params["items"] = child_instances
-                    elif component_name == "Carousel":
-                        # Carousel expects: carouselCards (List[CarouselCard])
-                        build_params["carousel_cards"] = child_instances
+                    elif children_field:
+                        # Use metadata-driven children field (wrapper SSoT).
+                        # Wrapper classes use snake_case param names, so convert
+                        # camelCase field names (e.g., "carouselCards" → "carousel_cards",
+                        # "columnItems" → "column_items").
+                        import re
+
+                        snake_field = re.sub(
+                            r"([a-z])([A-Z])", r"\1_\2", children_field
+                        ).lower()
+                        build_params[snake_field] = child_instances
 
                 instance = wrapper.create_card_component(comp_class, build_params)
                 if instance:
@@ -1822,8 +1818,8 @@ class SmartCardBuilderV2:
                 component_name, children, children_field
             )
         elif children:
-            # Use default children field based on component type
-            default_field = "widgets" if component_name in ("Section",) else "buttons"
+            # Use metadata-driven children field fallback
+            default_field = get_children_field(component_name, wrapper) or "widgets"
             inner[default_field] = children
 
         return {json_key: inner} if wrap_with_key else inner
@@ -2312,7 +2308,7 @@ class SmartCardBuilderV2:
 
             from gchat.card_builder.dsl import generate_dsl_notation
 
-            return generate_dsl_notation(card, wrapper.symbol_mapping)
+            return generate_dsl_notation(card, wrapper.symbol_mapping, wrapper=wrapper)
 
         except Exception as e:
             logger.debug(f"Failed to generate DSL from card: {e}")
@@ -2324,8 +2320,10 @@ class SmartCardBuilderV2:
         Uses the server's base_url with /card-feedback endpoint.
         Falls back to placeholder only if base_url is not configured.
         """
-        # Use the server's base_url (e.g., https://localhost:8002)
-        base_url = getattr(_settings, "base_url", "")
+        # Use feedback_base_url which can be separate from the proxy-facing base_url
+        base_url = getattr(_settings, "feedback_base_url", "") or getattr(
+            _settings, "base_url", ""
+        )
         if base_url:
             return f"{base_url}/card-feedback"
         return "https://feedback.example.com"
@@ -2482,20 +2480,16 @@ class SmartCardBuilderV2:
             )
 
             # Extract component paths from feedback widgets
-            # Map camelCase JSON keys to PascalCase component names
-            json_key_to_component = {
-                "textParagraph": "TextParagraph",
-                "decoratedText": "DecoratedText",
-                "buttonList": "ButtonList",
-                "chipList": "ChipList",
-                "columns": "Columns",
-                "divider": "Divider",
-            }
+            from gchat.card_builder.rendering import (
+                _JSON_KEY_TO_COMPONENT,
+                json_key_to_component_name,
+            )
+
             component_paths = []
             for widget in feedback_section.get("widgets", []):
                 for key in widget.keys():
-                    if key in json_key_to_component:
-                        component_paths.append(json_key_to_component[key])
+                    if key in _JSON_KEY_TO_COMPONENT:
+                        component_paths.append(json_key_to_component_name(key))
 
             # Store the FEEDBACK_UI pattern
             point_id = feedback_loop.store_instance_pattern(

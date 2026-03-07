@@ -17,6 +17,7 @@ from adapters.module_wrapper.types import (
     JsonDict,
     SymbolMapping,
 )
+from gchat.card_builder.metadata import get_children_field, get_container_child_type
 from gchat.card_builder.rendering import json_key_to_component_name
 
 logger = logging.getLogger(__name__)
@@ -26,24 +27,11 @@ logger = logging.getLogger(__name__)
 # WIDGET TYPE MAPPINGS
 # =============================================================================
 
-# JSON widget keys that can be identified in card structures
-WIDGET_JSON_KEYS = frozenset(
-    {
-        "textParagraph",
-        "decoratedText",
-        "buttonList",
-        "chipList",
-        "image",
-        "grid",
-        "columns",
-        "divider",
-        "textInput",
-        "selectionInput",
-        "dateTimePicker",
-        "carousel",
-        "carouselCard",
-    }
-)
+# JSON widget keys that can be identified in card structures.
+# Derived from rendering.py's _JSON_KEY_TO_COMPONENT (single source of truth).
+from gchat.card_builder.rendering import _JSON_KEY_TO_COMPONENT
+
+WIDGET_JSON_KEYS = frozenset(_JSON_KEY_TO_COMPONENT.keys())
 
 
 # =============================================================================
@@ -117,41 +105,56 @@ def suggest_dsl_for_params(
         >>> suggest_dsl_for_params({"text": "Hello", "buttons": [{"text": "Click"}]}, symbols)
         "§[δ, Ƀ[ᵬ]]"
     """
-    if not card_params:
+    if not card_params or not symbols:
         return None
 
-    # Get symbols with defaults
-    sec = symbols.get("Section", "§")
-    dt = symbols.get("DecoratedText", "δ")
-    bl = symbols.get("ButtonList", "Ƀ")
-    btn = symbols.get("Button", "ᵬ")
-    img = symbols.get("Image", "ι")
-    grid = symbols.get("Grid", "ℊ")
-    gi = symbols.get("GridItem", "ǵ")
+    # All symbols come from the mapping — no hardcoded fallbacks.
+    # If Section symbol is missing, we can't produce valid DSL.
+    sec = symbols.get("Section")
+    if not sec:
+        return None
 
     widgets = []
 
     # Add text widget if text or description provided
     if card_params.get("text") or card_params.get("description"):
-        widgets.append(dt)
+        dt = symbols.get("DecoratedText")
+        if dt:
+            widgets.append(dt)
 
     # Add image widget if image_url provided
     if card_params.get("image_url"):
-        widgets.append(img)
+        img = symbols.get("Image")
+        if img:
+            widgets.append(img)
 
     # Add button list if buttons provided
     buttons = card_params.get("buttons", [])
     if buttons:
-        n = len(buttons)
-        if n == 1:
-            widgets.append(f"{bl}[{btn}]")
-        else:
-            widgets.append(f"{bl}[{btn}×{n}]")
+        bl = symbols.get("ButtonList")
+        btn = symbols.get("Button")
+        if bl and btn:
+            n = len(buttons)
+            widgets.append(f"{bl}[{btn}]" if n == 1 else f"{bl}[{btn}×{n}]")
 
     # Add grid if grid_items or items provided
     items = card_params.get("grid_items") or card_params.get("items", [])
     if items:
-        widgets.append(f"{grid}[{gi}×{len(items)}]")
+        grid = symbols.get("Grid")
+        gi = symbols.get("GridItem")
+        if grid and gi:
+            widgets.append(f"{grid}[{gi}×{len(items)}]")
+
+    # Add carousel if cards provided
+    cards = card_params.get("cards") or card_params.get("carousel_cards", [])
+    if cards:
+        carousel = symbols.get("Carousel")
+        cc = symbols.get("CarouselCard")
+        if carousel and cc:
+            n = len(cards)
+            widgets.append(f"{carousel}[{cc}]" if n == 1 else f"{carousel}[{cc}×{n}]")
+            # Carousel is a top-level widget, return directly
+            return f"{sec}[{', '.join(widgets)}]" if widgets else None
 
     # Return None if no widgets to suggest
     if not widgets:
@@ -165,19 +168,97 @@ def suggest_dsl_for_params(
 # =============================================================================
 
 
+def _count_children(
+    widget_data: JsonDict,
+    component_name: ComponentName,
+    wrapper: Optional[Any] = None,
+) -> int:
+    """Count children of a container widget using metadata-driven field lookup.
+
+    Uses get_children_field() from metadata.py (wrapper SSoT, fallback to dict)
+    to discover which JSON field holds children, then counts them.
+
+    Args:
+        widget_data: The inner dict of the widget (e.g., the value of "buttonList")
+        component_name: Component type (e.g., "ButtonList", "Carousel")
+        wrapper: Optional ModuleWrapper for dynamic metadata lookups
+
+    Returns:
+        Number of children found, or 0 if not a container
+    """
+    children_field = get_children_field(component_name, wrapper)
+    if not children_field:
+        return 0
+    return len(widget_data.get(children_field, []))
+
+
+def _widget_to_dsl(
+    widget: JsonDict,
+    symbol_mapping: SymbolMapping,
+    wrapper: Optional[Any] = None,
+) -> Optional[str]:
+    """Convert a single widget dict to its DSL symbol notation.
+
+    Uses rendering.json_key_to_component_name() for reverse lookup and
+    metadata.get_children_field()/get_container_child_type() for nested structures.
+
+    Args:
+        widget: Widget dict (e.g., {"buttonList": {"buttons": [...]}})
+        symbol_mapping: Component-to-symbol mapping from ModuleWrapper
+        wrapper: Optional ModuleWrapper for dynamic metadata lookups
+
+    Returns:
+        DSL symbol string (e.g., "Ƀ[ᵬ×3]"), or None if widget type is unrecognized
+    """
+    # Find the widget type key — skip internal keys
+    json_key = None
+    for key in widget:
+        if not key.startswith("_"):
+            component = json_key_to_component_name(key)
+            if component in symbol_mapping:
+                json_key = key
+                break
+
+    if json_key is None:
+        return None
+
+    component_name = json_key_to_component_name(json_key)
+    symbol = symbol_mapping.get(component_name)
+    if not symbol:
+        return None
+
+    # Check for nested children via metadata
+    widget_data = widget.get(json_key, {})
+    child_count = _count_children(widget_data, component_name, wrapper)
+    if child_count > 0:
+        child_type = get_container_child_type(component_name, wrapper)
+        child_symbol = symbol_mapping.get(child_type, "") if child_type else ""
+        if child_symbol:
+            nested = (
+                f"{child_symbol}×{child_count}" if child_count > 1 else child_symbol
+            )
+            return f"{symbol}[{nested}]"
+
+    return symbol
+
+
 def generate_dsl_notation(
     card: JsonDict,
     symbol_mapping: SymbolMapping,
+    wrapper: Optional[Any] = None,
 ) -> Optional[DSLNotation]:
     """
     Generate DSL notation from a rendered card structure.
 
     Reverse-engineers the card structure to produce DSL notation
-    that could recreate the same structure.
+    that could recreate the same structure. Uses the metadata module
+    (wrapper SSoT with static fallbacks) to discover container/child
+    relationships instead of hardcoded if/elif chains.
 
     Args:
         card: Card dict in Google Chat format (with sections/widgets)
         symbol_mapping: Component-to-symbol mapping from ModuleWrapper
+        wrapper: Optional ModuleWrapper for dynamic metadata lookups
 
     Returns:
         DSL string using symbols from the mapping, or None if unable to generate
@@ -198,21 +279,6 @@ def generate_dsl_notation(
     if not sections:
         return None
 
-    # Map widget keys to component names
-    widget_to_component = {
-        "textParagraph": "TextParagraph",
-        "decoratedText": "DecoratedText",
-        "buttonList": "ButtonList",
-        "chipList": "ChipList",
-        "image": "Image",
-        "grid": "Grid",
-        "columns": "Columns",
-        "divider": "Divider",
-        "textInput": "TextInput",
-        "selectionInput": "SelectionInput",
-        "dateTimePicker": "DateTimePicker",
-    }
-
     section_dsls = []
 
     for section in sections:
@@ -220,72 +286,31 @@ def generate_dsl_notation(
         if not widgets:
             continue
 
-        widget_symbols = []
-        prev_symbol = None
+        widget_symbols: List[str] = []
+        prev_symbol: Optional[str] = None
         count = 0
 
         for widget in widgets:
-            # Find the widget type
-            widget_type = None
-            for key in widget.keys():
-                if key in widget_to_component:
-                    widget_type = key
-                    break
-
-            if not widget_type:
+            full_symbol = _widget_to_dsl(widget, symbol_mapping, wrapper)
+            if not full_symbol:
                 continue
-
-            component_name = widget_to_component[widget_type]
-            symbol = symbol_mapping.get(component_name, component_name[0])
-
-            # Handle nested structures (ButtonList with buttons, Grid with items)
-            nested_dsl = None
-            if widget_type == "buttonList":
-                buttons = widget.get("buttonList", {}).get("buttons", [])
-                btn_count = len(buttons)
-                if btn_count > 0:
-                    btn_symbol = symbol_mapping.get("Button", "ᵬ")
-                    nested_dsl = (
-                        f"{btn_symbol}×{btn_count}" if btn_count > 1 else btn_symbol
-                    )
-            elif widget_type == "grid":
-                items = widget.get("grid", {}).get("items", [])
-                item_count = len(items)
-                if item_count > 0:
-                    item_symbol = symbol_mapping.get("GridItem", "ǵ")
-                    nested_dsl = (
-                        f"{item_symbol}×{item_count}" if item_count > 1 else item_symbol
-                    )
-            elif widget_type == "chipList":
-                chips = widget.get("chipList", {}).get("chips", [])
-                chip_count = len(chips)
-                if chip_count > 0:
-                    chip_symbol = symbol_mapping.get("Chip", "ꞓ")
-                    nested_dsl = (
-                        f"{chip_symbol}×{chip_count}" if chip_count > 1 else chip_symbol
-                    )
-
-            # Build symbol with optional nesting
-            full_symbol = f"{symbol}[{nested_dsl}]" if nested_dsl else symbol
 
             # Collapse consecutive same symbols into ×N notation
             if full_symbol == prev_symbol:
                 count += 1
             else:
                 if prev_symbol:
-                    if count > 1:
-                        widget_symbols.append(f"{prev_symbol}×{count}")
-                    else:
-                        widget_symbols.append(prev_symbol)
+                    widget_symbols.append(
+                        f"{prev_symbol}×{count}" if count > 1 else prev_symbol
+                    )
                 prev_symbol = full_symbol
                 count = 1
 
         # Add final symbol
         if prev_symbol:
-            if count > 1:
-                widget_symbols.append(f"{prev_symbol}×{count}")
-            else:
-                widget_symbols.append(prev_symbol)
+            widget_symbols.append(
+                f"{prev_symbol}×{count}" if count > 1 else prev_symbol
+            )
 
         if widget_symbols:
             section_symbol = symbol_mapping.get("Section", "§")
