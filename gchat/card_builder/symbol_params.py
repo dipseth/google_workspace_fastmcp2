@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _CONTEXT_KEY_TO_PARAM: Dict[str, str] = {
     "content_texts": "items",
     "carousel_cards": "cards",
-    "grid_items": "items",
+    "grid_items": "grid_items",
 }
 
 # Scalar param keys (value is a single string, not a list)
@@ -92,8 +92,9 @@ def resolve_symbol_params(
         if resolved is not None:
             # Symbol keys override flat keys on conflict
             result[flat_key] = resolved
-            logger.debug(
-                f"Resolved symbol '{symbol}' → '{component_name}' → flat key '{flat_key}'"
+            logger.info(
+                f"Resolved symbol '{symbol}' → '{component_name}' → flat key '{flat_key}' "
+                f"({len(resolved) if isinstance(resolved, list) else type(resolved).__name__} items)"
             )
 
     return result

@@ -63,6 +63,8 @@ CARD_CONTEXT_RESOURCES = {
     "Chip": ("chips", "_chip_index"),
     "DecoratedText": ("content_texts", "_text_index"),
     "TextParagraph": ("content_texts", "_text_index"),
+    "GridItem": ("grid_items", "_grid_item_index"),
+    "CarouselCard": ("carousel_cards", "_carousel_card_index"),
 }
 
 # Container components: JSON field name for children

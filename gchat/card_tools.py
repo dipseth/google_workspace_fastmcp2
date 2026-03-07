@@ -952,11 +952,8 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     image_titles = (
                         card_params.get("image_titles") if card_params else None
                     )
-                    items = (
-                        (card_params.get("items") or card_params.get("grid_items"))
-                        if card_params
-                        else None
-                    )
+                    items = card_params.get("items") if card_params else None
+                    grid_items = card_params.get("grid_items") if card_params else None
                     cards = (
                         (card_params.get("cards") or card_params.get("carousel_cards"))
                         if card_params
@@ -989,23 +986,24 @@ def setup_card_tools(mcp: FastMCP) -> None:
                                 card_dict["header"] = header
 
                     # Convert grid images to items for DSL building
-                    grid_items = None
-                    if images:
-                        logger.info(f"🔲 Grid images: {len(images)}")
-                        grid_items = [
-                            {
-                                "title": (
-                                    image_titles[i]
-                                    if image_titles and i < len(image_titles)
-                                    else f"Item {i + 1}"
-                                ),
-                                "image_url": img_url,
-                            }
-                            for i, img_url in enumerate(images)
-                        ]
-                    elif grid and grid.get("items"):
-                        logger.info(f"🔲 Grid items: {len(grid.get('items', []))}")
-                        grid_items = grid["items"]
+                    # (only override grid_items if not already set from symbol params)
+                    if not grid_items:
+                        if images:
+                            logger.info(f"🔲 Grid images: {len(images)}")
+                            grid_items = [
+                                {
+                                    "title": (
+                                        image_titles[i]
+                                        if image_titles and i < len(image_titles)
+                                        else f"Item {i + 1}"
+                                    ),
+                                    "image_url": img_url,
+                                }
+                                for i, img_url in enumerate(images)
+                            ]
+                        elif grid and grid.get("items"):
+                            logger.info(f"🔲 Grid items: {len(grid.get('items', []))}")
+                            grid_items = grid["items"]
 
                     if cards:
                         logger.info(f"🎠 Carousel: {len(cards)} card(s)")
@@ -1030,7 +1028,8 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             chips=chips,
                             image_url=image_url,
                             text=text,
-                            items=grid_items or items,
+                            items=items,
+                            grid_items=grid_items,
                             cards=cards,
                         )
 

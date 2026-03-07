@@ -973,6 +973,7 @@ class SmartCardBuilderV2:
         image_url: Optional[str] = None,
         text: Optional[str] = None,
         items: Optional[List[Dict]] = None,
+        grid_items: Optional[List[Dict]] = None,
         cards: Optional[List[Dict]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Build a card from parsed DSL structure.
@@ -1042,7 +1043,9 @@ class SmartCardBuilderV2:
                 "chips": chips or [],
                 "carousel_cards": cards
                 or [],  # For carousel DSL (symbols from ModuleWrapper)
-                "grid_items": items or [],  # For grid DSL (GridItem consumption)
+                "grid_items": grid_items
+                or items
+                or [],  # Prefer explicit grid_items, fall back to items
                 "image_url": image_url,
                 "content_texts": content_texts,
                 "_button_index": 0,  # Track button consumption
@@ -1053,26 +1056,40 @@ class SmartCardBuilderV2:
                 "_mapping_report": InputMappingReport(),  # Track input consumption
             }
 
-            for component in parsed:
-                comp_name = component.get("name", "")
-                multiplier = component.get("multiplier", 1)
-                children = component.get("children", [])
+            logger.info(
+                f"📦 Context pools: grid_items={len(context.get('grid_items', []))}, "
+                f"content_texts={len(context.get('content_texts', []))}, "
+                f"buttons={len(context.get('buttons', []))}"
+            )
+            if context.get("grid_items"):
+                logger.info(f"📦 Grid items sample: {context['grid_items'][0]}")
 
-                # Section is special - it contains widgets, not a widget itself
-                if comp_name == "Section":
-                    widgets = self._build_widgets(
-                        children, buttons, image_url, content_texts, context
-                    )
-                    if widgets:
-                        sections.append({"widgets": widgets})
-                else:
-                    # GENERIC: All other top-level components use _build_widget_generic
-                    for _ in range(multiplier):
-                        widget = self._build_widget_generic(
-                            comp_name, children, context
+            # Split pipe-separated sections and parse each independently
+            section_dsls = [s.strip() for s in structure_dsl.split("|")]
+            for section_dsl in section_dsls:
+                if not section_dsl:
+                    continue
+                section_parsed = validator.parse_structure(section_dsl)
+                for component in section_parsed:
+                    comp_name = component.get("name", "")
+                    multiplier = component.get("multiplier", 1)
+                    children = component.get("children", [])
+
+                    # Section is special - it contains widgets, not a widget itself
+                    if comp_name == "Section":
+                        widgets = self._build_widgets(
+                            children, buttons, image_url, content_texts, context
                         )
-                        if widget:
-                            sections.append({"widgets": [widget]})
+                        if widgets:
+                            sections.append({"widgets": widgets})
+                    else:
+                        # GENERIC: All other top-level components use _build_widget_generic
+                        for _ in range(multiplier):
+                            widget = self._build_widget_generic(
+                                comp_name, children, context
+                            )
+                            if widget:
+                                sections.append({"widgets": [widget]})
 
             if not sections:
                 return None
@@ -3235,6 +3252,7 @@ class SmartCardBuilderV2:
         image_url: Optional[str] = None,
         text: Optional[str] = None,
         items: Optional[List[Dict]] = None,
+        grid_items: Optional[List[Dict]] = None,
         cards: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         """
@@ -3353,6 +3371,7 @@ class SmartCardBuilderV2:
                 image_url=image_url,
                 text=styled_text,
                 items=styled_items,
+                grid_items=grid_items,
                 cards=cards,
             )
 
