@@ -18,12 +18,7 @@ from gchat.card_delivery import (
     _split_card_payload,
 )
 
-TEST_CHAT_WEBHOOK = os.environ.get(
-    "TEST_CHAT_WEBHOOK",
-    "https://chat.googleapis.com/v1/spaces/AAQAKl_yP9Y/messages"
-    "?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI"
-    "&token=Ie8-brhWHA9kE_2JiqKRDhqjadPHK4RNe15UcWwLXDA",
-)
+TEST_CHAT_WEBHOOK = os.environ.get("TEST_CHAT_WEBHOOK", "")
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +312,7 @@ async def test_inter_part_delay():
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(not TEST_CHAT_WEBHOOK, reason="TEST_CHAT_WEBHOOK env var not set")
 @pytest.mark.asyncio
 async def test_live_single_part_delivery():
     """Send a small card via the real test webhook — single part, no split."""
@@ -356,6 +352,7 @@ async def test_live_single_part_delivery():
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(not TEST_CHAT_WEBHOOK, reason="TEST_CHAT_WEBHOOK env var not set")
 @pytest.mark.asyncio
 async def test_live_multi_part_delivery():
     """Send an oversized card that triggers auto-split via the real test webhook."""

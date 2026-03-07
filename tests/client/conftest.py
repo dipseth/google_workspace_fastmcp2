@@ -423,8 +423,11 @@ async def client():
     - Always use the shared connection logic in [`tests/client/base_test_config.create_test_client()`](tests/client/base_test_config.py:90)
       so tests don't depend on a valid local TLS/CA chain.
     - If the server is not running, skip the suite (this is an integration-style test harness).
+    - Automatically enables all tools via manage_tools to avoid minimal startup
+      mode causing "Tool 'X' is disabled" failures.
     """
     from .base_test_config import TEST_EMAIL, create_test_client
+    from .test_helpers import ensure_tools_enabled
 
     try:
         client_obj = await create_test_client(TEST_EMAIL)
@@ -432,6 +435,9 @@ async def client():
         pytest.skip(f"MCP server not reachable for integration tests: {e}")
 
     async with client_obj:
+        # Enable all tools for the test session to avoid minimal startup
+        # mode causing "Tool 'X' is disabled for this session" failures.
+        await ensure_tools_enabled(client_obj)
         yield client_obj
 
 
