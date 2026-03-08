@@ -846,8 +846,11 @@ def setup_legacy_callback_route(mcp) -> None:
                     <b>🔑 Your Personal API Key</b><br>
                     <small>Use this as a Bearer token to connect without re-authenticating.<br>
                     This key is shown <b>once</b> — save it now!</small>
-                    <div class="key-value" id="apiKey">{html.escape(user_api_key)}</div>
-                    <button onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
+                    <div class="key-value hidden" id="apiKey">{html.escape(user_api_key)}</div>
+                    <button id="revealBtn" onclick="document.getElementById('apiKey').classList.remove('hidden');this.style.display='none';document.getElementById('copyBtn').style.display=''">
+                        Click to Reveal Key
+                    </button>
+                    <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
                         Copy to Clipboard
                     </button>
                 </div>
@@ -868,6 +871,7 @@ def setup_legacy_callback_route(mcp) -> None:
                 .api-key small{{display:block;margin-bottom:10px}}
                 .key-value{{font-family:monospace;font-size:13px;background:#f8f9fa;padding:10px;border-radius:4px;
                            word-break:break-all;margin:10px 0;user-select:all;border:1px solid #dee2e6}}
+                .key-value.hidden{{filter:blur(8px);user-select:none;pointer-events:none}}
                 .api-key button{{background:#856404;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px}}
                 .api-key button:hover{{background:#6c5200}}
                 .linked-accounts{{background:#e8f4fd;color:#0c5460;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #bee5eb;text-align:left}}
@@ -1830,8 +1834,11 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         <b>🔑 Your Personal API Key</b><br>
                         <small>Use this as a Bearer token to connect without re-authenticating.<br>
                         This key is shown <b>once</b> — save it now!</small>
-                        <div class="key-value" id="apiKey">{html.escape(user_api_key)}</div>
-                        <button onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
+                        <div class="key-value hidden" id="apiKey">{html.escape(user_api_key)}</div>
+                        <button id="revealBtn" onclick="document.getElementById('apiKey').classList.remove('hidden');this.style.display='none';document.getElementById('copyBtn').style.display=''">
+                            Click to Reveal Key
+                        </button>
+                        <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
                             Copy to Clipboard
                         </button>
                     </div>
@@ -1857,6 +1864,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         .api-key {{ background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ffc107; text-align: left; }}
                         .api-key small {{ display: block; margin-bottom: 10px; }}
                         .key-value {{ font-family: monospace; font-size: 13px; background: #f8f9fa; padding: 10px; border-radius: 4px; word-break: break-all; margin: 10px 0; user-select: all; border: 1px solid #dee2e6; }}
+                        .key-value.hidden {{ filter: blur(8px); user-select: none; pointer-events: none; }}
                         .api-key button {{ background: #856404; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }}
                         .api-key button:hover {{ background: #6c5200; }}
                         .linked-accounts {{ background: #e8f4fd; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #bee5eb; text-align: left; }}

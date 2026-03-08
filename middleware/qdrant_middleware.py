@@ -68,17 +68,40 @@ _SENSITIVE_ARG_FIELDS = frozenset(
 )
 
 
+import re
+
+# Pattern-based detection for dynamically-named sensitive fields
+_SENSITIVE_KEY_PATTERN = re.compile(
+    r"(secret|token|password|credential|auth_key|api_key|private_key)",
+    re.IGNORECASE,
+)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """Check if a key is sensitive by exact match or pattern."""
+    return key in _SENSITIVE_RESPONSE_FIELDS or bool(_SENSITIVE_KEY_PATTERN.search(key))
+
+
 def _sanitize_for_storage(data: Any) -> Any:
-    """Recursively strip sensitive fields from a response before Qdrant storage."""
+    """Recursively strip sensitive fields from a response before Qdrant storage.
+
+    Uses both an explicit denylist and pattern matching to catch dynamically-named
+    fields containing 'secret', 'token', 'password', 'credential', etc.
+    """
     if isinstance(data, dict):
         return {
             k: _sanitize_for_storage(v)
             for k, v in data.items()
-            if k not in _SENSITIVE_RESPONSE_FIELDS
+            if not _is_sensitive_key(k)
         }
     if isinstance(data, list):
         return [_sanitize_for_storage(item) for item in data]
     return data
+
+
+def _is_sensitive_arg(key: str) -> bool:
+    """Check if an argument key is sensitive by exact match or pattern."""
+    return key in _SENSITIVE_ARG_FIELDS or bool(_SENSITIVE_KEY_PATTERN.search(key))
 
 
 def _sanitize_args_for_storage(args: dict) -> dict:
@@ -86,8 +109,7 @@ def _sanitize_args_for_storage(args: dict) -> dict:
     if not args:
         return args
     return {
-        k: ("***REDACTED***" if k in _SENSITIVE_ARG_FIELDS else v)
-        for k, v in args.items()
+        k: ("***REDACTED***" if _is_sensitive_arg(k) else v) for k, v in args.items()
     }
 
 

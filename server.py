@@ -328,10 +328,24 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
 
             _original_load_access_token = google_auth_provider.load_access_token
 
+            # Simple in-memory rate limiter for failed auth attempts
+            _failed_auth_attempts: dict[str, list[float]] = {}
+            _RATE_LIMIT_WINDOW = 60.0  # seconds
+            _RATE_LIMIT_MAX = 10  # max failures per window
+
             async def _load_access_token_with_api_key(token: str):
                 """Check for API key / per-user key before delegating to OAuth."""
                 import hmac
                 import time as _time
+
+                # Rate-limit check: reject tokens from sources with too many failures
+                token_prefix = token[:8]
+                now = _time.time()
+                attempts = _failed_auth_attempts.get(token_prefix, [])
+                attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+                if len(attempts) >= _RATE_LIMIT_MAX:
+                    logger.warning("🚫 Rate limit exceeded for auth attempts")
+                    return None
 
                 # 1. Shared admin API key (timing-safe comparison)
                 from auth.types import AuthProvenance
@@ -354,7 +368,7 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
 
                 user_email = lookup_key(token)
                 if user_email:
-                    logger.info(f"🔑 Per-user API key matched: {user_email}")
+                    logger.debug(f"🔑 Per-user API key matched: {user_email}")
                     return _FastMCPAccessToken(
                         token=token,
                         client_id=f"user-key-{user_email}",
@@ -376,6 +390,8 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                     logger.warning(
                         f"⚠️ load_access_token returned None for token: {token[:30]}..."
                     )
+                    # Record failed attempt for rate limiting
+                    _failed_auth_attempts.setdefault(token_prefix, []).append(now)
                 else:
                     logger.info(
                         f"✅ load_access_token succeeded: client={result.client_id}, scopes={result.scopes}"

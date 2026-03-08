@@ -19,6 +19,7 @@ Security model:
 """
 
 import hashlib
+import hmac
 import json
 import logging
 import secrets
@@ -70,8 +71,8 @@ def _save_registry(registry: dict) -> None:
         json.dump(registry, f, indent=2)
     try:
         path.chmod(0o600)
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning(f"⚠️ Could not set permissions on {path}: {e}")
 
 
 def _load_links() -> dict:
@@ -95,8 +96,8 @@ def _save_links(links: dict) -> None:
         json.dump(links, f, indent=2)
     try:
         path.chmod(0o600)
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning(f"⚠️ Could not set permissions on {path}: {e}")
 
 
 def generate_user_key(user_email: str) -> str:
@@ -129,6 +130,8 @@ def generate_user_key(user_email: str) -> str:
 def lookup_key(token: str) -> Optional[str]:
     """Look up a token against the user key registry.
 
+    Uses timing-safe comparison to prevent side-channel attacks on hash prefixes.
+
     Args:
         token: The plaintext bearer token from the client.
 
@@ -140,7 +143,10 @@ def lookup_key(token: str) -> Optional[str]:
     with _lock:
         registry = _load_registry()
 
-    return registry.get(token_hash)
+    for stored_hash, email in registry.items():
+        if hmac.compare_digest(token_hash, stored_hash):
+            return email
+    return None
 
 
 def revoke_user_key(user_email: str) -> bool:
@@ -221,8 +227,8 @@ def _save_pending_links(pending: dict) -> None:
         json.dump(pending, f, indent=2)
     try:
         path.chmod(0o600)
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning(f"⚠️ Could not set permissions on {path}: {e}")
 
 
 def request_link(source_email: str, target_email: str) -> None:
@@ -250,7 +256,9 @@ def request_link(source_email: str, target_email: str) -> None:
 def consume_pending_links(completed_email: str) -> None:
     """Execute any pending links for an email that just completed OAuth.
 
-    Called from _save_credentials after OAuth succeeds.
+    Called from _save_credentials after OAuth succeeds.  Only links where
+    the source email has a registered per-user key are activated — this
+    prevents orphan link requests from being consumed.
     """
     e = completed_email.lower().strip()
 
@@ -259,8 +267,18 @@ def consume_pending_links(completed_email: str) -> None:
         sources = pending.pop(e, [])
         if sources:
             _save_pending_links(pending)
+        # Load registry once to verify source emails have keys
+        registry = _load_registry()
+
+    registered_emails = set(registry.values())
 
     for source in sources:
+        if source not in registered_emails:
+            logger.warning(
+                f"🔗 Skipping pending link {source} → {e}: "
+                f"source has no registered per-user key"
+            )
+            continue
         link_accounts(source, e)
         logger.info(f"🔗 Executed deferred link: {source} ↔ {e}")
 

@@ -585,6 +585,12 @@ class TestPerUserKeyCredentialGuard:
         # Link should NOT be active yet (deferred until OAuth completes)
         assert "second@example.com" not in get_accessible_emails("keyowner@example.com")
 
+        # Register a per-user key for keyowner so consume_pending_links
+        # verifies the source has a valid key (security gate added in audit fix)
+        from auth.user_api_keys import generate_user_key
+
+        generate_user_key("keyowner@example.com")
+
         # Simulate OAuth completion — this is what _save_credentials calls
         consume_pending_links("second@example.com")
 
