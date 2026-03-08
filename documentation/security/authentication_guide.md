@@ -5,10 +5,12 @@
 2. [Authentication Flow](#authentication-flow)
 3. [OAuth Proxy Details](#oauth-proxy-details)
 4. [Configuration Guide](#configuration-guide)
-5. [API Reference](#api-reference)
-6. [Security Best Practices](#security-best-practices)
-7. [Troubleshooting](#troubleshooting)
-8. [Migration Guide](#migration-guide)
+5. [Custom OAuth Client Support](#custom-oauth-client-support)
+6. [API Reference](#api-reference)
+7. [Per-User API Key Management](#per-user-api-key-management)
+8. [Security Best Practices](#security-best-practices)
+9. [Troubleshooting](#troubleshooting)
+10. [Migration Guide](#migration-guide)
 
 ---
 
@@ -711,6 +713,77 @@ grant_type=refresh_token
 
 ---
 
+## Per-User API Key Management
+
+### Overview
+
+After completing OAuth authentication, each user receives a unique, revocable API key. This replaces the shared `MCP_API_KEY` model with individual keys for fine-grained access control.
+
+### Key Lifecycle
+
+1. **Generation**: After OAuth success, a 32-byte URL-safe token is generated
+2. **Display**: Key shown once on the success page (blurred by default, click-to-reveal, copy-to-clipboard)
+3. **Storage**: Only the SHA-256 hash is stored in `.user_api_keys.json` (permissions `0o600`)
+4. **Lookup**: Timing-safe comparison via `hmac.compare_digest()` prevents timing attacks
+5. **Revocation**: `revoke_user_key(email)` removes the key hash immediately
+
+### Account Linking
+
+Per-user keys can access multiple Google accounts through bidirectional linking:
+
+```python
+# Link two accounts (bidirectional)
+link_accounts("user@example.com", "user@company.com")
+
+# Check accessible accounts
+get_accessible_emails("user@example.com")
+# Returns: {"user@example.com", "user@company.com"}
+
+# Deferred linking (target hasn't completed OAuth yet)
+request_link("user@example.com", "new@example.com")
+# Activated when new@example.com completes OAuth via consume_pending_links()
+```
+
+### Credential Isolation
+
+The middleware enforces strict credential isolation based on auth provenance:
+
+| Auth Type | Can Access | OAuth File Fallback |
+|-----------|-----------|-------------------|
+| `API_KEY` (shared) | Only credentials created in this session | Blocked |
+| `USER_API_KEY` (per-user) | Owner email + linked accounts | Blocked |
+| `OAUTH` (browser) | All credentials for authenticated user | Allowed |
+
+### Crypto-Bound Encryption
+
+When `MCP_API_KEY` is set, credential encryption keys are **derived** from it via HKDF-SHA256:
+
+```
+Key = HKDF-SHA256(
+    input_key = MCP_API_KEY,
+    salt = "mcp-google-workspace-v1",
+    info = "credential-encryption",
+    length = 32 bytes
+)
+```
+
+This means credential files are **undecryptable** without the `MCP_API_KEY`, binding encryption to the server's authentication secret. The encryption key priority is:
+
+1. Explicit `encryption_key` parameter (base64-encoded)
+2. Derived from `MCP_API_KEY` (crypto-binding) — **default when MCP_API_KEY is set**
+3. Auto-generated random key in `.auth_encryption_key` (fallback)
+
+Legacy key migration is automatic — existing credentials are transparently re-encrypted on next save.
+
+### Environment Variables
+
+```bash
+# Per-user API key management (also used for crypto-bound encryption)
+MCP_API_KEY=your-server-api-key
+```
+
+---
+
 ## Security Best Practices
 
 ### 1. Credential Storage
@@ -1295,5 +1368,5 @@ if __name__ == "__main__":
 
 ---
 
-*Last Updated: December 2024*
-*Version: 2.0.0*
+*Last Updated: March 2026*
+*Version: 3.0.0*

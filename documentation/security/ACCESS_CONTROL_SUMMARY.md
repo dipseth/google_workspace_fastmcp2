@@ -232,14 +232,53 @@ print(stats)
 # }
 ```
 
+## Per-User API Key Access Control (New)
+
+In addition to the credential-file-based access control above, the system now enforces **auth provenance-based isolation**:
+
+### Auth Provenance Types
+
+| Provenance | Description | Access Scope |
+|-----------|-------------|-------------|
+| `API_KEY` | Shared `MCP_API_KEY` | Only credentials created in the current session |
+| `USER_API_KEY` | Per-user key (generated on OAuth) | Owner email + linked accounts |
+| `OAUTH` | Browser-based OAuth flow | All credentials for the authenticated user |
+
+### How It Works
+
+1. **After OAuth**: Each user receives a unique per-user API key (SHA-256 hash stored, plaintext shown once)
+2. **On tool call**: Middleware detects auth provenance from JWT `auth_method` claim
+3. **Credential isolation guard**: API key sessions cannot access file credentials from other users
+4. **Per-user key guard**: Access limited to `get_accessible_emails()` (owner + linked accounts)
+5. **OAuth file fallback**: Blocked for API key and per-user key sessions to prevent cross-contamination
+
+### Account Linking
+
+Per-user keys can access multiple accounts via bidirectional linking:
+
+```python
+from auth.user_api_keys import link_accounts, get_accessible_emails
+
+# Link accounts (bidirectional)
+link_accounts("user@example.com", "user@company.com")
+
+# Check accessible accounts
+emails = get_accessible_emails("user@example.com")
+# Returns: {"user@example.com", "user@company.com"}
+```
+
 ## Bottom Line
 
 **You don't need to change anything!** Your system already:
 1. Requires Google OAuth ✅
-2. Validates against credentials created through your auth system ✅  
+2. Validates against credentials created through your auth system ✅
 3. Blocks unauthorized users ✅
+4. Isolates credentials by auth provenance ✅ (new)
+5. Generates per-user API keys with hash-only storage ✅ (new)
 
 The credentials tie the OAuth to your auth system because:
 - Credentials are created by YOUR OAuth flow ([`auth/google_auth.py:_save_credentials()`](auth/google_auth.py:274))
 - Access validation checks for THOSE credential files ([`auth/access_control.py:_has_existing_credentials()`](auth/access_control.py:95))
 - Remote OAuth must match a credential file to proceed ([`auth/fastmcp_oauth_endpoints.py:validate_user_access()`](auth/fastmcp_oauth_endpoints.py:1232))
+- API key sessions are isolated to session-owned credentials only ([`auth/middleware.py`](auth/middleware.py))
+- Per-user key sessions are limited to owner + linked accounts ([`auth/user_api_keys.py`](auth/user_api_keys.py))
