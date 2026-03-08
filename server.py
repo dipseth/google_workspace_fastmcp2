@@ -220,7 +220,19 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                         expires_at=int(_time.time()) + 86400,  # 24h TTL
                         claims={"sub": "api-key-user", "auth_method": "api_key"},
                     )
-                return await _original_load_access_token(token)
+                logger.info(
+                    f"🔍 load_access_token called, token prefix: {token[:20]}..."
+                )
+                result = await _original_load_access_token(token)
+                if result is None:
+                    logger.warning(
+                        f"⚠️ load_access_token returned None for token: {token[:30]}..."
+                    )
+                else:
+                    logger.info(
+                        f"✅ load_access_token succeeded: client={result.client_id}, scopes={result.scopes}"
+                    )
+                return result
 
             google_auth_provider.load_access_token = _load_access_token_with_api_key
             logger.info("  🔑 API key bypass: enabled (MCP_API_KEY set)")
