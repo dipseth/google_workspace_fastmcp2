@@ -354,51 +354,62 @@ class AuthMiddleware(Middleware):
         # they created via start_google_auth in this session.
         # Ownership is tracked per-session (not global) to prevent cross-session leakage.
         if auth_provenance == AuthProvenance.API_KEY:
-            # Shared API key has no email claim — check tool arguments for target email
-            tool_args = getattr(context.message, "arguments", {}) or {}
-            target_email = (tool_args.get("user_google_email") or "").lower().strip()
-
-            # Also check the resolved user_email (from session data or fallback)
-            effective_email = target_email or (user_email or "").lower().strip()
-
-            if effective_email:
-                # Load per-session owned accounts from session storage
-                owned_raw = (
-                    get_session_data(session_id, SessionKey.API_KEY_OWNED_ACCOUNTS)
-                    if session_id
-                    else None
+            # CodeMode meta-tools (tags, search, get_schema, execute) are transport
+            # wrappers — they don't access Google credentials directly, so exempt
+            # them from credential isolation.  The *inner* tool calls they dispatch
+            # will go through on_call_tool again with the real tool_name.
+            if tool_name in self._CODE_MODE_TOOLS:
+                logger.debug(
+                    f"🔓 Skipping credential isolation for CodeMode meta-tool: {tool_name}"
                 )
-                owned_accounts = set(owned_raw) if owned_raw else set()
+            else:
+                # Shared API key has no email claim — check tool arguments for target email
+                tool_args = getattr(context.message, "arguments", {}) or {}
+                target_email = (
+                    (tool_args.get("user_google_email") or "").lower().strip()
+                )
 
-                if tool_name == "start_google_auth":
-                    # Register this email as owned by THIS session
-                    owned_accounts.add(effective_email)
-                    if session_id:
-                        store_session_data(
-                            session_id,
-                            SessionKey.API_KEY_OWNED_ACCOUNTS,
-                            list(owned_accounts),
+                # Also check the resolved user_email (from session data or fallback)
+                effective_email = target_email or (user_email or "").lower().strip()
+
+                if effective_email:
+                    # Load per-session owned accounts from session storage
+                    owned_raw = (
+                        get_session_data(session_id, SessionKey.API_KEY_OWNED_ACCOUNTS)
+                        if session_id
+                        else None
+                    )
+                    owned_accounts = set(owned_raw) if owned_raw else set()
+
+                    if tool_name == "start_google_auth":
+                        # Register this email as owned by THIS session
+                        owned_accounts.add(effective_email)
+                        if session_id:
+                            store_session_data(
+                                session_id,
+                                SessionKey.API_KEY_OWNED_ACCOUNTS,
+                                list(owned_accounts),
+                            )
+                        logger.info(
+                            f"🔑 Registered API key owned account (session-scoped): {effective_email}"
                         )
-                    logger.info(
-                        f"🔑 Registered API key owned account (session-scoped): {effective_email}"
-                    )
-                elif effective_email not in owned_accounts:
-                    from .audit import log_security_event
+                    elif effective_email not in owned_accounts:
+                        from .audit import log_security_event
 
-                    log_security_event(
-                        "api_key_credential_access_blocked",
-                        user_email=effective_email,
-                        details={
-                            "tool_name": tool_name,
-                            "session_id": session_id,
-                            "reason": "API key session attempted to use credentials it did not create",
-                        },
-                    )
-                    raise ValueError(
-                        f"API key sessions can only access credentials they created. "
-                        f"No credentials found for {effective_email} in this API key session.\n\n"
-                        f"Run `start_google_auth` with your email to create credentials."
-                    )
+                        log_security_event(
+                            "api_key_credential_access_blocked",
+                            user_email=effective_email,
+                            details={
+                                "tool_name": tool_name,
+                                "session_id": session_id,
+                                "reason": "API key session attempted to use credentials it did not create",
+                            },
+                        )
+                        raise ValueError(
+                            f"API key sessions can only access credentials they created. "
+                            f"No credentials found for {effective_email} in this API key session.\n\n"
+                            f"Run `start_google_auth` with your email to create credentials."
+                        )
 
         # SESSION-LEVEL ACCOUNT LINKING: When start_google_auth is called for
         # a new email, create pending links to ALL previously-authenticated

@@ -363,7 +363,9 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
             # New key generated — store on credentials so callers can show it
             credentials._user_api_key = user_key
         else:
-            # Key already exists for this email — don't invalidate it
+            # Key already exists for this email — don't invalidate it.
+            # Signal to the success page that a key exists (but can't be shown again).
+            credentials._user_api_key_exists = True
             logger.debug(f"Per-user API key already exists for {normalized_email}")
     except Exception as e:
         logger.warning(f"Could not generate per-user API key: {e}")

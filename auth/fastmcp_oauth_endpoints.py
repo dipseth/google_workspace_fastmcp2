@@ -810,10 +810,12 @@ def setup_legacy_callback_route(mcp) -> None:
 
             # Retrieve per-user API key if one was generated during credential save
             user_api_key = getattr(credentials, "_user_api_key", None)
+            user_api_key_exists = getattr(credentials, "_user_api_key_exists", False)
             api_key_section = ""
-            if user_api_key:
-                # Resolve linked accounts for this key
-                accessible_section = ""
+
+            # Build linked-accounts section (shown for both new and existing keys)
+            accessible_section = ""
+            if user_api_key or user_api_key_exists:
                 try:
                     from auth.user_api_keys import get_accessible_emails
 
@@ -841,6 +843,7 @@ def setup_legacy_callback_route(mcp) -> None:
                 except Exception:
                     pass
 
+            if user_api_key:
                 api_key_section = f"""
                 <div class="api-key">
                     <b>🔑 Your Personal API Key</b><br>
@@ -853,6 +856,14 @@ def setup_legacy_callback_route(mcp) -> None:
                     <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
                         Copy to Clipboard
                     </button>
+                </div>
+                {accessible_section}"""
+            elif user_api_key_exists:
+                api_key_section = f"""
+                <div class="api-key" style="background:#d1ecf1;color:#0c5460;border-color:#bee5eb">
+                    <b>🔑 API Key Active</b><br>
+                    <small>Your existing per-user API key is still valid.<br>
+                    Credentials have been refreshed — no need to update your key.</small>
                 </div>
                 {accessible_section}"""
 
@@ -1798,10 +1809,14 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
                 # Retrieve per-user API key if one was generated
                 user_api_key = getattr(credentials, "_user_api_key", None)
+                user_api_key_exists = getattr(
+                    credentials, "_user_api_key_exists", False
+                )
                 api_key_section = ""
-                if user_api_key:
-                    # Resolve linked accounts for this key
-                    accessible_section = ""
+
+                # Build linked-accounts section (shown for both new and existing keys)
+                accessible_section = ""
+                if user_api_key or user_api_key_exists:
                     try:
                         from auth.user_api_keys import get_accessible_emails
 
@@ -1829,6 +1844,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     except Exception:
                         pass
 
+                if user_api_key:
                     api_key_section = f"""
                     <div class="api-key">
                         <b>🔑 Your Personal API Key</b><br>
@@ -1841,6 +1857,14 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
                             Copy to Clipboard
                         </button>
+                    </div>
+                    {accessible_section}"""
+                elif user_api_key_exists:
+                    api_key_section = f"""
+                    <div class="api-key" style="background:#d1ecf1;color:#0c5460;border-color:#bee5eb">
+                        <b>🔑 API Key Active</b><br>
+                        <small>Your existing per-user API key is still valid.<br>
+                        Credentials have been refreshed — no need to update your key.</small>
                     </div>
                     {accessible_section}"""
 
