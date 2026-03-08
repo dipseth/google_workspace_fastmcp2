@@ -22,6 +22,7 @@ except PackageNotFoundError:
 from fastmcp import FastMCP
 
 from auth.fastmcp_oauth_endpoints import (
+    setup_legacy_callback_route,
     setup_oauth_endpoints_fastmcp,
     setup_service_selection_routes,
 )
@@ -895,6 +896,10 @@ if google_auth_provider:
         # Service selection routes are needed by start_google_auth scope-upgrade flow
         setup_service_selection_routes(mcp)
         logger.info("  ✅ Service selection routes registered (/auth/services/select)")
+
+        # Register the legacy /oauth2callback so start_google_auth can complete
+        setup_legacy_callback_route(mcp)
+        logger.info("  ✅ Legacy /oauth2callback registered for start_google_auth flow")
     except Exception as e:
         logger.warning(f"⚠️ Could not register supplemental OAuth endpoints: {e}")
 
