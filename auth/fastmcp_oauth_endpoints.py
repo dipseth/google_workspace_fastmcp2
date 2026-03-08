@@ -4,6 +4,7 @@ This module implements OAuth discovery and Dynamic Client Registration
 endpoints using FastMCP's native routing system.
 """
 
+import html
 import json
 import logging
 from datetime import UTC, datetime
@@ -539,7 +540,7 @@ def _generate_service_selection_html(
         return f"""
         <!DOCTYPE html>
         <html><head><title>Error</title></head>
-        <body><h1>Service Selection Error</h1><p>Error: {str(e)}</p></body></html>
+        <body><h1>Service Selection Error</h1><p>Error: {html.escape(str(e))}</p></body></html>
         """
 
 
@@ -624,7 +625,7 @@ def setup_service_selection_routes(mcp) -> None:
             logger.error(f"❌ Error showing service selection: {e}")
             return HTMLResponse(
                 content=f"<!DOCTYPE html><html><head><title>Error</title></head>"
-                f"<body><h1>Service Selection Error</h1><p>{str(e)}</p></body></html>",
+                f"<body><h1>Service Selection Error</h1><p>{html.escape(str(e))}</p></body></html>",
                 status_code=500,
             )
 
@@ -703,7 +704,7 @@ def setup_service_selection_routes(mcp) -> None:
             return HTMLResponse(
                 content=f"<!DOCTYPE html><html><head><title>Service Selection Error</title></head>"
                 f"<body><h1>Service Selection Error</h1>"
-                f"<p>Error: {str(e)}</p>"
+                f"<p>Error: {html.escape(str(e))}</p>"
                 f"<p>Please try the authentication process again.</p></body></html>",
                 status_code=400,
             )
@@ -781,7 +782,7 @@ def setup_legacy_callback_route(mcp) -> None:
                     content=f"""<!DOCTYPE html><html><head><title>Access Denied</title>
                     <style>body{{font-family:sans-serif;text-align:center;padding:60px}}
                     h1{{color:#dc3545}}</style></head><body>
-                    <h1>Access Denied</h1><p>User <b>{user_email}</b> is not authorized.</p>
+                    <h1>Access Denied</h1><p>User <b>{html.escape(user_email)}</b> is not authorized.</p>
                     </body></html>""",
                     status_code=403,
                 )
@@ -821,7 +822,7 @@ def setup_legacy_callback_route(mcp) -> None:
             </style></head><body><div class="container">
                 <div class="success-icon">✅</div>
                 <h1>Authentication Successful!</h1>
-                <div class="email">Authenticated: <b>{user_email}</b></div>
+                <div class="email">Authenticated: <b>{html.escape(user_email)}</b></div>
                 <div class="saved"><b>🔐 Credentials Saved!</b><br>Ready to use.</div>
                 <div class="services"><h3>🚀 Services Available</h3>
                     <div>Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms</div>
@@ -838,7 +839,7 @@ def setup_legacy_callback_route(mcp) -> None:
                 <style>body{{font-family:sans-serif;text-align:center;padding:60px}}
                 .error{{color:#dc3545;font-size:48px}}</style></head><body>
                 <div class="error">❌</div><h1>OAuth Error</h1>
-                <p>{str(e)}</p><p>Please try again.</p></body></html>""",
+                <p>{html.escape(str(e))}</p><p>Please try again.</p></body></html>""",
                 status_code=500,
             )
 
