@@ -11,6 +11,14 @@ Key areas tested:
 4. End-to-end card generation with ColBERT + NLP combined
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Config-dependent — requires ColBERT model loaded (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
+
 import json
 import logging
 import os

@@ -1,5 +1,12 @@
 """Test Template Middleware v3 Jinja2 integration using standardized client framework."""
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Subset of test_template_middleware_integration (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import pytest
 
 from .test_helpers import ToolTestRunner

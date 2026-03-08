@@ -152,6 +152,7 @@ class GraphMixin:
             "get_all_containers",
             "get_heterogeneous_containers",
             "register_component_metadata_batch",
+            "_context_resources",
         }
     )
     _MIXIN_REQUIRES = frozenset(

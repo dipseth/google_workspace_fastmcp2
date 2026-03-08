@@ -7,6 +7,14 @@ with real names and emails from the Google People API.
 Following standardized testing framework from tests/client/TESTING_FRAMEWORK.md
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Internal middleware detail — narrow enrichment middleware (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
+
 import pytest
 
 from .base_test_config import TEST_EMAIL

@@ -575,6 +575,264 @@ async def _handle_fastmcp_service_selection(
         raise
 
 
+def setup_service_selection_routes(mcp) -> None:
+    """Register /auth/services/select and /auth/services/selected routes.
+
+    These are needed by the ``start_google_auth`` scope-upgrade flow regardless
+    of whether GoogleProvider or the legacy OAuth system is active.  Extracted
+    so that ``server.py`` can call this independently.
+    """
+
+    @mcp.custom_route("/auth/services/select", methods=["GET", "OPTIONS"])
+    async def show_service_selection(request: Any):
+        """Show service selection page with PKCE support."""
+        from starlette.responses import HTMLResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
+
+        logger.info("🎨 Service selection page requested")
+        try:
+            query_params = dict(request.query_params)
+            state = query_params.get("state")
+            flow_type = query_params.get("flow_type", "fastmcp")
+            use_pkce = query_params.get("use_pkce", "true").lower() == "true"
+
+            if not state:
+                logger.error("❌ Missing state parameter in service selection request")
+                return HTMLResponse(
+                    content="<!DOCTYPE html><html><head><title>Error</title></head>"
+                    "<body><h1>Error: Invalid service selection request</h1></body></html>",
+                    status_code=400,
+                )
+
+            logger.info(
+                f"📋 Showing service selection for state: {state}, "
+                f"flow_type: {flow_type}, PKCE: {use_pkce}"
+            )
+            html_content = _generate_service_selection_html(state, flow_type, use_pkce)
+            return HTMLResponse(content=html_content)
+
+        except Exception as e:
+            logger.error(f"❌ Error showing service selection: {e}")
+            return HTMLResponse(
+                content=f"<!DOCTYPE html><html><head><title>Error</title></head>"
+                f"<body><h1>Service Selection Error</h1><p>{str(e)}</p></body></html>",
+                status_code=500,
+            )
+
+    @mcp.custom_route("/auth/services/selected", methods=["POST", "OPTIONS"])
+    async def handle_service_selection(request: Any):
+        """Handle service selection form submission with PKCE support."""
+        from starlette.responses import HTMLResponse, RedirectResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
+
+        logger.info("✅ Service selection form submitted")
+        try:
+            form_data = await request.form()
+            state = form_data.get("state")
+            flow_type = form_data.get("flow_type", "fastmcp")
+            auth_method = form_data.get("auth_method", "pkce_file")
+            use_pkce = auth_method != "file_credentials"
+            use_custom = form_data.get("use_custom_creds") == "on"
+            custom_client_id = form_data.get("custom_client_id") if use_custom else None
+            custom_client_secret = (
+                form_data.get("custom_client_secret") if use_custom else None
+            )
+            services = (
+                form_data.getlist("services") if hasattr(form_data, "getlist") else []
+            )
+            if not services and "services" in form_data:
+                services = [form_data.get("services")]
+
+            logger.info(
+                f"📋 Service selection received: state={state}, "
+                f"flow_type={flow_type}, services={services}"
+            )
+            logger.info(
+                f"🔐 Authentication method chosen: {auth_method} (PKCE: {use_pkce})"
+            )
+            if use_custom and custom_client_id:
+                logger.info(
+                    f"🔑 Using custom credentials: client_id={custom_client_id[:10]}..."
+                )
+
+            if not state:
+                raise ValueError("Missing state parameter")
+
+            if flow_type == "fastmcp":
+                oauth_url = await _handle_fastmcp_service_selection(
+                    state, services, use_pkce
+                )
+            else:
+                from .google_auth import handle_service_selection_callback
+
+                oauth_url = await handle_service_selection_callback(
+                    state=state,
+                    selected_services=services,
+                    use_pkce=use_pkce,
+                    auth_method=auth_method,
+                    custom_client_id=custom_client_id,
+                    custom_client_secret=custom_client_secret,
+                )
+
+            logger.info(
+                f"✅ Redirecting to OAuth URL for selected services "
+                f"(auth_method: {auth_method})"
+            )
+            return RedirectResponse(url=oauth_url, status_code=302)
+
+        except Exception as e:
+            logger.error(f"❌ Error handling service selection: {e}")
+            return HTMLResponse(
+                content=f"<!DOCTYPE html><html><head><title>Service Selection Error</title></head>"
+                f"<body><h1>Service Selection Error</h1>"
+                f"<p>Error: {str(e)}</p>"
+                f"<p>Please try the authentication process again.</p></body></html>",
+                status_code=400,
+            )
+
+    logger.info("  GET /auth/services/select (Service selection page)")
+    logger.info("  POST /auth/services/selected (Service selection form handler)")
+
+
+def setup_legacy_callback_route(mcp) -> None:
+    """Register only the /oauth2callback route.
+
+    This is needed when GoogleProvider is active so the legacy
+    ``start_google_auth`` tool flow can still complete Google OAuth
+    and store real Google API credentials.  The full
+    ``setup_oauth_endpoints_fastmcp`` is NOT called in that mode
+    because GoogleProvider already provides /authorize, /token, etc.
+    """
+
+    @mcp.custom_route("/oauth2callback", methods=["GET", "OPTIONS"])
+    async def oauth2callback_legacy(request: Any):
+        """OAuth2 callback for the legacy start_google_auth flow.
+
+        Delegates to the same handler logic used by the full endpoint set.
+        """
+        from starlette.responses import HTMLResponse, Response
+
+        from auth.access_control import validate_user_access
+        from auth.context import get_session_context, store_session_data
+        from auth.google_auth import handle_oauth_callback
+        from auth.pkce_utils import pkce_manager
+
+        logger.info("🚨 /oauth2callback hit (legacy route, GoogleProvider mode)")
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
+
+        try:
+            query_params = dict(request.query_params)
+            state = query_params.get("state")
+            code = query_params.get("code")
+            error = query_params.get("error")
+
+            logger.info(
+                f"🔍 oauth2callback params: state={state[:20] if state else 'MISSING'}... "
+                f"code={'PRESENT' if code else 'MISSING'} error={error or 'None'}"
+            )
+
+            # Retrieve PKCE code verifier if available
+            code_verifier = None
+            try:
+                code_verifier = pkce_manager.get_code_verifier(state)
+                logger.info("🔐 Retrieved PKCE code verifier for callback")
+            except KeyError:
+                logger.info(f"ℹ️ No PKCE session for state (non-PKCE flow)")
+            except Exception as e:
+                logger.warning(f"⚠️ PKCE retrieval error (continuing): {e}")
+
+            user_email, credentials = await handle_oauth_callback(
+                authorization_response=str(request.url),
+                state=state,
+                code_verifier=code_verifier,
+            )
+            logger.info(f"✅ OAuth callback processed for user: {user_email}")
+
+            if not validate_user_access(user_email):
+                logger.warning(f"🚫 Access denied for user: {user_email}")
+                return HTMLResponse(
+                    content=f"""<!DOCTYPE html><html><head><title>Access Denied</title>
+                    <style>body{{font-family:sans-serif;text-align:center;padding:60px}}
+                    h1{{color:#dc3545}}</style></head><body>
+                    <h1>Access Denied</h1><p>User <b>{user_email}</b> is not authorized.</p>
+                    </body></html>""",
+                    status_code=403,
+                )
+
+            # Store in session
+            try:
+                session_id = await get_session_context()
+                if session_id:
+                    store_session_data(session_id, "user_email", user_email)
+            except Exception as e:
+                logger.warning(f"⚠️ Session storage error (continuing): {e}")
+
+            success_html = f"""<!DOCTYPE html><html><head><title>Authentication Successful</title>
+            <style>
+                body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+                      margin:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+                      min-height:100vh;display:flex;align-items:center;justify-content:center}}
+                .container{{max-width:500px;background:white;border-radius:20px;padding:50px;
+                           text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.1)}}
+                .success-icon{{font-size:72px;margin-bottom:20px}}
+                h1{{color:#28a745;margin-bottom:10px;font-size:32px}}
+                .email{{color:#6c757d;font-size:18px;margin:20px 0}}
+                .saved{{background:#d4edda;color:#155724;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #c3e6cb}}
+                .services{{background:#f8f9fa;padding:20px;border-radius:10px;margin:20px 0}}
+            </style></head><body><div class="container">
+                <div class="success-icon">✅</div>
+                <h1>Authentication Successful!</h1>
+                <div class="email">Authenticated: <b>{user_email}</b></div>
+                <div class="saved"><b>🔐 Credentials Saved!</b><br>Ready to use.</div>
+                <div class="services"><h3>🚀 Services Available</h3>
+                    <div>Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms</div>
+                </div>
+                <p>You can close this window and return to your application.</p>
+            </div></body></html>"""
+
+            return HTMLResponse(content=success_html, status_code=200)
+
+        except Exception as e:
+            logger.error(f"❌ Legacy oauth2callback error: {e}", exc_info=True)
+            return HTMLResponse(
+                content=f"""<!DOCTYPE html><html><head><title>OAuth Error</title>
+                <style>body{{font-family:sans-serif;text-align:center;padding:60px}}
+                .error{{color:#dc3545;font-size:48px}}</style></head><body>
+                <div class="error">❌</div><h1>OAuth Error</h1>
+                <p>{str(e)}</p><p>Please try again.</p></body></html>""",
+                status_code=500,
+            )
+
+    logger.info("  ✅ Legacy /oauth2callback route registered (GoogleProvider mode)")
+
+
 def setup_oauth_endpoints_fastmcp(mcp) -> None:
     """Setup OAuth discovery and DCR endpoints using FastMCP custom routes.
 
@@ -1951,156 +2209,5 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     logger.info("  PUT /oauth/register/{client_id}")
     logger.info("  DELETE /oauth/register/{client_id}")
 
-    @mcp.custom_route("/auth/services/select", methods=["GET", "OPTIONS"])
-    async def show_service_selection(request: Any):
-        """Show service selection page with PKCE support."""
-
-        from starlette.responses import HTMLResponse, Response
-
-        # Handle CORS preflight
-        if request.method == "OPTIONS":
-            return Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                },
-            )
-
-        logger.info("🎨 Service selection page requested")
-
-        try:
-            # Get query parameters
-            query_params = dict(request.query_params)
-            state = query_params.get("state")
-            flow_type = query_params.get("flow_type", "fastmcp")
-            use_pkce = query_params.get("use_pkce", "true").lower() == "true"
-
-            if not state:
-                logger.error("❌ Missing state parameter in service selection request")
-                return HTMLResponse(
-                    content="""
-                    <!DOCTYPE html>
-                    <html><head><title>Error</title></head>
-                    <body><h1>Error: Invalid service selection request</h1></body></html>
-                    """,
-                    status_code=400,
-                )
-
-            logger.info(
-                f"📋 Showing service selection for state: {state}, flow_type: {flow_type}, PKCE: {use_pkce}"
-            )
-
-            html_content = _generate_service_selection_html(state, flow_type, use_pkce)
-            return HTMLResponse(content=html_content)
-
-        except Exception as e:
-            logger.error(f"❌ Error showing service selection: {e}")
-            return HTMLResponse(
-                content=f"""
-                <!DOCTYPE html>
-                <html><head><title>Error</title></head>
-                <body><h1>Service Selection Error</h1><p>{str(e)}</p></body></html>
-                """,
-                status_code=500,
-            )
-
-    @mcp.custom_route("/auth/services/selected", methods=["POST", "OPTIONS"])
-    async def handle_service_selection(request: Any):
-        """Handle service selection form submission with PKCE support."""
-        from starlette.responses import HTMLResponse, RedirectResponse, Response
-
-        # Handle CORS preflight
-        if request.method == "OPTIONS":
-            return Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                },
-            )
-
-        logger.info("✅ Service selection form submitted")
-
-        try:
-            # Parse form data
-            form_data = await request.form()
-            state = form_data.get("state")
-            flow_type = form_data.get("flow_type", "fastmcp")
-
-            # Get authentication method choice
-            auth_method = form_data.get("auth_method", "pkce_file")
-            use_pkce = auth_method != "file_credentials"
-
-            # Get custom credentials if enabled
-            use_custom = form_data.get("use_custom_creds") == "on"
-            custom_client_id = form_data.get("custom_client_id") if use_custom else None
-            custom_client_secret = (
-                form_data.get("custom_client_secret") if use_custom else None
-            )
-
-            # Get selected services (can be multiple)
-            services = (
-                form_data.getlist("services") if hasattr(form_data, "getlist") else []
-            )
-            if not services and "services" in form_data:
-                # Fallback for single service
-                services = [form_data.get("services")]
-
-            logger.info(
-                f"📋 Service selection received: state={state}, flow_type={flow_type}, services={services}"
-            )
-            logger.info(
-                f"🔐 Authentication method chosen: {auth_method} (PKCE: {use_pkce})"
-            )
-            if use_custom and custom_client_id:
-                logger.info(
-                    f"🔑 Using custom credentials: client_id={custom_client_id[:10]}..."
-                )
-
-            if not state:
-                raise ValueError("Missing state parameter")
-
-            # Handle based on flow type
-            if flow_type == "fastmcp":
-                oauth_url = await _handle_fastmcp_service_selection(
-                    state, services, use_pkce
-                )
-            else:
-                from .google_auth import handle_service_selection_callback
-
-                oauth_url = await handle_service_selection_callback(
-                    state=state,
-                    selected_services=services,
-                    use_pkce=use_pkce,
-                    auth_method=auth_method,
-                    custom_client_id=custom_client_id,
-                    custom_client_secret=custom_client_secret,
-                )
-
-            logger.info(
-                f"✅ Redirecting to OAuth URL for selected services (auth_method: {auth_method})"
-            )
-            return RedirectResponse(url=oauth_url, status_code=302)
-
-        except Exception as e:
-            logger.error(f"❌ Error handling service selection: {e}")
-            return HTMLResponse(
-                content=f"""
-                <!DOCTYPE html>
-                <html>
-                <head><title>Service Selection Error</title></head>
-                <body>
-                    <h1>Service Selection Error</h1>
-                    <p>Error: {str(e)}</p>
-                    <p>Please try the authentication process again.</p>
-                </body>
-                </html>
-                """,
-                status_code=400,
-            )
-
-    logger.info("  GET /auth/services/select (Service selection page)")
-    logger.info("  POST /auth/services/selected (Service selection form handler)")
+    # Register service selection routes (shared with GoogleProvider path)
+    setup_service_selection_routes(mcp)

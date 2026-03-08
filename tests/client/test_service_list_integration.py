@@ -5,6 +5,13 @@ This file tests the complete flow from resource discovery to tool execution,
 verifying that the service list resources correctly map to underlying tools.
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Overlaps test_tag_based_resource_middleware_integration (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import json
 
 import pytest

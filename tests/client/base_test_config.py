@@ -105,6 +105,13 @@ SERVER_URL = os.getenv(
 
 def print_test_configuration():
     """Print the test configuration for debugging."""
+    from ..test_auth_utils import get_mcp_api_key
+
+    api_key = get_mcp_api_key()
+    auth_method = "MCP_API_KEY" if api_key else "JWT token file (legacy)"
+    if not api_key and not os.path.exists("test_tokens.json"):
+        auth_method = "⚠️  NONE — set MCP_API_KEY in .env to authenticate"
+
     print("\n🔧 Test Configuration:")
     print(f"   SERVER_HOST: {SERVER_HOST}")
     print(f"   SERVER_PORT: {SERVER_PORT}")
@@ -112,6 +119,7 @@ def print_test_configuration():
     print(f"   FINAL_PROTOCOL: {PROTOCOL}")
     print(f"   SERVER_URL: {SERVER_URL}")
     print(f"   TEST_EMAIL: {TEST_EMAIL}")
+    print(f"   AUTH_METHOD: {auth_method}")
     print(
         f"   GOOGLE_SLIDE_PRESENTATION_ID: {GOOGLE_SLIDE_PRESENTATION_ID or 'Not set'}"
     )

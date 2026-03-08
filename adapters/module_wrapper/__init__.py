@@ -104,6 +104,11 @@ from adapters.module_wrapper.indexing_mixin import (
     THIRD_PARTY_PREFIXES,
     IndexingMixin,
 )
+from adapters.module_wrapper.input_resolver_mixin import (
+    FieldExtractor,
+    InputResolverMixin,
+    OverflowHandler,
+)
 from adapters.module_wrapper.instance_pattern_mixin import (
     InstancePattern,
     InstancePatternMixin,
@@ -249,6 +254,7 @@ class ModuleWrapper(
     SkillsMixin,
     PipelineMixin,
     GraphMixin,
+    InputResolverMixin,
     CacheMixin,
     InstancePatternMixin,
     ModuleWrapperBase,
@@ -265,6 +271,7 @@ class ModuleWrapper(
     - Symbol generation and DSL (SymbolsMixin)
     - Ingestion pipeline (PipelineMixin)
     - Graph-based relationship DAG (GraphMixin)
+    - Input resolution for DSL symbol params (InputResolverMixin)
     - Tiered component caching (CacheMixin)
     - Instance pattern storage and variation (InstancePatternMixin)
     - Skill document generation (SkillsMixin)
@@ -805,6 +812,9 @@ __all__ = [
     "ToolRelationshipGraph",
     "GraphMixin",
     "ComponentMetadataProvider",
+    "InputResolverMixin",
+    "FieldExtractor",
+    "OverflowHandler",
     "CacheMixin",
     "InstancePatternMixin",
     # Instance pattern classes

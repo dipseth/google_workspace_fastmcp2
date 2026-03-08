@@ -27,17 +27,17 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
-# Ensure pytest process uses the same trusted cert bundle as the running HTTPS server.
-# This mirrors the VS Code MCP client config that connects to https://localhost:8002/mcp.
-os.environ.setdefault(
-    "SSL_CERT_FILE",
-    os.path.abspath("localhost+2.pem"),
-)
-os.environ.setdefault(
-    "REQUESTS_CA_BUNDLE",
-    os.path.abspath("localhost+2.pem"),
-)
-
+# SSL trust for test clients connecting to the local HTTPS server.
+#
+# NOTE: `localhost+2.pem` is a *server leaf cert* (mkcert), NOT a CA bundle.
+# Setting SSL_CERT_FILE to a leaf cert breaks outgoing HTTPS in some stacks
+# (httpx, authlib, etc.).  The test client factory in base_test_config.py
+# already uses `verify=False` for local dev, so we do NOT override
+# SSL_CERT_FILE here by default.
+#
+# If you *do* have the mkcert root CA and want full TLS verification in tests,
+# set MCP_CA_BUNDLE=/path/to/rootCA.pem in your environment or .env file.
+# (base_test_config.py will pick it up and configure httpx accordingly.)
 from .base_test_config import TEST_EMAIL, create_test_client, print_test_configuration
 from .resource_helpers import (
     get_real_calendar_event_id,
@@ -423,8 +423,11 @@ async def client():
     - Always use the shared connection logic in [`tests/client/base_test_config.create_test_client()`](tests/client/base_test_config.py:90)
       so tests don't depend on a valid local TLS/CA chain.
     - If the server is not running, skip the suite (this is an integration-style test harness).
+    - Automatically enables all tools via manage_tools to avoid minimal startup
+      mode causing "Tool 'X' is disabled" failures.
     """
     from .base_test_config import TEST_EMAIL, create_test_client
+    from .test_helpers import ensure_tools_enabled
 
     try:
         client_obj = await create_test_client(TEST_EMAIL)
@@ -432,6 +435,9 @@ async def client():
         pytest.skip(f"MCP server not reachable for integration tests: {e}")
 
     async with client_obj:
+        # Enable all tools for the test session to avoid minimal startup
+        # mode causing "Tool 'X' is disabled for this session" failures.
+        await ensure_tools_enabled(client_obj)
         yield client_obj
 
 

@@ -39,8 +39,8 @@ class TestResolveParamKey:
     def test_chip_resolves_to_chips(self):
         assert _resolve_param_key("Chip") == "chips"
 
-    def test_grid_item_resolves_to_items(self):
-        assert _resolve_param_key("GridItem") == "items"
+    def test_grid_item_resolves_to_grid_items(self):
+        assert _resolve_param_key("GridItem") == "grid_items"
 
     def test_carousel_card_resolves_to_cards(self):
         assert _resolve_param_key("CarouselCard") == "cards"
@@ -170,13 +170,13 @@ class TestResolveSymbolParams:
         }
 
     def test_grid_item_symbol(self):
-        """GridItem symbol resolves to 'items' key."""
+        """GridItem symbol resolves to 'grid_items' key."""
         params = {
             "ǵ": [{"title": "Cell 1"}, {"title": "Cell 2"}],
         }
         result = resolve_symbol_params(params, REVERSE_SYMBOLS)
         assert result == {
-            "items": [{"title": "Cell 1"}, {"title": "Cell 2"}],
+            "grid_items": [{"title": "Cell 1"}, {"title": "Cell 2"}],
         }
 
     def test_carousel_card_symbol(self):

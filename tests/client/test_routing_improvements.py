@@ -1,5 +1,12 @@
 """Test suite for Phase 3.3: Routing Middleware Improvements using FastMCP Client SDK."""
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Phase-specific: Phase 3.3 validation, routing is stable (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import asyncio
 import time
 

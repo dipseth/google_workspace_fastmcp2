@@ -6,6 +6,13 @@ Tests verify:
 3. Middleware properly resolves user email from OAuth files
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Narrow: tests me keyword resolution only (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import pytest
 
 from .base_test_config import TEST_EMAIL

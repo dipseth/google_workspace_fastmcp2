@@ -34,10 +34,10 @@ _symbols_lock = threading.Lock()
 # =============================================================================
 
 # Google Chat Card API Limits
-GCHAT_CARD_MAX_BYTES = 20_000  # Maximum card payload size
+GCHAT_CARD_MAX_BYTES = 32_000  # Empirically determined webhook payload limit (~32KB)
 GCHAT_TEXT_MAX_CHARS = 18_000  # Maximum text message length
 GCHAT_SAFE_LIMIT_RATIO = 0.75  # Recommended operating ratio (75% of max)
-GCHAT_SAFE_CARD_BYTES = int(GCHAT_CARD_MAX_BYTES * GCHAT_SAFE_LIMIT_RATIO)  # ~15KB
+GCHAT_SAFE_CARD_BYTES = int(GCHAT_CARD_MAX_BYTES * GCHAT_SAFE_LIMIT_RATIO)  # ~24KB
 
 # Domain-specific stopwords for gchat card search
 GCHAT_STOPWORDS = [
@@ -63,6 +63,8 @@ CARD_CONTEXT_RESOURCES = {
     "Chip": ("chips", "_chip_index"),
     "DecoratedText": ("content_texts", "_text_index"),
     "TextParagraph": ("content_texts", "_text_index"),
+    "GridItem": ("grid_items", "_grid_item_index"),
+    "CarouselCard": ("carousel_cards", "_carousel_card_index"),
 }
 
 # Container components: JSON field name for children
@@ -202,6 +204,32 @@ def _register_card_component_metadata(wrapper) -> None:
         f"{len(CARD_CONTAINERS)} containers, "
         f"{len(CARD_WRAPPER_REQUIREMENTS)} wrappers, "
         f"{len(CARD_WIDGET_TYPES)} widgets"
+    )
+
+
+def _register_card_input_resolution(wrapper) -> None:
+    """Register card-specific input resolution with InputResolverMixin.
+
+    Populates field extractors, overflow handlers, and param key overrides
+    so the mixin can drive symbol param resolution and context consumption.
+    """
+    from gchat.card_builder.field_extractors import (
+        CARD_FIELD_EXTRACTORS,
+        CARD_OVERFLOW_HANDLERS,
+        CARD_PARAM_KEY_OVERRIDES,
+        CARD_SCALAR_PARAMS,
+    )
+
+    wrapper.register_input_resolution_batch(
+        extractors=CARD_FIELD_EXTRACTORS,
+        overflow_handlers=CARD_OVERFLOW_HANDLERS,
+        param_key_overrides=CARD_PARAM_KEY_OVERRIDES,
+        scalar_params=CARD_SCALAR_PARAMS,
+    )
+    logger.info(
+        f"📋 Registered card input resolution: "
+        f"{len(CARD_FIELD_EXTRACTORS)} extractors, "
+        f"{len(CARD_OVERFLOW_HANDLERS)} overflow handlers"
     )
 
 
@@ -346,10 +374,10 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
     from config.settings import settings
     from gchat.wrapper_dag import _warm_start_with_dag_patterns
 
-    logger.info("🔧 Creating singleton ModuleWrapper for card_framework...")
+    logger.info("🔧 Creating singleton ModuleWrapper for card_framework.v2...")
 
     wrapper = ModuleWrapper(
-        module_or_name="card_framework",
+        module_or_name="card_framework.v2",
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
         collection_name=settings.card_collection,
@@ -436,6 +464,13 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
         _register_card_component_metadata(wrapper)
     except Exception as e:
         logger.warning(f"⚠️ Failed to register component metadata: {e}")
+
+    # Register card-specific input resolution (field extractors, overflow handlers)
+    # This enables InputResolverMixin to drive symbol param resolution and context consumption
+    try:
+        _register_card_input_resolution(wrapper)
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to register input resolution: {e}")
 
     # Register gchat-specific skill templates for FastMCP SkillsDirectoryProvider
     try:

@@ -1,5 +1,12 @@
 """Comprehensive Qdrant integration tests using FastMCP Client SDK."""
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Overlaps qdrant_middleware_refactored, more comprehensive (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import asyncio
 import os
 

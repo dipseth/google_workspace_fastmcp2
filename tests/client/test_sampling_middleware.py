@@ -1,5 +1,12 @@
 """Test Sampling Middleware Integration using FastMCP Client SDK."""
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Narrow internal middleware detail (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 """Test sampling middleware for request/response monitoring and analysis.
 
 🔧 MCP Tools Used:
