@@ -30,6 +30,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from adapters.module_wrapper.pipeline_mixin import format_instance_params
 from config.enhanced_logging import setup_logger
 from config.settings import settings
 
@@ -1080,8 +1081,6 @@ class FeedbackLoop:
             return None
 
         # INPUTS VECTOR: Parameter values + card description
-        from adapters.module_wrapper.pipeline_mixin import format_instance_params
-
         inputs_text = format_instance_params(instance_params)
         if card_description:
             inputs_text = f"{inputs_text} | {card_description}"

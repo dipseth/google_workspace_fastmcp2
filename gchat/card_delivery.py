@@ -323,7 +323,9 @@ async def _send_api_with_retry(
         )
         await asyncio.sleep(delay)
 
-    raise last_exc  # type: ignore[misc]
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("_send_api_with_retry called with max_retries=0")
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +401,7 @@ async def deliver_card_message(
                 total_parts,
                 _estimate_payload_bytes(part),
             )
-            logger.debug("Webhook URL: %s", webhook_url)
+            logger.debug("Webhook URL: %s", _redact_webhook_url(webhook_url))
             logger.debug("Payload: %s", json.dumps(part, indent=2))
 
             try:

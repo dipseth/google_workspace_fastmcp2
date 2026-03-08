@@ -1062,7 +1062,7 @@ class SmartCardBuilderV2:
                 f"buttons={len(context.get('buttons', []))}"
             )
             if context.get("grid_items"):
-                logger.info(f"📦 Grid items sample: {context['grid_items'][0]}")
+                logger.debug(f"Grid items sample: {context['grid_items'][0]}")
 
             # Split pipe-separated sections and parse each independently
             section_dsls = [s.strip() for s in structure_dsl.split("|")]

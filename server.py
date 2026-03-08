@@ -209,11 +209,13 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                 """Check for API key before delegating to OAuth validation."""
                 if token == _mcp_api_key:
                     logger.debug("🔑 API key authentication — bypassing OAuth")
+                    import time as _time
+
                     return _FastMCPAccessToken(
                         token=token,
                         client_id="api-key-client",
                         scopes=["openid", "email", "profile"],
-                        expires_at=None,  # Never expires
+                        expires_at=int(_time.time()) + 86400,  # 24h TTL
                         claims={"sub": "api-key-user", "auth_method": "api_key"},
                     )
                 return await _original_load_access_token(token)
@@ -748,8 +750,11 @@ if google_auth_provider:
                 _Path(settings.credentials_dir) / ".oauth_authentication.json"
             )
             if oauth_data_path.exists():
-                with open(oauth_data_path, "r") as f:
-                    oauth_data = json.load(f)
+                try:
+                    with open(oauth_data_path, "r") as f:
+                        oauth_data = json.load(f)
+                except (json.JSONDecodeError, OSError):
+                    oauth_data = {}
                 authenticated_email = oauth_data.get("authenticated_email")
                 if authenticated_email:
                     return JSONResponse(
