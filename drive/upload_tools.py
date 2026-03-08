@@ -281,6 +281,8 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Wait for the success page",
                     "Return here and retry your operation",
                     "",
+                    f"⚠️ **After auth**: pass user_google_email='{user_google_email}' explicitly in all tool calls for this account",
+                    "",
                     "💡 **For CLI clients**: You can also poll authentication status:",
                     f"   GET {settings.base_url}/oauth/status",
                 ]
@@ -292,6 +294,8 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Grant permissions for Google services (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
                     "Wait for the success page",
                     "Return here and retry your operation",
+                    "",
+                    f"⚠️ **After auth**: pass user_google_email='{user_google_email}' explicitly in all tool calls for this account",
                     "",
                     "💡 **For CLI clients**: You can poll authentication status:",
                     f"   GET {settings.base_url}/oauth/status",
@@ -333,7 +337,15 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Google Calendar (event management)",
                     "And more Google services",
                 ],
-                note="The authentication will be linked to your current session and provide access to all Google services. Save your sessionId to reconnect with the same tool state using ?uuid= parameter.",
+                note=(
+                    "The authentication will be linked to your current session and provide "
+                    "access to all Google services. Save your sessionId to reconnect with "
+                    "the same tool state using ?uuid= parameter.\n\n"
+                    f"⚠️ IMPORTANT: After authentication completes, you MUST pass "
+                    f"user_google_email='{user_google_email}' explicitly in all subsequent "
+                    f"tool calls for this account. Do NOT omit user_google_email or the "
+                    f"server will default to the primary session account."
+                ),
             )
 
             # Add browser-specific fields

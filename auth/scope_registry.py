@@ -399,7 +399,7 @@ class ScopeRegistry:
             "base.openid",
             "photos.readonly",
             "photos.appendonly",
-            "photos.readonly_appcreated",
+            # appcreateddata scopes excluded — restricts API to app-created content only
         ],
         "photos_full": [
             "base.userinfo_email",
@@ -407,8 +407,7 @@ class ScopeRegistry:
             "photos.readonly",
             "photos.appendonly",
             "photos.full",
-            "photos.readonly_appcreated",
-            "photos.edit_appcreated",
+            # appcreateddata scopes excluded — restricts API to app-created content only
         ],
         "tasks_basic": [
             "base.userinfo_email",
@@ -486,8 +485,7 @@ class ScopeRegistry:
             "photos.readonly",
             "photos.appendonly",
             "photos.full",
-            "photos.readonly_appcreated",
-            "photos.edit_appcreated",
+            # appcreateddata scopes excluded — restricts API to app-created content only
             "calendar.readonly",
             "calendar.events",
             "calendar.full",

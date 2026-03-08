@@ -786,6 +786,18 @@ def setup_legacy_callback_route(mcp) -> None:
                     status_code=403,
                 )
 
+            # Register as secondary account in dual auth bridge
+            try:
+                from auth.dual_auth_bridge import get_dual_auth_bridge
+
+                dual_bridge = get_dual_auth_bridge()
+                dual_bridge.add_secondary_account(user_email)
+                logger.info(f"✅ Registered {user_email} as secondary account")
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ Dual auth bridge registration error (continuing): {e}"
+                )
+
             # Store in session
             try:
                 session_id = await get_session_context()

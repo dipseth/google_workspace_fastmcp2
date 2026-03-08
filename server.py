@@ -175,25 +175,137 @@ _fastmcp_google_client_secret = (
 
 if _fastmcp_google_client_id and _fastmcp_google_client_secret:
     try:
-        from fastmcp.server.auth.providers.google import GoogleProvider
+        from fastmcp.server.auth.providers.google import (
+            GoogleProvider,
+            GoogleTokenVerifier,
+        )
 
-        # The GoogleProvider handles:
-        # - /.well-known/oauth-protected-resource (RFC 9728)
-        # - /.well-known/oauth-authorization-server (RFC 8414)
-        # - /authorize (OAuth authorization)
-        # - /token (token exchange)
-        # - /auth/callback (OAuth redirect)
-        # - Dynamic Client Registration (RFC 7591)
-        # - PKCE (S256) automatically
-        # - Bearer token validation on /mcp endpoint
-        google_auth_provider = GoogleProvider(
+        # ─── SSO GoogleProvider ───────────────────────────────────────────
+        # Subclasses GoogleProvider to intercept Google tokens during
+        # the OAuth code exchange and store them as Google API credentials.
+        # This eliminates the need for a separate start_google_auth call —
+        # when Claude connects via OAuth, the user grants full API scopes
+        # in a single consent screen and credentials are saved automatically.
+        from auth.scope_registry import ScopeRegistry
+
+        _oauth_comprehensive_scopes = ScopeRegistry.resolve_scope_group(
+            "oauth_comprehensive"
+        )
+
+        class SSOGoogleProvider(GoogleProvider):
+            """GoogleProvider that saves Google API credentials on first auth."""
+
+            def __init__(self, **kwargs):
+                # Separate the scopes: advertise full API scopes to clients so
+                # Google's consent screen asks for everything, but keep the
+                # token verifier checking only "openid" to avoid false negatives
+                # (Google tokeninfo returns full URLs, matching is fragile for
+                # 30+ scopes).
+                super().__init__(**kwargs)
+
+                # After parent init, override the token verifier's required_scopes
+                # so load_access_token doesn't reject tokens missing any of the
+                # 30+ API scopes.  We only need "openid" for identity verification.
+                if hasattr(self, "_token_validator") and hasattr(
+                    self._token_validator, "required_scopes"
+                ):
+                    self._token_validator.required_scopes = ["openid"]
+
+            async def exchange_authorization_code(self, client, authorization_code):
+                """Intercept token exchange to save Google API credentials."""
+                # Read the idp_tokens BEFORE the parent deletes the code
+                code_model = await self._code_store.get(key=authorization_code.code)
+                idp_tokens = code_model.idp_tokens if code_model else None
+
+                # Call parent to do the real exchange (issues FastMCP JWT)
+                result = await super().exchange_authorization_code(
+                    client, authorization_code
+                )
+
+                # Now save the Google tokens as API credentials
+                if idp_tokens:
+                    try:
+                        await self._save_google_credentials(idp_tokens)
+                    except Exception as e:
+                        logger.warning(
+                            f"⚠️ SSO credential save failed (auth still works): {e}"
+                        )
+
+                return result
+
+            async def _save_google_credentials(self, idp_tokens: dict):
+                """Convert raw Google tokens to Credentials and save them."""
+                from google.oauth2.credentials import Credentials
+
+                from auth.google_auth import _save_credentials
+
+                access_token = idp_tokens.get("access_token")
+                refresh_token = idp_tokens.get("refresh_token")
+                id_token_str = idp_tokens.get("id_token")
+
+                if not access_token:
+                    logger.warning("SSO: No access_token in idp_tokens, skipping save")
+                    return
+
+                # Determine user email from the id_token or userinfo
+                user_email = None
+                if id_token_str:
+                    try:
+                        import base64
+                        import json
+
+                        # Decode JWT payload (no verification needed, we trust Google)
+                        parts = id_token_str.split(".")
+                        if len(parts) >= 2:
+                            # Add padding
+                            payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+                            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+                            user_email = payload.get("email")
+                    except Exception as e:
+                        logger.debug(f"SSO: Could not decode id_token: {e}")
+
+                if not user_email:
+                    # Fallback: call Google userinfo API
+                    try:
+                        import httpx
+
+                        async with httpx.AsyncClient(timeout=10) as http_client:
+                            resp = await http_client.get(
+                                "https://www.googleapis.com/oauth2/v2/userinfo",
+                                headers={"Authorization": f"Bearer {access_token}"},
+                            )
+                            if resp.status_code == 200:
+                                user_email = resp.json().get("email")
+                    except Exception as e:
+                        logger.warning(f"SSO: Could not fetch userinfo: {e}")
+
+                if not user_email:
+                    logger.warning("SSO: Could not determine user email, skipping save")
+                    return
+
+                # Build google.oauth2.credentials.Credentials
+                credentials = Credentials(
+                    token=access_token,
+                    refresh_token=refresh_token,
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=_fastmcp_google_client_id,
+                    client_secret=_fastmcp_google_client_secret,
+                    scopes=_oauth_comprehensive_scopes,
+                )
+
+                _save_credentials(user_email, credentials)
+                logger.info(
+                    f"✅ SSO: Google API credentials saved for {user_email} "
+                    f"(refresh_token: {'yes' if refresh_token else 'no'}, "
+                    f"scopes: {len(_oauth_comprehensive_scopes)})"
+                )
+
+        google_auth_provider = SSOGoogleProvider(
             client_id=_fastmcp_google_client_id,
             client_secret=_fastmcp_google_client_secret,
             base_url=settings.base_url,
-            required_scopes=[
-                "openid"
-            ],  # Minimal — Google tokeninfo returns full URLs, not shorthands
-            redirect_path="/auth/callback",  # FastMCP default
+            required_scopes=_oauth_comprehensive_scopes,  # Full API scopes for Google consent
+            redirect_path="/auth/callback",
             require_authorization_consent=False,  # Google already has its own consent screen
         )
 
