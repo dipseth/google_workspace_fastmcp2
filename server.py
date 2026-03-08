@@ -193,6 +193,7 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                 "openid"
             ],  # Minimal — Google tokeninfo returns full URLs, not shorthands
             redirect_path="/auth/callback",  # FastMCP default
+            require_authorization_consent=False,  # Google already has its own consent screen
         )
 
         # ─── API Key Bypass for non-OAuth clients (e.g., Roo Code) ───
@@ -285,6 +286,17 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
 
         google_auth_provider.get_client = _get_client_with_auto_register
 
+        # Enable DEBUG logging for FastMCP's OAuth proxy to trace auth flow
+        import logging as _logging
+
+        for _oauth_logger_name in [
+            "fastmcp.server.auth.oauth_proxy.proxy",
+            "fastmcp.server.auth.providers.google",
+            "mcp.server.auth.handlers.token",
+            "mcp.server.auth.handlers.authorize",
+        ]:
+            _logging.getLogger(_oauth_logger_name).setLevel(_logging.DEBUG)
+
         logger.info("✅ GoogleProvider configured for OAuth 2.1 (MCP protocol auth)")
         logger.info(f"  🌐 Base URL: {settings.base_url}")
         logger.info("  🔐 PKCE: Automatic (S256)")
@@ -292,6 +304,8 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
         logger.info("  🔍 Discovery: Auto-registered (RFC 9728 + RFC 8414)")
         logger.info("  🎯 Callback: /auth/callback")
         logger.info("  🔓 Auto-register: Unknown clients proxied automatically")
+        logger.info("  ⚡ Consent page: DISABLED (Google provides its own)")
+        logger.info("  🐛 OAuth DEBUG logging: ENABLED")
         logger.info("  ✅ Compatible with: Claude.ai, Claude Desktop, MCP Inspector")
 
     except ImportError as e:
@@ -350,6 +364,12 @@ if google_auth_provider:
     logger.info("  ✅ RFC 8414 Authorization Server Metadata: auto-registered")
     logger.info("  ✅ RFC 7591 Dynamic Client Registration: auto-registered")
     logger.info("  ✅ Bearer token validation: active on /mcp endpoint")
+    logger.info("  ⚡ Consent page: DISABLED (Google provides its own)")
+
+    # Enable uvicorn access logging at DEBUG level to trace all HTTP requests
+    # This captures whether clients call POST /token after /authorize callback
+    _logging.getLogger("uvicorn.access").setLevel(_logging.DEBUG)
+    logger.info("  📝 Uvicorn access logging: DEBUG (traces all HTTP requests)")
 else:
     logger.info("🔐 FastMCP running with legacy OAuth system (no GoogleProvider)")
     logger.info("  Custom OAuth endpoints will be registered below")
