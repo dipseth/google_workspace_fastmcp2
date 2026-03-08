@@ -364,6 +364,14 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
     except Exception as e:
         logger.warning(f"Could not generate per-user API key: {e}")
 
+    # Execute any deferred account links (from per-user key sessions)
+    try:
+        from .user_api_keys import consume_pending_links
+
+        consume_pending_links(normalized_email)
+    except Exception as e:
+        logger.warning(f"Could not process pending account links: {e}")
+
     # Check if AuthMiddleware is available for encrypted storage
     try:
         from .context import get_auth_middleware
@@ -1369,7 +1377,11 @@ async def handle_oauth_callback(
             # Store in session memory only
             session_id = await get_session_context()
             if session_id:
-                store_session_data(session_id, "credentials", credentials.to_json())
+                from auth.types import SessionKey
+
+                store_session_data(
+                    session_id, SessionKey.CREDENTIALS, credentials.to_json()
+                )
                 logger.info(f"Stored credentials in session memory for {user_email}")
             else:
                 logger.warning(

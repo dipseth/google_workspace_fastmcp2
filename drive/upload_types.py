@@ -119,6 +119,22 @@ class CheckAuthResponse(BaseModel):
         None,
         description="Session UUID for this connection. Save this to reconnect with same tool state using ?uuid= parameter",
     )
+    authMethod: Optional[str] = Field(
+        None,
+        description="How this session authenticated: 'oauth' (browser flow), 'api_key' (shared MCP_API_KEY), or 'user_api_key' (per-user key)",
+    )
+    keyBoundEmail: Optional[str] = Field(
+        None,
+        description="For per-user API key sessions, the email the key is bound to",
+    )
+    linkedAccounts: Optional[List[str]] = Field(
+        None,
+        description="Other email accounts accessible via account linking (per-user key sessions)",
+    )
+    scopes: Optional[List[str]] = Field(
+        None,
+        description="OAuth scopes granted for the checked account's credentials",
+    )
     error: Optional[str] = Field(
         None, description="Error message if authentication check failed"
     )

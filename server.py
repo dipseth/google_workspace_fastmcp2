@@ -330,17 +330,23 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
 
             async def _load_access_token_with_api_key(token: str):
                 """Check for API key / per-user key before delegating to OAuth."""
+                import hmac
                 import time as _time
 
-                # 1. Shared admin API key
-                if token == _mcp_api_key:
+                # 1. Shared admin API key (timing-safe comparison)
+                from auth.types import AuthProvenance
+
+                if hmac.compare_digest(token, _mcp_api_key):
                     logger.debug("🔑 API key authentication — bypassing OAuth")
                     return _FastMCPAccessToken(
                         token=token,
                         client_id="api-key-client",
                         scopes=_oauth_comprehensive_scopes,
                         expires_at=int(_time.time()) + 86400,
-                        claims={"sub": "api-key-user", "auth_method": "api_key"},
+                        claims={
+                            "sub": "api-key-user",
+                            "auth_method": AuthProvenance.API_KEY,
+                        },
                     )
 
                 # 2. Per-user API key (generated on OAuth completion)
@@ -357,7 +363,7 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                         claims={
                             "sub": user_email,
                             "email": user_email,
-                            "auth_method": "user_api_key",
+                            "auth_method": AuthProvenance.USER_API_KEY,
                         },
                     )
 

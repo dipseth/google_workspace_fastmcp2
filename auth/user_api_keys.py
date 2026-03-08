@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 _REGISTRY_FILENAME = ".user_api_keys.json"
 _LINKS_FILENAME = ".user_api_key_links.json"
+_PENDING_LINKS_FILENAME = ".user_api_key_pending_links.json"
 _lock = threading.Lock()
 
 
@@ -190,6 +191,78 @@ def link_accounts(email_a: str, email_b: str) -> None:
         _save_links(links)
 
     logger.info(f"🔗 Linked accounts: {a} ↔ {b}")
+
+
+# ---------------------------------------------------------------------------
+# Pending links (deferred until OAuth completes)
+# ---------------------------------------------------------------------------
+
+
+def _pending_links_path() -> Path:
+    return Path(settings.credentials_dir) / _PENDING_LINKS_FILENAME
+
+
+def _load_pending_links() -> dict:
+    """Load pending links. Returns {target_email: [source_emails]}."""
+    path = _pending_links_path()
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_pending_links(pending: dict) -> None:
+    path = _pending_links_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(pending, f, indent=2)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def request_link(source_email: str, target_email: str) -> None:
+    """Record a pending link request. Executed when target_email completes OAuth.
+
+    Args:
+        source_email: The email of the key owner requesting the link.
+        target_email: The email being authenticated (link deferred until OAuth completes).
+    """
+    s = source_email.lower().strip()
+    t = target_email.lower().strip()
+    if s == t:
+        return
+
+    with _lock:
+        pending = _load_pending_links()
+        sources = set(pending.get(t, []))
+        sources.add(s)
+        pending[t] = sorted(sources)
+        _save_pending_links(pending)
+
+    logger.info(f"🔗 Pending link request: {s} → {t} (awaiting OAuth completion)")
+
+
+def consume_pending_links(completed_email: str) -> None:
+    """Execute any pending links for an email that just completed OAuth.
+
+    Called from _save_credentials after OAuth succeeds.
+    """
+    e = completed_email.lower().strip()
+
+    with _lock:
+        pending = _load_pending_links()
+        sources = pending.pop(e, [])
+        if sources:
+            _save_pending_links(pending)
+
+    for source in sources:
+        link_accounts(source, e)
+        logger.info(f"🔗 Executed deferred link: {source} ↔ {e}")
 
 
 def get_accessible_emails(email: str) -> Set[str]:

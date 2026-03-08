@@ -10,6 +10,8 @@ from typing_extensions import Any, Dict, List, Optional, Union
 
 from config.enhanced_logging import setup_logger
 
+from .types import SessionKey
+
 logger = setup_logger()
 
 # Thread-safe storage for session data (this remains as it's not context-specific)
@@ -175,7 +177,7 @@ def set_user_email_context_in_session(user_email: str, session_id: str = None) -
         session_id: Session ID (optional - if provided, stores in session data)
     """
     if session_id:
-        store_session_data(session_id, "user_email", user_email)
+        store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
         logger.debug(f"Set user email in session storage: {user_email}")
     else:
         # Fallback: store in OAuth auth file for persistence
@@ -732,7 +734,7 @@ async def is_service_selection_needed(session_id: str = None) -> bool:
         session_id = await get_session_context()
 
     if session_id:
-        return get_session_data(session_id, "service_selection_needed", False)
+        return get_session_data(session_id, SessionKey.SERVICE_SELECTION_NEEDED, False)
 
     return False
 
@@ -761,7 +763,7 @@ async def get_session_disabled_tools(session_id: str = None) -> set:
     if not session_id:
         return set()
 
-    disabled = get_session_data(session_id, "session_disabled_tools", set())
+    disabled = get_session_data(session_id, SessionKey.SESSION_DISABLED_TOOLS, set())
     # Ensure we always return a set (in case None was stored)
     return (
         disabled if isinstance(disabled, set) else set(disabled) if disabled else set()
@@ -784,7 +786,7 @@ def get_session_disabled_tools_sync(session_id: str) -> set:
     if not session_id:
         return set()
 
-    disabled = get_session_data(session_id, "session_disabled_tools", set())
+    disabled = get_session_data(session_id, SessionKey.SESSION_DISABLED_TOOLS, set())
     # Ensure we always return a set (in case None was stored)
     return (
         disabled if isinstance(disabled, set) else set(disabled) if disabled else set()
@@ -817,14 +819,14 @@ async def disable_tool_for_session(
 
     disabled = await get_session_disabled_tools(session_id)
     disabled.add(tool_name)
-    store_session_data(session_id, "session_disabled_tools", disabled)
+    store_session_data(session_id, SessionKey.SESSION_DISABLED_TOOLS, disabled)
     logger.debug(f"Disabled tool '{tool_name}' for session {session_id}")
 
     if persist:
         # Also store user email for cross-session restoration
         user_email = await get_user_email_context()
         if user_email:
-            store_session_data(session_id, "user_email", user_email)
+            store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
         persist_session_tool_states()
 
     return True
@@ -852,7 +854,7 @@ def disable_tool_for_session_sync(tool_name: str, session_id: str) -> bool:
 
     disabled = get_session_disabled_tools_sync(session_id)
     disabled.add(tool_name)
-    store_session_data(session_id, "session_disabled_tools", disabled)
+    store_session_data(session_id, SessionKey.SESSION_DISABLED_TOOLS, disabled)
     logger.debug(f"Disabled tool '{tool_name}' for session {session_id}")
     return True
 
@@ -882,14 +884,14 @@ async def enable_tool_for_session(
 
     disabled = await get_session_disabled_tools(session_id)
     disabled.discard(tool_name)
-    store_session_data(session_id, "session_disabled_tools", disabled)
+    store_session_data(session_id, SessionKey.SESSION_DISABLED_TOOLS, disabled)
     logger.debug(f"Enabled tool '{tool_name}' for session {session_id}")
 
     if persist:
         # Also store user email for cross-session restoration
         user_email = await get_user_email_context()
         if user_email:
-            store_session_data(session_id, "user_email", user_email)
+            store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
         persist_session_tool_states()
 
     return True
@@ -939,7 +941,7 @@ async def clear_session_disabled_tools(session_id: str = None) -> bool:
         )
         return False
 
-    store_session_data(session_id, "session_disabled_tools", set())
+    store_session_data(session_id, SessionKey.SESSION_DISABLED_TOOLS, set())
     # Persist to disk so the cleared state survives across requests
     # (prevents _handle_session_connection from re-restoring stale state)
     persist_session_tool_states()
@@ -968,7 +970,7 @@ def clear_session_disabled_tools_sync(session_id: str) -> bool:
         )
         return False
 
-    store_session_data(session_id, "session_disabled_tools", set())
+    store_session_data(session_id, SessionKey.SESSION_DISABLED_TOOLS, set())
     # Persist to disk so the cleared state survives across requests
     # (prevents _handle_session_connection from re-restoring stale state)
     persist_session_tool_states()
@@ -1263,7 +1265,7 @@ def restore_session_tool_state(session_id: str) -> bool:
                 "last_accessed": datetime.now(),
             }
 
-        _session_store[session_id]["session_disabled_tools"] = state.get(
+        _session_store[session_id][SessionKey.SESSION_DISABLED_TOOLS] = state.get(
             "disabled_tools", set()
         )
         _session_store[session_id]["minimal_startup_applied"] = state.get(
@@ -1272,7 +1274,7 @@ def restore_session_tool_state(session_id: str) -> bool:
         _session_store[session_id]["last_accessed"] = datetime.now()
 
         if state.get("user_email"):
-            _session_store[session_id]["user_email"] = state["user_email"]
+            _session_store[session_id][SessionKey.USER_EMAIL] = state["user_email"]
 
     disabled_count = len(state.get("disabled_tools", set()))
     logger.info(
@@ -1378,13 +1380,13 @@ def restore_session_tool_state_by_email(new_session_id: str, user_email: str) ->
                 "last_accessed": datetime.now(),
             }
 
-        _session_store[new_session_id]["session_disabled_tools"] = old_state.get(
-            "disabled_tools", set()
+        _session_store[new_session_id][SessionKey.SESSION_DISABLED_TOOLS] = (
+            old_state.get("disabled_tools", set())
         )
         _session_store[new_session_id]["minimal_startup_applied"] = old_state.get(
             "minimal_startup_applied", False
         )
-        _session_store[new_session_id]["user_email"] = user_email
+        _session_store[new_session_id][SessionKey.USER_EMAIL] = user_email
         _session_store[new_session_id]["last_accessed"] = datetime.now()
 
     disabled_count = len(old_state.get("disabled_tools", set()))

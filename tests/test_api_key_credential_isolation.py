@@ -1,14 +1,21 @@
-"""Tests for API key credential isolation.
+"""Tests for API key credential isolation and crypto-bound encryption.
 
 Validates that API key sessions cannot inherit OAuth credentials from
 other users and can only access credentials they created via start_google_auth.
+
+Also validates that credential encryption is derived from MCP_API_KEY when
+set, creating a cryptographic binding between the API secret and stored
+credentials.
 """
 
+import base64
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from auth.dual_auth_bridge import DualAuthBridge
+from auth.types import AuthProvenance
 
 
 @pytest.fixture(autouse=True)
@@ -34,13 +41,13 @@ def _reset_session_store():
 
 @pytest.fixture(autouse=True)
 def _reset_account_links():
-    """Remove the account links file between tests."""
-    from auth.user_api_keys import _links_path
+    """Remove the account links and pending links files between tests."""
+    from auth.user_api_keys import _links_path, _pending_links_path
 
-    path = _links_path()
     yield
-    if path.exists():
-        path.unlink()
+    for path in [_links_path(), _pending_links_path()]:
+        if path.exists():
+            path.unlink()
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +99,10 @@ class TestDetectAuthProvenance:
         mw = AuthMiddleware()
 
         mock_token = MagicMock()
-        mock_token.claims = {"sub": "api-key-user", "auth_method": "api_key"}
+        mock_token.claims = {
+            "sub": "api-key-user",
+            "auth_method": AuthProvenance.API_KEY,
+        }
 
         with (
             patch(
@@ -129,7 +139,7 @@ class TestDetectAuthProvenance:
         mock_token.claims = {
             "sub": "user@example.com",
             "email": "user@example.com",
-            "auth_method": "user_api_key",
+            "auth_method": AuthProvenance.USER_API_KEY,
         }
 
         with patch(
@@ -161,24 +171,21 @@ class TestCredentialIsolationGuard:
 
     @pytest.mark.asyncio
     async def test_api_key_blocked_for_unowned_email(self):
-        """API key session should be blocked from using another user's credentials."""
+        """API key session should be blocked from using another user's credentials.
+
+        The shared API key has no email claim, so user_email is None.
+        The guard reads user_google_email from tool arguments directly.
+        """
         from auth.middleware import AuthMiddleware
 
         mw = AuthMiddleware()
 
-        # Simulate: API key session, email resolved from tool args, not owned
         mock_context = MagicMock()
         mock_context.message.name = "search_drive_files"
         mock_context.message.arguments = {"user_google_email": "victim@example.com"}
 
         mock_call_next = AsyncMock()
 
-        # Patch the extraction chain so:
-        # - _detect_auth_provenance returns "api_key"
-        # - _extract_user_from_jwt_token returns None (API key has no email)
-        # - _extract_user_from_google_provider returns None
-        # - _extract_user_email returns "victim@example.com" (from tool args)
-        # - _load_oauth_authentication_data is never called (blocked)
         with (
             patch.object(mw, "_detect_auth_provenance", return_value="api_key"),
             patch.object(mw, "_extract_user_from_jwt_token", return_value=None),
@@ -188,35 +195,55 @@ class TestCredentialIsolationGuard:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch.object(mw, "_extract_user_email", return_value="victim@example.com"),
+            patch.object(mw, "_extract_user_email", return_value=None),
             patch.object(mw, "_load_oauth_authentication_data", return_value=None),
             patch("auth.audit.log_security_event") as mock_audit,
         ):
             with pytest.raises(ValueError, match="API key sessions can only access"):
                 await mw.on_call_tool(mock_context, mock_call_next)
 
-            # Verify the security event was logged
             mock_audit.assert_called_once()
             assert mock_audit.call_args[0][0] == "api_key_credential_access_blocked"
 
-        # call_next should NOT have been reached
         mock_call_next.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_api_key_allowed_for_owned_email(self):
-        """API key session should be allowed for credentials it created."""
+        """API key session should be allowed for credentials it created via start_google_auth.
+
+        Ownership is tracked per-session (stored in session data), not globally.
+        """
         from auth.middleware import AuthMiddleware
 
         mw = AuthMiddleware()
-        # Pre-register the email as API-key-owned
-        mw._dual_auth_bridge.register_api_key_account("myemail@example.com")
 
         mock_context = MagicMock()
+        mock_call_next = AsyncMock(return_value="success")
+
+        # Step 1: Call start_google_auth to register ownership
+        mock_context.message.name = "start_google_auth"
+        mock_context.message.arguments = {"user_google_email": "myemail@example.com"}
+
+        with (
+            patch.object(mw, "_detect_auth_provenance", return_value="api_key"),
+            patch.object(mw, "_extract_user_from_jwt_token", return_value=None),
+            patch.object(
+                mw,
+                "_extract_user_from_google_provider",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(mw, "_extract_user_email", return_value=None),
+            patch.object(mw, "_load_oauth_authentication_data", return_value=None),
+            patch.object(mw, "_bridge_credentials_if_needed", new_callable=AsyncMock),
+            patch.object(mw, "_inject_services", new_callable=AsyncMock),
+        ):
+            await mw.on_call_tool(mock_context, mock_call_next)
+
+        # Step 2: Now access the same email — should be allowed
         mock_context.message.name = "search_drive_files"
         mock_context.message.arguments = {"user_google_email": "myemail@example.com"}
 
-        mock_call_next = AsyncMock(return_value="success")
-
         with (
             patch.object(mw, "_detect_auth_provenance", return_value="api_key"),
             patch.object(mw, "_extract_user_from_jwt_token", return_value=None),
@@ -226,66 +253,13 @@ class TestCredentialIsolationGuard:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch.object(mw, "_extract_user_email", return_value="myemail@example.com"),
-            patch.object(mw, "_load_oauth_authentication_data", return_value=None),
-            patch.object(mw, "_bridge_credentials_if_needed", new_callable=AsyncMock),
-            patch.object(mw, "_inject_services", new_callable=AsyncMock),
-        ):
-            result = await mw.on_call_tool(mock_context, mock_call_next)
-
-        mock_call_next.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_api_key_start_google_auth_registers_email(self):
-        """start_google_auth should register the email as API-key-owned."""
-        from auth.middleware import AuthMiddleware
-
-        mw = AuthMiddleware()
-
-        mock_context = MagicMock()
-        mock_context.message.name = "start_google_auth"
-        mock_context.message.arguments = {"user_google_email": "newuser@example.com"}
-
-        mock_call_next = AsyncMock(return_value="auth started")
-
-        with (
-            patch.object(mw, "_detect_auth_provenance", return_value="api_key"),
-            patch.object(mw, "_extract_user_from_jwt_token", return_value=None),
-            patch.object(
-                mw,
-                "_extract_user_from_google_provider",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-            patch.object(mw, "_extract_user_email", return_value="newuser@example.com"),
+            patch.object(mw, "_extract_user_email", return_value=None),
             patch.object(mw, "_load_oauth_authentication_data", return_value=None),
             patch.object(mw, "_bridge_credentials_if_needed", new_callable=AsyncMock),
             patch.object(mw, "_inject_services", new_callable=AsyncMock),
         ):
             await mw.on_call_tool(mock_context, mock_call_next)
 
-        # Email should now be registered as API-key-owned
-        assert mw._dual_auth_bridge.is_api_key_owned_account("newuser@example.com")
-
-        # Subsequent tool calls with this email should be allowed
-        mock_context.message.name = "search_drive_files"
-        with (
-            patch.object(mw, "_detect_auth_provenance", return_value="api_key"),
-            patch.object(mw, "_extract_user_from_jwt_token", return_value=None),
-            patch.object(
-                mw,
-                "_extract_user_from_google_provider",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-            patch.object(mw, "_extract_user_email", return_value="newuser@example.com"),
-            patch.object(mw, "_load_oauth_authentication_data", return_value=None),
-            patch.object(mw, "_bridge_credentials_if_needed", new_callable=AsyncMock),
-            patch.object(mw, "_inject_services", new_callable=AsyncMock),
-        ):
-            await mw.on_call_tool(mock_context, mock_call_next)
-
-        # Should have been called (not blocked)
         assert mock_call_next.call_count == 2
 
     @pytest.mark.asyncio
@@ -530,62 +504,272 @@ class TestPerUserKeyCredentialGuard:
         mock_call_next.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_user_key_start_auth_links_accounts(self):
-        """start_google_auth via per-user key should link the new email."""
+    async def test_session_level_linking_creates_pending_link(self):
+        """Two start_google_auth calls in the same session should create a pending link.
+
+        The link is deferred — only activated when the second OAuth completes
+        (via consume_pending_links).  This works for ANY auth type, not just
+        per-user key sessions.
+        """
         from auth.middleware import AuthMiddleware
-        from auth.user_api_keys import get_accessible_emails
+        from auth.user_api_keys import (
+            consume_pending_links,
+            get_accessible_emails,
+        )
 
         mw = AuthMiddleware()
 
         mock_context = MagicMock()
+        mock_call_next = AsyncMock(return_value="auth started")
+
+        common_patches = {
+            "_detect_auth_provenance": patch.object(
+                mw, "_detect_auth_provenance", return_value="user_api_key"
+            ),
+            "_extract_jwt": patch.object(
+                mw, "_extract_user_from_jwt_token", return_value="keyowner@example.com"
+            ),
+            "_extract_gp": patch.object(
+                mw,
+                "_extract_user_from_google_provider",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            "_extract_email": patch.object(
+                mw, "_extract_user_email", return_value=None
+            ),
+            "_load_oauth": patch.object(
+                mw, "_load_oauth_authentication_data", return_value=None
+            ),
+            "_auto_inject": patch.object(
+                mw, "_auto_inject_email_parameter", new_callable=AsyncMock
+            ),
+            "_bridge": patch.object(
+                mw, "_bridge_credentials_if_needed", new_callable=AsyncMock
+            ),
+            "_inject": patch.object(mw, "_inject_services", new_callable=AsyncMock),
+        }
+
+        # Step 1: First start_google_auth — records keyowner in session
+        mock_context.message.name = "start_google_auth"
+        mock_context.message.arguments = {"user_google_email": "keyowner@example.com"}
+
+        with (
+            common_patches["_detect_auth_provenance"],
+            common_patches["_extract_jwt"],
+            common_patches["_extract_gp"],
+            common_patches["_extract_email"],
+            common_patches["_load_oauth"],
+            common_patches["_auto_inject"],
+            common_patches["_bridge"],
+            common_patches["_inject"],
+        ):
+            await mw.on_call_tool(mock_context, mock_call_next)
+
+        # Step 2: Second start_google_auth — creates pending link
         mock_context.message.name = "start_google_auth"
         mock_context.message.arguments = {"user_google_email": "second@example.com"}
 
-        mock_call_next = AsyncMock(return_value="auth started")
-
         with (
-            patch.object(mw, "_detect_auth_provenance", return_value="user_api_key"),
-            patch.object(
-                mw, "_extract_user_from_jwt_token", return_value="keyowner@example.com"
-            ),
-            patch.object(
-                mw,
-                "_extract_user_from_google_provider",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-            patch.object(mw, "_extract_user_email", return_value=None),
-            patch.object(mw, "_load_oauth_authentication_data", return_value=None),
-            patch.object(mw, "_auto_inject_email_parameter", new_callable=AsyncMock),
-            patch.object(mw, "_bridge_credentials_if_needed", new_callable=AsyncMock),
-            patch.object(mw, "_inject_services", new_callable=AsyncMock),
+            common_patches["_detect_auth_provenance"],
+            common_patches["_extract_jwt"],
+            common_patches["_extract_gp"],
+            common_patches["_extract_email"],
+            common_patches["_load_oauth"],
+            common_patches["_auto_inject"],
+            common_patches["_bridge"],
+            common_patches["_inject"],
         ):
             await mw.on_call_tool(mock_context, mock_call_next)
 
-        # Accounts should now be linked
+        # Link should NOT be active yet (deferred until OAuth completes)
+        assert "second@example.com" not in get_accessible_emails("keyowner@example.com")
+
+        # Simulate OAuth completion — this is what _save_credentials calls
+        consume_pending_links("second@example.com")
+
+        # NOW accounts should be linked
         assert "second@example.com" in get_accessible_emails("keyowner@example.com")
         assert "keyowner@example.com" in get_accessible_emails("second@example.com")
 
-        # Subsequent access to second@example.com should be allowed
+        # Step 3: Subsequent access to second@example.com should be allowed
         mock_context.message.name = "search_drive_files"
         mock_context.message.arguments = {"user_google_email": "second@example.com"}
         with (
-            patch.object(mw, "_detect_auth_provenance", return_value="user_api_key"),
-            patch.object(
-                mw, "_extract_user_from_jwt_token", return_value="keyowner@example.com"
-            ),
-            patch.object(
-                mw,
-                "_extract_user_from_google_provider",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-            patch.object(mw, "_extract_user_email", return_value=None),
-            patch.object(mw, "_load_oauth_authentication_data", return_value=None),
-            patch.object(mw, "_auto_inject_email_parameter", new_callable=AsyncMock),
-            patch.object(mw, "_bridge_credentials_if_needed", new_callable=AsyncMock),
-            patch.object(mw, "_inject_services", new_callable=AsyncMock),
+            common_patches["_detect_auth_provenance"],
+            common_patches["_extract_jwt"],
+            common_patches["_extract_gp"],
+            common_patches["_extract_email"],
+            common_patches["_load_oauth"],
+            common_patches["_auto_inject"],
+            common_patches["_bridge"],
+            common_patches["_inject"],
         ):
             await mw.on_call_tool(mock_context, mock_call_next)
 
-        assert mock_call_next.call_count == 2
+        assert mock_call_next.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Crypto-binding: MCP_API_KEY-derived encryption
+# ---------------------------------------------------------------------------
+
+
+class TestCryptoBinding:
+    """Test that credential encryption is derived from MCP_API_KEY."""
+
+    def test_derive_fernet_key_deterministic(self):
+        """Same secret should always produce the same derived key."""
+        from auth.middleware import AuthMiddleware
+
+        key1 = AuthMiddleware._derive_fernet_key("test-secret-key-123")
+        key2 = AuthMiddleware._derive_fernet_key("test-secret-key-123")
+        assert key1 == key2
+
+    def test_derive_fernet_key_different_secrets(self):
+        """Different secrets should produce different derived keys."""
+        from auth.middleware import AuthMiddleware
+
+        key1 = AuthMiddleware._derive_fernet_key("secret-a")
+        key2 = AuthMiddleware._derive_fernet_key("secret-b")
+        assert key1 != key2
+
+    def test_derive_fernet_key_valid_for_fernet(self):
+        """Derived key should be a valid Fernet key (32 bytes, base64url-encoded)."""
+        from auth.middleware import AuthMiddleware
+
+        key = AuthMiddleware._derive_fernet_key("my-api-key")
+        raw = base64.urlsafe_b64decode(key)
+        assert len(raw) == 32
+
+    def test_setup_encryption_uses_mcp_api_key(self):
+        """When MCP_API_KEY is set, encryption key should be derived from it."""
+        from auth.middleware import AuthMiddleware
+
+        with patch.dict(os.environ, {"MCP_API_KEY": "test-api-key-for-encryption"}):
+            mw = AuthMiddleware()
+
+        assert mw._key_source == "mcp_api_key"
+        expected_key = AuthMiddleware._derive_fernet_key("test-api-key-for-encryption")
+        from cryptography.fernet import Fernet
+
+        expected_fernet = Fernet(expected_key)
+        test_data = b"test credential data"
+        encrypted = mw._fernet.encrypt(test_data)
+        assert expected_fernet.decrypt(encrypted) == test_data
+
+    def test_setup_encryption_falls_back_to_server_key(self, tmp_path):
+        """When MCP_API_KEY is not set, should fall back to server-generated key."""
+        from auth.middleware import AuthMiddleware
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch("auth.middleware.settings") as mock_settings,
+        ):
+            os.environ.pop("MCP_API_KEY", None)
+            mock_settings.credentials_dir = str(tmp_path)
+            mock_settings.credential_storage_mode = "FILE_ENCRYPTED"
+            mock_settings.enable_unified_auth = False
+            mock_settings.drive_scopes = []
+            mw = AuthMiddleware()
+
+        assert mw._key_source == "server_key"
+        assert (tmp_path / ".auth_encryption_key").exists()
+
+    def test_encrypt_decrypt_round_trip_with_derived_key(self):
+        """Credentials encrypted with MCP_API_KEY-derived key should decrypt correctly."""
+        from auth.middleware import AuthMiddleware
+
+        with patch.dict(os.environ, {"MCP_API_KEY": "round-trip-test-key"}):
+            mw = AuthMiddleware()
+
+        mock_creds = MagicMock()
+        mock_creds.token = "access-token-123"
+        mock_creds.refresh_token = "refresh-token-456"
+        mock_creds.token_uri = "https://oauth2.googleapis.com/token"
+        mock_creds.client_id = "client-id"
+        mock_creds.client_secret = "client-secret"
+        mock_creds.scopes = ["https://www.googleapis.com/auth/drive"]
+        mock_creds.expiry = None
+
+        encrypted = mw._encrypt_credentials(mock_creds)
+        decrypted = mw._decrypt_credentials(encrypted)
+
+        assert decrypted.token == "access-token-123"
+        assert decrypted.refresh_token == "refresh-token-456"
+
+    def test_wrong_api_key_cannot_decrypt(self):
+        """Credentials encrypted with one MCP_API_KEY should not be decryptable with another."""
+        from cryptography.fernet import InvalidToken
+
+        from auth.middleware import AuthMiddleware
+
+        with patch.dict(os.environ, {"MCP_API_KEY": "key-alpha"}):
+            mw_a = AuthMiddleware()
+
+        mock_creds = MagicMock()
+        mock_creds.token = "secret-token"
+        mock_creds.refresh_token = "secret-refresh"
+        mock_creds.token_uri = "https://oauth2.googleapis.com/token"
+        mock_creds.client_id = "cid"
+        mock_creds.client_secret = "cs"
+        mock_creds.scopes = []
+        mock_creds.expiry = None
+
+        encrypted = mw_a._encrypt_credentials(mock_creds)
+
+        with patch.dict(os.environ, {"MCP_API_KEY": "key-beta"}):
+            mw_b = AuthMiddleware()
+
+        if hasattr(mw_b, "_legacy_fernet"):
+            del mw_b._legacy_fernet
+
+        with pytest.raises((InvalidToken, Exception)):
+            mw_b._decrypt_credentials(encrypted)
+
+    def test_legacy_key_migration(self, tmp_path):
+        """Credentials encrypted with old server key should still decrypt after switching to MCP_API_KEY."""
+        from auth.middleware import AuthMiddleware
+
+        # Step 1: Encrypt with server key (no MCP_API_KEY)
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch("auth.middleware.settings") as mock_settings,
+        ):
+            os.environ.pop("MCP_API_KEY", None)
+            mock_settings.credentials_dir = str(tmp_path)
+            mock_settings.credential_storage_mode = "FILE_ENCRYPTED"
+            mock_settings.enable_unified_auth = False
+            mock_settings.drive_scopes = []
+            mw_old = AuthMiddleware()
+
+        assert mw_old._key_source == "server_key"
+
+        mock_creds = MagicMock()
+        mock_creds.token = "legacy-token"
+        mock_creds.refresh_token = "legacy-refresh"
+        mock_creds.token_uri = "https://oauth2.googleapis.com/token"
+        mock_creds.client_id = "cid"
+        mock_creds.client_secret = "cs"
+        mock_creds.scopes = []
+        mock_creds.expiry = None
+
+        encrypted_with_server_key = mw_old._encrypt_credentials(mock_creds)
+
+        # Step 2: Switch to MCP_API_KEY — old .auth_encryption_key still exists
+        with (
+            patch.dict(os.environ, {"MCP_API_KEY": "new-derived-key"}),
+            patch("auth.middleware.settings") as mock_settings,
+        ):
+            mock_settings.credentials_dir = str(tmp_path)
+            mock_settings.credential_storage_mode = "FILE_ENCRYPTED"
+            mock_settings.enable_unified_auth = False
+            mock_settings.drive_scopes = []
+            mw_new = AuthMiddleware()
+
+        assert mw_new._key_source == "mcp_api_key"
+        assert hasattr(mw_new, "_legacy_fernet")
+
+        decrypted = mw_new._decrypt_credentials(encrypted_with_server_key)
+        assert decrypted.token == "legacy-token"
+        assert decrypted.refresh_token == "legacy-refresh"

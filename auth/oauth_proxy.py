@@ -161,16 +161,14 @@ class OAuthProxy:
             is_public_client = auth_method == "none"
 
             # DIAGNOSTIC LOGGING for client_secret validation issue
-            logger.info(
+            logger.debug(
                 f"🔍 DIAGNOSTIC - Client secret validation for: {temp_client_id}"
             )
-            logger.info(f"   Received client_secret: '{temp_client_secret}'")
-            logger.info(f"   Received length: {len(temp_client_secret)}")
-            logger.info(f"   Stored client_secret: '{proxy_client.temp_client_secret}'")
-            logger.info(f"   Stored length: {len(proxy_client.temp_client_secret)}")
-            logger.info(f"   Auth method: {auth_method}")
-            logger.info(f"   Is public client: {is_public_client}")
-            logger.info(
+            logger.debug(f"   Received length: {len(temp_client_secret)}")
+            logger.debug(f"   Stored length: {len(proxy_client.temp_client_secret)}")
+            logger.debug(f"   Auth method: {auth_method}")
+            logger.debug(f"   Is public client: {is_public_client}")
+            logger.debug(
                 f"   Secrets match: {proxy_client.temp_client_secret == temp_client_secret}"
             )
 
@@ -181,8 +179,6 @@ class OAuthProxy:
                 )
             elif proxy_client.temp_client_secret != temp_client_secret:
                 logger.warning(f"❌ Invalid temp secret for client: {temp_client_id}")
-                logger.warning(f"   Expected: '{proxy_client.temp_client_secret}'")
-                logger.warning(f"   Received: '{temp_client_secret}'")
                 return None
 
             # Check if expired

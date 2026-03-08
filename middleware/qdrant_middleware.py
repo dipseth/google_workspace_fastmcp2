@@ -39,6 +39,57 @@ from middleware.qdrant_core.tools import setup_enhanced_qdrant_tools
 
 logger = setup_logger()
 
+# ── Sensitive field sanitization for stored responses ──
+# Fields stripped from tool responses before Qdrant storage to prevent
+# leaking auth topology, credential scopes, or key bindings.
+_SENSITIVE_RESPONSE_FIELDS = frozenset(
+    {
+        "scopes",  # OAuth scope list — reveals full permission surface
+        "linkedAccounts",  # Account linking topology
+        "keyBoundEmail",  # Which email a per-user key is bound to
+        "authMethod",  # How the session authenticated
+        "refreshToken",  # Should never appear, but guard against it
+        "refresh_token",
+        "accessToken",
+        "access_token",
+        "client_secret",
+        "clientSecret",
+    }
+)
+
+# Tool argument fields that should be redacted before storage
+_SENSITIVE_ARG_FIELDS = frozenset(
+    {
+        "api_key",
+        "password",
+        "secret",
+        "token",
+    }
+)
+
+
+def _sanitize_for_storage(data: Any) -> Any:
+    """Recursively strip sensitive fields from a response before Qdrant storage."""
+    if isinstance(data, dict):
+        return {
+            k: _sanitize_for_storage(v)
+            for k, v in data.items()
+            if k not in _SENSITIVE_RESPONSE_FIELDS
+        }
+    if isinstance(data, list):
+        return [_sanitize_for_storage(item) for item in data]
+    return data
+
+
+def _sanitize_args_for_storage(args: dict) -> dict:
+    """Redact sensitive argument fields before storage."""
+    if not args:
+        return args
+    return {
+        k: ("***REDACTED***" if k in _SENSITIVE_ARG_FIELDS else v)
+        for k, v in args.items()
+    }
+
 
 class QdrantUnifiedMiddleware(Middleware):
     """
@@ -332,12 +383,15 @@ class QdrantUnifiedMiddleware(Middleware):
 
             # Store response in Qdrant asynchronously (non-blocking via storage manager)
             # Track the task via client_manager so it can be cancelled on shutdown
+            # Sanitize before storage to prevent leaking auth/credential metadata
             logger.info(f"📝 Storing response for tool: {tool_name}")
+            safe_response = _sanitize_for_storage(response)
+            safe_args = _sanitize_args_for_storage(tool_args)
             store_task = asyncio.create_task(
                 self.storage_manager._store_response_with_params(
                     tool_name=tool_name,
-                    tool_args=tool_args,
-                    response=response,
+                    tool_args=safe_args,
+                    response=safe_response,
                     execution_time_ms=execution_time_ms,
                     session_id=session_id,
                     user_email=user_email,

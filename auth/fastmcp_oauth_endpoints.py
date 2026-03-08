@@ -15,6 +15,7 @@ from auth.context import (
     set_session_context,
     set_user_email_context,
 )
+from auth.types import SessionKey
 from config.enhanced_logging import setup_logger
 from config.settings import settings
 
@@ -803,7 +804,7 @@ def setup_legacy_callback_route(mcp) -> None:
             try:
                 session_id = await get_session_context()
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
             except Exception as e:
                 logger.warning(f"⚠️ Session storage error (continuing): {e}")
 
@@ -811,6 +812,35 @@ def setup_legacy_callback_route(mcp) -> None:
             user_api_key = getattr(credentials, "_user_api_key", None)
             api_key_section = ""
             if user_api_key:
+                # Resolve linked accounts for this key
+                accessible_section = ""
+                try:
+                    from auth.user_api_keys import get_accessible_emails
+
+                    accessible = get_accessible_emails(user_email)
+                    linked = sorted(
+                        e for e in accessible if e != user_email.lower().strip()
+                    )
+                    if linked:
+                        linked_items = "".join(
+                            f"<li>{html.escape(e)}</li>" for e in linked
+                        )
+                        accessible_section = f"""
+                        <div class="linked-accounts">
+                            <b>🔗 Linked Accounts</b>
+                            <small>This key can also access credentials for:</small>
+                            <ul>{linked_items}</ul>
+                        </div>"""
+                    else:
+                        accessible_section = """
+                        <div class="linked-accounts solo">
+                            <b>🔒 Single Account</b>
+                            <small>This key only has access to the email above.<br>
+                            Authenticate additional emails in the same session to link them.</small>
+                        </div>"""
+                except Exception:
+                    pass
+
                 api_key_section = f"""
                 <div class="api-key">
                     <b>🔑 Your Personal API Key</b><br>
@@ -820,7 +850,8 @@ def setup_legacy_callback_route(mcp) -> None:
                     <button onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
                         Copy to Clipboard
                     </button>
-                </div>"""
+                </div>
+                {accessible_section}"""
 
             success_html = f"""<!DOCTYPE html><html><head><title>Authentication Successful</title>
             <style>
@@ -839,6 +870,11 @@ def setup_legacy_callback_route(mcp) -> None:
                            word-break:break-all;margin:10px 0;user-select:all;border:1px solid #dee2e6}}
                 .api-key button{{background:#856404;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px}}
                 .api-key button:hover{{background:#6c5200}}
+                .linked-accounts{{background:#e8f4fd;color:#0c5460;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #bee5eb;text-align:left}}
+                .linked-accounts small{{display:block;margin-bottom:8px}}
+                .linked-accounts ul{{margin:8px 0 0 0;padding-left:20px}}
+                .linked-accounts li{{margin:4px 0;font-family:monospace;font-size:14px}}
+                .linked-accounts.solo{{background:#f8f9fa;color:#6c757d;border-color:#dee2e6}}
                 .services{{background:#f8f9fa;padding:20px;border-radius:10px;margin:20px 0}}
             </style></head><body><div class="container">
                 <div class="success-icon">✅</div>
@@ -1716,7 +1752,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         <div class="container">
                             <div class="error-icon">🚫</div>
                             <h1>Access Denied</h1>
-                            <div class="email">User: <strong>{user_email}</strong></div>
+                            <div class="email">User: <strong>{html.escape(user_email)}</strong></div>
                             <div class="message">
                                 You are not authorized to access this MCP server.
                             </div>
@@ -1747,12 +1783,59 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 try:
                     session_id = await get_session_context()
                     if session_id:
-                        store_session_data(session_id, "user_email", user_email)
+                        store_session_data(
+                            session_id, SessionKey.USER_EMAIL, user_email
+                        )
                         logger.info(
                             f"✅ Stored user email {user_email} in session {session_id}"
                         )
                 except Exception as e:
                     logger.warning(f"⚠️ Session storage error (continuing): {e}")
+
+                # Retrieve per-user API key if one was generated
+                user_api_key = getattr(credentials, "_user_api_key", None)
+                api_key_section = ""
+                if user_api_key:
+                    # Resolve linked accounts for this key
+                    accessible_section = ""
+                    try:
+                        from auth.user_api_keys import get_accessible_emails
+
+                        accessible = get_accessible_emails(user_email)
+                        linked = sorted(
+                            e for e in accessible if e != user_email.lower().strip()
+                        )
+                        if linked:
+                            linked_items = "".join(
+                                f"<li>{html.escape(e)}</li>" for e in linked
+                            )
+                            accessible_section = f"""
+                            <div class="linked-accounts">
+                                <b>🔗 Linked Accounts</b>
+                                <small>This key can also access credentials for:</small>
+                                <ul>{linked_items}</ul>
+                            </div>"""
+                        else:
+                            accessible_section = """
+                            <div class="linked-accounts solo">
+                                <b>🔒 Single Account</b>
+                                <small>This key only has access to the email above.<br>
+                                Authenticate additional emails in the same session to link them.</small>
+                            </div>"""
+                    except Exception:
+                        pass
+
+                    api_key_section = f"""
+                    <div class="api-key">
+                        <b>🔑 Your Personal API Key</b><br>
+                        <small>Use this as a Bearer token to connect without re-authenticating.<br>
+                        This key is shown <b>once</b> — save it now!</small>
+                        <div class="key-value" id="apiKey">{html.escape(user_api_key)}</div>
+                        <button onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
+                            Copy to Clipboard
+                        </button>
+                    </div>
+                    {accessible_section}"""
 
                 # Create beautiful success page
                 success_html = f"""
@@ -1771,29 +1854,35 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         .services h3 {{ color: #495057; margin-top: 0; }}
                         .service-list {{ color: #6c757d; font-size: 14px; }}
                         .credentials-saved {{ background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #c3e6cb; }}
+                        .api-key {{ background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ffc107; text-align: left; }}
+                        .api-key small {{ display: block; margin-bottom: 10px; }}
+                        .key-value {{ font-family: monospace; font-size: 13px; background: #f8f9fa; padding: 10px; border-radius: 4px; word-break: break-all; margin: 10px 0; user-select: all; border: 1px solid #dee2e6; }}
+                        .api-key button {{ background: #856404; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }}
+                        .api-key button:hover {{ background: #6c5200; }}
+                        .linked-accounts {{ background: #e8f4fd; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #bee5eb; text-align: left; }}
+                        .linked-accounts small {{ display: block; margin-bottom: 8px; }}
+                        .linked-accounts ul {{ margin: 8px 0 0 0; padding-left: 20px; }}
+                        .linked-accounts li {{ margin: 4px 0; font-family: monospace; font-size: 14px; }}
+                        .linked-accounts.solo {{ background: #f8f9fa; color: #6c757d; border-color: #dee2e6; }}
                     </style>
                 </head>
                 <body>
                     <div class="container">
                         <div class="success-icon">✅</div>
                         <h1>Authentication Successful!</h1>
-                        <div class="email">Successfully authenticated: <strong>{user_email}</strong></div>
+                        <div class="email">Authenticated: <strong>{html.escape(user_email)}</strong></div>
                         <div class="credentials-saved">
                             <strong>🔐 Credentials Saved!</strong><br>
-                            Your authentication has been securely stored and is ready to use.
+                            Ready to use.
                         </div>
-                        <div class="message">
-                            Your Google services are now connected and ready to use!
-                        </div>
+                        {api_key_section}
                         <div class="services">
                             <h3>🚀 Services Available</h3>
                             <div class="service-list">
-                                Google Drive • Gmail • Calendar • Docs • Sheets • Slides • Photos • Chat • Forms
+                                Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms
                             </div>
                         </div>
-                        <div class="message">
-                            You can now close this window and return to your application.
-                        </div>
+                        <p>You can close this window and return to your application.</p>
                     </div>
                 </body>
                 </html>

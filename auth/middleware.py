@@ -5,6 +5,7 @@ from config.enhanced_logging import setup_logger
 logger = setup_logger()
 import base64
 import json
+import os
 import secrets
 from datetime import datetime
 from enum import Enum
@@ -36,6 +37,7 @@ from .context import (
 )
 from .dual_auth_bridge import get_dual_auth_bridge
 from .service_manager import GoogleServiceError, get_google_service
+from .types import AuthProvenance, SessionKey
 
 logger = setup_logger()
 
@@ -249,7 +251,7 @@ class AuthMiddleware(Middleware):
         # Detect auth provenance (api_key vs oauth) and store in session
         auth_provenance = self._detect_auth_provenance()
         if auth_provenance and session_id:
-            store_session_data(session_id, "auth_provenance", auth_provenance)
+            store_session_data(session_id, SessionKey.AUTH_PROVENANCE, auth_provenance)
 
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
@@ -261,7 +263,7 @@ class AuthMiddleware(Middleware):
             self._dual_auth_bridge.set_primary_account(user_email)
             # Store in session for future use
             if session_id:
-                store_session_data(session_id, "user_email", user_email)
+                store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
             # Set context immediately
             await set_user_email_context(user_email)
             # Auto-inject into tool arguments if missing
@@ -278,7 +280,7 @@ class AuthMiddleware(Middleware):
                 )
                 # Store in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
                 # Set context immediately
                 await set_user_email_context(user_email)
                 # Auto-inject into tool arguments if missing
@@ -290,7 +292,7 @@ class AuthMiddleware(Middleware):
 
         # LEGACY AUTH: Fallback to session data (OAuth authenticated)
         if not user_email and session_id:
-            user_email = get_session_data(session_id, "user_email")
+            user_email = get_session_data(session_id, SessionKey.USER_EMAIL)
             if user_email:
                 logger.debug(
                     f"✅ Retrieved user email from session storage for tool {tool_name}: {user_email}"
@@ -306,7 +308,10 @@ class AuthMiddleware(Middleware):
 
         # OAUTH FILE FALLBACK: Check for stored OAuth authentication data
         # Skip for API key / per-user key sessions — they must not inherit another user's identity
-        if not user_email and auth_provenance not in ("api_key", "user_api_key"):
+        if not user_email and auth_provenance not in (
+            AuthProvenance.API_KEY,
+            AuthProvenance.USER_API_KEY,
+        ):
             user_email = self._load_oauth_authentication_data()
             if user_email:
                 logger.debug(
@@ -316,7 +321,7 @@ class AuthMiddleware(Middleware):
                 self._dual_auth_bridge.add_secondary_account(user_email)
                 # Store in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
                 # Set context immediately
                 await set_user_email_context(user_email)
                 # Auto-inject into tool arguments if missing
@@ -339,39 +344,96 @@ class AuthMiddleware(Middleware):
                     self._dual_auth_bridge.add_secondary_account(user_email)
                 # Store it in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
             else:
                 logger.debug(
                     f"🔍 DEBUG: No user email found in tool arguments for tool {tool_name}"
                 )
 
-        # CREDENTIAL ISOLATION: API key sessions can only use credentials they own.
-        # start_google_auth is always allowed (it's how they create credentials).
-        if auth_provenance == "api_key" and user_email:
-            if tool_name == "start_google_auth":
-                # Register this email as owned by the API key session
-                self._dual_auth_bridge.register_api_key_account(user_email)
-            elif not self._dual_auth_bridge.is_api_key_owned_account(user_email):
-                from .audit import log_security_event
+        # CREDENTIAL ISOLATION: Shared API key sessions can only use credentials
+        # they created via start_google_auth in this session.
+        # Ownership is tracked per-session (not global) to prevent cross-session leakage.
+        if auth_provenance == AuthProvenance.API_KEY:
+            # Shared API key has no email claim — check tool arguments for target email
+            tool_args = getattr(context.message, "arguments", {}) or {}
+            target_email = (tool_args.get("user_google_email") or "").lower().strip()
 
-                log_security_event(
-                    "api_key_credential_access_blocked",
-                    user_email=user_email,
-                    details={
-                        "tool_name": tool_name,
-                        "reason": "API key session attempted to use credentials it did not create",
-                    },
+            # Also check the resolved user_email (from session data or fallback)
+            effective_email = target_email or (user_email or "").lower().strip()
+
+            if effective_email:
+                # Load per-session owned accounts from session storage
+                owned_raw = (
+                    get_session_data(session_id, SessionKey.API_KEY_OWNED_ACCOUNTS)
+                    if session_id
+                    else None
                 )
-                raise ValueError(
-                    f"API key sessions can only access credentials they created. "
-                    f"No credentials found for {user_email} in this API key session.\n\n"
-                    f"Run `start_google_auth` with your email to create credentials."
+                owned_accounts = set(owned_raw) if owned_raw else set()
+
+                if tool_name == "start_google_auth":
+                    # Register this email as owned by THIS session
+                    owned_accounts.add(effective_email)
+                    if session_id:
+                        store_session_data(
+                            session_id,
+                            SessionKey.API_KEY_OWNED_ACCOUNTS,
+                            list(owned_accounts),
+                        )
+                    logger.info(
+                        f"🔑 Registered API key owned account (session-scoped): {effective_email}"
+                    )
+                elif effective_email not in owned_accounts:
+                    from .audit import log_security_event
+
+                    log_security_event(
+                        "api_key_credential_access_blocked",
+                        user_email=effective_email,
+                        details={
+                            "tool_name": tool_name,
+                            "session_id": session_id,
+                            "reason": "API key session attempted to use credentials it did not create",
+                        },
+                    )
+                    raise ValueError(
+                        f"API key sessions can only access credentials they created. "
+                        f"No credentials found for {effective_email} in this API key session.\n\n"
+                        f"Run `start_google_auth` with your email to create credentials."
+                    )
+
+        # SESSION-LEVEL ACCOUNT LINKING: When start_google_auth is called for
+        # a new email, create pending links to ALL previously-authenticated
+        # emails in this session.  This works for every auth type (OAuth,
+        # API key, per-user key) — not just per-user key sessions.
+        if tool_name == "start_google_auth" and session_id:
+            from auth.user_api_keys import request_link
+
+            tool_args = getattr(context.message, "arguments", {}) or {}
+            target_email = (tool_args.get("user_google_email") or "").lower().strip()
+
+            if target_email:
+                # Load previously authenticated emails in this session
+                prev_raw = (
+                    get_session_data(session_id, SessionKey.SESSION_AUTHED_EMAILS) or []
+                )
+                prev_emails = set(prev_raw)
+
+                # Queue pending links to every prior email in this session
+                for prev in prev_emails:
+                    if prev != target_email:
+                        request_link(prev, target_email)
+                        logger.info(
+                            f"🔗 Session link: {prev} → {target_email} (deferred until OAuth completes)"
+                        )
+
+                # Record this email in the session's authenticated set
+                prev_emails.add(target_email)
+                store_session_data(
+                    session_id, SessionKey.SESSION_AUTHED_EMAILS, sorted(prev_emails)
                 )
 
         # PER-USER API KEY: can access bound email + linked accounts.
-        # When start_google_auth is called, link the new email to the key's email.
-        if auth_provenance == "user_api_key":
-            from auth.user_api_keys import get_accessible_emails, link_accounts
+        if auth_provenance == AuthProvenance.USER_API_KEY:
+            from auth.user_api_keys import get_accessible_emails
 
             key_email = user_email  # From JWT claims (always the key-bound email)
 
@@ -382,17 +444,11 @@ class AuthMiddleware(Middleware):
                 target_email = target_email.lower().strip()
 
             if (
-                tool_name == "start_google_auth"
-                and key_email
+                tool_name != "start_google_auth"
                 and target_email
+                and key_email
                 and target_email != key_email.lower()
             ):
-                # Link the new email to the key's bound email
-                link_accounts(key_email, target_email)
-                logger.info(
-                    f"🔗 Per-user key ({key_email}) linked to new account: {target_email}"
-                )
-            elif target_email and key_email and target_email != key_email.lower():
                 # Accessing a different account — check if linked
                 accessible = get_accessible_emails(key_email)
                 if target_email not in {e.lower() for e in accessible}:
@@ -487,7 +543,7 @@ class AuthMiddleware(Middleware):
             )
             # Store in session for future use
             if session_id:
-                store_session_data(session_id, "user_email", user_email)
+                store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
             # Set context immediately
             await set_user_email_context(user_email)
         else:
@@ -504,7 +560,7 @@ class AuthMiddleware(Middleware):
                 )
                 # Store in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
                 # Set context immediately
                 await set_user_email_context(user_email)
             else:
@@ -514,7 +570,7 @@ class AuthMiddleware(Middleware):
 
         # LEGACY AUTH: Fallback to session data (OAuth authenticated)
         if not user_email and session_id:
-            user_email = get_session_data(session_id, "user_email")
+            user_email = get_session_data(session_id, SessionKey.USER_EMAIL)
             if user_email:
                 logger.debug(
                     f"✅ Retrieved user email from session storage for resource {resource_uri}: {user_email}"
@@ -529,9 +585,14 @@ class AuthMiddleware(Middleware):
         # OAUTH FILE FALLBACK: Check for stored OAuth authentication data
         # Skip for API key / per-user key sessions — they must not inherit another user's identity
         auth_provenance = (
-            get_session_data(session_id, "auth_provenance") if session_id else None
+            get_session_data(session_id, SessionKey.AUTH_PROVENANCE)
+            if session_id
+            else None
         )
-        if not user_email and auth_provenance not in ("api_key", "user_api_key"):
+        if not user_email and auth_provenance not in (
+            AuthProvenance.API_KEY,
+            AuthProvenance.USER_API_KEY,
+        ):
             user_email = self._load_oauth_authentication_data()
             if user_email:
                 logger.debug(
@@ -539,7 +600,7 @@ class AuthMiddleware(Middleware):
                 )
                 # Store in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
                 # Set context immediately
                 await set_user_email_context(user_email)
             else:
@@ -667,39 +728,104 @@ class AuthMiddleware(Middleware):
         self._service_injection_enabled = enabled
         logger.debug(f"Service injection {'enabled' if enabled else 'disabled'}")
 
+    @staticmethod
+    def _derive_fernet_key(secret: str) -> bytes:
+        """Derive a Fernet-compatible key from a secret string using HKDF.
+
+        Uses HKDF-SHA256 to derive a 32-byte key from the secret, then
+        base64url-encodes it for Fernet compatibility.
+
+        Args:
+            secret: The secret to derive from (e.g., MCP_API_KEY).
+
+        Returns:
+            Base64url-encoded 32-byte key suitable for Fernet.
+        """
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b"mcp-google-workspace-v1",
+            info=b"credential-encryption",
+        )
+        return base64.urlsafe_b64encode(hkdf.derive(secret.encode()))
+
     def _setup_encryption(self):
-        """Setup encryption for secure credential storage."""
+        """Setup encryption for secure credential storage.
+
+        Key derivation priority:
+        1. Explicit ``encryption_key`` parameter (base64-encoded)
+        2. Derived from ``MCP_API_KEY`` env var via HKDF — crypto-binds
+           credential files to the API secret so they are undecryptable
+           without it.
+        3. Auto-generated random server key stored in ``.auth_encryption_key``
+           (fallback when no API key is configured).
+
+        When switching from server key → MCP_API_KEY derivation, the old
+        server key is kept as ``_legacy_fernet`` so existing credential
+        files can still be decrypted (and transparently re-encrypted on
+        next save).
+        """
         try:
             if self._encryption_key:
                 # Use provided key
                 key_bytes = base64.urlsafe_b64decode(self._encryption_key.encode())
+                self._key_source = "explicit"
             else:
-                # Generate or load encryption key
-                key_path = Path(settings.credentials_dir) / ".auth_encryption_key"
-
-                if key_path.exists():
-                    with open(key_path, "rb") as f:
-                        key_bytes = f.read()
+                # Priority: MCP_API_KEY derivation > auto-generated server key
+                mcp_api_key = os.getenv("MCP_API_KEY", "")
+                if mcp_api_key:
+                    key_bytes = self._derive_fernet_key(mcp_api_key)
+                    self._key_source = "mcp_api_key"
+                    logger.info(
+                        "🔐 Encryption key derived from MCP_API_KEY (crypto-bound)"
+                    )
                 else:
-                    # Generate new key
-                    key_bytes = base64.urlsafe_b64encode(secrets.token_bytes(32))
-                    key_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Fallback: auto-generated random server key
+                    key_path = Path(settings.credentials_dir) / ".auth_encryption_key"
 
-                    with open(key_path, "wb") as f:
-                        f.write(key_bytes)
+                    if key_path.exists():
+                        with open(key_path, "rb") as f:
+                            key_bytes = f.read()
+                    else:
+                        # Generate new key
+                        key_bytes = base64.urlsafe_b64encode(secrets.token_bytes(32))
+                        key_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    # Set restrictive permissions
-                    try:
-                        key_path.chmod(0o600)
-                    except (OSError, AttributeError):
-                        logger.warning(
-                            "Could not set restrictive permissions on encryption key"
-                        )
+                        with open(key_path, "wb") as f:
+                            f.write(key_bytes)
+
+                        # Set restrictive permissions
+                        try:
+                            key_path.chmod(0o600)
+                        except (OSError, AttributeError):
+                            logger.warning(
+                                "Could not set restrictive permissions on encryption key"
+                            )
+                    self._key_source = "server_key"
 
             # Import here to avoid dependency issues if cryptography not installed
             from cryptography.fernet import Fernet
 
             self._fernet = Fernet(key_bytes)
+
+            # Migration: keep legacy server key for decrypting old credentials
+            # when we've switched to MCP_API_KEY-derived encryption.
+            if self._key_source == "mcp_api_key":
+                legacy_path = Path(settings.credentials_dir) / ".auth_encryption_key"
+                if legacy_path.exists():
+                    try:
+                        with open(legacy_path, "rb") as f:
+                            legacy_key = f.read()
+                        self._legacy_fernet = Fernet(legacy_key)
+                        logger.debug(
+                            "🔄 Legacy server key loaded for credential migration"
+                        )
+                    except Exception:
+                        pass
+
             logger.debug("✅ Encryption initialized for secure credential storage")
 
         except ImportError:
@@ -735,13 +861,32 @@ class AuthMiddleware(Middleware):
         return base64.urlsafe_b64encode(encrypted_data).decode()
 
     def _decrypt_credentials(self, encrypted_data: str) -> Credentials:
-        """Decrypt and reconstruct credentials."""
+        """Decrypt and reconstruct credentials.
+
+        Tries the primary Fernet key first.  If that fails and a legacy
+        server key exists (migration from random key → MCP_API_KEY-derived
+        key), retries with the legacy key so existing credential files are
+        not orphaned.
+        """
         if not hasattr(self, "_fernet"):
             raise RuntimeError("Encryption not initialized")
 
         try:
             encrypted_bytes = base64.urlsafe_b64decode(encrypted_data.encode())
-            decrypted_data = self._fernet.decrypt(encrypted_bytes)
+
+            try:
+                decrypted_data = self._fernet.decrypt(encrypted_bytes)
+            except Exception:
+                # Migration fallback: try legacy server key
+                if hasattr(self, "_legacy_fernet"):
+                    logger.info(
+                        "🔄 Primary key failed — decrypting with legacy server key "
+                        "(credentials will be re-encrypted with derived key on next save)"
+                    )
+                    decrypted_data = self._legacy_fernet.decrypt(encrypted_bytes)
+                else:
+                    raise
+
             creds_data = json.loads(decrypted_data.decode())
 
             credentials = Credentials(
@@ -1190,13 +1335,14 @@ class AuthMiddleware(Middleware):
                 with self._session_lock:
                     _sid = self._active_sessions.get(request_id)
                 _provenance = (
-                    get_session_data(_sid, "auth_provenance") if _sid else None
+                    get_session_data(_sid, SessionKey.AUTH_PROVENANCE) if _sid else None
                 )
 
                 # Try to get email from OAuth authentication file (not for API key / per-user key sessions)
                 oauth_email = (
                     self._load_oauth_authentication_data()
-                    if _provenance not in ("api_key", "user_api_key")
+                    if _provenance
+                    not in (AuthProvenance.API_KEY, AuthProvenance.USER_API_KEY)
                     else None
                 )
                 if oauth_email:
@@ -1346,7 +1492,9 @@ class AuthMiddleware(Middleware):
 
             session_id = get_session_context_sync()
             if session_id:
-                store_session_data(session_id, "service_selection_needed", needed)
+                store_session_data(
+                    session_id, SessionKey.SERVICE_SELECTION_NEEDED, needed
+                )
                 logger.debug(
                     f"Set service selection needed flag: {needed} for session {session_id}"
                 )
@@ -1445,12 +1593,12 @@ class AuthMiddleware(Middleware):
 
             if hasattr(access_token, "claims"):
                 auth_method = access_token.claims.get("auth_method")
-                if auth_method == "api_key":
+                if auth_method == AuthProvenance.API_KEY:
                     logger.debug("🔑 Detected API key session (shared MCP_API_KEY)")
-                    return "api_key"
-                if auth_method == "user_api_key":
+                    return AuthProvenance.API_KEY
+                if auth_method == AuthProvenance.USER_API_KEY:
                     logger.debug("🔑 Detected per-user API key session")
-                    return "user_api_key"
+                    return AuthProvenance.USER_API_KEY
 
             return None
         except Exception:
