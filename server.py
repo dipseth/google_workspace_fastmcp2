@@ -294,6 +294,13 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                 )
 
                 _save_credentials(user_email, credentials)
+                # Log the per-user API key if one was generated
+                user_api_key = getattr(credentials, "_user_api_key", None)
+                if user_api_key:
+                    logger.info(
+                        f"🔑 SSO: Per-user API key generated for {user_email} "
+                        f"(key will be available via check_drive_auth)"
+                    )
                 logger.info(
                     f"✅ SSO: Google API credentials saved for {user_email} "
                     f"(refresh_token: {'yes' if refresh_token else 'no'}, "
@@ -322,18 +329,39 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
             _original_load_access_token = google_auth_provider.load_access_token
 
             async def _load_access_token_with_api_key(token: str):
-                """Check for API key before delegating to OAuth validation."""
+                """Check for API key / per-user key before delegating to OAuth."""
+                import time as _time
+
+                # 1. Shared admin API key
                 if token == _mcp_api_key:
                     logger.debug("🔑 API key authentication — bypassing OAuth")
-                    import time as _time
-
                     return _FastMCPAccessToken(
                         token=token,
                         client_id="api-key-client",
-                        scopes=["openid", "email", "profile"],
-                        expires_at=int(_time.time()) + 86400,  # 24h TTL
+                        scopes=_oauth_comprehensive_scopes,
+                        expires_at=int(_time.time()) + 86400,
                         claims={"sub": "api-key-user", "auth_method": "api_key"},
                     )
+
+                # 2. Per-user API key (generated on OAuth completion)
+                from auth.user_api_keys import lookup_key
+
+                user_email = lookup_key(token)
+                if user_email:
+                    logger.info(f"🔑 Per-user API key matched: {user_email}")
+                    return _FastMCPAccessToken(
+                        token=token,
+                        client_id=f"user-key-{user_email}",
+                        scopes=_oauth_comprehensive_scopes,
+                        expires_at=int(_time.time()) + 86400,
+                        claims={
+                            "sub": user_email,
+                            "email": user_email,
+                            "auth_method": "user_api_key",
+                        },
+                    )
+
+                # 3. Normal OAuth token validation
                 logger.info(
                     f"🔍 load_access_token called, token prefix: {token[:20]}..."
                 )

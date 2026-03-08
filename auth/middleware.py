@@ -246,6 +246,11 @@ class AuthMiddleware(Middleware):
         user_email = None
         logger.debug(f"🔍 Starting user extraction for tool {tool_name}")
 
+        # Detect auth provenance (api_key vs oauth) and store in session
+        auth_provenance = self._detect_auth_provenance()
+        if auth_provenance and session_id:
+            store_session_data(session_id, "auth_provenance", auth_provenance)
+
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
         if user_email:
@@ -300,7 +305,8 @@ class AuthMiddleware(Middleware):
                 )
 
         # OAUTH FILE FALLBACK: Check for stored OAuth authentication data
-        if not user_email:
+        # Skip for API key / per-user key sessions — they must not inherit another user's identity
+        if not user_email and auth_provenance not in ("api_key", "user_api_key"):
             user_email = self._load_oauth_authentication_data()
             if user_email:
                 logger.debug(
@@ -338,6 +344,75 @@ class AuthMiddleware(Middleware):
                 logger.debug(
                     f"🔍 DEBUG: No user email found in tool arguments for tool {tool_name}"
                 )
+
+        # CREDENTIAL ISOLATION: API key sessions can only use credentials they own.
+        # start_google_auth is always allowed (it's how they create credentials).
+        if auth_provenance == "api_key" and user_email:
+            if tool_name == "start_google_auth":
+                # Register this email as owned by the API key session
+                self._dual_auth_bridge.register_api_key_account(user_email)
+            elif not self._dual_auth_bridge.is_api_key_owned_account(user_email):
+                from .audit import log_security_event
+
+                log_security_event(
+                    "api_key_credential_access_blocked",
+                    user_email=user_email,
+                    details={
+                        "tool_name": tool_name,
+                        "reason": "API key session attempted to use credentials it did not create",
+                    },
+                )
+                raise ValueError(
+                    f"API key sessions can only access credentials they created. "
+                    f"No credentials found for {user_email} in this API key session.\n\n"
+                    f"Run `start_google_auth` with your email to create credentials."
+                )
+
+        # PER-USER API KEY: can access bound email + linked accounts.
+        # When start_google_auth is called, link the new email to the key's email.
+        if auth_provenance == "user_api_key":
+            from auth.user_api_keys import get_accessible_emails, link_accounts
+
+            key_email = user_email  # From JWT claims (always the key-bound email)
+
+            # Check tool arguments for a different target email
+            tool_args = getattr(context.message, "arguments", {}) or {}
+            target_email = tool_args.get("user_google_email", "")
+            if target_email:
+                target_email = target_email.lower().strip()
+
+            if (
+                tool_name == "start_google_auth"
+                and key_email
+                and target_email
+                and target_email != key_email.lower()
+            ):
+                # Link the new email to the key's bound email
+                link_accounts(key_email, target_email)
+                logger.info(
+                    f"🔗 Per-user key ({key_email}) linked to new account: {target_email}"
+                )
+            elif target_email and key_email and target_email != key_email.lower():
+                # Accessing a different account — check if linked
+                accessible = get_accessible_emails(key_email)
+                if target_email not in {e.lower() for e in accessible}:
+                    from .audit import log_security_event
+
+                    log_security_event(
+                        "user_api_key_access_blocked",
+                        user_email=target_email,
+                        details={
+                            "tool_name": tool_name,
+                            "key_email": key_email,
+                            "accessible_emails": sorted(accessible),
+                            "reason": "Per-user key attempted to access unlinked account",
+                        },
+                    )
+                    raise ValueError(
+                        f"Your API key ({key_email}) does not have access to {target_email}.\n"
+                        f"Accessible accounts: {', '.join(sorted(accessible))}\n\n"
+                        f"Run `start_google_auth` with {target_email} to link it to your key."
+                    )
 
         # Set user email context if found
         if user_email:
@@ -452,7 +527,11 @@ class AuthMiddleware(Middleware):
                 )
 
         # OAUTH FILE FALLBACK: Check for stored OAuth authentication data
-        if not user_email:
+        # Skip for API key / per-user key sessions — they must not inherit another user's identity
+        auth_provenance = (
+            get_session_data(session_id, "auth_provenance") if session_id else None
+        )
+        if not user_email and auth_provenance not in ("api_key", "user_api_key"):
             user_email = self._load_oauth_authentication_data()
             if user_email:
                 logger.debug(
@@ -1104,8 +1183,22 @@ class AuthMiddleware(Middleware):
                 or user_email is None
                 or not user_email
             ):
-                # Try to get email from OAuth authentication file
-                oauth_email = self._load_oauth_authentication_data()
+                # Skip OAuth file fallback for API key sessions
+                from .context import get_session_data
+
+                request_id = self._get_request_id(context)
+                with self._session_lock:
+                    _sid = self._active_sessions.get(request_id)
+                _provenance = (
+                    get_session_data(_sid, "auth_provenance") if _sid else None
+                )
+
+                # Try to get email from OAuth authentication file (not for API key / per-user key sessions)
+                oauth_email = (
+                    self._load_oauth_authentication_data()
+                    if _provenance not in ("api_key", "user_api_key")
+                    else None
+                )
                 if oauth_email:
                     final_email = oauth_email
                     logger.debug(
@@ -1142,6 +1235,20 @@ class AuthMiddleware(Middleware):
                         current_value.lower().strip()
                     )
                 )
+
+                # Allow linked accounts for per-user API key sessions
+                is_linked_account = False
+                if current_value and final_email:
+                    try:
+                        from auth.user_api_keys import get_accessible_emails
+
+                        accessible = get_accessible_emails(final_email)
+                        if current_value.lower().strip() in {
+                            e.lower() for e in accessible
+                        }:
+                            is_linked_account = True
+                    except Exception:
+                        pass
 
                 if tool_name == "start_google_auth":
                     # start_google_auth must accept any email to begin auth
@@ -1181,6 +1288,11 @@ class AuthMiddleware(Middleware):
                     logger.debug(
                         f"✅ Allowed secondary account: {current_value} "
                         f"(primary: {final_email})"
+                    )
+                elif is_linked_account:
+                    logger.debug(
+                        f"✅ Allowed linked account: {current_value} "
+                        f"(key owner: {final_email})"
                     )
                 elif current_value.lower().strip() != final_email.lower().strip():
                     from .audit import log_security_event
@@ -1313,6 +1425,35 @@ class AuthMiddleware(Middleware):
         except Exception as e:
             # This is expected if no token is present
             logger.debug(f"No JWT/token authentication available: {e}")
+            return None
+
+    def _detect_auth_provenance(self) -> Optional[str]:
+        """Detect the authentication method for the current request.
+
+        Returns:
+            "api_key" for shared MCP_API_KEY sessions
+            "user_api_key" for per-user API key sessions
+            None for normal OAuth sessions
+        """
+        try:
+            from fastmcp.server.dependencies import get_access_token
+
+            try:
+                access_token = get_access_token()
+            except RuntimeError:
+                return None
+
+            if hasattr(access_token, "claims"):
+                auth_method = access_token.claims.get("auth_method")
+                if auth_method == "api_key":
+                    logger.debug("🔑 Detected API key session (shared MCP_API_KEY)")
+                    return "api_key"
+                if auth_method == "user_api_key":
+                    logger.debug("🔑 Detected per-user API key session")
+                    return "user_api_key"
+
+            return None
+        except Exception:
             return None
 
     def _load_oauth_authentication_data(self) -> Optional[str]:

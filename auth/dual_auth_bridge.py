@@ -78,6 +78,7 @@ class DualAuthBridge:
         self._memory_credentials: Dict[str, Credentials] = {}
         self._primary_account: Optional[str] = None
         self._secondary_accounts: set[str] = set()
+        self._api_key_owned_accounts: set[str] = set()
         logger.info("🌉 DualAuthBridge initialized")
 
     def set_primary_account(
@@ -112,6 +113,19 @@ class DualAuthBridge:
     def is_secondary_account(self, user_email: str) -> bool:
         """Check if an email is a secondary account."""
         return user_email in self._secondary_accounts
+
+    def register_api_key_account(self, user_email: str) -> None:
+        """Register an email as owned by an API key session.
+
+        Called when start_google_auth completes for an API key client,
+        granting that API key session access to these credentials.
+        """
+        self._api_key_owned_accounts.add(user_email.lower().strip())
+        logger.info(f"🔑 Registered API key owned account: {user_email}")
+
+    def is_api_key_owned_account(self, user_email: str) -> bool:
+        """Check if an email was registered by an API key session."""
+        return user_email.lower().strip() in self._api_key_owned_accounts
 
     def needs_scope_upgrade(self, user_email: str) -> bool:
         """Check if a user has identity auth but no API credentials.

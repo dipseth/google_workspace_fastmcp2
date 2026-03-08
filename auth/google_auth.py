@@ -354,6 +354,16 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
     # Normalize email to lowercase for consistent credential storage
     normalized_email = _normalize_email(user_email)
 
+    # Generate a per-user API key for this user's credentials
+    try:
+        from .user_api_keys import generate_user_key
+
+        user_key = generate_user_key(normalized_email)
+        # Store on the credentials object so callers can show it to the user
+        credentials._user_api_key = user_key
+    except Exception as e:
+        logger.warning(f"Could not generate per-user API key: {e}")
+
     # Check if AuthMiddleware is available for encrypted storage
     try:
         from .context import get_auth_middleware

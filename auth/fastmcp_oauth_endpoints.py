@@ -807,6 +807,21 @@ def setup_legacy_callback_route(mcp) -> None:
             except Exception as e:
                 logger.warning(f"⚠️ Session storage error (continuing): {e}")
 
+            # Retrieve per-user API key if one was generated during credential save
+            user_api_key = getattr(credentials, "_user_api_key", None)
+            api_key_section = ""
+            if user_api_key:
+                api_key_section = f"""
+                <div class="api-key">
+                    <b>🔑 Your Personal API Key</b><br>
+                    <small>Use this as a Bearer token to connect without re-authenticating.<br>
+                    This key is shown <b>once</b> — save it now!</small>
+                    <div class="key-value" id="apiKey">{html.escape(user_api_key)}</div>
+                    <button onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
+                        Copy to Clipboard
+                    </button>
+                </div>"""
+
             success_html = f"""<!DOCTYPE html><html><head><title>Authentication Successful</title>
             <style>
                 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
@@ -818,12 +833,19 @@ def setup_legacy_callback_route(mcp) -> None:
                 h1{{color:#28a745;margin-bottom:10px;font-size:32px}}
                 .email{{color:#6c757d;font-size:18px;margin:20px 0}}
                 .saved{{background:#d4edda;color:#155724;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #c3e6cb}}
+                .api-key{{background:#fff3cd;color:#856404;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #ffc107;text-align:left}}
+                .api-key small{{display:block;margin-bottom:10px}}
+                .key-value{{font-family:monospace;font-size:13px;background:#f8f9fa;padding:10px;border-radius:4px;
+                           word-break:break-all;margin:10px 0;user-select:all;border:1px solid #dee2e6}}
+                .api-key button{{background:#856404;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px}}
+                .api-key button:hover{{background:#6c5200}}
                 .services{{background:#f8f9fa;padding:20px;border-radius:10px;margin:20px 0}}
             </style></head><body><div class="container">
                 <div class="success-icon">✅</div>
                 <h1>Authentication Successful!</h1>
                 <div class="email">Authenticated: <b>{html.escape(user_email)}</b></div>
                 <div class="saved"><b>🔐 Credentials Saved!</b><br>Ready to use.</div>
+                {api_key_section}
                 <div class="services"><h3>🚀 Services Available</h3>
                     <div>Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms</div>
                 </div>
