@@ -40,8 +40,11 @@ from config.settings import settings
 try:
     import certifi
 
-    os.environ["SSL_CERT_FILE"] = certifi.where()
-    logger.info(f"🔒 SSL_CERT_FILE set to certifi CA bundle: {certifi.where()}")
+    if not os.environ.get("SSL_CERT_FILE"):
+        os.environ["SSL_CERT_FILE"] = certifi.where()
+        logger.info(f"🔒 SSL_CERT_FILE set to certifi CA bundle: {certifi.where()}")
+    else:
+        logger.debug(f"🔒 SSL_CERT_FILE already set: {os.environ['SSL_CERT_FILE']}")
 except ImportError:
     logger.warning("⚠️ certifi not installed — outgoing HTTPS may fail on macOS")
 

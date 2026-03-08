@@ -308,10 +308,11 @@ def _fix_child_in_place(child: Dict, any_of: Set[str]) -> Optional[str]:
     if any_of & {"onClick", "on_click", "action"}:
         if not any(child.get(f) for f in any_of):
             label = child.get("text") or child.get("label") or "?"
-            child["onClick"] = {"openLink": {"url": "https://example.com"}}
+            child["disabled"] = True
+            child["onClick"] = {"action": {"function": "noop"}}
             return (
-                f"Added placeholder onClick to '{label}' "
-                f"(had no click handler — provide a 'url' to make it functional)"
+                f"Disabled '{label}' — no click handler provided. "
+                f"Supply a 'url' param to make it functional."
             )
     return None
 

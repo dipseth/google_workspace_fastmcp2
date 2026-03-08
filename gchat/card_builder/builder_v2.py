@@ -1342,7 +1342,9 @@ class SmartCardBuilderV2:
                 if expected_child_type == "Chip":
                     if "text" in params and "label" not in params:
                         params["label"] = params.pop("text")
-                    params.setdefault("url", "https://example.com")
+                    # Drop Chips without a URL — can't create a valid onClick
+                    if not params.get("url"):
+                        continue
                 elif expected_child_type == "GridItem":
                     params.setdefault("title", f"Item {len(built_children) + 1}")
                     # Normalize image_url to image dict for wrapper
@@ -2604,7 +2606,9 @@ class SmartCardBuilderV2:
         # Google Chat requires onClick on every chip — omitting it silently drops the card.
         # Build chip via wrapper (_build_feedback_chip_item) then disable it.
         if config.get("direct_dict"):
-            chip_item = self._build_feedback_chip_item(text, "https://example.com")
+            # Google Chat requires onClick on every chip — use a no-op action
+            chip_item = self._build_feedback_chip_item(text, "")
+            chip_item["onClick"] = {"action": {"function": "noop"}}
             chip_item["enabled"] = False
             return {"chipList": {"chips": [chip_item]}}
 

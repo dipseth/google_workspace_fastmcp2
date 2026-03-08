@@ -92,7 +92,7 @@ def resolve_symbol_params(
         if resolved is not None:
             # Symbol keys override flat keys on conflict
             result[flat_key] = resolved
-            logger.info(
+            logger.debug(
                 f"Resolved symbol '{symbol}' → '{component_name}' → flat key '{flat_key}' "
                 f"({len(resolved) if isinstance(resolved, list) else type(resolved).__name__} items)"
             )

@@ -64,8 +64,9 @@ def render_dashboard_page(
     {_section_activations(vectors)}
     {_section_similar(similar)}
     {_section_footer()}
+    <script id="dash-data" type="application/json">{js_data}</script>
     <script>
-    const DASH_DATA = {js_data};
+    const DASH_DATA = JSON.parse(document.getElementById('dash-data').textContent);
     {_JS}
     </script>
 </body>

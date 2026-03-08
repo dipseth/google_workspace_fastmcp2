@@ -18,16 +18,18 @@ Usage:
 """
 
 import logging
+import threading
 from typing import List, Optional, Tuple
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded singletons
+# Lazy-loaded singletons (guarded by _init_lock)
 _embedder = None
 _icon_names: Optional[List[str]] = None
 _icon_embeddings: Optional[np.ndarray] = None
+_init_lock = threading.Lock()
 
 
 def _ensure_index():
@@ -37,27 +39,32 @@ def _ensure_index():
     if _icon_embeddings is not None:
         return
 
-    from fastembed import TextEmbedding
+    with _init_lock:
+        # Double-check after acquiring lock
+        if _icon_embeddings is not None:
+            return
 
-    from gchat.material_icons import MATERIAL_ICONS
+        from fastembed import TextEmbedding
 
-    logger.info(f"Building icon search index ({len(MATERIAL_ICONS)} icons)...")
+        from gchat.material_icons import MATERIAL_ICONS
 
-    _embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        logger.info(f"Building icon search index ({len(MATERIAL_ICONS)} icons)...")
 
-    # Prepare icon names with readable descriptions for better embeddings
-    # "trending_up" -> "trending up" (underscores to spaces for semantic meaning)
-    _icon_names = sorted(MATERIAL_ICONS)
-    texts = [name.replace("_", " ") for name in _icon_names]
+        _embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
-    # Embed all icons in one batch
-    embeddings = list(_embedder.embed(texts))
-    _icon_embeddings = np.array(embeddings, dtype=np.float32)
+        # Prepare icon names with readable descriptions for better embeddings
+        # "trending_up" -> "trending up" (underscores to spaces for semantic meaning)
+        _icon_names = sorted(MATERIAL_ICONS)
+        texts = [name.replace("_", " ") for name in _icon_names]
 
-    # L2-normalize for cosine similarity via dot product
-    norms = np.linalg.norm(_icon_embeddings, axis=1, keepdims=True)
-    norms = np.where(norms == 0, 1, norms)
-    _icon_embeddings = _icon_embeddings / norms
+        # Embed all icons in one batch
+        embeddings = list(_embedder.embed(texts))
+        _icon_embeddings = np.array(embeddings, dtype=np.float32)
+
+        # L2-normalize for cosine similarity via dot product
+        norms = np.linalg.norm(_icon_embeddings, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1, norms)
+        _icon_embeddings = _icon_embeddings / norms
 
     logger.info(f"Icon search index ready: {_icon_embeddings.shape}")
 
