@@ -354,13 +354,17 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
     # Normalize email to lowercase for consistent credential storage
     normalized_email = _normalize_email(user_email)
 
-    # Generate a per-user API key for this user's credentials
+    # Generate a per-user API key for this user's credentials (if one doesn't exist)
     try:
         from .user_api_keys import generate_user_key
 
         user_key = generate_user_key(normalized_email)
-        # Store on the credentials object so callers can show it to the user
-        credentials._user_api_key = user_key
+        if user_key:
+            # New key generated — store on credentials so callers can show it
+            credentials._user_api_key = user_key
+        else:
+            # Key already exists for this email — don't invalidate it
+            logger.debug(f"Per-user API key already exists for {normalized_email}")
     except Exception as e:
         logger.warning(f"Could not generate per-user API key: {e}")
 

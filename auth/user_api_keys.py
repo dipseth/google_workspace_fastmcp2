@@ -100,21 +100,38 @@ def _save_links(links: dict) -> None:
         logger.warning(f"⚠️ Could not set permissions on {path}: {e}")
 
 
-def generate_user_key(user_email: str) -> str:
-    """Generate a new API key for a user, replacing any existing key.
+def generate_user_key(user_email: str, *, force: bool = False) -> Optional[str]:
+    """Generate a new API key for a user.
+
+    By default, if a key already exists for this email, returns ``None``
+    so that re-authentication (from another session/client) does NOT
+    invalidate an active key.  Pass ``force=True`` to replace the
+    existing key (e.g. explicit key rotation).
 
     Args:
         user_email: The email to bind this key to.
+        force: If True, replace any existing key. Default False.
 
     Returns:
-        The plaintext key (shown once to the user, never stored).
+        The plaintext key (shown once to the user, never stored),
+        or ``None`` if a key already exists and *force* is False.
     """
     email = user_email.lower().strip()
-    key = secrets.token_urlsafe(32)
-    key_hash = _hash_key(key)
 
     with _lock:
         registry = _load_registry()
+
+        # Check if a key already exists for this email
+        if not force:
+            for _hash, registered_email in registry.items():
+                if registered_email == email:
+                    logger.debug(
+                        f"🔑 Per-user API key already exists for {email} — skipping generation"
+                    )
+                    return None
+
+        key = secrets.token_urlsafe(32)
+        key_hash = _hash_key(key)
 
         # Remove any previous key for this email
         registry = {h: e for h, e in registry.items() if e != email}

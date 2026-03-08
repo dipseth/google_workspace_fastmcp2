@@ -316,92 +316,92 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
             require_authorization_consent=False,  # Google already has its own consent screen
         )
 
-        # ─── API Key Bypass for non-OAuth clients (e.g., Roo Code) ───
-        # MCP_API_KEY allows pre-shared static tokens to bypass the full OAuth flow.
-        # Clients send: Authorization: Bearer <MCP_API_KEY>
-        # When matched, we return a synthetic AccessToken without calling Google.
+        # ─── API Key + Per-User Key Authentication ───
+        # Intercepts load_access_token to check two key types before OAuth:
+        #   1. MCP_API_KEY — shared admin/master key (optional, from .env)
+        #   2. Per-user keys — individual keys generated on OAuth completion
+        # Both are checked before falling back to standard FastMCP JWT validation.
         _mcp_api_key = os.getenv("MCP_API_KEY", "") or getattr(
             settings, "mcp_api_key", ""
         )
-        if _mcp_api_key:
-            from fastmcp.server.auth.auth import AccessToken as _FastMCPAccessToken
 
-            _original_load_access_token = google_auth_provider.load_access_token
+        from fastmcp.server.auth.auth import AccessToken as _FastMCPAccessToken
 
-            # Simple in-memory rate limiter for failed auth attempts
-            _failed_auth_attempts: dict[str, list[float]] = {}
-            _RATE_LIMIT_WINDOW = 60.0  # seconds
-            _RATE_LIMIT_MAX = 10  # max failures per window
+        _original_load_access_token = google_auth_provider.load_access_token
 
-            async def _load_access_token_with_api_key(token: str):
-                """Check for API key / per-user key before delegating to OAuth."""
-                import hmac
-                import time as _time
+        # Simple in-memory rate limiter for failed auth attempts
+        _failed_auth_attempts: dict[str, list[float]] = {}
+        _RATE_LIMIT_WINDOW = 60.0  # seconds
+        _RATE_LIMIT_MAX = 10  # max failures per window
 
-                # Rate-limit check: reject tokens from sources with too many failures
-                token_prefix = token[:8]
-                now = _time.time()
-                attempts = _failed_auth_attempts.get(token_prefix, [])
-                attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
-                if len(attempts) >= _RATE_LIMIT_MAX:
-                    logger.warning("🚫 Rate limit exceeded for auth attempts")
-                    return None
+        async def _load_access_token_with_api_key(token: str):
+            """Check for admin key / per-user key before delegating to OAuth."""
+            import hmac
+            import time as _time
 
-                # 1. Shared admin API key (timing-safe comparison)
-                from auth.types import AuthProvenance
+            # Rate-limit check: reject tokens from sources with too many failures
+            token_prefix = token[:8]
+            now = _time.time()
+            attempts = _failed_auth_attempts.get(token_prefix, [])
+            attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+            if len(attempts) >= _RATE_LIMIT_MAX:
+                logger.warning("🚫 Rate limit exceeded for auth attempts")
+                return None
 
-                if hmac.compare_digest(token, _mcp_api_key):
-                    logger.debug("🔑 API key authentication — bypassing OAuth")
-                    return _FastMCPAccessToken(
-                        token=token,
-                        client_id="api-key-client",
-                        scopes=_oauth_comprehensive_scopes,
-                        expires_at=int(_time.time()) + 86400,
-                        claims={
-                            "sub": "api-key-user",
-                            "auth_method": AuthProvenance.API_KEY,
-                        },
-                    )
+            from auth.types import AuthProvenance
 
-                # 2. Per-user API key (generated on OAuth completion)
-                from auth.user_api_keys import lookup_key
-
-                user_email = lookup_key(token)
-                if user_email:
-                    logger.debug(f"🔑 Per-user API key matched: {user_email}")
-                    return _FastMCPAccessToken(
-                        token=token,
-                        client_id=f"user-key-{user_email}",
-                        scopes=_oauth_comprehensive_scopes,
-                        expires_at=int(_time.time()) + 86400,
-                        claims={
-                            "sub": user_email,
-                            "email": user_email,
-                            "auth_method": AuthProvenance.USER_API_KEY,
-                        },
-                    )
-
-                # 3. Normal OAuth token validation
-                logger.info(
-                    f"🔍 load_access_token called, token prefix: {token[:20]}..."
+            # 1. Shared admin API key (only checked when MCP_API_KEY is set)
+            if _mcp_api_key and hmac.compare_digest(token, _mcp_api_key):
+                logger.debug("🔑 Admin API key authentication — bypassing OAuth")
+                return _FastMCPAccessToken(
+                    token=token,
+                    client_id="api-key-client",
+                    scopes=_oauth_comprehensive_scopes,
+                    expires_at=int(_time.time()) + 86400,
+                    claims={
+                        "sub": "api-key-user",
+                        "auth_method": AuthProvenance.API_KEY,
+                    },
                 )
-                result = await _original_load_access_token(token)
-                if result is None:
-                    logger.warning(
-                        f"⚠️ load_access_token returned None for token: {token[:30]}..."
-                    )
-                    # Record failed attempt for rate limiting
-                    _failed_auth_attempts.setdefault(token_prefix, []).append(now)
-                else:
-                    logger.info(
-                        f"✅ load_access_token succeeded: client={result.client_id}, scopes={result.scopes}"
-                    )
-                return result
 
-            google_auth_provider.load_access_token = _load_access_token_with_api_key
-            logger.info("  🔑 API key bypass: enabled (MCP_API_KEY set)")
+            # 2. Per-user API key (generated on OAuth completion)
+            from auth.user_api_keys import lookup_key
+
+            user_email = lookup_key(token)
+            if user_email:
+                logger.debug(f"🔑 Per-user API key matched: {user_email}")
+                return _FastMCPAccessToken(
+                    token=token,
+                    client_id=f"user-key-{user_email}",
+                    scopes=_oauth_comprehensive_scopes,
+                    expires_at=int(_time.time()) + 86400,
+                    claims={
+                        "sub": user_email,
+                        "email": user_email,
+                        "auth_method": AuthProvenance.USER_API_KEY,
+                    },
+                )
+
+            # 3. Normal OAuth token validation (FastMCP JWT)
+            logger.info(f"🔍 load_access_token called, token prefix: {token[:20]}...")
+            result = await _original_load_access_token(token)
+            if result is None:
+                logger.warning(
+                    f"⚠️ load_access_token returned None for token: {token[:30]}..."
+                )
+                # Record failed attempt for rate limiting
+                _failed_auth_attempts.setdefault(token_prefix, []).append(now)
+            else:
+                logger.info(
+                    f"✅ load_access_token succeeded: client={result.client_id}, scopes={result.scopes}"
+                )
+            return result
+
+        google_auth_provider.load_access_token = _load_access_token_with_api_key
+        if _mcp_api_key:
+            logger.info("  🔑 Token auth: admin key + per-user keys + OAuth")
         else:
-            logger.info("  🔑 API key bypass: disabled (no MCP_API_KEY)")
+            logger.info("  🔑 Token auth: per-user keys + OAuth (no admin key)")
 
         # ─── Auto-register unknown clients (e.g., Claude providing its own client ID) ───
         # When a client like Claude connects with its own OAuth client ID (not obtained
