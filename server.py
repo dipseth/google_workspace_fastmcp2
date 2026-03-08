@@ -286,6 +286,37 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
 
         google_auth_provider.get_client = _get_client_with_auto_register
 
+        # ─── Fix metadata: advertise token_endpoint_auth_method="none" ───
+        # Clients like Claude use their own client_id without DCR, so they have
+        # no client_secret for this server. The default metadata only advertises
+        # ["client_secret_post", "client_secret_basic"], causing Claude to skip
+        # the POST /token exchange entirely (it thinks it can't authenticate).
+        # Adding "none" tells clients they can exchange codes without a secret.
+        import mcp.server.auth.routes as _auth_routes
+
+        _original_build_metadata = _auth_routes.build_metadata
+
+        def _patched_build_metadata(*args, **kwargs):
+            metadata = _original_build_metadata(*args, **kwargs)
+            if metadata.token_endpoint_auth_methods_supported:
+                if "none" not in metadata.token_endpoint_auth_methods_supported:
+                    metadata.token_endpoint_auth_methods_supported.append("none")
+            else:
+                metadata.token_endpoint_auth_methods_supported = ["none"]
+            return metadata
+
+        _auth_routes.build_metadata = _patched_build_metadata
+        # Also patch the proxy module's direct import of build_metadata
+        try:
+            import fastmcp.server.auth.oauth_proxy.proxy as _proxy_module
+
+            _proxy_module.build_metadata = _patched_build_metadata
+        except (ImportError, AttributeError):
+            pass  # Proxy may not use direct import in all versions
+        logger.info(
+            '  🔓 Metadata patched: token_endpoint_auth_methods includes "none"'
+        )
+
         # Enable DEBUG logging for FastMCP's OAuth proxy to trace auth flow
         import logging as _logging
 
