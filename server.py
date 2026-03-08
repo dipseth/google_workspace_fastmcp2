@@ -189,7 +189,9 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
             client_id=_fastmcp_google_client_id,
             client_secret=_fastmcp_google_client_secret,
             base_url=settings.base_url,
-            required_scopes=["openid", "email", "profile"],
+            required_scopes=[
+                "openid"
+            ],  # Minimal — Google tokeninfo returns full URLs, not shorthands
             redirect_path="/auth/callback",  # FastMCP default
         )
 
