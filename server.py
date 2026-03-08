@@ -225,12 +225,59 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
         else:
             logger.info("  🔑 API key bypass: disabled (no MCP_API_KEY)")
 
+        # ─── Auto-register unknown clients (e.g., Claude providing its own client ID) ───
+        # When a client like Claude connects with its own OAuth client ID (not obtained
+        # via DCR), FastMCP's get_client() returns None → "Client Not Registered" error.
+        # This patch auto-registers unknown clients as proxy DCR clients so they go
+        # through the server's OAuth proxy (using the server's Google credentials).
+        _original_get_client = google_auth_provider.get_client
+
+        async def _get_client_with_auto_register(client_id: str):
+            """Auto-register unknown clients instead of rejecting them."""
+            client = await _original_get_client(client_id)
+            if client is not None:
+                return client
+
+            # Unknown client — auto-register it as a proxy DCR client
+            logger.info(f"🔧 Auto-registering unknown client: {client_id[:30]}...")
+            try:
+                from mcp.shared.auth import OAuthClientInformationFull
+
+                # Create a minimal client registration that the proxy will accept
+                auto_client = OAuthClientInformationFull(
+                    client_id=client_id,
+                    client_secret=None,  # Proxy handles upstream auth
+                    redirect_uris=[
+                        "http://localhost"
+                    ],  # Placeholder; proxy validates via patterns
+                    grant_types=["authorization_code", "refresh_token"],
+                    response_types=["code"],
+                    token_endpoint_auth_method="none",
+                    scope="openid email profile",
+                    client_name=f"Auto-registered ({client_id[:20]}...)",
+                )
+
+                # register_client wraps it in a ProxyDCRClient with redirect URI pattern support
+                await google_auth_provider.register_client(auto_client)
+                logger.info(f"✅ Auto-registered client: {client_id[:30]}...")
+
+                # Return the newly registered client
+                return await _original_get_client(client_id)
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ Auto-registration failed for {client_id[:30]}...: {e}"
+                )
+                return None
+
+        google_auth_provider.get_client = _get_client_with_auto_register
+
         logger.info("✅ GoogleProvider configured for OAuth 2.1 (MCP protocol auth)")
         logger.info(f"  🌐 Base URL: {settings.base_url}")
         logger.info("  🔐 PKCE: Automatic (S256)")
         logger.info("  📋 DCR: Built-in (RFC 7591)")
         logger.info("  🔍 Discovery: Auto-registered (RFC 9728 + RFC 8414)")
         logger.info("  🎯 Callback: /auth/callback")
+        logger.info("  🔓 Auto-register: Unknown clients proxied automatically")
         logger.info("  ✅ Compatible with: Claude.ai, Claude Desktop, MCP Inspector")
 
     except ImportError as e:
