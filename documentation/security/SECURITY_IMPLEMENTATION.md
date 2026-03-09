@@ -1056,6 +1056,82 @@ The FastMCP Google MCP Server implements defense-in-depth security with multiple
 - **Flexible storage strategies** from development to high-security deployments
 - **Optional security enhancement layer** for multi-tenant environments
 - **Comprehensive audit trail** of all authentication components
+- **Multi-recipient CEK envelope encryption** with per-user key wrapping and HMAC integrity seals
+- **Account linking with method tracking** — OAuth, session, and API key linking with auditable metadata
+- **30-minute API key linking window** — time-boxed linking for API key sessions, requiring OAuth after expiry
+- **Security visualization** on OAuth success pages showing encryption model, linked users, and linkage methods
+
+## Multi-Recipient Envelope Encryption
+
+### Overview
+
+Credentials are encrypted using a multi-recipient **Content Encryption Key (CEK)** envelope scheme. A random CEK encrypts the actual Google Workspace credentials; the CEK is then separately wrapped for each authorized user's derived key.
+
+### Envelope Format (v2)
+
+```json
+{
+  "v": 2,
+  "enc": "per_user",
+  "recipients": {
+    "<sha256_key_id_A>": "<CEK_wrapped_for_A>",
+    "<sha256_key_id_B>": "<CEK_wrapped_for_B>"
+  },
+  "data": "<base64_credentials_encrypted_with_CEK>",
+  "hmac": "<HMAC-SHA256_integrity_seal>"
+}
+```
+
+### Key Derivation (Split-Key Model)
+
+Neither the server secret alone nor the per-user key alone can decrypt credentials:
+
+```
+User Key = HKDF-SHA256(
+    ikm  = per_user_api_key,
+    salt = server_secret (.auth_encryption_key),
+    info = "per-user-credential-encryption-v1",
+    length = 32 bytes
+)
+```
+
+### Security Properties
+
+| Property | Implementation |
+|----------|---------------|
+| Encryption algorithm | Fernet (AES-128-CBC + HMAC-SHA256) |
+| Key derivation | HKDF-SHA256 with versioned info string |
+| Key IDs | Full SHA-256 hex digest (64 chars) |
+| Envelope integrity | HMAC-SHA256 keyed with server secret |
+| File locking | `fcntl.flock(LOCK_EX)` for atomic read-modify-write |
+| Key material cleanup | Best-effort `ctypes.memset` zeroing |
+| File permissions | `chmod 0o600` on all credential files |
+
+## Account Linking Security
+
+### Linking Methods and Trust Model
+
+| Method | Auth Provenance | Trust Basis | Time Restriction |
+|--------|----------------|-------------|-----------------|
+| OAuth | `OAUTH` | Browser-authenticated user links accounts | None |
+| Session | Any | Two `start_google_auth` calls in same MCP session | None |
+| API Key | `USER_API_KEY` | Per-user key holder links additional accounts | **30 minutes from key creation** |
+
+### 30-Minute API Key Linking Window
+
+API key sessions can establish account links only within 30 minutes of the key's creation timestamp. This prevents a stolen API key from being used to link and access arbitrary accounts long after the legitimate owner set it up.
+
+After the window expires, the middleware blocks link requests with:
+```
+🔗 API key link window expired for user@example.com → other@example.com. OAuth required to establish new links.
+```
+
+### Metadata Audit Trail
+
+All links are tracked in `.user_api_key_link_metadata.json` with:
+- **method**: How the link was established (`oauth`, `session`, `api_key`, `both`)
+- **linked_at**: ISO 8601 timestamp of initial link creation
+- **updated_at**: Timestamp if the link was reinforced via a second method
 
 Regular security audits, updates, and monitoring ensure ongoing security posture maintenance.
 
@@ -1063,7 +1139,7 @@ For security concerns or vulnerability reports, please contact the security team
 
 ---
 
-**Document Version**: 3.0.0
+**Document Version**: 3.1.0
 **Last Updated**: 2026-03-08
 **Classification**: Internal - Security Documentation
 **Auth Folder Audit**: Complete (26 files, ~11,000 lines)

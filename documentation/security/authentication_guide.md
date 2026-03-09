@@ -723,26 +723,70 @@ After completing OAuth authentication, each user receives a unique, revocable AP
 
 1. **Generation**: After OAuth success, a 32-byte URL-safe token is generated
 2. **Display**: Key shown once on the success page (blurred by default, click-to-reveal, copy-to-clipboard)
-3. **Storage**: Only the SHA-256 hash is stored in `.user_api_keys.json` (permissions `0o600`)
+3. **Storage**: Only the SHA-256 hash + creation timestamp stored in `.user_api_keys.json` (permissions `0o600`)
 4. **Lookup**: Timing-safe comparison via `hmac.compare_digest()` prevents timing attacks
 5. **Revocation**: `revoke_user_key(email)` removes the key hash immediately
 
 ### Account Linking
 
-Per-user keys can access multiple Google accounts through bidirectional linking:
+Per-user keys can access multiple Google accounts through bidirectional linking. Links are established via three methods, each tracked with metadata:
+
+#### Linking Methods
+
+| Method | How It Works | Time Restriction |
+|--------|-------------|-----------------|
+| **OAuth** | User connects via OAuth, then calls `start_google_auth` for another email | None — always allowed |
+| **Session** | Two `start_google_auth` calls in the same MCP session | None — always allowed |
+| **API Key** | Per-user API key session calls `start_google_auth` for another email | **30-minute window** from key creation |
+
+The 30-minute API key linking window prevents stolen keys from being used to link arbitrary accounts after the initial setup period. After the window expires, OAuth authentication is required to establish new links.
+
+#### How Linking Works
 
 ```python
-# Link two accounts (bidirectional)
-link_accounts("user@example.com", "user@company.com")
+# Link two accounts (bidirectional, with method tracking)
+link_accounts("user@example.com", "user@company.com", method="oauth")
 
 # Check accessible accounts
 get_accessible_emails("user@example.com")
 # Returns: {"user@example.com", "user@company.com"}
 
+# Check how accounts were linked
+get_link_method("user@example.com", "user@company.com")
+# Returns: "oauth", "session", "api_key", or "both"
+
 # Deferred linking (target hasn't completed OAuth yet)
-request_link("user@example.com", "new@example.com")
+request_link("user@example.com", "new@example.com", method="session")
 # Activated when new@example.com completes OAuth via consume_pending_links()
 ```
+
+#### Link Metadata Storage
+
+Link metadata is stored in `.user_api_key_link_metadata.json`:
+
+```json
+{
+  "user@company.com::user@example.com": {
+    "method": "oauth",
+    "linked_at": "2026-03-08T20:15:00+00:00"
+  }
+}
+```
+
+If accounts are linked via multiple methods, the metadata upgrades to `"both"`:
+
+```json
+{
+  "method": "both",
+  "methods": ["oauth", "session"],
+  "linked_at": "2026-03-08T20:15:00+00:00",
+  "updated_at": "2026-03-08T21:00:00+00:00"
+}
+```
+
+#### Session Email Seeding
+
+When a user connects via any authentication method (OAuth, JWT, API key), their email is automatically seeded into `SESSION_AUTHED_EMAILS`. This ensures that subsequent `start_google_auth` calls for other emails can discover the existing user and queue pending links.
 
 ### Credential Isolation
 
@@ -754,26 +798,73 @@ The middleware enforces strict credential isolation based on auth provenance:
 | `USER_API_KEY` (per-user) | Owner email + linked accounts | Blocked |
 | `OAUTH` (browser) | All credentials for authenticated user | Allowed |
 
-### Crypto-Bound Encryption
+### Multi-Recipient Envelope Encryption
 
-When `MCP_API_KEY` is set, credential encryption keys are **derived** from it via HKDF-SHA256:
+Credentials are encrypted using a **multi-recipient CEK (Content Encryption Key) envelope** scheme. This allows multiple linked users to independently decrypt the same credential file without sharing keys.
+
+#### Envelope Structure
+
+```json
+{
+  "v": 2,
+  "enc": "per_user",
+  "recipients": {
+    "<sha256_hash_of_key_A>": "<CEK_wrapped_with_key_A>",
+    "<sha256_hash_of_key_B>": "<CEK_wrapped_with_key_B>"
+  },
+  "data": "<credentials_encrypted_with_random_CEK>",
+  "hmac": "<HMAC-SHA256_integrity_seal>"
+}
+```
+
+#### How It Works
+
+1. A random **Content Encryption Key (CEK)** is generated for each credential file
+2. The CEK encrypts the actual Google Workspace credentials (tokens, refresh tokens, etc.)
+3. The CEK is separately **wrapped** (Fernet-encrypted) for each authorized user's derived key
+4. Each user's wrapping key is derived via: `HKDF-SHA256(ikm=per_user_key, salt=server_secret, info="per-user-credential-encryption-v1")`
+5. An **HMAC-SHA256** integrity seal (keyed with server secret) protects the entire envelope from tampering
+
+#### Split-Key Security Model
+
+Neither the server secret alone NOR the per-user API key alone can decrypt credentials:
 
 ```
-Key = HKDF-SHA256(
-    input_key = MCP_API_KEY,
-    salt = "mcp-google-workspace-v1",
-    info = "credential-encryption",
+Decryption Key = HKDF-SHA256(
+    input_key = per_user_api_key,
+    salt = server_secret (.auth_encryption_key),
+    info = "per-user-credential-encryption-v1",
     length = 32 bytes
 )
 ```
 
-This means credential files are **undecryptable** without the `MCP_API_KEY`, binding encryption to the server's authentication secret. The encryption key priority is:
+This split-key model ensures:
+- **Server compromise alone** does not expose credentials
+- **Key theft alone** does not expose credentials
+- Both pieces are required for decryption
 
-1. Explicit `encryption_key` parameter (base64-encoded)
-2. Derived from `MCP_API_KEY` (crypto-binding) — **default when MCP_API_KEY is set**
-3. Auto-generated random key in `.auth_encryption_key` (fallback)
+#### Security Hardening
 
-Legacy key migration is automatic — existing credentials are transparently re-encrypted on next save.
+- **File locking**: `fcntl.flock(LOCK_EX)` prevents TOCTOU races during recipient addition
+- **Full key IDs**: SHA-256 hex digest (64 chars) used for recipient lookup
+- **CEK zeroing**: Best-effort `ctypes.memset` clears sensitive key material from memory
+- **HMAC integrity**: Detects tampering or downgrade attacks on the envelope
+- **chmod warnings**: Logged if restrictive file permissions cannot be set
+
+#### Cross-Add (Linked Account Recipient Addition)
+
+When user B authenticates in the same session as user A:
+1. B's credentials are encrypted with both A's and B's keys (as recipients)
+2. A's credential file is updated to add B as a new recipient via `add_recipient_to_encrypted_file()`
+3. File locking ensures atomic read-modify-write
+
+### Security Visualization
+
+The OAuth success page displays a real-time security visualization showing:
+- **Authorized users** with their linkage method (OAuth, session, API key)
+- **Key wrapping flow** diagram
+- **Sealed envelope** contents (wrapped CEKs, encrypted services, HMAC seal)
+- **Security features** summary including the 30-minute API key linking policy
 
 ### Environment Variables
 
