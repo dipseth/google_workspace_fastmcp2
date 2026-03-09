@@ -411,6 +411,26 @@ class AuthMiddleware(Middleware):
                             f"Run `start_google_auth` with your email to create credentials."
                         )
 
+        # SEED SESSION_AUTHED_EMAILS: Ensure the session's authenticated email
+        # (from OAuth, JWT, API key, etc.) is recorded so that subsequent
+        # start_google_auth calls for OTHER emails can discover it and link.
+        if session_id and user_email:
+            _existing_authed = set(
+                get_session_data(session_id, SessionKey.SESSION_AUTHED_EMAILS) or []
+            )
+            _norm_email = user_email.lower().strip()
+            if _norm_email not in _existing_authed:
+                _existing_authed.add(_norm_email)
+                store_session_data(
+                    session_id,
+                    SessionKey.SESSION_AUTHED_EMAILS,
+                    sorted(_existing_authed),
+                )
+                logger.debug(
+                    f"🔗 Seeded SESSION_AUTHED_EMAILS with {_norm_email} "
+                    f"(now {len(_existing_authed)} email(s))"
+                )
+
         # SESSION-LEVEL ACCOUNT LINKING: When start_google_auth is called for
         # a new email, create pending links to ALL previously-authenticated
         # emails in this session.  This works for every auth type (OAuth,
@@ -428,12 +448,32 @@ class AuthMiddleware(Middleware):
                 )
                 prev_emails = set(prev_raw)
 
+                # Determine link method and enforce time window for API key sessions.
+                # API key sessions can only create links within 30 minutes of
+                # key creation; after that, OAuth is required.
+                if auth_provenance == AuthProvenance.OAUTH:
+                    _link_method = "oauth"
+                    _link_allowed = True
+                elif auth_provenance == AuthProvenance.USER_API_KEY:
+                    _link_method = "api_key"
+                    from auth.user_api_keys import is_key_within_link_window
+
+                    _link_allowed = is_key_within_link_window(user_email or "")
+                    if not _link_allowed:
+                        logger.warning(
+                            f"🔗 API key link window expired for {user_email} → {target_email}. "
+                            f"OAuth required to establish new links."
+                        )
+                else:
+                    _link_method = "session"
+                    _link_allowed = True
+
                 # Queue pending links to every prior email in this session
                 for prev in prev_emails:
-                    if prev != target_email:
-                        request_link(prev, target_email)
+                    if prev != target_email and _link_allowed:
+                        request_link(prev, target_email, method=_link_method)
                         logger.info(
-                            f"🔗 Session link: {prev} → {target_email} (deferred until OAuth completes)"
+                            f"🔗 {_link_method} link: {prev} → {target_email} (deferred until OAuth completes)"
                         )
 
                 # Record this email in the session's authenticated set

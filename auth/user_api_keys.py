@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 _REGISTRY_FILENAME = ".user_api_keys.json"
 _LINKS_FILENAME = ".user_api_key_links.json"
 _PENDING_LINKS_FILENAME = ".user_api_key_pending_links.json"
+_LINK_METADATA_FILENAME = ".user_api_key_link_metadata.json"
 _lock = threading.Lock()
 
 
@@ -45,9 +46,55 @@ def _links_path() -> Path:
     return Path(settings.credentials_dir) / _LINKS_FILENAME
 
 
+def _link_metadata_path() -> Path:
+    return Path(settings.credentials_dir) / _LINK_METADATA_FILENAME
+
+
+def _link_meta_key(a: str, b: str) -> str:
+    """Canonical key for a pair of emails (sorted for consistency)."""
+    return "::".join(sorted([a.lower().strip(), b.lower().strip()]))
+
+
+def _load_link_metadata() -> dict:
+    """Load link metadata. Returns {pair_key: {method, linked_at}}."""
+    path = _link_metadata_path()
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_link_metadata(meta: dict) -> None:
+    path = _link_metadata_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(meta, f, indent=2)
+    try:
+        path.chmod(0o600)
+    except OSError as e:
+        logger.warning(f"⚠️ Could not set permissions on {path}: {e}")
+
+
 def _hash_key(key: str) -> str:
     """SHA-256 hash of the plaintext key."""
     return hashlib.sha256(key.encode()).hexdigest()
+
+
+def _reg_email(entry) -> str:
+    """Extract email from a registry entry (supports legacy str and new dict formats)."""
+    if isinstance(entry, dict):
+        return entry.get("email", "")
+    return entry  # legacy: value is just the email string
+
+
+def _reg_created_at(entry) -> str:
+    """Extract created_at from a registry entry. Empty string for legacy entries."""
+    if isinstance(entry, dict):
+        return entry.get("created_at", "")
+    return ""
 
 
 def _load_registry() -> dict:
@@ -123,8 +170,8 @@ def generate_user_key(user_email: str, *, force: bool = False) -> Optional[str]:
 
         # Check if a key already exists for this email
         if not force:
-            for _hash, registered_email in registry.items():
-                if registered_email == email:
+            for _hash, entry in registry.items():
+                if _reg_email(entry) == email:
                     logger.debug(
                         f"🔑 Per-user API key already exists for {email} — skipping generation"
                     )
@@ -134,14 +181,50 @@ def generate_user_key(user_email: str, *, force: bool = False) -> Optional[str]:
         key_hash = _hash_key(key)
 
         # Remove any previous key for this email
-        registry = {h: e for h, e in registry.items() if e != email}
+        registry = {h: e for h, e in registry.items() if _reg_email(e) != email}
 
-        # Store the new hash → email mapping
-        registry[key_hash] = email
+        # Store the new hash → email + created_at mapping
+        from datetime import datetime, timezone
+
+        registry[key_hash] = {
+            "email": email,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
         _save_registry(registry)
 
     logger.info(f"🔑 Generated per-user API key for {email}")
     return key
+
+
+_API_KEY_LINK_WINDOW_MINUTES = 30
+
+
+def is_key_within_link_window(user_email: str) -> bool:
+    """Check if the per-user API key for this email was created within the linking window.
+
+    API key sessions can only create account links within this window.
+    After it expires, OAuth is required to establish new links.
+    """
+    from datetime import datetime, timezone
+
+    email = user_email.lower().strip()
+
+    with _lock:
+        registry = _load_registry()
+
+    for _hash, entry in registry.items():
+        if _reg_email(entry) == email:
+            created_str = _reg_created_at(entry)
+            if not created_str:
+                # Legacy entry without timestamp — deny linking
+                return False
+            try:
+                created = datetime.fromisoformat(created_str)
+                elapsed = (datetime.now(timezone.utc) - created).total_seconds()
+                return elapsed <= _API_KEY_LINK_WINDOW_MINUTES * 60
+            except (ValueError, TypeError):
+                return False
+    return False
 
 
 def lookup_key(token: str) -> Optional[str]:
@@ -160,9 +243,9 @@ def lookup_key(token: str) -> Optional[str]:
     with _lock:
         registry = _load_registry()
 
-    for stored_hash, email in registry.items():
+    for stored_hash, entry in registry.items():
         if hmac.compare_digest(token_hash, stored_hash):
-            return email
+            return _reg_email(entry)
     return None
 
 
@@ -176,7 +259,7 @@ def revoke_user_key(user_email: str) -> bool:
     with _lock:
         registry = _load_registry()
         before = len(registry)
-        registry = {h: e for h, e in registry.items() if e != email}
+        registry = {h: e for h, e in registry.items() if _reg_email(e) != email}
         _save_registry(registry)
 
     revoked = len(registry) < before
@@ -190,11 +273,17 @@ def revoke_user_key(user_email: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def link_accounts(email_a: str, email_b: str) -> None:
+def link_accounts(email_a: str, email_b: str, method: str = "session") -> None:
     """Bidirectionally link two email accounts.
 
     After linking, a per-user key for either email can access
     credentials for both.
+
+    Args:
+        email_a: First email address.
+        email_b: Second email address.
+        method: How the link was established — "session" (same MCP session)
+                or "oauth" (OAuth user called start_google_auth for other email).
     """
     a = email_a.lower().strip()
     b = email_b.lower().strip()
@@ -213,7 +302,28 @@ def link_accounts(email_a: str, email_b: str) -> None:
         links[b] = sorted(b_links)
         _save_links(links)
 
-    logger.info(f"🔗 Linked accounts: {a} ↔ {b}")
+        # Store link metadata
+        from datetime import datetime, timezone
+
+        meta = _load_link_metadata()
+        mk = _link_meta_key(a, b)
+        existing = meta.get(mk)
+        if existing and existing.get("method") != method:
+            # Upgrade to "both" if linked via a different method too
+            meta[mk] = {
+                "method": "both",
+                "methods": sorted(set([existing.get("method", "session"), method])),
+                "linked_at": existing.get("linked_at"),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        elif not existing:
+            meta[mk] = {
+                "method": method,
+                "linked_at": datetime.now(timezone.utc).isoformat(),
+            }
+        _save_link_metadata(meta)
+
+    logger.info(f"🔗 Linked accounts: {a} ↔ {b} (method={method})")
 
 
 # ---------------------------------------------------------------------------
@@ -248,12 +358,13 @@ def _save_pending_links(pending: dict) -> None:
         logger.warning(f"⚠️ Could not set permissions on {path}: {e}")
 
 
-def request_link(source_email: str, target_email: str) -> None:
+def request_link(source_email: str, target_email: str, method: str = "session") -> None:
     """Record a pending link request. Executed when target_email completes OAuth.
 
     Args:
         source_email: The email of the key owner requesting the link.
         target_email: The email being authenticated (link deferred until OAuth completes).
+        method: How the link was established — "session" or "oauth".
     """
     s = source_email.lower().strip()
     t = target_email.lower().strip()
@@ -262,12 +373,18 @@ def request_link(source_email: str, target_email: str) -> None:
 
     with _lock:
         pending = _load_pending_links()
-        sources = set(pending.get(t, []))
-        sources.add(s)
-        pending[t] = sorted(sources)
+        # Store as {target: {source: method}} for method tracking
+        target_pending = pending.get(t, {})
+        if isinstance(target_pending, list):
+            # Migrate legacy format [source_emails] → {source: method}
+            target_pending = {src: "session" for src in target_pending}
+        target_pending[s] = method
+        pending[t] = target_pending
         _save_pending_links(pending)
 
-    logger.info(f"🔗 Pending link request: {s} → {t} (awaiting OAuth completion)")
+    logger.info(
+        f"🔗 Pending link request: {s} → {t} (method={method}, awaiting OAuth completion)"
+    )
 
 
 def consume_pending_links(completed_email: str) -> None:
@@ -281,23 +398,29 @@ def consume_pending_links(completed_email: str) -> None:
 
     with _lock:
         pending = _load_pending_links()
-        sources = pending.pop(e, [])
-        if sources:
+        raw_sources = pending.pop(e, {})
+        if raw_sources:
             _save_pending_links(pending)
         # Load registry once to verify source emails have keys
         registry = _load_registry()
 
-    registered_emails = set(registry.values())
+    registered_emails = {_reg_email(e) for e in registry.values()}
 
-    for source in sources:
+    # Handle both legacy [source_emails] and new {source: method} formats
+    if isinstance(raw_sources, list):
+        source_methods = {src: "session" for src in raw_sources}
+    else:
+        source_methods = raw_sources
+
+    for source, method in source_methods.items():
         if source not in registered_emails:
             logger.warning(
                 f"🔗 Skipping pending link {source} → {e}: "
                 f"source has no registered per-user key"
             )
             continue
-        link_accounts(source, e)
-        logger.info(f"🔗 Executed deferred link: {source} ↔ {e}")
+        link_accounts(source, e, method=method)
+        logger.info(f"🔗 Executed deferred link: {source} ↔ {e} (method={method})")
 
 
 def get_accessible_emails(email: str) -> Set[str]:
@@ -313,6 +436,18 @@ def get_accessible_emails(email: str) -> Set[str]:
     accessible = {e}
     accessible.update(links.get(e, []))
     return accessible
+
+
+def get_link_method(email_a: str, email_b: str) -> str:
+    """Return how two emails were linked: 'session', 'oauth', or 'both'.
+
+    Returns empty string if no metadata found.
+    """
+    mk = _link_meta_key(email_a, email_b)
+    with _lock:
+        meta = _load_link_metadata()
+    entry = meta.get(mk, {})
+    return entry.get("method", "")
 
 
 def unlink_accounts(email_a: str, email_b: str) -> bool:

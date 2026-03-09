@@ -900,34 +900,57 @@ def setup_legacy_callback_route(mcp) -> None:
 
             # Build security visualization
             if _is_encrypted:
-                # Build recipient nodes for the diagram
-                _all_emails = [user_email.lower().strip()]
+                # Build recipient nodes with linkage method badges
+                _cur = user_email.lower().strip()
+                _all_emails = [_cur]
                 try:
-                    _all_emails = sorted(
-                        get_accessible_emails(user_email.lower().strip())
-                    )
+                    _all_emails = sorted(get_accessible_emails(_cur))
                 except Exception:
                     pass
 
+                try:
+                    from auth.user_api_keys import get_link_method
+                except Exception:
+
+                    def get_link_method(a, b):
+                        return ""
+
                 _recipient_nodes = ""
-                for i, em in enumerate(_all_emails):
-                    _is_current = em == user_email.lower().strip()
+                for em in _all_emails:
+                    _is_current = em == _cur
                     _highlight = "current" if _is_current else ""
-                    _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span></div>'
+                    _method_badge = ""
+                    if not _is_current:
+                        _m = get_link_method(_cur, em)
+                        if _m == "oauth":
+                            _method_badge = (
+                                '<span class="sec-method oauth">via OAuth</span>'
+                            )
+                        elif _m == "api_key":
+                            _method_badge = (
+                                '<span class="sec-method api_key">via API key</span>'
+                            )
+                        elif _m == "session":
+                            _method_badge = (
+                                '<span class="sec-method session">via session</span>'
+                            )
+                        elif _m == "both":
+                            _method_badge = (
+                                '<span class="sec-method both">multiple methods</span>'
+                            )
+                        else:
+                            _method_badge = '<span class="sec-method">linked</span>'
+                    _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span>{_method_badge}</div>'
 
                 _key_lines = ""
-                for i, em in enumerate(_all_emails):
-                    _is_current = em == user_email.lower().strip()
-                    _cls = "current" if _is_current else ""
+                for em in _all_emails:
+                    _cls = "current" if (em == _cur) else ""
                     _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
 
-                _env_label = (
-                    "v2 Envelope" if _has_hmac or _num_recipients > 1 else "Encrypted"
-                )
                 _subtitle = (
-                    "Your credentials are protected by multi-recipient envelope encryption"
+                    "Your Google Workspace credentials are protected by multi-recipient envelope encryption"
                     if _num_recipients > 1
-                    else "Your credentials are protected by split-key encryption"
+                    else "Your Google Workspace credentials are protected by split-key encryption"
                 )
 
                 security_viz_section = f"""
@@ -946,9 +969,9 @@ def setup_legacy_callback_route(mcp) -> None:
                         <div class="sec-col sec-col-envelope">
                             <div class="sec-col-label">Encrypted Envelope</div>
                             <div class="sec-envelope">
-                                <div class="sec-env-header">{_env_label}</div>
+                                <div class="sec-env-header">Sealed Envelope</div>
                                 <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
-                                <div class="sec-env-row"><span class="sec-env-badge data">🔒 AES-Encrypted Credentials</span></div>
+                                <div class="sec-env-row"><span class="sec-env-badge data">🔒 Gmail · Drive · Calendar · Docs · Sheets</span></div>
                                 <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
                             </div>
                         </div>
@@ -956,7 +979,7 @@ def setup_legacy_callback_route(mcp) -> None:
                     <div class="sec-features">
                         <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
                         <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
-                        <div class="sec-feat"><span>🔗</span> Linked accounts share access via separate key wraps</div>
+                        <div class="sec-feat"><span>🔗</span> Link accounts via <b>OAuth</b>, <b>session</b>, or <b>API key</b> (30 min window)</div>
                         <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
                     </div>
                 </div>"""
@@ -1000,6 +1023,12 @@ def setup_legacy_callback_route(mcp) -> None:
                 .sec-node.current{{border-color:#64ffda;background:rgba(100,255,218,0.08)}}
                 .sec-icon{{font-size:18px}}
                 .sec-label{{font-size:9px;font-family:monospace;word-break:break-all;line-height:1.2;color:#ccd6f6}}
+                .sec-method{{font-size:7px;padding:1px 5px;border-radius:3px;margin-top:2px;
+                            background:rgba(255,255,255,0.08);color:#8892b0}}
+                .sec-method.oauth{{background:rgba(100,255,218,0.12);color:#64ffda}}
+                .sec-method.session{{background:rgba(255,183,77,0.12);color:#ffb74d}}
+                .sec-method.both{{background:rgba(129,212,250,0.12);color:#81d4fa}}
+                .sec-method.api_key{{background:rgba(206,147,255,0.12);color:#ce93ff}}
                 .sec-col-keys{{flex:0.7;justify-content:center;gap:8px}}
                 .sec-flow-row{{display:flex;align-items:center;gap:3px;justify-content:center}}
                 .sec-flow-row.current .sec-key-badge{{background:#64ffda;color:#1a1a2e}}
@@ -2036,35 +2065,48 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
                 # Build security visualization
                 if _is_encrypted:
-                    _all_emails = [user_email.lower().strip()]
+                    _cur = user_email.lower().strip()
+                    _all_emails = [_cur]
                     try:
-                        _all_emails = sorted(
-                            get_accessible_emails(user_email.lower().strip())
-                        )
+                        _all_emails = sorted(get_accessible_emails(_cur))
                     except Exception:
                         pass
 
+                    try:
+                        from auth.user_api_keys import get_link_method
+                    except Exception:
+
+                        def get_link_method(a, b):
+                            return ""
+
                     _recipient_nodes = ""
-                    for i, em in enumerate(_all_emails):
-                        _is_current = em == user_email.lower().strip()
+                    for em in _all_emails:
+                        _is_current = em == _cur
                         _highlight = "current" if _is_current else ""
-                        _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span></div>'
+                        _method_badge = ""
+                        if not _is_current:
+                            _m = get_link_method(_cur, em)
+                            if _m == "oauth":
+                                _method_badge = (
+                                    '<span class="sec-method oauth">via OAuth</span>'
+                                )
+                            elif _m == "session":
+                                _method_badge = '<span class="sec-method session">via session</span>'
+                            elif _m == "both":
+                                _method_badge = '<span class="sec-method both">OAuth + session</span>'
+                            else:
+                                _method_badge = '<span class="sec-method">linked</span>'
+                        _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span>{_method_badge}</div>'
 
                     _key_lines = ""
-                    for i, em in enumerate(_all_emails):
-                        _is_current = em == user_email.lower().strip()
-                        _cls = "current" if _is_current else ""
+                    for em in _all_emails:
+                        _cls = "current" if (em == _cur) else ""
                         _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
 
-                    _env_label = (
-                        "v2 Envelope"
-                        if _has_hmac or _num_recipients > 1
-                        else "Encrypted"
-                    )
                     _subtitle = (
-                        "Your credentials are protected by multi-recipient envelope encryption"
+                        "Your Google Workspace credentials are protected by multi-recipient envelope encryption"
                         if _num_recipients > 1
-                        else "Your credentials are protected by split-key encryption"
+                        else "Your Google Workspace credentials are protected by split-key encryption"
                     )
 
                     security_viz_section = f"""
@@ -2083,9 +2125,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             <div class="sec-col sec-col-envelope">
                                 <div class="sec-col-label">Encrypted Envelope</div>
                                 <div class="sec-envelope">
-                                    <div class="sec-env-header">{_env_label}</div>
+                                    <div class="sec-env-header">Sealed Envelope</div>
                                     <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
-                                    <div class="sec-env-row"><span class="sec-env-badge data">🔒 AES-Encrypted Credentials</span></div>
+                                    <div class="sec-env-row"><span class="sec-env-badge data">🔒 Gmail · Drive · Calendar · Docs · Sheets</span></div>
                                     <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
                                 </div>
                             </div>
@@ -2137,6 +2179,11 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         .sec-node.current {{ border-color: #64ffda; background: rgba(100,255,218,0.08); }}
                         .sec-icon {{ font-size: 18px; }}
                         .sec-label {{ font-size: 9px; font-family: monospace; word-break: break-all; line-height: 1.2; color: #ccd6f6; }}
+                        .sec-method {{ font-size: 7px; padding: 1px 5px; border-radius: 3px; margin-top: 2px; background: rgba(255,255,255,0.08); color: #8892b0; }}
+                        .sec-method.oauth {{ background: rgba(100,255,218,0.12); color: #64ffda; }}
+                        .sec-method.session {{ background: rgba(255,183,77,0.12); color: #ffb74d; }}
+                        .sec-method.both {{ background: rgba(129,212,250,0.12); color: #81d4fa; }}
+                        .sec-method.api_key {{ background: rgba(206,147,255,0.12); color: #ce93ff; }}
                         .sec-col-keys {{ flex: 0.7; justify-content: center; gap: 8px; }}
                         .sec-flow-row {{ display: flex; align-items: center; gap: 3px; justify-content: center; }}
                         .sec-flow-row.current .sec-key-badge {{ background: #64ffda; color: #1a1a2e; }}
