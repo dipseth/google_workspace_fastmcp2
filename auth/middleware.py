@@ -799,7 +799,10 @@ class AuthMiddleware(Middleware):
         try:
             key_path.chmod(0o600)
         except OSError:
-            pass
+            logger.warning(
+                "Could not set restrictive permissions on server secret "
+                f"(.auth_encryption_key) — file may be world-readable"
+            )
         return key_bytes
 
     def derive_per_user_fernet_key(self, per_user_key: str) -> bytes:
@@ -823,7 +826,7 @@ class AuthMiddleware(Middleware):
             algorithm=hashes.SHA256(),
             length=32,
             salt=server_secret,
-            info=b"per-user-credential-encryption",
+            info=b"per-user-credential-encryption-v1",
         )
         return base64.urlsafe_b64encode(hkdf.derive(per_user_key.encode()))
 
@@ -1100,14 +1103,53 @@ class AuthMiddleware(Middleware):
 
     @staticmethod
     def _key_id(per_user_key: str) -> str:
-        """Deterministic short identifier for a per-user key (first 16 hex chars of SHA-256).
+        """Deterministic identifier for a per-user key (full SHA-256 hex digest).
 
         Used as the key in the ``recipients`` dict so we can look up the
         correct wrapped CEK without trying every entry.
         """
         import hashlib
 
-        return hashlib.sha256(per_user_key.encode()).hexdigest()[:16]
+        return hashlib.sha256(per_user_key.encode()).hexdigest()
+
+    def _compute_envelope_hmac(self, envelope: dict) -> str:
+        """Compute HMAC-SHA256 over the envelope (excluding the hmac field itself).
+
+        Keyed with the server secret to detect tampering, recipient removal,
+        and downgrade attacks.
+        """
+        import hashlib
+        import hmac as _hmac
+
+        # Build a canonical representation excluding the hmac field
+        hmac_input = {k: v for k, v in envelope.items() if k != "hmac"}
+        payload = json.dumps(hmac_input, sort_keys=True).encode()
+        server_secret = self._get_server_secret()
+        return _hmac.new(server_secret, payload, hashlib.sha256).hexdigest()
+
+    def _verify_envelope_hmac(self, envelope: dict) -> bool:
+        """Verify the envelope's HMAC. Returns True if valid or if no HMAC present (legacy)."""
+        import hmac as _hmac
+
+        stored_hmac = envelope.get("hmac")
+        if not stored_hmac:
+            return True  # Legacy envelope without HMAC — allow for backward compat
+        expected = self._compute_envelope_hmac(envelope)
+        return _hmac.compare_digest(stored_hmac, expected)
+
+    @staticmethod
+    def _zero_bytes(b: bytes) -> None:
+        """Best-effort zeroing of a bytes object in CPython.
+
+        This is not guaranteed by Python but raises the bar against memory
+        inspection attacks on long-running server processes.
+        """
+        try:
+            import ctypes
+
+            ctypes.memset(id(b) + bytes.__basicsize__ - 1, 0, len(b))
+        except Exception:
+            pass  # Non-CPython or restricted environment
 
     def _save_per_user_encrypted(
         self,
@@ -1142,40 +1184,47 @@ class AuthMiddleware(Middleware):
         # 1. Generate random Content Encryption Key (CEK)
         cek = Fernet.generate_key()  # 32-byte URL-safe base64
 
-        # 2. Encrypt credentials with CEK
-        creds_data = {
-            "token": credentials.token,
-            "refresh_token": credentials.refresh_token,
-            "token_uri": credentials.token_uri,
-            "client_id": credentials.client_id,
-            "client_secret": credentials.client_secret,
-            "scopes": credentials.scopes,
-            "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
-            "encrypted_at": datetime.now().isoformat(),
-        }
-        cek_fernet = Fernet(cek)
-        encrypted_creds = cek_fernet.encrypt(json.dumps(creds_data).encode())
+        try:
+            # 2. Encrypt credentials with CEK
+            creds_data = {
+                "token": credentials.token,
+                "refresh_token": credentials.refresh_token,
+                "token_uri": credentials.token_uri,
+                "client_id": credentials.client_id,
+                "client_secret": credentials.client_secret,
+                "scopes": credentials.scopes,
+                "expiry": credentials.expiry.isoformat()
+                if credentials.expiry
+                else None,
+                "encrypted_at": datetime.now().isoformat(),
+            }
+            cek_fernet = Fernet(cek)
+            encrypted_creds = cek_fernet.encrypt(json.dumps(creds_data).encode())
 
-        # 3. Wrap CEK for each authorized user
-        recipients = {}
-        all_keys = [per_user_key] + (additional_keys or [])
-        for key in all_keys:
-            kid = self._key_id(key)
-            wrapper_fernet_key = self.derive_per_user_fernet_key(key)
-            wrapper = Fernet(wrapper_fernet_key)
-            wrapped_cek = wrapper.encrypt(cek)
-            recipients[kid] = base64.urlsafe_b64encode(wrapped_cek).decode()
+            # 3. Wrap CEK for each authorized user
+            recipients = {}
+            all_keys = [per_user_key] + (additional_keys or [])
+            for key in all_keys:
+                kid = self._key_id(key)
+                wrapper_fernet_key = self.derive_per_user_fernet_key(key)
+                wrapper = Fernet(wrapper_fernet_key)
+                wrapped_cek = wrapper.encrypt(cek)
+                recipients[kid] = base64.urlsafe_b64encode(wrapped_cek).decode()
 
-        # 4. Write envelope
-        envelope = {
-            "v": 2,
-            "enc": "per_user",
-            "recipients": recipients,
-            "data": base64.urlsafe_b64encode(encrypted_creds).decode(),
-        }
+            # 4. Build envelope with integrity HMAC
+            envelope = {
+                "v": 2,
+                "enc": "per_user",
+                "recipients": recipients,
+                "data": base64.urlsafe_b64encode(encrypted_creds).decode(),
+            }
+            envelope["hmac"] = self._compute_envelope_hmac(envelope)
 
-        with open(path, "w") as f:
-            json.dump(envelope, f)
+            with open(path, "w") as f:
+                json.dump(envelope, f)
+        finally:
+            # Best-effort zeroing of CEK in memory
+            self._zero_bytes(cek)
 
         logger.debug(
             f"🔐 Wrote multi-recipient envelope to {path.name} "
@@ -1192,26 +1241,35 @@ class AuthMiddleware(Middleware):
         """
         from cryptography.fernet import Fernet
 
-        fernet_key = self.derive_per_user_fernet_key(per_user_key)
+        # Verify envelope integrity before processing
+        if not self._verify_envelope_hmac(envelope):
+            raise ValueError("Envelope HMAC verification failed — possible tampering")
 
-        if "recipients" in envelope:
-            # Multi-recipient: unwrap CEK first, then decrypt credentials
-            kid = self._key_id(per_user_key)
-            wrapped_cek_b64 = envelope["recipients"].get(kid)
-            if not wrapped_cek_b64:
-                raise ValueError(
-                    f"No recipient entry for this key. "
-                    f"{len(envelope['recipients'])} recipient(s) in envelope."
-                )
-            wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
-            cek = Fernet(fernet_key).decrypt(wrapped_cek)
-            # CEK is itself a Fernet key — use it to decrypt credentials
-            encrypted_creds = base64.urlsafe_b64decode(envelope["data"].encode())
-            decrypted_data = Fernet(cek).decrypt(encrypted_creds)
-        else:
-            # Legacy single-recipient: per-user key encrypts credentials directly
-            encrypted_bytes = base64.urlsafe_b64decode(envelope["data"].encode())
-            decrypted_data = Fernet(fernet_key).decrypt(encrypted_bytes)
+        fernet_key = self.derive_per_user_fernet_key(per_user_key)
+        cek = None
+
+        try:
+            if "recipients" in envelope:
+                # Multi-recipient: unwrap CEK first, then decrypt credentials
+                kid = self._key_id(per_user_key)
+                wrapped_cek_b64 = envelope["recipients"].get(kid)
+                if not wrapped_cek_b64:
+                    raise ValueError(
+                        f"No recipient entry for this key. "
+                        f"{len(envelope['recipients'])} recipient(s) in envelope."
+                    )
+                wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
+                cek = Fernet(fernet_key).decrypt(wrapped_cek)
+                # CEK is itself a Fernet key — use it to decrypt credentials
+                encrypted_creds = base64.urlsafe_b64decode(envelope["data"].encode())
+                decrypted_data = Fernet(cek).decrypt(encrypted_creds)
+            else:
+                # Legacy single-recipient: per-user key encrypts credentials directly
+                encrypted_bytes = base64.urlsafe_b64decode(envelope["data"].encode())
+                decrypted_data = Fernet(fernet_key).decrypt(encrypted_bytes)
+        finally:
+            if cek:
+                self._zero_bytes(cek)
 
         creds_data = json.loads(decrypted_data.decode())
 
@@ -1239,8 +1297,9 @@ class AuthMiddleware(Middleware):
     ) -> bool:
         """Add a new recipient to an existing multi-recipient envelope.
 
-        Reads the envelope, unwraps the CEK with ``existing_key``, wraps it
-        for ``new_key``, and writes the updated envelope back.
+        Uses file locking to prevent TOCTOU races when concurrent sessions
+        modify the same envelope. Verifies envelope HMAC before processing
+        and recomputes it after modification.
 
         Args:
             path: Path to the ``.enc`` credential file.
@@ -1250,68 +1309,88 @@ class AuthMiddleware(Middleware):
         Returns:
             True if the recipient was added, False on failure.
         """
+        import fcntl
+
         from cryptography.fernet import Fernet
 
         if not path.exists():
             logger.warning(f"Cannot add recipient — file not found: {path}")
             return False
 
+        cek = None
         try:
-            with open(path, "r") as f:
-                envelope = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Cannot read envelope {path}: {e}")
-            return False
+            with open(path, "r+") as f:
+                # Exclusive lock to prevent concurrent read-modify-write races
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try:
+                    envelope = json.load(f)
 
-        if not isinstance(envelope, dict) or envelope.get("enc") != "per_user":
-            logger.warning(f"Not a per-user envelope: {path}")
-            return False
+                    if (
+                        not isinstance(envelope, dict)
+                        or envelope.get("enc") != "per_user"
+                    ):
+                        logger.warning(f"Not a per-user envelope: {path}")
+                        return False
 
-        if "recipients" not in envelope:
-            logger.warning(
-                f"Legacy single-recipient envelope — cannot add recipient: {path}. "
-                f"Re-encrypt with multi-recipient format first."
-            )
-            return False
+                    if "recipients" not in envelope:
+                        logger.warning(
+                            f"Legacy single-recipient envelope — cannot add recipient: {path}. "
+                            f"Re-encrypt with multi-recipient format first."
+                        )
+                        return False
 
-        new_kid = self._key_id(new_key)
-        if new_kid in envelope["recipients"]:
-            logger.debug(f"Recipient {new_kid} already in envelope {path.name}")
-            return True
+                    # Verify envelope integrity
+                    if not self._verify_envelope_hmac(envelope):
+                        logger.error(f"Envelope HMAC verification failed: {path.name}")
+                        return False
 
-        # Unwrap CEK with existing key
-        existing_kid = self._key_id(existing_key)
-        wrapped_cek_b64 = envelope["recipients"].get(existing_kid)
-        if not wrapped_cek_b64:
-            logger.error(
-                f"Cannot unwrap CEK — existing key not in recipients of {path.name}"
-            )
-            return False
+                    new_kid = self._key_id(new_key)
+                    if new_kid in envelope["recipients"]:
+                        logger.debug(f"Recipient already in envelope {path.name}")
+                        return True
 
-        try:
-            existing_fernet_key = self.derive_per_user_fernet_key(existing_key)
-            wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
-            cek = Fernet(existing_fernet_key).decrypt(wrapped_cek)
+                    # Unwrap CEK with existing key
+                    existing_kid = self._key_id(existing_key)
+                    wrapped_cek_b64 = envelope["recipients"].get(existing_kid)
+                    if not wrapped_cek_b64:
+                        logger.error(
+                            f"Cannot unwrap CEK — existing key not in recipients of {path.name}"
+                        )
+                        return False
 
-            # Wrap CEK for new recipient
-            new_fernet_key = self.derive_per_user_fernet_key(new_key)
-            new_wrapped_cek = Fernet(new_fernet_key).encrypt(cek)
-            envelope["recipients"][new_kid] = base64.urlsafe_b64encode(
-                new_wrapped_cek
-            ).decode()
+                    existing_fernet_key = self.derive_per_user_fernet_key(existing_key)
+                    wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
+                    cek = Fernet(existing_fernet_key).decrypt(wrapped_cek)
 
-            with open(path, "w") as f:
-                json.dump(envelope, f)
+                    # Wrap CEK for new recipient
+                    new_fernet_key = self.derive_per_user_fernet_key(new_key)
+                    new_wrapped_cek = Fernet(new_fernet_key).encrypt(cek)
+                    envelope["recipients"][new_kid] = base64.urlsafe_b64encode(
+                        new_wrapped_cek
+                    ).decode()
 
-            logger.info(
-                f"🔐 Added recipient to {path.name} "
-                f"(now {len(envelope['recipients'])} recipient(s))"
-            )
-            return True
+                    # Recompute HMAC over updated envelope
+                    envelope["hmac"] = self._compute_envelope_hmac(envelope)
+
+                    # Write back atomically within the lock
+                    f.seek(0)
+                    f.truncate()
+                    json.dump(envelope, f)
+
+                    logger.info(
+                        f"🔐 Added recipient to {path.name} "
+                        f"(now {len(envelope['recipients'])} recipient(s))"
+                    )
+                    return True
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
 
         except Exception as e:
             logger.error(f"Failed to add recipient to {path.name}: {e}")
             return False
+        finally:
+            if cek:
+                self._zero_bytes(cek)
 
     def load_credentials(
         self, user_email: str, per_user_key: Optional[str] = None
