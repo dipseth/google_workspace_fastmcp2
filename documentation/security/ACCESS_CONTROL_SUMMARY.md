@@ -8,21 +8,22 @@
 
 ### 1. Creating Authorized Users (What You've Been Doing)
 
-When you authenticate a user, credentials are saved:
+When you authenticate a user, credentials are encrypted and saved using a multi-recipient envelope:
 
 ```python
-# In auth/google_auth.py - _save_credentials() function (line 274)
-creds_path = Path(settings.credentials_dir) / f"{safe_email}_credentials.json"
+# In auth/google_auth.py - _save_credentials() function
+# Credentials are encrypted via auth/middleware.py using envelope encryption
 
-creds_data = {
-    "token": credentials.token,
-    "refresh_token": credentials.refresh_token,
-    "client_id": credentials.client_id,  # ← OAuth client that was used
-    "client_secret": credentials.client_secret,
-    "user_email": user_email  # ← The authorized email
+# Saved to: credentials/user_at_example_com_credentials.enc
+# Format: JSON envelope with per-user wrapped CEK + HMAC integrity seal
+{
+    "v": 2,
+    "enc": "per_user",
+    "recipients": {"<key_id>": "<wrapped_CEK>"},
+    "data": "<encrypted_credentials>",
+    "hmac": "<integrity_seal>"
 }
-
-# Saved to: credentials/user_at_example_com_credentials.json
+# Decryption requires BOTH the per-user API key AND the server secret
 ```
 
 ### 2. Validating Access (New Security Layer)
