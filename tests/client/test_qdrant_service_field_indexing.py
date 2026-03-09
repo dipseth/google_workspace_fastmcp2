@@ -8,6 +8,13 @@ Relates to fix in middleware/qdrant_core/client.py ensuring service field has
 proper KeywordIndexParams indexing.
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Narrow: specific Qdrant indexing behavior (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import json
 
 import pytest

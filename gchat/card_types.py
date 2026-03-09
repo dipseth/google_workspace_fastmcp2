@@ -479,6 +479,14 @@ class SendDynamicCardResponse(BaseModel):
         description="Alternative valid DSL patterns using similar components. "
         "Use these for inspiration on different card structures.",
     )
+    partsSent: Optional[int] = Field(
+        None,
+        description="Number of card parts sent (>1 if payload was auto-split due to size)",
+    )
+    splitThreadKey: Optional[str] = Field(
+        None,
+        description="Thread key linking multi-part card messages together",
+    )
     message: str = Field(
         ...,
         description="Human-readable status message describing the result",

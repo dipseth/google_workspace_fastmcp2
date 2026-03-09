@@ -281,6 +281,8 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Wait for the success page",
                     "Return here and retry your operation",
                     "",
+                    f"⚠️ **After auth**: pass user_google_email='{user_google_email}' explicitly in all tool calls for this account",
+                    "",
                     "💡 **For CLI clients**: You can also poll authentication status:",
                     f"   GET {settings.base_url}/oauth/status",
                 ]
@@ -292,6 +294,8 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Grant permissions for Google services (Drive, Gmail, Docs, Sheets, Slides, Calendar, etc.)",
                     "Wait for the success page",
                     "Return here and retry your operation",
+                    "",
+                    f"⚠️ **After auth**: pass user_google_email='{user_google_email}' explicitly in all tool calls for this account",
                     "",
                     "💡 **For CLI clients**: You can poll authentication status:",
                     f"   GET {settings.base_url}/oauth/status",
@@ -333,7 +337,15 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                     "Google Calendar (event management)",
                     "And more Google services",
                 ],
-                note="The authentication will be linked to your current session and provide access to all Google services. Save your sessionId to reconnect with the same tool state using ?uuid= parameter.",
+                note=(
+                    "The authentication will be linked to your current session and provide "
+                    "access to all Google services. Save your sessionId to reconnect with "
+                    "the same tool state using ?uuid= parameter.\n\n"
+                    f"⚠️ IMPORTANT: After authentication completes, you MUST pass "
+                    f"user_google_email='{user_google_email}' explicitly in all subsequent "
+                    f"tool calls for this account. Do NOT omit user_google_email or the "
+                    f"server will default to the primary session account."
+                ),
             )
 
             # Add browser-specific fields
@@ -395,12 +407,55 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
         current_session_id = await get_session_context()
 
+        # ── Detect session auth method and linked accounts ──
+        auth_method = None
+        key_bound_email = None
+        linked_accounts = None
+
+        try:
+            from fastmcp.server.dependencies import get_access_token
+
+            from auth.types import AuthProvenance
+
+            try:
+                access_token = get_access_token()
+                if hasattr(access_token, "claims"):
+                    claims = access_token.claims or {}
+                    method = claims.get("auth_method")
+                    if method == AuthProvenance.API_KEY:
+                        auth_method = AuthProvenance.API_KEY
+                    elif method == AuthProvenance.USER_API_KEY:
+                        auth_method = AuthProvenance.USER_API_KEY
+                        key_bound_email = claims.get("email")
+                    else:
+                        auth_method = AuthProvenance.OAUTH
+            except RuntimeError:
+                auth_method = AuthProvenance.OAUTH
+        except Exception:
+            pass
+
+        # Resolve linked accounts for per-user key sessions
+        if auth_method == AuthProvenance.USER_API_KEY and key_bound_email:
+            try:
+                from auth.user_api_keys import get_accessible_emails
+
+                accessible = get_accessible_emails(key_bound_email)
+                # Linked = accessible minus the key's own email
+                others = sorted(e for e in accessible if e != key_bound_email.lower())
+                if others:
+                    linked_accounts = others
+            except Exception:
+                pass
+
         # Validate that user_google_email is provided
         if not user_google_email:
             return CheckAuthResponse(
                 authenticated=False,
                 userEmail="",
                 sessionId=current_session_id,
+                authMethod=auth_method,
+                keyBoundEmail=key_bound_email,
+                linkedAccounts=linked_accounts,
                 message="No user email provided. Please provide a Google email address to check authentication status.",
                 error="Missing user_google_email parameter",
             )
@@ -414,17 +469,41 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
             await asyncio.to_thread(drive_service.about().get(fields="user").execute)
 
+            # Try to read credential scopes
+            cred_scopes = None
+            try:
+                from auth.middleware import AuthMiddleware
+
+                mw = AuthMiddleware()
+                creds = mw.load_credentials(user_google_email)
+                if creds and creds.scopes:
+                    cred_scopes = sorted(creds.scopes)
+            except Exception:
+                pass
+
+            msg = f"{user_google_email} is authenticated for Google Drive."
+            if linked_accounts:
+                msg += f" This key also has access to: {', '.join(linked_accounts)}."
+            msg += " Save your sessionId to reconnect with the same tool state using ?uuid= parameter."
+
             return CheckAuthResponse(
                 authenticated=True,
                 userEmail=user_google_email,
                 sessionId=current_session_id,
-                message=f"{user_google_email} is authenticated for Google Drive. Save your sessionId to reconnect with the same tool state using ?uuid= parameter.",
+                authMethod=auth_method,
+                keyBoundEmail=key_bound_email,
+                linkedAccounts=linked_accounts,
+                scopes=cred_scopes,
+                message=msg,
             )
         except GoogleAuthError:
             return CheckAuthResponse(
                 authenticated=False,
                 userEmail=user_google_email,
                 sessionId=current_session_id,
+                authMethod=auth_method,
+                keyBoundEmail=key_bound_email,
+                linkedAccounts=linked_accounts,
                 message=f"{user_google_email} is not authenticated for Google Drive. Use the `start_google_auth` tool to authenticate.",
             )
         except Exception as e:
@@ -434,6 +513,9 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 authenticated=False,
                 userEmail=user_google_email,
                 sessionId=current_session_id,
+                authMethod=auth_method,
+                keyBoundEmail=key_bound_email,
+                linkedAccounts=linked_accounts,
                 message="",
                 error=error_msg,
             )

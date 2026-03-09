@@ -1,3 +1,9 @@
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Overlaps test_gmail_reply_improvements; sends real emails, slow/fragile (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
 #!/usr/bin/env python3
 """
 Integration test for Gmail reply improvements using real Gmail messages.

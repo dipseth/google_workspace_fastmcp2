@@ -4,6 +4,7 @@ This module implements OAuth discovery and Dynamic Client Registration
 endpoints using FastMCP's native routing system.
 """
 
+import html
 import json
 import logging
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from auth.context import (
     set_session_context,
     set_user_email_context,
 )
+from auth.types import SessionKey
 from config.enhanced_logging import setup_logger
 from config.settings import settings
 
@@ -539,7 +541,7 @@ def _generate_service_selection_html(
         return f"""
         <!DOCTYPE html>
         <html><head><title>Error</title></head>
-        <body><h1>Service Selection Error</h1><p>Error: {str(e)}</p></body></html>
+        <body><h1>Service Selection Error</h1><p>Error: {html.escape(str(e))}</p></body></html>
         """
 
 
@@ -573,6 +575,509 @@ async def _handle_fastmcp_service_selection(
     except Exception as e:
         logger.error(f"Error handling FastMCP service selection: {e}")
         raise
+
+
+def setup_service_selection_routes(mcp) -> None:
+    """Register /auth/services/select and /auth/services/selected routes.
+
+    These are needed by the ``start_google_auth`` scope-upgrade flow regardless
+    of whether GoogleProvider or the legacy OAuth system is active.  Extracted
+    so that ``server.py`` can call this independently.
+    """
+
+    @mcp.custom_route("/auth/services/select", methods=["GET", "OPTIONS"])
+    async def show_service_selection(request: Any):
+        """Show service selection page with PKCE support."""
+        from starlette.responses import HTMLResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
+
+        logger.info("🎨 Service selection page requested")
+        try:
+            query_params = dict(request.query_params)
+            state = query_params.get("state")
+            flow_type = query_params.get("flow_type", "fastmcp")
+            use_pkce = query_params.get("use_pkce", "true").lower() == "true"
+
+            if not state:
+                logger.error("❌ Missing state parameter in service selection request")
+                return HTMLResponse(
+                    content="<!DOCTYPE html><html><head><title>Error</title></head>"
+                    "<body><h1>Error: Invalid service selection request</h1></body></html>",
+                    status_code=400,
+                )
+
+            logger.info(
+                f"📋 Showing service selection for state: {state}, "
+                f"flow_type: {flow_type}, PKCE: {use_pkce}"
+            )
+            html_content = _generate_service_selection_html(state, flow_type, use_pkce)
+            return HTMLResponse(content=html_content)
+
+        except Exception as e:
+            logger.error(f"❌ Error showing service selection: {e}")
+            return HTMLResponse(
+                content=f"<!DOCTYPE html><html><head><title>Error</title></head>"
+                f"<body><h1>Service Selection Error</h1><p>{html.escape(str(e))}</p></body></html>",
+                status_code=500,
+            )
+
+    @mcp.custom_route("/auth/services/selected", methods=["POST", "OPTIONS"])
+    async def handle_service_selection(request: Any):
+        """Handle service selection form submission with PKCE support."""
+        from starlette.responses import HTMLResponse, RedirectResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
+
+        logger.info("✅ Service selection form submitted")
+        try:
+            form_data = await request.form()
+            state = form_data.get("state")
+            flow_type = form_data.get("flow_type", "fastmcp")
+            auth_method = form_data.get("auth_method", "pkce_file")
+            use_pkce = auth_method != "file_credentials"
+            use_custom = form_data.get("use_custom_creds") == "on"
+            custom_client_id = form_data.get("custom_client_id") if use_custom else None
+            custom_client_secret = (
+                form_data.get("custom_client_secret") if use_custom else None
+            )
+            services = (
+                form_data.getlist("services") if hasattr(form_data, "getlist") else []
+            )
+            if not services and "services" in form_data:
+                services = [form_data.get("services")]
+
+            logger.info(
+                f"📋 Service selection received: state={state}, "
+                f"flow_type={flow_type}, services={services}"
+            )
+            logger.info(
+                f"🔐 Authentication method chosen: {auth_method} (PKCE: {use_pkce})"
+            )
+            if use_custom and custom_client_id:
+                logger.info(
+                    f"🔑 Using custom credentials: client_id={custom_client_id[:10]}..."
+                )
+
+            if not state:
+                raise ValueError("Missing state parameter")
+
+            if flow_type == "fastmcp":
+                oauth_url = await _handle_fastmcp_service_selection(
+                    state, services, use_pkce
+                )
+            else:
+                from .google_auth import handle_service_selection_callback
+
+                oauth_url = await handle_service_selection_callback(
+                    state=state,
+                    selected_services=services,
+                    use_pkce=use_pkce,
+                    auth_method=auth_method,
+                    custom_client_id=custom_client_id,
+                    custom_client_secret=custom_client_secret,
+                )
+
+            logger.info(
+                f"✅ Redirecting to OAuth URL for selected services "
+                f"(auth_method: {auth_method})"
+            )
+            return RedirectResponse(url=oauth_url, status_code=302)
+
+        except Exception as e:
+            logger.error(f"❌ Error handling service selection: {e}")
+            return HTMLResponse(
+                content=f"<!DOCTYPE html><html><head><title>Service Selection Error</title></head>"
+                f"<body><h1>Service Selection Error</h1>"
+                f"<p>Error: {html.escape(str(e))}</p>"
+                f"<p>Please try the authentication process again.</p></body></html>",
+                status_code=400,
+            )
+
+    logger.info("  GET /auth/services/select (Service selection page)")
+    logger.info("  POST /auth/services/selected (Service selection form handler)")
+
+
+def setup_legacy_callback_route(mcp) -> None:
+    """Register only the /oauth2callback route.
+
+    This is needed when GoogleProvider is active so the legacy
+    ``start_google_auth`` tool flow can still complete Google OAuth
+    and store real Google API credentials.  The full
+    ``setup_oauth_endpoints_fastmcp`` is NOT called in that mode
+    because GoogleProvider already provides /authorize, /token, etc.
+    """
+
+    @mcp.custom_route("/oauth2callback", methods=["GET", "OPTIONS"])
+    async def oauth2callback_legacy(request: Any):
+        """OAuth2 callback for the legacy start_google_auth flow.
+
+        Delegates to the same handler logic used by the full endpoint set.
+        """
+        from starlette.responses import HTMLResponse, Response
+
+        from auth.access_control import validate_user_access
+        from auth.context import get_session_context, store_session_data
+        from auth.google_auth import handle_oauth_callback
+        from auth.pkce_utils import pkce_manager
+
+        logger.info("🚨 /oauth2callback hit (legacy route, GoogleProvider mode)")
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
+
+        try:
+            query_params = dict(request.query_params)
+            state = query_params.get("state")
+            code = query_params.get("code")
+            error = query_params.get("error")
+
+            logger.info(
+                f"🔍 oauth2callback params: state={state[:20] if state else 'MISSING'}... "
+                f"code={'PRESENT' if code else 'MISSING'} error={error or 'None'}"
+            )
+
+            # Retrieve PKCE code verifier if available
+            code_verifier = None
+            try:
+                code_verifier = pkce_manager.get_code_verifier(state)
+                logger.info("🔐 Retrieved PKCE code verifier for callback")
+            except KeyError:
+                logger.info(f"ℹ️ No PKCE session for state (non-PKCE flow)")
+            except Exception as e:
+                logger.warning(f"⚠️ PKCE retrieval error (continuing): {e}")
+
+            user_email, credentials = await handle_oauth_callback(
+                authorization_response=str(request.url),
+                state=state,
+                code_verifier=code_verifier,
+            )
+            logger.info(f"✅ OAuth callback processed for user: {user_email}")
+
+            if not validate_user_access(user_email):
+                logger.warning(f"🚫 Access denied for user: {user_email}")
+                return HTMLResponse(
+                    content=f"""<!DOCTYPE html><html><head><title>Access Denied</title>
+                    <style>body{{font-family:sans-serif;text-align:center;padding:60px}}
+                    h1{{color:#dc3545}}</style></head><body>
+                    <h1>Access Denied</h1><p>User <b>{html.escape(user_email)}</b> is not authorized.</p>
+                    </body></html>""",
+                    status_code=403,
+                )
+
+            # Register as secondary account in dual auth bridge
+            try:
+                from auth.dual_auth_bridge import get_dual_auth_bridge
+
+                dual_bridge = get_dual_auth_bridge()
+                dual_bridge.add_secondary_account(user_email)
+                logger.info(f"✅ Registered {user_email} as secondary account")
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ Dual auth bridge registration error (continuing): {e}"
+                )
+
+            # Store in session
+            try:
+                session_id = await get_session_context()
+                if session_id:
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
+            except Exception as e:
+                logger.warning(f"⚠️ Session storage error (continuing): {e}")
+
+            # Retrieve per-user API key if one was generated during credential save
+            user_api_key = getattr(credentials, "_user_api_key", None)
+            user_api_key_exists = getattr(credentials, "_user_api_key_exists", False)
+            api_key_section = ""
+
+            # Gather envelope info for security visualization
+            security_viz_section = ""
+            _num_recipients = 0
+            _has_hmac = False
+            _is_encrypted = False
+            try:
+                from pathlib import Path
+
+                from auth.google_auth import _normalize_email
+
+                safe_email = (
+                    _normalize_email(user_email).replace("@", "_at_").replace(".", "_")
+                )
+                enc_path = (
+                    Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
+                )
+                if enc_path.exists():
+                    _is_encrypted = True
+                    import json as _json
+
+                    try:
+                        _env = _json.load(open(enc_path))
+                        _num_recipients = len(_env.get("recipients", {}))
+                        _has_hmac = "hmac" in _env
+                    except (ValueError, KeyError):
+                        # Legacy format (raw Fernet bytes) — still encrypted
+                        _num_recipients = 1
+                        _has_hmac = False
+            except Exception:
+                pass
+
+            # Build linked-accounts section (shown for both new and existing keys)
+            accessible_section = ""
+            if user_api_key or user_api_key_exists:
+                try:
+                    from auth.user_api_keys import get_accessible_emails
+
+                    accessible = get_accessible_emails(user_email)
+                    linked = sorted(
+                        e for e in accessible if e != user_email.lower().strip()
+                    )
+                    if linked:
+                        linked_items = "".join(
+                            f"<li>{html.escape(e)}</li>" for e in linked
+                        )
+                        accessible_section = f"""
+                        <div class="linked-accounts">
+                            <b>🔗 Linked Accounts</b>
+                            <small>This key can also access credentials for:</small>
+                            <ul>{linked_items}</ul>
+                        </div>"""
+                    else:
+                        accessible_section = """
+                        <div class="linked-accounts solo">
+                            <b>🔒 Single Account</b>
+                            <small>This key only has access to the email above.<br>
+                            Authenticate additional emails in the same session to link them.</small>
+                        </div>"""
+                except Exception:
+                    pass
+
+            if user_api_key:
+                api_key_section = f"""
+                <div class="api-key">
+                    <b>🔑 Your Personal API Key</b><br>
+                    <small>Use this as a Bearer token to connect without re-authenticating.<br>
+                    This key is shown <b>once</b> — save it now!</small>
+                    <div class="key-value hidden" id="apiKey">{html.escape(user_api_key)}</div>
+                    <button id="revealBtn" onclick="document.getElementById('apiKey').classList.remove('hidden');this.style.display='none';document.getElementById('copyBtn').style.display=''">
+                        Click to Reveal Key
+                    </button>
+                    <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
+                        Copy to Clipboard
+                    </button>
+                </div>
+                {accessible_section}"""
+            elif user_api_key_exists:
+                api_key_section = f"""
+                <div class="api-key" style="background:#d1ecf1;color:#0c5460;border-color:#bee5eb">
+                    <b>🔑 API Key Active</b><br>
+                    <small>Your existing per-user API key is still valid.<br>
+                    Credentials have been refreshed — no need to update your key.</small>
+                </div>
+                {accessible_section}"""
+
+            # Build security visualization
+            if _is_encrypted:
+                # Build recipient nodes with linkage method badges
+                _cur = user_email.lower().strip()
+                _all_emails = [_cur]
+                try:
+                    _all_emails = sorted(get_accessible_emails(_cur))
+                except Exception:
+                    pass
+
+                try:
+                    from auth.user_api_keys import get_link_method
+                except Exception:
+
+                    def get_link_method(a, b):
+                        return ""
+
+                _recipient_nodes = ""
+                for em in _all_emails:
+                    _is_current = em == _cur
+                    _highlight = "current" if _is_current else ""
+                    _method_badge = ""
+                    if not _is_current:
+                        _m = get_link_method(_cur, em)
+                        if _m == "oauth":
+                            _method_badge = (
+                                '<span class="sec-method oauth">via OAuth</span>'
+                            )
+                        elif _m == "api_key":
+                            _method_badge = (
+                                '<span class="sec-method api_key">via API key</span>'
+                            )
+                        elif _m == "session":
+                            _method_badge = (
+                                '<span class="sec-method session">via session</span>'
+                            )
+                        elif _m == "both":
+                            _method_badge = (
+                                '<span class="sec-method both">multiple methods</span>'
+                            )
+                        else:
+                            _method_badge = '<span class="sec-method">linked</span>'
+                    _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span>{_method_badge}</div>'
+
+                _key_lines = ""
+                for em in _all_emails:
+                    _cls = "current" if (em == _cur) else ""
+                    _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
+
+                _subtitle = (
+                    "Your Google Workspace credentials are protected by multi-recipient envelope encryption"
+                    if _num_recipients > 1
+                    else "Your Google Workspace credentials are protected by split-key encryption"
+                )
+
+                security_viz_section = f"""
+                <div class="sec-panel">
+                    <div class="sec-title">🛡️ Credential Security Model</div>
+                    <div class="sec-subtitle">{_subtitle}</div>
+                    <div class="sec-diagram">
+                        <div class="sec-col sec-col-users">
+                            <div class="sec-col-label">Authorized Users</div>
+                            {_recipient_nodes}
+                        </div>
+                        <div class="sec-col sec-col-keys">
+                            <div class="sec-col-label">Key Wrapping</div>
+                            {_key_lines}
+                        </div>
+                        <div class="sec-col sec-col-envelope">
+                            <div class="sec-col-label">Encrypted Envelope</div>
+                            <div class="sec-envelope">
+                                <div class="sec-env-header">Sealed Envelope</div>
+                                <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
+                                <div class="sec-env-row"><span class="sec-env-badge data">🔒 Gmail · Drive · Calendar · Docs · Sheets</span></div>
+                                <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sec-features">
+                        <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
+                        <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
+                        <div class="sec-feat"><span>🔗</span> Link accounts via <b>OAuth</b>, <b>session</b>, or <b>API key</b> (30 min window)</div>
+                        <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
+                    </div>
+                </div>"""
+
+            success_html = f"""<!DOCTYPE html><html><head><title>Authentication Successful</title>
+            <style>
+                body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+                      margin:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+                      min-height:100vh;display:flex;align-items:center;justify-content:center}}
+                .container{{max-width:560px;background:white;border-radius:20px;padding:50px;
+                           text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.1)}}
+                .success-icon{{font-size:72px;margin-bottom:20px}}
+                h1{{color:#28a745;margin-bottom:10px;font-size:32px}}
+                .email{{color:#6c757d;font-size:18px;margin:20px 0}}
+                .saved{{background:#d4edda;color:#155724;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #c3e6cb}}
+                .api-key{{background:#fff3cd;color:#856404;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #ffc107;text-align:left}}
+                .api-key small{{display:block;margin-bottom:10px}}
+                .key-value{{font-family:monospace;font-size:13px;background:#f8f9fa;padding:10px;border-radius:4px;
+                           word-break:break-all;margin:10px 0;user-select:all;border:1px solid #dee2e6}}
+                .key-value.hidden{{filter:blur(8px);user-select:none;pointer-events:none}}
+                .api-key button{{background:#856404;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px}}
+                .api-key button:hover{{background:#6c5200}}
+                .linked-accounts{{background:#e8f4fd;color:#0c5460;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #bee5eb;text-align:left}}
+                .linked-accounts small{{display:block;margin-bottom:8px}}
+                .linked-accounts ul{{margin:8px 0 0 0;padding-left:20px}}
+                .linked-accounts li{{margin:4px 0;font-family:monospace;font-size:14px}}
+                .linked-accounts.solo{{background:#f8f9fa;color:#6c757d;border-color:#dee2e6}}
+                .services{{background:#f8f9fa;padding:20px;border-radius:10px;margin:20px 0}}
+                /* Security visualization */
+                .sec-panel{{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);color:#e0e0e0;
+                           padding:24px;border-radius:12px;margin:24px 0;text-align:left}}
+                .sec-title{{font-size:16px;font-weight:700;color:#fff;margin-bottom:4px}}
+                .sec-subtitle{{font-size:11px;color:#8892b0;margin-bottom:16px}}
+                .sec-diagram{{display:flex;gap:8px;align-items:stretch;margin-bottom:16px}}
+                .sec-col{{flex:1;display:flex;flex-direction:column;gap:6px}}
+                .sec-col-label{{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#64ffda;
+                               font-weight:600;margin-bottom:4px;text-align:center}}
+                .sec-node{{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);
+                          border-radius:8px;padding:8px 6px;text-align:center;display:flex;
+                          flex-direction:column;align-items:center;gap:2px}}
+                .sec-node.current{{border-color:#64ffda;background:rgba(100,255,218,0.08)}}
+                .sec-icon{{font-size:18px}}
+                .sec-label{{font-size:9px;font-family:monospace;word-break:break-all;line-height:1.2;color:#ccd6f6}}
+                .sec-method{{font-size:7px;padding:1px 5px;border-radius:3px;margin-top:2px;
+                            background:rgba(255,255,255,0.08);color:#8892b0}}
+                .sec-method.oauth{{background:rgba(100,255,218,0.12);color:#64ffda}}
+                .sec-method.session{{background:rgba(255,183,77,0.12);color:#ffb74d}}
+                .sec-method.both{{background:rgba(129,212,250,0.12);color:#81d4fa}}
+                .sec-method.api_key{{background:rgba(206,147,255,0.12);color:#ce93ff}}
+                .sec-col-keys{{flex:0.7;justify-content:center;gap:8px}}
+                .sec-flow-row{{display:flex;align-items:center;gap:3px;justify-content:center}}
+                .sec-flow-row.current .sec-key-badge{{background:#64ffda;color:#1a1a2e}}
+                .sec-key-badge{{background:rgba(255,255,255,0.12);color:#ccd6f6;font-size:8px;font-weight:600;
+                              padding:3px 6px;border-radius:4px;white-space:nowrap}}
+                .sec-arrow{{width:28px;height:12px;color:#64ffda;flex-shrink:0}}
+                .sec-cek-wrap{{font-size:8px;color:#8892b0;white-space:nowrap}}
+                .sec-col-envelope{{flex:1.1}}
+                .sec-envelope{{background:rgba(255,255,255,0.04);border:1.5px solid #64ffda;
+                              border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:5px}}
+                .sec-env-header{{font-size:10px;font-weight:700;color:#64ffda;text-align:center;
+                                letter-spacing:1px;text-transform:uppercase}}
+                .sec-env-row{{text-align:center}}
+                .sec-env-badge{{display:inline-block;font-size:9px;padding:3px 8px;border-radius:4px;
+                              font-weight:500}}
+                .sec-env-badge.rec{{background:rgba(255,183,77,0.15);color:#ffb74d}}
+                .sec-env-badge.data{{background:rgba(100,255,218,0.1);color:#64ffda}}
+                .sec-env-badge.hmac{{background:rgba(129,212,250,0.1);color:#81d4fa}}
+                .sec-features{{display:grid;grid-template-columns:1fr 1fr;gap:6px}}
+                .sec-feat{{font-size:10px;color:#8892b0;display:flex;align-items:start;gap:5px;line-height:1.3}}
+                .sec-feat span:first-child{{flex-shrink:0}}
+                .sec-feat b{{color:#ccd6f6}}
+            </style></head><body><div class="container">
+                <div class="success-icon">✅</div>
+                <h1>Authentication Successful!</h1>
+                <div class="email">Authenticated: <b>{html.escape(user_email)}</b></div>
+                <div class="saved"><b>🔐 Credentials Saved!</b><br>Ready to use.</div>
+                {api_key_section}
+                {security_viz_section}
+                <div class="services"><h3>🚀 Services Available</h3>
+                    <div>Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms</div>
+                </div>
+                <p>You can close this window and return to your application.</p>
+            </div></body></html>"""
+
+            return HTMLResponse(content=success_html, status_code=200)
+
+        except Exception as e:
+            logger.error(f"❌ Legacy oauth2callback error: {e}", exc_info=True)
+            return HTMLResponse(
+                content=f"""<!DOCTYPE html><html><head><title>OAuth Error</title>
+                <style>body{{font-family:sans-serif;text-align:center;padding:60px}}
+                .error{{color:#dc3545;font-size:48px}}</style></head><body>
+                <div class="error">❌</div><h1>OAuth Error</h1>
+                <p>{html.escape(str(e))}</p><p>Please try again.</p></body></html>""",
+                status_code=500,
+            )
+
+    logger.info("  ✅ Legacy /oauth2callback route registered (GoogleProvider mode)")
 
 
 def setup_oauth_endpoints_fastmcp(mcp) -> None:
@@ -1423,7 +1928,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         <div class="container">
                             <div class="error-icon">🚫</div>
                             <h1>Access Denied</h1>
-                            <div class="email">User: <strong>{user_email}</strong></div>
+                            <div class="email">User: <strong>{html.escape(user_email)}</strong></div>
                             <div class="message">
                                 You are not authorized to access this MCP server.
                             </div>
@@ -1454,12 +1959,186 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 try:
                     session_id = await get_session_context()
                     if session_id:
-                        store_session_data(session_id, "user_email", user_email)
+                        store_session_data(
+                            session_id, SessionKey.USER_EMAIL, user_email
+                        )
                         logger.info(
                             f"✅ Stored user email {user_email} in session {session_id}"
                         )
                 except Exception as e:
                     logger.warning(f"⚠️ Session storage error (continuing): {e}")
+
+                # Retrieve per-user API key if one was generated
+                user_api_key = getattr(credentials, "_user_api_key", None)
+                user_api_key_exists = getattr(
+                    credentials, "_user_api_key_exists", False
+                )
+                api_key_section = ""
+
+                # Build linked-accounts section (shown for both new and existing keys)
+                accessible_section = ""
+                if user_api_key or user_api_key_exists:
+                    try:
+                        from auth.user_api_keys import get_accessible_emails
+
+                        accessible = get_accessible_emails(user_email)
+                        linked = sorted(
+                            e for e in accessible if e != user_email.lower().strip()
+                        )
+                        if linked:
+                            linked_items = "".join(
+                                f"<li>{html.escape(e)}</li>" for e in linked
+                            )
+                            accessible_section = f"""
+                            <div class="linked-accounts">
+                                <b>🔗 Linked Accounts</b>
+                                <small>This key can also access credentials for:</small>
+                                <ul>{linked_items}</ul>
+                            </div>"""
+                        else:
+                            accessible_section = """
+                            <div class="linked-accounts solo">
+                                <b>🔒 Single Account</b>
+                                <small>This key only has access to the email above.<br>
+                                Authenticate additional emails in the same session to link them.</small>
+                            </div>"""
+                    except Exception:
+                        pass
+
+                if user_api_key:
+                    api_key_section = f"""
+                    <div class="api-key">
+                        <b>🔑 Your Personal API Key</b><br>
+                        <small>Use this as a Bearer token to connect without re-authenticating.<br>
+                        This key is shown <b>once</b> — save it now!</small>
+                        <div class="key-value hidden" id="apiKey">{html.escape(user_api_key)}</div>
+                        <button id="revealBtn" onclick="document.getElementById('apiKey').classList.remove('hidden');this.style.display='none';document.getElementById('copyBtn').style.display=''">
+                            Click to Reveal Key
+                        </button>
+                        <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
+                            Copy to Clipboard
+                        </button>
+                    </div>
+                    {accessible_section}"""
+                elif user_api_key_exists:
+                    api_key_section = f"""
+                    <div class="api-key" style="background:#d1ecf1;color:#0c5460;border-color:#bee5eb">
+                        <b>🔑 API Key Active</b><br>
+                        <small>Your existing per-user API key is still valid.<br>
+                        Credentials have been refreshed — no need to update your key.</small>
+                    </div>
+                    {accessible_section}"""
+
+                # Gather envelope info for security visualization
+                # Gather envelope info for security visualization
+                security_viz_section = ""
+                _num_recipients = 0
+                _has_hmac = False
+                _is_encrypted = False
+                try:
+                    from pathlib import Path
+
+                    from auth.google_auth import _normalize_email
+
+                    safe_email = (
+                        _normalize_email(user_email)
+                        .replace("@", "_at_")
+                        .replace(".", "_")
+                    )
+                    enc_path = (
+                        Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
+                    )
+                    if enc_path.exists():
+                        _is_encrypted = True
+                        import json as _json
+
+                        try:
+                            _env = _json.load(open(enc_path))
+                            _num_recipients = len(_env.get("recipients", {}))
+                            _has_hmac = "hmac" in _env
+                        except (ValueError, KeyError):
+                            # Legacy format (raw Fernet bytes) — still encrypted
+                            _num_recipients = 1
+                            _has_hmac = False
+                except Exception:
+                    pass
+
+                # Build security visualization
+                if _is_encrypted:
+                    _cur = user_email.lower().strip()
+                    _all_emails = [_cur]
+                    try:
+                        _all_emails = sorted(get_accessible_emails(_cur))
+                    except Exception:
+                        pass
+
+                    try:
+                        from auth.user_api_keys import get_link_method
+                    except Exception:
+
+                        def get_link_method(a, b):
+                            return ""
+
+                    _recipient_nodes = ""
+                    for em in _all_emails:
+                        _is_current = em == _cur
+                        _highlight = "current" if _is_current else ""
+                        _method_badge = ""
+                        if not _is_current:
+                            _m = get_link_method(_cur, em)
+                            if _m == "oauth":
+                                _method_badge = (
+                                    '<span class="sec-method oauth">via OAuth</span>'
+                                )
+                            elif _m == "session":
+                                _method_badge = '<span class="sec-method session">via session</span>'
+                            elif _m == "both":
+                                _method_badge = '<span class="sec-method both">OAuth + session</span>'
+                            else:
+                                _method_badge = '<span class="sec-method">linked</span>'
+                        _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span>{_method_badge}</div>'
+
+                    _key_lines = ""
+                    for em in _all_emails:
+                        _cls = "current" if (em == _cur) else ""
+                        _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
+
+                    _subtitle = (
+                        "Your Google Workspace credentials are protected by multi-recipient envelope encryption"
+                        if _num_recipients > 1
+                        else "Your Google Workspace credentials are protected by split-key encryption"
+                    )
+
+                    security_viz_section = f"""
+                    <div class="sec-panel">
+                        <div class="sec-title">🛡️ Credential Security Model</div>
+                        <div class="sec-subtitle">{_subtitle}</div>
+                        <div class="sec-diagram">
+                            <div class="sec-col sec-col-users">
+                                <div class="sec-col-label">Authorized Users</div>
+                                {_recipient_nodes}
+                            </div>
+                            <div class="sec-col sec-col-keys">
+                                <div class="sec-col-label">Key Wrapping</div>
+                                {_key_lines}
+                            </div>
+                            <div class="sec-col sec-col-envelope">
+                                <div class="sec-col-label">Encrypted Envelope</div>
+                                <div class="sec-envelope">
+                                    <div class="sec-env-header">Sealed Envelope</div>
+                                    <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
+                                    <div class="sec-env-row"><span class="sec-env-badge data">🔒 Gmail · Drive · Calendar · Docs · Sheets</span></div>
+                                    <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="sec-features">
+                            <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
+                            <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
+                            <div class="sec-feat"><span>🔗</span> Linked accounts share access via separate key wraps</div>
+                            <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
+                        </div>
+                    </div>"""
 
                 # Create beautiful success page
                 success_html = f"""
@@ -1469,7 +2148,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     <title>Authentication Successful</title>
                     <style>
                         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
-                        .container {{ max-width: 500px; background: white; border-radius: 20px; padding: 50px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }}
+                        .container {{ max-width: 560px; background: white; border-radius: 20px; padding: 50px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }}
                         .success-icon {{ font-size: 72px; margin-bottom: 20px; }}
                         h1 {{ color: #28a745; margin-bottom: 10px; font-size: 32px; }}
                         .email {{ color: #6c757d; font-size: 18px; margin: 20px 0; }}
@@ -1478,29 +2157,71 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         .services h3 {{ color: #495057; margin-top: 0; }}
                         .service-list {{ color: #6c757d; font-size: 14px; }}
                         .credentials-saved {{ background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #c3e6cb; }}
+                        .api-key {{ background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ffc107; text-align: left; }}
+                        .api-key small {{ display: block; margin-bottom: 10px; }}
+                        .key-value {{ font-family: monospace; font-size: 13px; background: #f8f9fa; padding: 10px; border-radius: 4px; word-break: break-all; margin: 10px 0; user-select: all; border: 1px solid #dee2e6; }}
+                        .key-value.hidden {{ filter: blur(8px); user-select: none; pointer-events: none; }}
+                        .api-key button {{ background: #856404; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }}
+                        .api-key button:hover {{ background: #6c5200; }}
+                        .linked-accounts {{ background: #e8f4fd; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #bee5eb; text-align: left; }}
+                        .linked-accounts small {{ display: block; margin-bottom: 8px; }}
+                        .linked-accounts ul {{ margin: 8px 0 0 0; padding-left: 20px; }}
+                        .linked-accounts li {{ margin: 4px 0; font-family: monospace; font-size: 14px; }}
+                        .linked-accounts.solo {{ background: #f8f9fa; color: #6c757d; border-color: #dee2e6; }}
+                        /* Security visualization */
+                        .sec-panel {{ background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #e0e0e0; padding: 24px; border-radius: 12px; margin: 24px 0; text-align: left; }}
+                        .sec-title {{ font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px; }}
+                        .sec-subtitle {{ font-size: 11px; color: #8892b0; margin-bottom: 16px; }}
+                        .sec-diagram {{ display: flex; gap: 8px; align-items: stretch; margin-bottom: 16px; }}
+                        .sec-col {{ flex: 1; display: flex; flex-direction: column; gap: 6px; }}
+                        .sec-col-label {{ font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #64ffda; font-weight: 600; margin-bottom: 4px; text-align: center; }}
+                        .sec-node {{ background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 6px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 2px; }}
+                        .sec-node.current {{ border-color: #64ffda; background: rgba(100,255,218,0.08); }}
+                        .sec-icon {{ font-size: 18px; }}
+                        .sec-label {{ font-size: 9px; font-family: monospace; word-break: break-all; line-height: 1.2; color: #ccd6f6; }}
+                        .sec-method {{ font-size: 7px; padding: 1px 5px; border-radius: 3px; margin-top: 2px; background: rgba(255,255,255,0.08); color: #8892b0; }}
+                        .sec-method.oauth {{ background: rgba(100,255,218,0.12); color: #64ffda; }}
+                        .sec-method.session {{ background: rgba(255,183,77,0.12); color: #ffb74d; }}
+                        .sec-method.both {{ background: rgba(129,212,250,0.12); color: #81d4fa; }}
+                        .sec-method.api_key {{ background: rgba(206,147,255,0.12); color: #ce93ff; }}
+                        .sec-col-keys {{ flex: 0.7; justify-content: center; gap: 8px; }}
+                        .sec-flow-row {{ display: flex; align-items: center; gap: 3px; justify-content: center; }}
+                        .sec-flow-row.current .sec-key-badge {{ background: #64ffda; color: #1a1a2e; }}
+                        .sec-key-badge {{ background: rgba(255,255,255,0.12); color: #ccd6f6; font-size: 8px; font-weight: 600; padding: 3px 6px; border-radius: 4px; white-space: nowrap; }}
+                        .sec-arrow {{ width: 28px; height: 12px; color: #64ffda; flex-shrink: 0; }}
+                        .sec-cek-wrap {{ font-size: 8px; color: #8892b0; white-space: nowrap; }}
+                        .sec-col-envelope {{ flex: 1.1; }}
+                        .sec-envelope {{ background: rgba(255,255,255,0.04); border: 1.5px solid #64ffda; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 5px; }}
+                        .sec-env-header {{ font-size: 10px; font-weight: 700; color: #64ffda; text-align: center; letter-spacing: 1px; text-transform: uppercase; }}
+                        .sec-env-row {{ text-align: center; }}
+                        .sec-env-badge {{ display: inline-block; font-size: 9px; padding: 3px 8px; border-radius: 4px; font-weight: 500; }}
+                        .sec-env-badge.rec {{ background: rgba(255,183,77,0.15); color: #ffb74d; }}
+                        .sec-env-badge.data {{ background: rgba(100,255,218,0.1); color: #64ffda; }}
+                        .sec-env-badge.hmac {{ background: rgba(129,212,250,0.1); color: #81d4fa; }}
+                        .sec-features {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }}
+                        .sec-feat {{ font-size: 10px; color: #8892b0; display: flex; align-items: start; gap: 5px; line-height: 1.3; }}
+                        .sec-feat span:first-child {{ flex-shrink: 0; }}
+                        .sec-feat b {{ color: #ccd6f6; }}
                     </style>
                 </head>
                 <body>
                     <div class="container">
                         <div class="success-icon">✅</div>
                         <h1>Authentication Successful!</h1>
-                        <div class="email">Successfully authenticated: <strong>{user_email}</strong></div>
+                        <div class="email">Authenticated: <strong>{html.escape(user_email)}</strong></div>
                         <div class="credentials-saved">
                             <strong>🔐 Credentials Saved!</strong><br>
-                            Your authentication has been securely stored and is ready to use.
+                            Ready to use.
                         </div>
-                        <div class="message">
-                            Your Google services are now connected and ready to use!
-                        </div>
+                        {api_key_section}
+                        {security_viz_section}
                         <div class="services">
                             <h3>🚀 Services Available</h3>
                             <div class="service-list">
-                                Google Drive • Gmail • Calendar • Docs • Sheets • Slides • Photos • Chat • Forms
+                                Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms
                             </div>
                         </div>
-                        <div class="message">
-                            You can now close this window and return to your application.
-                        </div>
+                        <p>You can close this window and return to your application.</p>
                     </div>
                 </body>
                 </html>
@@ -1951,156 +2672,5 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     logger.info("  PUT /oauth/register/{client_id}")
     logger.info("  DELETE /oauth/register/{client_id}")
 
-    @mcp.custom_route("/auth/services/select", methods=["GET", "OPTIONS"])
-    async def show_service_selection(request: Any):
-        """Show service selection page with PKCE support."""
-
-        from starlette.responses import HTMLResponse, Response
-
-        # Handle CORS preflight
-        if request.method == "OPTIONS":
-            return Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                },
-            )
-
-        logger.info("🎨 Service selection page requested")
-
-        try:
-            # Get query parameters
-            query_params = dict(request.query_params)
-            state = query_params.get("state")
-            flow_type = query_params.get("flow_type", "fastmcp")
-            use_pkce = query_params.get("use_pkce", "true").lower() == "true"
-
-            if not state:
-                logger.error("❌ Missing state parameter in service selection request")
-                return HTMLResponse(
-                    content="""
-                    <!DOCTYPE html>
-                    <html><head><title>Error</title></head>
-                    <body><h1>Error: Invalid service selection request</h1></body></html>
-                    """,
-                    status_code=400,
-                )
-
-            logger.info(
-                f"📋 Showing service selection for state: {state}, flow_type: {flow_type}, PKCE: {use_pkce}"
-            )
-
-            html_content = _generate_service_selection_html(state, flow_type, use_pkce)
-            return HTMLResponse(content=html_content)
-
-        except Exception as e:
-            logger.error(f"❌ Error showing service selection: {e}")
-            return HTMLResponse(
-                content=f"""
-                <!DOCTYPE html>
-                <html><head><title>Error</title></head>
-                <body><h1>Service Selection Error</h1><p>{str(e)}</p></body></html>
-                """,
-                status_code=500,
-            )
-
-    @mcp.custom_route("/auth/services/selected", methods=["POST", "OPTIONS"])
-    async def handle_service_selection(request: Any):
-        """Handle service selection form submission with PKCE support."""
-        from starlette.responses import HTMLResponse, RedirectResponse, Response
-
-        # Handle CORS preflight
-        if request.method == "OPTIONS":
-            return Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                },
-            )
-
-        logger.info("✅ Service selection form submitted")
-
-        try:
-            # Parse form data
-            form_data = await request.form()
-            state = form_data.get("state")
-            flow_type = form_data.get("flow_type", "fastmcp")
-
-            # Get authentication method choice
-            auth_method = form_data.get("auth_method", "pkce_file")
-            use_pkce = auth_method != "file_credentials"
-
-            # Get custom credentials if enabled
-            use_custom = form_data.get("use_custom_creds") == "on"
-            custom_client_id = form_data.get("custom_client_id") if use_custom else None
-            custom_client_secret = (
-                form_data.get("custom_client_secret") if use_custom else None
-            )
-
-            # Get selected services (can be multiple)
-            services = (
-                form_data.getlist("services") if hasattr(form_data, "getlist") else []
-            )
-            if not services and "services" in form_data:
-                # Fallback for single service
-                services = [form_data.get("services")]
-
-            logger.info(
-                f"📋 Service selection received: state={state}, flow_type={flow_type}, services={services}"
-            )
-            logger.info(
-                f"🔐 Authentication method chosen: {auth_method} (PKCE: {use_pkce})"
-            )
-            if use_custom and custom_client_id:
-                logger.info(
-                    f"🔑 Using custom credentials: client_id={custom_client_id[:10]}..."
-                )
-
-            if not state:
-                raise ValueError("Missing state parameter")
-
-            # Handle based on flow type
-            if flow_type == "fastmcp":
-                oauth_url = await _handle_fastmcp_service_selection(
-                    state, services, use_pkce
-                )
-            else:
-                from .google_auth import handle_service_selection_callback
-
-                oauth_url = await handle_service_selection_callback(
-                    state=state,
-                    selected_services=services,
-                    use_pkce=use_pkce,
-                    auth_method=auth_method,
-                    custom_client_id=custom_client_id,
-                    custom_client_secret=custom_client_secret,
-                )
-
-            logger.info(
-                f"✅ Redirecting to OAuth URL for selected services (auth_method: {auth_method})"
-            )
-            return RedirectResponse(url=oauth_url, status_code=302)
-
-        except Exception as e:
-            logger.error(f"❌ Error handling service selection: {e}")
-            return HTMLResponse(
-                content=f"""
-                <!DOCTYPE html>
-                <html>
-                <head><title>Service Selection Error</title></head>
-                <body>
-                    <h1>Service Selection Error</h1>
-                    <p>Error: {str(e)}</p>
-                    <p>Please try the authentication process again.</p>
-                </body>
-                </html>
-                """,
-                status_code=400,
-            )
-
-    logger.info("  GET /auth/services/select (Service selection page)")
-    logger.info("  POST /auth/services/selected (Service selection form handler)")
+    # Register service selection routes (shared with GoogleProvider path)
+    setup_service_selection_routes(mcp)

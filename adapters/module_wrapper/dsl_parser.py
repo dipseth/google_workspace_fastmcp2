@@ -1288,6 +1288,7 @@ class DSLParser:
                 return None
 
         # Find the end of DSL structure (after matching brackets)
+        # Supports pipe-separated multi-section DSL: §[δ×3] | §[ℊ[ǵ×6]]
         bracket_count = 0
         dsl_end = 0
         in_dsl = False
@@ -1300,6 +1301,11 @@ class DSLParser:
                 bracket_count -= 1
                 if bracket_count == 0 and in_dsl:
                     dsl_end = i + 1
+                    # Check if there's a pipe-separated continuation
+                    rest = text[dsl_end:].lstrip()
+                    if rest.startswith("|"):
+                        # Keep in_dsl=True so spaces/pipes don't trigger early break
+                        continue
                     break
             elif not in_dsl and char in " \t\n":
                 # End of simple symbol (no brackets)

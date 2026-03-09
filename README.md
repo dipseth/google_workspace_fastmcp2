@@ -123,6 +123,7 @@ All environment variables are **optional** — the server starts with sensible d
 |----------|---------|-------------|
 | `CREDENTIAL_STORAGE_MODE` | `FILE_ENCRYPTED` | `FILE_ENCRYPTED`, `FILE_PLAINTEXT`, `MEMORY_ONLY` |
 | `CREDENTIALS_DIR` | `./credentials` | Directory for stored credentials |
+| `MCP_API_KEY` | _(empty)_ | Server API key — also used for crypto-bound credential encryption (HKDF-SHA256) and per-user key generation |
 | `SESSION_TIMEOUT_MINUTES` | `60` | Session idle timeout |
 | `GMAIL_ALLOW_LIST` | _(empty)_ | Comma-separated trusted email addresses |
 
@@ -132,6 +133,9 @@ All environment variables are **optional** — the server starts with sensible d
 |----------|---------|-------------|
 | `MINIMAL_TOOLS_STARTUP` | `true` | Start with only 5 protected tools enabled |
 | `MINIMAL_STARTUP_SERVICES` | _(empty)_ | Comma-separated services to enable at startup (e.g., `drive,gmail`) |
+| `ENABLE_CODE_MODE` | `false` | Enable CodeMode transform — replaces full tool catalog with BM25 search + sandboxed `execute` |
+| `ENABLE_SKILLS_PROVIDER` | `false` | Enable FastMCP SkillsDirectoryProvider for dynamic skill generation |
+| `SKILLS_DIRECTORY` | `~/.claude/skills` | Directory for generated skill documents |
 | `RESPONSE_LIMIT_MAX_SIZE` | `500000` | Max tool response size in bytes (0 = disabled) |
 | `RESPONSE_LIMIT_TOOLS` | _(empty)_ | Comma-separated tool names to limit (empty = all) |
 
@@ -369,6 +373,47 @@ manage_tools(action="disable", tool_names=["send_gmail_message"], scope="global"
   "message": "Kept 5 tools, disabled 89 tools for this session"
 }
 ```
+
+### 🧠 CodeMode Transform (Experimental)
+
+When enabled via `ENABLE_CODE_MODE=true`, CodeMode replaces the full 92+ tool catalog with **4 meta-tools**, dramatically reducing token usage for LLM clients:
+
+| Meta-Tool | Purpose |
+|-----------|---------|
+| `get_tags` | Browse tools by service category (Gmail, Drive, Calendar, etc.) |
+| `search` | BM25-powered keyword search across tool names and descriptions |
+| `get_schema` | Get full parameter schemas for selected tools |
+| `execute` | Run tool calls in a sandboxed Python block via `await call_tool(name, params)` |
+
+**How it works:** Instead of loading all 92+ tool schemas upfront (expensive on tokens), LLMs discover tools on-demand via search, then chain multiple `call_tool()` calls in a single `execute` block:
+
+```python
+# Single execute block can chain multiple tool calls
+result = await call_tool("search_drive_files", {"query": "Q4 report"})
+return result
+```
+
+**Configuration:**
+```bash
+ENABLE_CODE_MODE=true   # Enable CodeMode transform
+```
+
+> CodeMode and the standard tool catalog are mutually exclusive — when CodeMode is active, direct tool calls are replaced by the search + execute pattern.
+
+### 📚 Skills Provider
+
+When enabled via `ENABLE_SKILLS_PROVIDER=true`, GoogleUnlimited generates **skill documents** from ModuleWrapper instances and serves them via FastMCP's `SkillsDirectoryProvider`. Skills provide structured knowledge that LLMs can reference for complex multi-step tasks.
+
+**Currently supported modules:**
+- `card_framework` → `gchat-cards` skill (Google Chat card DSL reference, component hierarchy, examples)
+
+**Configuration:**
+```bash
+ENABLE_SKILLS_PROVIDER=true     # Enable skill generation
+SKILLS_DIRECTORY=~/.claude/skills  # Output directory (default)
+```
+
+Skills are auto-regenerated on each startup and immediately available via the FastMCP skills system.
 
 ### 🖥️ Tool Management Dashboard
 
@@ -691,15 +736,21 @@ GoogleUnlimited implements **enterprise-grade security** with OAuth 2.1 + PKCE, 
 3. **🔧 Development JWT**: Testing mode with generated tokens
 4. **📁 Enhanced File Credentials**: Persistent storage with encryption options
 5. **🔑 Custom OAuth Clients**: Bring your own OAuth credentials with automatic fallback
+6. **🪪 Per-User API Keys**: Individual keys generated on OAuth completion with credential isolation
 
 ### ✨ Security Features
 
 - **🔐 OAuth 2.1 + PKCE**: Modern authentication with proof-of-key exchange (supports public clients)
+- **🔑 Per-User API Keys**: Unique, revocable keys per user with hash-only storage and timing-safe lookup
+- **🛡️ Credential Isolation**: Auth provenance-based access control prevents cross-user credential inheritance
+- **🔗 Account Linking**: Bidirectional account linking for multi-account per-user key access
+- **🔒 Crypto-Bound Encryption**: HKDF-SHA256 derived encryption keys bound to `MCP_API_KEY`
 - **🔒 Session Isolation**: Multi-tenant support preventing data leaks
 - **🏷️ 27+ API Scopes**: Granular permission management across all services
-- **📊 Audit Logging**: Complete security event tracking
-- **🔐 AES-256 Encryption**: Machine-specific keys for credential storage
+- **📊 Audit Logging**: Complete security event tracking with auth provenance
+- **🔐 AES-256 Encryption**: Credential storage with legacy key migration support
 - **🔄 Three-Tier Fallback**: Robust credential persistence across server restarts (State Map → UnifiedSession → Context Storage)
+- **🧹 Sensitive Data Stripping**: Auth metadata removed from Qdrant embeddings before storage
 
 ### ⚙️ Security Configuration
 

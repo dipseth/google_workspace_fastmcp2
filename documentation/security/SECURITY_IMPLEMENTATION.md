@@ -38,9 +38,9 @@ graph TB
 
 ### Executive Summary
 
-The authentication system comprises **24 files** (~10,250 lines) in the `auth/` folder, organized into a hierarchical dependency structure. The audit identified:
+The authentication system comprises **26 files** (~11,000 lines) in the `auth/` folder, organized into a hierarchical dependency structure. The audit identified:
 
-- **15 REQUIRED files** (Tiers 1-4): Core authentication functionality
+- **17 REQUIRED files** (Tiers 1-4): Core authentication functionality (includes new `types.py` and `user_api_keys.py`)
 - **3 OPTIONAL files**: Security enhancement layer
 - **4 HELPER files**: Utilities and type definitions
 - **2 MIGRATION files**: Credential migration helpers (minimal usage)
@@ -72,8 +72,10 @@ The authentication system comprises **24 files** (~10,250 lines) in the `auth/` 
 | `service_manager.py` | 484 | Generic service builder | ✅ Critical |
 | `service_types.py` | 83 | Type definitions | 📚 Helper |
 | `unified_session.py` | 360 | Unified session management | ✅ Required |
+| `types.py` | 38 | Auth enums (AuthProvenance, SessionKey) | ✅ Required |
+| `user_api_keys.py` | 333 | Per-user API key management | ✅ Required |
 
-**Total:** 24 files, 10,250 lines
+**Total:** 26 files, ~11,000 lines
 
 ### Dependency Tree
 
@@ -514,9 +516,193 @@ class CredentialEncryption:
 }
 ```
 
-## 3. Middleware Security
+## 3. Per-User API Key Management
 
-### 3.1 AuthMiddleware Security Features
+### 3.1 Overview
+
+The system now supports **per-user API keys** — unique, revocable tokens generated for each user after OAuth completion. This replaces the shared `MCP_API_KEY` model with individual keys that provide fine-grained access control and audit trails.
+
+**Implementation:** `auth/user_api_keys.py`
+
+### 3.2 Key Generation and Storage
+
+```python
+# auth/user_api_keys.py
+def generate_user_key(email: str) -> str:
+    """Generate a unique 32-byte URL-safe token per user."""
+    token = secrets.token_urlsafe(32)
+    # Only the SHA-256 hash is stored on disk — never the plaintext key
+    key_hash = hashlib.sha256(token.encode()).hexdigest()
+    # Registry: .user_api_keys.json (permissions 0o600)
+    # Format: {hash: email}
+    return token  # Shown once to user on OAuth success page
+```
+
+**Security properties:**
+- **Hash-only storage**: Only SHA-256 hashes stored in `.user_api_keys.json` (file permissions `0o600`)
+- **Timing-safe lookup**: `lookup_key()` uses `hmac.compare_digest()` to prevent timing attacks on hash prefix comparison
+- **Single reveal**: Key displayed once on OAuth success page with blur-by-default, click-to-reveal, and copy-to-clipboard UI
+
+### 3.3 Account Linking
+
+Per-user keys can access multiple Google accounts through bidirectional linking:
+
+```python
+# Bidirectional linking
+link_accounts(email_a, email_b)  # Creates A↔B link
+get_accessible_emails(email_a)   # Returns {email_a, email_b}
+
+# Deferred linking (for accounts not yet registered)
+request_link(source, target)     # Pending until target completes OAuth
+consume_pending_links(email)     # Called after OAuth to activate deferred links
+```
+
+- Links stored in `.user_api_key_links.json`
+- Self-linking is a no-op
+- Only emails with registered keys can consume pending links
+
+### 3.4 Key Revocation
+
+```python
+revoke_user_key(email)  # Removes key hash from registry, immediate effect
+```
+
+## 4. Auth Provenance Tracking
+
+### 4.1 AuthProvenance Enum
+
+**Implementation:** `auth/types.py`
+
+Every session now tracks *how* it authenticated via the `AuthProvenance` enum:
+
+```python
+class AuthProvenance(str, Enum):
+    API_KEY = "api_key"           # Shared MCP_API_KEY (admin token)
+    USER_API_KEY = "user_api_key" # Per-user key (generated on OAuth)
+    OAUTH = "oauth"               # Browser-based OAuth flow
+```
+
+Inherits from `str` for backward-compatible `== "api_key"` comparisons.
+
+### 4.2 SessionKey Enum
+
+Centralized session storage keys prevent typo-prone string literals:
+
+```python
+class SessionKey(str, Enum):
+    USER_EMAIL = "user_email"
+    AUTH_PROVENANCE = "auth_provenance"
+    API_KEY_OWNED_ACCOUNTS = "api_key_owned_accounts"
+    SESSION_AUTHED_EMAILS = "session_authed_emails"
+    SESSION_DISABLED_TOOLS = "session_disabled_tools"
+    SERVICE_SELECTION_NEEDED = "service_selection_needed"
+    CREDENTIALS = "credentials"
+```
+
+### 4.3 Detection
+
+`AuthMiddleware._detect_auth_provenance()` reads the `auth_method` claim from the JWT token and stores the provenance in the session immediately, enabling downstream credential isolation decisions.
+
+## 5. Credential Isolation Guard
+
+### 5.1 API Key Session Isolation
+
+**Implementation:** `auth/middleware.py` (in `on_call_tool`)
+
+When `auth_provenance == API_KEY`:
+- **Ownership tracking**: On `start_google_auth`, the target email is registered as "owned" by this session
+- **Access enforcement**: All other tools reject target emails not in the session's owned set
+- **OAuth file fallback blocked**: API key sessions skip `_load_oauth_authentication_data()` entirely
+
+This prevents a shared API key from inheriting OAuth file credentials belonging to other users.
+
+### 5.2 Per-User Key Access Control
+
+When `auth_provenance == USER_API_KEY`:
+- Resolve the key-bound email from the JWT
+- Check if the tool's target email is in `get_accessible_emails()` (owner + linked accounts)
+- Reject unlinked account access with audit logging
+- OAuth file fallback also blocked
+
+### 5.3 Scope Upgrade Detection
+
+**Implementation:** `auth/service_manager.py`
+
+When a user authenticates via GoogleProvider (identity-only) but lacks full API credentials, the system detects this and returns a clear error message directing the user to run `start_google_auth` for a one-time scope upgrade.
+
+## 6. Crypto-Bound Encryption
+
+### 6.1 HKDF-SHA256 Key Derivation
+
+**Implementation:** `auth/middleware.py` (`_derive_fernet_key()`)
+
+When `MCP_API_KEY` is set, the encryption key is **derived** from it using HKDF:
+
+```python
+def _derive_fernet_key(api_key: str) -> bytes:
+    """Derive Fernet key from MCP_API_KEY via HKDF-SHA256."""
+    # Salt: "mcp-google-workspace-v1"
+    # Info: "credential-encryption"
+    # Output: 32-byte Fernet-compatible key
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"mcp-google-workspace-v1",
+        info=b"credential-encryption",
+    )
+    return base64.urlsafe_b64encode(hkdf.derive(api_key.encode()))
+```
+
+**Result**: Credential files become **undecryptable** without the `MCP_API_KEY` — binding the encryption to the server's authentication secret.
+
+### 6.2 Encryption Key Priority
+
+1. Explicit `encryption_key` parameter (base64-encoded)
+2. **Derived from `MCP_API_KEY`** env var (crypto-binding) — **new default**
+3. Auto-generated random server key in `.auth_encryption_key` (fallback)
+
+### 6.3 Legacy Key Migration
+
+When switching from auto-generated to MCP_API_KEY-derived encryption:
+- Old server key retained as `_legacy_fernet`
+- `_decrypt_credentials()` tries primary key first, falls back to legacy on failure
+- Existing credentials transparently re-encrypted on next save
+
+## 7. Sensitive Data Stripping
+
+### 7.1 Qdrant Response Sanitization
+
+**Implementation:** `middleware/qdrant_middleware.py`
+
+Before storing tool responses in Qdrant for embeddings/analytics, sensitive fields are stripped:
+
+**Response fields removed:**
+- `scopes` — OAuth scope list (reveals permission surface)
+- `linkedAccounts` — Account linking topology
+- `keyBoundEmail` — Per-user key binding
+- `authMethod` — Session authentication method
+- `refreshToken`, `access_token`, `client_secret` — Credential material
+
+**Argument fields redacted:**
+- `api_key`, `password`, `secret`, `token` → `"***REDACTED***"`
+
+**Pattern-based detection:**
+- Regex: `(secret|token|password|credential|auth_key|api_key|private_key)` (case-insensitive)
+- Catches dynamically-named sensitive fields
+
+### 7.2 HTML Escaping in OAuth Pages
+
+**Implementation:** `auth/fastmcp_oauth_endpoints.py`
+
+All user-provided data rendered in OAuth success/error pages is escaped via `html.escape()`:
+- Error messages: `html.escape(str(e))`
+- User emails: `html.escape(user_email)`
+
+Prevents XSS if error messages are reflected in browser-rendered OAuth pages.
+
+## 8. Middleware Security
+
+### 8.1 AuthMiddleware Security Features
 
 The AuthMiddleware implements multiple security layers:
 
@@ -535,7 +721,7 @@ The AuthMiddleware implements multiple security layers:
    - Secure logging (no tokens/passwords)
    - Timing attack prevention
 
-### 3.2 MCPAuthMiddleware
+### 8.2 MCPAuthMiddleware
 
 Implements MCP specification compliant authentication:
 
@@ -553,9 +739,9 @@ class MCPAuthMiddleware:
         )
 ```
 
-## 4. API Security
+## 9. API Security
 
-### 4.1 Input Validation
+### 9.1 Input Validation
 
 All tool inputs are validated:
 
@@ -578,7 +764,7 @@ class InputValidator:
         return os.path.basename(path)
 ```
 
-### 4.2 Rate Limiting
+### 9.2 Rate Limiting
 
 Implements multiple rate limiting strategies:
 
@@ -592,7 +778,7 @@ class RateLimiter:
     }
 ```
 
-### 4.3 CORS Configuration
+### 9.3 CORS Configuration
 
 ```python
 # config/security.py
@@ -605,9 +791,9 @@ CORS_CONFIG = {
 }
 ```
 
-## 5. Data Security
+## 10. Data Security
 
-### 5.1 Data Classification
+### 10.1 Data Classification
 
 | Data Type | Classification | Encryption | Storage |
 |-----------|---------------|------------|---------|
@@ -617,16 +803,16 @@ CORS_CONFIG = {
 | File Content | User Data | In transit | Not stored |
 | Metadata | Internal | No | Temporary cache |
 
-### 5.2 Data Handling Policies
+### 10.2 Data Handling Policies
 
 1. **No Persistent User Data**: File contents are never stored
 2. **Token Lifecycle**: Automatic cleanup on expiry
 3. **Memory Cleanup**: Explicit zeroing of sensitive data
 4. **Secure Deletion**: Multi-pass overwrite for file deletion
 
-## 6. Network Security
+## 11. Network Security
 
-### 6.1 TLS/SSL Configuration
+### 11.1 TLS/SSL Configuration
 
 ```python
 # config/settings.py
@@ -638,26 +824,30 @@ SSL_CONFIG = {
 }
 ```
 
-### 6.2 Certificate Validation
+### 11.2 Certificate Validation
 
 - **Google APIs**: Certificate pinning for accounts.google.com
 - **Internal**: Optional mTLS for service-to-service
 - **Client**: Strict certificate validation
 
-## 7. Threat Model
+## 12. Threat Model
 
-### 7.1 Identified Threats
+### 12.1 Identified Threats
 
 | Threat | Impact | Mitigation |
 |--------|--------|------------|
 | Token Theft | High | Short-lived tokens, secure storage |
 | MITM Attack | High | TLS 1.2+, certificate pinning |
 | Session Hijacking | High | Secure session IDs, timeout |
-| Credential Leak | Critical | Encryption at rest, memory protection |
+| Credential Leak | Critical | Encryption at rest, memory protection, crypto-binding |
+| Credential Cross-Contamination | High | Auth provenance tracking, credential isolation guard |
 | CSRF | Medium | State parameter, PKCE |
-| XSS | Medium | Input sanitization, CSP headers |
+| XSS | Medium | HTML escaping in OAuth pages, input sanitization, CSP headers |
+| API Key Abuse | High | Per-user keys, hash-only storage, timing-safe lookup |
+| Sensitive Data in Embeddings | Medium | Qdrant response sanitization, pattern-based field stripping |
+| Timing Attack on Key Lookup | Medium | `hmac.compare_digest()` for constant-time comparison |
 
-### 7.2 Security Boundaries
+### 12.2 Security Boundaries
 
 ```mermaid
 graph LR
@@ -681,9 +871,9 @@ graph LR
     B -->|Encrypted| E
 ```
 
-## 8. Compliance Considerations
+## 13. Compliance Considerations
 
-### 8.1 OAuth 2.0 Compliance
+### 13.1 OAuth 2.0 Compliance
 
 - ✅ RFC 6749 (OAuth 2.0 Core)
 - ✅ RFC 7636 (PKCE)
@@ -691,23 +881,23 @@ graph LR
 - ✅ RFC 6819 (OAuth Security)
 - ✅ RFC 7591 (Dynamic Client Registration)
 
-### 8.2 Google OAuth Policies
+### 13.2 Google OAuth Policies
 
 - ✅ Restricted scope usage
 - ✅ Incremental authorization
 - ✅ Secure redirect URIs
 - ✅ User consent preservation
 
-### 8.3 Data Protection
+### 13.3 Data Protection
 
 - **Data Minimization**: Only required data collected
 - **Purpose Limitation**: Data used only for stated purpose
 - **Data Deletion**: User can revoke and delete credentials
 - **Transparency**: Clear data handling documentation
 
-## 9. Security Audit Checklist
+## 14. Security Audit Checklist
 
-### 9.1 Authentication
+### 14.1 Authentication
 - [x] OAuth flow uses PKCE
 - [x] State parameter validated
 - [x] Tokens expire appropriately
@@ -716,36 +906,51 @@ graph LR
 - [x] JWKS keys cached securely
 - [x] Public client support implemented
 - [x] Custom OAuth client fallback working
+- [x] Per-user API key generation and hash-only storage
+- [x] Auth provenance detection and tracking
+- [x] Timing-safe key lookup with `hmac.compare_digest()`
 
-### 9.2 Authorization
+### 14.2 Authorization
 - [x] Scope enforcement per tool
 - [x] User isolation enforced
 - [x] Admin operations restricted
 - [x] File access validated
+- [x] Credential isolation guard (API key sessions blocked from other users' credentials)
+- [x] Per-user key access control with account linking
+- [x] OAuth file fallback blocked for API key and per-user key sessions
 
-### 9.3 Cryptography
+### 14.3 Cryptography
 - [x] Strong algorithms (AES-256-GCM)
 - [x] Secure random generation
 - [x] Key derivation (PBKDF2)
 - [x] No hardcoded secrets
 - [x] Proper IV/nonce handling
+- [x] HKDF-SHA256 crypto-binding of encryption key to MCP_API_KEY
+- [x] Legacy encryption key migration with transparent re-encryption
 
-### 9.4 Session Management
+### 14.4 Session Management
 - [x] Session timeout configured
 - [x] Session invalidation on logout
 - [x] Session fixation prevention
 - [x] Concurrent session limits
 - [x] Three-tier credential persistence
+- [x] Type-safe session keys via SessionKey enum
 
-### 9.5 Error Handling
+### 14.5 Error Handling
 - [x] No stack traces to users
 - [x] No credential leakage
 - [x] Secure error logging
 - [x] Rate limit error responses
+- [x] HTML escaping in OAuth success/error pages
 
-## 10. Security Configuration
+### 14.6 Data Protection
+- [x] Sensitive field stripping from Qdrant embeddings
+- [x] Pattern-based detection of sensitive argument values
+- [x] Response sanitization before analytics storage
 
-### 10.1 Environment Variables
+## 15. Security Configuration
+
+### 15.1 Environment Variables
 
 ```bash
 # Required Security Settings
@@ -766,12 +971,15 @@ ENABLE_SECURITY_HEADERS=true
 CSP_POLICY="default-src 'self'"
 HSTS_MAX_AGE=31536000
 
+# Per-User API Key Management
+MCP_API_KEY=your-server-api-key  # Also used for crypto-bound encryption
+
 # Optional Security Layer
 ENABLE_SECURE_MIDDLEWARE=false  # Enable for high-security deployments
 CREDENTIAL_MIGRATION=false      # Enable for credential migration tracking
 ```
 
-### 10.2 Security Best Practices
+### 15.2 Security Best Practices
 
 1. **Regular Updates**: Keep all dependencies updated
 2. **Security Scanning**: Regular vulnerability scans
@@ -780,16 +988,16 @@ CREDENTIAL_MIGRATION=false      # Enable for credential migration tracking
 5. **Security Training**: Developer security awareness
 6. **Auth File Audit**: Periodic review of auth folder dependencies
 
-## 11. Incident Response
+## 16. Incident Response
 
-### 11.1 Security Incident Types
+### 16.1 Security Incident Types
 
 1. **Credential Compromise**: Immediate token revocation
 2. **Data Breach**: User notification within 72 hours
 3. **Service Compromise**: Immediate service isolation
 4. **Vulnerability Discovery**: Patch within SLA
 
-### 11.2 Response Procedures
+### 16.2 Response Procedures
 
 ```python
 # Emergency credential revocation
@@ -801,9 +1009,9 @@ async def emergency_revoke_all():
     logger.critical("SECURITY: All credentials revoked")
 ```
 
-## 12. Security Monitoring
+## 17. Security Monitoring
 
-### 12.1 Metrics Tracked
+### 17.1 Metrics Tracked
 
 - Failed authentication attempts
 - Unusual API usage patterns
@@ -812,7 +1020,7 @@ async def emergency_revoke_all():
 - Encryption/decryption errors
 - Auth file dependency changes
 
-### 12.2 Alerting Thresholds
+### 17.2 Alerting Thresholds
 
 ```yaml
 alerts:
@@ -835,13 +1043,95 @@ alerts:
 
 ## Conclusion
 
-The FastMCP Google MCP Server implements defense-in-depth security with multiple layers of protection across 24 authentication files organized in a hierarchical architecture. The system provides:
+The FastMCP Google MCP Server implements defense-in-depth security with multiple layers of protection across 26 authentication files organized in a hierarchical architecture. The system provides:
 
 - **Production-ready OAuth 2.0/2.1 + PKCE** with public and confidential client support
+- **Per-user API key management** with hash-only storage, timing-safe lookup, and account linking
+- **Crypto-bound encryption** via HKDF-SHA256 derivation from MCP_API_KEY
+- **Credential isolation guard** preventing cross-user credential inheritance in API key sessions
+- **Auth provenance tracking** distinguishing API key, per-user key, and OAuth sessions
 - **Three-tier credential persistence** ensuring reliability across server restarts
+- **Sensitive data stripping** from Qdrant embeddings and analytics storage
+- **HTML escaping** in all OAuth success/error pages to prevent XSS
 - **Flexible storage strategies** from development to high-security deployments
 - **Optional security enhancement layer** for multi-tenant environments
 - **Comprehensive audit trail** of all authentication components
+- **Multi-recipient CEK envelope encryption** with per-user key wrapping and HMAC integrity seals
+- **Account linking with method tracking** — OAuth, session, and API key linking with auditable metadata
+- **30-minute API key linking window** — time-boxed linking for API key sessions, requiring OAuth after expiry
+- **Security visualization** on OAuth success pages showing encryption model, linked users, and linkage methods
+
+## Multi-Recipient Envelope Encryption
+
+### Overview
+
+Credentials are encrypted using a multi-recipient **Content Encryption Key (CEK)** envelope scheme. A random CEK encrypts the actual Google Workspace credentials; the CEK is then separately wrapped for each authorized user's derived key.
+
+### Envelope Format (v2)
+
+```json
+{
+  "v": 2,
+  "enc": "per_user",
+  "recipients": {
+    "<sha256_key_id_A>": "<CEK_wrapped_for_A>",
+    "<sha256_key_id_B>": "<CEK_wrapped_for_B>"
+  },
+  "data": "<base64_credentials_encrypted_with_CEK>",
+  "hmac": "<HMAC-SHA256_integrity_seal>"
+}
+```
+
+### Key Derivation (Split-Key Model)
+
+Neither the server secret alone nor the per-user key alone can decrypt credentials:
+
+```
+User Key = HKDF-SHA256(
+    ikm  = per_user_api_key,
+    salt = server_secret (.auth_encryption_key),
+    info = "per-user-credential-encryption-v1",
+    length = 32 bytes
+)
+```
+
+### Security Properties
+
+| Property | Implementation |
+|----------|---------------|
+| Encryption algorithm | Fernet (AES-128-CBC + HMAC-SHA256) |
+| Key derivation | HKDF-SHA256 with versioned info string |
+| Key IDs | Full SHA-256 hex digest (64 chars) |
+| Envelope integrity | HMAC-SHA256 keyed with server secret |
+| File locking | `fcntl.flock(LOCK_EX)` for atomic read-modify-write |
+| Key material cleanup | Best-effort `ctypes.memset` zeroing |
+| File permissions | `chmod 0o600` on all credential files |
+
+## Account Linking Security
+
+### Linking Methods and Trust Model
+
+| Method | Auth Provenance | Trust Basis | Time Restriction |
+|--------|----------------|-------------|-----------------|
+| OAuth | `OAUTH` | Browser-authenticated user links accounts | None |
+| Session | Any | Two `start_google_auth` calls in same MCP session | None |
+| API Key | `USER_API_KEY` | Per-user key holder links additional accounts | **30 minutes from key creation** |
+
+### 30-Minute API Key Linking Window
+
+API key sessions can establish account links only within 30 minutes of the key's creation timestamp. This prevents a stolen API key from being used to link and access arbitrary accounts long after the legitimate owner set it up.
+
+After the window expires, the middleware blocks link requests with:
+```
+🔗 API key link window expired for user@example.com → other@example.com. OAuth required to establish new links.
+```
+
+### Metadata Audit Trail
+
+All links are tracked in `.user_api_key_link_metadata.json` with:
+- **method**: How the link was established (`oauth`, `session`, `api_key`, `both`)
+- **linked_at**: ISO 8601 timestamp of initial link creation
+- **updated_at**: Timestamp if the link was reinforced via a second method
 
 Regular security audits, updates, and monitoring ensure ongoing security posture maintenance.
 
@@ -849,7 +1139,7 @@ For security concerns or vulnerability reports, please contact the security team
 
 ---
 
-**Document Version**: 2.0.0  
-**Last Updated**: 2024-12-30  
-**Classification**: Internal - Security Documentation  
-**Auth Folder Audit**: Complete (24 files, 10,250 lines)
+**Document Version**: 3.1.0
+**Last Updated**: 2026-03-08
+**Classification**: Internal - Security Documentation
+**Auth Folder Audit**: Complete (26 files, ~11,000 lines)

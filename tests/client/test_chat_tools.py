@@ -139,18 +139,18 @@ class TestChatTools:
 
     @pytest.mark.asyncio
     async def test_chat_tools_available(self, client):
-        """Test that all Chat tools are available."""
+        """Test that all Chat tools are available.
+
+        NOTE: Legacy card tools (send_card_message, send_simple_card,
+        send_interactive_card, send_form_card, send_rich_card) were
+        consolidated into the unified send_dynamic_card tool.
+        """
         expected_chat_tools = [
             "list_spaces",
             "list_messages",
             "send_message",
             "search_messages",
-            "send_card_message",
-            "send_simple_card",
-            "send_interactive_card",
-            "send_form_card",
-            "send_rich_card",
-            "send_dynamic_card",  # New unified card tool
+            "send_dynamic_card",  # Unified card tool (replaces 5 legacy card tools)
         ]
 
         await assert_tools_registered(client, expected_chat_tools, context="Chat tools")
@@ -284,30 +284,34 @@ class TestChatTools:
         )
 
     @pytest.mark.asyncio
-    async def test_send_card_message(self, client):
-        """Test sending a card message."""
-        # Use test space ID if available, otherwise use placeholder
+    async def test_send_dynamic_card_simple(self, client):
+        """Test sending a simple card via the unified send_dynamic_card tool.
+
+        NOTE: Replaces the former test_send_card_message, test_send_simple_card tests.
+        """
         space_id = TEST_SPACE_ID or "spaces/test_space"
 
         result = await client.call_tool(
-            "send_card_message",
+            "send_dynamic_card",
             {
                 "user_google_email": TEST_EMAIL,
                 "space_id": space_id,
-                "card_type": "simple",
-                "title": "Test Card",
-                "text": "This is a test card from MCP Chat Tools",
+                "card_description": "A simple notification card",
+                "card_params": {
+                    "title": "Test Card",
+                    "text": "This is a test card from MCP Chat Tools",
+                },
             },
         )
 
         assert result is not None and result.content
         content = result.content[0].text
-        # Should either succeed or return authentication/middleware/permission error
         valid_responses = [
             "requires authentication",
             "no valid credentials",
             "successfully sent",
             "card sent",
+            "card message sent",
             "❌",
             "failed to send",
             "unexpected error",
@@ -315,36 +319,45 @@ class TestChatTools:
             "service",
             "not yet fulfilled",
             "permission denied",
+            "authorization failed",
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), (
             f"Response didn't match any expected pattern: {content}"
         )
 
     @pytest.mark.asyncio
-    async def test_send_simple_card(self, client):
-        """Test sending a simple card with basic content."""
-        # Use test space ID if available, otherwise use placeholder
+    async def test_send_dynamic_card_interactive(self, client):
+        """Test sending an interactive card with buttons via send_dynamic_card.
+
+        NOTE: Replaces the former test_send_interactive_card test.
+        """
         space_id = TEST_SPACE_ID or "spaces/test_space"
 
         result = await client.call_tool(
-            "send_simple_card",
+            "send_dynamic_card",
             {
                 "user_google_email": TEST_EMAIL,
                 "space_id": space_id,
-                "title": "Simple Test Card",
-                "text": "This is a simple card test from the MCP framework",
-                "subtitle": "Testing MCP Chat Tools",
+                "card_description": "An interactive card with two option buttons",
+                "card_params": {
+                    "title": "Interactive Test Card",
+                    "text": "Choose an option below:",
+                    "buttons": [
+                        {"text": "Option 1", "url": "https://example.com/1"},
+                        {"text": "Option 2", "url": "https://example.com/2"},
+                    ],
+                },
             },
         )
 
         assert result is not None and result.content
         content = result.content[0].text
-        # Should either succeed or return authentication/middleware/permission error
         valid_responses = [
             "requires authentication",
             "no valid credentials",
             "successfully sent",
             "card sent",
+            "card message sent",
             "❌",
             "failed to send",
             "unexpected error",
@@ -352,50 +365,40 @@ class TestChatTools:
             "service",
             "not yet fulfilled",
             "permission denied",
-            "fallback",
-            "simple card",
+            "authorization failed",
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), (
             f"Response didn't match any expected pattern: {content}"
         )
 
     @pytest.mark.asyncio
-    async def test_send_interactive_card(self, client):
-        """Test sending an interactive card with buttons."""
-        # Use test space ID if available, otherwise use placeholder
+    async def test_send_dynamic_card_form(self, client):
+        """Test sending a form card via send_dynamic_card.
+
+        NOTE: Replaces the former test_send_form_card test.
+        """
         space_id = TEST_SPACE_ID or "spaces/test_space"
 
-        # Interactive card with buttons
-        buttons = [
-            {
-                "text": "Option 1",
-                "onClick": {"action": {"actionMethodName": "option1"}},
-            },
-            {
-                "text": "Option 2",
-                "onClick": {"action": {"actionMethodName": "option2"}},
-            },
-        ]
-
         result = await client.call_tool(
-            "send_interactive_card",
+            "send_dynamic_card",
             {
                 "user_google_email": TEST_EMAIL,
                 "space_id": space_id,
-                "title": "Interactive Test Card",
-                "text": "Choose an option below:",
-                "buttons": buttons,
+                "card_description": "A feedback form with name and feedback fields and a submit button",
+                "card_params": {
+                    "title": "Feedback Form",
+                },
             },
         )
 
         assert result is not None and result.content
         content = result.content[0].text
-        # Should either succeed or return authentication/middleware/permission error
         valid_responses = [
             "requires authentication",
             "no valid credentials",
             "successfully sent",
             "card sent",
+            "card message sent",
             "❌",
             "failed to send",
             "unexpected error",
@@ -403,59 +406,40 @@ class TestChatTools:
             "service",
             "not yet fulfilled",
             "permission denied",
-            "fallback",
-            "interactive card",
+            "authorization failed",
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), (
             f"Response didn't match any expected pattern: {content}"
         )
 
     @pytest.mark.asyncio
-    async def test_send_form_card(self, client):
-        """Test sending a form card with input fields."""
-        # Use test space ID if available, otherwise use placeholder
+    async def test_send_dynamic_card_rich(self, client):
+        """Test sending a rich card with multiple sections via send_dynamic_card.
+
+        NOTE: Replaces the former test_send_rich_card test.
+        """
         space_id = TEST_SPACE_ID or "spaces/test_space"
 
-        # Form card with input fields
-        form_fields = [
-            {
-                "name": "user_name",
-                "label": "Your Name",
-                "type": "TEXT_INPUT",
-                "hint": "Enter your full name",
-            },
-            {
-                "name": "feedback",
-                "label": "Feedback",
-                "type": "TEXT_AREA",
-                "hint": "Please provide your feedback",
-            },
-        ]
-
-        submit_action = {
-            "function": "submit_feedback",
-            "parameters": [{"key": "action", "value": "submit"}],
-        }
-
         result = await client.call_tool(
-            "send_form_card",
+            "send_dynamic_card",
             {
                 "user_google_email": TEST_EMAIL,
                 "space_id": space_id,
-                "title": "Feedback Form",
-                "fields": form_fields,
-                "submit_action": submit_action,
+                "card_description": "A rich card with two sections: first about features, second about details",
+                "card_params": {
+                    "title": "Rich Test Card",
+                },
             },
         )
 
         assert result is not None and result.content
         content = result.content[0].text
-        # Should either succeed or return authentication/middleware/permission error
         valid_responses = [
             "requires authentication",
             "no valid credentials",
             "successfully sent",
-            "form card sent",
+            "card sent",
+            "card message sent",
             "❌",
             "failed to send",
             "unexpected error",
@@ -463,70 +447,7 @@ class TestChatTools:
             "service",
             "not yet fulfilled",
             "permission denied",
-            "fallback",
-            "form card",
-        ]
-        assert any(keyword in content.lower() for keyword in valid_responses), (
-            f"Response didn't match any expected pattern: {content}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_send_rich_card(self, client):
-        """Test sending a rich card with multiple elements."""
-        # Use test space ID if available, otherwise use placeholder
-        space_id = TEST_SPACE_ID or "spaces/test_space"
-
-        # Rich card with multiple sections and widgets
-        sections = [
-            {
-                "header": "Section 1",
-                "widgets": [
-                    {
-                        "textParagraph": {
-                            "text": "This is the first section of a rich card."
-                        }
-                    }
-                ],
-            },
-            {
-                "header": "Section 2",
-                "widgets": [
-                    {
-                        "textParagraph": {
-                            "text": "This is the second section with more content."
-                        }
-                    }
-                ],
-            },
-        ]
-
-        result = await client.call_tool(
-            "send_rich_card",
-            {
-                "user_google_email": TEST_EMAIL,
-                "space_id": space_id,
-                "title": "Rich Test Card",
-                "sections": sections,
-            },
-        )
-
-        assert result is not None and result.content
-        content = result.content[0].text
-        # Should either succeed or return authentication/middleware/permission error
-        valid_responses = [
-            "requires authentication",
-            "no valid credentials",
-            "successfully sent",
-            "rich card sent",
-            "❌",
-            "failed to send",
-            "unexpected error",
-            "middleware",
-            "service",
-            "not yet fulfilled",
-            "permission denied",
-            "card framework not available",
-            "cannot send rich cards",
+            "authorization failed",
         ]
         assert any(keyword in content.lower() for keyword in valid_responses), (
             f"Response didn't match any expected pattern: {content}"
@@ -635,10 +556,12 @@ class TestChatToolsIntegration:
         content = result.content[0].text
 
         # For real webhook, expect success or specific errors
-        success_indicators = ["successfully sent", "message sent"]
+        success_indicators = ["successfully sent", "message sent", "messageid"]
         error_indicators = [
             "requires authentication",
             "permission denied",
+            "authorization failed",
+            "external user",
             "not found",
             "failed to create google chat service",
             "check your credentials",
@@ -663,13 +586,15 @@ class TestChatToolsIntegration:
             pytest.skip("Could not extract space ID from webhook URL")
 
         result = await client.call_tool(
-            "send_simple_card",
+            "send_dynamic_card",
             {
                 "user_google_email": CHAT_TEST_EMAIL,
                 "space_id": f"spaces/{TEST_SPACE_ID}",
-                "title": "🧪 MCP Integration Test",
-                "text": "This card was sent from the MCP Chat Tools integration test suite.",
-                "subtitle": "Chat Tools Testing",
+                "card_description": "A simple integration test notification",
+                "card_params": {
+                    "title": "🧪 MCP Integration Test",
+                    "text": "This card was sent from the MCP Chat Tools integration test suite.",
+                },
                 "webhook_url": TEST_CHAT_WEBHOOK,
             },
         )
@@ -681,12 +606,15 @@ class TestChatToolsIntegration:
         success_indicators = [
             "successfully sent",
             "card sent",
+            "card message sent",
             "webhook",
             "status: 200",
         ]
         error_indicators = [
             "requires authentication",
             "permission denied",
+            "authorization failed",
+            "external user",
             "not found",
             "webhook delivery failed",
         ]

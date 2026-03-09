@@ -354,6 +354,50 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
     # Normalize email to lowercase for consistent credential storage
     normalized_email = _normalize_email(user_email)
 
+    # Generate a per-user API key for this user's credentials (if one doesn't exist)
+    try:
+        from .user_api_keys import generate_user_key
+
+        user_key = generate_user_key(normalized_email)
+        if user_key:
+            # New key generated — store on credentials so callers can show it
+            credentials._user_api_key = user_key
+            # Stash in session so linked accounts authed later in the same
+            # session can use it for multi-recipient encryption.
+            # Only stash if no key is already stashed — don't overwrite
+            # user A's key when user B auths in the same session.
+            try:
+                from .context import get_session_data, list_sessions, store_session_data
+                from .types import SessionKey
+
+                for sid in reversed(list_sessions()):
+                    existing = get_session_data(sid, SessionKey.PER_USER_ENCRYPTION_KEY)
+                    if not existing:
+                        store_session_data(
+                            sid, SessionKey.PER_USER_ENCRYPTION_KEY, user_key
+                        )
+                        logger.debug(
+                            f"🔐 Stashed per-user key for {normalized_email} in session"
+                        )
+                    break
+            except Exception as e:
+                logger.warning(f"Could not stash per-user key in session: {e}")
+        else:
+            # Key already exists for this email — don't invalidate it.
+            # Signal to the success page that a key exists (but can't be shown again).
+            credentials._user_api_key_exists = True
+            logger.debug(f"Per-user API key already exists for {normalized_email}")
+    except Exception as e:
+        logger.warning(f"Could not generate per-user API key: {e}")
+
+    # Execute any deferred account links (from per-user key sessions)
+    try:
+        from .user_api_keys import consume_pending_links
+
+        consume_pending_links(normalized_email)
+    except Exception as e:
+        logger.warning(f"Could not process pending account links: {e}")
+
     # Check if AuthMiddleware is available for encrypted storage
     try:
         from .context import get_auth_middleware
@@ -363,8 +407,105 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
             logger.info(
                 f"Using AuthMiddleware for credential storage (mode: {auth_middleware._storage_mode.value})"
             )
-            # Pass normalized email to middleware
-            auth_middleware.save_credentials(normalized_email, credentials)
+            # Per-user encryption: use the plaintext per-user key if available.
+            # On first auth, it was just generated (credentials._user_api_key).
+            # On re-auth, it may be stashed in the session from the bearer token.
+            per_user_key = getattr(credentials, "_user_api_key", None)
+            session_stashed_key = None
+            # Always look up the session-stashed key (the first user's key).
+            # When user B authenticates in a session where user A already authed,
+            # per_user_key is B's new key and session_stashed_key is A's key —
+            # we need both for multi-recipient encryption.
+            try:
+                from .context import get_session_data, list_sessions
+                from .types import SessionKey
+
+                for sid in reversed(list_sessions()):
+                    stashed = get_session_data(sid, SessionKey.PER_USER_ENCRYPTION_KEY)
+                    if stashed:
+                        session_stashed_key = stashed
+                        if not per_user_key:
+                            per_user_key = stashed
+                        break
+            except Exception:
+                pass
+
+            # Collect additional keys from linked accounts for multi-recipient encryption.
+            # When user B authenticates in a session started by user A:
+            #   - A's key is stashed in session (session_stashed_key or PER_USER_ENCRYPTION_KEY)
+            #   - B's key is on credentials._user_api_key (new) or session_stashed_key (re-auth)
+            # We add linked users' keys as additional recipients so any linked
+            # user can decrypt this credential file.
+            additional_keys = []
+            try:
+                from .user_api_keys import get_accessible_emails
+
+                linked_emails = get_accessible_emails(normalized_email)
+                linked_emails.discard(normalized_email)  # Exclude self
+
+                if linked_emails and per_user_key:
+                    # The session's bearer token belongs to the session-starting user.
+                    # If per_user_key != session_stashed_key, the stashed key is
+                    # a *different* user's key — add it as an additional recipient.
+                    if session_stashed_key and session_stashed_key != per_user_key:
+                        additional_keys.append(session_stashed_key)
+                    # If per_user_key IS the stashed key (re-auth for the session
+                    # owner), the newly-authed user's key (if different) was set
+                    # on credentials._user_api_key which is already per_user_key.
+                    if additional_keys:
+                        logger.info(
+                            f"🔐 Adding {len(additional_keys)} linked recipient(s) "
+                            f"to credential file for {normalized_email}"
+                        )
+            except Exception as e:
+                logger.warning(f"Could not collect linked account keys: {e}")
+
+            auth_middleware.save_credentials(
+                normalized_email,
+                credentials,
+                per_user_key=per_user_key,
+                additional_keys=additional_keys if additional_keys else None,
+            )
+
+            # Cross-add: add this user as a recipient to linked accounts' credential files.
+            # This allows the newly-authed user to decrypt linked accounts' credentials.
+            if (
+                per_user_key
+                and session_stashed_key
+                and session_stashed_key != per_user_key
+            ):
+                try:
+                    from pathlib import Path
+
+                    from config.settings import settings
+
+                    from .user_api_keys import get_accessible_emails
+
+                    linked_emails = get_accessible_emails(normalized_email)
+                    linked_emails.discard(normalized_email)
+
+                    for linked_email in linked_emails:
+                        safe = linked_email.replace("@", "_at_").replace(".", "_")
+                        cred_path = (
+                            Path(settings.credentials_dir) / f"{safe}_credentials.enc"
+                        )
+                        if cred_path.exists():
+                            # session_stashed_key can unwrap the linked user's file
+                            # (they started the session, so their file was encrypted
+                            # with their key). per_user_key is the new user to add.
+                            auth_middleware.add_recipient_to_encrypted_file(
+                                cred_path, session_stashed_key, per_user_key
+                            )
+                        backup_path = (
+                            Path(settings.credentials_dir) / f"{safe}_backup.enc"
+                        )
+                        if backup_path.exists():
+                            auth_middleware.add_recipient_to_encrypted_file(
+                                backup_path, session_stashed_key, per_user_key
+                            )
+                except Exception as e:
+                    logger.warning(f"Could not cross-add recipients: {e}")
+
             # ALWAYS update .oauth_authentication.json for "me"/"myself" resolution
             _update_oauth_session_marker(normalized_email, credentials)
             return
@@ -442,12 +583,25 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
 
     # Check if AuthMiddleware is available for encrypted storage
     try:
-        from .context import get_auth_middleware
+        from .context import get_auth_middleware, get_session_data, list_sessions
+        from .types import SessionKey
 
         auth_middleware = get_auth_middleware()
         if auth_middleware:
-            # Pass normalized email to middleware
-            creds = auth_middleware.load_credentials(normalized_email)
+            # Retrieve per-user key from session for per-user decryption
+            per_user_key = None
+            try:
+                for sid in reversed(list_sessions()):
+                    stashed = get_session_data(sid, SessionKey.PER_USER_ENCRYPTION_KEY)
+                    if stashed:
+                        per_user_key = stashed
+                        break
+            except Exception:
+                pass
+
+            creds = auth_middleware.load_credentials(
+                normalized_email, per_user_key=per_user_key
+            )
             if creds:
                 logger.info(
                     f"Successfully loaded credentials via AuthMiddleware for {normalized_email}"
@@ -1359,7 +1513,11 @@ async def handle_oauth_callback(
             # Store in session memory only
             session_id = await get_session_context()
             if session_id:
-                store_session_data(session_id, "credentials", credentials.to_json())
+                from auth.types import SessionKey
+
+                store_session_data(
+                    session_id, SessionKey.CREDENTIALS, credentials.to_json()
+                )
                 logger.info(f"Stored credentials in session memory for {user_email}")
             else:
                 logger.warning(

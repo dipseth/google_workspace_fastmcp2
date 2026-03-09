@@ -2359,6 +2359,18 @@ SEMANTIC_ICONS: dict[str, str] = {
     "favorite": "favorite",
     "star": "star",
     "bookmark": "bookmark",
+    # Common knownIcon aliases (UPPERCASE names that LLMs often use)
+    "clock": "schedule",
+    "invite": "event",
+    "ticket": "confirmation_number",
+    "trend_up": "trending_up",
+    "trend_down": "trending_down",
+    "confirmation_number_icon": "confirmation_number",
+    "deploy": "rocket_launch",
+    "shipped": "local_shipping",
+    "metric": "analytics",
+    "alert": "notifications_active",
+    "database": "storage",
     # Misc
     "lock": "lock",
     "unlock": "lock_open",
@@ -2463,7 +2475,22 @@ def resolve_icon_name(icon_name: str, strict: bool = False) -> str:
         logger.debug(f"Resolved semantic icon '{icon_name}' → '{semantic}'")
         return semantic
 
-    # 3. Unrecognized
+    # 3. Semantic vector search (FastEmbed over 2,209 icons)
+    # Skip for empty strings and in strict mode (strict callers want errors, not guesses)
+    if normalized and not strict:
+        try:
+            from gchat.icon_search import semantic_icon_search
+
+            semantic_match = semantic_icon_search(normalized, min_score=0.7)
+            if semantic_match:
+                logger.info(
+                    f"Resolved icon '{icon_name}' -> '{semantic_match}' via semantic search"
+                )
+                return semantic_match
+        except Exception as e:
+            logger.debug(f"Semantic icon search unavailable: {e}")
+
+    # 4. Unrecognized — substring suggestions as last resort
     suggestions = suggest_icons(normalized, limit=3)
     suggestion_text = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
 

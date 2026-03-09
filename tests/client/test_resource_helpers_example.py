@@ -6,6 +6,13 @@ instead of hardcoded fake IDs. This makes tests more realistic and helps validat
 the actual resource system integration.
 """
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Demo/tutorial file, not real coverage (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 import pytest
 
 from .base_test_config import TEST_EMAIL

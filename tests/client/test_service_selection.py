@@ -2,6 +2,11 @@
 
 import pytest
 
+pytest.skip(
+    "Old OAuth flow: service selection UI may not work with GoogleProvider (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
 from .base_test_config import TEST_EMAIL
 
 

@@ -41,8 +41,10 @@ Initiate the OAuth 2.0 authentication flow for Google Workspace services.
 1. Generates OAuth 2.0 authorization URL
 2. Opens browser for user consent
 3. Handles OAuth callback
-4. Stores encrypted credentials securely
-5. Returns authentication confirmation
+4. Stores encrypted credentials securely (crypto-bound to `MCP_API_KEY` if set)
+5. Generates per-user API key (SHA-256 hash stored, plaintext shown once)
+6. Activates any pending account links for this email
+7. Returns authentication confirmation with per-user key on success page
 
 **Response:**
 - Authentication URL for browser opening
@@ -73,6 +75,9 @@ Check authentication status across all Google Workspace services for a user.
 - Required scopes and permissions
 - Re-authentication requirements
 - Service availability status
+- `authMethod`: Authentication provenance (`api_key`, `user_api_key`, or `oauth`)
+- `keyBoundEmail`: Email bound to per-user API key (if applicable)
+- `linkedAccounts`: Accounts linked to the per-user key (if applicable)
 
 ### `get_my_auth_status`
 
@@ -160,11 +165,16 @@ Comprehensive API scope management across all Google services:
 
 ### Enterprise-Grade Security
 - ✅ **OAuth 2.0 with PKCE**: Enhanced security flow
-- ✅ **Token Encryption**: AES-256 credential protection
-- ✅ **Session Isolation**: Multi-user session management
+- ✅ **Token Encryption**: AES-256 credential protection with HKDF-SHA256 crypto-binding
+- ✅ **Per-User API Keys**: Unique, revocable keys per user with hash-only storage
+- ✅ **Credential Isolation**: Auth provenance-based access control prevents cross-user credential inheritance
+- ✅ **Account Linking**: Bidirectional account linking for multi-account per-user key access
+- ✅ **Session Isolation**: Multi-user session management with type-safe `SessionKey` enum
 - ✅ **Automatic Refresh**: Seamless token renewal
-- ✅ **Scope Validation**: Permission verification
-- ✅ **Audit Logging**: Comprehensive authentication logs
+- ✅ **Scope Validation**: Permission verification with scope upgrade detection
+- ✅ **HTML Escaping**: XSS prevention in OAuth success/error pages
+- ✅ **Sensitive Data Stripping**: Auth metadata removed from Qdrant embeddings
+- ✅ **Audit Logging**: Comprehensive authentication logs with provenance tracking
 
 ### Credential Storage Options
 
@@ -234,10 +244,12 @@ async def enhanced_tool():
 4. **Session Management**: Implement proper session cleanup
 
 ### Multi-User Environments
-1. **User Isolation**: Ensure proper credential separation
-2. **Resource Management**: Monitor authentication resource usage
-3. **Scalability**: Implement connection pooling for large deployments
-4. **Monitoring**: Track authentication success and failure rates
+1. **User Isolation**: Credential isolation guard enforced per auth provenance — API key sessions can only access credentials they created; per-user key sessions limited to owner + linked accounts
+2. **Per-User Keys**: Each user receives a unique, revocable API key after OAuth — prefer per-user keys over shared `MCP_API_KEY` in multi-user deployments
+3. **Account Linking**: Use `link_accounts()` for users who need cross-account access; links are bidirectional and audited
+4. **Resource Management**: Monitor authentication resource usage
+5. **Scalability**: Implement connection pooling for large deployments
+6. **Monitoring**: Track authentication success and failure rates; auth provenance logged for all sessions
 
 ## Common Use Cases
 

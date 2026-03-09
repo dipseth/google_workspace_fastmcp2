@@ -973,6 +973,7 @@ class SmartCardBuilderV2:
         image_url: Optional[str] = None,
         text: Optional[str] = None,
         items: Optional[List[Dict]] = None,
+        grid_items: Optional[List[Dict]] = None,
         cards: Optional[List[Dict]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Build a card from parsed DSL structure.
@@ -1042,7 +1043,9 @@ class SmartCardBuilderV2:
                 "chips": chips or [],
                 "carousel_cards": cards
                 or [],  # For carousel DSL (symbols from ModuleWrapper)
-                "grid_items": items or [],  # For grid DSL (GridItem consumption)
+                "grid_items": grid_items
+                or items
+                or [],  # Prefer explicit grid_items, fall back to items
                 "image_url": image_url,
                 "content_texts": content_texts,
                 "_button_index": 0,  # Track button consumption
@@ -1053,26 +1056,40 @@ class SmartCardBuilderV2:
                 "_mapping_report": InputMappingReport(),  # Track input consumption
             }
 
-            for component in parsed:
-                comp_name = component.get("name", "")
-                multiplier = component.get("multiplier", 1)
-                children = component.get("children", [])
+            logger.info(
+                f"📦 Context pools: grid_items={len(context.get('grid_items', []))}, "
+                f"content_texts={len(context.get('content_texts', []))}, "
+                f"buttons={len(context.get('buttons', []))}"
+            )
+            if context.get("grid_items"):
+                logger.debug(f"Grid items sample: {context['grid_items'][0]}")
 
-                # Section is special - it contains widgets, not a widget itself
-                if comp_name == "Section":
-                    widgets = self._build_widgets(
-                        children, buttons, image_url, content_texts, context
-                    )
-                    if widgets:
-                        sections.append({"widgets": widgets})
-                else:
-                    # GENERIC: All other top-level components use _build_widget_generic
-                    for _ in range(multiplier):
-                        widget = self._build_widget_generic(
-                            comp_name, children, context
+            # Split pipe-separated sections and parse each independently
+            section_dsls = [s.strip() for s in structure_dsl.split("|")]
+            for section_dsl in section_dsls:
+                if not section_dsl:
+                    continue
+                section_parsed = validator.parse_structure(section_dsl)
+                for component in section_parsed:
+                    comp_name = component.get("name", "")
+                    multiplier = component.get("multiplier", 1)
+                    children = component.get("children", [])
+
+                    # Section is special - it contains widgets, not a widget itself
+                    if comp_name == "Section":
+                        widgets = self._build_widgets(
+                            children, buttons, image_url, content_texts, context
                         )
-                        if widget:
-                            sections.append({"widgets": [widget]})
+                        if widgets:
+                            sections.append({"widgets": widgets})
+                    else:
+                        # GENERIC: All other top-level components use _build_widget_generic
+                        for _ in range(multiplier):
+                            widget = self._build_widget_generic(
+                                comp_name, children, context
+                            )
+                            if widget:
+                                sections.append({"widgets": [widget]})
 
             if not sections:
                 return None
@@ -1110,10 +1127,13 @@ class SmartCardBuilderV2:
         component_name: str,
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Consume resource from context. Delegates to card_builder.context."""
+        """Consume resource from context. Delegates to mixin or card_builder.context."""
+        wrapper = self._get_wrapper()
+        if wrapper and hasattr(wrapper, "consume_from_context"):
+            return wrapper.consume_from_context(component_name, context)
         from gchat.card_builder.context import consume_from_context
 
-        return consume_from_context(component_name, context, self._get_wrapper())
+        return consume_from_context(component_name, context, wrapper)
 
     def _build_widget_generic(
         self,
@@ -1311,44 +1331,32 @@ class SmartCardBuilderV2:
         if component_name == "Columns":
             return self._build_columns_generic(children, context)
 
-        # Build child items
+        # Build child items using _build_component() universal builder
         built_children = []
+
         for _ in range(expected_count):
-            if expected_child_type == "Button":
-                # Consume button from context
-                btn_params = self._consume_from_context("Button", context)
-                btn_obj = {"text": btn_params.get("text", "Button")}
-                if btn_params.get("url"):
-                    btn_obj["onClick"] = {"openLink": {"url": btn_params["url"]}}
-                # Add Material Icon if provided (e.g., "add_circle", "share")
-                if btn_params.get("icon"):
-                    btn_obj["icon"] = {"materialIcon": {"name": btn_params["icon"]}}
-                built_children.append(btn_obj)
-            elif expected_child_type == "GridItem":
-                grid_params = self._consume_from_context("GridItem", context)
-                grid_item = {
-                    "title": grid_params.get("title", f"Item {len(built_children) + 1}")
-                }
-                if grid_params.get("subtitle"):
-                    grid_item["subtitle"] = grid_params["subtitle"]
-                if grid_params.get("image_url"):
-                    grid_item["image"] = {"imageUri": grid_params["image_url"]}
-                elif grid_params.get("image"):
-                    grid_item["image"] = grid_params["image"]
-                built_children.append(grid_item)
-            elif expected_child_type == "Chip":
-                # Consume chip from context (similar to Button)
-                chip_params = self._consume_from_context("Chip", context)
-                chip_obj = {
-                    "label": chip_params.get("label")
-                    or chip_params.get("text", f"Chip {len(built_children) + 1}")
-                }
-                if chip_params.get("url"):
-                    chip_obj["onClick"] = {"openLink": {"url": chip_params["url"]}}
-                # Add icon if provided
-                if chip_params.get("icon"):
-                    chip_obj["icon"] = {"materialIcon": {"name": chip_params["icon"]}}
-                built_children.append(chip_obj)
+            if expected_child_type in ("Button", "Chip", "GridItem"):
+                # _build_component handles url->onClick, icon, image transforms
+                params = self._consume_from_context(expected_child_type, context)
+                # Normalize: context may use "text" for Chip but wrapper expects "label"
+                if expected_child_type == "Chip":
+                    if "text" in params and "label" not in params:
+                        params["label"] = params.pop("text")
+                    # Drop Chips without a URL — can't create a valid onClick
+                    if not params.get("url"):
+                        continue
+                elif expected_child_type == "GridItem":
+                    params.setdefault("title", f"Item {len(built_children) + 1}")
+                    # Normalize image_url to image dict for wrapper
+                    if "image_url" in params and "image" not in params:
+                        params["image"] = {"imageUri": params.pop("image_url")}
+                child = self._build_component(
+                    expected_child_type,
+                    params,
+                    wrap_with_key=False,
+                )
+                if child is not None:
+                    built_children.append(child)
             elif expected_child_type == "CarouselCard":
                 # Consume carousel card from context and build via wrapper
                 card_params = self._consume_from_context("CarouselCard", context)
@@ -2594,9 +2602,15 @@ class SmartCardBuilderV2:
             # Fallback to simple text paragraph
             config = TEXT_CONFIGS["text_paragraph"]
 
-        # Handle direct dict components (chip_text)
+        # Handle direct dict components (chip_text — display-only prompt chip)
+        # Google Chat requires onClick on every chip — omitting it silently drops the card.
+        # Build chip via wrapper (_build_feedback_chip_item) then disable it.
         if config.get("direct_dict"):
-            return {"chipList": {"chips": [{"label": text, "enabled": False}]}}
+            # Google Chat requires onClick on every chip — use a no-op action
+            chip_item = self._build_feedback_chip_item(text, "")
+            chip_item["onClick"] = {"action": {"function": "noop"}}
+            chip_item["enabled"] = False
+            return {"chipList": {"chips": [chip_item]}}
 
         # Apply text formatting if configured
         format_fn = config.get("format_text")
@@ -2644,6 +2658,81 @@ class SmartCardBuilderV2:
     # Business logic (labels, URLs) separated from widget structure
     # -------------------------------------------------------------------------
 
+    def _build_clickable_item(
+        self,
+        component_name: str,
+        label: str,
+        url: str,
+        *,
+        icon: Optional[str] = None,
+        icon_url: Optional[str] = None,
+        material_icon: Optional[str] = None,
+        button_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build a single clickable item (Button or Chip) with onClick via wrapper.
+
+        Unified builder for both Button and Chip components — they share the
+        same wrapper pattern (get classes, create OnClick, convert to camelCase).
+
+        Args:
+            component_name: "Button" or "Chip"
+            label: Display text (Button.text or Chip.label)
+            url: Callback URL for onClick
+            icon: Known icon name (legacy)
+            icon_url: URL for custom icon image
+            material_icon: Material icon name (preferred)
+            button_type: Button style (only for Button)
+        """
+        is_button = component_name == "Button"
+        wrapper = self._get_wrapper()
+        if wrapper:
+            try:
+                Cls = wrapper.get_cached_class(component_name)
+                OnClick = wrapper.get_cached_class("OnClick")
+                OpenLink = wrapper.get_cached_class("OpenLink")
+
+                if all([Cls, OnClick, OpenLink]):
+                    open_link = OpenLink(url=url)
+                    on_click = OnClick(open_link=open_link)
+                    kwargs = {"text": label} if is_button else {"label": label}
+                    instance = Cls(on_click=on_click, **kwargs)
+
+                    if hasattr(instance, "to_dict"):
+                        item_dict = self._convert_to_camel_case(instance.to_dict())
+                        if is_button:
+                            self._apply_button_icon(
+                                item_dict, material_icon, icon, icon_url
+                            )
+                            if button_type:
+                                item_dict["type"] = button_type
+                        return item_dict
+            except Exception as e:
+                logger.debug(f"Wrapper {component_name} build failed: {e}")
+
+        # Fallback to manual dict
+        label_key = "text" if is_button else "label"
+        item = {label_key: label, "onClick": {"openLink": {"url": url}}}
+        if is_button:
+            self._apply_button_icon(item, material_icon, icon, icon_url)
+            if button_type:
+                item["type"] = button_type
+        return item
+
+    @staticmethod
+    def _apply_button_icon(
+        btn: Dict[str, Any],
+        material_icon: Optional[str],
+        icon: Optional[str],
+        icon_url: Optional[str],
+    ) -> None:
+        """Apply the best-available icon to a button dict (mutates in place)."""
+        if material_icon:
+            btn["icon"] = {"materialIcon": {"name": material_icon}}
+        elif icon:
+            btn["icon"] = {"knownIcon": icon}
+        elif icon_url:
+            btn["icon"] = {"iconUrl": icon_url}
+
     def _build_feedback_button_item(
         self,
         text: str,
@@ -2653,85 +2742,32 @@ class SmartCardBuilderV2:
         material_icon: Optional[str] = None,
         button_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Build a single button item with onClick using wrapper.
+        """Build a single button item — delegates to _build_clickable_item."""
+        return self._build_clickable_item(
+            "Button",
+            text,
+            url,
+            icon=icon,
+            icon_url=icon_url,
+            material_icon=material_icon,
+            button_type=button_type,
+        )
 
-        Separates business logic (text, url) from widget structure.
+    def _build_feedback_chip_item(self, label: str, url: str) -> Dict[str, Any]:
+        """Build a single chip item — delegates to _build_clickable_item."""
+        return self._build_clickable_item("Chip", label, url)
 
-        Args:
-            text: Button text label
-            url: Callback URL for onClick
-            icon: Known icon name (e.g., "STAR", "BOOKMARK") - legacy
-            icon_url: URL for custom icon image
-            material_icon: Material icon name (e.g., "thumb_up") - preferred
-            button_type: Button style (OUTLINED, FILLED, FILLED_TONAL, BORDERLESS)
-        """
-        wrapper = self._get_wrapper()
-        if wrapper:
-            try:
-                # Get Button and OnClick classes via cache for fast retrieval
-                Button = wrapper.get_cached_class("Button")
-                OnClick = wrapper.get_cached_class("OnClick")
-                OpenLink = wrapper.get_cached_class("OpenLink")
-
-                if all([Button, OnClick, OpenLink]):
-                    open_link = OpenLink(url=url)
-                    on_click = OnClick(open_link=open_link)
-                    button = Button(text=text, on_click=on_click)
-
-                    if hasattr(button, "to_dict"):
-                        btn_dict = self._convert_to_camel_case(button.to_dict())
-                        # Add icon - prefer materialIcon, fallback to knownIcon/iconUrl
-                        if material_icon:
-                            btn_dict["icon"] = self._build_material_icon(material_icon)
-                        elif icon:
-                            btn_dict["icon"] = {"knownIcon": icon}
-                        elif icon_url:
-                            btn_dict["icon"] = {"iconUrl": icon_url}
-                        # Add button type/style
-                        if button_type:
-                            btn_dict["type"] = button_type
-                        return btn_dict
-            except Exception as e:
-                logger.debug(f"Wrapper button build failed: {e}")
-
-        # Fallback to manual dict
-        btn = {"text": text, "onClick": {"openLink": {"url": url}}}
-        if material_icon:
-            btn["icon"] = {"materialIcon": {"name": material_icon}}
-        elif icon:
-            btn["icon"] = {"knownIcon": icon}
-        elif icon_url:
-            btn["icon"] = {"iconUrl": icon_url}
-        if button_type:
-            btn["type"] = button_type
-        return btn
-
-    def _build_feedback_chip_item(
-        self,
-        label: str,
-        url: str,
-    ) -> Dict[str, Any]:
-        """Build a single chip item with onClick using wrapper."""
-        wrapper = self._get_wrapper()
-        if wrapper:
-            try:
-                # Get Chip and OnClick classes via cache for fast retrieval
-                Chip = wrapper.get_cached_class("Chip")
-                OnClick = wrapper.get_cached_class("OnClick")
-                OpenLink = wrapper.get_cached_class("OpenLink")
-
-                if all([Chip, OnClick, OpenLink]):
-                    open_link = OpenLink(url=url)
-                    on_click = OnClick(open_link=open_link)
-                    chip = Chip(label=label, on_click=on_click)
-
-                    if hasattr(chip, "to_dict"):
-                        return self._convert_to_camel_case(chip.to_dict())
-            except Exception as e:
-                logger.debug(f"Wrapper chip build failed: {e}")
-
-        # Fallback
-        return {"label": label, "onClick": {"openLink": {"url": url}}}
+    @staticmethod
+    def _resolve_config_icon(
+        config: Dict, static_key: Optional[str], source_key: str
+    ) -> Optional[str]:
+        """Resolve an icon from a config dict — returns a static value or random choice from a named list."""
+        if source_key and config.get(source_key):
+            icon_list = globals().get(config[source_key], [])
+            return random.choice(icon_list) if icon_list else None
+        if static_key:
+            return config.get(static_key)
+        return None
 
     def _build_clickable_feedback(
         self, handler_type: str, card_id: str, feedback_type: str
@@ -2767,25 +2803,15 @@ class SmartCardBuilderV2:
             pos_url = self._make_callback_url(card_id, "positive", feedback_type)
             neg_url = self._make_callback_url(card_id, "negative", feedback_type)
 
-            # Determine icons
-            pos_icon = config.get("pos_icon")
-            neg_icon = config.get("neg_icon")
-            pos_icon_url = None
-            neg_icon_url = None
-
-            if config.get("pos_icon_source"):
-                # Random icon from list
-                icon_list = globals().get(config["pos_icon_source"], [])
-                pos_icon = random.choice(icon_list) if icon_list else None
-            if config.get("neg_icon_source"):
-                icon_list = globals().get(config["neg_icon_source"], [])
-                neg_icon = random.choice(icon_list) if icon_list else None
-            if config.get("pos_icon_url_source"):
-                url_list = globals().get(config["pos_icon_url_source"], [])
-                pos_icon_url = random.choice(url_list) if url_list else None
-            if config.get("neg_icon_url_source"):
-                url_list = globals().get(config["neg_icon_url_source"], [])
-                neg_icon_url = random.choice(url_list) if url_list else None
+            # Resolve icons from config (static value or random from named list)
+            pos_icon = self._resolve_config_icon(config, "pos_icon", "pos_icon_source")
+            neg_icon = self._resolve_config_icon(config, "neg_icon", "neg_icon_source")
+            pos_icon_url = self._resolve_config_icon(
+                config, None, "pos_icon_url_source"
+            )
+            neg_icon_url = self._resolve_config_icon(
+                config, None, "neg_icon_url_source"
+            )
 
             if use_chips:
                 items = [
@@ -2858,18 +2884,18 @@ class SmartCardBuilderV2:
     def _dual_decorated_with_button(
         self, text: str, card_id: str, feedback_type: str, **_kwargs
     ) -> List[Dict]:
-        """Decorated text with inline button + separate negative button - uses wrapper.
+        """Decorated text with inline positive button + inline negative button.
 
-        Uses Material Icons for visual variety and consistency.
+        Uses short icon-only labels for inline buttons to avoid truncation.
+        Both buttons are placed in the decoratedText.button slot (positive) and
+        a compact ButtonList (both pos + neg) to avoid orphaned single-button rows.
         """
-        pos_label = random.choice(POSITIVE_LABELS)
-        neg_label = random.choice(NEGATIVE_LABELS)
         pos_url = self._make_callback_url(card_id, "positive", feedback_type)
         neg_url = self._make_callback_url(card_id, "negative", feedback_type)
         icon_name = random.choice(FEEDBACK_MATERIAL_ICONS)
         btn_type = random.choice(BUTTON_TYPES)
 
-        # Build decorated text with inline button using wrapper
+        # Build decorated text with short inline positive button
         decorated_widget = self._build_feedback_widget(
             "DecoratedText", {"text": text, "wrap_text": True}
         )
@@ -2877,15 +2903,17 @@ class SmartCardBuilderV2:
             decorated_widget["decoratedText"]["startIcon"] = self._build_start_icon(
                 icon_name
             )
+            # Use short label for inline button — long labels get truncated
             decorated_widget["decoratedText"]["button"] = (
-                self._build_feedback_button_item(
-                    pos_label, pos_url, button_type=btn_type
-                )
+                self._build_feedback_button_item("👍", pos_url, button_type=btn_type)
             )
 
-        # Build separate negative button list using wrapper
+        # Build compact ButtonList with both buttons (avoids orphaned single-button row)
+        pos_button = self._build_feedback_button_item(
+            "👍 Yes", pos_url, button_type=btn_type
+        )
         neg_button = self._build_feedback_button_item(
-            neg_label, neg_url, button_type=btn_type
+            "👎 No", neg_url, button_type=btn_type
         )
         wrapper = self._get_wrapper()
         button_list_widget = self._build_component(
@@ -2894,11 +2922,10 @@ class SmartCardBuilderV2:
             wrapper=wrapper,
             wrap_with_key=True,
         )
-        # Fallback if wrapper build fails or need to insert button
         if button_list_widget and "buttonList" in button_list_widget:
-            button_list_widget["buttonList"]["buttons"] = [neg_button]
+            button_list_widget["buttonList"]["buttons"] = [pos_button, neg_button]
         else:
-            button_list_widget = {"buttonList": {"buttons": [neg_button]}}
+            button_list_widget = {"buttonList": {"buttons": [pos_button, neg_button]}}
 
         return [decorated_widget, button_list_widget]
 
@@ -2910,20 +2937,19 @@ class SmartCardBuilderV2:
 
         Uses DecoratedText's built-in button property for maximum compactness.
         Only shows positive button inline - negative is implied by not clicking.
+        Uses short label to avoid truncation in the inline button slot.
         """
-        pos_label = random.choice(POSITIVE_LABELS)
         pos_url = self._make_callback_url(card_id, "positive", feedback_type)
         btn_type = random.choice(BUTTON_TYPES)
 
-        # Build decorated text with inline button
+        # Build decorated text with short inline button
         decorated_widget = self._build_feedback_widget(
             "DecoratedText", {"text": text, "wrap_text": True}
         )
         if decorated_widget and "decoratedText" in decorated_widget:
+            # Use short label — decoratedText inline buttons have very limited width
             decorated_widget["decoratedText"]["button"] = (
-                self._build_feedback_button_item(
-                    pos_label, pos_url, button_type=btn_type
-                )
+                self._build_feedback_button_item("👍", pos_url, button_type=btn_type)
             )
 
         return [decorated_widget]
@@ -3175,7 +3201,10 @@ class SmartCardBuilderV2:
 
         logger.debug(f"🎲 Feedback assembly: {assembly_metadata}")
 
-        # Build section with collapsible style and custom expand/collapse buttons
+        # Build section with collapsible style and custom expand/collapse buttons.
+        # NOTE: collapseControl buttons are structural UI chrome — NOT interactive
+        # card widgets. They don't use onClick; the Chat client manages the toggle.
+        # Using _build_material_icon for icon dicts.
         section = {
             "widgets": widgets,
             "collapsible": True,
@@ -3184,16 +3213,12 @@ class SmartCardBuilderV2:
                 "horizontalAlignment": "START",
                 "expandButton": {
                     "text": "Share Card Feedback",
-                    "icon": {
-                        "materialIcon": {"name": "arrow_cool_down"},
-                    },
+                    "icon": self._build_material_icon("arrow_cool_down"),
                     "type": "BORDERLESS",
                 },
                 "collapseButton": {
                     "text": "Hide Feedback",
-                    "icon": {
-                        "materialIcon": {"name": "keyboard_double_arrow_up"},
-                    },
+                    "icon": self._build_material_icon("keyboard_double_arrow_up"),
                     "type": "BORDERLESS",
                 },
             },
@@ -3216,6 +3241,7 @@ class SmartCardBuilderV2:
         image_url: Optional[str] = None,
         text: Optional[str] = None,
         items: Optional[List[Dict]] = None,
+        grid_items: Optional[List[Dict]] = None,
         cards: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         """
@@ -3334,6 +3360,7 @@ class SmartCardBuilderV2:
                 image_url=image_url,
                 text=styled_text,
                 items=styled_items,
+                grid_items=grid_items,
                 cards=cards,
             )
 

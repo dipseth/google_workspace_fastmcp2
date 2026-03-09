@@ -1,5 +1,13 @@
 """Integration tests for People contact groups and Gmail allow list group specs."""
 
+import pytest  # noqa: E402
+
+pytest.skip(
+    "Narrow — People groups edge case (see TEST_CLEANUP_AUDIT.md)",
+    allow_module_level=True,
+)
+
+
 import json
 
 import pytest

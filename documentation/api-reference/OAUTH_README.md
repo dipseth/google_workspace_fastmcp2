@@ -66,6 +66,8 @@ graph TB
 | [`context.py`](auth/context.py:1) | **FastMCP context management** | Session persistence, multi-user state |
 | [`session_bridge.py`](auth/session_bridge.py:1) | **Context-to-tool bridging** | Legacy tool compatibility, service caching |
 | [`unified_session.py`](auth/unified_session.py:1) | **Cross-flow session state** | GoogleProvider + legacy OAuth unified state |
+| [`types.py`](auth/types.py:1) | **Auth enums and types** | `AuthProvenance`, `SessionKey` enums for type-safe session tracking |
+| [`user_api_keys.py`](auth/user_api_keys.py:1) | **Per-user API key management** | Key generation, hash-only storage, account linking, timing-safe lookup |
 | [`mcp_auth_middleware.py`](auth/mcp_auth_middleware.py:1) | **MCP spec compliance** | WWW-Authenticate headers, OAuth discovery triggers |
 
 ### **Utility & Compatibility**
@@ -86,7 +88,9 @@ graph TB
 | **Access Token** | 1 hour | ✅ Yes | Memory/Encrypted file | AES-256 |
 | **Refresh Token** | Never expires* | ❌ No | Memory/Encrypted file | AES-256 |
 | **Encrypted Credentials** | Never expires | ❌ N/A | `credentials/*.enc` | AES-256 |
-| **Encryption Key** | Permanent | ❌ No | `credentials/.auth_encryption_key` | Hidden file (0o600) |
+| **Encryption Key** | Permanent | ❌ No | Derived from `MCP_API_KEY` or `.auth_encryption_key` | HKDF-SHA256 crypto-binding |
+| **Per-User API Key** | Until revoked | ❌ No | `.user_api_keys.json` (SHA-256 hash only) | Timing-safe lookup (0o600) |
+| **Account Links** | Until unlinked | ❌ No | `.user_api_key_links.json` | Bidirectional, audited |
 | **Session Context** | 60 min inactive | ❌ No | Memory only | Session isolation |
 | **OAuth Proxy Clients** | 24 hours | ❌ No | Memory only | Temporary mapping |
 | **JWT Development Tokens** | 1 hour (configurable) | ❌ No | Generated on demand | Development only |
@@ -94,11 +98,11 @@ graph TB
 *_Refresh tokens remain valid until explicitly revoked by user or Google_
 
 ### 🔐 **Encryption Key Management**
-- **Auto-Generation:** First use creates 32-byte Fernet key
-- **Location:** `credentials/.auth_encryption_key` (hidden file)
+- **Crypto-Binding (preferred):** When `MCP_API_KEY` is set, encryption key is derived via HKDF-SHA256 — credentials become undecryptable without the API key
+- **Auto-Generation (fallback):** If no `MCP_API_KEY`, first use creates 32-byte Fernet key in `.auth_encryption_key`
+- **Legacy Migration:** Old auto-generated keys kept as `_legacy_fernet`; credentials transparently re-encrypted on next save
 - **Permissions:** 0o600 (owner read/write only)
-- **Machine-Specific:** Keys tied to server instance
-- **Backup Strategy:** Manual backup recommended for production
+- **Backup Strategy:** For crypto-bound mode, back up `MCP_API_KEY`; for fallback mode, back up `.auth_encryption_key`
 
 ---
 
@@ -235,6 +239,8 @@ OAuth Start → Google Authorization → Encrypted Storage → Auto-refresh ✨
 - **Secondary Accounts:** File-based OAuth ([`dual_auth_bridge.py:62-70`](auth/dual_auth_bridge.py:62))
 - **Credential Bridging:** Cross-flow credential sharing ([`dual_auth_bridge.py:112-154`](auth/dual_auth_bridge.py:112))
 - **Account Switching:** Seamless multi-account operation ([`dual_auth_bridge.py:287-311`](auth/dual_auth_bridge.py:287))
+- **API Key Ownership:** `register_api_key_account()` tracks emails owned by API key sessions
+- **Identity-Only Detection:** `needs_scope_upgrade()` / `is_identity_only()` for GoogleProvider users without full API credentials
 
 ### **5. Service Manager - Universal Service Factory**
 **File:** [`auth/service_manager.py`](auth/service_manager.py:1)
@@ -545,11 +551,14 @@ LEGACY_COMPAT_MODE=false  # Disable after migration complete
 ### **Security Checklist**
 - ✅ Enable HTTPS with valid certificates
 - ✅ Use FILE_ENCRYPTED or MEMORY_ONLY storage
-- ✅ Backup encryption keys securely (`credentials/.auth_encryption_key`)
+- ✅ Set `MCP_API_KEY` for crypto-bound encryption (preferred over auto-generated key)
+- ✅ Prefer per-user API keys over shared `MCP_API_KEY` for multi-user deployments
+- ✅ Backup encryption keys securely (`MCP_API_KEY` or `.auth_encryption_key`)
 - ✅ Configure appropriate session timeouts
 - ✅ Restrict OAuth redirect URIs in Google Console
-- ✅ Monitor credential refresh failures
+- ✅ Monitor credential refresh failures and credential isolation audit logs
 - ✅ Regularly cleanup expired sessions and proxy clients
+- ✅ Review account links periodically (`revoke_user_key()` for compromised keys)
 
 ---
 
@@ -616,14 +625,18 @@ gmail = services["gmail"]
 - **Key Generation:** Automatic on first use ([`middleware.py:524`](auth/middleware.py:524))
 
 ### **Credential Isolation**
-- **Per-User Encryption:** Separate encrypted files
-- **Memory Isolation:** Session-based separation
+- **Per-User Encryption:** Separate encrypted files, crypto-bound to `MCP_API_KEY`
+- **Auth Provenance Guard:** API key sessions blocked from accessing other users' file credentials
+- **Per-User Key Access Control:** Each key limited to owner email + explicitly linked accounts
+- **Memory Isolation:** Session-based separation with type-safe `SessionKey` enum
 - **Proxy Security:** Real credentials never exposed to external clients
+- **Sensitive Data Stripping:** Auth metadata (scopes, linked accounts, key bindings) removed from Qdrant embeddings
 
 ### **Token Management**
 - **Automatic Refresh:** Expired access tokens refreshed automatically
 - **Refresh Token Security:** Encrypted storage, never logged
 - **Token Validation:** Comprehensive scope and expiry checking
+- **HTML Escaping:** All user data in OAuth pages escaped via `html.escape()` to prevent XSS
 
 ---
 

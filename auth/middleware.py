@@ -5,6 +5,7 @@ from config.enhanced_logging import setup_logger
 logger = setup_logger()
 import base64
 import json
+import os
 import secrets
 from datetime import datetime
 from enum import Enum
@@ -36,6 +37,7 @@ from .context import (
 )
 from .dual_auth_bridge import get_dual_auth_bridge
 from .service_manager import GoogleServiceError, get_google_service
+from .types import AuthProvenance, SessionKey
 
 logger = setup_logger()
 
@@ -246,6 +248,11 @@ class AuthMiddleware(Middleware):
         user_email = None
         logger.debug(f"🔍 Starting user extraction for tool {tool_name}")
 
+        # Detect auth provenance (api_key vs oauth) and store in session
+        auth_provenance = self._detect_auth_provenance()
+        if auth_provenance and session_id:
+            store_session_data(session_id, SessionKey.AUTH_PROVENANCE, auth_provenance)
+
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
         if user_email:
@@ -256,7 +263,7 @@ class AuthMiddleware(Middleware):
             self._dual_auth_bridge.set_primary_account(user_email)
             # Store in session for future use
             if session_id:
-                store_session_data(session_id, "user_email", user_email)
+                store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
             # Set context immediately
             await set_user_email_context(user_email)
             # Auto-inject into tool arguments if missing
@@ -273,7 +280,7 @@ class AuthMiddleware(Middleware):
                 )
                 # Store in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
                 # Set context immediately
                 await set_user_email_context(user_email)
                 # Auto-inject into tool arguments if missing
@@ -285,7 +292,7 @@ class AuthMiddleware(Middleware):
 
         # LEGACY AUTH: Fallback to session data (OAuth authenticated)
         if not user_email and session_id:
-            user_email = get_session_data(session_id, "user_email")
+            user_email = get_session_data(session_id, SessionKey.USER_EMAIL)
             if user_email:
                 logger.debug(
                     f"✅ Retrieved user email from session storage for tool {tool_name}: {user_email}"
@@ -300,7 +307,11 @@ class AuthMiddleware(Middleware):
                 )
 
         # OAUTH FILE FALLBACK: Check for stored OAuth authentication data
-        if not user_email:
+        # Skip for API key / per-user key sessions — they must not inherit another user's identity
+        if not user_email and auth_provenance not in (
+            AuthProvenance.API_KEY,
+            AuthProvenance.USER_API_KEY,
+        ):
             user_email = self._load_oauth_authentication_data()
             if user_email:
                 logger.debug(
@@ -310,7 +321,7 @@ class AuthMiddleware(Middleware):
                 self._dual_auth_bridge.add_secondary_account(user_email)
                 # Store in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
                 # Set context immediately
                 await set_user_email_context(user_email)
                 # Auto-inject into tool arguments if missing
@@ -333,11 +344,196 @@ class AuthMiddleware(Middleware):
                     self._dual_auth_bridge.add_secondary_account(user_email)
                 # Store it in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
             else:
                 logger.debug(
                     f"🔍 DEBUG: No user email found in tool arguments for tool {tool_name}"
                 )
+
+        # CREDENTIAL ISOLATION: Shared API key sessions can only use credentials
+        # they created via start_google_auth in this session.
+        # Ownership is tracked per-session (not global) to prevent cross-session leakage.
+        if auth_provenance == AuthProvenance.API_KEY:
+            # CodeMode meta-tools (tags, search, get_schema, execute) are transport
+            # wrappers — they don't access Google credentials directly, so exempt
+            # them from credential isolation.  The *inner* tool calls they dispatch
+            # will go through on_call_tool again with the real tool_name.
+            if tool_name in self._CODE_MODE_TOOLS:
+                logger.debug(
+                    f"🔓 Skipping credential isolation for CodeMode meta-tool: {tool_name}"
+                )
+            else:
+                # Shared API key has no email claim — check tool arguments for target email
+                tool_args = getattr(context.message, "arguments", {}) or {}
+                target_email = (
+                    (tool_args.get("user_google_email") or "").lower().strip()
+                )
+
+                # Also check the resolved user_email (from session data or fallback)
+                effective_email = target_email or (user_email or "").lower().strip()
+
+                if effective_email:
+                    # Load per-session owned accounts from session storage
+                    owned_raw = (
+                        get_session_data(session_id, SessionKey.API_KEY_OWNED_ACCOUNTS)
+                        if session_id
+                        else None
+                    )
+                    owned_accounts = set(owned_raw) if owned_raw else set()
+
+                    if tool_name == "start_google_auth":
+                        # Register this email as owned by THIS session
+                        owned_accounts.add(effective_email)
+                        if session_id:
+                            store_session_data(
+                                session_id,
+                                SessionKey.API_KEY_OWNED_ACCOUNTS,
+                                list(owned_accounts),
+                            )
+                        logger.info(
+                            f"🔑 Registered API key owned account (session-scoped): {effective_email}"
+                        )
+                    elif effective_email not in owned_accounts:
+                        from .audit import log_security_event
+
+                        log_security_event(
+                            "api_key_credential_access_blocked",
+                            user_email=effective_email,
+                            details={
+                                "tool_name": tool_name,
+                                "session_id": session_id,
+                                "reason": "API key session attempted to use credentials it did not create",
+                            },
+                        )
+                        raise ValueError(
+                            f"API key sessions can only access credentials they created. "
+                            f"No credentials found for {effective_email} in this API key session.\n\n"
+                            f"Run `start_google_auth` with your email to create credentials."
+                        )
+
+        # SEED SESSION_AUTHED_EMAILS: Ensure the session's authenticated email
+        # (from OAuth, JWT, API key, etc.) is recorded so that subsequent
+        # start_google_auth calls for OTHER emails can discover it and link.
+        if session_id and user_email:
+            _existing_authed = set(
+                get_session_data(session_id, SessionKey.SESSION_AUTHED_EMAILS) or []
+            )
+            _norm_email = user_email.lower().strip()
+            if _norm_email not in _existing_authed:
+                _existing_authed.add(_norm_email)
+                store_session_data(
+                    session_id,
+                    SessionKey.SESSION_AUTHED_EMAILS,
+                    sorted(_existing_authed),
+                )
+                logger.debug(
+                    f"🔗 Seeded SESSION_AUTHED_EMAILS with {_norm_email} "
+                    f"(now {len(_existing_authed)} email(s))"
+                )
+
+        # SESSION-LEVEL ACCOUNT LINKING: When start_google_auth is called for
+        # a new email, create pending links to ALL previously-authenticated
+        # emails in this session.  This works for every auth type (OAuth,
+        # API key, per-user key) — not just per-user key sessions.
+        if tool_name == "start_google_auth" and session_id:
+            from auth.user_api_keys import request_link
+
+            tool_args = getattr(context.message, "arguments", {}) or {}
+            target_email = (tool_args.get("user_google_email") or "").lower().strip()
+
+            if target_email:
+                # Load previously authenticated emails in this session
+                prev_raw = (
+                    get_session_data(session_id, SessionKey.SESSION_AUTHED_EMAILS) or []
+                )
+                prev_emails = set(prev_raw)
+
+                # Determine link method and enforce time window for API key sessions.
+                # API key sessions can only create links within 30 minutes of
+                # key creation; after that, OAuth is required.
+                if auth_provenance == AuthProvenance.OAUTH:
+                    _link_method = "oauth"
+                    _link_allowed = True
+                elif auth_provenance == AuthProvenance.USER_API_KEY:
+                    _link_method = "api_key"
+                    from auth.user_api_keys import is_key_within_link_window
+
+                    _link_allowed = is_key_within_link_window(user_email or "")
+                    if not _link_allowed:
+                        logger.warning(
+                            f"🔗 API key link window expired for {user_email} → {target_email}. "
+                            f"OAuth required to establish new links."
+                        )
+                else:
+                    _link_method = "session"
+                    _link_allowed = True
+
+                # Queue pending links to every prior email in this session
+                for prev in prev_emails:
+                    if prev != target_email and _link_allowed:
+                        request_link(prev, target_email, method=_link_method)
+                        logger.info(
+                            f"🔗 {_link_method} link: {prev} → {target_email} (deferred until OAuth completes)"
+                        )
+
+                # Record this email in the session's authenticated set
+                prev_emails.add(target_email)
+                store_session_data(
+                    session_id, SessionKey.SESSION_AUTHED_EMAILS, sorted(prev_emails)
+                )
+
+        # PER-USER API KEY: can access bound email + linked accounts.
+        if auth_provenance == AuthProvenance.USER_API_KEY:
+            from auth.user_api_keys import get_accessible_emails
+
+            # Stash the bearer token in session for per-user credential decryption.
+            # The token IS the per-user API key — needed to derive the Fernet key
+            # for encrypted credential files (split-key model).
+            try:
+                from fastmcp.server.dependencies import get_access_token as _gat
+
+                _at = _gat()
+                if _at and hasattr(_at, "token") and session_id:
+                    store_session_data(
+                        session_id, SessionKey.PER_USER_ENCRYPTION_KEY, _at.token
+                    )
+            except Exception:
+                pass
+
+            key_email = user_email  # From JWT claims (always the key-bound email)
+
+            # Check tool arguments for a different target email
+            tool_args = getattr(context.message, "arguments", {}) or {}
+            target_email = tool_args.get("user_google_email", "")
+            if target_email:
+                target_email = target_email.lower().strip()
+
+            if (
+                tool_name != "start_google_auth"
+                and target_email
+                and key_email
+                and target_email != key_email.lower()
+            ):
+                # Accessing a different account — check if linked
+                accessible = get_accessible_emails(key_email)
+                if target_email not in {e.lower() for e in accessible}:
+                    from .audit import log_security_event
+
+                    log_security_event(
+                        "user_api_key_access_blocked",
+                        user_email=target_email,
+                        details={
+                            "tool_name": tool_name,
+                            "key_email": key_email,
+                            "accessible_emails": sorted(accessible),
+                            "reason": "Per-user key attempted to access unlinked account",
+                        },
+                    )
+                    raise ValueError(
+                        f"Your API key ({key_email}) does not have access to {target_email}.\n"
+                        f"Accessible accounts: {', '.join(sorted(accessible))}\n\n"
+                        f"Run `start_google_auth` with {target_email} to link it to your key."
+                    )
 
         # Set user email context if found
         if user_email:
@@ -412,7 +608,7 @@ class AuthMiddleware(Middleware):
             )
             # Store in session for future use
             if session_id:
-                store_session_data(session_id, "user_email", user_email)
+                store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
             # Set context immediately
             await set_user_email_context(user_email)
         else:
@@ -429,7 +625,7 @@ class AuthMiddleware(Middleware):
                 )
                 # Store in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
                 # Set context immediately
                 await set_user_email_context(user_email)
             else:
@@ -439,7 +635,7 @@ class AuthMiddleware(Middleware):
 
         # LEGACY AUTH: Fallback to session data (OAuth authenticated)
         if not user_email and session_id:
-            user_email = get_session_data(session_id, "user_email")
+            user_email = get_session_data(session_id, SessionKey.USER_EMAIL)
             if user_email:
                 logger.debug(
                     f"✅ Retrieved user email from session storage for resource {resource_uri}: {user_email}"
@@ -452,7 +648,16 @@ class AuthMiddleware(Middleware):
                 )
 
         # OAUTH FILE FALLBACK: Check for stored OAuth authentication data
-        if not user_email:
+        # Skip for API key / per-user key sessions — they must not inherit another user's identity
+        auth_provenance = (
+            get_session_data(session_id, SessionKey.AUTH_PROVENANCE)
+            if session_id
+            else None
+        )
+        if not user_email and auth_provenance not in (
+            AuthProvenance.API_KEY,
+            AuthProvenance.USER_API_KEY,
+        ):
             user_email = self._load_oauth_authentication_data()
             if user_email:
                 logger.debug(
@@ -460,7 +665,7 @@ class AuthMiddleware(Middleware):
                 )
                 # Store in session for future use
                 if session_id:
-                    store_session_data(session_id, "user_email", user_email)
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
                 # Set context immediately
                 await set_user_email_context(user_email)
             else:
@@ -588,39 +793,157 @@ class AuthMiddleware(Middleware):
         self._service_injection_enabled = enabled
         logger.debug(f"Service injection {'enabled' if enabled else 'disabled'}")
 
+    @staticmethod
+    def _derive_fernet_key(secret: str) -> bytes:
+        """Derive a Fernet-compatible key from a secret string using HKDF.
+
+        Uses HKDF-SHA256 to derive a 32-byte key from the secret, then
+        base64url-encodes it for Fernet compatibility.
+
+        Args:
+            secret: The secret to derive from (e.g., MCP_API_KEY).
+
+        Returns:
+            Base64url-encoded 32-byte key suitable for Fernet.
+        """
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b"mcp-google-workspace-v1",
+            info=b"credential-encryption",
+        )
+        return base64.urlsafe_b64encode(hkdf.derive(secret.encode()))
+
+    def _get_server_secret(self) -> bytes:
+        """Return the server-side secret used as HKDF salt for per-user encryption.
+
+        This is the `.auth_encryption_key` file content.  If the file doesn't
+        exist yet (fresh install), one is generated.  The secret never leaves
+        the server, ensuring that per-user API keys alone cannot decrypt
+        credential files.
+        """
+        key_path = Path(settings.credentials_dir) / ".auth_encryption_key"
+        if key_path.exists():
+            with open(key_path, "rb") as f:
+                return f.read()
+        # Generate and persist a new server secret
+        from cryptography.fernet import Fernet
+
+        key_bytes = Fernet.generate_key()
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(key_path, "wb") as f:
+            f.write(key_bytes)
+        try:
+            key_path.chmod(0o600)
+        except OSError:
+            logger.warning(
+                "Could not set restrictive permissions on server secret "
+                f"(.auth_encryption_key) — file may be world-readable"
+            )
+        return key_bytes
+
+    def derive_per_user_fernet_key(self, per_user_key: str) -> bytes:
+        """Derive a Fernet key from a per-user API key + server secret.
+
+        Split-key model: decryption requires BOTH the per-user key (held by
+        the user, shown once) AND the server secret (on disk, never exposed).
+        Neither half alone is sufficient.
+
+        Args:
+            per_user_key: The plaintext per-user API key (bearer token).
+
+        Returns:
+            Base64url-encoded 32-byte Fernet key.
+        """
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+        server_secret = self._get_server_secret()
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=server_secret,
+            info=b"per-user-credential-encryption-v1",
+        )
+        return base64.urlsafe_b64encode(hkdf.derive(per_user_key.encode()))
+
     def _setup_encryption(self):
-        """Setup encryption for secure credential storage."""
+        """Setup encryption for secure credential storage.
+
+        Key derivation priority:
+        1. Explicit ``encryption_key`` parameter (base64-encoded)
+        2. Derived from ``MCP_API_KEY`` env var via HKDF — crypto-binds
+           credential files to the API secret so they are undecryptable
+           without it.
+        3. Auto-generated random server key stored in ``.auth_encryption_key``
+           (fallback when no API key is configured).
+
+        When switching from server key → MCP_API_KEY derivation, the old
+        server key is kept as ``_legacy_fernet`` so existing credential
+        files can still be decrypted (and transparently re-encrypted on
+        next save).
+        """
         try:
             if self._encryption_key:
                 # Use provided key
                 key_bytes = base64.urlsafe_b64decode(self._encryption_key.encode())
+                self._key_source = "explicit"
             else:
-                # Generate or load encryption key
-                key_path = Path(settings.credentials_dir) / ".auth_encryption_key"
-
-                if key_path.exists():
-                    with open(key_path, "rb") as f:
-                        key_bytes = f.read()
+                # Priority: MCP_API_KEY derivation > auto-generated server key
+                mcp_api_key = os.getenv("MCP_API_KEY", "")
+                if mcp_api_key:
+                    key_bytes = self._derive_fernet_key(mcp_api_key)
+                    self._key_source = "mcp_api_key"
+                    logger.info(
+                        "🔐 Encryption key derived from MCP_API_KEY (crypto-bound)"
+                    )
                 else:
-                    # Generate new key
-                    key_bytes = base64.urlsafe_b64encode(secrets.token_bytes(32))
-                    key_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Fallback: auto-generated random server key
+                    key_path = Path(settings.credentials_dir) / ".auth_encryption_key"
 
-                    with open(key_path, "wb") as f:
-                        f.write(key_bytes)
+                    if key_path.exists():
+                        with open(key_path, "rb") as f:
+                            key_bytes = f.read()
+                    else:
+                        # Generate new key
+                        key_bytes = base64.urlsafe_b64encode(secrets.token_bytes(32))
+                        key_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    # Set restrictive permissions
-                    try:
-                        key_path.chmod(0o600)
-                    except (OSError, AttributeError):
-                        logger.warning(
-                            "Could not set restrictive permissions on encryption key"
-                        )
+                        with open(key_path, "wb") as f:
+                            f.write(key_bytes)
+
+                        # Set restrictive permissions
+                        try:
+                            key_path.chmod(0o600)
+                        except (OSError, AttributeError):
+                            logger.warning(
+                                "Could not set restrictive permissions on encryption key"
+                            )
+                    self._key_source = "server_key"
 
             # Import here to avoid dependency issues if cryptography not installed
             from cryptography.fernet import Fernet
 
             self._fernet = Fernet(key_bytes)
+
+            # Migration: keep legacy server key for decrypting old credentials
+            # when we've switched to MCP_API_KEY-derived encryption.
+            if self._key_source == "mcp_api_key":
+                legacy_path = Path(settings.credentials_dir) / ".auth_encryption_key"
+                if legacy_path.exists():
+                    try:
+                        with open(legacy_path, "rb") as f:
+                            legacy_key = f.read()
+                        self._legacy_fernet = Fernet(legacy_key)
+                        logger.debug(
+                            "🔄 Legacy server key loaded for credential migration"
+                        )
+                    except Exception:
+                        pass
+
             logger.debug("✅ Encryption initialized for secure credential storage")
 
         except ImportError:
@@ -656,13 +979,32 @@ class AuthMiddleware(Middleware):
         return base64.urlsafe_b64encode(encrypted_data).decode()
 
     def _decrypt_credentials(self, encrypted_data: str) -> Credentials:
-        """Decrypt and reconstruct credentials."""
+        """Decrypt and reconstruct credentials.
+
+        Tries the primary Fernet key first.  If that fails and a legacy
+        server key exists (migration from random key → MCP_API_KEY-derived
+        key), retries with the legacy key so existing credential files are
+        not orphaned.
+        """
         if not hasattr(self, "_fernet"):
             raise RuntimeError("Encryption not initialized")
 
         try:
             encrypted_bytes = base64.urlsafe_b64decode(encrypted_data.encode())
-            decrypted_data = self._fernet.decrypt(encrypted_bytes)
+
+            try:
+                decrypted_data = self._fernet.decrypt(encrypted_bytes)
+            except Exception:
+                # Migration fallback: try legacy server key
+                if hasattr(self, "_legacy_fernet"):
+                    logger.info(
+                        "🔄 Primary key failed — decrypting with legacy server key "
+                        "(credentials will be re-encrypted with derived key on next save)"
+                    )
+                    decrypted_data = self._legacy_fernet.decrypt(encrypted_bytes)
+                else:
+                    raise
+
             creds_data = json.loads(decrypted_data.decode())
 
             credentials = Credentials(
@@ -691,15 +1033,27 @@ class AuthMiddleware(Middleware):
             logger.error(f"Failed to decrypt credentials: {e}")
             raise
 
-    def save_credentials(self, user_email: str, credentials: Credentials) -> None:
+    def save_credentials(
+        self,
+        user_email: str,
+        credentials: Credentials,
+        per_user_key: Optional[str] = None,
+        additional_keys: Optional[list] = None,
+    ) -> None:
         """
         Save credentials using the configured storage mode.
 
-        Email addresses are normalized to lowercase for consistent storage.
+        When ``per_user_key`` is provided the credential file is encrypted
+        with a split-key derived from the per-user API key + server secret.
+        This makes the file undecryptable without the user presenting their
+        bearer token at runtime.
 
         Args:
             user_email: User's email address (will be normalized to lowercase)
             credentials: Google OAuth credentials
+            per_user_key: Optional plaintext per-user API key for per-user encryption
+            additional_keys: Optional list of additional per-user keys to add as
+                recipients (for linked accounts)
         """
         # Import normalization function
         from .google_auth import _normalize_email
@@ -729,10 +1083,25 @@ class AuthMiddleware(Middleware):
             )
             creds_path.parent.mkdir(parents=True, exist_ok=True)
 
-            encrypted_data = self._encrypt_credentials(credentials)
-
-            with open(creds_path, "w") as f:
-                f.write(encrypted_data)
+            if per_user_key:
+                # Per-user encryption: multi-recipient split-key model
+                self._save_per_user_encrypted(
+                    creds_path,
+                    credentials,
+                    per_user_key,
+                    additional_keys=additional_keys,
+                )
+                logger.info(
+                    f"🔐 Saved per-user encrypted credentials for {normalized_email}"
+                )
+            else:
+                # Server-wide encryption (legacy / no per-user key available)
+                encrypted_data = self._encrypt_credentials(credentials)
+                with open(creds_path, "w") as f:
+                    f.write(encrypted_data)
+                logger.debug(
+                    f"✅ Saved server-encrypted credentials for {normalized_email}"
+                )
 
             # Set restrictive permissions
             try:
@@ -741,8 +1110,6 @@ class AuthMiddleware(Middleware):
                 logger.warning(
                     "Could not set restrictive permissions on credential file"
                 )
-
-            logger.debug(f"✅ Saved encrypted credentials for {normalized_email}")
 
         elif self._storage_mode == CredentialStorageMode.MEMORY_WITH_BACKUP:
             # Store in memory + encrypted backup with normalized email
@@ -753,10 +1120,17 @@ class AuthMiddleware(Middleware):
             backup_path = Path(settings.credentials_dir) / f"{safe_email}_backup.enc"
             backup_path.parent.mkdir(parents=True, exist_ok=True)
 
-            encrypted_data = self._encrypt_credentials(credentials)
-
-            with open(backup_path, "w") as f:
-                f.write(encrypted_data)
+            if per_user_key:
+                self._save_per_user_encrypted(
+                    backup_path,
+                    credentials,
+                    per_user_key,
+                    additional_keys=additional_keys,
+                )
+            else:
+                encrypted_data = self._encrypt_credentials(credentials)
+                with open(backup_path, "w") as f:
+                    f.write(encrypted_data)
 
             try:
                 backup_path.chmod(0o600)
@@ -767,17 +1141,313 @@ class AuthMiddleware(Middleware):
                 f"✅ Saved credentials in memory + encrypted backup for {normalized_email}"
             )
 
-    def load_credentials(self, user_email: str) -> Optional[Credentials]:
+    @staticmethod
+    def _key_id(per_user_key: str) -> str:
+        """Deterministic identifier for a per-user key (full SHA-256 hex digest).
+
+        Used as the key in the ``recipients`` dict so we can look up the
+        correct wrapped CEK without trying every entry.
+        """
+        import hashlib
+
+        return hashlib.sha256(per_user_key.encode()).hexdigest()
+
+    def _compute_envelope_hmac(self, envelope: dict) -> str:
+        """Compute HMAC-SHA256 over the envelope (excluding the hmac field itself).
+
+        Keyed with the server secret to detect tampering, recipient removal,
+        and downgrade attacks.
+        """
+        import hashlib
+        import hmac as _hmac
+
+        # Build a canonical representation excluding the hmac field
+        hmac_input = {k: v for k, v in envelope.items() if k != "hmac"}
+        payload = json.dumps(hmac_input, sort_keys=True).encode()
+        server_secret = self._get_server_secret()
+        return _hmac.new(server_secret, payload, hashlib.sha256).hexdigest()
+
+    def _verify_envelope_hmac(self, envelope: dict) -> bool:
+        """Verify the envelope's HMAC. Returns True if valid or if no HMAC present (legacy)."""
+        import hmac as _hmac
+
+        stored_hmac = envelope.get("hmac")
+        if not stored_hmac:
+            return True  # Legacy envelope without HMAC — allow for backward compat
+        expected = self._compute_envelope_hmac(envelope)
+        return _hmac.compare_digest(stored_hmac, expected)
+
+    @staticmethod
+    def _zero_bytes(b: bytes) -> None:
+        """Best-effort zeroing of a bytes object in CPython.
+
+        This is not guaranteed by Python but raises the bar against memory
+        inspection attacks on long-running server processes.
+        """
+        try:
+            import ctypes
+
+            ctypes.memset(id(b) + bytes.__basicsize__ - 1, 0, len(b))
+        except Exception:
+            pass  # Non-CPython or restricted environment
+
+    def _save_per_user_encrypted(
+        self,
+        path: Path,
+        credentials: Credentials,
+        per_user_key: str,
+        additional_keys: Optional[list] = None,
+    ) -> None:
+        """Encrypt credentials with a random CEK and wrap for each authorized user.
+
+        Multi-recipient envelope format::
+
+            {
+              "v": 2,
+              "enc": "per_user",
+              "recipients": {
+                "<key_id_A>": "<CEK wrapped for A>",
+                "<key_id_B>": "<CEK wrapped for B>"
+              },
+              "data": "<credentials encrypted with CEK>"
+            }
+
+        Args:
+            path: Where to write the envelope.
+            credentials: Google API credentials to encrypt.
+            per_user_key: The primary owner's plaintext per-user API key.
+            additional_keys: Optional list of additional plaintext per-user keys
+                that should also be able to decrypt (linked accounts).
+        """
+        from cryptography.fernet import Fernet
+
+        # 1. Generate random Content Encryption Key (CEK)
+        cek = Fernet.generate_key()  # 32-byte URL-safe base64
+
+        try:
+            # 2. Encrypt credentials with CEK
+            creds_data = {
+                "token": credentials.token,
+                "refresh_token": credentials.refresh_token,
+                "token_uri": credentials.token_uri,
+                "client_id": credentials.client_id,
+                "client_secret": credentials.client_secret,
+                "scopes": credentials.scopes,
+                "expiry": credentials.expiry.isoformat()
+                if credentials.expiry
+                else None,
+                "encrypted_at": datetime.now().isoformat(),
+            }
+            cek_fernet = Fernet(cek)
+            encrypted_creds = cek_fernet.encrypt(json.dumps(creds_data).encode())
+
+            # 3. Wrap CEK for each authorized user
+            recipients = {}
+            all_keys = [per_user_key] + (additional_keys or [])
+            for key in all_keys:
+                kid = self._key_id(key)
+                wrapper_fernet_key = self.derive_per_user_fernet_key(key)
+                wrapper = Fernet(wrapper_fernet_key)
+                wrapped_cek = wrapper.encrypt(cek)
+                recipients[kid] = base64.urlsafe_b64encode(wrapped_cek).decode()
+
+            # 4. Build envelope with integrity HMAC
+            envelope = {
+                "v": 2,
+                "enc": "per_user",
+                "recipients": recipients,
+                "data": base64.urlsafe_b64encode(encrypted_creds).decode(),
+            }
+            envelope["hmac"] = self._compute_envelope_hmac(envelope)
+
+            with open(path, "w") as f:
+                json.dump(envelope, f)
+        finally:
+            # Best-effort zeroing of CEK in memory
+            self._zero_bytes(cek)
+
+        logger.debug(
+            f"🔐 Wrote multi-recipient envelope to {path.name} "
+            f"({len(recipients)} recipient(s))"
+        )
+
+    def _load_per_user_encrypted(
+        self, envelope: dict, per_user_key: str
+    ) -> Credentials:
+        """Decrypt a per-user encrypted credential envelope.
+
+        Supports both legacy single-recipient (no ``recipients`` key) and
+        multi-recipient (with ``recipients`` dict) formats.
+        """
+        from cryptography.fernet import Fernet
+
+        # Verify envelope integrity before processing
+        if not self._verify_envelope_hmac(envelope):
+            raise ValueError("Envelope HMAC verification failed — possible tampering")
+
+        fernet_key = self.derive_per_user_fernet_key(per_user_key)
+        cek = None
+
+        try:
+            if "recipients" in envelope:
+                # Multi-recipient: unwrap CEK first, then decrypt credentials
+                kid = self._key_id(per_user_key)
+                wrapped_cek_b64 = envelope["recipients"].get(kid)
+                if not wrapped_cek_b64:
+                    raise ValueError(
+                        f"No recipient entry for this key. "
+                        f"{len(envelope['recipients'])} recipient(s) in envelope."
+                    )
+                wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
+                cek = Fernet(fernet_key).decrypt(wrapped_cek)
+                # CEK is itself a Fernet key — use it to decrypt credentials
+                encrypted_creds = base64.urlsafe_b64decode(envelope["data"].encode())
+                decrypted_data = Fernet(cek).decrypt(encrypted_creds)
+            else:
+                # Legacy single-recipient: per-user key encrypts credentials directly
+                encrypted_bytes = base64.urlsafe_b64decode(envelope["data"].encode())
+                decrypted_data = Fernet(fernet_key).decrypt(encrypted_bytes)
+        finally:
+            if cek:
+                self._zero_bytes(cek)
+
+        creds_data = json.loads(decrypted_data.decode())
+
+        credentials = Credentials(
+            token=creds_data["token"],
+            refresh_token=creds_data["refresh_token"],
+            token_uri=creds_data.get(
+                "token_uri", "https://oauth2.googleapis.com/token"
+            ),
+            client_id=creds_data["client_id"],
+            client_secret=creds_data["client_secret"],
+            scopes=creds_data.get("scopes", settings.drive_scopes),
+        )
+
+        if creds_data.get("expiry"):
+            expiry = datetime.fromisoformat(creds_data["expiry"])
+            if expiry.tzinfo is not None:
+                expiry = expiry.replace(tzinfo=None)
+            credentials.expiry = expiry
+
+        return credentials
+
+    def add_recipient_to_encrypted_file(
+        self, path: Path, existing_key: str, new_key: str
+    ) -> bool:
+        """Add a new recipient to an existing multi-recipient envelope.
+
+        Uses file locking to prevent TOCTOU races when concurrent sessions
+        modify the same envelope. Verifies envelope HMAC before processing
+        and recomputes it after modification.
+
+        Args:
+            path: Path to the ``.enc`` credential file.
+            existing_key: Plaintext per-user key that can already decrypt.
+            new_key: Plaintext per-user key to add as a new recipient.
+
+        Returns:
+            True if the recipient was added, False on failure.
+        """
+        import fcntl
+
+        from cryptography.fernet import Fernet
+
+        if not path.exists():
+            logger.warning(f"Cannot add recipient — file not found: {path}")
+            return False
+
+        cek = None
+        try:
+            with open(path, "r+") as f:
+                # Exclusive lock to prevent concurrent read-modify-write races
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try:
+                    envelope = json.load(f)
+
+                    if (
+                        not isinstance(envelope, dict)
+                        or envelope.get("enc") != "per_user"
+                    ):
+                        logger.warning(f"Not a per-user envelope: {path}")
+                        return False
+
+                    if "recipients" not in envelope:
+                        logger.warning(
+                            f"Legacy single-recipient envelope — cannot add recipient: {path}. "
+                            f"Re-encrypt with multi-recipient format first."
+                        )
+                        return False
+
+                    # Verify envelope integrity
+                    if not self._verify_envelope_hmac(envelope):
+                        logger.error(f"Envelope HMAC verification failed: {path.name}")
+                        return False
+
+                    new_kid = self._key_id(new_key)
+                    if new_kid in envelope["recipients"]:
+                        logger.debug(f"Recipient already in envelope {path.name}")
+                        return True
+
+                    # Unwrap CEK with existing key
+                    existing_kid = self._key_id(existing_key)
+                    wrapped_cek_b64 = envelope["recipients"].get(existing_kid)
+                    if not wrapped_cek_b64:
+                        logger.error(
+                            f"Cannot unwrap CEK — existing key not in recipients of {path.name}"
+                        )
+                        return False
+
+                    existing_fernet_key = self.derive_per_user_fernet_key(existing_key)
+                    wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
+                    cek = Fernet(existing_fernet_key).decrypt(wrapped_cek)
+
+                    # Wrap CEK for new recipient
+                    new_fernet_key = self.derive_per_user_fernet_key(new_key)
+                    new_wrapped_cek = Fernet(new_fernet_key).encrypt(cek)
+                    envelope["recipients"][new_kid] = base64.urlsafe_b64encode(
+                        new_wrapped_cek
+                    ).decode()
+
+                    # Recompute HMAC over updated envelope
+                    envelope["hmac"] = self._compute_envelope_hmac(envelope)
+
+                    # Write back atomically within the lock
+                    f.seek(0)
+                    f.truncate()
+                    json.dump(envelope, f)
+
+                    logger.info(
+                        f"🔐 Added recipient to {path.name} "
+                        f"(now {len(envelope['recipients'])} recipient(s))"
+                    )
+                    return True
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+
+        except Exception as e:
+            logger.error(f"Failed to add recipient to {path.name}: {e}")
+            return False
+        finally:
+            if cek:
+                self._zero_bytes(cek)
+
+    def load_credentials(
+        self, user_email: str, per_user_key: Optional[str] = None
+    ) -> Optional[Credentials]:
         """
         Load credentials using the configured storage mode.
 
-        Email addresses are normalized to lowercase for consistent lookup.
+        For per-user encrypted files, ``per_user_key`` (the bearer token)
+        is required to derive the decryption key.  If the file is per-user
+        encrypted and no key is provided, returns ``None``.
 
         Args:
             user_email: User's email address (will be normalized to lowercase)
+            per_user_key: Plaintext per-user API key (bearer token) for per-user decryption
 
         Returns:
-            Credentials if found, None otherwise
+            Credentials if found and decryptable, None otherwise
         """
         # Import normalization function
         from .google_auth import _normalize_email
@@ -798,17 +1468,7 @@ class AuthMiddleware(Middleware):
 
             if backup_path.exists():
                 try:
-                    with open(backup_path, "r") as f:
-                        encrypted_data = f.read()
-
-                    credentials = self._decrypt_credentials(encrypted_data)
-                    # Restore to memory with normalized email
-                    self._memory_credentials[normalized_email] = credentials
-                    logger.debug(
-                        f"🔄 Restored credentials from backup for {normalized_email}"
-                    )
-                    return credentials
-
+                    return self._load_encrypted_file(backup_path, per_user_key)
                 except Exception as e:
                     logger.error(
                         f"Failed to load credential backup for {normalized_email}: {e}"
@@ -826,11 +1486,7 @@ class AuthMiddleware(Middleware):
                 return None
 
             try:
-                with open(creds_path, "r") as f:
-                    encrypted_data = f.read()
-
-                return self._decrypt_credentials(encrypted_data)
-
+                return self._load_encrypted_file(creds_path, per_user_key)
             except Exception as e:
                 logger.error(
                     f"Failed to load encrypted credentials for {normalized_email}: {e}"
@@ -844,6 +1500,34 @@ class AuthMiddleware(Middleware):
             return _load_credentials(normalized_email)
 
         return None
+
+    def _load_encrypted_file(
+        self, path: Path, per_user_key: Optional[str] = None
+    ) -> Optional[Credentials]:
+        """Load and decrypt a credential file, handling both per-user and server encryption.
+
+        Detection:
+        - JSON with ``{"v": 2, "enc": "per_user"}`` → per-user split-key decryption
+        - Raw base64 string → server-wide Fernet decryption (legacy)
+        """
+        with open(path, "r") as f:
+            raw = f.read()
+
+        # Try JSON envelope first (v2 format)
+        try:
+            envelope = json.loads(raw)
+            if isinstance(envelope, dict) and envelope.get("enc") == "per_user":
+                if not per_user_key:
+                    logger.warning(
+                        f"🔐 Per-user encrypted file requires bearer token to decrypt: {path.name}"
+                    )
+                    return None
+                return self._load_per_user_encrypted(envelope, per_user_key)
+        except (json.JSONDecodeError, ValueError):
+            pass  # Not JSON — treat as legacy raw base64
+
+        # Legacy: server-wide encrypted (raw base64 Fernet)
+        return self._decrypt_credentials(raw)
 
     def get_storage_mode(self) -> CredentialStorageMode:
         """Get the current credential storage mode."""
@@ -1018,6 +1702,10 @@ class AuthMiddleware(Middleware):
         with GoogleProvider authentication. This is a key part of the unified
         OAuth architecture that maintains backward compatibility.
 
+        When the user has identity-only auth (GoogleProvider) but no API credentials,
+        this is detected and logged — the user will get a clear "scope upgrade"
+        message when they try to use a Google API tool.
+
         Args:
             user_email: User's email address
         """
@@ -1028,7 +1716,15 @@ class AuthMiddleware(Middleware):
             existing_credentials = get_valid_credentials(user_email)
             if existing_credentials and not existing_credentials.expired:
                 logger.debug(
-                    f"✅ User {user_email} has valid legacy credentials, no bridging needed"
+                    f"✅ User {user_email} has valid API credentials, no bridging needed"
+                )
+                return
+
+            # Check if this is an identity-only user (GoogleProvider without API creds)
+            if self._dual_auth_bridge.needs_scope_upgrade(user_email):
+                logger.info(
+                    f"🔑 User {user_email} authenticated via GoogleProvider (identity-only). "
+                    f"API tools will prompt for scope upgrade via start_google_auth."
                 )
                 return
 
@@ -1092,8 +1788,23 @@ class AuthMiddleware(Middleware):
                 or user_email is None
                 or not user_email
             ):
-                # Try to get email from OAuth authentication file
-                oauth_email = self._load_oauth_authentication_data()
+                # Skip OAuth file fallback for API key sessions
+                from .context import get_session_data
+
+                request_id = self._get_request_id(context)
+                with self._session_lock:
+                    _sid = self._active_sessions.get(request_id)
+                _provenance = (
+                    get_session_data(_sid, SessionKey.AUTH_PROVENANCE) if _sid else None
+                )
+
+                # Try to get email from OAuth authentication file (not for API key / per-user key sessions)
+                oauth_email = (
+                    self._load_oauth_authentication_data()
+                    if _provenance
+                    not in (AuthProvenance.API_KEY, AuthProvenance.USER_API_KEY)
+                    else None
+                )
                 if oauth_email:
                     final_email = oauth_email
                     logger.debug(
@@ -1130,6 +1841,20 @@ class AuthMiddleware(Middleware):
                         current_value.lower().strip()
                     )
                 )
+
+                # Allow linked accounts for per-user API key sessions
+                is_linked_account = False
+                if current_value and final_email:
+                    try:
+                        from auth.user_api_keys import get_accessible_emails
+
+                        accessible = get_accessible_emails(final_email)
+                        if current_value.lower().strip() in {
+                            e.lower() for e in accessible
+                        }:
+                            is_linked_account = True
+                    except Exception:
+                        pass
 
                 if tool_name == "start_google_auth":
                     # start_google_auth must accept any email to begin auth
@@ -1169,6 +1894,11 @@ class AuthMiddleware(Middleware):
                     logger.debug(
                         f"✅ Allowed secondary account: {current_value} "
                         f"(primary: {final_email})"
+                    )
+                elif is_linked_account:
+                    logger.debug(
+                        f"✅ Allowed linked account: {current_value} "
+                        f"(key owner: {final_email})"
                     )
                 elif current_value.lower().strip() != final_email.lower().strip():
                     from .audit import log_security_event
@@ -1222,7 +1952,9 @@ class AuthMiddleware(Middleware):
 
             session_id = get_session_context_sync()
             if session_id:
-                store_session_data(session_id, "service_selection_needed", needed)
+                store_session_data(
+                    session_id, SessionKey.SERVICE_SELECTION_NEEDED, needed
+                )
                 logger.debug(
                     f"Set service selection needed flag: {needed} for session {session_id}"
                 )
@@ -1301,6 +2033,35 @@ class AuthMiddleware(Middleware):
         except Exception as e:
             # This is expected if no token is present
             logger.debug(f"No JWT/token authentication available: {e}")
+            return None
+
+    def _detect_auth_provenance(self) -> Optional[str]:
+        """Detect the authentication method for the current request.
+
+        Returns:
+            "api_key" for shared MCP_API_KEY sessions
+            "user_api_key" for per-user API key sessions
+            None for normal OAuth sessions
+        """
+        try:
+            from fastmcp.server.dependencies import get_access_token
+
+            try:
+                access_token = get_access_token()
+            except RuntimeError:
+                return None
+
+            if hasattr(access_token, "claims"):
+                auth_method = access_token.claims.get("auth_method")
+                if auth_method == AuthProvenance.API_KEY:
+                    logger.debug("🔑 Detected API key session (shared MCP_API_KEY)")
+                    return AuthProvenance.API_KEY
+                if auth_method == AuthProvenance.USER_API_KEY:
+                    logger.debug("🔑 Detected per-user API key session")
+                    return AuthProvenance.USER_API_KEY
+
+            return None
+        except Exception:
             return None
 
     def _load_oauth_authentication_data(self) -> Optional[str]:

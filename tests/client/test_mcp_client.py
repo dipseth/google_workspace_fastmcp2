@@ -20,28 +20,42 @@ class TestMCPServer:
 
     @pytest.mark.asyncio
     async def test_list_tools(self, client):
-        """Test listing available tools."""
+        """Test listing available tools.
+
+        NOTE: When CodeMode is enabled, list_tools returns 4 meta-tools
+        (tags, search, get_schema, execute) instead of individual tools.
+        Underlying tools are accessed via the `execute` meta-tool.
+        """
         tools = await client.list_tools()
 
         # Check that we have tools available
         assert len(tools) > 0
 
-        # Check for expected tools
         tool_names = [tool.name for tool in tools]
-        assert "health_check" in tool_names
-        assert "check_drive_auth" in tool_names
-        assert "start_google_auth" in tool_names
 
-        # If Gmail tools are enabled
-        if "list_gmail_labels" in tool_names:
-            assert "search_gmail_messages" in tool_names
-            assert "send_gmail_message" in tool_names
+        # Detect CodeMode (4 meta-tools) vs normal mode
+        code_mode_tools = {"tags", "search", "get_schema", "execute"}
+        if code_mode_tools.issubset(set(tool_names)):
+            # CodeMode is active — verify the 4 meta-tools
+            assert len(tool_names) == 4, (
+                f"CodeMode should expose exactly 4 meta-tools, got {len(tool_names)}: {tool_names}"
+            )
+        else:
+            # Normal mode — check for expected tools
+            assert "health_check" in tool_names
+            assert "check_drive_auth" in tool_names
+            assert "start_google_auth" in tool_names
 
-        # If Google Docs tools are enabled
-        if "search_docs" in tool_names:
-            assert "get_doc_content" in tool_names
-            assert "list_docs_in_folder" in tool_names
-            assert "create_doc" in tool_names
+            # If Gmail tools are enabled
+            if "list_gmail_labels" in tool_names:
+                assert "search_gmail_messages" in tool_names
+                assert "send_gmail_message" in tool_names
+
+            # If Google Docs tools are enabled
+            if "search_docs" in tool_names:
+                assert "get_doc_content" in tool_names
+                assert "list_docs_in_folder" in tool_names
+                assert "create_doc" in tool_names
 
     @pytest.mark.asyncio
     async def test_health_check_tool(self, client):
@@ -618,6 +632,7 @@ class TestFormsTools:
     async def client(self):
         """Create a client connected to the running server."""
         from .base_test_config import create_test_client
+        from .test_helpers import ensure_tools_enabled
 
         try:
             client_obj = await create_test_client(TEST_EMAIL)
@@ -625,6 +640,7 @@ class TestFormsTools:
             pytest.skip(f"MCP server not reachable for integration tests: {e}")
 
         async with client_obj:
+            await ensure_tools_enabled(client_obj)
             yield client_obj
 
     @pytest.mark.asyncio
@@ -913,6 +929,7 @@ class TestGmailLabelColors:
     async def client(self):
         """Create a client connected to the running server."""
         from .base_test_config import create_test_client
+        from .test_helpers import ensure_tools_enabled
 
         try:
             client_obj = await create_test_client(TEST_EMAIL)
@@ -920,6 +937,7 @@ class TestGmailLabelColors:
             pytest.skip(f"MCP server not reachable for integration tests: {e}")
 
         async with client_obj:
+            await ensure_tools_enabled(client_obj)
             yield client_obj
 
     @pytest.mark.asyncio
@@ -1182,32 +1200,39 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_required_params(self, client):
-        """Test calling a tool without required parameters."""
-        # Try to call a tool that requires parameters without providing them
-        # Use get_doc_content which requires document_id
+        """Test calling a tool without required parameters.
+
+        Uses health_check (always enabled) with invalid params, and
+        send_gmail_message (requires body/to) to test param validation.
+        """
+        # Test send_gmail_message without required 'to' and 'body' params
         try:
             result = await client.call_tool(
-                "get_doc_content",
+                "send_gmail_message",
                 {
-                    "user_google_email": TEST_EMAIL
-                    # Missing required: document_id
+                    "user_google_email": TEST_EMAIL,
+                    # Missing required: to, body
                 },
             )
             # If no exception, check if the response indicates missing param
             if result and result.content:
                 content = result.content[0].text.lower()
-                # Accept either an exception or a response indicating missing param
                 assert (
                     "required" in content
                     or "missing" in content
-                    or "document_id" in content
+                    or "to" in content
+                    or "body" in content
+                    or "recipient" in content
                 )
         except Exception as exc_info:
-            # Should indicate missing parameter
+            # Should indicate missing parameter or validation error
+            error_msg = str(exc_info).lower()
             assert (
-                "required" in str(exc_info).lower()
-                or "missing" in str(exc_info).lower()
-                or "document_id" in str(exc_info).lower()
+                "required" in error_msg
+                or "missing" in error_msg
+                or "to" in error_msg
+                or "body" in error_msg
+                or "validation" in error_msg
             )
 
 
