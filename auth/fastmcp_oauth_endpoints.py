@@ -813,6 +813,37 @@ def setup_legacy_callback_route(mcp) -> None:
             user_api_key_exists = getattr(credentials, "_user_api_key_exists", False)
             api_key_section = ""
 
+            # Gather envelope info for security visualization
+            security_viz_section = ""
+            _num_recipients = 0
+            _has_hmac = False
+            _is_encrypted = False
+            try:
+                from pathlib import Path
+
+                from auth.google_auth import _normalize_email
+
+                safe_email = (
+                    _normalize_email(user_email).replace("@", "_at_").replace(".", "_")
+                )
+                enc_path = (
+                    Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
+                )
+                if enc_path.exists():
+                    _is_encrypted = True
+                    import json as _json
+
+                    try:
+                        _env = _json.load(open(enc_path))
+                        _num_recipients = len(_env.get("recipients", {}))
+                        _has_hmac = "hmac" in _env
+                    except (ValueError, KeyError):
+                        # Legacy format (raw Fernet bytes) — still encrypted
+                        _num_recipients = 1
+                        _has_hmac = False
+            except Exception:
+                pass
+
             # Build linked-accounts section (shown for both new and existing keys)
             accessible_section = ""
             if user_api_key or user_api_key_exists:
@@ -867,12 +898,75 @@ def setup_legacy_callback_route(mcp) -> None:
                 </div>
                 {accessible_section}"""
 
+            # Build security visualization
+            if _is_encrypted:
+                # Build recipient nodes for the diagram
+                _all_emails = [user_email.lower().strip()]
+                try:
+                    _all_emails = sorted(
+                        get_accessible_emails(user_email.lower().strip())
+                    )
+                except Exception:
+                    pass
+
+                _recipient_nodes = ""
+                for i, em in enumerate(_all_emails):
+                    _is_current = em == user_email.lower().strip()
+                    _highlight = "current" if _is_current else ""
+                    _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span></div>'
+
+                _key_lines = ""
+                for i, em in enumerate(_all_emails):
+                    _is_current = em == user_email.lower().strip()
+                    _cls = "current" if _is_current else ""
+                    _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
+
+                _env_label = (
+                    "v2 Envelope" if _has_hmac or _num_recipients > 1 else "Encrypted"
+                )
+                _subtitle = (
+                    "Your credentials are protected by multi-recipient envelope encryption"
+                    if _num_recipients > 1
+                    else "Your credentials are protected by split-key encryption"
+                )
+
+                security_viz_section = f"""
+                <div class="sec-panel">
+                    <div class="sec-title">🛡️ Credential Security Model</div>
+                    <div class="sec-subtitle">{_subtitle}</div>
+                    <div class="sec-diagram">
+                        <div class="sec-col sec-col-users">
+                            <div class="sec-col-label">Authorized Users</div>
+                            {_recipient_nodes}
+                        </div>
+                        <div class="sec-col sec-col-keys">
+                            <div class="sec-col-label">Key Wrapping</div>
+                            {_key_lines}
+                        </div>
+                        <div class="sec-col sec-col-envelope">
+                            <div class="sec-col-label">Encrypted Envelope</div>
+                            <div class="sec-envelope">
+                                <div class="sec-env-header">{_env_label}</div>
+                                <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
+                                <div class="sec-env-row"><span class="sec-env-badge data">🔒 AES-Encrypted Credentials</span></div>
+                                <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sec-features">
+                        <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
+                        <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
+                        <div class="sec-feat"><span>🔗</span> Linked accounts share access via separate key wraps</div>
+                        <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
+                    </div>
+                </div>"""
+
             success_html = f"""<!DOCTYPE html><html><head><title>Authentication Successful</title>
             <style>
                 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
                       margin:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
                       min-height:100vh;display:flex;align-items:center;justify-content:center}}
-                .container{{max-width:500px;background:white;border-radius:20px;padding:50px;
+                .container{{max-width:560px;background:white;border-radius:20px;padding:50px;
                            text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.1)}}
                 .success-icon{{font-size:72px;margin-bottom:20px}}
                 h1{{color:#28a745;margin-bottom:10px;font-size:32px}}
@@ -891,12 +985,50 @@ def setup_legacy_callback_route(mcp) -> None:
                 .linked-accounts li{{margin:4px 0;font-family:monospace;font-size:14px}}
                 .linked-accounts.solo{{background:#f8f9fa;color:#6c757d;border-color:#dee2e6}}
                 .services{{background:#f8f9fa;padding:20px;border-radius:10px;margin:20px 0}}
+                /* Security visualization */
+                .sec-panel{{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);color:#e0e0e0;
+                           padding:24px;border-radius:12px;margin:24px 0;text-align:left}}
+                .sec-title{{font-size:16px;font-weight:700;color:#fff;margin-bottom:4px}}
+                .sec-subtitle{{font-size:11px;color:#8892b0;margin-bottom:16px}}
+                .sec-diagram{{display:flex;gap:8px;align-items:stretch;margin-bottom:16px}}
+                .sec-col{{flex:1;display:flex;flex-direction:column;gap:6px}}
+                .sec-col-label{{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#64ffda;
+                               font-weight:600;margin-bottom:4px;text-align:center}}
+                .sec-node{{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);
+                          border-radius:8px;padding:8px 6px;text-align:center;display:flex;
+                          flex-direction:column;align-items:center;gap:2px}}
+                .sec-node.current{{border-color:#64ffda;background:rgba(100,255,218,0.08)}}
+                .sec-icon{{font-size:18px}}
+                .sec-label{{font-size:9px;font-family:monospace;word-break:break-all;line-height:1.2;color:#ccd6f6}}
+                .sec-col-keys{{flex:0.7;justify-content:center;gap:8px}}
+                .sec-flow-row{{display:flex;align-items:center;gap:3px;justify-content:center}}
+                .sec-flow-row.current .sec-key-badge{{background:#64ffda;color:#1a1a2e}}
+                .sec-key-badge{{background:rgba(255,255,255,0.12);color:#ccd6f6;font-size:8px;font-weight:600;
+                              padding:3px 6px;border-radius:4px;white-space:nowrap}}
+                .sec-arrow{{width:28px;height:12px;color:#64ffda;flex-shrink:0}}
+                .sec-cek-wrap{{font-size:8px;color:#8892b0;white-space:nowrap}}
+                .sec-col-envelope{{flex:1.1}}
+                .sec-envelope{{background:rgba(255,255,255,0.04);border:1.5px solid #64ffda;
+                              border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:5px}}
+                .sec-env-header{{font-size:10px;font-weight:700;color:#64ffda;text-align:center;
+                                letter-spacing:1px;text-transform:uppercase}}
+                .sec-env-row{{text-align:center}}
+                .sec-env-badge{{display:inline-block;font-size:9px;padding:3px 8px;border-radius:4px;
+                              font-weight:500}}
+                .sec-env-badge.rec{{background:rgba(255,183,77,0.15);color:#ffb74d}}
+                .sec-env-badge.data{{background:rgba(100,255,218,0.1);color:#64ffda}}
+                .sec-env-badge.hmac{{background:rgba(129,212,250,0.1);color:#81d4fa}}
+                .sec-features{{display:grid;grid-template-columns:1fr 1fr;gap:6px}}
+                .sec-feat{{font-size:10px;color:#8892b0;display:flex;align-items:start;gap:5px;line-height:1.3}}
+                .sec-feat span:first-child{{flex-shrink:0}}
+                .sec-feat b{{color:#ccd6f6}}
             </style></head><body><div class="container">
                 <div class="success-icon">✅</div>
                 <h1>Authentication Successful!</h1>
                 <div class="email">Authenticated: <b>{html.escape(user_email)}</b></div>
                 <div class="saved"><b>🔐 Credentials Saved!</b><br>Ready to use.</div>
                 {api_key_section}
+                {security_viz_section}
                 <div class="services"><h3>🚀 Services Available</h3>
                     <div>Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms</div>
                 </div>
@@ -1868,6 +2000,104 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     </div>
                     {accessible_section}"""
 
+                # Gather envelope info for security visualization
+                # Gather envelope info for security visualization
+                security_viz_section = ""
+                _num_recipients = 0
+                _has_hmac = False
+                _is_encrypted = False
+                try:
+                    from pathlib import Path
+
+                    from auth.google_auth import _normalize_email
+
+                    safe_email = (
+                        _normalize_email(user_email)
+                        .replace("@", "_at_")
+                        .replace(".", "_")
+                    )
+                    enc_path = (
+                        Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
+                    )
+                    if enc_path.exists():
+                        _is_encrypted = True
+                        import json as _json
+
+                        try:
+                            _env = _json.load(open(enc_path))
+                            _num_recipients = len(_env.get("recipients", {}))
+                            _has_hmac = "hmac" in _env
+                        except (ValueError, KeyError):
+                            # Legacy format (raw Fernet bytes) — still encrypted
+                            _num_recipients = 1
+                            _has_hmac = False
+                except Exception:
+                    pass
+
+                # Build security visualization
+                if _is_encrypted:
+                    _all_emails = [user_email.lower().strip()]
+                    try:
+                        _all_emails = sorted(
+                            get_accessible_emails(user_email.lower().strip())
+                        )
+                    except Exception:
+                        pass
+
+                    _recipient_nodes = ""
+                    for i, em in enumerate(_all_emails):
+                        _is_current = em == user_email.lower().strip()
+                        _highlight = "current" if _is_current else ""
+                        _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span></div>'
+
+                    _key_lines = ""
+                    for i, em in enumerate(_all_emails):
+                        _is_current = em == user_email.lower().strip()
+                        _cls = "current" if _is_current else ""
+                        _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
+
+                    _env_label = (
+                        "v2 Envelope"
+                        if _has_hmac or _num_recipients > 1
+                        else "Encrypted"
+                    )
+                    _subtitle = (
+                        "Your credentials are protected by multi-recipient envelope encryption"
+                        if _num_recipients > 1
+                        else "Your credentials are protected by split-key encryption"
+                    )
+
+                    security_viz_section = f"""
+                    <div class="sec-panel">
+                        <div class="sec-title">🛡️ Credential Security Model</div>
+                        <div class="sec-subtitle">{_subtitle}</div>
+                        <div class="sec-diagram">
+                            <div class="sec-col sec-col-users">
+                                <div class="sec-col-label">Authorized Users</div>
+                                {_recipient_nodes}
+                            </div>
+                            <div class="sec-col sec-col-keys">
+                                <div class="sec-col-label">Key Wrapping</div>
+                                {_key_lines}
+                            </div>
+                            <div class="sec-col sec-col-envelope">
+                                <div class="sec-col-label">Encrypted Envelope</div>
+                                <div class="sec-envelope">
+                                    <div class="sec-env-header">{_env_label}</div>
+                                    <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
+                                    <div class="sec-env-row"><span class="sec-env-badge data">🔒 AES-Encrypted Credentials</span></div>
+                                    <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="sec-features">
+                            <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
+                            <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
+                            <div class="sec-feat"><span>🔗</span> Linked accounts share access via separate key wraps</div>
+                            <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
+                        </div>
+                    </div>"""
+
                 # Create beautiful success page
                 success_html = f"""
                 <!DOCTYPE html>
@@ -1876,7 +2106,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     <title>Authentication Successful</title>
                     <style>
                         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
-                        .container {{ max-width: 500px; background: white; border-radius: 20px; padding: 50px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }}
+                        .container {{ max-width: 560px; background: white; border-radius: 20px; padding: 50px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }}
                         .success-icon {{ font-size: 72px; margin-bottom: 20px; }}
                         h1 {{ color: #28a745; margin-bottom: 10px; font-size: 32px; }}
                         .email {{ color: #6c757d; font-size: 18px; margin: 20px 0; }}
@@ -1896,6 +2126,35 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         .linked-accounts ul {{ margin: 8px 0 0 0; padding-left: 20px; }}
                         .linked-accounts li {{ margin: 4px 0; font-family: monospace; font-size: 14px; }}
                         .linked-accounts.solo {{ background: #f8f9fa; color: #6c757d; border-color: #dee2e6; }}
+                        /* Security visualization */
+                        .sec-panel {{ background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #e0e0e0; padding: 24px; border-radius: 12px; margin: 24px 0; text-align: left; }}
+                        .sec-title {{ font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px; }}
+                        .sec-subtitle {{ font-size: 11px; color: #8892b0; margin-bottom: 16px; }}
+                        .sec-diagram {{ display: flex; gap: 8px; align-items: stretch; margin-bottom: 16px; }}
+                        .sec-col {{ flex: 1; display: flex; flex-direction: column; gap: 6px; }}
+                        .sec-col-label {{ font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #64ffda; font-weight: 600; margin-bottom: 4px; text-align: center; }}
+                        .sec-node {{ background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 6px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 2px; }}
+                        .sec-node.current {{ border-color: #64ffda; background: rgba(100,255,218,0.08); }}
+                        .sec-icon {{ font-size: 18px; }}
+                        .sec-label {{ font-size: 9px; font-family: monospace; word-break: break-all; line-height: 1.2; color: #ccd6f6; }}
+                        .sec-col-keys {{ flex: 0.7; justify-content: center; gap: 8px; }}
+                        .sec-flow-row {{ display: flex; align-items: center; gap: 3px; justify-content: center; }}
+                        .sec-flow-row.current .sec-key-badge {{ background: #64ffda; color: #1a1a2e; }}
+                        .sec-key-badge {{ background: rgba(255,255,255,0.12); color: #ccd6f6; font-size: 8px; font-weight: 600; padding: 3px 6px; border-radius: 4px; white-space: nowrap; }}
+                        .sec-arrow {{ width: 28px; height: 12px; color: #64ffda; flex-shrink: 0; }}
+                        .sec-cek-wrap {{ font-size: 8px; color: #8892b0; white-space: nowrap; }}
+                        .sec-col-envelope {{ flex: 1.1; }}
+                        .sec-envelope {{ background: rgba(255,255,255,0.04); border: 1.5px solid #64ffda; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 5px; }}
+                        .sec-env-header {{ font-size: 10px; font-weight: 700; color: #64ffda; text-align: center; letter-spacing: 1px; text-transform: uppercase; }}
+                        .sec-env-row {{ text-align: center; }}
+                        .sec-env-badge {{ display: inline-block; font-size: 9px; padding: 3px 8px; border-radius: 4px; font-weight: 500; }}
+                        .sec-env-badge.rec {{ background: rgba(255,183,77,0.15); color: #ffb74d; }}
+                        .sec-env-badge.data {{ background: rgba(100,255,218,0.1); color: #64ffda; }}
+                        .sec-env-badge.hmac {{ background: rgba(129,212,250,0.1); color: #81d4fa; }}
+                        .sec-features {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }}
+                        .sec-feat {{ font-size: 10px; color: #8892b0; display: flex; align-items: start; gap: 5px; line-height: 1.3; }}
+                        .sec-feat span:first-child {{ flex-shrink: 0; }}
+                        .sec-feat b {{ color: #ccd6f6; }}
                     </style>
                 </head>
                 <body>
@@ -1908,6 +2167,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             Ready to use.
                         </div>
                         {api_key_section}
+                        {security_viz_section}
                         <div class="services">
                             <h3>🚀 Services Available</h3>
                             <div class="service-list">
