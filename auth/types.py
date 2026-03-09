@@ -36,3 +36,6 @@ class SessionKey(str, Enum):
     SESSION_DISABLED_TOOLS = "session_disabled_tools"
     SERVICE_SELECTION_NEEDED = "service_selection_needed"
     CREDENTIALS = "credentials"
+    PER_USER_ENCRYPTION_KEY = (
+        "per_user_encryption_key"  # Derived Fernet key bytes (in-memory only)
+    )
