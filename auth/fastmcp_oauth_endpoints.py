@@ -728,9 +728,9 @@ def setup_service_selection_routes(mcp) -> None:
                     set_oauth_linkage(
                         user_email_for_linkage,
                         enabled=oauth_linkage_enabled,
-                        password=oauth_linkage_password,
                     )
-                # Also stash password in cache for the save path
+                # Stash password in cache — it flows through to _save_credentials
+                # in-memory only, never persisted to disk
                 _service_selection_cache[state]["oauth_linkage_password"] = (
                     oauth_linkage_password
                 )

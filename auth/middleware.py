@@ -904,8 +904,12 @@ class AuthMiddleware(Middleware):
         self,
         google_sub: Optional[str],
         normalized_email: str,
+        password: str = "",
     ) -> Optional[str]:
         """Derive the OAuth recipient key for an email, respecting linkage prefs.
+
+        The password is passed in from the caller (form submission or session),
+        never read from disk.
 
         Returns None if cross-OAuth is disabled or google_sub is unavailable.
         """
@@ -917,10 +921,9 @@ class AuthMiddleware(Middleware):
             linkage = get_oauth_linkage(normalized_email)
             if not linkage.get("enabled", True):
                 return None
-            oauth_password = linkage.get("password", "")
-            return self._derive_oauth_recipient_key(google_sub, password=oauth_password)
+            return self._derive_oauth_recipient_key(google_sub, password=password)
         except Exception:
-            return self._derive_oauth_recipient_key(google_sub)
+            return self._derive_oauth_recipient_key(google_sub, password=password)
 
     def _resolve_oauth_recipient_key_for_load(
         self,
@@ -1197,6 +1200,7 @@ class AuthMiddleware(Middleware):
         per_user_key: Optional[str] = None,
         additional_keys: Optional[list] = None,
         google_sub: Optional[str] = None,
+        oauth_linkage_password: str = "",
     ) -> None:
         """
         Save credentials using the configured storage mode.
@@ -1213,6 +1217,8 @@ class AuthMiddleware(Middleware):
             additional_keys: Optional list of additional per-user keys to add as
                 recipients (for linked accounts)
             google_sub: Optional Google account ID (sub claim) for OAuth recipient
+            oauth_linkage_password: Passphrase for OAuth recipient key derivation
+                (in-memory only, never persisted)
         """
         # Import normalization function
         from .google_auth import _normalize_email
@@ -1243,7 +1249,7 @@ class AuthMiddleware(Middleware):
             creds_path.parent.mkdir(parents=True, exist_ok=True)
 
             oauth_recipient_key = self._resolve_oauth_recipient_key(
-                google_sub, normalized_email
+                google_sub, normalized_email, password=oauth_linkage_password
             )
             self._save_encrypted_with_recipients(
                 creds_path,
@@ -1272,7 +1278,7 @@ class AuthMiddleware(Middleware):
             backup_path.parent.mkdir(parents=True, exist_ok=True)
 
             oauth_recipient_key = self._resolve_oauth_recipient_key(
-                google_sub, normalized_email
+                google_sub, normalized_email, password=oauth_linkage_password
             )
             self._save_encrypted_with_recipients(
                 backup_path,

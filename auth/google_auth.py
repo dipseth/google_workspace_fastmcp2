@@ -490,12 +490,24 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
                         f"Could not persist google_sub for {normalized_email}: {e}"
                     )
 
+            # Get OAuth linkage password from session (set during start_google_auth form)
+            oauth_linkage_password = ""
+            try:
+                for sid in reversed(list_sessions()):
+                    pwd = get_session_data(sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
+                    if pwd:
+                        oauth_linkage_password = pwd
+                        break
+            except Exception:
+                pass
+
             auth_middleware.save_credentials(
                 normalized_email,
                 credentials,
                 per_user_key=per_user_key,
                 additional_keys=additional_keys if additional_keys else None,
                 google_sub=google_sub,
+                oauth_linkage_password=oauth_linkage_password,
             )
 
             # Cross-add: add this user as a recipient to linked accounts' credential files.
@@ -980,6 +992,7 @@ async def initiate_oauth_flow(
     auth_method: Literal["file_credentials", "pkce_file", "pkce_memory"] = "pkce_file",
     custom_client_id: Optional[str] = None,
     custom_client_secret: Optional[str] = None,
+    oauth_linkage_password: str = "",
 ) -> str:
     """
     Initiate OAuth flow for a user with optional service selection and PKCE support.
@@ -1107,6 +1120,7 @@ async def initiate_oauth_flow(
         "auth_method": auth_method,
         "custom_client_id": custom_client_id,
         "custom_client_secret": custom_client_secret,
+        "oauth_linkage_password": oauth_linkage_password,
     }
 
     # Use enhanced context-based credential storage for persistence
@@ -1230,6 +1244,7 @@ async def handle_service_selection_callback(
         auth_method=final_auth_method,  # Pass auth method through
         custom_client_id=custom_client_id,  # Pass custom client credentials
         custom_client_secret=custom_client_secret,
+        oauth_linkage_password=flow_info.get("oauth_linkage_password", ""),
     )
 
 
@@ -1292,6 +1307,21 @@ async def handle_oauth_callback(
     auth_method = state_info["auth_method"]
     custom_client_id = state_info.get("custom_client_id")
     custom_client_secret = state_info.get("custom_client_secret")
+
+    # Stash OAuth linkage password in session so _save_credentials can use it
+    _oauth_linkage_pw = state_info.get("oauth_linkage_password", "")
+    if _oauth_linkage_pw:
+        try:
+            from .context import list_sessions, store_session_data
+            from .types import SessionKey
+
+            for sid in reversed(list_sessions()):
+                store_session_data(
+                    sid, SessionKey.OAUTH_LINKAGE_PASSWORD, _oauth_linkage_pw
+                )
+                break
+        except Exception:
+            pass
 
     # DIAGNOSTIC: Log custom credentials retrieval
     logger.info("🔍 CUSTOM_CREDS_DEBUG: Retrieved from state:")

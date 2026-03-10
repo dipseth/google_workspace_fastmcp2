@@ -581,8 +581,9 @@ def set_oauth_linkage(
     with _lock:
         prefs = _load_oauth_linkage_prefs()
         entry: dict = {"enabled": enabled, "has_password": bool(password)}
-        if password:
-            entry["password"] = password
+        # Password is NOT persisted — it's only used in-memory at save time
+        # to derive the OAuth recipient key, then discarded. At load time,
+        # the user provides it again via cross_oauth_password.
         if google_sub:
             entry["google_sub"] = google_sub
         elif normalized in prefs and "google_sub" in prefs[normalized]:
@@ -602,14 +603,13 @@ def get_oauth_linkage(email: str) -> dict:
     """Get cross-OAuth linkage preference for an email.
 
     Returns:
-        {"enabled": bool, "has_password": bool, "password": str, "google_sub": str}
+        {"enabled": bool, "has_password": bool, "google_sub": str}
         Defaults to enabled=True, no password, no sub if not set.
     """
     normalized = email.lower().strip()
     with _lock:
         prefs = _load_oauth_linkage_prefs()
-    default = {"enabled": True, "has_password": False, "password": "", "google_sub": ""}
+    default = {"enabled": True, "has_password": False, "google_sub": ""}
     entry = prefs.get(normalized, default)
-    entry.setdefault("password", "")
     entry.setdefault("google_sub", "")
     return entry
