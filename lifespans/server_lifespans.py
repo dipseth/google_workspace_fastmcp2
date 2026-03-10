@@ -459,7 +459,15 @@ async def memory_cleanup_lifespan(server: Any):
 
     # --- Tier 2: aiomonitor task inspector ---
     try:
-        import aiomonitor
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Importing 'parser.split_arg_string'",
+                category=DeprecationWarning,
+            )
+            import aiomonitor
 
         loop = asyncio.get_running_loop()
         aiomonitor_ctx = aiomonitor.start_monitor(loop, host="127.0.0.1", port=20101)
