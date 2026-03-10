@@ -460,11 +460,42 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
             except Exception as e:
                 logger.warning(f"Could not collect linked account keys: {e}")
 
+            # Retrieve Google sub (immutable account ID) for OAuth recipient.
+            # Try: credentials object (SSO flow), then session (tool-call flow).
+            google_sub = getattr(credentials, "_google_sub", None)
+            if not google_sub:
+                try:
+                    for sid in reversed(list_sessions()):
+                        google_sub = get_session_data(sid, SessionKey.GOOGLE_SUB)
+                        if google_sub:
+                            break
+                except Exception:
+                    pass
+
+            # Persist google_sub in linkage prefs so it survives server restarts
+            # and is available for cross-account OAuth recipient decryption.
+            if google_sub:
+                try:
+                    from .user_api_keys import get_oauth_linkage, set_oauth_linkage
+
+                    existing = get_oauth_linkage(normalized_email)
+                    set_oauth_linkage(
+                        normalized_email,
+                        enabled=existing.get("enabled", True),
+                        password=existing.get("password", ""),
+                        google_sub=google_sub,
+                    )
+                except Exception as e:
+                    logger.debug(
+                        f"Could not persist google_sub for {normalized_email}: {e}"
+                    )
+
             auth_middleware.save_credentials(
                 normalized_email,
                 credentials,
                 per_user_key=per_user_key,
                 additional_keys=additional_keys if additional_keys else None,
+                google_sub=google_sub,
             )
 
             # Cross-add: add this user as a recipient to linked accounts' credential files.
@@ -588,19 +619,37 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
 
         auth_middleware = get_auth_middleware()
         if auth_middleware:
-            # Retrieve per-user key from session for per-user decryption
+            # Retrieve per-user key and Google sub from session for decryption
             per_user_key = None
+            google_sub = None
             try:
                 for sid in reversed(list_sessions()):
-                    stashed = get_session_data(sid, SessionKey.PER_USER_ENCRYPTION_KEY)
-                    if stashed:
-                        per_user_key = stashed
+                    if not per_user_key:
+                        per_user_key = get_session_data(
+                            sid, SessionKey.PER_USER_ENCRYPTION_KEY
+                        )
+                    if not google_sub:
+                        google_sub = get_session_data(sid, SessionKey.GOOGLE_SUB)
+                    if per_user_key and google_sub:
                         break
             except Exception:
                 pass
 
+            # Fall back to persisted google_sub from linkage prefs
+            # (survives server restarts, enables cross-account decryption)
+            if not google_sub:
+                try:
+                    from .user_api_keys import get_oauth_linkage
+
+                    linkage = get_oauth_linkage(normalized_email)
+                    google_sub = linkage.get("google_sub", "")
+                except Exception:
+                    pass
+
             creds = auth_middleware.load_credentials(
-                normalized_email, per_user_key=per_user_key
+                normalized_email,
+                per_user_key=per_user_key,
+                google_sub=google_sub,
             )
             if creds:
                 logger.info(
@@ -1495,6 +1544,8 @@ async def handle_oauth_callback(
         userinfo_service = build("oauth2", "v2", credentials=credentials)
         user_info = userinfo_service.userinfo().get().execute()
         authenticated_email = user_info.get("email")
+        # Capture Google's immutable account ID for OAuth recipient encryption
+        credentials._google_sub = user_info.get("id")
 
         # If we used fallback user_email, update it with the actual authenticated email
         if user_email == "unknown@gmail.com" or not user_email:

@@ -379,6 +379,32 @@ def _generate_service_selection_html(
                         </div>
                     </div>
                     
+                    <!-- Cross-OAuth Linkage Section -->
+                    <div class="custom-credentials-section" style="margin-bottom: 30px; padding: 20px; border: 2px solid #e8eaed; border-radius: 12px;">
+                        <div style="font-weight: 600; color: #1a73e8; margin-bottom: 12px;">🔗 Cross-OAuth Account Access</div>
+                        <p style="color: #5f6368; font-size: 14px; margin-bottom: 15px;">
+                            When enabled, linked accounts that authenticate via OAuth can access this account's credentials
+                            without needing your per-user API key. Optionally set a passphrase for additional security.
+                        </p>
+                        <label style="display: flex; align-items: center; margin-bottom: 12px;">
+                            <input type="checkbox" id="oauth_linkage_enabled" name="oauth_linkage_enabled" checked
+                                   style="margin-right: 10px; transform: scale(1.2);"
+                                   onchange="document.getElementById('oauth-password-field').style.display = this.checked ? 'block' : 'none';">
+                            <span style="font-weight: 500; color: #202124;">Allow cross-OAuth access to this account</span>
+                        </label>
+                        <div id="oauth-password-field" style="display: block;">
+                            <label style="display: block; font-size: 14px; color: #5f6368; margin-bottom: 6px;">
+                                Optional passphrase (0-9, A-Z, a-z, _, - only):
+                            </label>
+                            <input type="text" name="oauth_linkage_password" placeholder="Leave blank for no passphrase"
+                                   pattern="[0-9A-Za-z_-]*" title="Only 0-9, A-Z, a-z, underscore, and hyphen allowed"
+                                   style="padding: 10px; border: 1px solid #dadce0; border-radius: 8px; font-size: 14px; width: 300px; font-family: monospace;">
+                            <p style="color: #5f6368; font-size: 12px; margin-top: 6px;">
+                                If set, OAuth sessions will need this passphrase to access your credentials.
+                            </p>
+                        </div>
+                    </div>
+
                     <div class="auto-select-info">
                         <p>💡 Common services (Drive, Gmail, Calendar, Docs, Sheets, User Information) are pre-selected for your convenience</p>
                     </div>
@@ -663,12 +689,22 @@ def setup_service_selection_routes(mcp) -> None:
             if not services and "services" in form_data:
                 services = [form_data.get("services")]
 
+            # Cross-OAuth linkage preference
+            oauth_linkage_enabled = form_data.get("oauth_linkage_enabled") == "on"
+            oauth_linkage_password = (
+                form_data.get("oauth_linkage_password") or ""
+            ).strip()
+
             logger.info(
                 f"📋 Service selection received: state={state}, "
                 f"flow_type={flow_type}, services={services}"
             )
             logger.info(
                 f"🔐 Authentication method chosen: {auth_method} (PKCE: {use_pkce})"
+            )
+            logger.info(
+                f"🔗 Cross-OAuth linkage: enabled={oauth_linkage_enabled}, "
+                f"password={'set' if oauth_linkage_password else 'none'}"
             )
             if use_custom and custom_client_id:
                 logger.info(
@@ -677,6 +713,27 @@ def setup_service_selection_routes(mcp) -> None:
 
             if not state:
                 raise ValueError("Missing state parameter")
+
+            # Store cross-OAuth preference immediately.  The password is persisted
+            # per-email so _save_credentials can pick it up after OAuth redirects.
+            from .google_auth import _service_selection_cache
+
+            if state in _service_selection_cache:
+                user_email_for_linkage = _service_selection_cache[state].get(
+                    "user_email", ""
+                )
+                if user_email_for_linkage:
+                    from .user_api_keys import set_oauth_linkage
+
+                    set_oauth_linkage(
+                        user_email_for_linkage,
+                        enabled=oauth_linkage_enabled,
+                        password=oauth_linkage_password,
+                    )
+                # Also stash password in cache for the save path
+                _service_selection_cache[state]["oauth_linkage_password"] = (
+                    oauth_linkage_password
+                )
 
             if flow_type == "fastmcp":
                 oauth_url = await _handle_fastmcp_service_selection(

@@ -261,6 +261,7 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                             payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
                             payload = json.loads(base64.urlsafe_b64decode(payload_b64))
                             user_email = payload.get("email")
+                            self._google_sub = payload.get("sub")
                     except Exception as e:
                         logger.debug(f"SSO: Could not decode id_token: {e}")
 
@@ -275,7 +276,9 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                                 headers={"Authorization": f"Bearer {access_token}"},
                             )
                             if resp.status_code == 200:
-                                user_email = resp.json().get("email")
+                                userinfo = resp.json()
+                                user_email = userinfo.get("email")
+                                self._google_sub = userinfo.get("id")
                     except Exception as e:
                         logger.warning(f"SSO: Could not fetch userinfo: {e}")
 
@@ -292,6 +295,8 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                     client_secret=_fastmcp_google_client_secret,
                     scopes=_oauth_comprehensive_scopes,
                 )
+                # Attach Google's immutable account ID for OAuth recipient encryption
+                credentials._google_sub = getattr(self, "_google_sub", None)
 
                 _save_credentials(user_email, credentials)
                 # Log the per-user API key if one was generated

@@ -39,3 +39,7 @@ class SessionKey(str, Enum):
     PER_USER_ENCRYPTION_KEY = (
         "per_user_encryption_key"  # Derived Fernet key bytes (in-memory only)
     )
+    GOOGLE_SUB = "google_sub"  # Google account ID (immutable, non-public)
+    OAUTH_LINKAGE_PASSWORD = (
+        "oauth_linkage_password"  # Cross-OAuth passphrase (runtime)
+    )
