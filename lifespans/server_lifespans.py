@@ -332,7 +332,8 @@ async def _periodic_memory_cleanup(
     import objgraph
 
     # Prime objgraph baseline (first call returns everything, subsequent calls show deltas)
-    objgraph.growth(limit=0)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, objgraph.growth, 0)
 
     cycle_count = 0
 
@@ -383,13 +384,15 @@ async def _periodic_memory_cleanup(
                 logger.info(f"Process health: {health}")
 
             # objgraph growth check every 3rd cycle (~15 min)
+            # Run in executor — gc.get_objects() walks the entire heap and blocks
             if cycle_count % 3 == 0:
-                growth = objgraph.growth(limit=10)
+                loop = asyncio.get_running_loop()
+                growth = await loop.run_in_executor(None, objgraph.growth, 10)
                 if growth:
                     notable = [(t, c, d) for t, c, d in growth if d > 100]
                     if notable:
                         logger.warning(
-                            f"Object growth: "
+                            "Object growth: "
                             + ", ".join(f"{t}(+{d})" for t, _, d in notable)
                         )
 
@@ -450,9 +453,9 @@ async def memory_cleanup_lifespan(server: Any):
     try:
         import aiodebug.log_slow_callbacks
 
-        aiodebug.log_slow_callbacks.enable(0.1)  # warn if callback takes >100ms
+        aiodebug.log_slow_callbacks.enable(0.25)  # warn if callback takes >250ms
         logger.info(
-            "Memory monitoring: aiodebug slow callback detection enabled (>100ms)"
+            "Memory monitoring: aiodebug slow callback detection enabled (>250ms)"
         )
     except Exception as e:
         logger.warning(f"aiodebug setup skipped: {e}")
