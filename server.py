@@ -333,6 +333,7 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
         _failed_auth_attempts: dict[str, list[float]] = {}
         _RATE_LIMIT_WINDOW = 60.0  # seconds
         _RATE_LIMIT_MAX = 10  # max failures per window
+        _MAX_TRACKED_PREFIXES = 1000  # cap to prevent memory growth from brute-force
 
         async def _load_access_token_with_api_key(token: str):
             """Check for admin key / per-user key before delegating to OAuth."""
@@ -344,6 +345,11 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
             now = _time.time()
             attempts = _failed_auth_attempts.get(token_prefix, [])
             attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+            # Write back filtered list (self-cleaning: removes expired timestamps)
+            if attempts:
+                _failed_auth_attempts[token_prefix] = attempts
+            elif token_prefix in _failed_auth_attempts:
+                del _failed_auth_attempts[token_prefix]
             if len(attempts) >= _RATE_LIMIT_MAX:
                 logger.warning("🚫 Rate limit exceeded for auth attempts")
                 return None
@@ -391,6 +397,10 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                 )
                 # Record failed attempt for rate limiting
                 _failed_auth_attempts.setdefault(token_prefix, []).append(now)
+                # Evict oldest prefix if over cap (defense against unique-token flooding)
+                if len(_failed_auth_attempts) > _MAX_TRACKED_PREFIXES:
+                    oldest_key = next(iter(_failed_auth_attempts))
+                    del _failed_auth_attempts[oldest_key]
             else:
                 logger.info(
                     f"✅ load_access_token succeeded: client={result.client_id}, scopes={result.scopes}"
