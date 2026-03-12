@@ -585,22 +585,9 @@ else:
 
 # --- Code Mode Transform (opt-in) ---
 if settings.enable_code_mode:
-    from fastmcp.experimental.transforms.code_mode import (
-        CodeMode,
-        GetSchemas,
-        GetTags,
-        Search,
-    )
+    from tools.code_mode import setup_code_mode
 
-    code_mode = CodeMode(
-        discovery_tools=[
-            GetTags(),  # Stage 1: Browse by service category
-            Search(default_limit=10),  # Stage 2: BM25 search names + descriptions
-            GetSchemas(),  # Stage 3: Get param details for selected tools
-        ],
-    )
-    mcp.add_transform(code_mode)
-    logger.info("Code Mode enabled — LLMs will use BM25 search + sandboxed execution")
+    setup_code_mode(mcp)
 else:
     logger.info("Code Mode disabled — set ENABLE_CODE_MODE=true in .env to enable")
 
