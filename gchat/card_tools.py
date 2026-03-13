@@ -614,8 +614,8 @@ def setup_card_tools(mcp: FastMCP) -> None:
             Field(
                 default=None,
                 description="Explicit overrides: title, subtitle, text, buttons, images. "
-                "Supports DSL symbol keys (e.g. δ for items, ᵬ for buttons) with optional "
-                '_shared/_items merging: {"δ": {"_shared": {...}, "_items": [...]}}. '
+                f"Supports DSL symbol keys (e.g. {dtext_sym} for items, {btn_sym} for buttons) with optional "
+                f'_shared/_items merging: {{"{dtext_sym}": {{"_shared": {{...}}, "_items": [...]}}}}. '
                 "The 'text' field supports Jinja filters ({{ 'text' | success_text }}) "
                 'and raw HTML (<font color="#hex">text</font>). '
                 "Message-level fields: 'message_text' (plain text above card), "
@@ -636,42 +636,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
         ] = None,
         progress: Progress = Progress(),  # FastMCP background task progress reporting
     ) -> SendDynamicCardResponse:
-        """
-        Send a card to Google Chat using DSL notation for structure control.
-
-        IMPORTANT: Use DSL symbols in card_description to define card structure.
-        Without DSL, cards render as simple text only.
-
-        DSL Syntax:
-        - §[widgets] = Section containing widgets
-        - δ = DecoratedText (text display)
-        - Ƀ[ᵬ×N] = ButtonList with N buttons
-        - ℊ[ǵ×N] = Grid with N items
-        - ×N = repeat N times
-
-        Common Patterns:
-        - §[δ] = Simple text card
-        - §[δ, Ƀ[ᵬ×2]] = Text + 2 buttons
-        - §[δ×3] = 3 text items
-        - §[ℊ[ǵ×4]] = Grid with 4 items
-        - §[δ, Ƀ[ᵬ×2], δ] = Text, buttons, more text
-
-        Content (in card_params):
-        - title: Card header title
-        - subtitle: Card header subtitle
-        - text: Main text content
-        - buttons: [{text, url}, ...] for ButtonList
-
-        Jinja Styling (in card_params.text):
-        - {{ 'text' | success_text }} = green
-        - {{ 'text' | error_text }} = red
-        - {{ 'text' | warning_text }} = yellow
-        - {{ 'text' | color('#hex') }} = custom color
-
-        Examples:
-            card_description="§[δ]", card_params={"title": "Alert", "text": "Done"}
-            card_description="§[δ, Ƀ[ᵬ×2]]", card_params={"title": "Actions", "buttons": [...]}
-        """
+        """Send a card to Google Chat using DSL notation for structure control."""
         try:
             logger.info(f"🔍 Finding card component for: {card_description}")
 
@@ -1417,3 +1382,36 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 message="Error sending dynamic card",
                 error=str(e),
             )
+
+    # Dynamic docstring — symbols generated from SymbolGenerator, never hardcoded
+    send_dynamic_card.__doc__ = (
+        "Send a card to Google Chat using DSL notation for structure control.\n\n"
+        "IMPORTANT: Use DSL symbols in card_description to define card structure.\n"
+        "Without DSL, cards render as simple text only.\n\n"
+        f"DSL Syntax:\n"
+        f"- {section_sym}[widgets] = Section containing widgets\n"
+        f"- {dtext_sym} = DecoratedText (text display)\n"
+        f"- {btnlist_sym}[{btn_sym}×N] = ButtonList with N buttons\n"
+        f"- {grid_sym}[{gitem_sym}×N] = Grid with N items\n"
+        "- ×N = repeat N times\n\n"
+        f"Common Patterns:\n"
+        f"- {section_sym}[{dtext_sym}] = Simple text card\n"
+        f"- {section_sym}[{dtext_sym}, {btnlist_sym}[{btn_sym}×2]] = Text + 2 buttons\n"
+        f"- {section_sym}[{dtext_sym}×3] = 3 text items\n"
+        f"- {section_sym}[{grid_sym}[{gitem_sym}×4]] = Grid with 4 items\n\n"
+        "Content (in card_params):\n"
+        "- title: Card header title\n"
+        "- subtitle: Card header subtitle\n"
+        "- text: Main text content\n"
+        "- buttons: [{text, url}, ...] for ButtonList\n\n"
+        "Jinja Styling (in card_params.text):\n"
+        "- {{ 'text' | success_text }} = green\n"
+        "- {{ 'text' | error_text }} = red\n"
+        "- {{ 'text' | warning_text }} = yellow\n"
+        "- {{ 'text' | color('#hex') }} = custom color\n\n"
+        "Examples:\n"
+        f'    card_description="{section_sym}[{dtext_sym}]", '
+        'card_params={"title": "Alert", "text": "Done"}\n'
+        f'    card_description="{section_sym}[{dtext_sym}, {btnlist_sym}[{btn_sym}×2]]", '
+        'card_params={"title": "Actions", "buttons": [...]}'
+    )

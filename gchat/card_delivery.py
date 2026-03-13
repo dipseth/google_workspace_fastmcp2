@@ -74,13 +74,58 @@ def _is_feedback_section(section: dict) -> bool:
     """Return True if *section* is the card's feedback section.
 
     Detected by the presence of ``_feedback_assembly`` metadata or a
-    ``collapseControl`` widget (the collapsible feedback UI pattern).
+    ``collapseControl`` key (the collapsible feedback UI pattern).
+    ``collapseControl`` is a section-level key, not a widget key.
     """
     if "_feedback_assembly" in section:
         return True
-    for widget in section.get("widgets", []):
-        if isinstance(widget, dict) and "collapseControl" in widget:
-            return True
+    if "collapseControl" in section:
+        return True
+    return False
+
+
+def _strip_empty_widgets(part: dict) -> dict:
+    """Remove empty widgets and sections left behind after metadata cleaning.
+
+    After ``clean_card_metadata`` strips ``_``-prefixed keys, some widgets may
+    become empty dicts (e.g. ``{"decoratedText": {}}``).  Google Chat silently
+    drops these, which can leave entire sections visually blank.  This function
+    removes them so parts are not sent with hollow content.
+    """
+    for card_wrapper in part.get("cardsV2", []):
+        card = card_wrapper.get("card", {})
+        cleaned_sections = []
+        for section in card.get("sections", []):
+            widgets = section.get("widgets", [])
+            # Keep widgets that have at least one non-empty value
+            non_empty = []
+            for w in widgets:
+                if isinstance(w, dict):
+                    # A widget like {"decoratedText": {"text": "..."}} is valid;
+                    # {"decoratedText": {}} is empty after cleaning.
+                    has_content = any(
+                        v if not isinstance(v, dict) else bool(v) for v in w.values()
+                    )
+                    if has_content:
+                        non_empty.append(w)
+                else:
+                    non_empty.append(w)
+            if non_empty or _is_feedback_section(section):
+                section["widgets"] = non_empty
+                cleaned_sections.append(section)
+        card["sections"] = cleaned_sections
+    return part
+
+
+def _part_has_content(part: dict) -> bool:
+    """Return True if *part* has at least one non-feedback section with widgets."""
+    for card_wrapper in part.get("cardsV2", []):
+        card = card_wrapper.get("card", {})
+        for section in card.get("sections", []):
+            if _is_feedback_section(section):
+                continue
+            if section.get("widgets"):
+                return True
     return False
 
 
@@ -237,6 +282,29 @@ def _build_part_payload(
     return body
 
 
+def _renumber_part_headers(parts: List[dict]) -> None:
+    """Fix ``Part X/Y`` labels in headers after empty parts have been dropped."""
+    import re
+
+    total = len(parts)
+    for idx, part in enumerate(parts):
+        for card_wrapper in part.get("cardsV2", []):
+            card = card_wrapper.get("card", {})
+            header = card.get("header", {})
+            subtitle = header.get("subtitle", "")
+            if subtitle:
+                header["subtitle"] = re.sub(
+                    r"Part \d+/\d+",
+                    f"Part {idx + 1}/{total}",
+                    subtitle,
+                )
+            # Fix cardId suffix
+            card_id = card_wrapper.get("cardId", "")
+            if "-part-" in card_id:
+                base = card_id.rsplit("-part-", 1)[0]
+                card_wrapper["cardId"] = f"{base}-part-{idx + 1}"
+
+
 # ---------------------------------------------------------------------------
 # Retry helpers
 # ---------------------------------------------------------------------------
@@ -364,7 +432,19 @@ async def deliver_card_message(
         parts_raw = _split_card_payload(
             message_body, max_bytes=GCHAT_WEBHOOK_SAFE_BYTES
         )
-        parts = [clean_card_metadata(p) for p in parts_raw]
+        parts = [_strip_empty_widgets(clean_card_metadata(p)) for p in parts_raw]
+        # Drop parts that ended up with no content after cleaning (only header/feedback)
+        pre_filter_count = len(parts)
+        parts = [p for p in parts if _part_has_content(p)]
+        if not parts:
+            # All parts were empty — fall back to cleaned unsplit body
+            parts = [_strip_empty_widgets(cleaned_body)]
+        if len(parts) != pre_filter_count:
+            logger.info(
+                "Dropped %d empty parts after metadata cleaning",
+                pre_filter_count - len(parts),
+            )
+            _renumber_part_headers(parts)
         logger.info(
             "Payload %d bytes exceeds %d threshold — split into %d parts",
             payload_bytes,
@@ -372,7 +452,7 @@ async def deliver_card_message(
             len(parts),
         )
     else:
-        parts = [cleaned_body]
+        parts = [_strip_empty_widgets(cleaned_body)]
 
     total_parts = len(parts)
     thread_key_for_result = thread_key
