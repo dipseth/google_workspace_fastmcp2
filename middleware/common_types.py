@@ -40,10 +40,17 @@ class TemplateMiddlewareFields(TypedDict):
     jinjaTemplateError: NotRequired[Optional[str]]
 
 
-class MiddlewareFields(TemplateMiddlewareFields):
+class PrivacyMiddlewareFields(TypedDict):
+    """Fields that privacy middleware injects into tool responses."""
+
+    privacyMode: NotRequired[str]
+    privacyTokenCount: NotRequired[int]
+    privacyEncrypted: NotRequired[bool]
+
+
+class MiddlewareFields(TemplateMiddlewareFields, PrivacyMiddlewareFields):
     """Combined fields that all middleware can inject into tool responses."""
 
-    # Future middleware can add their fields here
     pass
 
 

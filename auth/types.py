@@ -43,3 +43,7 @@ class SessionKey(str, Enum):
     OAUTH_LINKAGE_PASSWORD = (
         "oauth_linkage_password"  # Cross-OAuth passphrase (runtime)
     )
+    PRIVACY_MODE = "privacy_mode"  # "disabled" | "auto" | "strict"
+    PRIVACY_VAULT_SEED = (
+        "privacy_vault_seed"  # Random bytes for shared API key sessions
+    )

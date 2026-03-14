@@ -262,6 +262,23 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "RESPONSE_LIMIT_TOOLS"},
     )
 
+    # Privacy Mode Configuration
+    privacy_mode: str = Field(
+        default="disabled",
+        description="Privacy mode: 'disabled', 'auto' (field heuristics + value patterns), or 'strict' (encrypt all strings)",
+        json_schema_extra={"env": "PRIVACY_MODE"},
+    )
+    privacy_field_patterns: str = Field(
+        default="",
+        description="Comma-separated additional field names to treat as PII",
+        json_schema_extra={"env": "PRIVACY_FIELD_PATTERNS"},
+    )
+    privacy_exclude_tools: str = Field(
+        default="manage_tools,check_drive_auth,get_server_info",
+        description="Comma-separated tool names to exclude from privacy processing",
+        json_schema_extra={"env": "PRIVACY_EXCLUDE_TOOLS"},
+    )
+
     # FastMCP 2.12.0 GoogleProvider Configuration
     fastmcp_server_auth: str = ""
     fastmcp_server_auth_google_client_id: str = ""

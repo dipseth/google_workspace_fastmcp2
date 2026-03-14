@@ -766,7 +766,19 @@ logger.info(
     "✅ TagBasedResourceMiddleware enabled - service:// URIs will be handled via tag-based tool discovery"
 )
 
-# 8. Add ResponseLimitingMiddleware for tool response size control
+# 8. Add PrivacyMiddleware for PII encryption (after all data-producing middleware)
+if settings.privacy_mode != "disabled":
+    from middleware.privacy.middleware import PrivacyMiddleware
+
+    privacy_middleware = PrivacyMiddleware(
+        mode=settings.privacy_mode,
+        additional_fields=settings.privacy_field_patterns,
+        exclude_tools=settings.privacy_exclude_tools,
+    )
+    mcp.add_middleware(privacy_middleware)
+    logger.info(f"✅ Privacy middleware enabled (mode={settings.privacy_mode})")
+
+# 9. Add ResponseLimitingMiddleware for tool response size control
 if settings.response_limit_max_size > 0:
     from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 

@@ -1,0 +1,96 @@
+{% macro email_resource_report(label_data, profile_data, session_data, symbols, mode='dsl') %}
+{%- set s = symbols -%}
+{#- Extract labels -#}
+{%- set labels = label_data.result.labels if label_data is defined and label_data.result is defined else [] -%}
+{%- set user_labels = [] -%}
+{%- set system_labels = [] -%}
+{%- for label in labels -%}
+  {%- if label.type == 'user' -%}
+    {%- set _ = user_labels.append(label) -%}
+  {%- elif label.type == 'system' -%}
+    {%- set _ = system_labels.append(label) -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set active_labels = [] -%}
+{%- for label in user_labels -%}
+  {%- if label.messagesUnread > 0 -%}
+    {%- set _ = active_labels.append(label) -%}
+  {%- endif -%}
+{%- endfor -%}
+{#- Sort by unread desc -#}
+{%- set sorted_labels = active_labels | sort(attribute='messagesUnread', reverse=true) -%}
+{%- set top_labels = sorted_labels[:12] -%}
+{#- Extract profile -#}
+{%- set user_email = profile_data.email if profile_data is defined and profile_data.email is defined else '' -%}
+{%- set user_name = profile_data.name if profile_data is defined and profile_data.name is defined else '' -%}
+{%- set is_authed = profile_data.authenticated if profile_data is defined and profile_data.authenticated is defined else false -%}
+{#- Extract session -#}
+{%- set session_active = session_data.session_active if session_data is defined and session_data.session_active is defined else false -%}
+{%- set session_ts = session_data.timestamp if session_data is defined and session_data.timestamp is defined else '' -%}
+{#- Count total unread across system labels -#}
+{%- set inbox_label = none -%}
+{%- for label in system_labels -%}
+  {%- if label.name == 'INBOX' -%}
+    {%- set inbox_label = label -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set total_unread = inbox_label.messagesUnread if inbox_label else 0 -%}
+{%- set total_messages = inbox_label.messagesTotal if inbox_label else 0 -%}
+{#- Block count: header + hero + 3 metrics (in columns) + section header + label rows + divider + session info + footer -#}
+{%- set label_row_count = [top_labels|length, 1]|max -%}
+{%- if mode == 'dsl' -%}
+{{ s.EmailSpec }}[{{ s.HeaderBlock }}, {{ s.HeroBlock }}, {{ s.TextBlock }}x3, {{ s.DividerBlock }}, {{ s.TextBlock }}x{{ label_row_count + 1 }}, {{ s.DividerBlock }}, {{ s.TextBlock }}x2, {{ s.FooterBlock }}]
+{%- elif mode == 'params' -%}
+{#- Build metric cards -#}
+{%- set read_pct = (((total_messages - total_unread) / [total_messages, 1]|max) * 100)|round|int if total_messages > 0 else 0 -%}
+{%- set metric_items = [
+  {"text": "<div style='background:#EFF6FF;padding:16px;border-radius:12px;text-align:center;border:1px solid #3B82F620'><div style='font-size:32px;font-weight:800;color:#2563EB;letter-spacing:-1px'>" ~ (total_unread|string) ~ "</div><div style='font-size:11px;color:#2563EB99;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px'>Unread</div></div>"},
+  {"text": "<div style='background:#F0FDF4;padding:16px;border-radius:12px;text-align:center;border:1px solid #22C55E20'><div style='font-size:32px;font-weight:800;color:#059669;letter-spacing:-1px'>" ~ (user_labels|length|string) ~ "</div><div style='font-size:11px;color:#05966999;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px'>Labels</div></div>"},
+  {"text": "<div style='background:#FFF7ED;padding:16px;border-radius:12px;text-align:center;border:1px solid #F9731620'><div style='font-size:32px;font-weight:800;color:#EA580C;letter-spacing:-1px'>" ~ (active_labels|length|string) ~ "</div><div style='font-size:11px;color:#EA580C99;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px'>Active</div></div>"}
+] -%}
+{#- Build label rows with color chips -#}
+{%- set label_items = [] -%}
+{%- set _ = label_items.append({"text": "<div style='border-left:4px solid #6366F1;padding:4px 0 4px 16px'><div style='font-size:18px;font-weight:700;color:#1a1a2e;letter-spacing:-0.3px'>Labels with Unread</div><div style='font-size:12px;color:#64748B;margin-top:2px'>Top " ~ (top_labels|length|string) ~ " by unread count</div></div>", "padding": "16px 0 8px 0"}) -%}
+{%- for label in top_labels -%}
+  {%- set bg_color = label.color.backgroundColor if label.color is defined and label.color.backgroundColor is defined else '#F1F5F9' -%}
+  {%- set txt_color = label.color.textColor if label.color is defined and label.color.textColor is defined else '#334155' -%}
+  {%- set unread_pct = ((label.messagesUnread / [label.messagesTotal, 1]|max) * 100)|round|int -%}
+  {%- set bar_color = '#EF4444' if unread_pct > 80 else '#F59E0B' if unread_pct > 50 else '#22C55E' -%}
+  {%- set _ = label_items.append({
+    "text": "<div style='display:flex;align-items:center;padding:10px 16px;border-radius:8px;background:#FAFAFA;margin-bottom:4px'><span style='display:inline-block;width:12px;height:12px;border-radius:3px;background:" ~ bg_color ~ ";margin-right:12px;flex-shrink:0'></span><div style='flex:1'><div style='font-size:14px;font-weight:600;color:#1E293B'>" ~ label.name ~ "</div><div style='font-size:11px;color:#94A3B8;margin-top:2px'>" ~ (label.messagesTotal|string) ~ " total</div></div><div style='text-align:right'><div style='font-size:18px;font-weight:700;color:" ~ bar_color ~ "'>" ~ (label.messagesUnread|string) ~ "</div><div style='font-size:10px;color:#94A3B8'>unread</div></div></div>",
+    "padding": "2px 0"
+  }) -%}
+{%- endfor -%}
+{#- Session & profile info -#}
+{%- set info_items = [
+  {"text": "<div style='border-left:4px solid #8B5CF6;padding:4px 0 4px 16px'><div style='font-size:18px;font-weight:700;color:#1a1a2e'>Session Info</div></div>", "padding": "16px 0 8px 0"},
+  {"text": "<div style='background:#F8FAFC;border-radius:8px;padding:16px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px;width:120px'>Account</td><td style='padding:6px 12px;font-size:14px;color:#1E293B;font-weight:500'>" ~ (user_email if user_email else 'N/A') ~ "</td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Authenticated</td><td style='padding:6px 12px;font-size:14px'><span style='display:inline-block;background:" ~ ('#DCFCE7' if is_authed else '#FEE2E2') ~ ";color:" ~ ('#166534' if is_authed else '#991B1B') ~ ";padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600'>" ~ ('Yes' if is_authed else 'No') ~ "</span></td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Session</td><td style='padding:6px 12px;font-size:14px'><span style='display:inline-block;background:" ~ ('#DCFCE7' if session_active else '#FEE2E2') ~ ";color:" ~ ('#166534' if session_active else '#991B1B') ~ ";padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600'>" ~ ('Active' if session_active else 'Inactive') ~ "</span></td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Generated</td><td style='padding:6px 12px;font-size:13px;color:#64748B;font-family:monospace'>" ~ (session_ts if session_ts else 'N/A') ~ "</td></tr></table></div>", "padding": "4px 0"}
+] -%}
+{#- Combine all text items: metrics(3) + label section header + label rows + session rows -#}
+{%- set all_text_items = metric_items + label_items + info_items -%}
+{%- set result = {
+  s.HeaderBlock: {"title": "Google Workspace", "subtitle": "Resource Report"},
+  s.HeroBlock: {"title": "Your Workspace at a Glance", "subtitle": (total_messages|string) ~ " messages across " ~ (labels|length|string) ~ " labels"},
+  s.TextBlock: {"_items": all_text_items},
+  s.DividerBlock: {"_items": [{}, {}]},
+  s.FooterBlock: {"_items": [{"text": "Generated by Google Workspace MCP Server &bull; Privacy Mode Enabled"}]}
+} -%}
+{{ result | tojson }}
+{%- endif -%}
+{% endmacro %}
+
+{#
+DUAL-MODE EMAIL MACRO USAGE:
+
+email_description: {{ email_resource_report(service://gmail/labels, user://current/profile, auth://session/current, email_symbols, 'dsl') }}
+email_params:      {{ email_resource_report(service://gmail/labels, user://current/profile, auth://session/current, email_symbols, 'params') }}
+
+Renders a comprehensive resource report with:
+- Hero banner with inbox stats
+- 3 metric cards (unread, labels, active)
+- Color-coded label list sorted by unread count
+- Session/profile info table with status badges
+- Footer with generation timestamp
+
+Requires `email_symbols` to be available in the Jinja2 context (registered as a global).
+#}
