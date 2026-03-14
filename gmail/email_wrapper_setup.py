@@ -84,7 +84,147 @@ EMAIL_NL_RELATIONSHIP_PATTERNS = {
     ("Column", "TextBlock"): "column with text",
     ("Column", "ButtonBlock"): "column with button",
     ("Column", "ImageBlock"): "column with image",
+    ("EmailSpec", "AccordionBlock"): "email with expandable accordion sections",
+    ("EmailSpec", "CarouselBlock"): "email with image carousel",
 }
+
+
+# =============================================================================
+# EMAIL-SPECIFIC SKILL TEMPLATES
+# =============================================================================
+
+EMAIL_DSL_GUIDE = """# Email DSL Syntax
+
+MJML emails use a compact DSL notation for defining block structure.
+
+## Basic Syntax
+
+```
+ε[ħ, τ×2, Ƀ]
+```
+
+Means: EmailSpec with HeroBlock, 2 TextBlocks, and a ButtonBlock.
+
+## Notation Rules
+
+- **Symbols**: Each block type has a unique Unicode symbol (see `symbols.md`)
+- **Brackets**: `[]` denote children of a container
+- **Multiplier**: `×N` creates N copies of a block
+- **Comma**: Separates sibling blocks
+
+## Symbol Table
+
+{symbol_table}
+
+## Containment Rules
+
+- EmailSpec → all block types (top-level container)
+- ColumnsBlock → Column (layout container)
+- Column → TextBlock, ButtonBlock, ImageBlock, SpacerBlock, DividerBlock
+
+## Examples
+
+{examples}
+"""
+
+EMAIL_JINJA_GUIDE = """# Email Jinja Template Filters
+
+MJML email templates support Jinja2 expressions for dynamic content within `email_params`.
+
+## Color Filters
+
+| Filter | Color | Usage |
+|--------|-------|-------|
+| `success_text` | Green | `{{{{ 'Active' | success_text }}}}` |
+| `error_text` | Red | `{{{{ 'Overdue' | error_text }}}}` |
+| `warning_text` | Yellow | `{{{{ 'Pending' | warning_text }}}}` |
+| `info_text` | Blue | `{{{{ 'New' | info_text }}}}` |
+
+## Text Styling
+
+| Filter | Effect |
+|--------|--------|
+| `bold` | **Bold text** |
+| `italic` | *Italic text* |
+| `strike` | ~~Strikethrough~~ |
+
+## Combining Filters
+
+```jinja
+{{{{ 'Critical Alert' | error_text | bold }}}}
+```
+
+## Dual-Mode Macros
+
+Email macros support two modes:
+- **DSL mode**: Returns structure notation (e.g., `ε[ħ, τ×3, ƒ]`)
+- **Params mode**: Returns JSON `email_params` with symbol keys
+
+```
+email_description: {{{{ email_workspace_digest(service://gmail/labels, email_symbols, 'dsl') }}}}
+email_params:      {{{{ email_workspace_digest(service://gmail/labels, email_symbols, 'params') }}}}
+```
+
+## Examples
+
+{examples}
+"""
+
+EMAIL_SKILL_EXAMPLES = {
+    "dsl-syntax": [
+        "ε[ħ, τ] — EmailSpec with HeroBlock and TextBlock",
+        "ε[Ħ, ħ, τ×3, Ƀ] — Header, hero, 3 text blocks, button",
+        "ε[ħ, Ç[ç×2], Ƀ] — Hero, 2-column layout, button",
+        "ε[Ħ, τ, ḑ, ƒ] — Header, text, divider, footer",
+    ],
+    "jinja-filters": [
+        "{{ 'Active' | success_text }} — Green text",
+        "{{ 'Overdue' | error_text }} — Red text",
+        "{{ count ~ ' unread' | bold }} — Bold count",
+        "{{ label.name | info_text }} — Blue label name",
+    ],
+}
+
+
+def _generate_email_dsl_template(wrapper) -> str:
+    """Generate the email DSL syntax skill document."""
+    symbol_table = (
+        wrapper.get_symbol_table_text()
+        if hasattr(wrapper, "get_symbol_table_text")
+        else "No symbols available."
+    )
+
+    examples = EMAIL_SKILL_EXAMPLES.get("dsl-syntax", [])
+    examples_text = "\n".join(f"- `{e}`" for e in examples)
+
+    return EMAIL_DSL_GUIDE.format(
+        symbol_table=symbol_table,
+        examples=examples_text,
+    )
+
+
+def _generate_email_jinja_template(wrapper) -> str:
+    """Generate the email Jinja filters skill document."""
+    examples = EMAIL_SKILL_EXAMPLES.get("jinja-filters", [])
+    examples_text = "\n".join(f"- `{e}`" for e in examples)
+
+    return EMAIL_JINJA_GUIDE.format(
+        examples=examples_text,
+    )
+
+
+def _register_email_skill_templates(wrapper) -> None:
+    """Register email-specific skill templates with the ModuleWrapper.
+
+    Called during wrapper initialization via post_init_hooks.
+    """
+    wrapper.register_skill_template("email-dsl-syntax", _generate_email_dsl_template)
+    wrapper.register_skill_template("jinja-filters", _generate_email_jinja_template)
+
+    for skill_type, examples in EMAIL_SKILL_EXAMPLES.items():
+        wrapper.register_skill_examples(skill_type, examples)
+
+    logger.info("Registered email skill templates with ModuleWrapper")
 
 
 # =============================================================================
@@ -144,6 +284,7 @@ def _create_email_wrapper() -> "ModuleWrapper":
         nl_relationship_patterns=EMAIL_NL_RELATIONSHIP_PATTERNS,
         post_init_hooks=[
             _register_email_component_metadata,
+            _register_email_skill_templates,
         ],
         post_pipeline_hooks=[],
         domain_label="Email Blocks (MJML)",
@@ -167,31 +308,10 @@ def _create_email_wrapper() -> "ModuleWrapper":
     # Filter symbol_mapping to only email-relevant types.
     # The wrapper introspects gmail.mjml_types and generates symbols for ALL classes,
     # including utility types (BaseModel, Annotated, Tag, etc.) that shouldn't be user-facing.
-    # New block types may not be picked up by introspection (Qdrant cache, .pyc staleness)
-    # so we ensure stable symbols via MANUAL_SYMBOLS as the canonical source.
     RELEVANT_TYPES = EMAIL_WIDGET_TYPES | {"EmailSpec", "Column"}
-
-    # Canonical symbol assignments — stable across regeneration
-    MANUAL_SYMBOLS = {
-        "EmailSpec": "ε",
-        "HeroBlock": "ħ",
-        "TextBlock": "τ",
-        "ButtonBlock": "Ƀ",
-        "ImageBlock": "ɨ",
-        "ColumnsBlock": "¢",
-        "Column": "©",
-        "SpacerBlock": "ş",
-        "DividerBlock": "đ",
-        "FooterBlock": "ƒ",
-        "HeaderBlock": "Ħ",
-        "SocialBlock": "ʂ",
-        "TableBlock": "ƭ",
-        "AccordionBlock": "ǎ",
-        "CarouselBlock": "ȼ",
-    }
-
+    raw_symbols = wrapper.symbol_mapping  # triggers lazy generation
     wrapper._symbol_mapping = {
-        name: sym for name, sym in MANUAL_SYMBOLS.items() if name in RELEVANT_TYPES
+        name: sym for name, sym in raw_symbols.items() if name in RELEVANT_TYPES
     }
     wrapper._reverse_symbol_mapping = {v: k for k, v in wrapper._symbol_mapping.items()}
 
@@ -199,7 +319,7 @@ def _create_email_wrapper() -> "ModuleWrapper":
     symbol_count = len(wrapper._symbol_mapping)
     logger.info(
         f"Email ModuleWrapper ready: {component_count} components, "
-        f"{symbol_count} symbols (manual assignment)"
+        f"{symbol_count} symbols (filtered from {len(raw_symbols)})"
     )
 
     wrapper.run_domain_hooks("post_init")

@@ -80,9 +80,9 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
             lines.append(f"**{category}:** {', '.join(mappings)}")
 
     # Containment rules
-    spec_sym = symbols.get("EmailSpec", "ε")
-    cols_sym = symbols.get("ColumnsBlock", "¢")
-    col_sym = symbols.get("Column", "©")
+    spec_sym = symbols["EmailSpec"]
+    cols_sym = symbols["ColumnsBlock"]
+    col_sym = symbols["Column"]
 
     lines.append("\n### Containment Rules")
     lines.append(f"- {spec_sym} EmailSpec → all block types (top-level container)")
@@ -92,14 +92,14 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
     )
 
     if include_examples:
-        hero_sym = symbols.get("HeroBlock", "ħ")
-        text_sym = symbols.get("TextBlock", "τ")
-        btn_sym = symbols.get("ButtonBlock", "Ƀ")
-        img_sym = symbols.get("ImageBlock", "ɨ")
-        spacer_sym = symbols.get("SpacerBlock", "ş")
-        divider_sym = symbols.get("DividerBlock", "đ")
-        header_sym = symbols.get("HeaderBlock", "Ħ")
-        footer_sym = symbols.get("FooterBlock", "ƒ")
+        hero_sym = symbols["HeroBlock"]
+        text_sym = symbols["TextBlock"]
+        btn_sym = symbols["ButtonBlock"]
+        img_sym = symbols["ImageBlock"]
+        spacer_sym = symbols["SpacerBlock"]
+        divider_sym = symbols["DividerBlock"]
+        header_sym = symbols["HeaderBlock"]
+        footer_sym = symbols["FooterBlock"]
 
         lines.append("\n### Examples")
         lines.append(f"- `{spec_sym}[{hero_sym}, {text_sym}]` = hero + text email")
@@ -138,6 +138,8 @@ def get_email_dsl_field_description() -> str:
         "Column",
         "HeaderBlock",
         "FooterBlock",
+        "AccordionBlock",
+        "CarouselBlock",
     ]
 
     for comp in key_components:
@@ -159,16 +161,18 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
     """
     symbols = get_email_symbols()
 
-    spec = symbols.get("EmailSpec", "ε")
-    hero = symbols.get("HeroBlock", "ħ")
-    text = symbols.get("TextBlock", "τ")
-    btn = symbols.get("ButtonBlock", "Ƀ")
-    img = symbols.get("ImageBlock", "ɨ")
-    header = symbols.get("HeaderBlock", "Ħ")
-    footer = symbols.get("FooterBlock", "ƒ")
-    divider = symbols.get("DividerBlock", "đ")
-    cols = symbols.get("ColumnsBlock", "¢")
-    col = symbols.get("Column", "©")
+    spec = symbols["EmailSpec"]
+    hero = symbols["HeroBlock"]
+    text = symbols["TextBlock"]
+    btn = symbols["ButtonBlock"]
+    img = symbols["ImageBlock"]
+    header = symbols["HeaderBlock"]
+    footer = symbols["FooterBlock"]
+    divider = symbols["DividerBlock"]
+    cols = symbols["ColumnsBlock"]
+    col = symbols["Column"]
+    accordion = symbols["AccordionBlock"]
+    carousel = symbols["CarouselBlock"]
 
     all_examples = [
         {
@@ -232,6 +236,61 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
                 text: {"_items": [{"text": "Check out our new product."}]},
                 btn: {
                     "_items": [{"text": "Shop Now", "url": "https://example.com/shop"}]
+                },
+            },
+        },
+        {
+            "description": "FAQ with accordion",
+            "email_description": f"{spec}[{hero}, {accordion}, {btn}]",
+            "email_params": {
+                hero: {"title": "FAQ"},
+                accordion: {
+                    "_items": [
+                        {
+                            "items": [
+                                {
+                                    "title": "How does it work?",
+                                    "content": "It just works.",
+                                },
+                                {
+                                    "title": "Is it free?",
+                                    "content": "Yes, completely free.",
+                                },
+                            ]
+                        }
+                    ]
+                },
+                btn: {
+                    "_items": [
+                        {"text": "Contact Us", "url": "https://example.com/contact"}
+                    ]
+                },
+            },
+        },
+        {
+            "description": "Image carousel showcase",
+            "email_description": f"{spec}[{hero}, {carousel}]",
+            "email_params": {
+                hero: {"title": "Gallery"},
+                carousel: {
+                    "_items": [
+                        {
+                            "images": [
+                                {
+                                    "src": "https://picsum.photos/600/300?1",
+                                    "alt": "Photo 1",
+                                },
+                                {
+                                    "src": "https://picsum.photos/600/300?2",
+                                    "alt": "Photo 2",
+                                },
+                                {
+                                    "src": "https://picsum.photos/600/300?3",
+                                    "alt": "Photo 3",
+                                },
+                            ]
+                        }
+                    ]
                 },
             },
         },

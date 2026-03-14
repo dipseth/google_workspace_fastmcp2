@@ -638,6 +638,9 @@ def _build_email_spec_from_dsl(
                     if block is not None:
                         col_blocks.append(block)
             item_data = _get_item_for_class("Column") or {}
+            # When DSL has no child nodes (e.g. ©x2), pull blocks from params
+            if not col_blocks and "blocks" in item_data:
+                col_blocks = item_data.pop("blocks")
             return EmailColumn(
                 blocks=col_blocks,
                 width=item_data.get("width"),
@@ -3478,10 +3481,10 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     )
 
     email_symbols = get_email_symbols()
-    spec_sym = email_symbols.get("EmailSpec", "ε")
-    hero_sym = email_symbols.get("HeroBlock", "ħ")
-    text_sym = email_symbols.get("TextBlock", "τ")
-    btn_sym = email_symbols.get("ButtonBlock", "Ƀ")
+    spec_sym = email_symbols["EmailSpec"]
+    hero_sym = email_symbols["HeroBlock"]
+    text_sym = email_symbols["TextBlock"]
+    btn_sym = email_symbols["ButtonBlock"]
     email_dsl_field_desc = get_email_dsl_field_description()
 
     compose_tool_description = (
@@ -3521,7 +3524,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             Field(description=email_description_help),
         ],
         email_params: Annotated[
-            Optional[dict],
+            Optional[Union[dict, str]],
             Field(
                 default=None,
                 description="Block content keyed by symbol or class name. "
@@ -3544,10 +3547,19 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         bcc: GmailRecipientsOptional = None,
     ):
         """Compose responsive HTML email via DSL notation, then send or draft."""
+        import json as _json
+
         from gmail.email_wrapper_api import (
             extract_email_dsl_from_description,
             parse_email_dsl,
         )
+
+        # MCP clients / Jinja macros may send email_params as a JSON string; coerce to dict.
+        if isinstance(email_params, str):
+            try:
+                email_params = _json.loads(email_params)
+            except (ValueError, TypeError):
+                email_params = None
 
         # 1. Extract DSL from description
         dsl_string = extract_email_dsl_from_description(email_description)

@@ -85,6 +85,7 @@ class EmailBlock(BaseModel):
     """Base class for all email blocks."""
 
     block_type: str = ""
+    background_color: Optional[str] = None
 
     def to_mjml(self, theme: Optional[EmailTheme] = None) -> str:
         raise NotImplementedError
@@ -98,21 +99,24 @@ class HeroBlock(EmailBlock):
     subtitle: Optional[str] = None
     cta_text: Optional[str] = None
     cta_url: Optional[str] = None
-    background_color: Optional[str] = None
     background_image_url: Optional[str] = None
+    title_color: Optional[str] = None
+    subtitle_color: Optional[str] = None
     title_size: str = "28px"
     subtitle_size: str = "16px"
 
     def to_mjml(self, theme: Optional[EmailTheme] = None) -> str:
         theme = theme or EmailTheme()
+        t_color = self.title_color or theme.text_color
+        s_color = self.subtitle_color or "#334155"
         parts = []
         parts.append(
             f'<mj-text font-size="{self.title_size}" font-weight="700" '
-            f'padding="0 0 8px 0">{self.title}</mj-text>'
+            f'color="{t_color}" padding="0 0 8px 0">{self.title}</mj-text>'
         )
         if self.subtitle:
             parts.append(
-                f'<mj-text font-size="{self.subtitle_size}" color="#334155" '
+                f'<mj-text font-size="{self.subtitle_size}" color="{s_color}" '
                 f'padding="0 0 16px 0">{self.subtitle}</mj-text>'
             )
         if self.cta_text and self.cta_url:
@@ -189,6 +193,7 @@ class Column(BaseModel):
     blocks: List[EmailBlock]
     width: Optional[str] = None
     padding: str = "0"
+    background_color: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -212,6 +217,8 @@ class Column(BaseModel):
         attrs = [f'padding="{self.padding}"']
         if self.width:
             attrs.append(f'width="{self.width}"')
+        if self.background_color:
+            attrs.append(f'background-color="{self.background_color}"')
         inner = "\n".join(b.to_mjml(theme) for b in self.blocks)
         return f"<mj-column {' '.join(attrs)}>\n{inner}\n</mj-column>"
 
@@ -225,7 +232,12 @@ class ColumnsBlock(EmailBlock):
 
     def to_mjml(self, theme: Optional[EmailTheme] = None) -> str:
         cols = "\n".join(c.to_mjml(theme) for c in self.columns)
-        return f'<mj-section padding="{self.padding}">\n{cols}\n</mj-section>'
+        bg = (
+            f' background-color="{self.background_color}"'
+            if self.background_color
+            else ""
+        )
+        return f'<mj-section{bg} padding="{self.padding}">\n{cols}\n</mj-section>'
 
 
 class SpacerBlock(EmailBlock):
@@ -285,12 +297,13 @@ class HeaderBlock(EmailBlock):
     logo_alt: str = ""
     logo_width: str = "150px"
     title: Optional[str] = None
-    background_color: Optional[str] = None
+    text_color: Optional[str] = None
     padding: str = "16px 0"
 
     def to_mjml(self, theme: Optional[EmailTheme] = None) -> str:
         theme = theme or EmailTheme()
         bg = self.background_color or theme.card_bg_color
+        color = self.text_color or theme.text_color
         parts = []
         if self.logo_url:
             parts.append(
@@ -300,7 +313,7 @@ class HeaderBlock(EmailBlock):
         if self.title:
             parts.append(
                 f'<mj-text font-size="24px" font-weight="700" '
-                f'padding="0">{self.title}</mj-text>'
+                f'color="{color}" padding="0">{self.title}</mj-text>'
             )
         inner = "\n".join(parts)
         return (
@@ -591,9 +604,10 @@ class EmailSpec(BaseModel):
         # Content wrapper
         parts.append('<mj-wrapper padding="0">')
 
-        # Render blocks — ColumnsBlock and HeaderBlock get their own sections,
-        # all other blocks go inside a shared single-column section.
-        # Group consecutive non-section blocks together.
+        # Render blocks — each block either:
+        # 1. Renders its own <mj-section> (ColumnsBlock, HeaderBlock)
+        # 2. Gets its own <mj-section> if it has a custom background_color
+        # 3. Groups with adjacent blocks into a shared <mj-section>
         inline_blocks: List[EmailBlock] = []
 
         def _flush_inline(inline: List[EmailBlock]) -> None:
@@ -610,11 +624,20 @@ class EmailSpec(BaseModel):
 
         for block in self.blocks:
             if isinstance(block, (ColumnsBlock, HeaderBlock)):
-                # Flush any pending inline blocks first
                 _flush_inline(inline_blocks)
                 inline_blocks = []
-                # ColumnsBlock/HeaderBlock renders its own <mj-section>
                 parts.append(block.to_mjml(theme))
+            elif block.background_color and not isinstance(block, ButtonBlock):
+                # Block has a custom section background — give it its own section
+                # (ButtonBlock.background_color is the button element color, not section)
+                _flush_inline(inline_blocks)
+                inline_blocks = []
+                bg = block.background_color
+                parts.append(f'<mj-section background-color="{bg}" padding="24px">')
+                parts.append("<mj-column>")
+                parts.append(block.to_mjml(theme))
+                parts.append("</mj-column>")
+                parts.append("</mj-section>")
             else:
                 inline_blocks.append(block)
 
