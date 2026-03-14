@@ -164,13 +164,34 @@ def _create_email_wrapper() -> "ModuleWrapper":
 
     wrapper.initialize()
 
-    # Filter symbol_mapping to only email-relevant types
+    # Filter symbol_mapping to only email-relevant types.
     # The wrapper introspects gmail.mjml_types and generates symbols for ALL classes,
     # including utility types (BaseModel, Annotated, Tag, etc.) that shouldn't be user-facing.
+    # New block types may not be picked up by introspection (Qdrant cache, .pyc staleness)
+    # so we ensure stable symbols via MANUAL_SYMBOLS as the canonical source.
     RELEVANT_TYPES = EMAIL_WIDGET_TYPES | {"EmailSpec", "Column"}
-    raw_symbols = wrapper.symbol_mapping  # triggers lazy generation
+
+    # Canonical symbol assignments — stable across regeneration
+    MANUAL_SYMBOLS = {
+        "EmailSpec": "ε",
+        "HeroBlock": "ħ",
+        "TextBlock": "τ",
+        "ButtonBlock": "Ƀ",
+        "ImageBlock": "ɨ",
+        "ColumnsBlock": "¢",
+        "Column": "©",
+        "SpacerBlock": "ş",
+        "DividerBlock": "đ",
+        "FooterBlock": "ƒ",
+        "HeaderBlock": "Ħ",
+        "SocialBlock": "ʂ",
+        "TableBlock": "ƭ",
+        "AccordionBlock": "ǎ",
+        "CarouselBlock": "ȼ",
+    }
+
     wrapper._symbol_mapping = {
-        name: sym for name, sym in raw_symbols.items() if name in RELEVANT_TYPES
+        name: sym for name, sym in MANUAL_SYMBOLS.items() if name in RELEVANT_TYPES
     }
     wrapper._reverse_symbol_mapping = {v: k for k, v in wrapper._symbol_mapping.items()}
 
@@ -178,7 +199,7 @@ def _create_email_wrapper() -> "ModuleWrapper":
     symbol_count = len(wrapper._symbol_mapping)
     logger.info(
         f"Email ModuleWrapper ready: {component_count} components, "
-        f"{symbol_count} symbols (filtered from {len(raw_symbols)})"
+        f"{symbol_count} symbols (manual assignment)"
     )
 
     wrapper.run_domain_hooks("post_init")
