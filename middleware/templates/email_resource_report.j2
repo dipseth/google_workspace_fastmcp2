@@ -27,50 +27,60 @@
 {#- Extract session -#}
 {%- set session_active = session_data.session_active if session_data is defined and session_data.session_active is defined else false -%}
 {%- set session_ts = session_data.timestamp if session_data is defined and session_data.timestamp is defined else '' -%}
-{#- Count total unread across system labels -#}
-{%- set inbox_label = none -%}
+{#- Count total unread across system labels (use dict.update to escape Jinja2 for-loop scope) -#}
+{%- set sys = {"inbox": none, "starred": none, "draft": none} -%}
 {%- for label in system_labels -%}
   {%- if label.name == 'INBOX' -%}
-    {%- set inbox_label = label -%}
+    {%- set _ = sys.update({"inbox": label}) -%}
+  {%- elif label.name == 'STARRED' -%}
+    {%- set _ = sys.update({"starred": label}) -%}
+  {%- elif label.name == 'DRAFT' -%}
+    {%- set _ = sys.update({"draft": label}) -%}
   {%- endif -%}
 {%- endfor -%}
-{%- set total_unread = inbox_label.messagesUnread if inbox_label else 0 -%}
-{%- set total_messages = inbox_label.messagesTotal if inbox_label else 0 -%}
-{#- Block count: header + hero + 3 metrics (in columns) + section header + label rows + divider + session info + footer -#}
+{%- set total_unread = sys.inbox.messagesUnread if sys.inbox else 0 -%}
+{%- set total_messages = sys.inbox.messagesTotal if sys.inbox else 0 -%}
+{%- set starred_count = sys.starred.messagesTotal if sys.starred else 0 -%}
+{%- set draft_count = sys.draft.messagesTotal if sys.draft else 0 -%}
+{#- Gmail base URL — no /u/0/ so mobile uses active account; authuser= targets by email -#}
+{%- set gmail_base = 'https://mail.google.com/mail/' -%}
+{%- set gmail_auth = '?authuser=' ~ user_email if user_email else '' -%}
+{#- Block count: header + hero + 3 metrics + divider + section header + label rows + divider + session info + footer -#}
 {%- set label_row_count = [top_labels|length, 1]|max -%}
 {%- if mode == 'dsl' -%}
 {{ s.EmailSpec }}[{{ s.HeaderBlock }}, {{ s.HeroBlock }}, {{ s.TextBlock }}x3, {{ s.DividerBlock }}, {{ s.TextBlock }}x{{ label_row_count + 1 }}, {{ s.DividerBlock }}, {{ s.TextBlock }}x2, {{ s.FooterBlock }}]
 {%- elif mode == 'params' -%}
-{#- Build metric cards -#}
-{%- set read_pct = (((total_messages - total_unread) / [total_messages, 1]|max) * 100)|round|int if total_messages > 0 else 0 -%}
+{#- Build metric cards — each links to its Gmail view -#}
 {%- set metric_items = [
-  {"text": "<div style='background:#EFF6FF;padding:16px;border-radius:12px;text-align:center;border:1px solid #3B82F620'><div style='font-size:32px;font-weight:800;color:#2563EB;letter-spacing:-1px'>" ~ (total_unread|string) ~ "</div><div style='font-size:11px;color:#2563EB99;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px'>Unread</div></div>"},
-  {"text": "<div style='background:#F0FDF4;padding:16px;border-radius:12px;text-align:center;border:1px solid #22C55E20'><div style='font-size:32px;font-weight:800;color:#059669;letter-spacing:-1px'>" ~ (user_labels|length|string) ~ "</div><div style='font-size:11px;color:#05966999;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px'>Labels</div></div>"},
-  {"text": "<div style='background:#FFF7ED;padding:16px;border-radius:12px;text-align:center;border:1px solid #F9731620'><div style='font-size:32px;font-weight:800;color:#EA580C;letter-spacing:-1px'>" ~ (active_labels|length|string) ~ "</div><div style='font-size:11px;color:#EA580C99;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px'>Active</div></div>"}
+  {"text": "<a href='" ~ gmail_base ~ gmail_auth ~ "#inbox' style='text-decoration:none;display:block'><div style='background:#EFF6FF;padding:16px;border-radius:12px;text-align:center;border:1px solid #3B82F620;cursor:pointer'><div style='font-size:32px;font-weight:800;color:#2563EB;letter-spacing:-1px'>" ~ (total_unread|string) ~ "</div><div style='font-size:11px;color:#2563EB99;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px'>Inbox Unread</div></div></a>"},
+  {"text": "<a href='" ~ gmail_base ~ gmail_auth ~ "#starred' style='text-decoration:none;display:block'><div style='background:#FFFBEB;padding:16px;border-radius:12px;text-align:center;border:1px solid #F59E0B20;cursor:pointer'><div style='font-size:32px;font-weight:800;color:#D97706;letter-spacing:-1px'>" ~ (starred_count|string) ~ "</div><div style='font-size:11px;color:#D9770699;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px'>Starred</div></div></a>"},
+  {"text": "<a href='" ~ gmail_base ~ gmail_auth ~ "#drafts' style='text-decoration:none;display:block'><div style='background:#F0FDF4;padding:16px;border-radius:12px;text-align:center;border:1px solid #22C55E20;cursor:pointer'><div style='font-size:32px;font-weight:800;color:#059669;letter-spacing:-1px'>" ~ (draft_count|string) ~ "</div><div style='font-size:11px;color:#05966999;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px'>Drafts</div></div></a>"}
 ] -%}
-{#- Build label rows with color chips -#}
+{#- Build label rows with color chips — each row links to the label in Gmail -#}
 {%- set label_items = [] -%}
-{%- set _ = label_items.append({"text": "<div style='border-left:4px solid #6366F1;padding:4px 0 4px 16px'><div style='font-size:18px;font-weight:700;color:#1a1a2e;letter-spacing:-0.3px'>Labels with Unread</div><div style='font-size:12px;color:#64748B;margin-top:2px'>Top " ~ (top_labels|length|string) ~ " by unread count</div></div>", "padding": "16px 0 8px 0"}) -%}
+{%- set _ = label_items.append({"text": "<div style='border-left:4px solid #6366F1;padding:4px 0 4px 16px'><div style='font-size:18px;font-weight:700;color:#1a1a2e;letter-spacing:-0.3px'>Labels with Unread</div><div style='font-size:12px;color:#64748B;margin-top:2px'>Top " ~ (top_labels|length|string) ~ " by unread count &mdash; click to open in Gmail</div></div>", "padding": "16px 0 8px 0"}) -%}
 {%- for label in top_labels -%}
   {%- set bg_color = label.color.backgroundColor if label.color is defined and label.color.backgroundColor is defined else '#F1F5F9' -%}
   {%- set txt_color = label.color.textColor if label.color is defined and label.color.textColor is defined else '#334155' -%}
   {%- set unread_pct = ((label.messagesUnread / [label.messagesTotal, 1]|max) * 100)|round|int -%}
   {%- set bar_color = '#EF4444' if unread_pct > 80 else '#F59E0B' if unread_pct > 50 else '#22C55E' -%}
+  {%- set label_url = gmail_base ~ gmail_auth ~ '#label/' ~ (label.name | urlencode | replace('%20', '+') | replace('%2F', '/')) -%}
   {%- set _ = label_items.append({
-    "text": "<div style='display:flex;align-items:center;padding:10px 16px;border-radius:8px;background:#FAFAFA;margin-bottom:4px'><span style='display:inline-block;width:12px;height:12px;border-radius:3px;background:" ~ bg_color ~ ";margin-right:12px;flex-shrink:0'></span><div style='flex:1'><div style='font-size:14px;font-weight:600;color:#1E293B'>" ~ label.name ~ "</div><div style='font-size:11px;color:#94A3B8;margin-top:2px'>" ~ (label.messagesTotal|string) ~ " total</div></div><div style='text-align:right'><div style='font-size:18px;font-weight:700;color:" ~ bar_color ~ "'>" ~ (label.messagesUnread|string) ~ "</div><div style='font-size:10px;color:#94A3B8'>unread</div></div></div>",
+    "text": "<a href='" ~ label_url ~ "' style='text-decoration:none;display:block'><div style='display:flex;align-items:center;padding:10px 16px;border-radius:8px;background:#FAFAFA;margin-bottom:4px;cursor:pointer'><span style='display:inline-block;width:12px;height:12px;border-radius:3px;background:" ~ bg_color ~ ";margin-right:12px;flex-shrink:0'></span><div style='flex:1'><div style='font-size:14px;font-weight:600;color:#1E293B'>" ~ label.name ~ "</div><div style='font-size:11px;color:#94A3B8;margin-top:2px'>" ~ (label.messagesTotal|string) ~ " total</div></div><div style='text-align:right;display:flex;align-items:center;gap:8px'><div><div style='font-size:18px;font-weight:700;color:" ~ bar_color ~ "'>" ~ (label.messagesUnread|string) ~ "</div><div style='font-size:10px;color:#94A3B8'>unread</div></div><span style='color:#94A3B8;font-size:16px'>&#8250;</span></div></div></a>",
     "padding": "2px 0"
   }) -%}
 {%- endfor -%}
 {#- Session & profile info -#}
+{%- set account_link = gmail_base ~ gmail_auth ~ '#settings/general' -%}
 {%- set info_items = [
   {"text": "<div style='border-left:4px solid #8B5CF6;padding:4px 0 4px 16px'><div style='font-size:18px;font-weight:700;color:#1a1a2e'>Session Info</div></div>", "padding": "16px 0 8px 0"},
-  {"text": "<div style='background:#F8FAFC;border-radius:8px;padding:16px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px;width:120px'>Account</td><td style='padding:6px 12px;font-size:14px;color:#1E293B;font-weight:500'>" ~ (user_email if user_email else 'N/A') ~ "</td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Authenticated</td><td style='padding:6px 12px;font-size:14px'><span style='display:inline-block;background:" ~ ('#DCFCE7' if is_authed else '#FEE2E2') ~ ";color:" ~ ('#166534' if is_authed else '#991B1B') ~ ";padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600'>" ~ ('Yes' if is_authed else 'No') ~ "</span></td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Session</td><td style='padding:6px 12px;font-size:14px'><span style='display:inline-block;background:" ~ ('#DCFCE7' if session_active else '#FEE2E2') ~ ";color:" ~ ('#166534' if session_active else '#991B1B') ~ ";padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600'>" ~ ('Active' if session_active else 'Inactive') ~ "</span></td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Generated</td><td style='padding:6px 12px;font-size:13px;color:#64748B;font-family:monospace'>" ~ (session_ts if session_ts else 'N/A') ~ "</td></tr></table></div>", "padding": "4px 0"}
+  {"text": "<div style='background:#F8FAFC;border-radius:8px;padding:16px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px;width:120px'>Account</td><td style='padding:6px 12px;font-size:14px;color:#1E293B;font-weight:500'><a href='" ~ account_link ~ "' style='color:#2563EB;text-decoration:none'>" ~ (user_email if user_email else 'N/A') ~ "</a></td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Authenticated</td><td style='padding:6px 12px;font-size:14px'><span style='display:inline-block;background:" ~ ('#DCFCE7' if is_authed else '#FEE2E2') ~ ";color:" ~ ('#166534' if is_authed else '#991B1B') ~ ";padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600'>" ~ ('Yes' if is_authed else 'No') ~ "</span></td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Session</td><td style='padding:6px 12px;font-size:14px'><span style='display:inline-block;background:" ~ ('#DCFCE7' if session_active else '#FEE2E2') ~ ";color:" ~ ('#166534' if session_active else '#991B1B') ~ ";padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600'>" ~ ('Active' if session_active else 'Inactive') ~ "</span></td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Labels</td><td style='padding:6px 12px;font-size:14px;color:#1E293B'><a href='" ~ gmail_base ~ gmail_auth ~ "#settings/labels' style='color:#2563EB;text-decoration:none'>" ~ (user_labels|length|string) ~ " custom, " ~ (system_labels|length|string) ~ " system</a></td></tr><tr><td style='padding:6px 12px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:1px'>Generated</td><td style='padding:6px 12px;font-size:13px;color:#64748B;font-family:monospace'>" ~ (session_ts if session_ts else 'N/A') ~ "</td></tr></table></div>", "padding": "4px 0"}
 ] -%}
 {#- Combine all text items: metrics(3) + label section header + label rows + session rows -#}
 {%- set all_text_items = metric_items + label_items + info_items -%}
 {%- set result = {
   s.HeaderBlock: {"title": "Google Workspace", "subtitle": "Resource Report"},
-  s.HeroBlock: {"title": "Your Workspace at a Glance", "subtitle": (total_messages|string) ~ " messages across " ~ (labels|length|string) ~ " labels"},
+  s.HeroBlock: {"title": "Your Workspace at a Glance", "subtitle": (total_messages|string) ~ " messages across " ~ (labels|length|string) ~ " labels", "button_text": "Open Gmail", "button_url": gmail_base ~ gmail_auth ~ "#inbox"},
   s.TextBlock: {"_items": all_text_items},
   s.DividerBlock: {"_items": [{}, {}]},
   s.FooterBlock: {"_items": [{"text": "Generated by Google Workspace MCP Server &bull; Privacy Mode Enabled"}]}
@@ -86,11 +96,16 @@ email_description: {{ email_resource_report(service://gmail/labels, user://curre
 email_params:      {{ email_resource_report(service://gmail/labels, user://current/profile, auth://session/current, email_symbols, 'params') }}
 
 Renders a comprehensive resource report with:
-- Hero banner with inbox stats
-- 3 metric cards (unread, labels, active)
-- Color-coded label list sorted by unread count
-- Session/profile info table with status badges
+- Hero banner with inbox stats + "Open Gmail" CTA button
+- 3 clickable metric cards (Inbox Unread → #inbox, Starred → #starred, Drafts → #drafts)
+- Color-coded label list sorted by unread — each row links to that label in Gmail
+- Session/profile info table with linked account email → Gmail settings
+- Labels count links to Gmail label settings
 - Footer with generation timestamp
+
+Gmail deep link format: https://mail.google.com/mail/?authuser=user@gmail.com#label/Label+Name
+Nested labels use /: Kids/School → #label/Kids/School
+No /u/0/ hardcoding — authuser= targets account by email, works across devices.
 
 Requires `email_symbols` to be available in the Jinja2 context (registered as a global).
 #}
