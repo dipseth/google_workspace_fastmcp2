@@ -649,6 +649,18 @@ template_middleware = setup_template_middleware(
 )
 # Register with lifespan for cache cleanup on shutdown
 register_template_middleware(template_middleware)
+
+# Register email_symbols as a Jinja2 global so macros can access them
+try:
+    from gmail.email_wrapper_api import get_email_symbols
+
+    jinja_env = template_middleware.jinja_env_manager.jinja2_env
+    if jinja_env:
+        jinja_env.globals["email_symbols"] = get_email_symbols()
+        logger.info("📧 Registered email_symbols as Jinja2 global")
+except Exception as e:
+    logger.warning(f"⚠️ Could not register email_symbols global: {e}")
+
 logger.info(
     "✅ Enhanced Template Parameter Middleware enabled - modular architecture with 12 focused components active"
 )
@@ -828,13 +840,15 @@ if settings.enable_skills_provider:
     logger.info("📚 Setting up Skills Provider for FastMCP...")
     try:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
+        from gmail.email_wrapper_setup import get_email_wrapper
         from skills import setup_skills_provider
 
         card_wrapper = get_card_framework_wrapper()
+        email_wrapper = get_email_wrapper()
         skills_path = setup_skills_provider(
             mcp=mcp,
-            wrappers=[card_wrapper],
-            enabled_modules=["card_framework"],
+            wrappers=[card_wrapper, email_wrapper],
+            enabled_modules=["card_framework", "gmail.mjml_types"],
             skills_root=settings.skills_directory_path,
             auto_regenerate=settings.skills_auto_regenerate,
         )
