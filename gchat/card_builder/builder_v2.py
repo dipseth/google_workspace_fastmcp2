@@ -2298,6 +2298,55 @@ class SmartCardBuilderV2:
 
         return validate_content(card_dict)
 
+    def validate_and_repair_card(
+        self, google_format_card: Dict[str, Any]
+    ) -> Tuple[bool, Optional[str], List[str]]:
+        """Validate card content and structure, auto-repair if needed.
+
+        Runs content validation, then structural validation with auto-repair.
+        Generates DSL notation once after all repairs are applied.
+
+        Args:
+            google_format_card: Card dict with cardId + card structure
+
+        Returns:
+            Tuple of (is_valid, rendered_dsl, issues_list)
+        """
+        from gchat.card_builder.validation import fix_structure, validate_structure
+
+        final_card = (
+            google_format_card.get("card", {})
+            if isinstance(google_format_card, dict)
+            else {}
+        )
+
+        # Content validation
+        is_valid_content, content_issues = self.validate_content(final_card)
+        if not is_valid_content:
+            return False, None, content_issues
+
+        # Structural validation + auto-repair
+        is_valid_structure, structure_issues = validate_structure(final_card)
+        if not is_valid_structure:
+            logger.warning(
+                f"⚠️ Structural issues detected ({len(structure_issues)}), auto-repairing..."
+            )
+            fixed_card, fixes_applied = fix_structure(final_card)
+            for fix in fixes_applied:
+                logger.info(f"  🔧 {fix}")
+
+            # Replace the card in google_format_card
+            if isinstance(google_format_card, dict) and "card" in google_format_card:
+                google_format_card["card"] = fixed_card
+
+            content_issues = (content_issues or []) + [
+                f"[auto-fixed] {f}" for f in fixes_applied
+            ]
+
+        # Generate DSL notation once (after all repairs)
+        rendered_dsl = self.generate_dsl_notation(google_format_card)
+        return True, rendered_dsl, content_issues or []
+
     def generate_dsl_notation(self, card: Dict[str, Any]) -> Optional[str]:
         """Generate DSL notation from a rendered card structure.
 
@@ -3226,6 +3275,117 @@ class SmartCardBuilderV2:
         }
 
         return section
+
+    # =========================================================================
+    # PARAM-DRIVEN BUILD ENTRY POINT
+    # =========================================================================
+
+    def build_from_params(
+        self,
+        description: str,
+        card_params: Dict[str, Any],
+        suggested_dsl: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Build a card from description and a flat card_params dict.
+
+        Extracts and normalizes individual params from card_params (title,
+        subtitle, buttons, grid_items, etc.) and delegates to build().
+        Handles grid/image transformation and pre-built sections passthrough.
+
+        Args:
+            description: Card description with optional DSL notation
+            card_params: Flat dict of card parameters from MCP tool call
+            suggested_dsl: Optional suggested DSL to use when description has no DSL
+
+        Returns:
+            Card dict in Google Chat cardsV2 format (with cardId + card),
+            or None if building failed.
+        """
+        import time
+
+        # Extract params from flat dict
+        title = card_params.get("title")
+        subtitle = card_params.get("subtitle")
+        image_url = card_params.get("image_url")
+        text = card_params.get("text")
+        buttons = card_params.get("buttons")
+        chips = card_params.get("chips")
+        grid = card_params.get("grid")
+        images = card_params.get("images")
+        image_titles = card_params.get("image_titles")
+        items = card_params.get("items")
+        grid_items = card_params.get("grid_items")
+        cards = card_params.get("cards") or card_params.get("carousel_cards")
+        sections = card_params.get("sections")
+
+        # Pre-built sections passthrough
+        card_dict = None
+        if sections and isinstance(sections, list) and len(sections) > 0:
+            has_widgets = any(
+                isinstance(s, dict) and s.get("widgets") for s in sections
+            )
+            if has_widgets:
+                logger.info(
+                    f"📋 Using pre-built sections passthrough: {len(sections)} section(s)"
+                )
+                card_dict = {"sections": sections}
+                if title:
+                    header = {"title": title}
+                    if subtitle:
+                        header["subtitle"] = subtitle
+                    card_dict["header"] = header
+
+        # Convert grid images to items (only if grid_items not already set)
+        if not grid_items:
+            if images:
+                logger.info(f"🔲 Grid images: {len(images)}")
+                grid_items = [
+                    {
+                        "title": (
+                            image_titles[i]
+                            if image_titles and i < len(image_titles)
+                            else f"Item {i + 1}"
+                        ),
+                        "image_url": img_url,
+                    }
+                    for i, img_url in enumerate(images)
+                ]
+            elif grid and grid.get("items"):
+                logger.info(f"🔲 Grid items: {len(grid.get('items', []))}")
+                grid_items = grid["items"]
+
+        if cards:
+            logger.info(f"🎠 Carousel: {len(cards)} card(s)")
+
+        # Build via unified DSL/DAG pipeline (skip if pre-built)
+        if not card_dict:
+            build_description = description
+            if suggested_dsl and not self._extract_structure_dsl(description):
+                build_description = suggested_dsl
+                logger.info(
+                    f"💡 Using suggested DSL as build description: {suggested_dsl}"
+                )
+
+            card_dict = self.build(
+                description=build_description,
+                title=title,
+                subtitle=subtitle,
+                buttons=buttons,
+                chips=chips,
+                image_url=image_url,
+                text=text,
+                items=items,
+                grid_items=grid_items,
+                cards=cards,
+            )
+
+        if card_dict:
+            card_id = f"smart_card_{int(time.time())}_{hash(str(card_params)) % 10000}"
+            return {
+                "cardId": card_id,
+                "card": card_dict,
+            }
+        return None
 
     # =========================================================================
     # MAIN BUILD METHOD

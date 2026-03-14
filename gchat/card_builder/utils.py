@@ -2,9 +2,14 @@
 Utility functions and decorators for the card builder.
 """
 
+import json
+import logging
+import re
 import threading
 from functools import wraps
-from typing import Callable, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+
+logger = logging.getLogger(__name__)
 
 F = TypeVar("F", bound=Callable[..., None])
 
@@ -38,7 +43,78 @@ def fire_and_forget(func: F) -> F:
     return wrapper  # type: ignore[return-value]
 
 
+def coerce_json_param(value: Any, param_name: str = "params") -> Dict[str, Any]:
+    """Coerce a JSON string parameter to a dict.
+
+    MCP wire format sends complex objects as JSON strings. This handles:
+        - Already a dict -> returned as-is
+        - JSON string -> parsed to dict
+        - None -> empty dict
+        - Invalid JSON -> empty dict with warning
+
+    Args:
+        value: The parameter value (string, dict, or None).
+        param_name: Name for logging on parse failure.
+
+    Returns:
+        Dict, always non-None.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+            logger.warning(
+                f"{param_name} parsed to {type(parsed).__name__}, expected dict"
+            )
+            return {}
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(f"Could not parse {param_name} as JSON: {value!r}")
+            return {}
+    if value is None:
+        return {}
+    logger.warning(f"Unexpected type for {param_name}: {type(value).__name__}")
+    return {}
+
+
+def extract_urls_from_text(
+    text: str,
+) -> Tuple[List[Dict[str, str]], Optional[str]]:
+    """Extract URLs from text and return as button dicts.
+
+    When text contains URLs, extracts them as button definitions with labels
+    derived from URL paths, and returns the cleaned text (URLs removed).
+
+    Args:
+        text: Text potentially containing URLs
+
+    Returns:
+        Tuple of (list of button dicts [{text, url}], cleaned text or None)
+    """
+    urls = re.findall(r"https?://[^\s,\)]+", text)
+    if not urls:
+        return [], None
+
+    buttons = []
+    for url in urls:
+        path_parts = url.rstrip("/").split("/")
+        label = (
+            path_parts[-1] if len(path_parts) > 3 else url.split("//")[1].split("/")[0]
+        )
+        buttons.append({"text": label, "url": url})
+
+    # Clean text by removing URLs
+    clean_text = re.sub(r"https?://[^\s,\)]+", "", text).strip()
+    clean_text = re.sub(r"\s+", " ", clean_text).strip(" .,;:")
+
+    return buttons, clean_text if clean_text else None
+
+
 __all__ = [
     "fire_and_forget",
+    "coerce_json_param",
+    "extract_urls_from_text",
     "F",
 ]

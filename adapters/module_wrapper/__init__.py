@@ -63,6 +63,7 @@ from adapters.module_wrapper.core import (
     get_qdrant_config_from_env,
     parse_qdrant_url,
 )
+from adapters.module_wrapper.domain_mixin import DomainConfig, DomainMixin
 
 # =============================================================================
 # DSL PARSING
@@ -255,6 +256,7 @@ class ModuleWrapper(
     PipelineMixin,
     GraphMixin,
     InputResolverMixin,
+    DomainMixin,
     CacheMixin,
     InstancePatternMixin,
     ModuleWrapperBase,
@@ -272,6 +274,7 @@ class ModuleWrapper(
     - Ingestion pipeline (PipelineMixin)
     - Graph-based relationship DAG (GraphMixin)
     - Input resolution for DSL symbol params (InputResolverMixin)
+    - Domain-level module resolution and lifecycle hooks (DomainMixin)
     - Tiered component caching (CacheMixin)
     - Instance pattern storage and variation (InstancePatternMixin)
     - Skill document generation (SkillsMixin)
@@ -324,6 +327,7 @@ class ModuleWrapper(
         colbert_collection_name: Optional[str] = None,
         priority_overrides: Optional[Dict[str, int]] = None,
         nl_relationship_patterns: Optional[Dict[tuple, str]] = None,
+        domain_config: Optional["DomainConfig"] = None,
     ):
         """
         Initialize the ModuleWrapper.
@@ -350,6 +354,7 @@ class ModuleWrapper(
             colbert_collection_name: Separate collection for ColBERT
             priority_overrides: Domain-specific priority score boosts for symbol generation
             nl_relationship_patterns: Domain-specific NL patterns for relationships
+            domain_config: Optional DomainConfig for domain-level module resolution and hooks
         """
         self._pipeline_thread: Optional[threading.Thread] = None
         self._pipeline_status: str = "idle"  # idle, running, completed, failed
@@ -357,7 +362,19 @@ class ModuleWrapper(
         self._post_pipeline_callbacks: List[callable] = []
         self._pipeline_lock = threading.Lock()
 
+        # When domain_config is provided, use it to supply priority_overrides
+        # and nl_relationship_patterns if not explicitly given
+        if domain_config:
+            if priority_overrides is None and domain_config.priority_overrides:
+                priority_overrides = domain_config.priority_overrides
+            if (
+                nl_relationship_patterns is None
+                and domain_config.nl_relationship_patterns
+            ):
+                nl_relationship_patterns = domain_config.nl_relationship_patterns
+
         # Initialize base class (sets up all configuration)
+        # domain_config is consumed by DomainMixin.__init__ via kwargs
         super().__init__(
             module_or_name=module_or_name,
             qdrant_host=qdrant_host,
@@ -380,6 +397,7 @@ class ModuleWrapper(
             colbert_collection_name=colbert_collection_name,
             priority_overrides=priority_overrides,
             nl_relationship_patterns=nl_relationship_patterns,
+            domain_config=domain_config,
         )
 
         # Auto-initialize if requested
@@ -815,6 +833,8 @@ __all__ = [
     "InputResolverMixin",
     "FieldExtractor",
     "OverflowHandler",
+    "DomainMixin",
+    "DomainConfig",
     "CacheMixin",
     "InstancePatternMixin",
     # Instance pattern classes

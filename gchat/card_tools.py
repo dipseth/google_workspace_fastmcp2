@@ -661,49 +661,24 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     error="Missing required parameter: space_id",
                 )
 
-            # Default parameters if not provided
             # MCP clients may send card_params as a JSON string; coerce to dict.
-            if isinstance(card_params, str):
-                try:
-                    card_params = json.loads(card_params)
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning(
-                        f"⚠️ Could not parse card_params as JSON: {card_params!r}"
-                    )
-                    card_params = {}
-            if card_params is None:
-                card_params = {}
+            from gchat.card_builder.utils import coerce_json_param
+
+            card_params = coerce_json_param(card_params, "card_params")
 
             # =================================================================
             # AUTO-EXTRACT URLs FROM DESCRIPTION
             # When the description contains URLs but no buttons in card_params,
             # extract them as buttons so the DSL suggestion can include ButtonList.
-            # This allows callers to just pass URLs without worrying about DSL.
             # =================================================================
             if card_description and not card_params.get("buttons"):
-                import re
+                from gchat.card_builder.utils import extract_urls_from_text
 
-                urls = re.findall(r"https?://[^\s,\)]+", card_description)
-                if urls:
-                    extracted_buttons = []
-                    for url in urls:
-                        # Derive button label from URL path
-                        path_parts = url.rstrip("/").split("/")
-                        label = (
-                            path_parts[-1]
-                            if len(path_parts) > 3
-                            else url.split("//")[1].split("/")[0]
-                        )
-                        extracted_buttons.append({"text": label, "url": url})
+                extracted_buttons, clean_text = extract_urls_from_text(card_description)
+                if extracted_buttons:
                     card_params.setdefault("buttons", extracted_buttons)
-                    # Use description (minus URLs) as text if no text provided
-                    if not card_params.get("text"):
-                        clean_desc = re.sub(
-                            r"https?://[^\s,\)]+", "", card_description
-                        ).strip()
-                        clean_desc = re.sub(r"\s+", " ", clean_desc).strip(" .,;:")
-                        if clean_desc:
-                            card_params["text"] = clean_desc
+                    if not card_params.get("text") and clean_text:
+                        card_params["text"] = clean_text
                     logger.info(
                         f"🔗 Auto-extracted {len(extracted_buttons)} URL(s) as buttons from description"
                     )
@@ -715,18 +690,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 _card_framework_wrapper
                 and _card_framework_wrapper.reverse_symbol_mapping
             ):
-                if hasattr(_card_framework_wrapper, "resolve_symbol_params"):
-                    card_params = _card_framework_wrapper.resolve_symbol_params(
-                        card_params
-                    )
-                else:
-                    from gchat.card_builder.symbol_params import resolve_symbol_params
-
-                    card_params = resolve_symbol_params(
-                        card_params,
-                        _card_framework_wrapper.reverse_symbol_mapping,
-                        wrapper=_card_framework_wrapper,
-                    )
+                card_params = _card_framework_wrapper.resolve_symbol_params(card_params)
 
             # =================================================================
             # EXTRACT MESSAGE-LEVEL PARAMS FROM card_params (early extraction)
@@ -738,42 +702,6 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     logger.info(
                         f"🧵 Extracted thread_key from card_params: {thread_key}"
                     )
-
-            # =================================================================
-            # NLP PARSING COMMENTED OUT - SmartCardBuilder has its own inference
-            # SmartCardBuilder.infer_content_type() detects prices, IDs, URLs, etc.
-            # SmartCardBuilder.infer_layout() detects columns, image positioning
-            # If we need NLP parsing for multi-section cards, uncomment below.
-            # =================================================================
-            # try:
-            #     logger.info(
-            #         f"🧠 Parsing natural language description: '{card_description}'"
-            #     )
-            #     nlp_extracted_params = parse_enhanced_natural_language_description(
-            #         card_description
-            #     )
-            #
-            #     if nlp_extracted_params:
-            #         logger.info(
-            #             f"✅ NLP extracted parameters: {list(nlp_extracted_params.keys())}"
-            #         )
-            #
-            #         merged_params: Dict[str, Any] = {}
-            #         merged_params.update(nlp_extracted_params)
-            #         merged_params.update(card_params)
-            #
-            #         if isinstance(merged_params.get("sections"), list):
-            #             logger.info(
-            #                 f"✅ NLP produced sections: {len(merged_params['sections'])} section(s)"
-            #             )
-            #
-            #         card_params = merged_params
-            #     else:
-            #         logger.info("📝 No parameters extracted from NLP")
-            #
-            # except Exception as nlp_error:
-            #     logger.warning(f"⚠️ NLP parsing failed: {nlp_error}")
-            # =================================================================
 
             # Initialize default best_match to prevent UnboundLocalError
             best_match = {"type": "fallback", "name": "simple_fallback", "score": 0.0}
@@ -905,111 +833,14 @@ def setup_card_tools(mcp: FastMCP) -> None:
                     "Querying Qdrant and building card structure..."
                 )
                 try:
-                    # Use SmartCardBuilder.build() directly with unpacked params
-                    import time
-
                     builder = get_smart_card_builder()
 
-                    # Extract params
-                    title = card_params.get("title") if card_params else None
-                    subtitle = card_params.get("subtitle") if card_params else None
-                    image_url = card_params.get("image_url") if card_params else None
-                    text = card_params.get("text") if card_params else None
-                    buttons = card_params.get("buttons") if card_params else None
-                    chips = card_params.get("chips") if card_params else None
-                    grid = card_params.get("grid") if card_params else None
-                    images = card_params.get("images") if card_params else None
-                    image_titles = (
-                        card_params.get("image_titles") if card_params else None
+                    google_format_card = builder.build_from_params(
+                        description=card_description,
+                        card_params=card_params,
+                        suggested_dsl=suggested_dsl,
                     )
-                    items = card_params.get("items") if card_params else None
-                    grid_items = card_params.get("grid_items") if card_params else None
-                    cards = (
-                        (card_params.get("cards") or card_params.get("carousel_cards"))
-                        if card_params
-                        else None
-                    )
-                    sections = card_params.get("sections") if card_params else None
 
-                    # =============================================================
-                    # PRE-BUILT SECTIONS PASSTHROUGH
-                    # When card_params contains fully structured 'sections' with
-                    # widget JSON, use them directly instead of building from scratch.
-                    # This supports callers who provide complete card structures.
-                    # =============================================================
-                    card_dict = None
-                    if sections and isinstance(sections, list) and len(sections) > 0:
-                        # Check if sections contain actual widget structures
-                        has_widgets = any(
-                            isinstance(s, dict) and s.get("widgets") for s in sections
-                        )
-                        if has_widgets:
-                            logger.info(
-                                f"📋 Using pre-built sections passthrough: {len(sections)} section(s)"
-                            )
-                            card_dict = {"sections": sections}
-                            # Add header if title provided
-                            if title:
-                                header = {"title": title}
-                                if subtitle:
-                                    header["subtitle"] = subtitle
-                                card_dict["header"] = header
-
-                    # Convert grid images to items for DSL building
-                    # (only override grid_items if not already set from symbol params)
-                    if not grid_items:
-                        if images:
-                            logger.info(f"🔲 Grid images: {len(images)}")
-                            grid_items = [
-                                {
-                                    "title": (
-                                        image_titles[i]
-                                        if image_titles and i < len(image_titles)
-                                        else f"Item {i + 1}"
-                                    ),
-                                    "image_url": img_url,
-                                }
-                                for i, img_url in enumerate(images)
-                            ]
-                        elif grid and grid.get("items"):
-                            logger.info(f"🔲 Grid items: {len(grid.get('items', []))}")
-                            grid_items = grid["items"]
-
-                    if cards:
-                        logger.info(f"🎠 Carousel: {len(cards)} card(s)")
-
-                    # Build card via unified DSL/DAG pipeline (skip if pre-built)
-                    if not card_dict:
-                        # When description has no DSL but we have a suggested DSL
-                        # from card_params, use it as the build description so the
-                        # builder can create proper widget structure.
-                        build_description = card_description
-                        if suggested_dsl and not dsl_string:
-                            build_description = suggested_dsl
-                            logger.info(
-                                f"💡 Using suggested DSL as build description: {suggested_dsl}"
-                            )
-
-                        card_dict = builder.build(
-                            description=build_description,
-                            title=title,
-                            subtitle=subtitle,
-                            buttons=buttons,
-                            chips=chips,
-                            image_url=image_url,
-                            text=text,
-                            items=items,
-                            grid_items=grid_items,
-                            cards=cards,
-                        )
-
-                    # Wrap in cardsV2 format for Google Chat API
-                    if card_dict:
-                        card_id = f"smart_card_{int(time.time())}_{hash(str(card_params)) % 10000}"
-                        google_format_card = {
-                            "cardId": card_id,
-                            "card": card_dict,
-                        }
                     if google_format_card:
                         best_match = {
                             "type": "smart_builder",
@@ -1064,16 +895,8 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
             # =================================================================
             # MESSAGE-LEVEL PARAMS FROM card_params
-            # These can be passed in card_params as an alternative to tool params
+            # (thread_key already extracted above at early extraction)
             # =================================================================
-
-            # Extract thread_key from card_params if not provided as tool param
-            if not thread_key:
-                thread_key = card_params.get("thread_key") or card_params.get("thread")
-                if thread_key:
-                    logger.debug(
-                        f"🧵 Extracted thread_key from card_params: {thread_key}"
-                    )
 
             # Set fallback_text if provided in card_params
             # This shows in notifications and is used for accessibility
@@ -1177,42 +1000,29 @@ def setup_card_tools(mcp: FastMCP) -> None:
             # Render message
             message_body = message_obj.render()
 
-            # Convert snake_case to camelCase using SmartCardBuilder's method
-            builder = get_smart_card_builder()
-            message_body = builder._convert_to_camel_case(message_body)
+            # Convert snake_case to camelCase for Google Chat API
+            from gchat.card_builder.rendering import convert_to_camel_case
+
+            message_body = convert_to_camel_case(message_body)
 
             # Special case: fallbackText -> text (Google Chat webhook uses 'text' not 'fallbackText')
             if "fallbackText" in message_body:
                 message_body["text"] = message_body.pop("fallbackText")
 
-            # CRITICAL DEBUGGING: Pre-validate card content before sending
+            # Validate content + structure, auto-repair if needed
             await progress.set_message("Validating card content...")
-            final_card = (
-                google_format_card.get("card", {})
-                if isinstance(google_format_card, dict)
-                else {}
+            is_valid, rendered_dsl, content_issues = builder.validate_and_repair_card(
+                google_format_card
             )
-            # Use SmartCardBuilder for validation (reuse builder from camelCase conversion)
-            is_valid_content, content_issues = builder.validate_content(final_card)
-
-            # Generate DSL notation from rendered card (for LLM learning)
-            rendered_dsl = builder.generate_dsl_notation(google_format_card)
             if rendered_dsl:
                 logger.info(f"🔣 Rendered DSL notation: {rendered_dsl}")
 
-            if not is_valid_content:
+            if not is_valid:
                 logger.error(
                     "🚨 BLANK MESSAGE PREVENTION: Card has no renderable content!"
                 )
                 logger.error(f"🚨 Content validation issues: {content_issues}")
-                logger.error(
-                    f"🚨 Card params received: {json.dumps(card_params, indent=2)}"
-                )
-                logger.error(
-                    f"🚨 Card structure created: {json.dumps(google_format_card, indent=2)}"
-                )
 
-                # Return an error instead of sending a blank card
                 return SendDynamicCardResponse(
                     success=False,
                     spaceId=space_id,
@@ -1239,43 +1049,14 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
             logger.info("✅ Pre-send validation passed - card has renderable content")
 
-            # Structural validation — fix silent-failure patterns (e.g. buttons without onClick)
-            from gchat.card_builder.validation import fix_structure, validate_structure
-
-            is_valid_structure, structure_issues = validate_structure(final_card)
-            if not is_valid_structure:
-                logger.warning(
-                    f"⚠️ Structural issues detected ({len(structure_issues)}), auto-repairing..."
-                )
-                for issue in structure_issues:
-                    logger.warning(f"  - {issue}")
-
-                # Auto-repair: strip invalid children so the rest of the card renders
-                fixed_card, fixes_applied = fix_structure(final_card)
-                for fix in fixes_applied:
-                    logger.info(f"  🔧 {fix}")
-
-                # Replace the card in google_format_card (for DSL regeneration)
-                if (
-                    isinstance(google_format_card, dict)
-                    and "card" in google_format_card
-                ):
-                    google_format_card["card"] = fixed_card
-
-                # Also fix in message_body (the actual payload sent to webhook)
+            # Apply structural repairs to message_body if card was fixed
+            if content_issues:
+                fixed_card = google_format_card.get("card", {})
                 cards_v2 = message_body.get("cardsV2", [])
                 for card_wrapper in cards_v2:
                     if isinstance(card_wrapper, dict) and "card" in card_wrapper:
                         card_wrapper["card"] = fixed_card
                         break
-
-                # Append structural fixes to content_issues for the response
-                content_issues = (content_issues or []) + [
-                    f"[auto-fixed] {f}" for f in fixes_applied
-                ]
-
-                # Re-generate DSL notation after fix
-                rendered_dsl = builder.generate_dsl_notation(google_format_card)
 
             # --- Deliver via card_delivery module (handles split + retry) ---
             from gchat.card_delivery import deliver_card_message

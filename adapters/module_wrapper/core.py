@@ -399,8 +399,17 @@ class ModuleWrapperBase:
         self.relationships_embedder = None
         self.relationships_embedding_dim = 384
 
-        # Initialize state
-        self.module = self._resolve_module(module_or_name)
+        # Initialize state — use domain-aware resolution if DomainMixin is present
+        domain_cfg = getattr(self, "_domain_config", None)
+        if domain_cfg and hasattr(self, "resolve_module_auto"):
+            self.module = self.resolve_module_auto(
+                module_or_name,
+                pip_name=domain_cfg.pip_package,
+                module_path=domain_cfg.module_path,
+                auto_install=domain_cfg.auto_install,
+            )
+        else:
+            self.module = self._resolve_module(module_or_name)
         self._module_name = self.module.__name__
         self.components: Dict[str, ModuleComponent] = {}
         self.root_components: Dict[str, ModuleComponent] = {}
