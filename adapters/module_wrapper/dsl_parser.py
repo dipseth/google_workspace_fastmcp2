@@ -691,6 +691,15 @@ class DSLParser:
             if char.isalpha() or char == "_":
                 j = i
                 while j < len(s) and (s[j].isalnum() or s[j] == "_"):
+                    # Break at multiplier boundary (xN, *N, ×N) when
+                    # the word so far is a known symbol — e.g. τx3 → τ + x3
+                    if (
+                        s[j] in "x*×"
+                        and j + 1 < len(s)
+                        and s[j + 1].isdigit()
+                        and s[i:j] in self._all_symbols
+                    ):
+                        break
                     j += 1
                 word = s[i:j]
 
