@@ -14,7 +14,7 @@
 <mj-wrapper padding="0">
 <mj-section background-color="#FFFFFF" padding="24px">
 <mj-column>
-<mj-text font-size="28px" font-weight="700" padding="0 0 8px 0">Welcome to RiversUnlimited</mj-text>
+<mj-text font-size="28px" font-weight="700" color="#0f172a" padding="0 0 8px 0">Welcome to RiversUnlimited</mj-text>
 <mj-text font-size="16px" color="#334155" padding="0 0 16px 0">We’re glad you’re here.</mj-text>
 <mj-button href="https://example.com/start" padding="0 0 8px 0">Get started</mj-button>
 <mj-spacer height="8px" />
