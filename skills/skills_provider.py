@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Module name to skill directory name mapping
 SKILL_NAMES = {
     "card_framework": "gchat-cards",
+    "gmail.mjml_types": "mjml-email",
     "google_drive": "drive-files",
     "google_gmail": "gmail-automation",
 }
@@ -37,6 +38,7 @@ SKILL_NAMES = {
 # Module name to skill title mapping
 SKILL_TITLES = {
     "card_framework": "Google Chat Card Builder",
+    "gmail.mjml_types": "MJML Email Composer",
     "google_drive": "Google Drive File Operations",
     "google_gmail": "Gmail Automation",
 }
