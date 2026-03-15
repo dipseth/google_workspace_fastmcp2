@@ -51,10 +51,7 @@ TEST_EMAIL = os.getenv("TEST_CHAT_WEBHOOK_EMAIL", "srivers@groupon.com")
 # Test space ID for Google Chat - extract from your configured webhook space or use full format
 TEST_SPACE_ID = f"spaces/{os.getenv('TEST_CHAT_WEBHOOK_SPACE', 'AAAAWvjq2HE')}"
 # Test webhook URL for Google Chat - using your configured variable
-TEST_WEBHOOK_URL = os.getenv(
-    "TEST_CHAT_WEBHOOK",
-    "https://chat.googleapis.com/v1/spaces/AAAAWvjq2HE/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=mfrR_lwMjDtMA6qVGp0C0Hlu8jFvaYEpFrfIaKJJroQ",
-)
+TEST_WEBHOOK_URL = os.getenv("TEST_CHAT_WEBHOOK")
 
 
 class TestUnifiedCardTool:

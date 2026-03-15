@@ -62,6 +62,7 @@ BANNED_CHARS -= EXCLUDED_SYMBOLS
 TARGET_FILES: list[str] = [
     "gchat/card_framework_wrapper.py",
     "middleware/qdrant_core/qdrant_models_wrapper.py",
+    "skills/server_skill_generator.py",
 ]
 
 

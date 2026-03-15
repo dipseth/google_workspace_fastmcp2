@@ -369,45 +369,21 @@ def get_card_framework_wrapper(
 
 
 def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
-    """Create and configure the ModuleWrapper instance."""
-    from adapters.module_wrapper import ModuleWrapper
+    """Create and configure the ModuleWrapper instance using DomainConfig."""
+    from adapters.module_wrapper import DomainConfig, ModuleWrapper
     from config.settings import settings
     from gchat.wrapper_dag import _warm_start_with_dag_patterns
 
     logger.info("🔧 Creating singleton ModuleWrapper for card_framework.v2...")
 
-    wrapper = ModuleWrapper(
-        module_or_name="card_framework.v2",
-        qdrant_url=settings.qdrant_url,
-        qdrant_api_key=settings.qdrant_api_key,
-        collection_name=settings.card_collection,
-        auto_initialize=False,  # We call initialize() manually below
-        index_nested=True,
-        index_private=False,
-        max_depth=5,  # Capture full component hierarchy
-        skip_standard_library=True,
-        priority_overrides=CARD_PRIORITY_OVERRIDES,
-        nl_relationship_patterns=GCHAT_NL_RELATIONSHIP_PATTERNS,
-    )
-
-    # Initialize: populates self.components and symbols synchronously.
-    # If the pipeline is needed, it runs in a background thread.
-    wrapper.initialize()
-
-    component_count = len(wrapper.components) if wrapper.components else 0
-    logger.info(f"✅ Singleton ModuleWrapper ready: {component_count} components")
-
-    # === IN-MEMORY OPERATIONS (always sync — no Qdrant writes) ===
-
-    # Custom component metadata for Qdrant indexing (used by deferred callback below)
+    # Custom component metadata for Qdrant indexing (used by post-pipeline hook)
     custom_components_metadata = {
-        # Message-level components (webhook-supported)
         "Message": {
             "children": ["CardWithId", "AccessoryWidget", "Thread"],
             "docstring": "Top-level Google Chat message container. Supports text (fallback for "
             "notifications), cardsV2 (card content), accessoryWidgets (buttons at "
             "bottom of message), and thread (for reply threading). Symbol: μ",
-            "json_field": None,  # Message is the root
+            "json_field": None,
             "full_path": "card_framework.v2.message.Message",
         },
         "AccessoryWidget": {
@@ -424,7 +400,6 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
             "json_field": "thread",
             "full_path": "card_framework.v2.message.Thread",
         },
-        # Carousel components
         "Carousel": {
             "children": ["CarouselCard"],
             "docstring": "Horizontal scrollable carousel of cards in Google Chat. Contains CarouselCard items.",
@@ -443,8 +418,10 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
         },
     }
 
-    # Register custom components IN MEMORY (symbol generation, ModuleComponent creation)
-    try:
+    # -------------------------------------------------------------------------
+    # Post-init hooks: in-memory operations (sync, no Qdrant writes)
+    # -------------------------------------------------------------------------
+    def _hook_register_custom_components(wrapper):
         custom_symbols = wrapper.register_custom_components(
             CUSTOM_CHAT_API_RELATIONSHIPS,
             generate_symbols=True,
@@ -455,35 +432,11 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
                 f"🔧 Registered {len(custom_symbols)} custom Chat API components: "
                 f"{list(custom_symbols.keys())}"
             )
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to register custom components: {e}")
 
-    # Register card-specific component metadata (context resources, containers, etc.)
-    # This is the SSoT for SmartCardBuilder and DSLParser queries
-    try:
-        _register_card_component_metadata(wrapper)
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to register component metadata: {e}")
-
-    # Register card-specific input resolution (field extractors, overflow handlers)
-    # This enables InputResolverMixin to drive symbol param resolution and context consumption
-    try:
-        _register_card_input_resolution(wrapper)
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to register input resolution: {e}")
-
-    # Register gchat-specific skill templates for FastMCP SkillsDirectoryProvider
-    try:
-        _register_gchat_skill_templates(wrapper)
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to register skill templates: {e}")
-
-    # === QDRANT WRITE OPERATIONS ===
-    # If pipeline is running in the background, defer these until it completes.
-    # If pipeline already completed (fast path), they run immediately.
-
-    def _post_pipeline_qdrant_writes():
-        """Runs after pipeline creates the collection — indexes custom components + text indices."""
+    # -------------------------------------------------------------------------
+    # Post-pipeline hooks: Qdrant write operations (deferred if pipeline running)
+    # -------------------------------------------------------------------------
+    def _hook_post_pipeline_qdrant_writes(wrapper):
         try:
             indexed_count = wrapper.index_custom_components(custom_components_metadata)
             if indexed_count > 0:
@@ -511,25 +464,74 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
             except Exception as e:
                 logger.warning(f"⚠️ Failed to create text indices: {e}")
 
-    def _post_pipeline_dag_warmstart():
-        """Generate DAG-based instance patterns to warm-start the collection."""
+    def _hook_post_pipeline_dag_warmstart(wrapper):
         try:
             _warm_start_with_dag_patterns(wrapper)
         except Exception as e:
             logger.warning(f"⚠️ DAG warm-start failed: {e}")
 
+    # -------------------------------------------------------------------------
+    # DomainConfig: declarative domain configuration
+    # -------------------------------------------------------------------------
+    # NOTE: DAG warm-start is NOT in post_pipeline_hooks because it needs
+    # conditional logic (skip if instance patterns already exist on fast path).
+    # It's handled explicitly below.
+    domain_config = DomainConfig(
+        module_name="card_framework.v2",
+        pip_package="python-card-framework",
+        auto_install=False,  # Already in requirements.txt
+        priority_overrides=CARD_PRIORITY_OVERRIDES,
+        nl_relationship_patterns=GCHAT_NL_RELATIONSHIP_PATTERNS,
+        post_init_hooks=[
+            _hook_register_custom_components,
+            _register_card_component_metadata,
+            _register_card_input_resolution,
+            _register_gchat_skill_templates,
+        ],
+        post_pipeline_hooks=[
+            _hook_post_pipeline_qdrant_writes,
+        ],
+        domain_label="Google Chat Cards",
+    )
+
+    wrapper = ModuleWrapper(
+        module_or_name=domain_config.module_name,
+        qdrant_url=settings.qdrant_url,
+        qdrant_api_key=settings.qdrant_api_key,
+        collection_name=settings.card_collection,
+        auto_initialize=False,
+        index_nested=True,
+        index_private=False,
+        max_depth=5,
+        skip_standard_library=True,
+        domain_config=domain_config,
+    )
+
+    # Initialize: populates self.components and symbols synchronously.
+    # If the pipeline is needed, it runs in a background thread.
+    wrapper.initialize()
+
+    component_count = len(wrapper.components) if wrapper.components else 0
+    logger.info(f"✅ Singleton ModuleWrapper ready: {component_count} components")
+
+    # Run post-init hooks (in-memory operations)
+    wrapper.run_domain_hooks("post_init")
+
+    # Schedule post-pipeline hooks (Qdrant write operations)
     if wrapper.pipeline_status == "running":
-        # Pipeline is running in background — queue Qdrant writes for when it finishes.
+        # Pipeline running in background — queue writes + DAG warm-start for when it finishes.
         # Order matters: custom components first, then DAG warm-start (needs the collection ready).
         logger.info("📋 Pipeline running — queuing Qdrant writes for post-pipeline")
-        wrapper.queue_post_pipeline_callback(_post_pipeline_qdrant_writes)
-        wrapper.queue_post_pipeline_callback(_post_pipeline_dag_warmstart)
+        for hook in domain_config.post_pipeline_hooks:
+            wrapper.queue_post_pipeline_callback(lambda h=hook: h(wrapper))
+        wrapper.queue_post_pipeline_callback(
+            lambda: _hook_post_pipeline_dag_warmstart(wrapper)
+        )
     else:
-        # Pipeline already completed (fast path) — run custom component writes immediately.
-        _post_pipeline_qdrant_writes()
+        # Pipeline already completed (fast path) — run Qdrant writes immediately
+        wrapper.run_domain_hooks("post_pipeline")
 
-        # Check if instance patterns exist — if not, warm-start even on fast path.
-        # This handles the case where the pipeline ran but warm-start was missed.
+        # DAG warm-start: only if no instance patterns exist yet
         if wrapper.client:
             try:
                 from qdrant_client import models as qmodels
@@ -550,7 +552,7 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
                     logger.info(
                         "🌱 No instance patterns found — running DAG warm-start"
                     )
-                    _post_pipeline_dag_warmstart()
+                    _hook_post_pipeline_dag_warmstart(wrapper)
                 else:
                     logger.debug(
                         f"Instance patterns already exist ({result.count}) — skipping warm-start"

@@ -460,11 +460,54 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
             except Exception as e:
                 logger.warning(f"Could not collect linked account keys: {e}")
 
+            # Retrieve Google sub (immutable account ID) for OAuth recipient.
+            # Try: credentials object (SSO flow), then session (tool-call flow).
+            google_sub = getattr(credentials, "_google_sub", None)
+            if not google_sub:
+                try:
+                    for sid in reversed(list_sessions()):
+                        google_sub = get_session_data(sid, SessionKey.GOOGLE_SUB)
+                        if google_sub:
+                            break
+                except Exception:
+                    pass
+
+            # Persist google_sub in linkage prefs so it survives server restarts
+            # and is available for cross-account OAuth recipient decryption.
+            if google_sub:
+                try:
+                    from .user_api_keys import get_oauth_linkage, set_oauth_linkage
+
+                    existing = get_oauth_linkage(normalized_email)
+                    set_oauth_linkage(
+                        normalized_email,
+                        enabled=existing.get("enabled", True),
+                        password=existing.get("password", ""),
+                        google_sub=google_sub,
+                    )
+                except Exception as e:
+                    logger.debug(
+                        f"Could not persist google_sub for {normalized_email}: {e}"
+                    )
+
+            # Get OAuth linkage password from session (set during start_google_auth form)
+            oauth_linkage_password = ""
+            try:
+                for sid in reversed(list_sessions()):
+                    pwd = get_session_data(sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
+                    if pwd:
+                        oauth_linkage_password = pwd
+                        break
+            except Exception:
+                pass
+
             auth_middleware.save_credentials(
                 normalized_email,
                 credentials,
                 per_user_key=per_user_key,
                 additional_keys=additional_keys if additional_keys else None,
+                google_sub=google_sub,
+                oauth_linkage_password=oauth_linkage_password,
             )
 
             # Cross-add: add this user as a recipient to linked accounts' credential files.
@@ -588,19 +631,37 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
 
         auth_middleware = get_auth_middleware()
         if auth_middleware:
-            # Retrieve per-user key from session for per-user decryption
+            # Retrieve per-user key and Google sub from session for decryption
             per_user_key = None
+            google_sub = None
             try:
                 for sid in reversed(list_sessions()):
-                    stashed = get_session_data(sid, SessionKey.PER_USER_ENCRYPTION_KEY)
-                    if stashed:
-                        per_user_key = stashed
+                    if not per_user_key:
+                        per_user_key = get_session_data(
+                            sid, SessionKey.PER_USER_ENCRYPTION_KEY
+                        )
+                    if not google_sub:
+                        google_sub = get_session_data(sid, SessionKey.GOOGLE_SUB)
+                    if per_user_key and google_sub:
                         break
             except Exception:
                 pass
 
+            # Fall back to persisted google_sub from linkage prefs
+            # (survives server restarts, enables cross-account decryption)
+            if not google_sub:
+                try:
+                    from .user_api_keys import get_oauth_linkage
+
+                    linkage = get_oauth_linkage(normalized_email)
+                    google_sub = linkage.get("google_sub", "")
+                except Exception:
+                    pass
+
             creds = auth_middleware.load_credentials(
-                normalized_email, per_user_key=per_user_key
+                normalized_email,
+                per_user_key=per_user_key,
+                google_sub=google_sub,
             )
             if creds:
                 logger.info(
@@ -931,6 +992,7 @@ async def initiate_oauth_flow(
     auth_method: Literal["file_credentials", "pkce_file", "pkce_memory"] = "pkce_file",
     custom_client_id: Optional[str] = None,
     custom_client_secret: Optional[str] = None,
+    oauth_linkage_password: str = "",
 ) -> str:
     """
     Initiate OAuth flow for a user with optional service selection and PKCE support.
@@ -1058,6 +1120,7 @@ async def initiate_oauth_flow(
         "auth_method": auth_method,
         "custom_client_id": custom_client_id,
         "custom_client_secret": custom_client_secret,
+        "oauth_linkage_password": oauth_linkage_password,
     }
 
     # Use enhanced context-based credential storage for persistence
@@ -1181,6 +1244,7 @@ async def handle_service_selection_callback(
         auth_method=final_auth_method,  # Pass auth method through
         custom_client_id=custom_client_id,  # Pass custom client credentials
         custom_client_secret=custom_client_secret,
+        oauth_linkage_password=flow_info.get("oauth_linkage_password", ""),
     )
 
 
@@ -1243,6 +1307,21 @@ async def handle_oauth_callback(
     auth_method = state_info["auth_method"]
     custom_client_id = state_info.get("custom_client_id")
     custom_client_secret = state_info.get("custom_client_secret")
+
+    # Stash OAuth linkage password in session so _save_credentials can use it
+    _oauth_linkage_pw = state_info.get("oauth_linkage_password", "")
+    if _oauth_linkage_pw:
+        try:
+            from .context import list_sessions, store_session_data
+            from .types import SessionKey
+
+            for sid in reversed(list_sessions()):
+                store_session_data(
+                    sid, SessionKey.OAUTH_LINKAGE_PASSWORD, _oauth_linkage_pw
+                )
+                break
+        except Exception:
+            pass
 
     # DIAGNOSTIC: Log custom credentials retrieval
     logger.info("🔍 CUSTOM_CREDS_DEBUG: Retrieved from state:")
@@ -1495,6 +1574,8 @@ async def handle_oauth_callback(
         userinfo_service = build("oauth2", "v2", credentials=credentials)
         user_info = userinfo_service.userinfo().get().execute()
         authenticated_email = user_info.get("email")
+        # Capture Google's immutable account ID for OAuth recipient encryption
+        credentials._google_sub = user_info.get("id")
 
         # If we used fallback user_email, update it with the actual authenticated email
         if user_email == "unknown@gmail.com" or not user_email:

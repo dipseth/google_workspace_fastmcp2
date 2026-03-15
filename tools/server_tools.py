@@ -41,6 +41,7 @@ from tools.server_types import (
     HealthCheckResponse,
     ManageCredentialsResponse,
     ManageToolsResponse,
+    MemoryHealth,
     OAuthFlowStatus,
     SessionToolState,
     ToolInfo,
@@ -249,6 +250,60 @@ async def health_check(
         healthy = creds_accessible and oauth_configured
         status = "healthy" if healthy else "degraded"
 
+        # Memory health metrics
+        memory_health = None
+        try:
+            from lifespans.server_lifespans import (
+                _CRITICAL_THRESHOLD_MB,
+                _MEMORY_LIMIT_MB,
+                _WARN_THRESHOLD_MB,
+                _get_process_health,
+            )
+
+            proc_health = _get_process_health()
+            rss_mb = proc_health["rss_mb"]
+            rss_pct = (
+                round(rss_mb / _MEMORY_LIMIT_MB * 100, 1) if _MEMORY_LIMIT_MB > 0 else 0
+            )
+
+            if rss_mb > _CRITICAL_THRESHOLD_MB:
+                mem_status = "critical"
+            elif rss_mb > _WARN_THRESHOLD_MB:
+                mem_status = "warning"
+            else:
+                mem_status = "ok"
+
+            import gc as _gc
+
+            gc_stats = _gc.get_stats()
+            memory_health = MemoryHealth(
+                rss_mb=rss_mb,
+                vms_mb=proc_health["vms_mb"],
+                rss_percent=rss_pct,
+                memory_limit_mb=_MEMORY_LIMIT_MB,
+                warn_threshold_mb=_WARN_THRESHOLD_MB,
+                critical_threshold_mb=_CRITICAL_THRESHOLD_MB,
+                memory_status=mem_status,
+                cpu_percent=proc_health["cpu_pct"],
+                num_fds=proc_health["num_fds"],
+                num_threads=proc_health["num_threads"],
+                asyncio_tasks=proc_health["asyncio_tasks"],
+                gc_gen0_collections=gc_stats[0]["collections"],
+                gc_gen1_collections=gc_stats[1]["collections"],
+                gc_gen2_collections=gc_stats[2]["collections"],
+                gc_uncollectable=sum(g["uncollectable"] for g in gc_stats),
+            )
+
+            # Degrade overall status based on memory pressure
+            if mem_status == "critical":
+                status = "unhealthy"
+                healthy = False
+            elif mem_status == "warning" and status == "healthy":
+                status = "degraded"
+
+        except Exception as e:
+            logger.debug(f"Memory health check skipped: {e}")
+
         return HealthCheckResponse(
             status=status,
             healthy=healthy,
@@ -263,6 +318,7 @@ async def health_check(
             logLevel=settings.log_level,
             oauthFlowStatus=oauth_flow_status,
             oauthCallbackUrl=settings.dynamic_oauth_redirect_uri,
+            memoryHealth=memory_health,
         )
 
     except Exception as e:

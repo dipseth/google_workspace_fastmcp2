@@ -102,6 +102,18 @@ class StartAuthResponse(BaseModel):
     )
 
 
+class CrossOAuthLinkageInfo(BaseModel):
+    """Cross-OAuth account access configuration for a credential."""
+
+    enabled: bool = Field(
+        ..., description="Whether cross-OAuth access is enabled for this account"
+    )
+    has_password: bool = Field(
+        ...,
+        description="Whether a passphrase is required. When true, provide cross_oauth_password.",
+    )
+
+
 class CheckAuthResponse(BaseModel):
     """Response structure for check_drive_auth tool."""
 
@@ -134,6 +146,10 @@ class CheckAuthResponse(BaseModel):
     scopes: Optional[List[str]] = Field(
         None,
         description="OAuth scopes granted for the checked account's credentials",
+    )
+    crossOAuthLinkage: Optional[CrossOAuthLinkageInfo] = Field(
+        None,
+        description="Cross-OAuth linkage configuration for this account",
     )
     error: Optional[str] = Field(
         None, description="Error message if authentication check failed"

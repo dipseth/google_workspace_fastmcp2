@@ -502,6 +502,28 @@ class ProfileEnrichmentMiddleware(Middleware):
         self._cache_timestamps.clear()
         logger.info("🧹 Profile cache cleared")
 
+    def cleanup_expired_entries(self) -> int:
+        """Remove expired entries from the profile cache.
+
+        Returns:
+            Number of expired entries removed.
+        """
+        import time as _time
+
+        current_time = _time.time()
+        expired = [
+            uid
+            for uid, ts in self._cache_timestamps.items()
+            if (current_time - ts) >= self._cache_ttl
+        ]
+        for uid in expired:
+            self._profile_cache.pop(uid, None)
+            del self._cache_timestamps[uid]
+
+        if expired:
+            logger.debug(f"🧹 Cleaned up {len(expired)} expired profile cache entries")
+        return len(expired)
+
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get comprehensive cache statistics including Qdrant integration."""
         import time

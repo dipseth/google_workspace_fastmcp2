@@ -253,6 +253,21 @@ def _generate_service_selection_html(
     state: str, flow_type: str, use_pkce: bool = True
 ) -> str:
     """Generate the service selection page HTML with authentication method choice."""
+    from config.settings import settings as _settings
+
+    _env_client_id = (
+        _settings.google_client_id or _settings.fastmcp_server_auth_google_client_id
+    )
+    _env_client_secret = (
+        _settings.google_client_secret
+        or _settings.fastmcp_server_auth_google_client_secret
+    )
+    _env_has_creds = bool(_env_client_id and _env_client_secret)
+    _env_client_id_display = (_env_client_id[:20] + "...") if _env_client_id else ""
+    _redirect_uri = getattr(
+        _settings, "dynamic_oauth_redirect_uri", "https://localhost:8002/oauth2callback"
+    )
+
     try:
         from .scope_registry import ScopeRegistry
 
@@ -266,125 +281,331 @@ def _generate_service_selection_html(
                 categories[category] = []
             categories[category].append((key, service))
 
-        # Generate HTML with authentication method selection
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Select Google Services - FastMCP</title>
-            <style>
-                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f5f5f5; }}
-                .container {{ background: white; border-radius: 12px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                .header {{ text-align: center; margin-bottom: 30px; }}
-                .header h1 {{ color: #1a73e8; margin-bottom: 10px; }}
-                .header p {{ color: #5f6368; }}
-                .auth-method-section {{ margin-bottom: 30px; }}
-                .auth-method-title {{ font-size: 18px; font-weight: 600; color: #1a73e8; margin-bottom: 15px; }}
-                .auth-method-options {{ display: flex; gap: 15px; margin-bottom: 20px; }}
-                .auth-method-option {{ flex: 1; padding: 20px; border: 2px solid #e8eaed; border-radius: 12px; cursor: pointer; transition: all 0.2s ease; }}
-                .auth-method-option:hover {{ border-color: #1a73e8; background-color: #f8f9ff; }}
-                .auth-method-option.selected {{ border-color: #1a73e8; background-color: #e8f0fe; }}
-                .auth-method-option input[type="radio"] {{ margin-right: 10px; transform: scale(1.2); }}
-                .auth-method-name {{ font-weight: 600; color: #202124; margin-bottom: 8px; }}
-                .auth-method-description {{ font-size: 14px; color: #5f6368; line-height: 1.4; }}
-                .auth-method-pros {{ font-size: 12px; color: #137333; margin-top: 8px; }}
-                .auth-method-cons {{ font-size: 12px; color: #d93025; margin-top: 4px; }}
-                .category {{ margin-bottom: 25px; }}
-                .category-title {{ font-size: 18px; font-weight: 600; color: #1a73e8; margin-bottom: 12px; border-bottom: 2px solid #e8eaed; padding-bottom: 5px; }}
-                .service-item {{ display: flex; align-items: center; padding: 12px; border: 1px solid #e8eaed; border-radius: 8px; margin-bottom: 8px; transition: all 0.2s ease; }}
-                .service-item:hover {{ border-color: #1a73e8; background-color: #f8f9ff; }}
-                .service-item.required {{ background-color: #e8f5e8; border-color: #34a853; }}
-                .service-checkbox {{ margin-right: 12px; transform: scale(1.2); }}
-                .service-info {{ flex: 1; }}
-                .service-name {{ font-weight: 500; color: #202124; }}
-                .service-description {{ font-size: 14px; color: #5f6368; margin-top: 4px; }}
-                .required-badge {{ color: #34a853; font-size: 12px; font-weight: 500; margin-left: 8px; }}
-                .btn {{ padding: 14px 24px; border-radius: 6px; border: none; font-weight: 500; cursor: pointer; font-size: 16px; }}
-                .btn-primary {{ background: #1a73e8; color: white; margin-right: 10px; }}
-                .btn-primary:hover {{ background: #1557b0; }}
-                .btn-secondary {{ background: #f8f9fa; color: #3c4043; border: 1px solid #dadce0; }}
-                .btn-secondary:hover {{ background: #e8eaed; }}
-                .form-actions {{ text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e8eaed; }}
-                .auto-select-info {{ background: #e8f0fe; padding: 12px; border-radius: 8px; margin-bottom: 20px; }}
-                .auto-select-info p {{ margin: 0; color: #1a73e8; font-size: 14px; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>🔐 Configure Google Authentication</h1>
-                    <p>Choose your authentication method and services for FastMCP</p>
-                </div>
-                
-                <form method="POST" action="/auth/services/selected">
-                    <input type="hidden" name="state" value="{state}">
-                    <input type="hidden" name="flow_type" value="{flow_type}">
-                    
-                    <!-- Authentication Method Selection -->
-                    <div class="auth-method-section">
-                        <div class="auth-method-title">🔒 Choose Authentication Method</div>
-                        <div class="auth-method-options">
-                            <div class="auth-method-option {"selected" if use_pkce else ""}" onclick="selectAuthMethod('pkce', this)">
-                                <label>
-                                    <input type="radio" name="auth_method" value="pkce" {"checked" if use_pkce else ""}>
-                                    <div class="auth-method-name">🔐 PKCE Flow (Recommended)</div>
-                                    <div class="auth-method-description">Enhanced OAuth 2.1 security with Proof Key for Code Exchange</div>
-                                    <div class="auth-method-pros">✅ Best security • Persists across restarts • Code verifier protection</div>
-                                    <div class="auth-method-cons">⚠️ Requires client secret for Web apps • Encrypted file storage</div>
-                                </label>
-                            </div>
-                            <div class="auth-method-option {"selected" if not use_pkce else ""}" onclick="selectAuthMethod('credentials', this)">
-                                <label>
-                                    <input type="radio" name="auth_method" value="credentials" {"checked" if not use_pkce else ""}>
-                                    <div class="auth-method-name">📁 Legacy OAuth 2.0</div>
-                                    <div class="auth-method-description">Traditional OAuth flow with encrypted credential storage</div>
-                                    <div class="auth-method-pros">✅ Multi-account support • Persists across restarts • Encrypted storage</div>
-                                    <div class="auth-method-cons">⚠️ Requires client secret • No PKCE enhancement</div>
-                                </label>
-                            </div>
-                        </div>
+        # Build env-configured credentials banner or empty state
+        if _env_has_creds:
+            creds_status_html = f"""
+                <div style="display:flex;align-items:center;gap:10px;background:rgba(52,168,83,0.08);
+                            border:1px solid rgba(52,168,83,0.3);border-radius:10px;padding:12px 16px;margin-bottom:12px;">
+                    <span style="font-size:20px">✅</span>
+                    <div>
+                        <div style="font-size:13px;font-weight:600;color:#137333">Environment credentials configured</div>
+                        <div style="font-size:11px;color:#5f6368;font-family:monospace;margin-top:2px">{_env_client_id_display}</div>
                     </div>
-                    
-                    <!-- Custom Credentials Section -->
-                    <div class="custom-credentials-section" style="margin-bottom: 30px; padding: 20px; border: 2px solid #e8eaed; border-radius: 12px;">
-                        <label style="display: flex; align-items: center; margin-bottom: 15px;">
-                            <input type="checkbox" id="use_custom_creds" name="use_custom_creds" style="margin-right: 10px; transform: scale(1.2);">
-                            <span style="font-weight: 600; color: #1a73e8;">Use custom Google OAuth credentials</span>
-                        </label>
-                        <div id="custom-creds-fields" style="display: none;">
-                            <div class="custom-creds-warning" style="background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                                <strong>⚠️ Important Setup Requirements:</strong><br>
-                                Your custom OAuth client must have this redirect URI configured:<br>
-                                <code style="background: #f8f9fa; padding: 4px 8px; border-radius: 4px; font-family: monospace;">https://localhost:8002/oauth2callback</code>
-                            </div>
-                            <div class="custom-creds-info" style="background: #e8f0fe; border: 1px solid #dadce0; color: #1a73e8; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                                <strong>🔧 Google Cloud Console Setup:</strong><br>
-                                1. Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → APIs & Services → Credentials</a><br>
-                                2. Create or edit your OAuth 2.0 Client ID<br>
-                                3. Add <code>https://localhost:8002/oauth2callback</code> to "Authorized redirect URIs"<br>
-                                4. Enable required APIs (Drive, Gmail, Calendar, etc.)
-                            </div>
-                            <p style="color: #d93025; font-weight: bold; margin-bottom: 15px;">Warning: Providing client secret through UI is not recommended for production!</p>
-                            <div style="display: flex; flex-direction: column; gap: 10px;">
-                                <input type="text" name="custom_client_id" placeholder="Custom Client ID (required)" style="padding: 12px; border: 1px solid #dadce0; border-radius: 8px; font-size: 14px; width: 100%; box-sizing: border-box;">
-                                <input type="text" name="custom_client_secret" placeholder="Custom Client Secret (optional for PKCE)" style="padding: 12px; border: 1px solid #dadce0; border-radius: 8px; font-size: 14px; width: 100%; box-sizing: border-box;">
-                            </div>
-                            <div class="custom-creds-troubleshooting" style="background: #fef7e0; border: 1px solid #fbcf33; color: #b7791f; padding: 15px; border-radius: 8px; margin-top: 15px;">
-                                <strong>🔍 Troubleshooting:</strong><br>
-                                • If you get "invalid_client" error, check your redirect URI configuration<br>
-                                • Ensure your OAuth consent screen is configured<br>
-                                • Verify all required APIs are enabled in Google Cloud Console<br>
-                                • For PKCE flow, client_secret is optional but client_id is required
-                            </div>
-                        </div>
+                    <div style="margin-left:auto;font-size:11px;color:#137333;background:rgba(52,168,83,0.12);
+                                padding:3px 10px;border-radius:12px;font-weight:600">AUTO</div>
+                </div>"""
+            creds_hint = "Override below only if you need different credentials for this session."
+        else:
+            creds_status_html = f"""
+                <div style="display:flex;align-items:center;gap:10px;background:rgba(234,67,53,0.06);
+                            border:1px solid rgba(234,67,53,0.2);border-radius:10px;padding:12px 16px;margin-bottom:12px;">
+                    <span style="font-size:20px">⚠️</span>
+                    <div>
+                        <div style="font-size:13px;font-weight:600;color:#c5221f">No environment credentials found</div>
+                        <div style="font-size:11px;color:#5f6368;margin-top:2px">Set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET or enter below</div>
                     </div>
-                    
-                    <div class="auto-select-info">
-                        <p>💡 Common services (Drive, Gmail, Calendar, Docs, Sheets, User Information) are pre-selected for your convenience</p>
-                    </div>
-        """
+                </div>"""
+            creds_hint = "Enter your Google OAuth credentials to continue."
 
-        # Sort categories for better organization
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Authentication — FastMCP</title>
+    <style>
+        *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 40px 20px;
+        }}
+        .card {{
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+            width: 100%;
+            max-width: 680px;
+            overflow: hidden;
+        }}
+        /* Header — matches success screen gradient treatment */
+        .card-header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 36px 40px 30px;
+            text-align: center;
+            color: white;
+        }}
+        .card-header .icon {{ font-size: 52px; margin-bottom: 12px; }}
+        .card-header h1 {{ font-size: 26px; font-weight: 700; margin-bottom: 6px; }}
+        .card-header p {{ font-size: 14px; opacity: 0.85; }}
+        .card-body {{ padding: 32px 40px 40px; }}
+
+        /* Section panels */
+        .panel {{
+            border: 1.5px solid #e8eaed;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }}
+        .panel-header {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 18px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e8eaed;
+            cursor: pointer;
+            user-select: none;
+        }}
+        .panel-header .panel-icon {{ font-size: 18px; }}
+        .panel-header .panel-title {{ font-size: 14px; font-weight: 600; color: #202124; flex: 1; }}
+        .panel-header .panel-badge {{
+            font-size: 11px; font-weight: 600; padding: 2px 10px;
+            border-radius: 12px; background: #e8f0fe; color: #1a73e8;
+        }}
+        .panel-header .panel-badge.green {{ background: rgba(52,168,83,0.1); color: #137333; }}
+        .panel-header .chevron {{
+            font-size: 12px; color: #9aa0a6; transition: transform 0.2s;
+        }}
+        .panel-header.collapsed .chevron {{ transform: rotate(-90deg); }}
+        .panel-body {{ padding: 18px; }}
+
+        /* Auth method cards */
+        .auth-options {{ display: flex; gap: 12px; }}
+        .auth-option {{
+            flex: 1; padding: 16px; border: 2px solid #e8eaed; border-radius: 10px;
+            cursor: pointer; transition: all 0.15s ease; background: white;
+        }}
+        .auth-option:hover {{ border-color: #764ba2; background: #f8f5ff; }}
+        .auth-option.selected {{ border-color: #667eea; background: #f0eeff; }}
+        .auth-option input[type="radio"] {{ display: none; }}
+        .auth-option-name {{ font-size: 13px; font-weight: 600; color: #202124; margin-bottom: 5px; }}
+        .auth-option-desc {{ font-size: 12px; color: #5f6368; line-height: 1.4; }}
+        .auth-option-pros {{ font-size: 11px; color: #137333; margin-top: 6px; }}
+        .auth-option-cons {{ font-size: 11px; color: #d93025; margin-top: 3px; }}
+
+        /* Service chips */
+        .services-grid {{ display: flex; flex-wrap: wrap; gap: 6px; }}
+        .service-chip {{
+            display: flex; align-items: center; gap: 5px;
+            padding: 5px 10px; border: 1.5px solid #e8eaed; border-radius: 20px;
+            cursor: pointer; transition: all 0.15s ease; background: white;
+            font-size: 12px; color: #202124;
+        }}
+        .service-chip:hover {{ border-color: #764ba2; background: #f8f5ff; }}
+        .service-chip.checked {{ border-color: #667eea; background: #f0eeff; color: #4527a0; }}
+        .service-chip.required {{ border-color: #34a853; background: #e8f5e9; color: #1b5e20; cursor: default; }}
+        .service-chip input {{ display: none; }}
+        .service-chip .chip-check {{ font-size: 11px; }}
+        .category-label {{
+            font-size: 10px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.8px; color: #9aa0a6; margin: 10px 0 5px;
+        }}
+        .category-label:first-child {{ margin-top: 0; }}
+
+        /* Credential inputs */
+        .field-group {{ display: flex; flex-direction: column; gap: 10px; }}
+        .field-input {{
+            width: 100%; padding: 11px 14px; border: 1.5px solid #dadce0;
+            border-radius: 8px; font-size: 13px; color: #202124;
+            transition: border-color 0.15s; outline: none; font-family: monospace;
+        }}
+        .field-input:focus {{ border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.12); }}
+        .field-label {{ font-size: 12px; color: #5f6368; margin-bottom: 4px; font-weight: 500; }}
+        .field-hint {{ font-size: 11px; color: #9aa0a6; margin-top: 4px; }}
+        .redirect-uri {{
+            font-family: monospace; font-size: 12px; background: #f8f9fa;
+            padding: 8px 12px; border-radius: 6px; border: 1px solid #e8eaed;
+            color: #5f6368; word-break: break-all;
+        }}
+
+        /* Toggle row */
+        .toggle-row {{
+            display: flex; align-items: center; gap: 12px; padding: 4px 0;
+        }}
+        .toggle-label {{ font-size: 13px; color: #202124; flex: 1; }}
+        .toggle-desc {{ font-size: 11px; color: #9aa0a6; margin-top: 2px; }}
+        /* Native checkbox styled */
+        .toggle-row input[type="checkbox"] {{ transform: scale(1.25); accent-color: #667eea; cursor: pointer; }}
+
+        /* Passphrase field */
+        .passphrase-wrap {{ margin-top: 14px; padding-top: 14px; border-top: 1px solid #f1f3f4; }}
+
+        /* Info/warning boxes */
+        .info-box {{
+            border-radius: 8px; padding: 12px 14px; font-size: 12px; line-height: 1.5;
+            margin-bottom: 12px;
+        }}
+        .info-box.blue {{ background: #e8f0fe; color: #1a56a0; border: 1px solid #c5d8f8; }}
+        .info-box.amber {{ background: #fff8e1; color: #795700; border: 1px solid #ffe08a; }}
+        .info-box.red {{ background: #fce8e6; color: #c5221f; border: 1px solid #f5c6c3; }}
+        .info-box a {{ color: inherit; }}
+
+        /* Hint bar */
+        .hint-bar {{
+            display: flex; align-items: center; gap: 8px;
+            background: #f0eeff; border-radius: 8px; padding: 10px 14px;
+            margin-bottom: 20px; font-size: 12px; color: #4527a0;
+        }}
+
+        /* Actions */
+        .actions {{
+            display: flex; align-items: center; gap: 12px;
+            padding-top: 24px; border-top: 1px solid #f1f3f4; margin-top: 4px;
+        }}
+        .btn-primary {{
+            flex: 1; padding: 14px; border: none; border-radius: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; font-size: 15px; font-weight: 600; cursor: pointer;
+            transition: opacity 0.15s; letter-spacing: 0.2px;
+        }}
+        .btn-primary:hover {{ opacity: 0.92; }}
+        .btn-secondary {{
+            padding: 14px 18px; border: 1.5px solid #dadce0; border-radius: 10px;
+            background: white; color: #3c4043; font-size: 14px; font-weight: 500;
+            cursor: pointer; transition: background 0.15s; white-space: nowrap;
+        }}
+        .btn-secondary:hover {{ background: #f8f9fa; }}
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="card-header">
+        <div class="icon">🔐</div>
+        <h1>Google Authentication</h1>
+        <p>Select services and configure your auth method for FastMCP</p>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="/auth/services/selected" id="auth-form">
+            <input type="hidden" name="state" value="{state}">
+            <input type="hidden" name="flow_type" value="{flow_type}">
+
+            <!-- Auth Method -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('auth-method-body', this)">
+                    <span class="panel-icon">🔒</span>
+                    <span class="panel-title">Authentication Method</span>
+                    <span class="panel-badge">{"PKCE (Recommended)" if use_pkce else "Legacy OAuth"}</span>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="panel-body" id="auth-method-body">
+                    <div class="auth-options">
+                        <div class="auth-option {"selected" if use_pkce else ""}" onclick="selectAuthMethod('pkce', this)">
+                            <input type="radio" name="auth_method" value="pkce" {"checked" if use_pkce else ""}>
+                            <div class="auth-option-name">🔐 PKCE Flow</div>
+                            <div class="auth-option-desc">OAuth 2.1 with Proof Key for Code Exchange — enhanced security</div>
+                            <div class="auth-option-pros">✅ Best security · Code verifier protection · Encrypted storage</div>
+                            <div class="auth-option-cons">⚠️ Requires client secret for web apps</div>
+                        </div>
+                        <div class="auth-option {"selected" if not use_pkce else ""}" onclick="selectAuthMethod('credentials', this)">
+                            <input type="radio" name="auth_method" value="credentials" {"checked" if not use_pkce else ""}>
+                            <div class="auth-option-name">📁 Legacy OAuth 2.0</div>
+                            <div class="auth-option-desc">Traditional OAuth flow with encrypted credential storage</div>
+                            <div class="auth-option-pros">✅ Multi-account support · Persists across restarts</div>
+                            <div class="auth-option-cons">⚠️ No PKCE enhancement</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- OAuth Credentials (optional override) -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('creds-body', this)">
+                    <span class="panel-icon">🔑</span>
+                    <span class="panel-title">OAuth Credentials</span>
+                    <span class="panel-badge {"green" if _env_has_creds else ""}">{"Env configured" if _env_has_creds else "Manual entry"}</span>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="panel-body" id="creds-body">
+                    {creds_status_html}
+                    <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer;">
+                        <input type="checkbox" id="use_custom_creds" name="use_custom_creds"
+                               style="transform:scale(1.2);accent-color:#667eea;">
+                        <span style="font-size:13px;color:#202124;font-weight:500;">
+                            Override with custom credentials
+                        </span>
+                    </label>
+                    <div id="custom-creds-fields" style="display:none;">
+                        <div class="info-box amber" style="margin-bottom:12px;">
+                            <strong>Redirect URI required in Google Cloud Console:</strong><br>
+                            <div class="redirect-uri" style="margin-top:6px;">{_redirect_uri}</div>
+                        </div>
+                        <div class="field-group">
+                            <div>
+                                <div class="field-label">Client ID</div>
+                                <input type="text" name="custom_client_id" class="field-input"
+                                       placeholder="xxxxxx.apps.googleusercontent.com"
+                                       value="{_env_client_id if _env_has_creds else ""}">
+                                <div class="field-hint">From Google Cloud Console → APIs &amp; Services → Credentials</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Client Secret</div>
+                                <input type="text" name="custom_client_secret" class="field-input"
+                                       placeholder="GOCSPX-..."
+                                       value="{_env_client_secret if _env_has_creds else ""}">
+                                <div class="field-hint">Optional for PKCE flow · Not recommended to enter in production UI</div>
+                            </div>
+                        </div>
+                        <div class="info-box blue" style="margin-top:12px;">
+                            <strong>🔧 Cloud Console setup:</strong>
+                            <a href="https://console.cloud.google.com/apis/credentials" target="_blank">
+                                APIs &amp; Services → Credentials
+                            </a> · Create/edit OAuth 2.0 Client ID · Add redirect URI above · Enable required APIs
+                        </div>
+                    </div>
+                    <div style="font-size:11px;color:#9aa0a6;margin-top:4px;">{creds_hint}</div>
+                </div>
+            </div>
+
+            <!-- Cross-OAuth Linkage -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('linkage-body', this)">
+                    <span class="panel-icon">🔗</span>
+                    <span class="panel-title">Cross-OAuth Account Access</span>
+                    <span class="panel-badge green">Enabled</span>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="panel-body" id="linkage-body">
+                    <div class="toggle-row">
+                        <div>
+                            <div class="toggle-label">Allow cross-OAuth access to this account</div>
+                            <div class="toggle-desc">Linked accounts can access credentials without a per-user API key</div>
+                        </div>
+                        <input type="checkbox" id="oauth_linkage_enabled" name="oauth_linkage_enabled" checked
+                               onchange="document.getElementById('oauth-password-field').style.display=this.checked?'block':'none';">
+                    </div>
+                    <div id="oauth-password-field" class="passphrase-wrap">
+                        <div class="field-label">Optional passphrase (alphanumeric, _, - only)</div>
+                        <input type="text" name="oauth_linkage_password" class="field-input"
+                               placeholder="Leave blank for no passphrase"
+                               pattern="[0-9A-Za-z_-]*"
+                               title="Only 0-9, A-Z, a-z, underscore, and hyphen allowed"
+                               style="max-width:320px;margin-top:6px;">
+                        <div class="field-hint">If set, OAuth sessions require this passphrase to access your credentials.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Service Selection -->
+            <div class="panel">
+                <div class="panel-header collapsed" onclick="togglePanel('services-body', this)">
+                    <span class="panel-icon">🚀</span>
+                    <span class="panel-title">Google Services</span>
+                    <span class="panel-badge" id="services-badge">Loading...</span>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="panel-body" id="services-body" style="display:none;">
+                    <div class="hint-bar" style="font-size:11px;padding:8px 12px;">
+                        💡 Common services pre-selected — expand to change
+                    </div>
+                    <div class="services-grid" id="services-grid">
+"""
+
+        # Sort categories
         category_order = [
             "Core Services",
             "Storage & Files",
@@ -395,154 +616,159 @@ def _generate_service_selection_html(
         ]
         sorted_categories = sorted(
             categories.items(),
-            key=lambda x: (
-                category_order.index(x[0])
-                if x[0] in category_order
-                else len(category_order)
-            ),
+            key=lambda x: category_order.index(x[0])
+            if x[0] in category_order
+            else len(category_order),
         )
 
         for category_name, services in sorted_categories:
-            html += f'<div class="category"><div class="category-title">{category_name}</div>'
-
+            html += (
+                f'<div class="category-label" style="width:100%">{category_name}</div>'
+            )
             for service_key, service_info in services:
                 required = service_info.get("required", False)
-                checked = "checked disabled" if required else ""
-                required_class = "required" if required else ""
-
+                chip_class = "service-chip required" if required else "service-chip"
+                disabled_attr = "disabled" if required else ""
+                check_icon = "✅" if required else "◻"
                 html += f"""
-                    <div class="service-item {required_class}">
-                        <input type="checkbox" class="service-checkbox" name="services"
-                               value="{service_key}" {checked}>
-                        <div class="service-info">
-                            <div class="service-name">
-                                {service_info["name"]}
-                                {'<span class="required-badge">Required</span>' if required else ""}
-                            </div>
-                            <div class="service-description">{service_info["description"]}</div>
-                        </div>
-                    </div>
-                """
+                        <label class="{chip_class}" title="{service_info["description"]}">
+                            <input type="checkbox" name="services" value="{service_key}" {disabled_attr}
+                                   onchange="updateChip(this);updateBadge();">
+                            <span class="chip-check">{check_icon}</span>
+                            <span>{service_info["name"]}{"&nbsp;🔒" if required else ""}</span>
+                        </label>"""
 
-            html += "</div>"
-
-        html += """
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-primary">Continue with Selected Configuration</button>
-                        <button type="button" class="btn btn-secondary" onclick="selectAll()">Select All Services</button>
+        html += f"""
                     </div>
-                </form>
+                    <div style="display:flex;gap:6px;margin-top:10px;">
+                        <button type="button" onclick="selectAll()" class="btn-secondary" style="font-size:11px;padding:6px 12px;">Toggle All</button>
+                        <button type="button" onclick="selectCommon()" class="btn-secondary" style="font-size:11px;padding:6px 12px;">Reset to Common</button>
+                    </div>
+                </div>
             </div>
-            
-            <script>
-                // Auto-select common services - matches drive/upload_tools.py default list
-                document.addEventListener('DOMContentLoaded', function() {
-                    const commonServices = ['drive', 'gmail', 'calendar', 'docs', 'sheets', 'slides', 'photos', 'chat', 'forms', 'people'];
-                    commonServices.forEach(serviceKey => {
-                        const checkbox = document.querySelector(`input[value="${serviceKey}"]`);
-                        if (checkbox && !checkbox.disabled) {
-                            checkbox.checked = true;
-                        }
-                    });
-                });
-                
-                function selectAll() {
-                    const checkboxes = document.querySelectorAll('input[name="services"]:not(:disabled)');
-                    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-                    checkboxes.forEach(cb => cb.checked = !allChecked);
-                }
-                
-                function selectAuthMethod(method, element) {
-                    // Update radio button
-                    const radio = element.querySelector('input[type="radio"]');
-                    radio.checked = true;
-                    
-                    // Update visual selection
-                    document.querySelectorAll('.auth-method-option').forEach(opt => {
-                        opt.classList.remove('selected');
-                    });
-                    element.classList.add('selected');
-                    
-                    // Update hidden form field
-                    const usesPkce = method === 'pkce';
-                    const hiddenField = document.querySelector('input[name="use_pkce"]');
-                    if (hiddenField) {
-                        hiddenField.value = usesPkce.toString();
-                    }
-                    
-                    console.log(`Selected authentication method: ${method} (PKCE: ${usesPkce})`);
-                }
-                
-                // Handle radio button clicks
-                document.addEventListener('DOMContentLoaded', function() {
-                    document.querySelectorAll('.auth-method-option input[type="radio"]').forEach(radio => {
-                        radio.addEventListener('change', function() {
-                            if (this.checked) {
-                                selectAuthMethod(this.value, this.closest('.auth-method-option'));
-                            }
-                        });
-                    });
-                    
-                    // Handle custom credentials checkbox
-                    const customCredsCheckbox = document.getElementById('use_custom_creds');
-                    const customCredsFields = document.getElementById('custom-creds-fields');
-                    
-                    if (customCredsCheckbox && customCredsFields) {
-                        customCredsCheckbox.addEventListener('change', function() {
-                            if (this.checked) {
-                                customCredsFields.style.display = 'block';
-                                // Scroll to show the fields
-                                customCredsFields.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                            } else {
-                                customCredsFields.style.display = 'none';
-                                // Clear the fields when hiding
-                                const inputs = customCredsFields.querySelectorAll('input');
-                                inputs.forEach(input => input.value = '');
-                            }
-                        });
-                    }
-                    
-                    // Form validation
-                    const form = document.querySelector('form');
-                    if (form) {
-                        form.addEventListener('submit', function(e) {
-                            const customCredsEnabled = customCredsCheckbox && customCredsCheckbox.checked;
-                            if (customCredsEnabled) {
-                                const clientIdInput = document.querySelector('input[name="custom_client_id"]');
-                                if (!clientIdInput || !clientIdInput.value.trim()) {
-                                    e.preventDefault();
-                                    alert('Please provide a Custom Client ID when using custom credentials.');
-                                    if (clientIdInput) clientIdInput.focus();
-                                    return false;
-                                }
-                                
-                                // Validate client ID format
-                                const clientId = clientIdInput.value.trim();
-                                if (!clientId.includes('.apps.googleusercontent.com')) {
-                                    const proceed = confirm('Warning: Your Client ID doesn\\'t look like a Google OAuth client ID.\\n\\nGoogle Client IDs usually end with \\".apps.googleusercontent.com\\"\\n\\nDo you want to continue anyway?');
-                                    if (!proceed) {
-                                        e.preventDefault();
-                                        return false;
-                                    }
-                                }
-                            }
-                        });
-                    }
-                });
-            </script>
-        </body>
-        </html>
-        """
+
+            <div class="actions">
+                <button type="submit" class="btn-primary">Continue with Selected Configuration</button>
+                <button type="button" class="btn-secondary" onclick="selectCommon()">Reset</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    const COMMON_SERVICES = ['drive','gmail','calendar','docs','sheets','slides','photos','chat','forms','people'];
+
+    function updateChip(checkbox) {{
+        const chip = checkbox.closest('.service-chip');
+        if (!chip || chip.classList.contains('required')) return;
+        const icon = chip.querySelector('.chip-check');
+        if (checkbox.checked) {{
+            chip.classList.add('checked');
+            if (icon) icon.textContent = '✅';
+        }} else {{
+            chip.classList.remove('checked');
+            if (icon) icon.textContent = '◻';
+        }}
+    }}
+
+    function updateBadge() {{
+        const checked = document.querySelectorAll('input[name="services"]:checked').length;
+        const badge = document.getElementById('services-badge');
+        if (badge) badge.textContent = checked + ' selected';
+    }}
+
+    function selectCommon() {{
+        document.querySelectorAll('input[name="services"]:not(:disabled)').forEach(cb => {{
+            cb.checked = COMMON_SERVICES.includes(cb.value);
+            updateChip(cb);
+        }});
+        updateBadge();
+    }}
+
+    function selectAll() {{
+        const boxes = document.querySelectorAll('input[name="services"]:not(:disabled)');
+        const allChecked = Array.from(boxes).every(cb => cb.checked);
+        boxes.forEach(cb => {{ cb.checked = !allChecked; updateChip(cb); }});
+        updateBadge();
+    }}
+
+    function selectAuthMethod(method, element) {{
+        document.querySelectorAll('.auth-option').forEach(o => o.classList.remove('selected'));
+        element.classList.add('selected');
+        element.querySelector('input[type="radio"]').checked = true;
+        // Update badge
+        const badge = element.closest('.panel').querySelector('.panel-badge');
+        if (badge) badge.textContent = method === 'pkce' ? 'PKCE (Recommended)' : 'Legacy OAuth';
+    }}
+
+    function togglePanel(bodyId, headerEl) {{
+        const body = document.getElementById(bodyId);
+        if (!body) return;
+        const hidden = body.style.display === 'none';
+        body.style.display = hidden ? '' : 'none';
+        if (headerEl) headerEl.classList.toggle('collapsed', !hidden);
+    }}
+
+    document.addEventListener('DOMContentLoaded', function() {{
+        // Pre-select common services
+        selectCommon();
+        // Required checkboxes always checked
+        document.querySelectorAll('input[name="services"]:disabled').forEach(cb => {{
+            cb.checked = true; updateChip(cb);
+        }});
+        updateBadge();
+
+        // Custom creds toggle
+        const customCheck = document.getElementById('use_custom_creds');
+        const customFields = document.getElementById('custom-creds-fields');
+        if (customCheck && customFields) {{
+            customCheck.addEventListener('change', function() {{
+                customFields.style.display = this.checked ? 'block' : 'none';
+                if (!this.checked) {{
+                    customFields.querySelectorAll('input[type="text"]').forEach(i => i.value = '');
+                }}
+            }});
+        }}
+
+        // Form validation
+        document.getElementById('auth-form').addEventListener('submit', function(e) {{
+            const useCustom = customCheck && customCheck.checked;
+            if (useCustom) {{
+                const clientId = document.querySelector('input[name="custom_client_id"]');
+                if (!clientId || !clientId.value.trim()) {{
+                    e.preventDefault();
+                    alert('Please provide a Client ID when using custom credentials.');
+                    if (clientId) clientId.focus();
+                    return;
+                }}
+                if (!clientId.value.includes('.apps.googleusercontent.com')) {{
+                    if (!confirm('Client ID doesn\\'t look like a Google OAuth ID (should end in .apps.googleusercontent.com). Continue anyway?')) {{
+                        e.preventDefault();
+                    }}
+                }}
+            }}
+        }});
+
+        // Auth method click handlers
+        document.querySelectorAll('.auth-option').forEach(opt => {{
+            opt.addEventListener('click', function() {{
+                selectAuthMethod(this.querySelector('input').value, this);
+            }});
+        }});
+    }});
+</script>
+</body>
+</html>"""
 
         return html
 
     except Exception as e:
         logger.error(f"Error generating service selection HTML: {e}")
-        return f"""
-        <!DOCTYPE html>
-        <html><head><title>Error</title></head>
-        <body><h1>Service Selection Error</h1><p>Error: {html.escape(str(e))}</p></body></html>
-        """
+        return f"""<!DOCTYPE html>
+<html><head><title>Error</title></head>
+<body style="font-family:sans-serif;padding:40px">
+<h1>Service Selection Error</h1><p>{html.escape(str(e))}</p>
+</body></html>"""
 
 
 async def _handle_fastmcp_service_selection(
@@ -663,12 +889,22 @@ def setup_service_selection_routes(mcp) -> None:
             if not services and "services" in form_data:
                 services = [form_data.get("services")]
 
+            # Cross-OAuth linkage preference
+            oauth_linkage_enabled = form_data.get("oauth_linkage_enabled") == "on"
+            oauth_linkage_password = (
+                form_data.get("oauth_linkage_password") or ""
+            ).strip()
+
             logger.info(
                 f"📋 Service selection received: state={state}, "
                 f"flow_type={flow_type}, services={services}"
             )
             logger.info(
                 f"🔐 Authentication method chosen: {auth_method} (PKCE: {use_pkce})"
+            )
+            logger.info(
+                f"🔗 Cross-OAuth linkage: enabled={oauth_linkage_enabled}, "
+                f"password={'set' if oauth_linkage_password else 'none'}"
             )
             if use_custom and custom_client_id:
                 logger.info(
@@ -677,6 +913,27 @@ def setup_service_selection_routes(mcp) -> None:
 
             if not state:
                 raise ValueError("Missing state parameter")
+
+            # Store cross-OAuth preference immediately.  The password is persisted
+            # per-email so _save_credentials can pick it up after OAuth redirects.
+            from .google_auth import _service_selection_cache
+
+            if state in _service_selection_cache:
+                user_email_for_linkage = _service_selection_cache[state].get(
+                    "user_email", ""
+                )
+                if user_email_for_linkage:
+                    from .user_api_keys import set_oauth_linkage
+
+                    set_oauth_linkage(
+                        user_email_for_linkage,
+                        enabled=oauth_linkage_enabled,
+                    )
+                # Stash password in cache — it flows through to _save_credentials
+                # in-memory only, never persisted to disk
+                _service_selection_cache[state]["oauth_linkage_password"] = (
+                    oauth_linkage_password
+                )
 
             if flow_type == "fastmcp":
                 oauth_url = await _handle_fastmcp_service_selection(

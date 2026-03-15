@@ -22,6 +22,7 @@ Usage:
     )
 """
 
+import asyncio
 import gc
 from typing import Any, Dict, Optional
 
@@ -232,6 +233,309 @@ async def cache_middleware_lifespan(server: Any):
         )
 
 
+# =========================================================================
+# Memory monitoring & watchdog configuration
+# =========================================================================
+# Docker limit is 2G; trigger graceful shutdown at 75% to capture diagnostics
+# before an opaque OOM kill. Configurable via env vars.
+import os
+
+_MEMORY_LIMIT_MB = int(os.getenv("MEMORY_LIMIT_MB", "2048"))
+_MEMORY_WARN_PCT = float(os.getenv("MEMORY_WARN_PCT", "0.65"))
+_MEMORY_CRITICAL_PCT = float(os.getenv("MEMORY_CRITICAL_PCT", "0.75"))
+_CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "300"))
+
+_WARN_THRESHOLD_MB = int(_MEMORY_LIMIT_MB * _MEMORY_WARN_PCT)
+_CRITICAL_THRESHOLD_MB = int(_MEMORY_LIMIT_MB * _MEMORY_CRITICAL_PCT)
+
+
+def _has_running_loop() -> bool:
+    """Check if there's a running asyncio event loop."""
+    try:
+        asyncio.get_running_loop()
+        return True
+    except RuntimeError:
+        return False
+
+
+def _get_rss_mb() -> float:
+    """Current process RSS in MB."""
+    import psutil
+
+    return psutil.Process().memory_info().rss / (1024 * 1024)
+
+
+def _get_process_health() -> Dict[str, Any]:
+    """Snapshot of process-level health metrics."""
+    import psutil
+
+    proc = psutil.Process()
+    with proc.oneshot():
+        mem = proc.memory_info()
+        return {
+            "rss_mb": round(mem.rss / (1024 * 1024), 1),
+            "vms_mb": round(mem.vms / (1024 * 1024), 1),
+            "cpu_pct": proc.cpu_percent(interval=None),
+            "num_fds": proc.num_fds() if hasattr(proc, "num_fds") else -1,
+            "num_threads": proc.num_threads(),
+            "asyncio_tasks": len(asyncio.all_tasks()) if _has_running_loop() else -1,
+        }
+
+
+def _dump_diagnostics(reason: str) -> None:
+    """Dump memory diagnostics to logs for post-mortem analysis."""
+    import tracemalloc
+
+    import objgraph
+
+    logger.warning(f"=== MEMORY DIAGNOSTICS ({reason}) ===")
+
+    # objgraph: what object types are growing
+    growth = objgraph.growth(limit=20)
+    if growth:
+        logger.warning("Top growing object types:")
+        for type_name, count, delta in growth:
+            logger.warning(f"  {type_name}: {count} (+{delta})")
+
+    # tracemalloc: top allocating code locations
+    if tracemalloc.is_tracing():
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics("lineno")[:15]
+        logger.warning("Top memory allocations by line:")
+        for stat in top_stats:
+            logger.warning(f"  {stat}")
+
+    # GC stats
+    gc_stats = gc.get_stats()
+    logger.warning(f"GC stats: {gc_stats}")
+
+    # Process health
+    health = _get_process_health()
+    logger.warning(f"Process health: {health}")
+    logger.warning(f"=== END DIAGNOSTICS ===")
+
+
+def _gc_callback(phase: str, info: Dict[str, Any]) -> None:
+    """GC callback to detect uncollectable reference cycles."""
+    if phase == "stop" and info.get("uncollectable", 0) > 0:
+        logger.warning(
+            f"GC found {info['uncollectable']} uncollectable objects "
+            f"(generation {info['generation']}) — possible reference cycle leak"
+        )
+
+
+async def _periodic_memory_cleanup(
+    interval_seconds: float = _CLEANUP_INTERVAL,
+    shutdown_event: Optional[asyncio.Event] = None,
+) -> None:
+    """Background task: cleans stale data, monitors RSS, triggers watchdog."""
+    import objgraph
+
+    # Prime objgraph baseline (first call returns everything, subsequent calls show deltas)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, objgraph.growth, 0)
+
+    cycle_count = 0
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        cycle_count += 1
+        try:
+            cleaned_items = 0
+
+            # --- Cache & session cleanup (from Fix 1-3) ---
+
+            # 1. Tool relationship graph — stale sessions
+            qdrant_mw = _lifespan_state.get("qdrant_middleware")
+            if qdrant_mw is not None:
+                graph = getattr(qdrant_mw, "_tool_relationship_graph", None)
+                if graph is not None:
+                    cleaned_items += graph.cleanup_stale_sessions(max_age_seconds=3600)
+
+            # 2. Template cache — expired entries
+            cache_refs = _lifespan_state.get("cache_middleware_refs", {})
+            template_mw = cache_refs.get("template_middleware")
+            if template_mw is not None:
+                try:
+                    cm = getattr(template_mw, "cache_manager", None)
+                    if cm is not None:
+                        cleaned_items += cm.cleanup_expired_entries()
+                except Exception:
+                    pass
+
+            # 3. Profile cache — expired entries
+            profile_mw = cache_refs.get("profile_middleware")
+            if profile_mw is not None:
+                try:
+                    cleaned_items += profile_mw.cleanup_expired_entries()
+                except Exception:
+                    pass
+
+            if cleaned_items > 0:
+                logger.info(f"Periodic cleanup: {cleaned_items} items removed")
+
+            # --- Tier 1: Process health & RSS monitoring ---
+
+            rss_mb = _get_rss_mb()
+
+            # Log health every 6th cycle (~30 min at 5min interval) or when elevated
+            if cycle_count % 6 == 0 or rss_mb > _WARN_THRESHOLD_MB:
+                health = _get_process_health()
+                logger.info(f"Process health: {health}")
+
+            # objgraph growth check every 3rd cycle (~15 min)
+            # Run in executor — gc.get_objects() walks the entire heap and blocks
+            if cycle_count % 3 == 0:
+                loop = asyncio.get_running_loop()
+                growth = await loop.run_in_executor(None, objgraph.growth, 10)
+                if growth:
+                    notable = [(t, c, d) for t, c, d in growth if d > 100]
+                    if notable:
+                        logger.warning(
+                            "Object growth: "
+                            + ", ".join(f"{t}(+{d})" for t, _, d in notable)
+                        )
+
+            # --- Watchdog: memory threshold checks ---
+
+            if rss_mb > _CRITICAL_THRESHOLD_MB:
+                _dump_diagnostics(
+                    f"RSS {rss_mb:.0f}MB exceeds critical threshold "
+                    f"{_CRITICAL_THRESHOLD_MB}MB ({_MEMORY_CRITICAL_PCT:.0%} of {_MEMORY_LIMIT_MB}MB)"
+                )
+                logger.error(
+                    f"RSS {rss_mb:.0f}MB exceeds critical threshold — "
+                    f"signaling graceful shutdown"
+                )
+                if shutdown_event:
+                    shutdown_event.set()
+                    return
+
+            elif rss_mb > _WARN_THRESHOLD_MB:
+                logger.warning(
+                    f"RSS {rss_mb:.0f}MB exceeds warning threshold "
+                    f"{_WARN_THRESHOLD_MB}MB ({_MEMORY_WARN_PCT:.0%} of {_MEMORY_LIMIT_MB}MB)"
+                )
+
+        except Exception as e:
+            logger.warning(f"Periodic memory cleanup error: {e}")
+
+
+@lifespan
+async def memory_cleanup_lifespan(server: Any):
+    """
+    Periodic memory cleanup & monitoring lifecycle.
+
+    Integrates:
+    - Cache/session cleanup (every 5 min)
+    - psutil RSS/FD/CPU tracking (every 30 min, or when elevated)
+    - objgraph.growth() leak detection (every 15 min)
+    - gc.callbacks for uncollectable reference cycles
+    - aiodebug slow event-loop callback detection
+    - aiomonitor async task inspector (localhost:20101)
+    - Watchdog: at 75% of MEMORY_LIMIT_MB, dump diagnostics + graceful shutdown
+
+    Yields:
+        Dict with 'memory_cleanup_active' flag
+    """
+    import tracemalloc
+
+    # --- Tier 1: tracemalloc (1-frame, low overhead) ---
+    if not tracemalloc.is_tracing():
+        tracemalloc.start(1)
+        logger.info(f"Memory monitoring: tracemalloc started (nframe=1)")
+
+    # --- Tier 1: GC callback for uncollectable cycles ---
+    gc.callbacks.append(_gc_callback)
+
+    # --- Tier 2: aiodebug slow callback detection ---
+    aiomonitor_ctx = None
+    try:
+        import aiodebug.log_slow_callbacks
+
+        aiodebug.log_slow_callbacks.enable(0.25)  # warn if callback takes >250ms
+        logger.info(
+            "Memory monitoring: aiodebug slow callback detection enabled (>250ms)"
+        )
+    except Exception as e:
+        logger.warning(f"aiodebug setup skipped: {e}")
+
+    # --- Tier 2: aiomonitor task inspector ---
+    try:
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Importing 'parser.split_arg_string'",
+                category=DeprecationWarning,
+            )
+            import aiomonitor
+
+        loop = asyncio.get_running_loop()
+        aiomonitor_ctx = aiomonitor.start_monitor(loop, host="127.0.0.1", port=20101)
+        monitor = aiomonitor_ctx.__enter__()
+        logger.info("Memory monitoring: aiomonitor started on 127.0.0.1:20101")
+    except Exception as e:
+        logger.warning(f"aiomonitor setup skipped: {e}")
+        aiomonitor_ctx = None
+
+    # --- Shutdown event for watchdog ---
+    shutdown_event = asyncio.Event()
+
+    # --- Start the periodic cleanup + monitoring task ---
+    cleanup_task = asyncio.create_task(
+        _periodic_memory_cleanup(shutdown_event=shutdown_event)
+    )
+
+    rss_mb = _get_rss_mb()
+    logger.info(
+        f"Memory monitoring active: RSS={rss_mb:.0f}MB, "
+        f"warn={_WARN_THRESHOLD_MB}MB, critical={_CRITICAL_THRESHOLD_MB}MB, "
+        f"limit={_MEMORY_LIMIT_MB}MB"
+    )
+
+    # --- Watchdog shutdown listener ---
+    async def _watchdog_shutdown():
+        await shutdown_event.wait()
+        logger.error("Watchdog triggered — initiating server shutdown")
+        # Raise SystemExit to trigger lifespan cleanup chain
+        os._exit(1)
+
+    watchdog_task = asyncio.create_task(_watchdog_shutdown())
+
+    try:
+        yield {"memory_cleanup_active": True}
+    finally:
+        # Cancel background tasks
+        cleanup_task.cancel()
+        watchdog_task.cancel()
+        for t in (cleanup_task, watchdog_task):
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+
+        # Cleanup aiomonitor
+        if aiomonitor_ctx is not None:
+            try:
+                aiomonitor_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
+
+        # Remove GC callback
+        try:
+            gc.callbacks.remove(_gc_callback)
+        except ValueError:
+            pass
+
+        # Stop tracemalloc
+        if tracemalloc.is_tracing():
+            tracemalloc.stop()
+
+        logger.info("Memory monitoring stopped")
+
+
 @lifespan
 async def dynamic_instructions_lifespan(server: Any):
     """
@@ -339,6 +643,7 @@ combined_server_lifespan = (
     | colbert_lifespan
     | session_state_lifespan
     | cache_middleware_lifespan
+    | memory_cleanup_lifespan
     | dynamic_instructions_lifespan
 )
 
@@ -349,6 +654,7 @@ __all__ = [
     "colbert_lifespan",
     "session_state_lifespan",
     "cache_middleware_lifespan",
+    "memory_cleanup_lifespan",
     "dynamic_instructions_lifespan",
     "combined_server_lifespan",
     "register_profile_middleware",
