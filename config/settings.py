@@ -123,6 +123,7 @@ class Settings(BaseSettings):
 
     # Sampling Tools Configuration
     sampling_tools: bool = False  # Enable sampling middleware tools (default: False)
+    anthropic_api_key: Optional[str] = None  # For sampling fallback handler
 
     # MCP List Page Size Configuration
     # Controls pagination of tools/resources/prompts listing responses.

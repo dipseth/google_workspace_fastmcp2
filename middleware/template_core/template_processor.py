@@ -36,8 +36,10 @@ class TemplateProcessor:
     SIMPLE_TEMPLATE_PATTERN = re.compile(r"\{\{([a-zA-Z][a-zA-Z0-9]*://[^}]+)\}\}")
 
     # Enhanced pattern to match resource URIs in ALL contexts (expressions, loops, conditionals, etc.)
+    # Requires the scheme to start at a non-letter boundary (prevents matching 'ttps://' inside 'https://')
+    # and excludes http:// / https:// to avoid treating embedded web URLs as MCP resources.
     RESOURCE_URI_PATTERN = re.compile(
-        r"([a-zA-Z][a-zA-Z0-9]*://[a-zA-Z0-9/_-]+)((?:\.\w+)*)"
+        r"(?<![a-zA-Z])((?!https?://)[a-zA-Z][a-zA-Z0-9]*://[a-zA-Z0-9/_-]+)((?:\.\w+)*)"
     )
 
     # Pattern to detect Jinja2 syntax (control structures, filters, etc.)

@@ -532,6 +532,25 @@ else:
     logger.info("  💡 To enable: set FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID and")
     logger.info("     FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET in .env")
 
+# Configure sampling fallback handler (uses Anthropic when client doesn't support sampling)
+_sampling_handler = None
+if settings.anthropic_api_key:
+    try:
+        from anthropic import AsyncAnthropic
+        from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
+
+        _sampling_handler = AnthropicSamplingHandler(
+            default_model="claude-sonnet-4-6",
+            client=AsyncAnthropic(api_key=settings.anthropic_api_key),
+        )
+        logger.info("🤖 Anthropic sampling handler configured (fallback mode)")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to configure Anthropic sampling handler: {e}")
+else:
+    logger.warning(
+        "⚠️ ANTHROPIC_API_KEY not set — sampling will fail if client doesn't support it"
+    )
+
 # Create FastMCP instance with composed lifespans for proper lifecycle management
 # Lifespans handle: Qdrant init/shutdown, ColBERT init, session state persistence,
 # cache cleanup, and dynamic instructions update
@@ -565,6 +584,8 @@ For manual/legacy auth:
 ## Tool Management
 Use `manage_tools` to list, enable, or disable tools at runtime.""",
     auth=google_auth_provider,  # GoogleProvider when configured, None for legacy fallback
+    sampling_handler=_sampling_handler,  # Anthropic fallback when client lacks sampling
+    sampling_handler_behavior="fallback",  # Use client LLM when available, Anthropic when not
 )
 
 if google_auth_provider:

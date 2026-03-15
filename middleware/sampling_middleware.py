@@ -37,14 +37,84 @@ Usage:
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Annotated, Any, Dict, List, Optional, Union
+from typing import Annotated, Any, Dict, List, Optional, Tuple, Union
 
 from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools import Tool
 from fastmcp.tools.tool_transform import forward
-from pydantic import Field
+from mcp.types import SamplingMessage as MCPSamplingMessage
+from mcp.types import TextContent as MCPTextContent
+from pydantic import BaseModel, Field
+
+
+# Lazy imports for dynamic DSL documentation (avoids circular imports at module load)
+def _get_email_dsl_docs() -> str:
+    """Get email DSL documentation dynamically from the email wrapper."""
+    try:
+        from gmail.email_wrapper_api import get_email_dsl_documentation
+
+        return (
+            get_email_dsl_documentation(include_examples=True)
+            + "\n\nReturn a JSON object with exactly two keys:\n"
+            + "- `email_description`: the DSL string (e.g. `ε[Ħ, ħ, τ×2, Ƀ]`)\n"
+            + '- `email_params`: content dict keyed by symbol (e.g. `{"τ": {"_items": [...]}}`)'
+        )
+    except Exception as e:
+        logger.warning(f"Could not load email DSL docs dynamically: {e}")
+        return "Generate email DSL. Return JSON: {email_description, email_params}"
+
+
+def _get_card_dsl_docs() -> str:
+    """Get card DSL documentation dynamically from the gchat wrapper."""
+    try:
+        from gchat.wrapper_api import get_dsl_documentation
+
+        return (
+            get_dsl_documentation(include_examples=True, include_hierarchy=True)
+            + "\n\nReturn a JSON object with exactly two keys:\n"
+            + "- `card_description`: the DSL string (e.g. `§[δ×3, Ƀ[ᵬ×2]]`)\n"
+            + '- `card_params`: content dict keyed by symbol (e.g. `{"δ": {"_items": [...]}}`)'
+        )
+    except Exception as e:
+        logger.warning(f"Could not load card DSL docs dynamically: {e}")
+        return "Generate card DSL. Return JSON: {card_description, card_params}"
+
+
+def _get_dsl_error_recovery_docs() -> str:
+    """Get combined DSL documentation for error recovery prompts."""
+    parts = [
+        "You are a DSL error recovery expert. Fix the DSL errors listed below "
+        "while preserving the original intent. Return corrected JSON with the same structure.",
+    ]
+    try:
+        from gchat.wrapper_api import get_dsl_documentation
+
+        parts.append(
+            "\n\n## Card DSL Reference\n"
+            + get_dsl_documentation(include_examples=True, include_hierarchy=True)
+        )
+    except Exception:
+        pass
+    try:
+        from gmail.email_wrapper_api import get_email_dsl_documentation
+
+        parts.append(
+            "\n\n## Email DSL Reference\n"
+            + get_email_dsl_documentation(include_examples=True)
+        )
+    except Exception:
+        pass
+    parts.append(
+        "\n\nRules:\n"
+        "- Only use symbols defined in the reference above\n"
+        "- Respect parent-child hierarchy (e.g. Buttons must be inside ButtonList)\n"
+        "- Preserve the user's intended layout and content\n"
+        "- Return ONLY the corrected JSON, no explanation"
+    )
+    return "\n".join(parts)
+
 
 # Configure logging
 from config.enhanced_logging import setup_logger
@@ -89,6 +159,10 @@ class SamplingTemplate(Enum):
     WORKFLOW_SUGGESTION = "workflow_suggestion"
     RESOURCE_DISCOVERY = "resource_discovery"
     HISTORICAL_PATTERN_ANALYSIS = "historical_pattern_analysis"
+    # DSL generator templates
+    EMAIL_DSL_GENERATOR = "email_dsl_generator"
+    CARD_DSL_GENERATOR = "card_dsl_generator"
+    DSL_ERROR_RECOVERY = "dsl_error_recovery"
 
 
 class EnhancementLevel(Enum):
@@ -754,7 +828,6 @@ When analyzing requests, consider:
 Always be specific about available tools and resources that could help.""",
                 "temperature": 0.3,
                 "max_tokens": 600,
-                "include_context": "thisServer",
             },
             SamplingTemplate.MACRO_AWARE_EMAIL_ASSISTANT: {
                 "system_prompt": """You are an intelligent email assistant with access to sophisticated email templates.
@@ -829,6 +902,21 @@ Provide personalized recommendations based on historical success patterns.""",
                 "temperature": 0.2,
                 "max_tokens": 700,
             },
+            SamplingTemplate.EMAIL_DSL_GENERATOR: {
+                "system_prompt_fn": _get_email_dsl_docs,  # lazy: avoids hardcoded symbols
+                "temperature": 0.2,
+                "max_tokens": 1000,
+            },
+            SamplingTemplate.CARD_DSL_GENERATOR: {
+                "system_prompt_fn": _get_card_dsl_docs,  # lazy: avoids hardcoded symbols
+                "temperature": 0.2,
+                "max_tokens": 1000,
+            },
+            SamplingTemplate.DSL_ERROR_RECOVERY: {
+                "system_prompt_fn": _get_dsl_error_recovery_docs,
+                "temperature": 0.1,  # precise fixes
+                "max_tokens": 1000,
+            },
         }
 
     async def sample(
@@ -839,8 +927,8 @@ Provide personalized recommendations based on historical success patterns.""",
         max_tokens: int = 512,
         model_preferences: Optional[Union[str, List[str], ModelPreferences]] = None,
         template: Optional[SamplingTemplate] = None,
-        include_context: Optional[str] = None,
-    ) -> Union[TextContent, ImageContent]:
+        result_type: Optional[Any] = None,
+    ) -> Any:
         """
         Request text generation from the client's LLM.
 
@@ -851,10 +939,10 @@ Provide personalized recommendations based on historical success patterns.""",
             max_tokens: Maximum number of tokens to generate
             model_preferences: Model selection preferences
             template: Pre-defined template for common use cases
-            include_context: Include server context ("thisServer" or None)
+            result_type: Pydantic model type for structured output (sets .result on SamplingResult)
 
         Returns:
-            TextContent or ImageContent with the LLM's response
+            SamplingResult — callers access .text for raw text or .result for structured output
 
         Raises:
             ToolError: If sampling fails or client doesn't support sampling
@@ -868,6 +956,11 @@ Provide personalized recommendations based on historical success patterns.""",
                 template_config = self._template_cache.get(template, {})
                 if system_prompt is None:
                     system_prompt = template_config.get("system_prompt")
+                    # Support lazy callable system prompts (avoids hardcoded symbols)
+                    if system_prompt is None:
+                        system_prompt_fn = template_config.get("system_prompt_fn")
+                        if callable(system_prompt_fn):
+                            system_prompt = system_prompt_fn()
                 if temperature is None:
                     temperature = template_config.get("temperature")
                 if max_tokens == 512:  # Default value
@@ -891,8 +984,8 @@ Provide personalized recommendations based on historical success patterns.""",
                 sampling_params["model_preferences"] = self._prepare_model_preferences(
                     model_preferences
                 )
-            if include_context:
-                sampling_params["include_context"] = include_context
+            if result_type is not None:
+                sampling_params["result_type"] = result_type
 
             if self.enable_debug:
                 logger.debug(
@@ -908,37 +1001,8 @@ Provide personalized recommendations based on historical success patterns.""",
             if self.enable_debug:
                 logger.debug(f"✅ Sampling completed for tool: {self.tool_name}")
 
-            # Return structured response
-            if hasattr(response, "text"):
-                return TextContent(
-                    text=response.text,
-                    metadata={
-                        "tool_name": self.tool_name,
-                        "sampling_params": sampling_params,
-                        "template_used": template.value if template else None,
-                    },
-                )
-            elif hasattr(response, "data"):
-                return ImageContent(
-                    data=response.data,
-                    mime_type=getattr(response, "mime_type", "image/png"),
-                    metadata={
-                        "tool_name": self.tool_name,
-                        "sampling_params": sampling_params,
-                        "template_used": template.value if template else None,
-                    },
-                )
-            else:
-                # Fallback for unexpected response types
-                return TextContent(
-                    text=str(response),
-                    metadata={
-                        "tool_name": self.tool_name,
-                        "sampling_params": sampling_params,
-                        "template_used": template.value if template else None,
-                        "response_type": type(response).__name__,
-                    },
-                )
+            # Return SamplingResult directly — callers use .text or .result
+            return response
 
         except Exception as e:
             logger.error(f"❌ LLM sampling failed for tool {self.tool_name}: {e}")
@@ -946,21 +1010,39 @@ Provide personalized recommendations based on historical success patterns.""",
 
     def _prepare_messages(
         self, messages: Union[str, List[Union[str, SamplingMessage]]]
-    ) -> List[Dict[str, str]]:
+    ) -> List[MCPSamplingMessage]:
         """Prepare messages for sampling request."""
         if isinstance(messages, str):
-            return [{"role": "user", "content": messages}]
+            return [
+                MCPSamplingMessage(
+                    role="user", content=MCPTextContent(type="text", text=messages)
+                )
+            ]
 
         prepared = []
         for msg in messages:
             if isinstance(msg, str):
-                prepared.append({"role": "user", "content": msg})
+                prepared.append(
+                    MCPSamplingMessage(
+                        role="user", content=MCPTextContent(type="text", text=msg)
+                    )
+                )
             elif isinstance(msg, SamplingMessage):
-                prepared.append({"role": msg.role, "content": msg.content})
-            elif isinstance(msg, dict):
+                prepared.append(
+                    MCPSamplingMessage(
+                        role=msg.role,
+                        content=MCPTextContent(type="text", text=msg.content),
+                    )
+                )
+            elif isinstance(msg, MCPSamplingMessage):
                 prepared.append(msg)
             else:
-                prepared.append({"role": "user", "content": str(msg)})
+                prepared.append(
+                    MCPSamplingMessage(
+                        role="user",
+                        content=MCPTextContent(type="text", text=str(msg)),
+                    )
+                )
 
         return prepared
 
@@ -1075,14 +1157,92 @@ class EnhancedSamplingMiddleware(Middleware):
                         f"✅ Enhanced context stored for elicitation-enabled tool: {tool_name}"
                     )
 
-            # Continue with normal tool execution
-            return await call_next(context)
+            # Execute tool and capture result
+            result = await call_next(context)
+
+            # Post-call: enrich DSL errors with diagnostics
+            if self._is_dsl_tool(tool_name):
+                result = self._enrich_dsl_errors(result, tool_name)
+
+            return result
 
         except Exception as e:
             if self.enable_debug:
                 logger.debug(f"⚠️ Could not check tool tags for {tool_name}: {e}")
             # Continue without elicitation on error
             return await call_next(context)
+
+    _DSL_TOOLS = {
+        "send_dynamic_card",
+        "compose_dynamic_email",
+        "compose_email_with_ai",
+        "send_card_with_ai",
+    }
+
+    def _is_dsl_tool(self, tool_name: str) -> bool:
+        """Check if a tool uses DSL notation."""
+        return tool_name in self._DSL_TOOLS
+
+    def _enrich_dsl_errors(self, result, tool_name: str):
+        """Inspect tool result for DSL errors and append structured diagnostics.
+
+        If the result content contains error indicators, attempts to parse any
+        DSL fragments from the error text and adds an extra TextContent block
+        with issues, suggestions, and hints.
+        """
+        from mcp.types import TextContent
+
+        if not hasattr(result, "content") or not result.content:
+            return result
+
+        # Scan content blocks for error indicators
+        error_keywords = [
+            "unknown symbol",
+            "cannot be direct child",
+            "invalid dsl",
+            "dsl error",
+            "card_description",
+            "email_description",
+            "ToolError",
+            "validation failed",
+        ]
+
+        error_text = None
+        for block in result.content:
+            if hasattr(block, "text"):
+                text_lower = block.text.lower()
+                if any(kw in text_lower for kw in error_keywords):
+                    error_text = block.text
+                    break
+
+        if not error_text:
+            return result
+
+        # Determine DSL type from tool name
+        dsl_type = "email" if "email" in tool_name else "card"
+
+        # Try to extract a DSL fragment from the error text
+        dsl_fragment = None
+        try:
+            from adapters.module_wrapper.dsl_parser import DSLParser
+
+            parser = DSLParser()
+            dsl_fragment = parser.extract_dsl_from_text(error_text)
+        except Exception:
+            pass
+
+        diag = _build_dsl_error_diagnostics(
+            Exception(error_text), dsl_type, dsl_fragment
+        )
+
+        # Append diagnostics as an additional content block
+        diag_text = "\n--- DSL Diagnostics ---\n" + json.dumps(diag, indent=2)
+        result.content.append(TextContent(type="text", text=diag_text))
+
+        if self.enable_debug:
+            logger.debug(f"Enriched DSL error diagnostics for {tool_name}")
+
+        return result
 
     async def _store_enhanced_context(self, context: MiddlewareContext, tool_name: str):
         """Store enhanced sampling context for tools that support elicitation."""
@@ -1515,6 +1675,211 @@ class SamplingUtils:
 # ============================================================================
 
 
+# ============================================================================
+# PYDANTIC RESULT TYPES FOR STRUCTURED SAMPLING
+# ============================================================================
+
+
+class SentimentResult(BaseModel):
+    """Structured sentiment analysis result."""
+
+    sentiment: str  # "positive" | "negative" | "neutral"
+    confidence: float  # 0.0–1.0
+    reasoning: str
+
+
+class EmailDSLResult(BaseModel):
+    """Structured email DSL generation result."""
+
+    email_description: str  # e.g. "ε[Ħ, ħ, τ×2, Ƀ]"
+    email_params: dict  # content for each symbol key
+
+
+class CardDSLResult(BaseModel):
+    """Structured card DSL generation result."""
+
+    card_description: str  # e.g. "§[δ×3, Ƀ[ᵬ×2]]"
+    card_params: dict  # content for each symbol key
+
+
+# ============================================================================
+# DSL VALIDATION & ERROR RECOVERY HELPERS
+# ============================================================================
+
+
+def _build_dsl_error_diagnostics(
+    error: Exception, dsl_type: str, dsl_string: str = None
+) -> dict:
+    """Build structured diagnostics from a DSL-related error.
+
+    Attempts to parse any available DSL fragment to provide actionable
+    issues and suggestions alongside the raw error message.
+
+    Returns:
+        Dict with keys: dsl_type, error, and optionally issues, suggestions,
+        expanded_notation.
+    """
+    diag: Dict[str, Any] = {"dsl_type": dsl_type, "error": str(error)}
+
+    if not dsl_string:
+        return diag
+
+    try:
+        if dsl_type == "card":
+            from gchat.wrapper_api import parse_dsl
+
+            result = parse_dsl(dsl_string)
+        else:
+            from gmail.email_wrapper_api import parse_email_dsl
+
+            result = parse_email_dsl(dsl_string)
+
+        if result.issues:
+            diag["issues"] = result.issues
+        if result.suggestions:
+            diag["suggestions"] = result.suggestions
+        if result.root_nodes:
+            diag["expanded_notation"] = ", ".join(
+                n.to_expanded_notation() for n in result.root_nodes
+            )
+        diag["hint"] = (
+            "Use get_schema('send_dynamic_card') or get_schema('compose_dynamic_email') "
+            "to see valid DSL syntax."
+        )
+    except Exception:
+        pass  # parser unavailable — return basic diagnostics
+
+    return diag
+
+
+async def _validate_and_recover_dsl(
+    sctx: "SamplingContext",
+    dsl_string: str,
+    dsl_type: str,
+    original_description: str,
+    result_type: type,
+    max_retries: int = 2,
+) -> Tuple[Any, List[str]]:
+    """Validate DSL and attempt LLM-assisted recovery if invalid.
+
+    Args:
+        sctx: SamplingContext for LLM calls
+        dsl_string: The DSL string to validate
+        dsl_type: "card" or "email"
+        original_description: The user's original description (for recovery context)
+        result_type: Pydantic model type (CardDSLResult or EmailDSLResult)
+        max_retries: Maximum recovery attempts
+
+    Returns:
+        Tuple of (validated result or None, list of warning strings)
+    """
+    # Import the appropriate parser
+    try:
+        if dsl_type == "card":
+            from gchat.wrapper_api import parse_dsl
+
+            parser = parse_dsl
+        else:
+            from gmail.email_wrapper_api import parse_email_dsl
+
+            parser = parse_email_dsl
+    except ImportError:
+        logger.warning(
+            f"DSL parser for '{dsl_type}' not available — skipping validation"
+        )
+        return None, ["DSL validation skipped: parser not available"]
+
+    warnings: List[str] = []
+    current_dsl = dsl_string
+
+    for attempt in range(max_retries + 1):
+        try:
+            parse_result = parser(current_dsl)
+        except Exception as exc:
+            warnings.append(f"DSL parse error (attempt {attempt + 1}): {exc}")
+            break
+
+        if parse_result.is_valid:
+            if attempt > 0:
+                logger.info(
+                    f"DSL recovery succeeded on attempt {attempt} for '{dsl_type}'"
+                )
+                warnings.append(
+                    f"DSL was corrected after {attempt} recovery attempt(s)"
+                )
+            return None, warnings  # None = keep original, DSL is valid
+
+        # DSL is invalid — attempt recovery if we have retries left
+        if attempt >= max_retries:
+            warnings.append(
+                f"DSL validation failed after {max_retries} recovery attempts. "
+                f"Issues: {parse_result.issues}"
+            )
+            break
+
+        # Build recovery prompt
+        expanded = (
+            ", ".join(n.to_expanded_notation() for n in parse_result.root_nodes)
+            if parse_result.root_nodes
+            else "(could not parse)"
+        )
+
+        recovery_prompt = (
+            f"The following {dsl_type} DSL is invalid. Fix it.\n\n"
+            f"Original request: {original_description}\n\n"
+            f"Invalid DSL: {current_dsl}\n"
+            f"Expanded notation: {expanded}\n\n"
+            f"Issues:\n" + "\n".join(f"- {issue}" for issue in parse_result.issues)
+        )
+        if parse_result.suggestions:
+            recovery_prompt += "\n\nSuggestions:\n" + "\n".join(
+                f"- {s}" for s in parse_result.suggestions
+            )
+
+        logger.info(
+            f"DSL validation failed (attempt {attempt + 1}/{max_retries}), "
+            f"issues: {parse_result.issues}. Attempting recovery..."
+        )
+
+        try:
+            recovery_result = await sctx.sample(
+                messages=recovery_prompt,
+                template=SamplingTemplate.DSL_ERROR_RECOVERY,
+                result_type=result_type,
+            )
+            recovered = recovery_result.result
+            # Extract the DSL string from the recovered result
+            if dsl_type == "card" and hasattr(recovered, "card_description"):
+                current_dsl = recovered.card_description
+            elif dsl_type == "email" and hasattr(recovered, "email_description"):
+                current_dsl = recovered.email_description
+            else:
+                warnings.append("Recovery returned unexpected result type")
+                break
+
+            # Will re-validate on next loop iteration
+            # If valid, return the full recovered object
+            try:
+                re_check = parser(current_dsl)
+                if re_check.is_valid:
+                    logger.info(
+                        f"DSL recovery succeeded on attempt {attempt + 1} for '{dsl_type}'"
+                    )
+                    warnings.append(
+                        f"DSL was corrected after {attempt + 1} recovery attempt(s)"
+                    )
+                    return recovered, warnings
+            except Exception:
+                pass
+            # If still invalid, continue loop
+
+        except Exception as exc:
+            warnings.append(f"DSL recovery sampling failed: {exc}")
+            break
+
+    return None, warnings
+
+
 def setup_enhanced_sampling_demo_tools(mcp: FastMCP):
     """Setup demo tools that showcase enhanced sampling capabilities."""
 
@@ -1694,7 +2059,6 @@ Include the full macro call I can use.
             )
 
         try:
-            # Use standard FastMCP ctx.sample()
             prompt = f"""
 I need help creating a workflow for: {task_description}
 
@@ -1707,19 +2071,27 @@ Please suggest a step-by-step workflow that:
 
 Provide actionable steps with specific tool recommendations.
 """
-
-            response = await ctx.sample(
-                messages=prompt,
-                system_prompt="You are a workflow optimization expert with access to the user's workspace and tools.",
-                temperature=0.4,
-                max_tokens=800,
-            )
+            messages = [prompt]
+            result_text = ""
+            while True:
+                step = await ctx.sample_step(
+                    messages=messages,
+                    system_prompt="You are a workflow optimization expert with access to the user's workspace and tools.",
+                    max_tokens=800,
+                    temperature=0.4,
+                )
+                if not step.is_tool_use:
+                    result_text = step.text or ""
+                    break
+                for call in step.tool_calls:
+                    logger.info(f"Sampling step tool call: {call.name}")
+                messages = step.history
 
             return WorkflowAssistantResponse(
                 success=True,
                 task_description=task_description,
                 include_history=include_history,
-                workflow_suggestions=response.text,
+                workflow_suggestions=result_text,
                 historical_patterns=(
                     ["Previous successful workflows analyzed"]
                     if include_history
@@ -1966,7 +2338,232 @@ Focus on practical examples with actual resource URIs.
                 error=str(e),
             )
 
+    @mcp.tool(
+        name="analyze_sentiment",
+        description="Analyze text sentiment using structured LLM sampling",
+        tags={"sampling", "analysis", "demo"},
+        annotations={
+            "title": "Sentiment Analyzer",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+        },
+    )
+    async def analyze_sentiment(
+        text: str,
+        user_google_email: UserGoogleEmail = None,
+        ctx: Context = None,
+    ) -> dict:
+        """Analyze text sentiment using structured LLM output.
+
+        Args:
+            text: Text to analyze
+            user_google_email: User's email address (auto-injected)
+            ctx: FastMCP context (automatically injected)
+        """
+        if not ctx:
+            return {"error": "Context not available"}
+
+        try:
+            result = await ctx.sample(
+                messages=f"Analyze the sentiment of: {text}",
+                system_prompt="You are a sentiment analysis expert. Analyze text sentiment as positive, negative, or neutral.",
+                result_type=SentimentResult,
+                temperature=0.1,
+                max_tokens=200,
+            )
+            return result.result.model_dump()
+        except Exception as e:
+            logger.error(f"Error in analyze_sentiment: {e}")
+            return {"error": str(e), "text": text}
+
+    @mcp.tool(
+        name="compose_email_with_ai",
+        description="Generate email DSL from natural language, then compose the email",
+        tags={"sampling", "email", "dsl", "ai"},
+        annotations={
+            "title": "AI Email Composer",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+        },
+    )
+    async def compose_email_with_ai(
+        description: str,
+        to: str = "myself",
+        action: str = "draft",
+        user_google_email: UserGoogleEmail = None,
+        ctx: Context = None,
+    ) -> dict:
+        """Compose an email from natural language using AI-generated DSL.
+
+        Args:
+            description: Natural language email description (e.g. 'Weekly report with hero, 3 sections, and a button')
+            to: Recipient email address
+            action: 'draft' or 'send'
+            user_google_email: User's email address (auto-injected)
+            ctx: FastMCP context (automatically injected)
+        """
+        if not ctx:
+            return {"error": "Context not available"}
+
+        try:
+            _sctx = SamplingContext(
+                fastmcp_context=ctx, tool_name="compose_email_with_ai"
+            )
+            result = await _sctx.sample(
+                messages=f"Generate email DSL for: {description}",
+                template=SamplingTemplate.EMAIL_DSL_GENERATOR,
+                result_type=EmailDSLResult,
+            )
+            dsl = result.result
+
+            # Validate and attempt recovery if DSL is invalid
+            recovered, warnings = await _validate_and_recover_dsl(
+                _sctx, dsl.email_description, "email", description, EmailDSLResult
+            )
+            if isinstance(recovered, EmailDSLResult):
+                dsl = recovered  # Use corrected version
+
+            tool_result = await ctx.fastmcp.call_tool(
+                "compose_dynamic_email",
+                {
+                    "email_description": dsl.email_description,
+                    "email_params": dsl.email_params,
+                    "to": to,
+                    "action": action,
+                },
+            )
+            response = {
+                "dsl": {
+                    "email_description": dsl.email_description,
+                    "email_params": dsl.email_params,
+                },
+                "result": str(tool_result),
+            }
+            if warnings:
+                response["dsl_warnings"] = warnings
+            return response
+        except Exception as e:
+            logger.error(f"Error in compose_email_with_ai: {e}")
+            diag = _build_dsl_error_diagnostics(e, "email")
+            return {"error": str(e), "diagnostics": diag}
+
+    @mcp.tool(
+        name="send_card_with_ai",
+        description="Generate Google Chat card DSL from natural language, then send the card",
+        tags={"sampling", "chat", "dsl", "ai"},
+        annotations={
+            "title": "AI Card Sender",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+        },
+    )
+    async def send_card_with_ai(
+        description: str,
+        space_id: Optional[str] = None,
+        webhook_url: Optional[str] = None,
+        user_google_email: UserGoogleEmail = None,
+        ctx: Context = None,
+    ) -> dict:
+        """Send a Google Chat card from natural language using AI-generated DSL.
+
+        Args:
+            description: Natural language card description (e.g. 'Status card with 2 items and a View button')
+            space_id: Google Chat space ID (optional)
+            webhook_url: Webhook URL to send to (optional)
+            user_google_email: User's email address (auto-injected)
+            ctx: FastMCP context (automatically injected)
+        """
+        if not ctx:
+            return {"error": "Context not available"}
+
+        try:
+            _sctx = SamplingContext(fastmcp_context=ctx, tool_name="send_card_with_ai")
+            result = await _sctx.sample(
+                messages=f"Generate card DSL for: {description}",
+                template=SamplingTemplate.CARD_DSL_GENERATOR,
+                result_type=CardDSLResult,
+            )
+            dsl = result.result
+
+            # Validate and attempt recovery if DSL is invalid
+            recovered, warnings = await _validate_and_recover_dsl(
+                _sctx, dsl.card_description, "card", description, CardDSLResult
+            )
+            if isinstance(recovered, CardDSLResult):
+                dsl = recovered  # Use corrected version
+
+            tool_args = {
+                "card_description": dsl.card_description,
+                "card_params": dsl.card_params,
+            }
+            if space_id:
+                tool_args["space_id"] = space_id
+            if webhook_url:
+                tool_args["webhook_url"] = webhook_url
+            tool_result = await ctx.fastmcp.call_tool("send_dynamic_card", tool_args)
+            response = {
+                "dsl": {
+                    "card_description": dsl.card_description,
+                    "card_params": dsl.card_params,
+                },
+                "result": str(tool_result),
+            }
+            if warnings:
+                response["dsl_warnings"] = warnings
+            return response
+        except Exception as e:
+            logger.error(f"Error in send_card_with_ai: {e}")
+            diag = _build_dsl_error_diagnostics(e, "card")
+            return {"error": str(e), "diagnostics": diag}
+
+    @mcp.tool(
+        name="research_with_tools",
+        description="Agentic sampling demo: research a query using Gmail search",
+        tags={"sampling", "agentic", "demo"},
+        annotations={
+            "title": "Research with Tools",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+        },
+    )
+    async def research_with_tools(
+        query: str,
+        user_google_email: UserGoogleEmail = None,
+        ctx: Context = None,
+    ) -> str:
+        """Research a query using agentic sampling with Gmail search tool.
+
+        Args:
+            query: Research query
+            user_google_email: User's email address (auto-injected)
+            ctx: FastMCP context (automatically injected)
+        """
+        if not ctx:
+            return "Context not available"
+
+        def search_emails(topic: str) -> str:
+            """Search user's Gmail for emails about a topic."""
+            return f"[Email search results for: {topic}]"
+
+        try:
+            result = await ctx.sample(
+                messages=f"Research this using my Gmail: {query}",
+                tools=[search_emails],
+                system_prompt="You are a research assistant. Use search_emails to find relevant info before answering.",
+                max_tokens=600,
+            )
+            return result.text or ""
+        except Exception as e:
+            logger.error(f"Error in research_with_tools: {e}")
+            return f"Research failed: {e}"
+
     logger.info("✅ Enhanced sampling demo tools registered")
     logger.info(
-        "   Tools: intelligent_email_composer, smart_workflow_assistant, template_rendering_demo, resource_discovery_assistant"
+        "   Tools: intelligent_email_composer, smart_workflow_assistant, template_rendering_demo, "
+        "resource_discovery_assistant, analyze_sentiment, compose_email_with_ai, "
+        "send_card_with_ai, research_with_tools"
     )
