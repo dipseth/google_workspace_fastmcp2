@@ -25,20 +25,31 @@ class CacheManager:
     - TTL-based automatic expiration
     - Cache statistics and monitoring
     - Manual cache management (clear, stats)
-    - Thread-safe operations for concurrent access
+    - Bounded capacity with FIFO eviction when max_entries exceeded
     - Memory-efficient with automatic cleanup of expired entries
+
+    Note:
+        Not thread-safe. Intended for use within a single asyncio event loop
+        where concurrent dict mutation does not occur.
     """
 
-    def __init__(self, enable_caching: bool = True, cache_ttl_seconds: int = 300):
+    def __init__(
+        self,
+        enable_caching: bool = True,
+        cache_ttl_seconds: int = 300,
+        max_entries: int = 500,
+    ):
         """
         Initialize the cache manager.
 
         Args:
             enable_caching: Whether to enable caching functionality (default: True)
             cache_ttl_seconds: Time-to-live for cache entries in seconds (default: 300)
+            max_entries: Maximum number of cache entries before eviction (default: 500)
         """
         self.enable_caching = enable_caching
         self.cache_ttl_seconds = cache_ttl_seconds
+        self.max_entries = max_entries
 
         # Resource cache: {resource_uri: {data: Any, expires_at: datetime}}
         self._resource_cache: Dict[str, Dict[str, Any]] = {}
@@ -90,6 +101,15 @@ class CacheManager:
             "data": data,
             "expires_at": datetime.now() + timedelta(seconds=self.cache_ttl_seconds),
         }
+
+        # Evict if over capacity: first remove expired, then oldest by insertion order
+        if len(self._resource_cache) > self.max_entries:
+            self.cleanup_expired_entries()
+        if len(self._resource_cache) > self.max_entries:
+            # Remove oldest entries (insertion order) until at capacity
+            excess = len(self._resource_cache) - self.max_entries
+            for key in list(self._resource_cache)[:excess]:
+                del self._resource_cache[key]
 
     def clear_cache(self) -> None:
         """

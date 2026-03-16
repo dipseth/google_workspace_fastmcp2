@@ -680,6 +680,17 @@ def cleanup_expired_sessions(timeout_minutes: int = 60) -> int:
         for session_id in expired_sessions:
             del _session_store[session_id]
 
+        # Determine still-active sessions for vault cleanup
+        active_ids = set(_session_store.keys())
+
+    # Clean up privacy vaults for expired sessions
+    try:
+        from middleware.privacy.registry import cleanup_expired_vaults
+
+        cleanup_expired_vaults(active_ids)
+    except ImportError:
+        pass  # Privacy middleware not installed
+
     if expired_sessions:
         logger.info(f"Cleaned up {len(expired_sessions)} expired sessions")
 

@@ -1,0 +1,10 @@
+{
+  "alice@example.com::bob@example.com": {
+    "method": "session",
+    "linked_at": "2026-03-16T12:26:18.022960+00:00"
+  },
+  "alice@example.com::charlie@example.com": {
+    "method": "session",
+    "linked_at": "2026-03-16T12:26:18.032615+00:00"
+  }
+}

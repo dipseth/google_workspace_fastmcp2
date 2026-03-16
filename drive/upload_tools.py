@@ -132,6 +132,17 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 )
             ),
         ] = "pkce_file",
+        cross_oauth_password: Annotated[
+            Optional[str],
+            Field(
+                pattern=r"^[0-9A-Za-z_-]*$",
+                description=(
+                    "Passphrase for cross-OAuth account access. "
+                    "Provide this when accessing a linked account that requires a passphrase. "
+                    "Only alphanumeric, underscore, and hyphen allowed."
+                ),
+            ),
+        ] = None,
     ) -> StartAuthResponse:
         """
         Initiate Google OAuth2 authentication flow for Google services access.
@@ -166,6 +177,22 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         Returns:
             StartAuthResponse: Structured response with auth URL, instructions, and metadata
         """
+        # Stash cross-OAuth password in session for credential decryption
+        if cross_oauth_password:
+            try:
+                from auth.context import get_session_context_sync, store_session_data
+                from auth.types import SessionKey
+
+                session_id = get_session_context_sync()
+                if session_id:
+                    store_session_data(
+                        session_id,
+                        SessionKey.OAUTH_LINKAGE_PASSWORD,
+                        cross_oauth_password,
+                    )
+            except Exception as e:
+                logger.debug(f"Could not stash cross-OAuth password: {e}")
+
         # DEBUG: Log all received parameters
         logger.info("🔧 TOOL DEBUG: start_google_auth called with parameters:")
         logger.info(
@@ -383,6 +410,17 @@ def setup_drive_tools(mcp: FastMCP) -> None:
     )
     async def check_drive_auth(
         user_google_email: UserGoogleEmailDrive = None,
+        cross_oauth_password: Annotated[
+            Optional[str],
+            Field(
+                description=(
+                    "Passphrase for cross-OAuth account access. "
+                    "Required when the linked account owner set a passphrase "
+                    "during their start_google_auth setup. "
+                    "Only alphanumeric, underscore, and hyphen allowed."
+                )
+            ),
+        ] = None,
     ) -> CheckAuthResponse:
         """
         Verify Google Drive authentication status for a specific user account.
@@ -391,8 +429,12 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         authentication credentials. It attempts to access the Drive service to
         validate the authentication state without performing any Drive operations.
 
+        When accessing a linked account that has a cross-OAuth passphrase set,
+        provide the passphrase via the cross_oauth_password parameter.
+
         Args:
             user_google_email: Google email address to verify authentication status for
+            cross_oauth_password: Passphrase for cross-OAuth access to linked accounts
 
         Returns:
             CheckAuthResponse: Structured response indicating authentication state
@@ -400,6 +442,22 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         Raises:
             Handles GoogleAuthError for invalid/missing credentials and generic exceptions
         """
+        # Stash cross-OAuth password in session for credential decryption
+        if cross_oauth_password:
+            try:
+                from auth.context import get_session_context_sync, store_session_data
+                from auth.types import SessionKey
+
+                session_id = get_session_context_sync()
+                if session_id:
+                    store_session_data(
+                        session_id,
+                        SessionKey.OAUTH_LINKAGE_PASSWORD,
+                        cross_oauth_password,
+                    )
+            except Exception as e:
+                logger.debug(f"Could not stash cross-OAuth password: {e}")
+
         logger.info(f"Checking authentication for {user_google_email}")
 
         # Get current session ID for reconnection support
@@ -481,9 +539,25 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             except Exception:
                 pass
 
+            # Look up cross-OAuth linkage info for this account
+            oauth_linkage_info = None
+            try:
+                from auth.user_api_keys import get_oauth_linkage
+                from drive.upload_types import CrossOAuthLinkageInfo
+
+                linkage = get_oauth_linkage(user_google_email)
+                oauth_linkage_info = CrossOAuthLinkageInfo(
+                    enabled=linkage.get("enabled", True),
+                    has_password=linkage.get("has_password", False),
+                )
+            except Exception:
+                pass
+
             msg = f"{user_google_email} is authenticated for Google Drive."
             if linked_accounts:
                 msg += f" This key also has access to: {', '.join(linked_accounts)}."
+            if oauth_linkage_info and oauth_linkage_info.has_password:
+                msg += " Cross-OAuth access requires a passphrase (use cross_oauth_password parameter)."
             msg += " Save your sessionId to reconnect with the same tool state using ?uuid= parameter."
 
             return CheckAuthResponse(
@@ -494,6 +568,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 keyBoundEmail=key_bound_email,
                 linkedAccounts=linked_accounts,
                 scopes=cred_scopes,
+                crossOAuthLinkage=oauth_linkage_info,
                 message=msg,
             )
         except GoogleAuthError:

@@ -870,6 +870,179 @@ class AuthMiddleware(Middleware):
         )
         return base64.urlsafe_b64encode(hkdf.derive(per_user_key.encode()))
 
+    def _derive_oauth_recipient_key(self, google_sub: str, password: str = "") -> str:
+        """Derive a deterministic recipient key for OAuth identity-based decryption.
+
+        Uses Google's immutable account ID (``sub``) as the identity component.
+        This is non-public — an attacker cannot derive it from just the email
+        address; they'd need to actually complete OAuth for the Google account.
+
+        When a ``password`` is provided it is mixed into the derivation,
+        requiring the OAuth session to also know the passphrase.
+
+        Security model: requires the server secret (on disk, 0600) AND the
+        Google ``sub`` (only obtainable via OAuth) AND the optional password.
+
+        Args:
+            google_sub: Google's immutable numeric account ID (from ``sub`` claim).
+            password: Optional passphrase set by the credential owner.
+
+        Returns:
+            A deterministic string key that can be passed to derive_per_user_fernet_key.
+        """
+        import hashlib
+
+        server_secret = self._get_server_secret()
+        material = (
+            server_secret + b":oauth-identity-recipient-v2:" + google_sub.encode()
+        )
+        if password:
+            material += b":" + password.encode()
+        return hashlib.sha256(material).hexdigest()
+
+    def _resolve_oauth_recipient_key(
+        self,
+        google_sub: Optional[str],
+        normalized_email: str,
+        password: str = "",
+    ) -> Optional[str]:
+        """Derive the OAuth recipient key for an email, respecting linkage prefs.
+
+        The password is passed in from the caller (form submission or session),
+        never read from disk.
+
+        Returns None if cross-OAuth is disabled or google_sub is unavailable.
+        """
+        if not google_sub:
+            return None
+        try:
+            from auth.user_api_keys import get_oauth_linkage
+
+            linkage = get_oauth_linkage(normalized_email)
+            if not linkage.get("enabled", True):
+                return None
+            return self._derive_oauth_recipient_key(google_sub, password=password)
+        except Exception:
+            return self._derive_oauth_recipient_key(google_sub, password=password)
+
+    def _resolve_oauth_recipient_key_for_load(
+        self,
+        google_sub: Optional[str],
+        normalized_email: str,
+        session_password: str = "",
+    ) -> list:
+        """Build list of OAuth recipient keys to try during decryption.
+
+        Tries session-provided password first, then no-password fallback.
+        """
+        if not google_sub:
+            return []
+        keys = []
+        if session_password:
+            keys.append(
+                self._derive_oauth_recipient_key(google_sub, password=session_password)
+            )
+        # Always try without password (covers default no-password envelopes)
+        keys.append(self._derive_oauth_recipient_key(google_sub))
+        return keys
+
+    def _try_decrypt_with_keys(
+        self,
+        path: Path,
+        per_user_key: Optional[str],
+        google_sub: Optional[str],
+        normalized_email: str,
+    ) -> Optional[Credentials]:
+        """Try decrypting a credential file with all available keys.
+
+        Priority: per-user key → OAuth recipient (with session password) → OAuth (no password).
+        """
+        keys_to_try = []
+        if per_user_key:
+            keys_to_try.append(per_user_key)
+
+        if google_sub:
+            # Get passphrase from current session first; fall back to scan
+            # to avoid cross-session leakage in multi-user scenarios.
+            session_password = ""
+            try:
+                from .context import (
+                    get_session_context_sync,
+                    get_session_data,
+                    list_sessions,
+                )
+
+                current_sid = get_session_context_sync()
+                if current_sid:
+                    session_password = (
+                        get_session_data(current_sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
+                        or ""
+                    )
+                if not session_password:
+                    # Fallback for contexts without FastMCP session (e.g. OAuth callback)
+                    for sid in reversed(list_sessions()):
+                        pwd = get_session_data(sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
+                        if pwd:
+                            session_password = pwd
+                            break
+            except Exception:
+                pass
+            keys_to_try.extend(
+                self._resolve_oauth_recipient_key_for_load(
+                    google_sub, normalized_email, session_password
+                )
+            )
+
+        for key in keys_to_try:
+            try:
+                creds = self._load_encrypted_file(path, key)
+                if creds:
+                    return creds
+            except Exception:
+                continue
+        return None
+
+    def _save_encrypted_with_recipients(
+        self,
+        path: Path,
+        credentials: Credentials,
+        per_user_key: Optional[str],
+        additional_keys: Optional[list],
+        oauth_recipient_key: Optional[str],
+        normalized_email: str,
+    ) -> None:
+        """Save credentials with per-user + OAuth recipients, with proper fallbacks."""
+        if per_user_key:
+            all_additional = list(additional_keys or [])
+            if oauth_recipient_key:
+                all_additional.append(oauth_recipient_key)
+            self._save_per_user_encrypted(
+                path,
+                credentials,
+                per_user_key,
+                additional_keys=all_additional if all_additional else None,
+            )
+            logger.info(
+                f"🔐 Saved per-user encrypted credentials for {normalized_email}"
+                + (" (+OAuth recipient)" if oauth_recipient_key else "")
+            )
+        elif oauth_recipient_key:
+            self._save_per_user_encrypted(
+                path,
+                credentials,
+                oauth_recipient_key,
+                additional_keys=additional_keys,
+            )
+            logger.info(
+                f"🔐 Saved OAuth-recipient encrypted credentials for {normalized_email} "
+                f"(per-user key recipient restored on next key-based auth)"
+            )
+        else:
+            encrypted_data = self._encrypt_credentials(credentials)
+            with open(path, "w") as f:
+                f.write(encrypted_data)
+            logger.debug(f"Saved server-encrypted credentials for {normalized_email}")
+
     def _setup_encryption(self):
         """Setup encryption for secure credential storage.
 
@@ -1039,6 +1212,8 @@ class AuthMiddleware(Middleware):
         credentials: Credentials,
         per_user_key: Optional[str] = None,
         additional_keys: Optional[list] = None,
+        google_sub: Optional[str] = None,
+        oauth_linkage_password: str = "",
     ) -> None:
         """
         Save credentials using the configured storage mode.
@@ -1054,6 +1229,9 @@ class AuthMiddleware(Middleware):
             per_user_key: Optional plaintext per-user API key for per-user encryption
             additional_keys: Optional list of additional per-user keys to add as
                 recipients (for linked accounts)
+            google_sub: Optional Google account ID (sub claim) for OAuth recipient
+            oauth_linkage_password: Passphrase for OAuth recipient key derivation
+                (in-memory only, never persisted)
         """
         # Import normalization function
         from .google_auth import _normalize_email
@@ -1083,25 +1261,17 @@ class AuthMiddleware(Middleware):
             )
             creds_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if per_user_key:
-                # Per-user encryption: multi-recipient split-key model
-                self._save_per_user_encrypted(
-                    creds_path,
-                    credentials,
-                    per_user_key,
-                    additional_keys=additional_keys,
-                )
-                logger.info(
-                    f"🔐 Saved per-user encrypted credentials for {normalized_email}"
-                )
-            else:
-                # Server-wide encryption (legacy / no per-user key available)
-                encrypted_data = self._encrypt_credentials(credentials)
-                with open(creds_path, "w") as f:
-                    f.write(encrypted_data)
-                logger.debug(
-                    f"✅ Saved server-encrypted credentials for {normalized_email}"
-                )
+            oauth_recipient_key = self._resolve_oauth_recipient_key(
+                google_sub, normalized_email, password=oauth_linkage_password
+            )
+            self._save_encrypted_with_recipients(
+                creds_path,
+                credentials,
+                per_user_key,
+                additional_keys,
+                oauth_recipient_key,
+                normalized_email,
+            )
 
             # Set restrictive permissions
             try:
@@ -1120,26 +1290,22 @@ class AuthMiddleware(Middleware):
             backup_path = Path(settings.credentials_dir) / f"{safe_email}_backup.enc"
             backup_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if per_user_key:
-                self._save_per_user_encrypted(
-                    backup_path,
-                    credentials,
-                    per_user_key,
-                    additional_keys=additional_keys,
-                )
-            else:
-                encrypted_data = self._encrypt_credentials(credentials)
-                with open(backup_path, "w") as f:
-                    f.write(encrypted_data)
+            oauth_recipient_key = self._resolve_oauth_recipient_key(
+                google_sub, normalized_email, password=oauth_linkage_password
+            )
+            self._save_encrypted_with_recipients(
+                backup_path,
+                credentials,
+                per_user_key,
+                additional_keys,
+                oauth_recipient_key,
+                normalized_email,
+            )
 
             try:
                 backup_path.chmod(0o600)
             except (OSError, AttributeError):
                 pass
-
-            logger.debug(
-                f"✅ Saved credentials in memory + encrypted backup for {normalized_email}"
-            )
 
     @staticmethod
     def _key_id(per_user_key: str) -> str:
@@ -1433,18 +1599,23 @@ class AuthMiddleware(Middleware):
                 self._zero_bytes(cek)
 
     def load_credentials(
-        self, user_email: str, per_user_key: Optional[str] = None
+        self,
+        user_email: str,
+        per_user_key: Optional[str] = None,
+        google_sub: Optional[str] = None,
     ) -> Optional[Credentials]:
         """
         Load credentials using the configured storage mode.
 
         For per-user encrypted files, ``per_user_key`` (the bearer token)
-        is required to derive the decryption key.  If the file is per-user
-        encrypted and no key is provided, returns ``None``.
+        is required to derive the decryption key.  Falls back to the OAuth
+        identity recipient key (derived from ``google_sub`` + server secret)
+        when no per-user key is available.
 
         Args:
             user_email: User's email address (will be normalized to lowercase)
             per_user_key: Plaintext per-user API key (bearer token) for per-user decryption
+            google_sub: Google account ID for OAuth recipient key derivation
 
         Returns:
             Credentials if found and decryptable, None otherwise
@@ -1467,12 +1638,11 @@ class AuthMiddleware(Middleware):
             backup_path = Path(settings.credentials_dir) / f"{safe_email}_backup.enc"
 
             if backup_path.exists():
-                try:
-                    return self._load_encrypted_file(backup_path, per_user_key)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to load credential backup for {normalized_email}: {e}"
-                    )
+                creds = self._try_decrypt_with_keys(
+                    backup_path, per_user_key, google_sub, normalized_email
+                )
+                if creds:
+                    return creds
 
             return None
 
@@ -1485,13 +1655,17 @@ class AuthMiddleware(Middleware):
             if not creds_path.exists():
                 return None
 
-            try:
-                return self._load_encrypted_file(creds_path, per_user_key)
-            except Exception as e:
-                logger.error(
-                    f"Failed to load encrypted credentials for {normalized_email}: {e}"
-                )
-                return None
+            creds = self._try_decrypt_with_keys(
+                creds_path, per_user_key, google_sub, normalized_email
+            )
+            if creds:
+                return creds
+
+            logger.warning(
+                f"Could not decrypt credentials for {normalized_email} "
+                f"with any available key"
+            )
+            return None
 
         elif self._storage_mode == CredentialStorageMode.FILE_PLAINTEXT:
             # Backward compatibility - use existing file-based storage (handles normalization)
@@ -1997,6 +2171,29 @@ class AuthMiddleware(Middleware):
                 user_email = access_token.claims.get(
                     "email"
                 ) or access_token.claims.get("google_email")
+
+                # Stash Google's immutable account ID (sub) for OAuth recipient
+                # key derivation.  This is non-public — only obtainable by
+                # completing OAuth for the account.
+                google_sub = access_token.claims.get("sub")
+                if google_sub and user_email:
+                    try:
+                        from .context import (
+                            get_session_data,
+                            list_sessions,
+                            store_session_data,
+                        )
+
+                        for sid in reversed(list_sessions()):
+                            # Only write if not already set (avoid redundant writes per tool call)
+                            if not get_session_data(sid, SessionKey.GOOGLE_SUB):
+                                store_session_data(
+                                    sid, SessionKey.GOOGLE_SUB, google_sub
+                                )
+                            break
+                    except Exception:
+                        pass
+
                 if user_email:
                     logger.debug(
                         f"📧 Extracted user email from token claims: {user_email}"

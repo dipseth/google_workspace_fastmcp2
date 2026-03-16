@@ -33,6 +33,7 @@ from .gmail_types import (
     ReplyGmailMessageResponse,
     SendGmailMessageResponse,
 )
+from .mjml_types import EmailSpec
 from .service import _get_gmail_service_with_fallback
 from .utils import (
     _create_mime_message,
@@ -483,6 +484,232 @@ async def _filter_recipients_allowed_by_groups(
     return allowed_recipients
 
 
+def _render_email_spec(
+    email_spec: Union[dict, EmailSpec],
+) -> tuple:
+    """Render an EmailSpec to (subject, html_body).
+
+    Args:
+        email_spec: EmailSpec object or dict with EmailSpec fields
+
+    Returns:
+        (subject, html_body) tuple
+
+    Raises:
+        ValueError: If rendering fails
+    """
+    if isinstance(email_spec, dict):
+        email_spec = EmailSpec(**email_spec)
+
+    result = email_spec.render()
+    if not result.success:
+        diag_msgs = "; ".join(d.message for d in result.diagnostics)
+        raise ValueError(f"EmailSpec rendering failed: {diag_msgs}")
+
+    return email_spec.subject, result.html
+
+
+# =============================================================================
+# DSL → EmailSpec builder
+# =============================================================================
+
+# Class name → block_type literal mapping (used by _build_email_spec_from_dsl)
+_CLASS_TO_BLOCK_TYPE = {
+    "HeroBlock": "hero",
+    "TextBlock": "text",
+    "ButtonBlock": "button",
+    "ImageBlock": "image",
+    "ColumnsBlock": "columns",
+    "SpacerBlock": "spacer",
+    "DividerBlock": "divider",
+    "FooterBlock": "footer",
+    "HeaderBlock": "header",
+    "SocialBlock": "social",
+    "TableBlock": "table",
+    "AccordionBlock": "accordion",
+    "CarouselBlock": "carousel",
+}
+
+
+def _build_email_spec_from_dsl(
+    parse_result,
+    email_params: Optional[dict],
+    description: str,
+) -> EmailSpec:
+    """Convert parsed DSL + params into an EmailSpec.
+
+    Walks parse_result.root_nodes and maps each component to a block instance
+    using email_params for content. Supports symbol-keyed _shared/_items merging.
+
+    Args:
+        parse_result: DSLParseResult from parse_email_dsl()
+        email_params: Block content keyed by symbol, class name, or block_type
+        description: Natural language description (used as fallback subject)
+
+    Returns:
+        EmailSpec ready for rendering
+    """
+    from gmail.mjml_types import _BLOCK_TYPE_MAP
+    from gmail.mjml_types import Column as EmailColumn
+
+    email_params = email_params or {}
+
+    # Build reverse lookup: symbol → class name (for symbol-keyed params)
+    from gmail.email_wrapper_api import get_email_symbols
+
+    symbols = get_email_symbols()
+    reverse_symbols = {v: k for k, v in symbols.items()}
+
+    # Normalize email_params keys → class name
+    normalized_params: dict = {}
+    for key, value in email_params.items():
+        if key in reverse_symbols:
+            # Symbol key → class name
+            normalized_params[reverse_symbols[key]] = value
+        elif key in _CLASS_TO_BLOCK_TYPE:
+            # Already a class name
+            normalized_params[key] = value
+        elif key in _BLOCK_TYPE_MAP:
+            # block_type literal → class name
+            cls = _BLOCK_TYPE_MAP[key]
+            normalized_params[cls.__name__] = value
+        else:
+            # Pass through (e.g. "subject", "preheader")
+            normalized_params[key] = value
+
+    # Track consumption index per class for _items lists
+    item_indices: dict = {}
+
+    def _get_item_for_class(class_name: str) -> Optional[dict]:
+        """Get next item from _items list for the given class, with _shared merging."""
+        params_entry = normalized_params.get(class_name)
+        if params_entry is None:
+            return None
+
+        if isinstance(params_entry, dict):
+            shared = params_entry.get("_shared", {})
+            items = params_entry.get("_items")
+            if items and isinstance(items, list):
+                idx = item_indices.get(class_name, 0)
+                if idx < len(items):
+                    item_indices[class_name] = idx + 1
+                    merged = {**shared, **items[idx]}
+                    return merged
+                return {**shared} if shared else None
+            else:
+                # Single dict without _items — use directly (consumed once)
+                if class_name not in item_indices:
+                    item_indices[class_name] = 1
+                    return params_entry
+                return None
+        return None
+
+    def _build_block(node, depth: int = 0):
+        """Recursively build a block from a DSLNode."""
+        class_name = node.component_name
+        block_type_str = _CLASS_TO_BLOCK_TYPE.get(class_name)
+
+        if class_name == "EmailSpec":
+            # Top-level: recurse into children
+            blocks = []
+            for child in node.children:
+                for _ in range(child.multiplier):
+                    block = _build_block(child, depth + 1)
+                    if block is not None:
+                        blocks.append(block)
+            return blocks
+
+        if class_name == "ColumnsBlock":
+            # Children should be Column nodes
+            columns = []
+            for child in node.children:
+                for _ in range(child.multiplier):
+                    col = _build_block(child, depth + 1)
+                    if col is not None:
+                        columns.append(col)
+            return _BLOCK_TYPE_MAP["columns"](columns=columns)
+
+        if class_name == "Column":
+            # Column children are content blocks
+            col_blocks = []
+            for child in node.children:
+                for _ in range(child.multiplier):
+                    block = _build_block(child, depth + 1)
+                    if block is not None:
+                        col_blocks.append(block)
+            item_data = _get_item_for_class("Column") or {}
+            # When DSL has no child nodes (e.g. ©x2), pull blocks from params
+            if not col_blocks and "blocks" in item_data:
+                col_blocks = item_data.pop("blocks")
+            return EmailColumn(
+                blocks=col_blocks,
+                width=item_data.get("width"),
+                padding=item_data.get("padding", "0"),
+            )
+
+        # Leaf block — get params from email_params
+        if block_type_str is None:
+            logger.warning(f"Unknown block class: {class_name}")
+            return None
+
+        block_cls = _BLOCK_TYPE_MAP.get(block_type_str)
+        if block_cls is None:
+            return None
+
+        item_data = _get_item_for_class(class_name)
+        if item_data:
+            # Ensure block_type is set
+            item_data.setdefault("block_type", block_type_str)
+            try:
+                return block_cls(**item_data)
+            except Exception as e:
+                logger.warning(f"Failed to build {class_name} from params: {e}")
+
+        # Fallback: create with minimal defaults for blocks that need them
+        if class_name in ("SpacerBlock", "DividerBlock"):
+            return block_cls()
+        if class_name == "TextBlock":
+            return block_cls(text="")
+        if class_name == "HeroBlock":
+            return block_cls(title="")
+        if class_name == "ButtonBlock":
+            return block_cls(text="", url="#")
+
+        return None
+
+    # Walk root nodes to build blocks
+    all_blocks = []
+    for root in parse_result.root_nodes:
+        for _ in range(root.multiplier):
+            result = _build_block(root)
+            if isinstance(result, list):
+                all_blocks.extend(result)
+            elif result is not None:
+                all_blocks.append(result)
+
+    # Determine subject
+    subject = normalized_params.get("subject", "")
+    if not subject:
+        # Strip DSL from description to get NL part
+        from gmail.email_wrapper_api import extract_email_dsl_from_description
+
+        dsl_part = extract_email_dsl_from_description(description)
+        if dsl_part:
+            subject = description.replace(dsl_part, "").strip()
+        else:
+            subject = description.strip()
+    if not subject:
+        subject = "Email"
+
+    preheader = normalized_params.get("preheader")
+
+    return EmailSpec(
+        subject=subject,
+        preheader=preheader,
+        blocks=all_blocks,
+    )
+
+
 async def _handle_elicitation_fallback(
     fallback_mode: str,
     to: Union[str, List[str]],
@@ -596,6 +823,7 @@ async def send_gmail_message(
     html_body: Optional[str] = None,
     cc: GmailRecipientsOptional = None,
     bcc: GmailRecipientsOptional = None,
+    email_spec: Optional[Union[dict, EmailSpec]] = None,
 ) -> SendGmailMessageResponse:
     """
     Sends an email using the user's Gmail account with support for HTML formatting and multiple recipients.
@@ -620,6 +848,9 @@ async def send_gmail_message(
         html_body: HTML content when content_type="mixed". Ignored for other content types.
         cc: Optional CC recipient(s) - can be a single string or list of strings
         bcc: Optional BCC recipient(s) - can be a single string or list of strings
+        email_spec: Optional EmailSpec (dict or object) for MJML-based responsive emails.
+            When provided, renders to HTML and overrides content_type/body/html_body/subject.
+            The EmailSpec subject is used unless subject is explicitly provided.
 
     Returns:
         str: Confirmation message with the sent email's message ID
@@ -635,14 +866,39 @@ async def send_gmail_message(
         send_gmail_message(ctx, "user@example.com", "Subject", "Plain version",
                           content_type="mixed", html_body="<h1>HTML version</h1>")
 
-        # Multiple recipients with HTML
-        send_gmail_message(ctx, ["user1@example.com", "user2@example.com"],
-                          "Subject", "<p>HTML for everyone!</p>", content_type="html",
-                          cc="manager@example.com")
-
-        # Auto-injected user (middleware handles user_google_email)
-        send_gmail_message(ctx, "user@example.com", "Subject", "Body content")
+        # EmailSpec (MJML-based responsive email)
+        send_gmail_message(ctx, "user@example.com", "", "", email_spec={
+            "subject": "Welcome!", "blocks": [{"type": "TextBlock", "text": "Hello!"}]
+        })
     """
+    # EmailSpec rendering — overrides content_type/body/html_body
+    if email_spec is not None:
+        try:
+            spec_subject, rendered_html = _render_email_spec(email_spec)
+            # Use spec subject unless caller explicitly provided one
+            if not subject:
+                subject = spec_subject
+            # Switch to HTML mode with rendered content
+            body = rendered_html
+            content_type = "html"
+            html_body = None
+            logger.info(
+                f"[send_gmail_message] EmailSpec rendered: subject='{subject}', "
+                f"html_size={len(rendered_html)} bytes"
+            )
+        except (ValueError, Exception) as e:
+            logger.error(f"[send_gmail_message] EmailSpec render failed: {e}")
+            return SendGmailMessageResponse(
+                success=False,
+                message=f"EmailSpec rendering failed: {e}",
+                messageId=None,
+                threadId=None,
+                recipientCount=0,
+                contentType="html",
+                templateApplied=False,
+                error=f"EmailSpec render error: {e}",
+            )
+
     # Parameter validation and helpful error messages
     if content_type == "html" and html_body and not body.strip().startswith("<"):
         error_msg = (
@@ -1117,6 +1373,7 @@ async def draft_gmail_message(
     html_body: Optional[str] = None,
     cc: GmailRecipientsOptional = None,
     bcc: GmailRecipientsOptional = None,
+    email_spec: Optional[Union[dict, EmailSpec]] = None,
 ) -> DraftGmailMessageResponse:
     """
     Creates a draft email in the user's Gmail account with support for HTML formatting and multiple recipients.
@@ -1136,6 +1393,7 @@ async def draft_gmail_message(
         html_body: HTML content when content_type="mixed". Ignored for other content types.
         cc: Optional CC recipient(s) - can be a single string or list of strings
         bcc: Optional BCC recipient(s) - can be a single string or list of strings
+        email_spec: Optional EmailSpec (dict or object) for MJML-based responsive emails.
 
     Returns:
         str: Confirmation message with the created draft's ID
@@ -1154,6 +1412,31 @@ async def draft_gmail_message(
         # Auto-injected user (middleware handles user_google_email)
         draft_gmail_message("Subject", "Body content")
     """
+    # EmailSpec rendering — overrides content_type/body/html_body
+    if email_spec is not None:
+        try:
+            spec_subject, rendered_html = _render_email_spec(email_spec)
+            if not subject:
+                subject = spec_subject
+            body = rendered_html
+            content_type = "html"
+            html_body = None
+            logger.info(
+                f"[draft_gmail_message] EmailSpec rendered: subject='{subject}', "
+                f"html_size={len(rendered_html)} bytes"
+            )
+        except (ValueError, Exception) as e:
+            logger.error(f"[draft_gmail_message] EmailSpec render failed: {e}")
+            return DraftGmailMessageResponse(
+                success=False,
+                subject=subject,
+                content_type="html",
+                has_recipients=bool(to),
+                recipient_count=0,
+                userEmail=user_google_email or "",
+                error=f"EmailSpec render error: {e}",
+            )
+
     # Parameter validation and helpful error messages (same as send_gmail_message)
     if content_type == "html" and html_body and not body.strip().startswith("<"):
         error_msg = (
@@ -2693,6 +2976,14 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         ] = None,
         cc: GmailRecipientsOptional = None,
         bcc: GmailRecipientsOptional = None,
+        email_spec: Annotated[
+            Optional[dict],
+            Field(
+                description="MJML-based responsive email spec. When provided, renders blocks to HTML "
+                "and overrides body/content_type/html_body. Subject comes from spec unless explicitly set. "
+                'Example: {"subject": "Welcome!", "blocks": [{"title": "Hello", ...}]}'
+            ),
+        ] = None,
     ) -> SendGmailMessageResponse:
         """
         Send Gmail message with structured output and elicitation support.
@@ -2707,6 +2998,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         - Email template auto-application based on recipients
         - Elicitation for recipients not on allow list
         - Auto-injection of user context via middleware
+        - MJML-based responsive email rendering via email_spec
 
         Args:
             ctx: FastMCP context for user interactions and elicitation
@@ -2718,12 +3010,22 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             html_body: HTML content for mixed-type emails
             cc: CC recipients (optional)
             bcc: BCC recipients (optional)
+            email_spec: Optional MJML EmailSpec for responsive HTML emails
 
         Returns:
         SendGmailMessageResponse: Structured response with send status and details
         """
         return await send_gmail_message(
-            ctx, subject, body, to, user_google_email, content_type, html_body, cc, bcc
+            ctx,
+            subject,
+            body,
+            to,
+            user_google_email,
+            content_type,
+            html_body,
+            cc,
+            bcc,
+            email_spec=email_spec,
         )
 
     @mcp.tool(
@@ -2762,6 +3064,13 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         ] = None,
         cc: GmailRecipientsOptional = None,
         bcc: GmailRecipientsOptional = None,
+        email_spec: Annotated[
+            Optional[dict],
+            Field(
+                description="MJML-based responsive email spec. When provided, renders blocks to HTML "
+                "and overrides body/content_type/html_body. Subject comes from spec unless explicitly set."
+            ),
+        ] = None,
     ) -> DraftGmailMessageResponse:
         """
         Create Gmail draft with structured output.
@@ -2775,6 +3084,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         - Multiple recipients (to, cc, bcc) or recipient-less drafts
         - Auto-injection of user context via middleware
         - Flexible content type handling
+        - MJML-based responsive email rendering via email_spec
 
         Args:
             subject: Email subject line
@@ -2785,12 +3095,21 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             html_body: HTML content for mixed-type emails
             cc: CC recipients (optional)
             bcc: BCC recipients (optional)
+            email_spec: Optional MJML EmailSpec for responsive HTML emails
 
         Returns:
         DraftGmailMessageResponse: Structured response with draft creation details
         """
         return await draft_gmail_message(
-            subject, body, user_google_email, to, content_type, html_body, cc, bcc
+            subject,
+            body,
+            user_google_email,
+            to,
+            content_type,
+            html_body,
+            cc,
+            bcc,
+            email_spec=email_spec,
         )
 
     @mcp.tool(
@@ -3149,3 +3468,171 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         return await draft_gmail_forward(
             message_id, to, user_google_email, body, content_type, html_body, cc, bcc
         )
+
+    # =========================================================================
+    # compose_dynamic_email — DSL-driven email composition
+    # =========================================================================
+
+    from gmail.email_wrapper_api import (
+        get_email_dsl_documentation,
+        get_email_dsl_field_description,
+        get_email_symbols,
+        get_email_tool_examples,
+    )
+
+    email_symbols = get_email_symbols()
+    spec_sym = email_symbols["EmailSpec"]
+    hero_sym = email_symbols["HeroBlock"]
+    text_sym = email_symbols["TextBlock"]
+    btn_sym = email_symbols["ButtonBlock"]
+    email_dsl_field_desc = get_email_dsl_field_description()
+
+    compose_tool_description = (
+        "Compose responsive HTML emails using DSL notation for block structure. "
+        f"Common patterns: {spec_sym}[{hero_sym}, {text_sym}] = hero + text, "
+        f"{spec_sym}[{hero_sym}, {text_sym}x2, {btn_sym}] = hero + 2 text blocks + button. "
+        f"{email_dsl_field_desc}"
+    )
+
+    email_description_help = (
+        "DSL notation + optional natural language. "
+        f"Start with DSL symbols to define block structure. "
+        f"Examples: {spec_sym}[{hero_sym}, {text_sym}] = hero + text, "
+        f"{spec_sym}[{hero_sym}, {text_sym}x2, {btn_sym}] = hero + 2 texts + button. "
+        "The natural-language part (after DSL) becomes the email subject. "
+        f"{email_dsl_field_desc}"
+    )
+
+    @mcp.tool(
+        name="compose_dynamic_email",
+        description=compose_tool_description,
+        tags={"gmail", "email", "compose", "mjml", "dynamic", "dsl"},
+        annotations={
+            "title": "Compose Dynamic Email",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True,
+            "dsl_documentation": get_email_dsl_documentation(include_examples=True),
+            "examples": get_email_tool_examples(max_examples=5),
+        },
+    )
+    async def compose_dynamic_email(
+        ctx: Context,
+        email_description: Annotated[
+            str,
+            Field(description=email_description_help),
+        ],
+        email_params: Annotated[
+            Optional[Union[dict, str]],
+            Field(
+                default=None,
+                description="Block content keyed by symbol or class name. "
+                f"Supports _shared/_items merging: "
+                f'{{"'
+                + text_sym
+                + '": {{"_shared": {{}}, "_items": [{{"text": "Hello"}}, ...]}}}}. '
+                "Also accepts 'subject' and 'preheader' keys.",
+            ),
+        ] = None,
+        to: GmailRecipients = "myself",
+        user_google_email: UserGoogleEmail = None,
+        action: Annotated[
+            Literal["send", "draft"],
+            Field(
+                description="'draft' (default, safe) or 'send' to deliver immediately"
+            ),
+        ] = "draft",
+        cc: GmailRecipientsOptional = None,
+        bcc: GmailRecipientsOptional = None,
+    ):
+        """Compose responsive HTML email via DSL notation, then send or draft."""
+        import json as _json
+
+        from gmail.email_wrapper_api import (
+            extract_email_dsl_from_description,
+            parse_email_dsl,
+        )
+
+        # MCP clients / Jinja macros may send email_params as a JSON string; coerce to dict.
+        if isinstance(email_params, str):
+            try:
+                email_params = _json.loads(email_params)
+            except (ValueError, TypeError):
+                email_params = None
+
+        # 1. Extract DSL from description
+        dsl_string = extract_email_dsl_from_description(email_description)
+        if not dsl_string:
+            return SendGmailMessageResponse(
+                success=False,
+                message=(
+                    "No DSL notation found in email_description. "
+                    f"Use symbols like {spec_sym}[{hero_sym}, {text_sym}] to define structure."
+                ),
+                messageId=None,
+                threadId=None,
+                recipientCount=0,
+                contentType="html",
+                templateApplied=False,
+                error="No DSL found in email_description",
+            )
+
+        # 2. Parse DSL
+        dsl_result = parse_email_dsl(dsl_string)
+        if not dsl_result.is_valid:
+            return SendGmailMessageResponse(
+                success=False,
+                message=f"Invalid DSL: {'; '.join(dsl_result.issues)}",
+                messageId=None,
+                threadId=None,
+                recipientCount=0,
+                contentType="html",
+                templateApplied=False,
+                error=f"DSL parse error: {dsl_result.issues}",
+            )
+
+        logger.info(
+            f"[compose_dynamic_email] DSL parsed: {dsl_result.component_counts}"
+        )
+
+        # 3. Build EmailSpec from DSL + params
+        try:
+            email_spec = _build_email_spec_from_dsl(
+                dsl_result, email_params, email_description
+            )
+        except Exception as e:
+            logger.error(f"[compose_dynamic_email] Build failed: {e}", exc_info=True)
+            return SendGmailMessageResponse(
+                success=False,
+                message=f"Failed to build email from DSL: {e}",
+                messageId=None,
+                threadId=None,
+                recipientCount=0,
+                contentType="html",
+                templateApplied=False,
+                error=str(e),
+            )
+
+        # 4. Deliver via existing send/draft paths
+        if action == "send":
+            return await send_gmail_message(
+                ctx,
+                subject=email_spec.subject,
+                body="",
+                to=to,
+                user_google_email=user_google_email,
+                cc=cc,
+                bcc=bcc,
+                email_spec=email_spec,
+            )
+        else:
+            return await draft_gmail_message(
+                subject=email_spec.subject,
+                body="",
+                user_google_email=user_google_email,
+                to=to,
+                cc=cc,
+                bcc=bcc,
+                email_spec=email_spec,
+            )

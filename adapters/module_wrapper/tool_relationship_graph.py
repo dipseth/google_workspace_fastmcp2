@@ -17,7 +17,6 @@ Graph analysis (all via rustworkx):
 
 import logging
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -60,7 +59,7 @@ class ToolEdgeData:
 
     co_occurrence_count: int = 0
     total_time_delta_ms: float = 0.0
-    sessions_seen_in: Set[str] = field(default_factory=set)
+    unique_session_count: int = 0
 
     @property
     def avg_time_delta_ms(self) -> float:
@@ -89,6 +88,8 @@ class ToolRelationshipGraph:
 
     # How many recent tool calls per session to link as predecessors
     PREDECESSOR_WINDOW = 3
+    # Maximum number of sessions tracked before oldest are evicted
+    MAX_SESSIONS = 500
 
     def __init__(self):
         rx = _get_rustworkx()
@@ -99,7 +100,8 @@ class ToolRelationshipGraph:
         self._idx_to_name: Dict[int, str] = {}
 
         # Per-session recent tool history (for edge creation)
-        self._session_history: Dict[str, List[Tuple[str, float]]] = defaultdict(list)
+        # Regular dict (not defaultdict) to control size via MAX_SESSIONS
+        self._session_history: Dict[str, List[Tuple[str, float]]] = {}
 
         # Cached graph metrics (recomputed periodically)
         self._betweenness: Dict[int, float] = {}
@@ -172,7 +174,14 @@ class ToolRelationshipGraph:
 
         # Create edges from recent predecessors in this session
         if session_id:
-            history = self._session_history[session_id]
+            is_new_session = session_id not in self._session_history
+            history = self._session_history.setdefault(session_id, [])
+
+            # Evict oldest sessions if over cap (only when adding a new one)
+            if is_new_session:
+                while len(self._session_history) > self.MAX_SESSIONS:
+                    oldest_key = next(iter(self._session_history))
+                    del self._session_history[oldest_key]
 
             # Link from each recent predecessor to this tool
             window = history[-self.PREDECESSOR_WINDOW :]
@@ -185,7 +194,8 @@ class ToolRelationshipGraph:
                 edge_data = self._ensure_edge(prev_idx, idx)
                 edge_data.co_occurrence_count += 1
                 edge_data.total_time_delta_ms += now - prev_ts
-                edge_data.sessions_seen_in.add(session_id)
+                if is_new_session:
+                    edge_data.unique_session_count += 1
 
             # Append to session history
             history.append((tool_name, now))
@@ -364,6 +374,35 @@ class ToolRelationshipGraph:
         parts.append(f"Workflow: [{chain_str}].")
 
         return " ".join(parts)
+
+    # =========================================================================
+    # CLEANUP
+    # =========================================================================
+
+    def cleanup_stale_sessions(self, max_age_seconds: float = 3600) -> int:
+        """Remove sessions whose last tool call is older than max_age_seconds.
+
+        Args:
+            max_age_seconds: Maximum age in seconds for a session's last tool call.
+
+        Returns:
+            Number of sessions removed.
+        """
+        cutoff_ms = (time.time() - max_age_seconds) * 1000
+        stale = [
+            sid
+            for sid, history in self._session_history.items()
+            if not history or history[-1][1] < cutoff_ms
+        ]
+        for sid in stale:
+            del self._session_history[sid]
+
+        if stale:
+            logger.info(
+                f"Cleaned up {len(stale)} stale sessions "
+                f"({len(self._session_history)} remaining)"
+            )
+        return len(stale)
 
     # =========================================================================
     # SERIALIZATION

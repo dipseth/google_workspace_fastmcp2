@@ -10,7 +10,8 @@ Lifespan Composition Order (enter left-to-right, exit right-to-left):
 2. colbert_lifespan → Initialize ColBERT wrapper (if enabled)
 3. session_state_lifespan → Setup session filtering middleware
 4. cache_middleware_lifespan → Setup template & profile middleware
-5. dynamic_instructions_lifespan → Update MCP instructions with Qdrant data
+5. memory_cleanup_lifespan → Periodic cleanup of stale sessions & expired caches
+6. dynamic_instructions_lifespan → Update MCP instructions with Qdrant data
 
 Context Available to Tools:
 After lifespan composition, ctx.lifespan_context will contain:
@@ -27,6 +28,7 @@ from .server_lifespans import (
     combined_server_lifespan,
     dynamic_instructions_lifespan,
     get_lifespan_state,
+    memory_cleanup_lifespan,
     qdrant_lifespan,
     register_profile_middleware,
     register_qdrant_middleware,
@@ -39,6 +41,7 @@ __all__ = [
     "colbert_lifespan",
     "session_state_lifespan",
     "cache_middleware_lifespan",
+    "memory_cleanup_lifespan",
     "dynamic_instructions_lifespan",
     "combined_server_lifespan",
     "register_qdrant_middleware",

@@ -1,0 +1,289 @@
+{#
+=============================================================================
+LINKEDIN DIGEST EMAIL MACRO
+=============================================================================
+Dual-mode macro that handles ALL rendering. The LLM's execute block only needs
+to supply categorized data + agent_take strings. HTML, badges, chips, layout,
+DSL structure — all handled here.
+
+DATA CONTRACT — what the LLM passes per item:
+  {
+    "subject":      str,            # required
+    "snippet":      str,            # optional, ~100 chars
+    "gmail_url":    str,            # required
+    "linkedin_url": str,            # optional — falls back to gmail_url
+    "priority":     "high"|"medium"|"low",  # optional
+    "badge":        str,            # optional, e.g. "REPLY", "VIEW ON LI"
+    "ai_score":     0|1|3,          # optional — 3=core AI/ML, 1=adjacent, 0=unrelated
+    "agent_take":   str             # the LLM's 1-2 sentence analysis — this is the value
+  }
+
+top_picks list: [{"category": "action"|"job"|"content"|"profile", + all item fields}]
+
+SECTION COLORS:
+  action   → #EF4444 (red)
+  job      → #2563EB (blue)
+  profile  → #7C3AED (purple)
+  content  → #0EA5E9 (sky)
+
+MODE:
+  'dsl'    → returns DSL structure string for email_description
+  'params' → returns full JSON params for email_params (includes subject)
+=============================================================================
+#}
+
+{# ── internal: AI/ML relevance chip ── #}
+{% macro _li_chip(ai_score) -%}
+{%- if ai_score is defined and ai_score >= 3 -%}
+<span style='display:inline-block;background:#DBEAFE;color:#1D4ED8;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px;vertical-align:middle'>AI/ML</span>
+{%- endif -%}
+{%- endmacro %}
+
+{# ── internal: single item row with snippet + agent_take + buttons ── #}
+{% macro _li_item_row(item, idx, section_color) -%}
+{%- set bg = "background:#FAFAFA;" if idx % 2 == 0 else "" -%}
+{%- set li_url = item.linkedin_url if item.linkedin_url is defined and item.linkedin_url else item.gmail_url -%}
+{%- set gmail_url = item.gmail_url if item.gmail_url is defined else "" -%}
+{%- set badge = item.badge if item.badge is defined and item.badge else "VIEW" -%}
+{%- set bc = "#EF4444" if item.priority is defined and item.priority == "high" else "#F59E0B" if item.priority is defined and item.priority == "medium" else section_color -%}
+{%- set take = item.agent_take if item.agent_take is defined and item.agent_take else "" -%}
+{%- set snip = item.snippet[:100] if item.snippet is defined and item.snippet else "" -%}
+{%- set ai_score = item.ai_score if item.ai_score is defined else 0 -%}
+<tr style="{{ bg }}"><td style="padding:10px 14px 10px 14px;">
+  <div>
+    <a href="{{ li_url }}" style="font-size:13px;font-weight:600;color:#1E293B;text-decoration:none;">{{ item.subject }}</a>{{ _li_chip(ai_score) }}
+  </div>
+  {%- if snip %}
+  <div style="font-size:11px;color:#94A3B8;margin-top:3px;">{{ snip }}</div>
+  {%- endif %}
+  {%- if take %}
+  <div style="font-size:12px;color:#475569;font-style:italic;margin-top:6px;border-left:3px solid #CBD5E1;padding:4px 0 4px 10px;line-height:1.5;">&#128161; {{ take }}</div>
+  {%- endif %}
+  <div style="margin-top:8px;">
+    <a href="{{ li_url }}" style="display:inline-block;background:{{ bc }};color:#fff;font-size:10px;font-weight:700;padding:4px 12px;border-radius:5px;text-decoration:none;">{{ badge }}</a>
+    {%- if gmail_url and gmail_url != li_url %}
+    <a href="{{ gmail_url }}" style="display:inline-block;background:#F1F5F9;color:#64748B;font-size:10px;font-weight:600;padding:4px 10px;border-radius:5px;text-decoration:none;margin-left:6px;">email</a>
+    {%- endif %}
+  </div>
+</td></tr>
+{%- endmacro %}
+
+{# ── internal: full section (header + item rows or empty state) ── #}
+{% macro _li_section(emoji_title, color, items, empty_msg, empty_url, empty_label) -%}
+{%- set header_html -%}
+<div style="border-left:4px solid {{ color }};padding:4px 0 4px 14px;margin-bottom:10px;">
+  <div style="font-size:15px;font-weight:700;color:{{ color }};">{{ emoji_title }}{% if items %} ({{ items|length }}){% endif %}</div>
+</div>
+{%- endset -%}
+{{ header_html }}
+{%- if items %}
+<table style="width:100%;border-collapse:collapse;">
+  {%- for item in items %}{{ _li_item_row(item, loop.index0, color) }}{%- endfor %}
+</table>
+{%- else %}
+<div style="background:#F8FAFC;border-radius:8px;padding:12px 16px;font-size:13px;color:#64748B;">
+  {{ empty_msg }} <a href="{{ empty_url }}" style="color:{{ color }};font-weight:600;">{{ empty_label }}</a>
+</div>
+{%- endif %}
+{%- endmacro %}
+
+{# ── internal: Agent Picks gradient card ── #}
+{% macro _li_picks_card(picks) -%}
+{%- set cat_color = {"action": "#EF4444", "job": "#2563EB", "content": "#0EA5E9", "profile": "#7C3AED"} -%}
+{%- set cat_label = {"action": "Action Needed", "job": "Job Alert", "content": "Worth Reading", "profile": "Profile Signal"} -%}
+<div style="background:linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%);border-radius:12px;padding:18px;">
+  <div style="font-size:11px;font-weight:700;color:#6366F1;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px;">&#127775; Agent Picks — Top 3 This Window</div>
+  {%- if picks %}
+    {%- for pick in picks %}
+      {%- set color = cat_color.get(pick.category, "#64748B") -%}
+      {%- set label = cat_label.get(pick.category, pick.category) -%}
+      {%- set li_url = pick.linkedin_url if pick.linkedin_url is defined and pick.linkedin_url else pick.gmail_url -%}
+      {%- set take = pick.agent_take if pick.agent_take is defined else "" -%}
+      {%- set ai_score = pick.ai_score if pick.ai_score is defined else 0 -%}
+      <div style="border-left:3px solid {{ color }};padding:8px 0 8px 14px;margin-bottom:{% if not loop.last %}12px{% else %}0{% endif %};">
+        <div style="font-size:10px;font-weight:700;color:{{ color }};text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">{{ label }}{{ _li_chip(ai_score) }}</div>
+        <a href="{{ li_url }}" style="font-size:13px;font-weight:600;color:#1E293B;text-decoration:none;line-height:1.4;">{{ pick.subject }}</a>
+        {%- if take %}
+        <div style="font-size:12px;color:#475569;font-style:italic;margin-top:5px;line-height:1.5;">&#128161; {{ take }}</div>
+        {%- endif %}
+      </div>
+    {%- endfor %}
+  {%- else %}
+  <div style="font-size:13px;color:#92400E;">No high-signal items this window.</div>
+  {%- endif %}
+</div>
+{%- endmacro %}
+
+{# ══════════════════════════════════════════════════════════════════════════
+   MAIN MACRO
+   ══════════════════════════════════════════════════════════════════════════ #}
+{% macro linkedin_digest_email(label_data, profile_data, symbols,
+    action_items=[], job_alerts=[], profile_updates=[], content_highlights=[],
+    top_picks=[], window_hours=72, subject_date='', mode='dsl') %}
+{%- set s = symbols -%}
+
+{#- Pull LinkedIn label stats from service://gmail/labels resource -#}
+{%- set labels = label_data.result.labels if label_data is defined and label_data.result is defined else [] -%}
+{%- set li_label = {"found": none} -%}
+{%- for label in labels -%}
+  {%- if label.name == 'LinkedIn' -%}
+    {%- set _ = li_label.update({"found": label}) -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set li_unread = li_label.found.messagesUnread if li_label.found else 0 -%}
+{%- set li_total  = li_label.found.messagesTotal  if li_label.found else 0 -%}
+
+{#- Pull user email from user://current/profile resource -#}
+{%- set user_email = profile_data.email if profile_data is defined and profile_data.email is defined else '' -%}
+{%- set gmail_auth = '?authuser=' ~ user_email if user_email else '' -%}
+{%- set gmail_li_url = 'https://mail.google.com/mail/' ~ gmail_auth ~ '#label/LinkedIn' -%}
+
+{%- set total_items = (action_items|length) + (job_alerts|length) + (profile_updates|length) + (content_highlights|length) -%}
+{%- set high_actions = action_items | selectattr('priority', 'equalto', 'high') | list -%}
+{%- set hero_sub = (total_items|string) ~ ' items · last ' ~ (window_hours|string) ~ 'h · ' ~ (high_actions|length|string) ~ ' high-priority · ' ~ (li_unread|string) ~ ' unread in label' -%}
+
+{#- DSL: always 5 TextBlocks (picks + 4 sections) + 3 buttons -#}
+{%- if mode == 'dsl' -%}
+{{ s.EmailSpec }}[{{ s.HeaderBlock }}, {{ s.HeroBlock }}, {{ s.TextBlock }}×5, {{ s.ButtonBlock }}×3, {{ s.DividerBlock }}, {{ s.FooterBlock }}]
+
+{%- elif mode == 'params' -%}
+
+{#- Capture each section as a string using set/endset blocks -#}
+{%- set picks_html -%}{{ _li_picks_card(top_picks) }}{%- endset -%}
+
+{%- set actions_html -%}
+{{ _li_section("🔴 Action Required", "#EF4444", action_items,
+   "No pending connections, messages, or replies.",
+   "https://www.linkedin.com/mynetwork/invitation-manager/", "check invitations") }}
+{%- endset -%}
+
+{%- set jobs_html -%}
+{{ _li_section("💼 Job Alerts", "#2563EB", job_alerts,
+   "No new job alerts this window.",
+   "https://www.linkedin.com/jobs/", "browse jobs") }}
+{%- endset -%}
+
+{%- set profile_html -%}
+{{ _li_section("📊 Profile Activity", "#7C3AED", profile_updates,
+   "No profile activity this window.",
+   "https://www.linkedin.com/analytics/profile-views/", "check views") }}
+{%- endset -%}
+
+{%- set content_html -%}
+{{ _li_section("📰 Worth Reading", "#0EA5E9", content_highlights,
+   "No notable content this window.",
+   "https://www.linkedin.com/feed/", "open feed") }}
+{%- endset -%}
+
+{%- set result = {
+  "subject": "LinkedIn Brief — " ~ (subject_date if subject_date else "Today"),
+  s.HeaderBlock: {"_items": [{"title": "LinkedIn", "subtitle": "AI-Advised Brief"}]},
+  s.HeroBlock: {"_items": [{
+    "title": "Your LinkedIn Brief",
+    "subtitle": hero_sub,
+    "button_text": "Open LinkedIn Label",
+    "button_url": gmail_li_url
+  }]},
+  s.TextBlock: {"_items": [
+    {"text": picks_html,   "padding": "16px 0"},
+    {"text": actions_html, "padding": "16px 0"},
+    {"text": jobs_html,    "padding": "16px 0"},
+    {"text": profile_html, "padding": "16px 0"},
+    {"text": content_html, "padding": "16px 0"}
+  ]},
+  s.ButtonBlock: {"_items": [
+    {"text": "LinkedIn Inbox",  "url": "https://www.linkedin.com/messaging/"},
+    {"text": "Connections",     "url": "https://www.linkedin.com/mynetwork/invitation-manager/"},
+    {"text": "Job Alerts",      "url": "https://www.linkedin.com/jobs/"}
+  ]},
+  s.DividerBlock: {"_items": [{}]},
+  s.FooterBlock:  {"_items": [{"text": "LinkedIn Advisor Brief &bull; Google Workspace MCP &bull; " ~ user_email}]}
+} -%}
+{{ result | tojson }}
+{%- endif -%}
+{% endmacro %}
+
+{#
+═══════════════════════════════════════════════════════════════════════════════
+USAGE
+═══════════════════════════════════════════════════════════════════════════════
+
+The LLM's execute block ONLY needs to:
+  1. Fetch messages (search_gmail_messages)
+  2. Categorize into lists (sender/subject rules)
+  3. Score ai_score (0/1/3) per item
+  4. Write agent_take per item  ← the LLM's actual analytical value
+  5. Pick top_picks (3 items with category field)
+  6. Call compose_dynamic_email with the macro strings below
+
+COMPOSE CALL (in execute block):
+  action_json  = to_json(action_items)
+  jobs_json    = to_json(job_alerts)
+  profile_json = to_json(profile_updates)
+  content_json = to_json(content_highlights)
+  picks_json   = to_json(top_picks)
+  wh           = str(window_hours)
+
+  def macro_call(mode):
+      return (
+          "{{% from 'linkedin_digest_email.j2' import linkedin_digest_email -%}}"
+          "{{{{ linkedin_digest_email("
+          "service://gmail/labels, user://current/profile, email_symbols, "
+          "action_items=" + action_json + ", "
+          "job_alerts=" + jobs_json + ", "
+          "profile_updates=" + profile_json + ", "
+          "content_highlights=" + content_json + ", "
+          "top_picks=" + picks_json + ", "
+          "window_hours=" + wh + ", "
+          "subject_date='" + today() + "', "
+          "mode='" + mode + "'"
+          ") }}}}"
+      )
+
+  result = await call_tool("compose_dynamic_email", {
+      "email_description": macro_call("dsl"),
+      "email_params":      macro_call("params"),
+      "to": "myself",
+      "action": "send"
+  })
+
+ITEM SCHEMA:
+  Each item in action_items / job_alerts / profile_updates / content_highlights:
+  {
+    "subject":      str,                     # required
+    "snippet":      str,                     # optional, ≤100 chars
+    "gmail_url":    str,                     # required
+    "linkedin_url": str,                     # optional, falls back to gmail_url
+    "priority":     "high"|"medium"|"low",   # optional (drives badge color)
+    "badge":        str,                     # optional (e.g. "REPLY NOW", "VIEW ON LI")
+    "ai_score":     0|1|3,                   # 3=core AI/ML, 1=adjacent, 0=unrelated
+    "agent_take":   str                      # LLM writes this — the advisory value
+  }
+
+  Each item in top_picks additionally needs:
+  {
+    "category": "action"|"job"|"content"|"profile"
+  }
+
+DIRECT USAGE (stats-only, no agent data, via Template Middleware):
+  email_description: {{ linkedin_digest_email(service://gmail/labels, user://current/profile, email_symbols, mode='dsl') }}
+  email_params:      {{ linkedin_digest_email(service://gmail/labels, user://current/profile, email_symbols, mode='params') }}
+
+  Renders a minimal digest using only label stats (unread count, total).
+  No section content — useful as a quick "check-in" email without full agent run.
+
+WHAT THE MACRO OWNS:
+  ✓ All HTML rendering (item rows, section headers, picks card, badges, chips)
+  ✓ DSL structure string (always: ε[Ħ, ħ, τ×5, Ƀ×3, đ, ƒ])
+  ✓ Hero subtitle (total items + window + high-priority count + label unread)
+  ✓ Subject line ("LinkedIn Brief — {date}")
+  ✓ ButtonBlock items (Inbox / Connections / Jobs)
+  ✓ Header / Footer content
+
+WHAT THE LLM OWNS:
+  ✓ Fetching messages from Gmail API
+  ✓ Categorizing by sender/subject
+  ✓ Writing agent_take (the analytical value — why this matters for the user)
+  ✓ Scoring ai_score (keyword matching against interests)
+  ✓ Selecting top_picks (judgment on what's highest value)
+#}

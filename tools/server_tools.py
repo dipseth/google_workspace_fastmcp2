@@ -41,6 +41,7 @@ from tools.server_types import (
     HealthCheckResponse,
     ManageCredentialsResponse,
     ManageToolsResponse,
+    MemoryHealth,
     OAuthFlowStatus,
     SessionToolState,
     ToolInfo,
@@ -249,6 +250,60 @@ async def health_check(
         healthy = creds_accessible and oauth_configured
         status = "healthy" if healthy else "degraded"
 
+        # Memory health metrics
+        memory_health = None
+        try:
+            from lifespans.server_lifespans import (
+                _CRITICAL_THRESHOLD_MB,
+                _MEMORY_LIMIT_MB,
+                _WARN_THRESHOLD_MB,
+                _get_process_health,
+            )
+
+            proc_health = _get_process_health()
+            rss_mb = proc_health["rss_mb"]
+            rss_pct = (
+                round(rss_mb / _MEMORY_LIMIT_MB * 100, 1) if _MEMORY_LIMIT_MB > 0 else 0
+            )
+
+            if rss_mb > _CRITICAL_THRESHOLD_MB:
+                mem_status = "critical"
+            elif rss_mb > _WARN_THRESHOLD_MB:
+                mem_status = "warning"
+            else:
+                mem_status = "ok"
+
+            import gc as _gc
+
+            gc_stats = _gc.get_stats()
+            memory_health = MemoryHealth(
+                rss_mb=rss_mb,
+                vms_mb=proc_health["vms_mb"],
+                rss_percent=rss_pct,
+                memory_limit_mb=_MEMORY_LIMIT_MB,
+                warn_threshold_mb=_WARN_THRESHOLD_MB,
+                critical_threshold_mb=_CRITICAL_THRESHOLD_MB,
+                memory_status=mem_status,
+                cpu_percent=proc_health["cpu_pct"],
+                num_fds=proc_health["num_fds"],
+                num_threads=proc_health["num_threads"],
+                asyncio_tasks=proc_health["asyncio_tasks"],
+                gc_gen0_collections=gc_stats[0]["collections"],
+                gc_gen1_collections=gc_stats[1]["collections"],
+                gc_gen2_collections=gc_stats[2]["collections"],
+                gc_uncollectable=sum(g["uncollectable"] for g in gc_stats),
+            )
+
+            # Degrade overall status based on memory pressure
+            if mem_status == "critical":
+                status = "unhealthy"
+                healthy = False
+            elif mem_status == "warning" and status == "healthy":
+                status = "degraded"
+
+        except Exception as e:
+            logger.debug(f"Memory health check skipped: {e}")
+
         return HealthCheckResponse(
             status=status,
             healthy=healthy,
@@ -263,6 +318,7 @@ async def health_check(
             logLevel=settings.log_level,
             oauthFlowStatus=oauth_flow_status,
             oauthCallbackUrl=settings.dynamic_oauth_redirect_uri,
+            memoryHealth=memory_health,
         )
 
     except Exception as e:
@@ -729,6 +785,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "health_check",
             "start_google_auth",
             "check_drive_auth",
+            "set_privacy_mode",
             # CodeMode meta-tools (FastMCP 3.1.0+)
             "tags",
             "search",
@@ -1344,6 +1401,151 @@ def setup_server_tools(mcp: FastMCP) -> None:
             error="Unexpected code path reached",
         )
 
+    @mcp.tool(
+        name="set_privacy_mode",
+        description=(
+            "Toggle per-session PII privacy mode. When enabled, tool responses "
+            "have sensitive values (emails, names, phone numbers) replaced with "
+            "[PRIVATE:token_N] tokens. Requires authenticated session (OAuth or per-user API key)."
+        ),
+        tags={"server", "privacy", "security", "session"},
+        annotations={
+            "title": "Set Privacy Mode",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    )
+    async def set_privacy_mode_tool(
+        mode: Annotated[
+            Literal["disabled", "auto", "strict"],
+            Field(
+                description=(
+                    "Privacy mode to set for this session: "
+                    "'disabled' (no masking), "
+                    "'auto' (mask PII identity fields + email patterns), "
+                    "'strict' (mask all string values)."
+                )
+            ),
+        ],
+        mask_content: Annotated[
+            Optional[bool],
+            Field(
+                description=(
+                    "When true, also mask content fields (snippet, subject, body, "
+                    "text, description, summary, web_url, attendees, location). "
+                    "Default true when mode is 'auto'. Has no effect when mode is "
+                    "'strict' (everything is already masked) or 'disabled'."
+                )
+            ),
+        ] = None,
+        additional_fields: Annotated[
+            Optional[str],
+            Field(
+                description=(
+                    "Comma-separated extra field names to treat as PII for this "
+                    "session (e.g. 'customField1,notes'). Merged with built-in "
+                    "patterns."
+                )
+            ),
+        ] = None,
+        user_google_email: Annotated[
+            UserGoogleEmail,
+            Field(description="Auto-injected by middleware. Not used by this tool."),
+        ] = None,
+    ) -> Dict[str, Any]:
+        """Toggle per-session privacy mode.
+
+        Security: requires an authenticated session (OAuth or per-user API key)
+        so that the vault key is crypto-derived from identity material.
+        Shared API key sessions are rejected because they use a random vault
+        seed with no identity binding.
+        """
+        from auth.context import (
+            get_session_context,
+            get_session_data,
+            store_session_data,
+        )
+        from auth.types import AuthProvenance, SessionKey
+
+        session_id = await get_session_context()
+        if not session_id:
+            return {
+                "success": False,
+                "error": "No active session — cannot set privacy mode",
+            }
+
+        # Security: reject shared API key sessions (random vault seed, no identity binding).
+        provenance = get_session_data(
+            session_id, SessionKey.AUTH_PROVENANCE, default=None
+        )
+        if provenance == AuthProvenance.API_KEY:
+            return {
+                "success": False,
+                "error": (
+                    "Privacy mode requires authenticated session "
+                    "(OAuth or per-user API key), not shared API key"
+                ),
+                "auth_provenance": str(provenance),
+            }
+
+        # Get previous state
+        previous_mode = get_session_data(
+            session_id, SessionKey.PRIVACY_MODE, default=None
+        )
+        effective_previous = (
+            previous_mode if previous_mode is not None else settings.privacy_mode
+        )
+
+        # Store the new mode
+        store_session_data(session_id, SessionKey.PRIVACY_MODE, mode)
+
+        # Build session-level additional fields set
+        # Default: mask_content=True when mode is "auto"
+        effective_mask_content = (
+            mask_content if mask_content is not None else (mode == "auto")
+        )
+
+        session_fields: set[str] = set()
+        if effective_mask_content and mode != "disabled":
+            session_fields.add(
+                "__content__"
+            )  # sentinel that expands to PRIVACY_CONTENT_FIELDS
+        if additional_fields:
+            for f in additional_fields.split(","):
+                f = f.strip()
+                if f:
+                    session_fields.add(f)
+
+        if session_fields:
+            store_session_data(
+                session_id,
+                SessionKey.PRIVACY_ADDITIONAL_FIELDS,
+                frozenset(session_fields),
+            )
+        else:
+            store_session_data(session_id, SessionKey.PRIVACY_ADDITIONAL_FIELDS, None)
+
+        logger.info(
+            "Privacy mode changed for session %s: %s -> %s (mask_content=%s, extra_fields=%s)",
+            session_id[:8] + "..." if len(session_id) > 8 else session_id,
+            effective_previous,
+            mode,
+            effective_mask_content,
+            additional_fields or "none",
+        )
+
+        return {
+            "success": True,
+            "previous_mode": effective_previous,
+            "current_mode": mode,
+            "mask_content": effective_mask_content,
+            "additional_fields": sorted(session_fields) if session_fields else None,
+            "auth_provenance": str(provenance),
+            "message": f"Privacy mode set to '{mode}' for this session",
+        }
+
     logger.info(
-        "✅ Server management tools registered: health_check, server_info, manage_credentials, manage_tools"
+        "Server management tools registered: health_check, server_info, manage_credentials, manage_tools, set_privacy_mode"
     )
