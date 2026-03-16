@@ -403,6 +403,16 @@ async def get_registered_tools(client: Client) -> List[str]:
         return []
 
 
+async def is_code_mode_active(client: Client) -> bool:
+    """Check if Code Mode is active (CatalogTransform wrapping list_tools).
+
+    Code Mode replaces list_tools() output with 4 meta-tools:
+    execute, search, get_schema, tags. Direct call_tool() is unaffected.
+    """
+    tools = await client.list_tools()
+    return {t.name for t in tools} == {"execute", "search", "get_schema", "tags"}
+
+
 async def assert_tools_registered(
     client: Client, expected_tools: List[str], context: str = ""
 ):

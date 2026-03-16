@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 from fastmcp import Client
 
 from ..test_auth_utils import get_client_auth_config
-from .test_helpers import assert_tools_registered
+from .test_helpers import assert_tools_registered, get_registered_tools
 
 # Load environment variables from .env file
 load_dotenv()
@@ -404,8 +404,8 @@ class TestBackwardCompatibility:
         """Test that existing tools with required user_google_email still work."""
         print("\n🔄 Testing backward compatibility with existing tools")
 
-        tools = await client.list_tools()
-        tool_names = [tool.name for tool in tools]
+        # Use registry (not list_tools) so this works under Code Mode too
+        tool_names = await get_registered_tools(client)
 
         # Find a few other Gmail tools that should still require user_google_email
         gmail_tools_to_test = [

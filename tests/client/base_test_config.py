@@ -45,6 +45,21 @@ if _CA_BUNDLE:
 # Load environment variables from .env file
 load_dotenv()
 
+# Sampling handler for tests — uses Anthropic when tools call ctx.sample()
+_test_sampling_handler = None
+_anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+if _anthropic_key:
+    try:
+        from anthropic import AsyncAnthropic
+        from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
+
+        _test_sampling_handler = AnthropicSamplingHandler(
+            default_model="claude-sonnet-4-6",
+            client=AsyncAnthropic(api_key=_anthropic_key),
+        )
+    except ImportError:
+        pass  # fastmcp[anthropic] not installed
+
 # Server configuration from environment variables with defaults
 SERVER_HOST = os.getenv("SERVER_HOST", os.getenv("MCP_SERVER_HOST", "localhost"))
 SERVER_PORT = os.getenv("SERVER_PORT", os.getenv("MCP_SERVER_PORT", "8002"))
@@ -125,6 +140,9 @@ def print_test_configuration():
     )
     print(f"   SSL_CERT_FILE: {os.getenv('SSL_CERT_FILE', 'Not set')}")
     print(f"   SSL_KEY_FILE: {os.getenv('SSL_KEY_FILE', 'Not set')}")
+    print(
+        f"   SAMPLING: {'Anthropic handler' if _test_sampling_handler else 'None (ANTHROPIC_API_KEY not set)'}"
+    )
 
 
 async def create_test_client(test_email: str = TEST_EMAIL):
@@ -187,10 +205,19 @@ async def create_test_client(test_email: str = TEST_EMAIL):
                     auth=auth_config,
                     httpx_client_factory=_httpx_client_factory,
                 )
-                test_client = Client(transport, timeout=30.0)
+                test_client = Client(
+                    transport,
+                    timeout=30.0,
+                    sampling_handler=_test_sampling_handler,
+                )
             else:
                 # HTTP fallback uses default transport inference
-                test_client = Client(test_url, auth=auth_config, timeout=30.0)
+                test_client = Client(
+                    test_url,
+                    auth=auth_config,
+                    timeout=30.0,
+                    sampling_handler=_test_sampling_handler,
+                )
 
             # Install handler that auto-refreshes tool cache on list_changed
             handler = AutoRefreshTaskHandler(test_client)

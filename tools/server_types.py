@@ -30,6 +30,47 @@ class OAuthFlowStatus(BaseModel):
     )
 
 
+class MemoryHealth(BaseModel):
+    """Memory and process health metrics."""
+
+    rss_mb: float = Field(..., description="Resident set size in MB")
+    vms_mb: float = Field(..., description="Virtual memory size in MB")
+    rss_percent: float = Field(
+        ..., description="RSS as percentage of configured memory limit"
+    )
+    memory_limit_mb: int = Field(..., description="Configured memory limit in MB")
+    warn_threshold_mb: int = Field(
+        ..., description="Warning threshold in MB (status degrades to 'degraded')"
+    )
+    critical_threshold_mb: int = Field(
+        ..., description="Critical threshold in MB (triggers graceful shutdown)"
+    )
+    memory_status: str = Field(
+        ...,
+        description="Memory status: 'ok', 'warning', or 'critical'",
+    )
+    cpu_percent: float = Field(..., description="CPU usage percentage")
+    num_fds: int = Field(
+        ..., description="Number of open file descriptors (-1 if unavailable)"
+    )
+    num_threads: int = Field(..., description="Number of threads")
+    asyncio_tasks: int = Field(
+        ..., description="Number of asyncio tasks (-1 if no event loop)"
+    )
+    gc_gen0_collections: int = Field(
+        ..., description="Generation 0 GC collection count"
+    )
+    gc_gen1_collections: int = Field(
+        ..., description="Generation 1 GC collection count"
+    )
+    gc_gen2_collections: int = Field(
+        ..., description="Generation 2 GC collection count"
+    )
+    gc_uncollectable: int = Field(
+        ..., description="Total uncollectable objects across all generations"
+    )
+
+
 class HealthCheckResponse(BaseModel):
     """Response structure for health_check tool."""
 
@@ -60,6 +101,9 @@ class HealthCheckResponse(BaseModel):
     )
     oauthCallbackUrl: str = Field(
         ..., description="OAuth callback URL for authentication redirects"
+    )
+    memoryHealth: Optional[MemoryHealth] = Field(
+        None, description="Memory and process health metrics"
     )
     error: Optional[str] = Field(
         None, description="Error message if health check failed"

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Module name to skill directory name mapping
 SKILL_NAMES = {
     "card_framework": "gchat-cards",
+    "gmail.mjml_types": "mjml-email",
     "google_drive": "drive-files",
     "google_gmail": "gmail-automation",
 }
@@ -37,6 +38,7 @@ SKILL_NAMES = {
 # Module name to skill title mapping
 SKILL_TITLES = {
     "card_framework": "Google Chat Card Builder",
+    "gmail.mjml_types": "MJML Email Composer",
     "google_drive": "Google Drive File Operations",
     "google_gmail": "Gmail Automation",
 }
@@ -159,6 +161,24 @@ def setup_skills_provider(
         except Exception as e:
             logger.error(f"Failed to generate skills for {module_name}: {e}")
             continue
+
+    # Generate cross-module server skill (combines card + email symbol maps)
+    try:
+        from skills.server_skill_generator import write_server_skill
+
+        card_w = next(
+            (w for w in wrappers if "card_framework" in getattr(w, "module_name", "")),
+            None,
+        )
+        email_w = next(
+            (w for w in wrappers if "mjml" in getattr(w, "module_name", "")),
+            None,
+        )
+        if card_w and email_w:
+            write_server_skill(skills_root, card_w, email_w)
+            skills_generated = True
+    except Exception as e:
+        logger.error(f"Failed to generate server skill: {e}")
 
     if not skills_generated:
         logger.warning("No skills were generated")

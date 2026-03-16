@@ -565,13 +565,25 @@ uv run pytest tests/client/test_gmail_tools.py -v -s
 
 ### Authentication (Important!)
 
-- `MCP_API_KEY`: **Pre-shared API key for test auth** (preferred). When set, tests send
-  `Authorization: Bearer <MCP_API_KEY>` which the server's API key bypass accepts without
-  OAuth. This is the recommended method when GoogleProvider is active.
+- `TEST_MCP_API_KEY`: **Dedicated test API key** (preferred). Each API key gets its own
+  server session with independently linked OAuth credentials. Using a separate key for
+  tests avoids interfering with the primary server session.
   Generate with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
-  Must match the same `MCP_API_KEY` in the server's `.env`.
+  Must also be registered in the server's `.env` as `TEST_MCP_API_KEY`.
+  **Setup**: After adding the key, run `start_google_auth` from a test client session
+  to link OAuth credentials to this key's session.
+- `MCP_API_KEY`: Fallback if `TEST_MCP_API_KEY` is not set. This is the server's primary
+  API key — tests will share its session state, which can cause "no credentials found"
+  errors if OAuth hasn't been linked in that session.
+- `ANTHROPIC_API_KEY`: Required for the sampling handler. Enables testing tools that
+  call `ctx.sample()` for LLM-assisted responses.
 - `ENABLE_JWT_AUTH`: Legacy JWT auth toggle (default: true). When true AND `test_tokens.json`
   exists, tests use JWT tokens from that file. Rarely needed now.
+
+**Auth priority order** (in `test_auth_utils.py`):
+1. `TEST_MCP_API_KEY` — dedicated test session with linked creds
+2. `MCP_API_KEY` — server's primary key (fallback)
+3. JWT token file — legacy (last resort)
 
 ### Required
 
@@ -765,6 +777,43 @@ async def test_custom_resource_fetching(self, client):
             "filter_id": gmail_filters
         })
         assert result is not None
+```
+
+## 🧪 Code Mode Compatibility
+
+Code Mode uses a `CatalogTransform` that wraps `list_tools()` to return only 4 meta-tools (`execute`, `search`, `get_schema`, `tags`). Important details:
+
+- **`call_tool()` is NOT affected** — direct tool calls work regardless of Code Mode
+- **`list_tools()` IS affected** — returns 4 meta-tools instead of the full registry
+- **Use `assert_tools_registered()` / `get_registered_tools()`** to check if tools exist in the server (queries `manage_tools(list)`, bypasses Code Mode filtering)
+- **Use `is_code_mode_active()`** helper when testing the listing behavior itself
+
+```python
+from .test_helpers import is_code_mode_active, get_registered_tools, assert_tools_registered
+
+# Check if Code Mode is active
+if await is_code_mode_active(client):
+    print("Code Mode active — list_tools() returns meta-tools only")
+
+# Check tool existence via registry (works under Code Mode)
+await assert_tools_registered(client, ["list_gmail_labels", "send_gmail_message"])
+
+# Get all registered tools regardless of Code Mode
+all_tools = await get_registered_tools(client)
+```
+
+## 🤖 Sampling Handler
+
+Client tests use an `AnthropicSamplingHandler` when `ANTHROPIC_API_KEY` is set in `.env`. This enables testing tools that call `ctx.sample()` for LLM-assisted responses.
+
+- **Client-side handler**: `base_test_config.py` creates an `AnthropicSamplingHandler` and passes it to all `Client` constructors
+- **Server-side fallback**: The server also configures `sampling_handler_behavior="fallback"`, but the client-side handler is preferred for realistic testing
+- **Graceful degradation**: If `ANTHROPIC_API_KEY` is not set or `fastmcp[anthropic]` is not installed, tests run without a sampling handler (tools calling `ctx.sample()` will use the server's fallback or fail)
+
+```python
+# In base_test_config.py (already configured):
+from .base_test_config import _test_sampling_handler
+print(f"Sampling: {_test_sampling_handler}")  # None if key not set
 ```
 
 ## ✅ Recent Framework Improvements

@@ -57,10 +57,13 @@ def setup_health_endpoints(
                 else str(health_status)
             )
 
+            # Use 503 for unhealthy (critical memory) so orchestrators can act
+            http_status = 503 if health_status.status == "unhealthy" else 200
+
             return JSONResponse(
-                status_code=200,
+                status_code=http_status,
                 content={
-                    "status": "healthy",
+                    "status": health_status.status,
                     "service": settings.server_name,
                     "version": "1.0.0",
                     "details": details,

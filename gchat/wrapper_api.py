@@ -12,10 +12,24 @@ Usage:
 import logging
 from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel
+
 import gchat.wrapper_setup as _setup
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger(__name__)
+
+
+# =============================================================================
+# PYDANTIC RESULT TYPES
+# =============================================================================
+
+
+class CardDSLResult(BaseModel):
+    """Structured card DSL generation result."""
+
+    card_description: str  # e.g. "§[δ×3, Ƀ[ᵬ×2]]"
+    card_params: dict  # content for each symbol key
 
 
 # =============================================================================

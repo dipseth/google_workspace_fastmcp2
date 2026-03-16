@@ -35,6 +35,7 @@ _REGISTRY_FILENAME = ".user_api_keys.json"
 _LINKS_FILENAME = ".user_api_key_links.json"
 _PENDING_LINKS_FILENAME = ".user_api_key_pending_links.json"
 _LINK_METADATA_FILENAME = ".user_api_key_link_metadata.json"
+_OAUTH_LINKAGE_FILENAME = ".oauth_linkage_prefs.json"
 _lock = threading.Lock()
 
 
@@ -483,3 +484,132 @@ def unlink_accounts(email_a: str, email_b: str) -> bool:
             logger.info(f"🔗 Unlinked accounts: {a} ↔ {b}")
 
     return changed
+
+
+# =========================================================================
+# OAuth Cross-Linkage Preferences
+# =========================================================================
+
+
+def _oauth_linkage_path() -> Path:
+    return Path(settings.credentials_dir) / _OAUTH_LINKAGE_FILENAME
+
+
+def _get_linkage_fernet():
+    """Get a Fernet instance for encrypting/decrypting linkage prefs.
+
+    Derives from the same server secret used by AuthMiddleware, ensuring
+    google_sub and passwords are encrypted at rest.
+    """
+    import base64
+
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    secret_path = Path(settings.credentials_dir) / ".auth_encryption_key"
+    if not secret_path.exists():
+        # No server secret yet — can't encrypt.  Caller should handle.
+        return None
+    server_secret = secret_path.read_bytes().strip()
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"oauth-linkage-prefs-salt-v1",
+        info=b"oauth-linkage-prefs-encryption-v1",
+    )
+    key = base64.urlsafe_b64encode(hkdf.derive(server_secret))
+    return Fernet(key)
+
+
+def _load_oauth_linkage_prefs() -> dict:
+    path = _oauth_linkage_path()
+    if not path.exists():
+        return {}
+    try:
+        raw = path.read_bytes()
+        # Try encrypted format first
+        fernet = _get_linkage_fernet()
+        if fernet:
+            try:
+                decrypted = fernet.decrypt(raw)
+                return json.loads(decrypted)
+            except Exception:
+                pass
+        # Fall back to plaintext (legacy / migration)
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def _save_oauth_linkage_prefs(prefs: dict) -> None:
+    path = _oauth_linkage_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(prefs, indent=2).encode()
+    fernet = _get_linkage_fernet()
+    if fernet:
+        data = fernet.encrypt(data)
+    path.write_bytes(data)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def set_oauth_linkage(
+    email: str,
+    enabled: bool = True,
+    password: str = "",
+    google_sub: str = "",
+) -> None:
+    """Set cross-OAuth linkage preference for an email.
+
+    Args:
+        email: The account email.
+        enabled: Whether OAuth sessions can decrypt this account's credentials.
+        password: Optional passphrase added to the OAuth recipient key derivation.
+            Only alphanumeric, underscore, and hyphen allowed.  Empty = no password.
+        google_sub: Google's immutable account ID.  Persisted so cross-account
+            decryption works after server restarts.
+    """
+    import re
+
+    normalized = email.lower().strip()
+    if password and not re.fullmatch(r"[0-9A-Za-z_-]*", password):
+        raise ValueError("Password may only contain 0-9, A-Z, a-z, _, -")
+
+    with _lock:
+        prefs = _load_oauth_linkage_prefs()
+        entry: dict = {"enabled": enabled, "has_password": bool(password)}
+        # Password is NOT persisted — it's only used in-memory at save time
+        # to derive the OAuth recipient key, then discarded. At load time,
+        # the user provides it again via cross_oauth_password.
+        if google_sub:
+            entry["google_sub"] = google_sub
+        elif normalized in prefs and "google_sub" in prefs[normalized]:
+            # Preserve existing google_sub if not provided
+            entry["google_sub"] = prefs[normalized]["google_sub"]
+        prefs[normalized] = entry
+        _save_oauth_linkage_prefs(prefs)
+
+    logger.info(
+        f"OAuth linkage for {normalized}: enabled={enabled}, "
+        f"password={'set' if password else 'none'}, "
+        f"google_sub={'set' if google_sub else 'preserved' if entry.get('google_sub') else 'none'}"
+    )
+
+
+def get_oauth_linkage(email: str) -> dict:
+    """Get cross-OAuth linkage preference for an email.
+
+    Returns:
+        {"enabled": bool, "has_password": bool, "google_sub": str}
+        Defaults to enabled=True, no password, no sub if not set.
+    """
+    normalized = email.lower().strip()
+    with _lock:
+        prefs = _load_oauth_linkage_prefs()
+    default = {"enabled": True, "has_password": False, "google_sub": ""}
+    entry = prefs.get(normalized, default)
+    entry.setdefault("google_sub", "")
+    return entry

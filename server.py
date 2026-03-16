@@ -1,6 +1,8 @@
 """FastMCP2 Google Workspace MCP Server.
 
-A comprehensive MCP server for Google Workspace integration with OAuth 2.1 authentication.
+A comprehensive MCP server for Google Workspace integration with OAuth 2.1 authentication,
+sandboxed code execution (Code Mode), context-aware LLM sampling, and privacy middleware
+for PII protection.
 """
 
 import os
@@ -64,6 +66,7 @@ from middleware.qdrant_middleware import (
     setup_qdrant_resources,
 )
 from middleware.sampling_middleware import (
+    DSLToolConfig,
     EnhancementLevel,
     setup_enhanced_sampling_demo_tools,
     setup_enhanced_sampling_middleware,
@@ -261,6 +264,7 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                             payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
                             payload = json.loads(base64.urlsafe_b64decode(payload_b64))
                             user_email = payload.get("email")
+                            self._google_sub = payload.get("sub")
                     except Exception as e:
                         logger.debug(f"SSO: Could not decode id_token: {e}")
 
@@ -275,7 +279,9 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                                 headers={"Authorization": f"Bearer {access_token}"},
                             )
                             if resp.status_code == 200:
-                                user_email = resp.json().get("email")
+                                userinfo = resp.json()
+                                user_email = userinfo.get("email")
+                                self._google_sub = userinfo.get("id")
                     except Exception as e:
                         logger.warning(f"SSO: Could not fetch userinfo: {e}")
 
@@ -292,6 +298,8 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                     client_secret=_fastmcp_google_client_secret,
                     scopes=_oauth_comprehensive_scopes,
                 )
+                # Attach Google's immutable account ID for OAuth recipient encryption
+                credentials._google_sub = getattr(self, "_google_sub", None)
 
                 _save_credentials(user_email, credentials)
                 # Log the per-user API key if one was generated
@@ -333,6 +341,7 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
         _failed_auth_attempts: dict[str, list[float]] = {}
         _RATE_LIMIT_WINDOW = 60.0  # seconds
         _RATE_LIMIT_MAX = 10  # max failures per window
+        _MAX_TRACKED_PREFIXES = 1000  # cap to prevent memory growth from brute-force
 
         async def _load_access_token_with_api_key(token: str):
             """Check for admin key / per-user key before delegating to OAuth."""
@@ -344,6 +353,11 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
             now = _time.time()
             attempts = _failed_auth_attempts.get(token_prefix, [])
             attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+            # Write back filtered list (self-cleaning: removes expired timestamps)
+            if attempts:
+                _failed_auth_attempts[token_prefix] = attempts
+            elif token_prefix in _failed_auth_attempts:
+                del _failed_auth_attempts[token_prefix]
             if len(attempts) >= _RATE_LIMIT_MAX:
                 logger.warning("🚫 Rate limit exceeded for auth attempts")
                 return None
@@ -391,6 +405,10 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                 )
                 # Record failed attempt for rate limiting
                 _failed_auth_attempts.setdefault(token_prefix, []).append(now)
+                # Evict oldest prefix if over cap (defense against unique-token flooding)
+                if len(_failed_auth_attempts) > _MAX_TRACKED_PREFIXES:
+                    oldest_key = next(iter(_failed_auth_attempts))
+                    del _failed_auth_attempts[oldest_key]
             else:
                 logger.info(
                     f"✅ load_access_token succeeded: client={result.client_id}, scopes={result.scopes}"
@@ -517,6 +535,25 @@ else:
     logger.info("  💡 To enable: set FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID and")
     logger.info("     FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET in .env")
 
+# Configure sampling fallback handler (uses Anthropic when client doesn't support sampling)
+_sampling_handler = None
+if settings.anthropic_api_key:
+    try:
+        from anthropic import AsyncAnthropic
+        from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
+
+        _sampling_handler = AnthropicSamplingHandler(
+            default_model="claude-sonnet-4-6",
+            client=AsyncAnthropic(api_key=settings.anthropic_api_key),
+        )
+        logger.info("🤖 Anthropic sampling handler configured (fallback mode)")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to configure Anthropic sampling handler: {e}")
+else:
+    logger.warning(
+        "⚠️ ANTHROPIC_API_KEY not set — sampling will fail if client doesn't support it"
+    )
+
 # Create FastMCP instance with composed lifespans for proper lifecycle management
 # Lifespans handle: Qdrant init/shutdown, ColBERT init, session state persistence,
 # cache cleanup, and dynamic instructions update
@@ -550,6 +587,8 @@ For manual/legacy auth:
 ## Tool Management
 Use `manage_tools` to list, enable, or disable tools at runtime.""",
     auth=google_auth_provider,  # GoogleProvider when configured, None for legacy fallback
+    sampling_handler=_sampling_handler,  # Anthropic fallback when client lacks sampling
+    sampling_handler_behavior="fallback",  # Use client LLM when available, Anthropic when not
 )
 
 if google_auth_provider:
@@ -570,22 +609,9 @@ else:
 
 # --- Code Mode Transform (opt-in) ---
 if settings.enable_code_mode:
-    from fastmcp.experimental.transforms.code_mode import (
-        CodeMode,
-        GetSchemas,
-        GetTags,
-        Search,
-    )
+    from tools.code_mode import setup_code_mode
 
-    code_mode = CodeMode(
-        discovery_tools=[
-            GetTags(),  # Stage 1: Browse by service category
-            Search(default_limit=10),  # Stage 2: BM25 search names + descriptions
-            GetSchemas(),  # Stage 3: Get param details for selected tools
-        ],
-    )
-    mcp.add_transform(code_mode)
-    logger.info("Code Mode enabled — LLMs will use BM25 search + sandboxed execution")
+    setup_code_mode(mcp)
 else:
     logger.info("Code Mode disabled — set ENABLE_CODE_MODE=true in .env to enable")
 
@@ -647,6 +673,18 @@ template_middleware = setup_template_middleware(
 )
 # Register with lifespan for cache cleanup on shutdown
 register_template_middleware(template_middleware)
+
+# Register email_symbols as a Jinja2 global so macros can access them
+try:
+    from gmail.email_wrapper_api import get_email_symbols
+
+    jinja_env = template_middleware.jinja_env_manager.jinja2_env
+    if jinja_env:
+        jinja_env.globals["email_symbols"] = get_email_symbols()
+        logger.info("📧 Registered email_symbols as Jinja2 global")
+except Exception as e:
+    logger.warning(f"⚠️ Could not register email_symbols global: {e}")
+
 logger.info(
     "✅ Enhanced Template Parameter Middleware enabled - modular architecture with 12 focused components active"
 )
@@ -655,6 +693,57 @@ logger.info(
 sampling_middleware = None  # Initialize to None for later checks
 if settings.sampling_tools:
     logger.info("🎯 Setting up Enhanced Sampling Middleware...")
+
+    # Build DSLToolConfig instances from available domain modules
+    dsl_configs: dict[str, DSLToolConfig] = {}
+    try:
+        from gchat.wrapper_api import (
+            CardDSLResult,
+            extract_dsl_from_description,
+            get_dsl_documentation,
+            parse_dsl,
+        )
+
+        dsl_configs["send_dynamic_card"] = DSLToolConfig(
+            arg_key="card_description",
+            parse_fn=parse_dsl,
+            extract_fn=extract_dsl_from_description,
+            result_type=CardDSLResult,
+            description_attr="card_description",
+            params_attr="card_params",
+            params_arg_key="card_params",
+            get_docs_fn=lambda: get_dsl_documentation(
+                include_examples=True, include_hierarchy=True
+            ),
+            dsl_type_label="card",
+            error_keywords=["card_description"],
+        )
+    except ImportError:
+        logger.warning("Card DSL validation disabled — gchat module unavailable")
+
+    try:
+        from gmail.email_wrapper_api import (
+            EmailDSLResult,
+            extract_email_dsl_from_description,
+            get_email_dsl_documentation,
+            parse_email_dsl,
+        )
+
+        dsl_configs["compose_dynamic_email"] = DSLToolConfig(
+            arg_key="email_description",
+            parse_fn=parse_email_dsl,
+            extract_fn=extract_email_dsl_from_description,
+            result_type=EmailDSLResult,
+            description_attr="email_description",
+            params_attr="email_params",
+            params_arg_key="email_params",
+            get_docs_fn=lambda: get_email_dsl_documentation(include_examples=True),
+            dsl_type_label="email",
+            error_keywords=["email_description"],
+        )
+    except ImportError:
+        logger.warning("Email DSL validation disabled — gmail module unavailable")
+
     sampling_middleware = setup_enhanced_sampling_middleware(
         mcp,
         enable_debug=True,  # Enable for testing and development
@@ -666,6 +755,7 @@ if settings.sampling_tools:
         qdrant_middleware=None,  # Will be set after Qdrant middleware is initialized
         template_middleware=template_middleware,
         default_enhancement_level=EnhancementLevel.CONTEXTUAL,
+        dsl_tool_configs=dsl_configs,
     )
     logger.info(
         "✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context"
@@ -752,7 +842,19 @@ logger.info(
     "✅ TagBasedResourceMiddleware enabled - service:// URIs will be handled via tag-based tool discovery"
 )
 
-# 8. Add ResponseLimitingMiddleware for tool response size control
+# 8. Add PrivacyMiddleware for PII encryption (after all data-producing middleware)
+if settings.privacy_mode != "disabled":
+    from middleware.privacy.middleware import PrivacyMiddleware
+
+    privacy_middleware = PrivacyMiddleware(
+        mode=settings.privacy_mode,
+        additional_fields=settings.privacy_field_patterns,
+        exclude_tools=settings.privacy_exclude_tools,
+    )
+    mcp.add_middleware(privacy_middleware)
+    logger.info(f"✅ Privacy middleware enabled (mode={settings.privacy_mode})")
+
+# 9. Add ResponseLimitingMiddleware for tool response size control
 if settings.response_limit_max_size > 0:
     from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 
@@ -826,13 +928,15 @@ if settings.enable_skills_provider:
     logger.info("📚 Setting up Skills Provider for FastMCP...")
     try:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
+        from gmail.email_wrapper_setup import get_email_wrapper
         from skills import setup_skills_provider
 
         card_wrapper = get_card_framework_wrapper()
+        email_wrapper = get_email_wrapper()
         skills_path = setup_skills_provider(
             mcp=mcp,
-            wrappers=[card_wrapper],
-            enabled_modules=["card_framework"],
+            wrappers=[card_wrapper, email_wrapper],
+            enabled_modules=["card_framework", "gmail.mjml_types"],
             skills_root=settings.skills_directory_path,
             auto_regenerate=settings.skills_auto_regenerate,
         )
