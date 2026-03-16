@@ -592,3 +592,131 @@ async def test_run_try_except_inside_code_cannot_catch_parse_errors():
         "Expected run() to catch the parse error — "
         "a try/except inside Monty code cannot catch parse-time failures"
     )
+
+
+# =============================================================================
+# gather_tools() — sequential multi-call helper
+# =============================================================================
+
+
+class TestGatherTools:
+    """Test the gather_tools() helper injected by EnhancedSandboxProvider."""
+
+    @pytest.mark.asyncio
+    async def test_sequential_execution(self):
+        call_log = []
+
+        async def mock_call_tool(name, params):
+            call_log.append(name)
+            return f"result-{name}"
+
+        provider = EnhancedSandboxProvider()
+        result = await provider.run(
+            'r = await gather_tools([["tool_a", {}], ["tool_b", {}]])\nreturn r',
+            external_functions={"call_tool": mock_call_tool},
+        )
+        assert result == ["result-tool_a", "result-tool_b"]
+        assert call_log == ["tool_a", "tool_b"]
+
+    @pytest.mark.asyncio
+    async def test_single_call(self):
+        async def mock_call_tool(name, params):
+            return 42
+
+        provider = EnhancedSandboxProvider()
+        result = await provider.run(
+            'r = await gather_tools([["only", {}]])\nreturn r',
+            external_functions={"call_tool": mock_call_tool},
+        )
+        assert result == [42]
+
+    @pytest.mark.asyncio
+    async def test_empty_list(self):
+        async def mock_call_tool(name, params):
+            return None
+
+        provider = EnhancedSandboxProvider()
+        result = await provider.run(
+            "r = await gather_tools([])\nreturn r",
+            external_functions={"call_tool": mock_call_tool},
+        )
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_error_propagates(self):
+        async def mock_call_tool(name, params):
+            raise RuntimeError("boom")
+
+        provider = EnhancedSandboxProvider()
+        result = await provider.run(
+            'r = await gather_tools([["bad", {}]])\nreturn r',
+            external_functions={"call_tool": mock_call_tool},
+        )
+        # Monty surfaces runtime errors as SandboxError strings
+        assert isinstance(result, str)
+        assert "boom" in result or "SandboxError" in result or "Error" in result
+
+
+# =============================================================================
+# setup_code_mode() — registration
+# =============================================================================
+
+
+class TestSetupCodeMode:
+    def test_code_mode_uses_enhanced_sandbox(self):
+        """setup_code_mode should use EnhancedSandboxProvider (with helpers), not base Monty."""
+        from unittest.mock import MagicMock
+
+        from tools.code_mode import EnhancedSandboxProvider, setup_code_mode
+
+        mock_mcp = MagicMock()
+        setup_code_mode(mock_mcp)
+        code_mode = mock_mcp.add_transform.call_args[0][0]
+        assert isinstance(code_mode.sandbox_provider, EnhancedSandboxProvider)
+
+    def test_code_mode_has_execute_description_with_helpers(self):
+        """Execute description must document helpers — LLMs won't use undocumented functions."""
+        from unittest.mock import MagicMock
+
+        from tools.code_mode import setup_code_mode
+
+        mock_mcp = MagicMock()
+        setup_code_mode(mock_mcp)
+        code_mode = mock_mcp.add_transform.call_args[0][0]
+        desc = code_mode.execute_description
+        # Verify critical helpers are documented
+        for helper in ["gather_tools", "now", "to_json", "from_json", "call_tool"]:
+            assert helper in desc, (
+                f"EXECUTE_DESCRIPTION missing '{helper}' — LLM won't know about it"
+            )
+
+
+# =============================================================================
+# Edge cases
+# =============================================================================
+
+
+class TestEdgeCases:
+    @pytest.mark.asyncio
+    async def test_empty_code(self):
+        provider = EnhancedSandboxProvider()
+        result = await provider.run("")
+        assert result is None or result == "" or isinstance(result, str)
+
+    @pytest.mark.asyncio
+    async def test_assignment_only_no_return(self):
+        provider = EnhancedSandboxProvider()
+        result = await provider.run("x = 42")
+        assert result is None
+
+    def test_sync_helpers_not_coroutines(self):
+        EnhancedSandboxProvider._HELPERS = {}
+        helpers = EnhancedSandboxProvider._build_helpers()
+        result = helpers["now"]()
+        assert isinstance(result, str)  # not a coroutine
+        assert "20" in result  # year starts with 20xx
+
+    def test_execute_description_documents_gather_tools(self):
+        from tools.code_mode import EXECUTE_DESCRIPTION
+
+        assert "gather_tools" in EXECUTE_DESCRIPTION

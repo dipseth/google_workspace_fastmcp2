@@ -132,3 +132,4 @@ adapters/discovery_manager.py
 .component_cache/*
 credentials copy/**
 prompts/LinkedIn Digest.md
+.claude/skills/google-workspace-mcp/SKILL copy.md

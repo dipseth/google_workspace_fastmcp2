@@ -10,7 +10,11 @@ pytest.skip(
 import pytest
 
 from .base_test_config import TEST_EMAIL
-from .test_helpers import assert_tools_registered, get_registered_tools
+from .test_helpers import (
+    assert_tools_registered,
+    get_registered_tools,
+    is_code_mode_active,
+)
 
 
 class TestRegistryDiscovery:
@@ -89,8 +93,13 @@ class TestRegistryDiscovery:
         )
 
         # Now get enabled tools and check their metadata
+        # Under Code Mode, list_tools() returns only 4 meta-tools;
+        # metadata checks still apply to whatever tools are listed.
         enabled_tools = await client.list_tools()
+        code_mode = await is_code_mode_active(client)
         sample_tools = enabled_tools[:5]  # Check first 5 tools
+        if code_mode:
+            print(f"Code Mode active — checking {len(enabled_tools)} meta-tools")
         for tool in sample_tools:
             assert tool.name, "Tool should have a name from registry"
             assert tool.description, "Tool should have a description from registry"

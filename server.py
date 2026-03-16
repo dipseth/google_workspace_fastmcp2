@@ -1,6 +1,8 @@
 """FastMCP2 Google Workspace MCP Server.
 
-A comprehensive MCP server for Google Workspace integration with OAuth 2.1 authentication.
+A comprehensive MCP server for Google Workspace integration with OAuth 2.1 authentication,
+sandboxed code execution (Code Mode), context-aware LLM sampling, and privacy middleware
+for PII protection.
 """
 
 import os
@@ -64,6 +66,7 @@ from middleware.qdrant_middleware import (
     setup_qdrant_resources,
 )
 from middleware.sampling_middleware import (
+    DSLToolConfig,
     EnhancementLevel,
     setup_enhanced_sampling_demo_tools,
     setup_enhanced_sampling_middleware,
@@ -690,6 +693,57 @@ logger.info(
 sampling_middleware = None  # Initialize to None for later checks
 if settings.sampling_tools:
     logger.info("🎯 Setting up Enhanced Sampling Middleware...")
+
+    # Build DSLToolConfig instances from available domain modules
+    dsl_configs: dict[str, DSLToolConfig] = {}
+    try:
+        from gchat.wrapper_api import (
+            CardDSLResult,
+            extract_dsl_from_description,
+            get_dsl_documentation,
+            parse_dsl,
+        )
+
+        dsl_configs["send_dynamic_card"] = DSLToolConfig(
+            arg_key="card_description",
+            parse_fn=parse_dsl,
+            extract_fn=extract_dsl_from_description,
+            result_type=CardDSLResult,
+            description_attr="card_description",
+            params_attr="card_params",
+            params_arg_key="card_params",
+            get_docs_fn=lambda: get_dsl_documentation(
+                include_examples=True, include_hierarchy=True
+            ),
+            dsl_type_label="card",
+            error_keywords=["card_description"],
+        )
+    except ImportError:
+        logger.warning("Card DSL validation disabled — gchat module unavailable")
+
+    try:
+        from gmail.email_wrapper_api import (
+            EmailDSLResult,
+            extract_email_dsl_from_description,
+            get_email_dsl_documentation,
+            parse_email_dsl,
+        )
+
+        dsl_configs["compose_dynamic_email"] = DSLToolConfig(
+            arg_key="email_description",
+            parse_fn=parse_email_dsl,
+            extract_fn=extract_email_dsl_from_description,
+            result_type=EmailDSLResult,
+            description_attr="email_description",
+            params_attr="email_params",
+            params_arg_key="email_params",
+            get_docs_fn=lambda: get_email_dsl_documentation(include_examples=True),
+            dsl_type_label="email",
+            error_keywords=["email_description"],
+        )
+    except ImportError:
+        logger.warning("Email DSL validation disabled — gmail module unavailable")
+
     sampling_middleware = setup_enhanced_sampling_middleware(
         mcp,
         enable_debug=True,  # Enable for testing and development
@@ -701,6 +755,7 @@ if settings.sampling_tools:
         qdrant_middleware=None,  # Will be set after Qdrant middleware is initialized
         template_middleware=template_middleware,
         default_enhancement_level=EnhancementLevel.CONTEXTUAL,
+        dsl_tool_configs=dsl_configs,
     )
     logger.info(
         "✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context"

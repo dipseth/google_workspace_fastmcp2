@@ -10,10 +10,24 @@ Usage:
 import logging
 from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel
+
 import gmail.email_wrapper_setup as _setup
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger(__name__)
+
+
+# =============================================================================
+# PYDANTIC RESULT TYPES
+# =============================================================================
+
+
+class EmailDSLResult(BaseModel):
+    """Structured email DSL generation result."""
+
+    email_description: str  # e.g. "ε[Ħ, ħ, τ×2, Ƀ]"
+    email_params: dict  # content for each symbol key
 
 
 # =============================================================================
