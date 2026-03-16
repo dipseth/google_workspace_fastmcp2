@@ -174,9 +174,145 @@ def _process_thread_key_for_webhook_url(
     return threaded_webhook_url
 
 
+def _build_chat_from_sa_info(sa_info: dict, user_google_email: str = None):
+    """Build a Chat service from a parsed service account JSON dict.
+
+    Tries DWD delegation first, falls back to app-level auth.
+    """
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+
+    from auth.scope_registry import ScopeRegistry
+
+    scopes = ScopeRegistry.resolve_scope_group("chat_app")
+    creds = service_account.Credentials.from_service_account_info(
+        sa_info, scopes=scopes
+    )
+
+    if user_google_email:
+        try:
+            delegated = creds.with_subject(user_google_email)
+            svc = build("chat", "v1", credentials=delegated)
+            logger.info(
+                f"Built Chat service with delegated auth for {user_google_email}"
+            )
+            return svc
+        except Exception as e:
+            logger.debug(
+                f"Delegated auth failed for {user_google_email}, using app-level: {e}"
+            )
+
+    svc = build("chat", "v1", credentials=creds)
+    logger.info("Built Chat service from SA info (app-level)")
+    return svc
+
+
+def _get_chat_service_account(user_google_email: str = None):
+    """Build a Chat service using per-user encrypted SA or global SA file.
+
+    Priority:
+      1. Per-user encrypted Chat SA (from OAuth consent screen upload)
+      2. Global CHAT_SERVICE_ACCOUNT_FILE env var
+
+    Uses ``chat_app`` scope group from ``ScopeRegistry``.  When
+    ``user_google_email`` is provided, tries domain-wide delegation.
+
+    Returns:
+        Authenticated Google Chat service instance or None if unavailable/unconfigured.
+    """
+    # 1. Try per-user encrypted SA
+    if user_google_email:
+        try:
+            from auth.context import (
+                get_auth_middleware,
+                get_session_data,
+                list_sessions,
+            )
+            from auth.types import SessionKey
+
+            # Check session cache first
+            for sid in reversed(list_sessions()):
+                cached = get_session_data(sid, SessionKey.CHAT_SERVICE_ACCOUNT_JSON)
+                if cached and isinstance(cached, dict):
+                    logger.info("Using cached per-user Chat SA from session")
+                    return _build_chat_from_sa_info(cached, user_google_email)
+
+            # Try loading from encrypted file
+            auth_middleware = get_auth_middleware()
+            if auth_middleware:
+                per_user_key = None
+                google_sub = None
+                for sid in reversed(list_sessions()):
+                    per_user_key = per_user_key or get_session_data(
+                        sid, SessionKey.PER_USER_ENCRYPTION_KEY
+                    )
+                    google_sub = google_sub or get_session_data(
+                        sid, SessionKey.GOOGLE_SUB
+                    )
+                    if per_user_key:
+                        break
+
+                sa_info = auth_middleware.load_chat_service_account(
+                    user_google_email,
+                    per_user_key=per_user_key,
+                    google_sub=google_sub,
+                )
+                if sa_info:
+                    # Cache in session for subsequent calls
+                    for sid in reversed(list_sessions()):
+                        from auth.context import store_session_data
+
+                        store_session_data(
+                            sid, SessionKey.CHAT_SERVICE_ACCOUNT_JSON, sa_info
+                        )
+                        break
+                    logger.info("Using per-user encrypted Chat SA")
+                    return _build_chat_from_sa_info(sa_info, user_google_email)
+        except Exception as e:
+            logger.debug(f"Per-user Chat SA lookup failed: {e}")
+
+    # 2. Fall back to global SA file
+    sa_file = settings.chat_service_account_file
+    if not sa_file:
+        return None
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+
+        from auth.scope_registry import ScopeRegistry
+
+        scopes = ScopeRegistry.resolve_scope_group("chat_app")
+        creds = service_account.Credentials.from_service_account_file(
+            sa_file, scopes=scopes
+        )
+
+        if user_google_email:
+            try:
+                delegated_creds = creds.with_subject(user_google_email)
+                service = build("chat", "v1", credentials=delegated_creds)
+                logger.info(
+                    f"Built Chat service with delegated auth for {user_google_email}"
+                )
+                return service
+            except Exception as e:
+                logger.debug(
+                    f"Delegated auth failed for {user_google_email}, using app-level: {e}"
+                )
+
+        service = build("chat", "v1", credentials=creds)
+        logger.info(f"Built Chat service from global SA (app-level): {sa_file}")
+        return service
+    except Exception as e:
+        logger.warning(f"Failed to build Chat service from global SA: {e}")
+        return None
+
+
 async def _get_chat_service_with_fallback(user_google_email: UserGoogleEmail):
     """
-    Get Google Chat service with fallback to direct creation if middleware injection fails.
+    Get Google Chat service with fallback chain:
+      1. Service account file (CHAT_SERVICE_ACCOUNT_FILE) — preferred for Workspace Chat API
+      2. Middleware injection (OAuth)
+      3. Direct service creation (OAuth)
 
     Args:
         user_google_email: User's Google email address
@@ -184,7 +320,14 @@ async def _get_chat_service_with_fallback(user_google_email: UserGoogleEmail):
     Returns:
         Authenticated Google Chat service instance or None if unavailable
     """
-    # First, try middleware injection
+    # Prefer service account when configured (Chat API requires Workspace / Chat app)
+    # Pass user email for delegated auth (enables reading messages etc.)
+    sa_service = _get_chat_service_account(user_google_email)
+    if sa_service:
+        logger.info("Using Chat service account (CHAT_SERVICE_ACCOUNT_FILE)")
+        return sa_service
+
+    # Otherwise, try middleware injection
     service_key = await request_service("chat")
 
     try:
@@ -217,17 +360,16 @@ async def _get_chat_service_with_fallback(user_google_email: UserGoogleEmail):
                 logger.error(
                     f"Direct Chat service creation failed for {user_google_email}: {direct_error}"
                 )
-                return None
         else:
             # Different type of RuntimeError, log and return None
             logger.error(f"Chat service injection error for {user_google_email}: {e}")
-            return None
 
     except Exception as e:
         logger.error(
             f"Unexpected error getting Chat service for {user_google_email}: {e}"
         )
-        return None
+
+    return None
 
 
 async def _send_text_message_helper(
@@ -926,9 +1068,21 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 "create_space",
                 "update_space",
                 "delete_space",
+                "get_message",
+                "update_message",
+                "delete_message",
+                "add_reaction",
+                "list_reactions",
+                "delete_reaction",
             ],
             Field(
-                description="Action to perform: 'list_members', 'add_member', 'remove_member', 'create_space', 'update_space', 'delete_space'"
+                description=(
+                    "Action to perform. Space/member actions: 'list_members', 'add_member', "
+                    "'remove_member', 'create_space', 'update_space', 'delete_space'. "
+                    "Message actions: 'get_message', 'update_message', 'delete_message'. "
+                    "Reaction actions (require delegated user auth): 'add_reaction', "
+                    "'list_reactions', 'delete_reaction'."
+                )
             ),
         ],
         space_id: Annotated[
@@ -965,10 +1119,34 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             Optional[str],
             Field(description="Description for create_space or update_space."),
         ] = None,
+        message_name: Annotated[
+            Optional[str],
+            Field(
+                description="Full message resource name (e.g., 'spaces/xxx/messages/yyy'). Required for get/update/delete_message and reaction actions."
+            ),
+        ] = None,
+        message_text: Annotated[
+            Optional[str],
+            Field(
+                description="New message text for update_message. Supports @mentions via <users/email> format."
+            ),
+        ] = None,
+        emoji: Annotated[
+            Optional[str],
+            Field(
+                description="Unicode emoji for add_reaction (e.g., '\U0001f680', '\U0001f44d')."
+            ),
+        ] = None,
+        reaction_name: Annotated[
+            Optional[str],
+            Field(
+                description="Full reaction resource name (e.g., 'spaces/xxx/messages/yyy/reactions/zzz'). Required for delete_reaction."
+            ),
+        ] = None,
         user_google_email: UserGoogleEmail = None,
     ) -> ManageSpaceResponse:
         """
-        Unified tool for Google Chat space administration.
+        Unified tool for Google Chat space administration, message operations, and reactions.
 
         Supports the following actions:
         - list_members: List all members of a space
@@ -977,16 +1155,26 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         - create_space: Create a new space
         - update_space: Update an existing space
         - delete_space: Delete a space
+        - get_message: Retrieve a single message by resource name
+        - update_message: Edit message text (app can only edit its own messages)
+        - delete_message: Delete a message (app can only delete its own messages)
+        - add_reaction: Add an emoji reaction to a message (requires delegated user auth)
+        - list_reactions: List reactions on a message (requires delegated user auth)
+        - delete_reaction: Remove a reaction (requires delegated user auth)
 
         Args:
             action: The action to perform.
-            space_id: Space resource name. Required for most actions.
+            space_id: Space resource name. Required for space/member actions.
             member_email: Email of member to add. Required for add_member.
             member_role: Role for the member (ROLE_MEMBER or ROLE_MANAGER).
             member_name: Full member resource name. Required for remove_member.
             display_name: Display name for create_space or update_space.
             space_type: Type of space to create (SPACE or GROUP_CHAT).
             description: Description for create_space or update_space.
+            message_name: Full message resource name. Required for message/reaction actions.
+            message_text: New message text for update_message.
+            emoji: Unicode emoji for add_reaction.
+            reaction_name: Full reaction resource name. Required for delete_reaction.
             user_google_email: User's Google email for authentication.
 
         Returns:
@@ -1164,15 +1352,73 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 if description:
                     space_body["spaceDetails"] = {"description": description}
 
+                # Service account auth requires customer ID in the body.
+                # Resolve it from an existing named space.
+                try:
+                    existing = await asyncio.to_thread(
+                        chat_service.spaces().list(pageSize=10).execute
+                    )
+                    for sp in existing.get("spaces", []):
+                        customer = sp.get("customer")
+                        if customer:
+                            space_body["customer"] = customer
+                            logger.info(
+                                f"Resolved customer for create_space: {customer}"
+                            )
+                            break
+                    else:
+                        # DM spaces lack customer — fetch a named space's detail
+                        for sp in existing.get("spaces", []):
+                            if sp.get("spaceType") == "SPACE":
+                                detail = await asyncio.to_thread(
+                                    chat_service.spaces().get(name=sp["name"]).execute
+                                )
+                                customer = detail.get("customer")
+                                if customer:
+                                    space_body["customer"] = customer
+                                    logger.info(
+                                        f"Resolved customer from space detail: {customer}"
+                                    )
+                                    break
+                except Exception as e:
+                    logger.warning(f"Could not resolve customer ID: {e}")
+
                 result = await asyncio.to_thread(
                     chat_service.spaces().create(body=space_body).execute
                 )
                 new_space_id = result.get("name", "")
+
+                # Auto-add the requesting user as ROLE_MANAGER so they can access
+                added_user = None
+                if user_google_email and new_space_id:
+                    try:
+                        membership_body = {
+                            "member": {
+                                "name": f"users/{user_google_email}",
+                                "type": "HUMAN",
+                            },
+                            "role": "ROLE_MANAGER",
+                        }
+                        await asyncio.to_thread(
+                            chat_service.spaces()
+                            .members()
+                            .create(parent=new_space_id, body=membership_body)
+                            .execute
+                        )
+                        added_user = user_google_email
+                        logger.info(
+                            f"Auto-added {user_google_email} as ROLE_MANAGER to {new_space_id}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not auto-add {user_google_email} to new space: {e}"
+                        )
+
                 return ManageSpaceResponse(
                     success=True,
                     action=action,
                     spaceId=new_space_id,
-                    data={"space": result},
+                    data={"space": result, "addedUser": added_user},
                     message=f"Created space '{display_name}' ({new_space_id})",
                 )
 
@@ -1266,6 +1512,276 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     spaceId=space_id,
                     data=None,
                     message=f"Deleted space {space_id}",
+                )
+
+            # ── Message operations ──────────────────────────────────────
+
+            elif action == "get_message":
+                if not message_name:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="message_name is required for get_message",
+                        error="Missing parameter: message_name",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Failed to create Chat service",
+                        error="Service unavailable",
+                    )
+
+                result = await asyncio.to_thread(
+                    chat_service.spaces().messages().get(name=message_name).execute
+                )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=result.get("space", {}).get("name"),
+                    data={"message": result},
+                    message=f"Retrieved message {message_name}",
+                )
+
+            elif action == "update_message":
+                if not message_name:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="message_name is required for update_message",
+                        error="Missing parameter: message_name",
+                    )
+                if not message_text:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="message_text is required for update_message",
+                        error="Missing parameter: message_text",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Failed to create Chat service",
+                        error="Service unavailable",
+                    )
+
+                result = await asyncio.to_thread(
+                    chat_service.spaces()
+                    .messages()
+                    .patch(
+                        name=message_name,
+                        updateMask="text",
+                        body={"text": message_text},
+                    )
+                    .execute
+                )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=result.get("space", {}).get("name"),
+                    data={"message": result},
+                    message=f"Updated message {message_name}",
+                )
+
+            elif action == "delete_message":
+                if not message_name:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="message_name is required for delete_message",
+                        error="Missing parameter: message_name",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Failed to create Chat service",
+                        error="Service unavailable",
+                    )
+
+                await asyncio.to_thread(
+                    chat_service.spaces().messages().delete(name=message_name).execute
+                )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=None,
+                    data={"deletedMessage": message_name},
+                    message=f"Deleted message {message_name}",
+                )
+
+            # ── Reaction operations (require delegated user auth) ───────
+
+            elif action == "add_reaction":
+                if not message_name:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="message_name is required for add_reaction",
+                        error="Missing parameter: message_name",
+                    )
+                if not emoji:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="emoji is required for add_reaction",
+                        error="Missing parameter: emoji",
+                    )
+                if not user_google_email:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Reactions require delegated user auth. Provide user_google_email.",
+                        error="Reactions require user-level auth (delegated). user_google_email is required.",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Failed to create Chat service with delegated auth for reactions",
+                        error="Service unavailable",
+                    )
+
+                result = await asyncio.to_thread(
+                    chat_service.spaces()
+                    .messages()
+                    .reactions()
+                    .create(
+                        parent=message_name,
+                        body={"emoji": {"unicode": emoji}},
+                    )
+                    .execute
+                )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=None,
+                    data={"reaction": result},
+                    message=f"Added reaction {emoji} to {message_name}",
+                )
+
+            elif action == "list_reactions":
+                if not message_name:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="message_name is required for list_reactions",
+                        error="Missing parameter: message_name",
+                    )
+                if not user_google_email:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Reactions require delegated user auth. Provide user_google_email.",
+                        error="Reactions require user-level auth (delegated). user_google_email is required.",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Failed to create Chat service with delegated auth for reactions",
+                        error="Service unavailable",
+                    )
+
+                response = await asyncio.to_thread(
+                    chat_service.spaces()
+                    .messages()
+                    .reactions()
+                    .list(parent=message_name, pageSize=100)
+                    .execute
+                )
+                reactions = response.get("reactions", [])
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=None,
+                    data={"reactions": reactions, "count": len(reactions)},
+                    message=f"Found {len(reactions)} reactions on {message_name}",
+                )
+
+            elif action == "delete_reaction":
+                if not reaction_name:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="reaction_name is required for delete_reaction",
+                        error="Missing parameter: reaction_name",
+                    )
+                if not user_google_email:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Reactions require delegated user auth. Provide user_google_email.",
+                        error="Reactions require user-level auth (delegated). user_google_email is required.",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Failed to create Chat service with delegated auth for reactions",
+                        error="Service unavailable",
+                    )
+
+                await asyncio.to_thread(
+                    chat_service.spaces()
+                    .messages()
+                    .reactions()
+                    .delete(name=reaction_name)
+                    .execute
+                )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=None,
+                    data={"deletedReaction": reaction_name},
+                    message=f"Deleted reaction {reaction_name}",
                 )
 
             else:

@@ -308,59 +308,12 @@ _card_templates_collection = "card_templates"
 
 
 async def _get_chat_service_with_fallback(user_google_email: str):
-    """
-    Get Google Chat service with fallback to direct creation if middleware injection fails.
+    """Get Google Chat service — delegates to chat_tools which includes service account fallback."""
+    from gchat.chat_tools import (
+        _get_chat_service_with_fallback as _chat_tools_fallback,
+    )
 
-    Args:
-        user_google_email: User's Google email address
-
-    Returns:
-        Authenticated Google Chat service instance or None if unavailable
-    """
-    # First, try middleware injection
-    service_key = await request_service("chat")
-
-    try:
-        # Try to get the injected service from middleware
-        chat_service = await get_injected_service(service_key)
-        logger.info(
-            f"Successfully retrieved injected Chat service for {user_google_email}"
-        )
-        return chat_service
-
-    except RuntimeError as e:
-        if (
-            "not yet fulfilled" in str(e).lower()
-            or "service injection" in str(e).lower()
-        ):
-            # Middleware injection failed, fall back to direct service creation
-            logger.warning(
-                f"Middleware injection unavailable, falling back to direct service creation for {user_google_email}"
-            )
-
-            try:
-                # Use the same helper function pattern as Gmail
-                chat_service = await get_service("chat", user_google_email)
-                logger.info(
-                    f"Successfully created Chat service directly for {user_google_email}"
-                )
-                return chat_service
-
-            except Exception as direct_error:
-                logger.error(
-                    f"Direct Chat service creation failed for {user_google_email}: {direct_error}"
-                )
-                return None
-        else:
-            # Different type of RuntimeError, log and return None
-            logger.error(f"Chat service injection error for {user_google_email}: {e}")
-            return None
-
-    except Exception as e:
-        logger.error(
-            f"Unexpected error getting Chat service for {user_google_email}: {e}"
-        )
-        return None
+    return await _chat_tools_fallback(user_google_email)
 
 
 def _get_qdrant_client():
@@ -643,8 +596,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
             # Report progress for background task tracking
             await progress.set_message("Initializing card builder...")
 
-            # Use default webhook from settings if not provided
-            if not webhook_url and settings.mcp_chat_webhook:
+            # Use default webhook from settings if neither webhook nor space_id provided.
+            # When space_id is explicitly given, prefer API delivery over default webhook.
+            if not webhook_url and not space_id and settings.mcp_chat_webhook:
                 webhook_url = settings.mcp_chat_webhook
                 logger.info("📡 Using default webhook from MCP_CHAT_WEBHOOK setting")
 

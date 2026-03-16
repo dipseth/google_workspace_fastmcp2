@@ -261,6 +261,262 @@ class TestServiceUnavailable:
             assert "Service unavailable" in (result.get("error") or "")
 
 
+class TestGetMessage:
+    @pytest.mark.asyncio
+    async def test_get_message_success(self, mcp, mock_get_service, mock_chat_service):
+        mock_chat_service.spaces().messages().get().execute.return_value = {
+            "name": "spaces/abc/messages/msg1",
+            "text": "Hello world",
+            "space": {"name": "spaces/abc"},
+            "createTime": "2024-01-01T00:00:00Z",
+        }
+
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {"action": "get_message", "message_name": "spaces/abc/messages/msg1"},
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is True
+        assert result["data"]["message"]["text"] == "Hello world"
+
+    @pytest.mark.asyncio
+    async def test_get_message_missing_message_name(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {"action": "get_message"},
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "message_name" in result["error"]
+
+
+class TestUpdateMessage:
+    @pytest.mark.asyncio
+    async def test_update_message_success(
+        self, mcp, mock_get_service, mock_chat_service
+    ):
+        mock_chat_service.spaces().messages().patch().execute.return_value = {
+            "name": "spaces/abc/messages/msg1",
+            "text": "Edited text",
+            "space": {"name": "spaces/abc"},
+        }
+
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {
+                "action": "update_message",
+                "message_name": "spaces/abc/messages/msg1",
+                "message_text": "Edited text",
+            },
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is True
+        assert result["data"]["message"]["text"] == "Edited text"
+
+    @pytest.mark.asyncio
+    async def test_update_message_missing_message_name(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {"action": "update_message", "message_text": "x"},
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "message_name" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_update_message_missing_message_text(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {"action": "update_message", "message_name": "spaces/abc/messages/msg1"},
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "message_text" in result["error"]
+
+
+class TestDeleteMessage:
+    @pytest.mark.asyncio
+    async def test_delete_message_success(
+        self, mcp, mock_get_service, mock_chat_service
+    ):
+        mock_chat_service.spaces().messages().delete().execute.return_value = {}
+
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {"action": "delete_message", "message_name": "spaces/abc/messages/msg1"},
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is True
+        assert result["data"]["deletedMessage"] == "spaces/abc/messages/msg1"
+
+    @pytest.mark.asyncio
+    async def test_delete_message_missing_message_name(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {"action": "delete_message"},
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "message_name" in result["error"]
+
+
+class TestAddReaction:
+    @pytest.mark.asyncio
+    async def test_add_reaction_success(self, mcp, mock_get_service, mock_chat_service):
+        mock_chat_service.spaces().messages().reactions().create().execute.return_value = {
+            "name": "spaces/abc/messages/msg1/reactions/r1",
+            "emoji": {"unicode": "\U0001f680"},
+        }
+
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {
+                "action": "add_reaction",
+                "message_name": "spaces/abc/messages/msg1",
+                "emoji": "\U0001f680",
+                "user_google_email": "user@example.com",
+            },
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is True
+        assert "reaction" in result["data"]
+
+    @pytest.mark.asyncio
+    async def test_add_reaction_missing_message_name(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {
+                "action": "add_reaction",
+                "emoji": "\U0001f680",
+                "user_google_email": "u@x.com",
+            },
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "message_name" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_add_reaction_missing_emoji(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {
+                "action": "add_reaction",
+                "message_name": "spaces/abc/messages/msg1",
+                "user_google_email": "u@x.com",
+            },
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "emoji" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_add_reaction_missing_user_email(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {
+                "action": "add_reaction",
+                "message_name": "spaces/abc/messages/msg1",
+                "emoji": "\U0001f680",
+            },
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "user_google_email" in result["error"] or "user-level" in result["error"]
+
+
+class TestListReactions:
+    @pytest.mark.asyncio
+    async def test_list_reactions_success(
+        self, mcp, mock_get_service, mock_chat_service
+    ):
+        mock_chat_service.spaces().messages().reactions().list().execute.return_value = {
+            "reactions": [
+                {
+                    "name": "spaces/abc/messages/msg1/reactions/r1",
+                    "emoji": {"unicode": "\U0001f44d"},
+                    "user": {"name": "users/123", "type": "HUMAN"},
+                }
+            ]
+        }
+
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {
+                "action": "list_reactions",
+                "message_name": "spaces/abc/messages/msg1",
+                "user_google_email": "user@example.com",
+            },
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is True
+        assert result["data"]["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_list_reactions_missing_message_name(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {"action": "list_reactions", "user_google_email": "u@x.com"},
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "message_name" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_list_reactions_missing_user_email(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {"action": "list_reactions", "message_name": "spaces/abc/messages/msg1"},
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "user_google_email" in result["error"] or "user-level" in result["error"]
+
+
+class TestDeleteReaction:
+    @pytest.mark.asyncio
+    async def test_delete_reaction_success(
+        self, mcp, mock_get_service, mock_chat_service
+    ):
+        mock_chat_service.spaces().messages().reactions().delete().execute.return_value = {}
+
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {
+                "action": "delete_reaction",
+                "reaction_name": "spaces/abc/messages/msg1/reactions/r1",
+                "user_google_email": "user@example.com",
+            },
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is True
+        assert (
+            result["data"]["deletedReaction"] == "spaces/abc/messages/msg1/reactions/r1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_reaction_missing_reaction_name(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {"action": "delete_reaction", "user_google_email": "u@x.com"},
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "reaction_name" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_delete_reaction_missing_user_email(self, mcp, mock_get_service):
+        result_raw = await mcp.call_tool(
+            "manage_space",
+            {
+                "action": "delete_reaction",
+                "reaction_name": "spaces/abc/messages/msg1/reactions/r1",
+            },
+        )
+        result = _extract_result(result_raw)
+        assert result["success"] is False
+        assert "user_google_email" in result["error"] or "user-level" in result["error"]
+
+
 class TestHttpErrorHandling:
     @pytest.mark.asyncio
     async def test_http_error_handling(self, mcp, mock_chat_service):
