@@ -1,3 +1,6 @@
+# Qdrant local database
+qdrant_data/
+
 # Python
 __pycache__/
 *.py[cod]

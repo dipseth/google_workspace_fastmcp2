@@ -962,16 +962,29 @@ class AuthMiddleware(Middleware):
             keys_to_try.append(per_user_key)
 
         if google_sub:
-            # Get passphrase from session (provided via check_drive_auth / start_google_auth)
+            # Get passphrase from current session first; fall back to scan
+            # to avoid cross-session leakage in multi-user scenarios.
             session_password = ""
             try:
-                from .context import get_session_data, list_sessions
+                from .context import (
+                    get_session_context_sync,
+                    get_session_data,
+                    list_sessions,
+                )
 
-                for sid in reversed(list_sessions()):
-                    pwd = get_session_data(sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
-                    if pwd:
-                        session_password = pwd
-                        break
+                current_sid = get_session_context_sync()
+                if current_sid:
+                    session_password = (
+                        get_session_data(current_sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
+                        or ""
+                    )
+                if not session_password:
+                    # Fallback for contexts without FastMCP session (e.g. OAuth callback)
+                    for sid in reversed(list_sessions()):
+                        pwd = get_session_data(sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
+                        if pwd:
+                            session_password = pwd
+                            break
             except Exception:
                 pass
             keys_to_try.extend(

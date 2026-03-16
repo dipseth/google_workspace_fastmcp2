@@ -275,7 +275,7 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "PRIVACY_FIELD_PATTERNS"},
     )
     privacy_exclude_tools: str = Field(
-        default="manage_tools,check_drive_auth,get_server_info",
+        default="manage_tools,check_drive_auth,get_server_info,set_privacy_mode",
         description="Comma-separated tool names to exclude from privacy processing",
         json_schema_extra={"env": "PRIVACY_EXCLUDE_TOOLS"},
     )

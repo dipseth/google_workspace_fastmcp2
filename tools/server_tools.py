@@ -785,6 +785,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "health_check",
             "start_google_auth",
             "check_drive_auth",
+            "set_privacy_mode",
             # CodeMode meta-tools (FastMCP 3.1.0+)
             "tags",
             "search",
@@ -1400,6 +1401,151 @@ def setup_server_tools(mcp: FastMCP) -> None:
             error="Unexpected code path reached",
         )
 
+    @mcp.tool(
+        name="set_privacy_mode",
+        description=(
+            "Toggle per-session PII privacy mode. When enabled, tool responses "
+            "have sensitive values (emails, names, phone numbers) replaced with "
+            "[PRIVATE:token_N] tokens. Requires authenticated session (OAuth or per-user API key)."
+        ),
+        tags={"server", "privacy", "security", "session"},
+        annotations={
+            "title": "Set Privacy Mode",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    )
+    async def set_privacy_mode_tool(
+        mode: Annotated[
+            Literal["disabled", "auto", "strict"],
+            Field(
+                description=(
+                    "Privacy mode to set for this session: "
+                    "'disabled' (no masking), "
+                    "'auto' (mask PII identity fields + email patterns), "
+                    "'strict' (mask all string values)."
+                )
+            ),
+        ],
+        mask_content: Annotated[
+            Optional[bool],
+            Field(
+                description=(
+                    "When true, also mask content fields (snippet, subject, body, "
+                    "text, description, summary, web_url, attendees, location). "
+                    "Default true when mode is 'auto'. Has no effect when mode is "
+                    "'strict' (everything is already masked) or 'disabled'."
+                )
+            ),
+        ] = None,
+        additional_fields: Annotated[
+            Optional[str],
+            Field(
+                description=(
+                    "Comma-separated extra field names to treat as PII for this "
+                    "session (e.g. 'customField1,notes'). Merged with built-in "
+                    "patterns."
+                )
+            ),
+        ] = None,
+        user_google_email: Annotated[
+            UserGoogleEmail,
+            Field(description="Auto-injected by middleware. Not used by this tool."),
+        ] = None,
+    ) -> Dict[str, Any]:
+        """Toggle per-session privacy mode.
+
+        Security: requires an authenticated session (OAuth or per-user API key)
+        so that the vault key is crypto-derived from identity material.
+        Shared API key sessions are rejected because they use a random vault
+        seed with no identity binding.
+        """
+        from auth.context import (
+            get_session_context,
+            get_session_data,
+            store_session_data,
+        )
+        from auth.types import AuthProvenance, SessionKey
+
+        session_id = await get_session_context()
+        if not session_id:
+            return {
+                "success": False,
+                "error": "No active session — cannot set privacy mode",
+            }
+
+        # Security: reject shared API key sessions (random vault seed, no identity binding).
+        provenance = get_session_data(
+            session_id, SessionKey.AUTH_PROVENANCE, default=None
+        )
+        if provenance == AuthProvenance.API_KEY:
+            return {
+                "success": False,
+                "error": (
+                    "Privacy mode requires authenticated session "
+                    "(OAuth or per-user API key), not shared API key"
+                ),
+                "auth_provenance": str(provenance),
+            }
+
+        # Get previous state
+        previous_mode = get_session_data(
+            session_id, SessionKey.PRIVACY_MODE, default=None
+        )
+        effective_previous = (
+            previous_mode if previous_mode is not None else settings.privacy_mode
+        )
+
+        # Store the new mode
+        store_session_data(session_id, SessionKey.PRIVACY_MODE, mode)
+
+        # Build session-level additional fields set
+        # Default: mask_content=True when mode is "auto"
+        effective_mask_content = (
+            mask_content if mask_content is not None else (mode == "auto")
+        )
+
+        session_fields: set[str] = set()
+        if effective_mask_content and mode != "disabled":
+            session_fields.add(
+                "__content__"
+            )  # sentinel that expands to PRIVACY_CONTENT_FIELDS
+        if additional_fields:
+            for f in additional_fields.split(","):
+                f = f.strip()
+                if f:
+                    session_fields.add(f)
+
+        if session_fields:
+            store_session_data(
+                session_id,
+                SessionKey.PRIVACY_ADDITIONAL_FIELDS,
+                frozenset(session_fields),
+            )
+        else:
+            store_session_data(session_id, SessionKey.PRIVACY_ADDITIONAL_FIELDS, None)
+
+        logger.info(
+            "Privacy mode changed for session %s: %s -> %s (mask_content=%s, extra_fields=%s)",
+            session_id[:8] + "..." if len(session_id) > 8 else session_id,
+            effective_previous,
+            mode,
+            effective_mask_content,
+            additional_fields or "none",
+        )
+
+        return {
+            "success": True,
+            "previous_mode": effective_previous,
+            "current_mode": mode,
+            "mask_content": effective_mask_content,
+            "additional_fields": sorted(session_fields) if session_fields else None,
+            "auth_provenance": str(provenance),
+            "message": f"Privacy mode set to '{mode}' for this session",
+        }
+
     logger.info(
-        "✅ Server management tools registered: health_check, server_info, manage_credentials, manage_tools"
+        "Server management tools registered: health_check, server_info, manage_credentials, manage_tools, set_privacy_mode"
     )

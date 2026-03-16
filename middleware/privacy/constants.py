@@ -22,6 +22,7 @@ PRIVACY_FIELD_PATTERNS: frozenset[str] = frozenset(
         "reply_to",
         "deliveredTo",
         "delivered_to",
+        "userEmail",
         # Identity
         "organizer",
         "creator",
@@ -33,11 +34,36 @@ PRIVACY_FIELD_PATTERNS: frozenset[str] = frozenset(
         "full_name",
         "givenName",
         "familyName",
+        "senderName",
+        "senderEmail",
         # Contact info
         "phoneNumber",
         "phone_number",
         "phone",
         "address",
+    }
+)
+
+# Content fields that contain user data but aren't strictly PII identity fields.
+# Added to PRIVACY_FIELD_PATTERNS when privacy mode is "auto" with content masking,
+# or when the user explicitly includes them via set_privacy_mode(additional_fields=...).
+PRIVACY_CONTENT_FIELDS: frozenset[str] = frozenset(
+    {
+        "snippet",
+        "subject",
+        "body",
+        "text",
+        "description",
+        "summary",
+        "web_url",
+        "webUrl",
+        "attendees",
+        "location",
+        "htmlBody",
+        "html_body",
+        "plainText",
+        "plain_text",
+        "content",
     }
 )
 

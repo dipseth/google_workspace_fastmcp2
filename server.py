@@ -843,16 +843,17 @@ logger.info(
 )
 
 # 8. Add PrivacyMiddleware for PII encryption (after all data-producing middleware)
-if settings.privacy_mode != "disabled":
-    from middleware.privacy.middleware import PrivacyMiddleware
+from middleware.privacy.middleware import PrivacyMiddleware
 
-    privacy_middleware = PrivacyMiddleware(
-        mode=settings.privacy_mode,
-        additional_fields=settings.privacy_field_patterns,
-        exclude_tools=settings.privacy_exclude_tools,
-    )
-    mcp.add_middleware(privacy_middleware)
-    logger.info(f"✅ Privacy middleware enabled (mode={settings.privacy_mode})")
+privacy_middleware = PrivacyMiddleware(
+    mode=settings.privacy_mode,  # server default ("disabled" is valid)
+    additional_fields=settings.privacy_field_patterns,
+    exclude_tools=settings.privacy_exclude_tools,
+)
+mcp.add_middleware(privacy_middleware)
+logger.info(
+    f"Privacy middleware registered (default={settings.privacy_mode}, per-session toggle available)"
+)
 
 # 9. Add ResponseLimitingMiddleware for tool response size control
 if settings.response_limit_max_size > 0:

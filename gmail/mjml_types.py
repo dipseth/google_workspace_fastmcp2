@@ -21,12 +21,25 @@ Usage:
         html = result.html
 """
 
+import html
 import logging
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Discriminator, Field, Tag, model_validator
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_url(url: Optional[str]) -> str:
+    """Validate URL to prevent javascript: and data: protocol injection."""
+    if not url:
+        return ""
+    stripped = url.strip()
+    lower = stripped.lower()
+    if lower.startswith(("http://", "https://", "/", "#", "mailto:")):
+        return html.escape(stripped, quote=True)
+    # Reject javascript:, data:, vbscript:, etc.
+    return ""
 
 
 # =============================================================================
@@ -112,17 +125,17 @@ class HeroBlock(EmailBlock):
         parts = []
         parts.append(
             f'<mj-text font-size="{self.title_size}" font-weight="700" '
-            f'color="{t_color}" padding="0 0 8px 0">{self.title}</mj-text>'
+            f'color="{t_color}" padding="0 0 8px 0">{html.escape(self.title)}</mj-text>'
         )
         if self.subtitle:
             parts.append(
                 f'<mj-text font-size="{self.subtitle_size}" color="{s_color}" '
-                f'padding="0 0 16px 0">{self.subtitle}</mj-text>'
+                f'padding="0 0 16px 0">{html.escape(self.subtitle)}</mj-text>'
             )
         if self.cta_text and self.cta_url:
             parts.append(
-                f'<mj-button href="{self.cta_url}" '
-                f'padding="0 0 8px 0">{self.cta_text}</mj-button>'
+                f'<mj-button href="{_safe_url(self.cta_url)}" '
+                f'padding="0 0 8px 0">{html.escape(self.cta_text)}</mj-button>'
             )
         return "\n".join(parts)
 
@@ -142,7 +155,7 @@ class TextBlock(EmailBlock):
         color = self.color or theme.text_color
         return (
             f'<mj-text font-size="{self.font_size}" color="{color}" '
-            f'padding="{self.padding}">{self.text}</mj-text>'
+            f'padding="{self.padding}">{html.escape(self.text)}</mj-text>'
         )
 
 
@@ -162,9 +175,9 @@ class ButtonBlock(EmailBlock):
         theme = theme or EmailTheme()
         bg = self.background_color or theme.primary_color
         return (
-            f'<mj-button href="{self.url}" background-color="{bg}" '
+            f'<mj-button href="{_safe_url(self.url)}" background-color="{bg}" '
             f'color="{self.color}" border-radius="{self.border_radius}" '
-            f'align="{self.align}" padding="{self.padding}">{self.text}</mj-button>'
+            f'align="{self.align}" padding="{self.padding}">{html.escape(self.text)}</mj-button>'
         )
 
 
@@ -179,11 +192,15 @@ class ImageBlock(EmailBlock):
     padding: str = "0 0 12px 0"
 
     def to_mjml(self, theme: Optional[EmailTheme] = None) -> str:
-        attrs = [f'src="{self.src}"', f'alt="{self.alt}"', f'padding="{self.padding}"']
+        attrs = [
+            f'src="{_safe_url(self.src)}"',
+            f'alt="{html.escape(self.alt, quote=True)}"',
+            f'padding="{self.padding}"',
+        ]
         if self.width:
             attrs.append(f'width="{self.width}"')
         if self.href:
-            attrs.append(f'href="{self.href}"')
+            attrs.append(f'href="{_safe_url(self.href)}"')
         return f"<mj-image {' '.join(attrs)} />"
 
 
@@ -278,12 +295,12 @@ class FooterBlock(EmailBlock):
         parts = [
             f'<mj-divider border-color="{theme.border_color}" padding="16px 0" />',
             f'<mj-text font-size="{self.font_size}" color="{color}" padding="0">'
-            f"{self.text}</mj-text>",
+            f"{html.escape(self.text)}</mj-text>",
         ]
         if self.unsubscribe_url:
             parts.append(
                 f'<mj-text font-size="{self.font_size}" color="{color}" padding="8px 0 0 0">\n'
-                f'  <a href="{self.unsubscribe_url}" style="color:{color}">Unsubscribe</a>\n'
+                f'  <a href="{_safe_url(self.unsubscribe_url)}" style="color:{color}">Unsubscribe</a>\n'
                 f"</mj-text>"
             )
         return "\n".join(parts)
@@ -307,13 +324,13 @@ class HeaderBlock(EmailBlock):
         parts = []
         if self.logo_url:
             parts.append(
-                f'<mj-image src="{self.logo_url}" alt="{self.logo_alt}" '
+                f'<mj-image src="{_safe_url(self.logo_url)}" alt="{html.escape(self.logo_alt, quote=True)}" '
                 f'width="{self.logo_width}" padding="0" />'
             )
         if self.title:
             parts.append(
                 f'<mj-text font-size="24px" font-weight="700" '
-                f'color="{color}" padding="0">{self.title}</mj-text>'
+                f'color="{color}" padding="0">{html.escape(self.title)}</mj-text>'
             )
         inner = "\n".join(parts)
         return (
@@ -343,12 +360,12 @@ class SocialBlock(EmailBlock):
         for link in self.links:
             if link.icon_url:
                 elements.append(
-                    f'<mj-social-element name="{link.name}" href="{link.href}" '
-                    f'src="{link.icon_url}" />'
+                    f'<mj-social-element name="{html.escape(link.name, quote=True)}" href="{_safe_url(link.href)}" '
+                    f'src="{_safe_url(link.icon_url)}" />'
                 )
             else:
                 elements.append(
-                    f'<mj-social-element name="{link.name}" href="{link.href}" />'
+                    f'<mj-social-element name="{html.escape(link.name, quote=True)}" href="{_safe_url(link.href)}" />'
                 )
         inner = "\n".join(elements)
         return (
@@ -375,14 +392,14 @@ class TableBlock(EmailBlock):
         theme = theme or EmailTheme()
         header_cells = "".join(
             f'<th style="padding:8px;border-bottom:2px solid {theme.border_color};'
-            f'text-align:left">{h}</th>'
+            f'text-align:left">{html.escape(h)}</th>'
             for h in self.headers
         )
         data_rows = []
         for row in self.rows:
             cells = "".join(
                 f'<td style="padding:8px;border-bottom:1px solid {theme.border_color}">'
-                f"{c}</td>"
+                f"{html.escape(c)}</td>"
                 for c in row.cells
             )
             data_rows.append(f"<tr>{cells}</tr>")
@@ -447,9 +464,9 @@ class AccordionBlock(EmailBlock):
             elements.append(
                 f"<mj-accordion-element>\n"
                 f"  <mj-accordion-title {' '.join(title_attrs)}>"
-                f"{item.title}</mj-accordion-title>\n"
+                f"{html.escape(item.title)}</mj-accordion-title>\n"
                 f"  <mj-accordion-text {' '.join(text_attrs)}>"
-                f"{item.content}</mj-accordion-text>\n"
+                f"{html.escape(item.content)}</mj-accordion-text>\n"
                 f"</mj-accordion-element>"
             )
 
@@ -491,13 +508,16 @@ class CarouselBlock(EmailBlock):
 
         img_elements = []
         for img in self.images:
-            img_attrs = [f'src="{img.src}"', f'alt="{img.alt}"']
+            img_attrs = [
+                f'src="{_safe_url(img.src)}"',
+                f'alt="{html.escape(img.alt, quote=True)}"',
+            ]
             if img.href:
-                img_attrs.append(f'href="{img.href}"')
+                img_attrs.append(f'href="{_safe_url(img.href)}"')
             if img.thumbnails_src:
-                img_attrs.append(f'thumbnails-src="{img.thumbnails_src}"')
+                img_attrs.append(f'thumbnails-src="{_safe_url(img.thumbnails_src)}"')
             if img.title:
-                img_attrs.append(f'title="{img.title}"')
+                img_attrs.append(f'title="{html.escape(img.title, quote=True)}"')
             img_elements.append(f"<mj-carousel-image {' '.join(img_attrs)} />")
 
         inner = "\n".join(img_elements)
@@ -596,7 +616,7 @@ class EmailSpec(BaseModel):
             parts.append(
                 f'<mj-text font-size="1px" color="{theme.bg_color}" '
                 f'height="0" line-height="1px" padding="0">'
-                f"{self.preheader}</mj-text>"
+                f"{html.escape(self.preheader)}</mj-text>"
             )
             parts.append("</mj-column>")
             parts.append("</mj-section>")

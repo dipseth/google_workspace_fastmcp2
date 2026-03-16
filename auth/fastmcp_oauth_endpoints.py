@@ -2286,7 +2286,68 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     </div>
                     {accessible_section}"""
 
-                # Gather envelope info for security visualization
+                # Build privacy mode toggle section
+                privacy_section = ""
+                _privacy_session_id = ""
+                try:
+                    _privacy_session_id = session_id or ""
+                except Exception:
+                    pass
+                if _privacy_session_id:
+                    privacy_section = f"""
+                    <div class="privacy-toggle">
+                        <div class="privacy-header">
+                            <b>🛡️ Privacy Mode</b>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="privacyToggle"
+                                       onchange="togglePrivacy(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <small class="privacy-desc">
+                            When enabled, tool responses have personal information
+                            (emails, names, phone numbers) replaced with
+                            <code>[PRIVATE:token]</code> placeholders before the AI sees them.
+                            Your data stays encrypted on the server and can be revealed
+                            when needed. Disabled by default.
+                        </small>
+                        <div id="privacyStatus" class="privacy-status"></div>
+                    </div>
+                    <script>
+                    function togglePrivacy(enabled) {{
+                        var mode = enabled ? 'auto' : 'disabled';
+                        var statusEl = document.getElementById('privacyStatus');
+                        statusEl.textContent = 'Updating...';
+                        statusEl.className = 'privacy-status';
+                        fetch('/api/privacy-mode', {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json'}},
+                            body: JSON.stringify({{
+                                session_id: '{_privacy_session_id}',
+                                mode: mode
+                            }})
+                        }})
+                        .then(function(r) {{ return r.json(); }})
+                        .then(function(data) {{
+                            if (data.success) {{
+                                statusEl.textContent = enabled
+                                    ? 'Privacy mode active — PII will be masked in tool responses'
+                                    : 'Privacy mode off — tool responses show full data';
+                                statusEl.className = 'privacy-status ' + (enabled ? 'active' : 'off');
+                            }} else {{
+                                statusEl.textContent = 'Error: ' + (data.error || 'unknown');
+                                statusEl.className = 'privacy-status error';
+                                document.getElementById('privacyToggle').checked = !enabled;
+                            }}
+                        }})
+                        .catch(function(err) {{
+                            statusEl.textContent = 'Network error';
+                            statusEl.className = 'privacy-status error';
+                            document.getElementById('privacyToggle').checked = !enabled;
+                        }});
+                    }}
+                    </script>"""
+
                 # Gather envelope info for security visualization
                 security_viz_section = ""
                 _num_recipients = 0
@@ -2425,6 +2486,21 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         .linked-accounts ul {{ margin: 8px 0 0 0; padding-left: 20px; }}
                         .linked-accounts li {{ margin: 4px 0; font-family: monospace; font-size: 14px; }}
                         .linked-accounts.solo {{ background: #f8f9fa; color: #6c757d; border-color: #dee2e6; }}
+                        /* Privacy mode toggle */
+                        .privacy-toggle {{ background: #f0f4ff; border: 1px solid #c5cae9; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: left; }}
+                        .privacy-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }}
+                        .privacy-desc {{ display: block; color: #495057; line-height: 1.5; }}
+                        .privacy-desc code {{ background: #e8eaf6; padding: 1px 5px; border-radius: 3px; font-size: 12px; }}
+                        .privacy-status {{ font-size: 12px; margin-top: 8px; min-height: 16px; }}
+                        .privacy-status.active {{ color: #2e7d32; }}
+                        .privacy-status.off {{ color: #6c757d; }}
+                        .privacy-status.error {{ color: #c62828; }}
+                        .toggle-switch {{ position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; }}
+                        .toggle-switch input {{ opacity: 0; width: 0; height: 0; }}
+                        .toggle-slider {{ position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; border-radius: 26px; transition: 0.3s; }}
+                        .toggle-slider:before {{ content: ""; position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.3s; }}
+                        .toggle-switch input:checked + .toggle-slider {{ background: #5c6bc0; }}
+                        .toggle-switch input:checked + .toggle-slider:before {{ transform: translateX(22px); }}
                         /* Security visualization */
                         .sec-panel {{ background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #e0e0e0; padding: 24px; border-radius: 12px; margin: 24px 0; text-align: left; }}
                         .sec-title {{ font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px; }}
@@ -2471,6 +2547,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             Ready to use.
                         </div>
                         {api_key_section}
+                        {privacy_section}
                         {security_viz_section}
                         <div class="services">
                             <h3>🚀 Services Available</h3>
@@ -2904,6 +2981,78 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     "Access-Control-Allow-Origin": "*",
                 },
             )
+
+    # ── Per-session privacy mode toggle (called from OAuth success page) ──
+    @mcp.custom_route("/api/privacy-mode", methods=["POST", "OPTIONS"])
+    async def privacy_mode_api(request: Any):
+        """Set per-session privacy mode from the OAuth success page."""
+        from starlette.responses import JSONResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            )
+
+        try:
+            body = await request.json()
+            target_session = body.get("session_id")
+            mode = body.get("mode")
+
+            if mode not in ("disabled", "auto", "strict"):
+                return JSONResponse(
+                    {"success": False, "error": f"Invalid mode: {mode}"},
+                    status_code=400,
+                )
+
+            if not target_session:
+                return JSONResponse(
+                    {"success": False, "error": "Missing session_id"},
+                    status_code=400,
+                )
+
+            from auth.context import get_session_data, store_session_data
+            from auth.types import AuthProvenance, SessionKey
+
+            # Reject shared API key sessions (no identity binding)
+            provenance = get_session_data(
+                target_session, SessionKey.AUTH_PROVENANCE, default=None
+            )
+            if provenance == AuthProvenance.API_KEY:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Privacy mode requires authenticated session (not shared API key)",
+                    },
+                    status_code=403,
+                )
+
+            previous = get_session_data(
+                target_session, SessionKey.PRIVACY_MODE, default=None
+            )
+            store_session_data(target_session, SessionKey.PRIVACY_MODE, mode)
+
+            logger.info(
+                "Privacy mode set via API: session=%s, %s -> %s",
+                target_session[:8] + "...",
+                previous or "default",
+                mode,
+            )
+
+            return JSONResponse(
+                {
+                    "success": True,
+                    "previous_mode": previous or "disabled",
+                    "current_mode": mode,
+                }
+            )
+        except Exception as e:
+            logger.exception("Privacy mode API error")
+            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
     # For simplicity, let's focus on the core endpoints that MCP Inspector needs
     # The client configuration endpoints can be added later if needed

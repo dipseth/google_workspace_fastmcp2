@@ -177,10 +177,11 @@ class ToolRelationshipGraph:
             is_new_session = session_id not in self._session_history
             history = self._session_history.setdefault(session_id, [])
 
-            # Evict oldest session if over cap (only when adding a new one)
-            if is_new_session and len(self._session_history) > self.MAX_SESSIONS:
-                oldest_key = next(iter(self._session_history))
-                del self._session_history[oldest_key]
+            # Evict oldest sessions if over cap (only when adding a new one)
+            if is_new_session:
+                while len(self._session_history) > self.MAX_SESSIONS:
+                    oldest_key = next(iter(self._session_history))
+                    del self._session_history[oldest_key]
 
             # Link from each recent predecessor to this tool
             window = history[-self.PREDECESSOR_WINDOW :]

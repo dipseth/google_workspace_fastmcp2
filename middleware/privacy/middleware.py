@@ -7,6 +7,9 @@ encrypted ciphertext, while server-side storage (Qdrant) retains plaintext.
 Two phases per ``on_call_tool``:
   Phase A (inbound):  resolve [PRIVATE:token_N] in arguments → plaintext
   Phase B (outbound): scan response → encrypt sensitive values → mask content
+
+Per-session toggle: sessions can override the server default via
+``SessionKey.PRIVACY_MODE`` (set by the ``set_privacy_mode`` tool).
 """
 
 from __future__ import annotations
@@ -35,8 +38,10 @@ class PrivacyMiddleware(Middleware):
     """Encrypts sensitive values in tool responses, masks them for the LLM.
 
     Args:
-        mode: ``"auto"`` (field heuristics + value patterns) or
-              ``"strict"`` (encrypt all string values).
+        mode: ``"disabled"``, ``"auto"`` (field heuristics + value patterns),
+              or ``"strict"`` (encrypt all string values).
+              Acts as the server-wide default; individual sessions can
+              override via ``SessionKey.PRIVACY_MODE``.
         additional_fields: Comma-separated extra field names to treat as PII.
         exclude_tools: Comma-separated tool names to skip privacy processing.
     """
@@ -68,11 +73,63 @@ class PrivacyMiddleware(Middleware):
         """Return True if this tool's response should be privacy-processed."""
         return tool_name not in self._exclude_tools
 
+    def _get_effective_mode(self, session_id: str | None) -> str:
+        """Return the privacy mode for this session.
+
+        Checks session-level override first, falls back to server default.
+        """
+        if session_id:
+            try:
+                from auth.context import get_session_data
+                from auth.types import SessionKey
+
+                session_mode = get_session_data(
+                    session_id, SessionKey.PRIVACY_MODE, default=None
+                )
+                if session_mode is not None:
+                    return session_mode
+            except Exception:
+                pass
+        return self._mode
+
+    def _get_effective_additional_fields(
+        self, session_id: str | None
+    ) -> frozenset[str] | None:
+        """Merge server-level and session-level additional fields.
+
+        Session can store extra field names via ``SessionKey.PRIVACY_ADDITIONAL_FIELDS``.
+        The special value ``"__content__"`` expands to ``PRIVACY_CONTENT_FIELDS``.
+        """
+        merged: set[str] = (
+            set(self._additional_fields) if self._additional_fields else set()
+        )
+
+        if session_id:
+            try:
+                from auth.context import get_session_data
+                from auth.types import SessionKey
+
+                session_fields = get_session_data(
+                    session_id, SessionKey.PRIVACY_ADDITIONAL_FIELDS, default=None
+                )
+                if session_fields:
+                    if "__content__" in session_fields:
+                        from middleware.privacy.constants import PRIVACY_CONTENT_FIELDS
+
+                        merged |= PRIVACY_CONTENT_FIELDS
+                        session_fields = session_fields - {"__content__"}
+                    merged |= session_fields
+            except Exception:
+                pass
+
+        return frozenset(merged) if merged else None
+
     async def on_call_tool(self, context, call_next):
         """Two-phase privacy processing around tool execution."""
         session_id = await self._get_session_id(context)
 
         # Phase A: resolve [PRIVATE:token_N] → plaintext in arguments
+        # (needed even when disabled, for in-flight tokens from a prior enabled state)
         if context.message.arguments:
             vault = get_vault(session_id) if session_id else None
             if vault:
@@ -80,11 +137,20 @@ class PrivacyMiddleware(Middleware):
                     context.message.arguments, vault
                 )
 
+        # Determine effective mode for this session
+        effective_mode = self._get_effective_mode(session_id)
+
+        # Short-circuit: excluded tools and disabled mode bypass Phase B entirely
+        if effective_mode == "disabled" or not self._should_process(
+            context.message.name
+        ):
+            return await call_next(context)
+
         # Execute tool
         result = await call_next(context)
 
-        # Phase B: encrypt + mask response
-        if not session_id or not self._should_process(context.message.name):
+        # Phase B: encrypt + mask response (only when enabled)
+        if not session_id:
             return result
 
         if result is None:
@@ -94,6 +160,9 @@ class PrivacyMiddleware(Middleware):
         if vault is None:
             return result
 
+        effective_strict = effective_mode == "strict"
+        effective_fields = self._get_effective_additional_fields(session_id)
+
         # Process content blocks (what LLM reads — masked text)
         masked_content = result.content
         if result.content:
@@ -101,11 +170,18 @@ class PrivacyMiddleware(Middleware):
                 masked_content = scan_and_encrypt_content(
                     result.content,
                     vault,
-                    additional_fields=self._additional_fields,
-                    strict=self._strict,
+                    additional_fields=effective_fields,
+                    strict=effective_strict,
                 )
             except Exception:
-                logger.exception("Privacy: error scanning content")
+                logger.exception(
+                    "Privacy: error scanning content — suppressing response to prevent PII leak"
+                )
+                from mcp.types import TextContent
+
+                masked_content = [
+                    TextContent(type="text", text="[PRIVACY_ERROR: content redacted]")
+                ]
 
         # Process structured_content (encrypted sentinels for round-trip)
         encrypted_structured = result.structured_content
@@ -114,11 +190,14 @@ class PrivacyMiddleware(Middleware):
                 encrypted_structured = scan_and_encrypt_structured(
                     result.structured_content,
                     vault,
-                    additional_fields=self._additional_fields,
-                    strict=self._strict,
+                    additional_fields=effective_fields,
+                    strict=effective_strict,
                 )
             except Exception:
-                logger.exception("Privacy: error scanning structured_content")
+                logger.exception(
+                    "Privacy: error scanning structured_content — suppressing to prevent PII leak"
+                )
+                encrypted_structured = None
 
         # Build updated meta
         meta = dict(result.meta) if result.meta else {}

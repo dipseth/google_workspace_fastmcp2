@@ -72,7 +72,8 @@ class PrivacyVault:
     def __init__(self, session_id: str, fernet_key: bytes) -> None:
         self._session_id = session_id
         self._fernet = Fernet(fernet_key)
-        self._fernet_key_bytes = fernet_key
+        # Store as mutable bytearray so destroy() can safely zero the key
+        self._fernet_key_bytes = bytearray(fernet_key)
         self._token_counter = 0
         self._store: dict[str, bytes] = {}
         self._type_hints: dict[str, str] = {}
@@ -153,14 +154,14 @@ class PrivacyVault:
         return self._session_id
 
     def destroy(self) -> None:
-        """Wipe vault state.  Best-effort zeroing of ciphertexts."""
+        """Wipe vault state.  Zero the key bytearray and clear all stores."""
         with self._lock:
-            for ct in self._store.values():
-                _zero_bytes(ct)
             self._store.clear()
             self._type_hints.clear()
             self._dedup_index.clear()
-            _zero_bytes(self._fernet_key_bytes)
+            # Zero the mutable key bytearray in-place (safe, no ctypes needed)
+            for i in range(len(self._fernet_key_bytes)):
+                self._fernet_key_bytes[i] = 0
 
     # ------------------------------------------------------------------
     # Internals
@@ -173,13 +174,3 @@ class PrivacyVault:
             value.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-
-
-def _zero_bytes(b: bytes) -> None:
-    """Best-effort zeroing of a bytes object (CPython only)."""
-    try:
-        import ctypes
-
-        ctypes.memset(id(b) + bytes.__basicsize__ - 1, 0, len(b))
-    except Exception:
-        pass

@@ -559,7 +559,7 @@ def _save_oauth_linkage_prefs(prefs: dict) -> None:
 def set_oauth_linkage(
     email: str,
     enabled: bool = True,
-    password: str = "",
+    password: Optional[str] = None,
     google_sub: str = "",
 ) -> None:
     """Set cross-OAuth linkage preference for an email.
@@ -568,7 +568,8 @@ def set_oauth_linkage(
         email: The account email.
         enabled: Whether OAuth sessions can decrypt this account's credentials.
         password: Optional passphrase added to the OAuth recipient key derivation.
-            Only alphanumeric, underscore, and hyphen allowed.  Empty = no password.
+            Only alphanumeric, underscore, and hyphen allowed.  ``None`` preserves
+            the existing ``has_password`` flag; ``""`` explicitly clears it.
         google_sub: Google's immutable account ID.  Persisted so cross-account
             decryption works after server restarts.
     """
@@ -580,15 +581,24 @@ def set_oauth_linkage(
 
     with _lock:
         prefs = _load_oauth_linkage_prefs()
-        entry: dict = {"enabled": enabled, "has_password": bool(password)}
+        existing_entry = prefs.get(normalized, {})
+
+        # Preserve has_password when password is not provided (None),
+        # to avoid silently resetting it during google_sub-only updates.
+        if password is not None:
+            has_password = bool(password)
+        else:
+            has_password = existing_entry.get("has_password", False)
+
+        entry: dict = {"enabled": enabled, "has_password": has_password}
         # Password is NOT persisted — it's only used in-memory at save time
         # to derive the OAuth recipient key, then discarded. At load time,
         # the user provides it again via cross_oauth_password.
         if google_sub:
             entry["google_sub"] = google_sub
-        elif normalized in prefs and "google_sub" in prefs[normalized]:
+        elif "google_sub" in existing_entry:
             # Preserve existing google_sub if not provided
-            entry["google_sub"] = prefs[normalized]["google_sub"]
+            entry["google_sub"] = existing_entry["google_sub"]
         prefs[normalized] = entry
         _save_oauth_linkage_prefs(prefs)
 

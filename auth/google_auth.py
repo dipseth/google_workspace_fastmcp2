@@ -461,14 +461,24 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
                 logger.warning(f"Could not collect linked account keys: {e}")
 
             # Retrieve Google sub (immutable account ID) for OAuth recipient.
-            # Try: credentials object (SSO flow), then session (tool-call flow).
+            # Try: credentials object (SSO flow), then current session, then scan
+            # (OAuth callback runs outside FastMCP context so sync context may be None).
             google_sub = getattr(credentials, "_google_sub", None)
             if not google_sub:
                 try:
-                    for sid in reversed(list_sessions()):
-                        google_sub = get_session_data(sid, SessionKey.GOOGLE_SUB)
-                        if google_sub:
-                            break
+                    from .context import get_session_context_sync
+
+                    current_sid = get_session_context_sync()
+                    if current_sid:
+                        google_sub = get_session_data(
+                            current_sid, SessionKey.GOOGLE_SUB
+                        )
+                    if not google_sub:
+                        # Fallback: scan sessions (OAuth callback has no FastMCP context)
+                        for sid in reversed(list_sessions()):
+                            google_sub = get_session_data(sid, SessionKey.GOOGLE_SUB)
+                            if google_sub:
+                                break
                 except Exception:
                     pass
 
@@ -490,14 +500,24 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
                         f"Could not persist google_sub for {normalized_email}: {e}"
                     )
 
-            # Get OAuth linkage password from session (set during start_google_auth form)
+            # Get OAuth linkage password from session (set during start_google_auth form).
+            # Prefer current session context; fall back to scan for OAuth callback.
             oauth_linkage_password = ""
             try:
-                for sid in reversed(list_sessions()):
-                    pwd = get_session_data(sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
-                    if pwd:
-                        oauth_linkage_password = pwd
-                        break
+                from .context import get_session_context_sync
+
+                current_sid = get_session_context_sync()
+                if current_sid:
+                    oauth_linkage_password = (
+                        get_session_data(current_sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
+                        or ""
+                    )
+                if not oauth_linkage_password:
+                    for sid in reversed(list_sessions()):
+                        pwd = get_session_data(sid, SessionKey.OAUTH_LINKAGE_PASSWORD)
+                        if pwd:
+                            oauth_linkage_password = pwd
+                            break
             except Exception:
                 pass
 
@@ -1497,15 +1517,15 @@ async def handle_oauth_callback(
     oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
 
     # DIAGNOSTIC LOG: OAuth client_secret debugging - callback phase
-    logger.info("🔍 CALLBACK_DEBUG: Creating OAuth flow for token exchange")
-    logger.info(f"🔍 CALLBACK_DEBUG: - oauth_config keys: {list(oauth_config.keys())}")
-    logger.info(
-        f"🔍 CALLBACK_DEBUG: - client_id: {oauth_config.get('client_id', 'MISSING')[:20]}..."
+    logger.debug("CALLBACK_DEBUG: Creating OAuth flow for token exchange")
+    logger.debug(f"CALLBACK_DEBUG: - oauth_config keys: {list(oauth_config.keys())}")
+    logger.debug(
+        f"CALLBACK_DEBUG: - client_id: {oauth_config.get('client_id', 'MISSING')[:8]}..."
     )
-    logger.info(
-        f"🔍 CALLBACK_DEBUG: - client_secret: {'PRESENT' if oauth_config.get('client_secret') else 'MISSING'} (length: {len(oauth_config.get('client_secret', '')) if oauth_config.get('client_secret') else 0})"
+    logger.debug(
+        f"CALLBACK_DEBUG: - client_secret: {'PRESENT' if oauth_config.get('client_secret') else 'MISSING'}"
     )
-    logger.info(f"🔍 CALLBACK_DEBUG: - token_uri: {oauth_config.get('token_uri')}")
+    logger.debug(f"CALLBACK_DEBUG: - token_uri: {oauth_config.get('token_uri')}")
 
     # DIAGNOSTIC LOG: OAuth scope consistency debugging
     logger.info(
@@ -1521,12 +1541,14 @@ async def handle_oauth_callback(
     flow.redirect_uri = settings.dynamic_oauth_redirect_uri
 
     # DIAGNOSTIC LOG: Verify flow has client credentials
-    logger.info("🔍 CALLBACK_DEBUG: Flow configuration after creation:")
-    logger.info(f"🔍 CALLBACK_DEBUG: - flow.client_config: {flow.client_config}")
-    logger.info(
-        f"🔍 CALLBACK_DEBUG: - flow.client_type: {getattr(flow, 'client_type', 'NOT_SET')}"
+    logger.debug("CALLBACK_DEBUG: Flow configuration after creation:")
+    logger.debug(
+        f"CALLBACK_DEBUG: - flow.client_config keys: {list(flow.client_config.get('web', {}).keys()) if isinstance(flow.client_config, dict) else 'N/A'}"
     )
-    logger.info(f"🔍 CALLBACK_DEBUG: - flow redirect_uri: {flow.redirect_uri}")
+    logger.debug(
+        f"CALLBACK_DEBUG: - flow.client_type: {getattr(flow, 'client_type', 'NOT_SET')}"
+    )
+    logger.debug(f"CALLBACK_DEBUG: - flow redirect_uri: {flow.redirect_uri}")
 
     # Exchange authorization code for credentials
     try:
