@@ -1675,6 +1675,171 @@ class AuthMiddleware(Middleware):
 
         return None
 
+    # ── Chat service account envelope (per-user encrypted) ──────────
+
+    def save_chat_service_account(
+        self,
+        user_email: str,
+        sa_json_str: str,
+        per_user_key: Optional[str] = None,
+        additional_keys: Optional[list] = None,
+        google_sub: Optional[str] = None,
+        oauth_linkage_password: str = "",
+    ) -> None:
+        """Encrypt and save a Chat service account JSON key as a separate envelope.
+
+        Uses the same CEK/multi-recipient pattern as OAuth credentials,
+        stored in ``{safe_email}_chat_sa.enc``.  The SA JSON is never
+        logged or written in plaintext.
+        """
+        from cryptography.fernet import Fernet
+
+        from .google_auth import _normalize_email
+
+        normalized_email = _normalize_email(user_email)
+        safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
+        sa_path = Path(settings.credentials_dir) / f"{safe_email}_chat_sa.enc"
+        sa_path.parent.mkdir(parents=True, exist_ok=True)
+
+        oauth_recipient_key = self._resolve_oauth_recipient_key(
+            google_sub, normalized_email, password=oauth_linkage_password
+        )
+
+        # Collect all recipient keys
+        all_keys = []
+        if per_user_key:
+            all_keys.append(per_user_key)
+        if additional_keys:
+            all_keys.extend(additional_keys)
+        if oauth_recipient_key:
+            all_keys.append(oauth_recipient_key)
+
+        if not all_keys:
+            # Fallback to server-level encryption
+            encrypted_sa = self._fernet.encrypt(sa_json_str.encode())
+            with open(sa_path, "w") as f:
+                f.write(base64.urlsafe_b64encode(encrypted_sa).decode())
+            logger.info(f"Saved server-encrypted Chat SA for {normalized_email}")
+        else:
+            cek = Fernet.generate_key()
+            try:
+                cek_fernet = Fernet(cek)
+                encrypted_data = cek_fernet.encrypt(sa_json_str.encode())
+
+                recipients = {}
+                for key in all_keys:
+                    kid = self._key_id(key)
+                    wrapper_fernet_key = self.derive_per_user_fernet_key(key)
+                    wrapper = Fernet(wrapper_fernet_key)
+                    wrapped_cek = wrapper.encrypt(cek)
+                    recipients[kid] = base64.urlsafe_b64encode(wrapped_cek).decode()
+
+                envelope = {
+                    "v": 2,
+                    "enc": "per_user",
+                    "type": "chat_service_account",
+                    "recipients": recipients,
+                    "data": base64.urlsafe_b64encode(encrypted_data).decode(),
+                }
+                envelope["hmac"] = self._compute_envelope_hmac(envelope)
+
+                with open(sa_path, "w") as f:
+                    json.dump(envelope, f)
+            finally:
+                self._zero_bytes(cek)
+
+            logger.info(
+                f"🔐 Saved per-user encrypted Chat SA for {normalized_email} "
+                f"({len(recipients)} recipient(s))"
+            )
+
+        try:
+            sa_path.chmod(0o600)
+        except (OSError, AttributeError):
+            pass
+
+    def load_chat_service_account(
+        self,
+        user_email: str,
+        per_user_key: Optional[str] = None,
+        google_sub: Optional[str] = None,
+        oauth_linkage_password: str = "",
+    ) -> Optional[Dict]:
+        """Load and decrypt a per-user Chat service account JSON.
+
+        Returns the parsed SA JSON dict, or None if not found/undecryptable.
+        """
+        from cryptography.fernet import Fernet
+
+        from .google_auth import _normalize_email
+
+        normalized_email = _normalize_email(user_email)
+        safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
+        sa_path = Path(settings.credentials_dir) / f"{safe_email}_chat_sa.enc"
+
+        if not sa_path.exists():
+            return None
+
+        try:
+            with open(sa_path) as f:
+                raw = f.read()
+
+            # Try JSON envelope (v2 per-user format)
+            try:
+                envelope = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                # Legacy server-encrypted (raw base64 Fernet)
+                encrypted_bytes = base64.urlsafe_b64decode(raw.encode())
+                decrypted = self._fernet.decrypt(encrypted_bytes)
+                return json.loads(decrypted.decode())
+
+            if not isinstance(envelope, dict) or envelope.get("enc") != "per_user":
+                return None
+
+            if not self._verify_envelope_hmac(envelope):
+                logger.error(f"Chat SA envelope HMAC failed: {sa_path.name}")
+                return None
+
+            # Build list of keys to try
+            keys_to_try = []
+            if per_user_key:
+                keys_to_try.append(per_user_key)
+
+            oauth_key = self._resolve_oauth_recipient_key(
+                google_sub, normalized_email, password=oauth_linkage_password
+            )
+            if oauth_key:
+                keys_to_try.append(oauth_key)
+
+            for key in keys_to_try:
+                kid = self._key_id(key)
+                wrapped_cek_b64 = envelope.get("recipients", {}).get(kid)
+                if not wrapped_cek_b64:
+                    continue
+
+                cek = None
+                try:
+                    fernet_key = self.derive_per_user_fernet_key(key)
+                    wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
+                    cek = Fernet(fernet_key).decrypt(wrapped_cek)
+                    encrypted_data = base64.urlsafe_b64decode(envelope["data"].encode())
+                    decrypted = Fernet(cek).decrypt(encrypted_data)
+                    return json.loads(decrypted.decode())
+                except Exception:
+                    continue
+                finally:
+                    if cek:
+                        self._zero_bytes(cek)
+
+            logger.debug(
+                f"Could not decrypt Chat SA for {normalized_email} with any key"
+            )
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to load Chat SA for {normalized_email}: {e}")
+            return None
+
     def _load_encrypted_file(
         self, path: Path, per_user_key: Optional[str] = None
     ) -> Optional[Credentials]:

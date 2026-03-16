@@ -267,6 +267,7 @@ def _generate_service_selection_html(
     _redirect_uri = getattr(
         _settings, "dynamic_oauth_redirect_uri", "https://localhost:8002/oauth2callback"
     )
+    _sa_file_configured = bool(_settings.chat_service_account_file)
 
     try:
         from .scope_registry import ScopeRegistry
@@ -590,6 +591,88 @@ def _generate_service_selection_html(
                 </div>
             </div>
 
+            <!-- Chat Bot Service Account (Optional) -->
+            <div class="panel">
+                <div class="panel-header collapsed" onclick="togglePanel('chat-sa-body', this)">
+                    <span class="panel-icon">🤖</span>
+                    <span class="panel-title">Chat Bot Service Account</span>
+                    <span class="panel-badge {"green" if _sa_file_configured else ""}" id="chat-sa-badge">{"Env configured" if _sa_file_configured else "Optional"}</span>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="panel-body" id="chat-sa-body" style="display:none;">
+                    {"" if not _sa_file_configured else '<div style="display:flex;align-items:center;gap:10px;background:rgba(52,168,83,0.08);border:1px solid rgba(52,168,83,0.3);border-radius:10px;padding:12px 16px;margin-bottom:12px;"><span style="font-size:20px">✅</span><div><div style="font-size:13px;font-weight:600;color:#137333">Global service account configured via environment</div><div style="font-size:11px;color:#5f6368;margin-top:2px">Upload below only to use a different SA for your account</div></div></div>'}
+                    <div class="info-box blue" style="line-height:1.7;">
+                        <strong>What is this?</strong><br>
+                        A Google Chat service account lets the MCP server act as a Chat bot &mdash;
+                        sending messages, managing spaces, and performing reactions via Domain-Wide
+                        Delegation (DWD).
+                        <br><br>
+                        <strong>Setup steps:</strong>
+                        <ol style="margin:6px 0 0 16px;padding:0;">
+                            <li>Create a service account in
+                                <a href="https://console.cloud.google.com/iam-admin/serviceaccounts/create"
+                                   target="_blank" rel="noopener">Cloud Console &rarr; Service Accounts</a></li>
+                            <li>Enable the
+                                <a href="https://console.cloud.google.com/apis/library/chat.googleapis.com"
+                                   target="_blank" rel="noopener">Google Chat API</a></li>
+                            <li>Create &amp; download a JSON key from
+                                <a href="https://console.cloud.google.com/apis/credentials"
+                                   target="_blank" rel="noopener">APIs &amp; Services &rarr; Credentials</a></li>
+                            <li>In <a href="https://admin.google.com/ac/owl/domainwidedelegation"
+                                      target="_blank" rel="noopener">Admin Console &rarr; Domain-wide Delegation</a>,
+                                add the SA client ID with these scopes:</li>
+                        </ol>
+                        <div style="position:relative;margin-top:8px;">
+                            <div id="dwd-scopes-display" style="background:rgba(0,0,0,0.04);border-radius:6px;padding:8px 10px 8px 10px;
+                                        font-family:monospace;font-size:10px;word-break:break-all;">
+                                https://www.googleapis.com/auth/chat.spaces,<br>
+                                https://www.googleapis.com/auth/chat.spaces.create,<br>
+                                https://www.googleapis.com/auth/chat.delete,<br>
+                                https://www.googleapis.com/auth/chat.app.delete,<br>
+                                https://www.googleapis.com/auth/chat.memberships,<br>
+                                https://www.googleapis.com/auth/chat.memberships.readonly,<br>
+                                https://www.googleapis.com/auth/chat.memberships.app,<br>
+                                https://www.googleapis.com/auth/chat.messages,<br>
+                                https://www.googleapis.com/auth/chat.messages.readonly,<br>
+                                https://www.googleapis.com/auth/chat.messages.create,<br>
+                                https://www.googleapis.com/auth/chat.app.memberships,<br>
+                                https://www.googleapis.com/auth/chat.app.spaces,<br>
+                                https://www.googleapis.com/auth/chat.app.spaces.create,<br>
+                                https://www.googleapis.com/auth/chat.messages.reactions,<br>
+                                https://www.googleapis.com/auth/chat.messages.reactions.create,<br>
+                                https://www.googleapis.com/auth/chat.messages.reactions.readonly
+                            </div>
+                            <button type="button" onclick="copyDwdScopes(this)"
+                                    style="position:absolute;top:6px;right:6px;background:#fff;border:1px solid #dadce0;
+                                           border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;
+                                           color:#1a73e8;font-weight:500;transition:all 0.15s;">
+                                📋 Copy scopes
+                            </button>
+                        </div>
+                    </div>
+                    <div style="margin-top:14px;">
+                        <div class="field-label">Service Account JSON Key</div>
+                        <textarea name="chat_sa_json" id="chat_sa_json"
+                                  class="field-input" rows="6"
+                                  placeholder="Paste the full JSON key here, or use the file picker below..."
+                                  style="font-family:monospace;font-size:11px;resize:vertical;"></textarea>
+                        <div style="margin-top:8px;display:flex;align-items:center;gap:10px;">
+                            <label class="btn-secondary" style="padding:8px 14px;font-size:12px;cursor:pointer;">
+                                📁 Choose JSON file
+                                <input type="file" id="chat_sa_file" accept=".json"
+                                       style="display:none;"
+                                       onchange="handleSAFileUpload(this)">
+                            </label>
+                            <span id="chat-sa-filename" style="font-size:11px;color:#5f6368;"></span>
+                        </div>
+                        <div class="field-hint">
+                            The JSON key will be encrypted and bound to the email you authenticate with.
+                            It is never stored in plaintext.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Service Selection -->
             <div class="panel">
                 <div class="panel-header collapsed" onclick="togglePanel('services-body', this)">
@@ -657,6 +740,42 @@ def _generate_service_selection_html(
 
 <script>
     const COMMON_SERVICES = ['drive','gmail','calendar','docs','sheets','slides','photos','chat','forms','people'];
+
+    function copyDwdScopes(btn) {{
+        const scopes = 'https://www.googleapis.com/auth/chat.spaces,https://www.googleapis.com/auth/chat.spaces.create,https://www.googleapis.com/auth/chat.delete,https://www.googleapis.com/auth/chat.app.delete,https://www.googleapis.com/auth/chat.memberships,https://www.googleapis.com/auth/chat.memberships.readonly,https://www.googleapis.com/auth/chat.memberships.app,https://www.googleapis.com/auth/chat.messages,https://www.googleapis.com/auth/chat.messages.readonly,https://www.googleapis.com/auth/chat.messages.create,https://www.googleapis.com/auth/chat.app.memberships,https://www.googleapis.com/auth/chat.app.spaces,https://www.googleapis.com/auth/chat.app.spaces.create,https://www.googleapis.com/auth/chat.messages.reactions,https://www.googleapis.com/auth/chat.messages.reactions.create,https://www.googleapis.com/auth/chat.messages.reactions.readonly';
+        navigator.clipboard.writeText(scopes).then(function() {{
+            btn.textContent = '✅ Copied!';
+            btn.style.color = '#137333';
+            btn.style.borderColor = '#34a853';
+            setTimeout(function() {{
+                btn.textContent = '📋 Copy scopes';
+                btn.style.color = '#1a73e8';
+                btn.style.borderColor = '#dadce0';
+            }}, 2000);
+        }});
+    }}
+
+    function handleSAFileUpload(input) {{
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {{
+            try {{
+                const parsed = JSON.parse(e.target.result);
+                if (!parsed.type || parsed.type !== 'service_account') {{
+                    alert('This does not appear to be a Google service account JSON key (missing "type": "service_account").');
+                    return;
+                }}
+                document.getElementById('chat_sa_json').value = e.target.result;
+                document.getElementById('chat-sa-filename').textContent = file.name;
+                const badge = document.getElementById('chat-sa-badge');
+                if (badge) {{ badge.textContent = 'Provided'; badge.classList.add('green'); }}
+            }} catch(err) {{
+                alert('Invalid JSON file: ' + err.message);
+            }}
+        }};
+        reader.readAsText(file);
+    }}
 
     function updateChip(checkbox) {{
         const chip = checkbox.closest('.service-chip');
@@ -745,6 +864,24 @@ def _generate_service_selection_html(
                     if (!confirm('Client ID doesn\\'t look like a Google OAuth ID (should end in .apps.googleusercontent.com). Continue anyway?')) {{
                         e.preventDefault();
                     }}
+                }}
+            }}
+            // Validate Chat SA JSON if provided
+            const saJson = document.getElementById('chat_sa_json');
+            if (saJson && saJson.value.trim()) {{
+                try {{
+                    const parsed = JSON.parse(saJson.value.trim());
+                    if (parsed.type !== 'service_account') {{
+                        e.preventDefault();
+                        alert('The Chat service account JSON must have "type": "service_account". Please check the file.');
+                        saJson.focus();
+                        return;
+                    }}
+                }} catch(err) {{
+                    e.preventDefault();
+                    alert('The Chat service account JSON is not valid JSON: ' + err.message);
+                    saJson.focus();
+                    return;
                 }}
             }}
         }});
@@ -895,6 +1032,24 @@ def setup_service_selection_routes(mcp) -> None:
                 form_data.get("oauth_linkage_password") or ""
             ).strip()
 
+            # Chat service account JSON (optional)
+            chat_sa_json = None
+            chat_sa_json_raw = (form_data.get("chat_sa_json") or "").strip()
+            if chat_sa_json_raw:
+                try:
+                    import json as _json
+
+                    parsed_sa = _json.loads(chat_sa_json_raw)
+                    if parsed_sa.get("type") != "service_account":
+                        logger.warning(
+                            "Chat SA JSON rejected: missing 'type': 'service_account'"
+                        )
+                    else:
+                        chat_sa_json = chat_sa_json_raw
+                        logger.info("🤖 Chat service account JSON provided")
+                except Exception as sa_err:
+                    logger.warning(f"Chat SA JSON rejected: invalid JSON: {sa_err}")
+
             logger.info(
                 f"📋 Service selection received: state={state}, "
                 f"flow_type={flow_type}, services={services}"
@@ -934,6 +1089,9 @@ def setup_service_selection_routes(mcp) -> None:
                 _service_selection_cache[state]["oauth_linkage_password"] = (
                     oauth_linkage_password
                 )
+                # Stash Chat SA JSON — encrypted after OAuth completes
+                if chat_sa_json:
+                    _service_selection_cache[state]["chat_sa_json"] = chat_sa_json
 
             if flow_type == "fastmcp":
                 oauth_url = await _handle_fastmcp_service_selection(

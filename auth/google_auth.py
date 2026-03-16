@@ -530,6 +530,24 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
                 oauth_linkage_password=oauth_linkage_password,
             )
 
+            # Save Chat service account JSON if provided via consent screen
+            _chat_sa_json = getattr(credentials, "_chat_sa_json", None)
+            if _chat_sa_json:
+                try:
+                    auth_middleware.save_chat_service_account(
+                        normalized_email,
+                        _chat_sa_json,
+                        per_user_key=per_user_key,
+                        additional_keys=additional_keys if additional_keys else None,
+                        google_sub=google_sub,
+                        oauth_linkage_password=oauth_linkage_password,
+                    )
+                    logger.info(f"Saved Chat service account for {normalized_email}")
+                except Exception as e:
+                    logger.warning(
+                        f"Could not save Chat SA for {normalized_email}: {e}"
+                    )
+
             # Cross-add: add this user as a recipient to linked accounts' credential files.
             # This allows the newly-authed user to decrypt linked accounts' credentials.
             if (
@@ -1013,6 +1031,7 @@ async def initiate_oauth_flow(
     custom_client_id: Optional[str] = None,
     custom_client_secret: Optional[str] = None,
     oauth_linkage_password: str = "",
+    chat_sa_json: Optional[str] = None,
 ) -> str:
     """
     Initiate OAuth flow for a user with optional service selection and PKCE support.
@@ -1141,6 +1160,7 @@ async def initiate_oauth_flow(
         "custom_client_id": custom_client_id,
         "custom_client_secret": custom_client_secret,
         "oauth_linkage_password": oauth_linkage_password,
+        "chat_sa_json": chat_sa_json,
     }
 
     # Use enhanced context-based credential storage for persistence
@@ -1255,6 +1275,9 @@ async def handle_service_selection_callback(
     if custom_client_id:
         logger.info(f"🔑 Using custom client credentials: {custom_client_id[:10]}...")
 
+    # Chat service account JSON (optional, from consent screen)
+    chat_sa_json = flow_info.get("chat_sa_json")
+
     # Now call the regular OAuth flow with selected services and custom credentials
     return await initiate_oauth_flow(
         user_email=user_email,
@@ -1265,6 +1288,7 @@ async def handle_service_selection_callback(
         custom_client_id=custom_client_id,  # Pass custom client credentials
         custom_client_secret=custom_client_secret,
         oauth_linkage_password=flow_info.get("oauth_linkage_password", ""),
+        chat_sa_json=chat_sa_json,
     )
 
 
@@ -1327,6 +1351,7 @@ async def handle_oauth_callback(
     auth_method = state_info["auth_method"]
     custom_client_id = state_info.get("custom_client_id")
     custom_client_secret = state_info.get("custom_client_secret")
+    chat_sa_json = state_info.get("chat_sa_json")
 
     # Stash OAuth linkage password in session so _save_credentials can use it
     _oauth_linkage_pw = state_info.get("oauth_linkage_password", "")
@@ -1610,6 +1635,10 @@ async def handle_oauth_callback(
                 f"⚠️ Email mismatch: expected {user_email}, got {authenticated_email} - using actual email"
             )
             user_email = authenticated_email  # Use the actual authenticated email
+
+        # Attach Chat SA JSON so _save_credentials can persist it
+        if chat_sa_json:
+            credentials._chat_sa_json = chat_sa_json
 
         # Conditional storage based on auth_method
         if auth_method == "pkce_memory":

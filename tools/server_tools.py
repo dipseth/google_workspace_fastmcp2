@@ -1559,32 +1559,73 @@ def setup_server_tools(mcp: FastMCP) -> None:
         },
     )
     async def verify_payment(
-        tx_hash: Annotated[str, Field(description="Transaction hash to verify")],
+        tx_hash: Annotated[
+            str,
+            Field(
+                default="",
+                description="Transaction hash to verify (legacy Path C)",
+            ),
+        ] = "",
+        payment_payload_b64: Annotated[
+            str,
+            Field(
+                default="",
+                description="Base64-encoded x402 payment payload (x402-native Path A/B)",
+            ),
+        ] = "",
         chain_id: Annotated[
             int, Field(description="Chain ID of the transaction")
-        ] = 8453,
+        ] = 84532,
         ctx: Context = None,
     ) -> dict:
         """Verify a blockchain payment transaction to unlock tool access.
 
-        After sending a USDC payment to the required wallet, call this tool
-        with the transaction hash to unlock access for your session.
+        Supports two verification paths:
+        - x402-native: provide payment_payload_b64 (signed EIP-3009 payload)
+        - Legacy: provide tx_hash (on-chain USDC transfer)
         """
         import time as _time
 
         from middleware.payment.verifier import X402Verifier
 
+        # Get the x402 resource server if available
+        resource_server = None
+        try:
+            from middleware.payment.x402_server import get_resource_server
+
+            resource_server = get_resource_server(settings)
+        except Exception:
+            pass
+
         verifier = X402Verifier(
             chain_id=chain_id,
             rpc_url=settings.payment_rpc_url,
-            verification_url=settings.payment_verification_url,
+            verification_url=settings.payment_facilitator_url
+            or settings.payment_verification_url,
+            resource_server=resource_server,
         )
 
-        result = await verifier.verify_payment(
-            tx_hash=tx_hash,
-            expected_amount=settings.payment_usdc_amount,
-            recipient_wallet=settings.payment_recipient_wallet,
-        )
+        # Choose verification path
+        if payment_payload_b64:
+            result = await verifier.verify_payment_payload(
+                payload_b64=payment_payload_b64,
+                expected_amount=settings.payment_usdc_amount,
+                recipient_wallet=settings.payment_recipient_wallet,
+            )
+            verified_hash = result.settlement_tx_hash or result.tx_hash
+        elif tx_hash:
+            result = await verifier.verify_payment(
+                tx_hash=tx_hash,
+                expected_amount=settings.payment_usdc_amount,
+                recipient_wallet=settings.payment_recipient_wallet,
+            )
+            verified_hash = tx_hash
+        else:
+            return {
+                "success": False,
+                "error": "Provide either tx_hash or payment_payload_b64",
+                "message": "No payment proof provided.",
+            }
 
         if result.verified and ctx:
             # Store payment verification in session
@@ -1594,7 +1635,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
                 session_id = ctx.session_id
                 store_session_data(session_id, SessionKey.PAYMENT_VERIFIED, True)
-                store_session_data(session_id, SessionKey.PAYMENT_TX_HASH, tx_hash)
+                store_session_data(
+                    session_id, SessionKey.PAYMENT_TX_HASH, verified_hash
+                )
                 store_session_data(
                     session_id,
                     SessionKey.PAYMENT_VERIFIED_AT,
@@ -1605,6 +1648,17 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     SessionKey.PAYMENT_AMOUNT,
                     result.amount or "",
                 )
+                store_session_data(
+                    session_id,
+                    SessionKey.PAYMENT_NETWORK,
+                    settings.payment_network,
+                )
+                if result.settlement_tx_hash:
+                    store_session_data(
+                        session_id,
+                        SessionKey.PAYMENT_SETTLE_TX_HASH,
+                        result.settlement_tx_hash,
+                    )
 
                 expires_at = _time.time() + (settings.payment_session_ttl_minutes * 60)
                 logger.info(
@@ -1617,8 +1671,10 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
             return {
                 "success": True,
-                "tx_hash": tx_hash,
+                "tx_hash": verified_hash,
                 "amount": result.amount,
+                "settlement_tx_hash": result.settlement_tx_hash,
+                "network": settings.payment_network,
                 "expires_at": expires_at,
                 "message": (
                     f"Payment verified! Tool access unlocked for "
@@ -1628,14 +1684,15 @@ def setup_server_tools(mcp: FastMCP) -> None:
         elif result.verified:
             return {
                 "success": True,
-                "tx_hash": tx_hash,
+                "tx_hash": verified_hash,
                 "amount": result.amount,
+                "settlement_tx_hash": result.settlement_tx_hash,
                 "message": "Payment verified but session context unavailable -- may need to re-verify.",
             }
         else:
             return {
                 "success": False,
-                "tx_hash": tx_hash,
+                "tx_hash": verified_hash,
                 "error": result.error,
                 "message": f"Payment verification failed: {result.error}",
             }

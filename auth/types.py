@@ -56,3 +56,8 @@ class SessionKey(str, Enum):
     PAYMENT_TX_HASH = "payment_tx_hash"  # str
     PAYMENT_VERIFIED_AT = "payment_verified_at"  # float (timestamp)
     PAYMENT_AMOUNT = "payment_amount"  # str (USDC amount)
+    PAYMENT_SETTLE_TX_HASH = "payment_settle_tx_hash"  # str (facilitator settlement)
+    PAYMENT_NETWORK = "payment_network"  # str (CAIP-2 network id)
+
+    # Chat service account (per-user encrypted)
+    CHAT_SERVICE_ACCOUNT_JSON = "chat_service_account_json"  # dict (in-memory cache)

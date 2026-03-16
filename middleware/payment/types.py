@@ -12,9 +12,11 @@ class PaymentRequiredDetails(BaseModel):
     amount: str = Field(description="Required USDC amount")
     chain_id: int = Field(description="Blockchain chain ID")
     usdc_contract: str = Field(description="USDC contract address")
+    network: str = Field(default="", description="CAIP-2 network identifier")
+    scheme: str = Field(default="exact", description="x402 payment scheme")
     verify_tool: str = Field(
         default="verify_payment",
-        description="Tool name to call after payment",
+        description="Tool name to call after payment (legacy path)",
     )
 
 
@@ -31,7 +33,20 @@ class PaymentVerificationResult(BaseModel):
     verified: bool = Field(description="Whether the payment was verified")
     tx_hash: str = Field(description="Transaction hash that was verified")
     amount: Optional[str] = Field(default=None, description="Verified amount")
+    settlement_tx_hash: Optional[str] = Field(
+        default=None,
+        description="On-chain settlement transaction hash from facilitator",
+    )
     error: Optional[str] = Field(
         default=None,
         description="Error message if verification failed",
+    )
+
+
+class X402PaymentContext(BaseModel):
+    """Parsed x402 payment data passed through middleware."""
+
+    payload_b64: str = Field(description="Base64-encoded x402 payment payload")
+    source: str = Field(
+        description="How the payment was submitted: 'header' or 'tool_arg'"
     )

@@ -857,19 +857,32 @@ logger.info(
 
 # 8b. X402 Payment Protocol Middleware (conditional)
 if settings.payment_enabled:
-    from middleware.payment import X402PaymentMiddleware
+    from middleware.payment import X402PaymentMiddleware, get_resource_server
+
+    # Initialize the x402 SDK resource server for real payment verification
+    try:
+        x402_resource_server = get_resource_server(settings)
+    except Exception as _x402_err:
+        logger.warning(
+            "x402 SDK init failed (%s), falling back to stub mode", _x402_err
+        )
+        x402_resource_server = None
 
     payment_middleware = X402PaymentMiddleware(
         gated_tools=settings.payment_gated_tools,
         free_for_oauth=settings.payment_free_for_oauth,
         session_ttl_minutes=settings.payment_session_ttl_minutes,
+        resource_server=x402_resource_server,
     )
     mcp.add_middleware(payment_middleware)
-    logger.info("X402 Payment middleware enabled")
+    logger.info("X402 Payment middleware enabled (x402 SDK v2)")
     logger.info(f"  Recipient: {settings.payment_recipient_wallet or '(not set)'}")
     logger.info(f"  Amount: {settings.payment_usdc_amount} USDC")
-    logger.info(f"  Chain: {settings.payment_chain_id}")
+    logger.info(f"  Network: {settings.payment_network}")
+    logger.info(f"  Facilitator: {settings.payment_facilitator_url}")
+    logger.info(f"  Scheme: {settings.payment_scheme}")
     logger.info(f"  Free for OAuth: {settings.payment_free_for_oauth}")
+    logger.info(f"  SDK: {'active' if x402_resource_server else 'stub fallback'}")
 else:
     logger.info("X402 Payment middleware disabled (PAYMENT_ENABLED=false)")
 

@@ -297,18 +297,33 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "PAYMENT_USDC_AMOUNT"},
     )
     payment_chain_id: int = Field(
-        default=8453,
-        description="Blockchain chain ID (8453 = Base)",
+        default=84532,
+        description="Blockchain chain ID (derived from payment_network for backward compat)",
         json_schema_extra={"env": "PAYMENT_CHAIN_ID"},
+    )
+    payment_network: str = Field(
+        default="eip155:84532",
+        description="CAIP-2 network identifier (Base Sepolia default = testnet-safe)",
+        json_schema_extra={"env": "PAYMENT_NETWORK"},
+    )
+    payment_facilitator_url: str = Field(
+        default="https://x402.org/facilitator",
+        description="x402 facilitator service URL for payment verification/settlement",
+        json_schema_extra={"env": "PAYMENT_FACILITATOR_URL"},
+    )
+    payment_scheme: str = Field(
+        default="exact",
+        description="x402 payment scheme (exact = EIP-3009 signature-based)",
+        json_schema_extra={"env": "PAYMENT_SCHEME"},
     )
     payment_rpc_url: str = Field(
         default="",
-        description="RPC URL for on-chain verification",
+        description="RPC URL for on-chain verification (legacy, kept for backward compat)",
         json_schema_extra={"env": "PAYMENT_RPC_URL"},
     )
     payment_verification_url: str = Field(
         default="",
-        description="External verification service URL",
+        description="External verification service URL (legacy, kept for backward compat)",
         json_schema_extra={"env": "PAYMENT_VERIFICATION_URL"},
     )
     payment_session_ttl_minutes: int = Field(

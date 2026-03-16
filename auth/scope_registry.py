@@ -109,9 +109,22 @@ class ScopeRegistry:
         "chat": {
             "messages_readonly": "https://www.googleapis.com/auth/chat.messages.readonly",
             "messages": "https://www.googleapis.com/auth/chat.messages",
+            "messages_create": "https://www.googleapis.com/auth/chat.messages.create",
             "spaces": "https://www.googleapis.com/auth/chat.spaces",
+            "spaces_create": "https://www.googleapis.com/auth/chat.spaces.create",
             "memberships_readonly": "https://www.googleapis.com/auth/chat.memberships.readonly",
             "memberships": "https://www.googleapis.com/auth/chat.memberships",
+            "memberships_app": "https://www.googleapis.com/auth/chat.memberships.app",
+            "delete": "https://www.googleapis.com/auth/chat.delete",
+            # Reaction scopes (require user-level / delegated auth)
+            "reactions": "https://www.googleapis.com/auth/chat.messages.reactions",
+            "reactions_create": "https://www.googleapis.com/auth/chat.messages.reactions.create",
+            "reactions_readonly": "https://www.googleapis.com/auth/chat.messages.reactions.readonly",
+            # App-level scopes (service account authentication)
+            "app_memberships": "https://www.googleapis.com/auth/chat.app.memberships",
+            "app_spaces": "https://www.googleapis.com/auth/chat.app.spaces",
+            "app_spaces_create": "https://www.googleapis.com/auth/chat.app.spaces.create",
+            "app_delete": "https://www.googleapis.com/auth/chat.app.delete",
         },
         # Google Forms scopes
         "forms": {
@@ -382,6 +395,25 @@ class ScopeRegistry:
             "chat.memberships_readonly",
             "chat.memberships",
             "people.readonly",
+        ],
+        # Service account (app-level) scopes for Chat API
+        "chat_app": [
+            "chat.spaces",
+            "chat.spaces_create",
+            "chat.delete",
+            "chat.messages",
+            "chat.messages_readonly",
+            "chat.messages_create",
+            "chat.memberships",
+            "chat.memberships_readonly",
+            "chat.memberships_app",
+            "chat.app_memberships",
+            "chat.app_spaces",
+            "chat.app_spaces_create",
+            "chat.app_delete",
+            "chat.reactions",
+            "chat.reactions_create",
+            "chat.reactions_readonly",
         ],
         "forms_basic": [
             "base.userinfo_email",
