@@ -380,6 +380,7 @@ class ScopeRegistry:
             "chat.messages",
             "chat.spaces",
             "chat.memberships_readonly",
+            "chat.memberships",
             "people.readonly",
         ],
         "forms_basic": [

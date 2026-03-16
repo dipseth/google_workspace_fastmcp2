@@ -75,7 +75,8 @@ import json
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
-from typing_extensions import Any, Dict, List, Optional
+from pydantic import Field
+from typing_extensions import Annotated, Any, Dict, List, Literal, Optional
 
 from auth.context import get_injected_service
 from auth.service_helpers import get_service, request_service
@@ -85,6 +86,8 @@ from resources.user_resources import get_current_user_email_simple
 from tools.common_types import UserGoogleEmail
 
 from .chat_types import (
+    ManageSpaceResponse,
+    MemberInfo,
     MessageInfo,
     MessageListResponse,
     SearchMessageResult,
@@ -902,6 +905,400 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 error=str(e),
             )
 
+    @mcp.tool(
+        name="manage_space",
+        description="Unified tool for Google Chat space administration: manage members, create/update/delete spaces",
+        tags={"chat", "spaces", "members", "management"},
+        annotations={
+            "title": "Manage Chat Space",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        },
+    )
+    async def manage_space(
+        action: Annotated[
+            Literal[
+                "list_members",
+                "add_member",
+                "remove_member",
+                "create_space",
+                "update_space",
+                "delete_space",
+            ],
+            Field(
+                description="Action to perform: 'list_members', 'add_member', 'remove_member', 'create_space', 'update_space', 'delete_space'"
+            ),
+        ],
+        space_id: Annotated[
+            Optional[str],
+            Field(
+                description="Space resource name (e.g., 'spaces/AAQAKl_yP9Y'). Required for list_members, add_member, update_space, delete_space."
+            ),
+        ] = None,
+        member_email: Annotated[
+            Optional[str],
+            Field(
+                description="Email address of the member to add. Required for add_member."
+            ),
+        ] = None,
+        member_role: Annotated[
+            Optional[Literal["ROLE_MEMBER", "ROLE_MANAGER"]],
+            Field(description="Role for the member. Default: ROLE_MEMBER."),
+        ] = None,
+        member_name: Annotated[
+            Optional[str],
+            Field(
+                description="Full member resource name (e.g., 'spaces/xxx/members/yyy'). Required for remove_member."
+            ),
+        ] = None,
+        display_name: Annotated[
+            Optional[str],
+            Field(description="Display name for create_space or update_space."),
+        ] = None,
+        space_type: Annotated[
+            Optional[Literal["SPACE", "GROUP_CHAT"]],
+            Field(description="Type of space to create. Default: SPACE."),
+        ] = None,
+        description: Annotated[
+            Optional[str],
+            Field(description="Description for create_space or update_space."),
+        ] = None,
+        user_google_email: UserGoogleEmail = None,
+    ) -> ManageSpaceResponse:
+        """
+        Unified tool for Google Chat space administration.
+
+        Supports the following actions:
+        - list_members: List all members of a space
+        - add_member: Add a member to a space
+        - remove_member: Remove a member from a space
+        - create_space: Create a new space
+        - update_space: Update an existing space
+        - delete_space: Delete a space
+
+        Args:
+            action: The action to perform.
+            space_id: Space resource name. Required for most actions.
+            member_email: Email of member to add. Required for add_member.
+            member_role: Role for the member (ROLE_MEMBER or ROLE_MANAGER).
+            member_name: Full member resource name. Required for remove_member.
+            display_name: Display name for create_space or update_space.
+            space_type: Type of space to create (SPACE or GROUP_CHAT).
+            description: Description for create_space or update_space.
+            user_google_email: User's Google email for authentication.
+
+        Returns:
+            ManageSpaceResponse with operation result.
+        """
+        logger.info(
+            f"[manage_space] action={action}, space_id={space_id}, user={user_google_email}"
+        )
+
+        try:
+            if action == "list_members":
+                if not space_id:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="space_id is required for list_members",
+                        error="Missing parameter: space_id",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=space_id,
+                        data=None,
+                        message="Failed to create Chat service",
+                        error="Service unavailable",
+                    )
+
+                response = await asyncio.to_thread(
+                    chat_service.spaces()
+                    .members()
+                    .list(parent=space_id, pageSize=100)
+                    .execute
+                )
+                memberships = response.get("memberships", [])
+                members = []
+                for m in memberships:
+                    member_data = m.get("member", {})
+                    members.append(
+                        MemberInfo(
+                            name=m.get("name", ""),
+                            email=member_data.get("email"),
+                            displayName=member_data.get("displayName", "Unknown"),
+                            role=m.get("role", "ROLE_MEMBER"),
+                            type=member_data.get("type", "HUMAN"),
+                            createTime=m.get("createTime"),
+                        )
+                    )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=space_id,
+                    data={
+                        "members": [dict(mem) for mem in members],
+                        "count": len(members),
+                    },
+                    message=f"Found {len(members)} members in {space_id}",
+                )
+
+            elif action == "add_member":
+                if not space_id:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="space_id is required for add_member",
+                        error="Missing parameter: space_id",
+                    )
+                if not member_email:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=space_id,
+                        data=None,
+                        message="member_email is required for add_member",
+                        error="Missing parameter: member_email",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=space_id,
+                        data=None,
+                        message="Failed to create Chat service",
+                        error="Service unavailable",
+                    )
+
+                membership_body = {
+                    "member": {
+                        "name": f"users/{member_email}",
+                        "type": "HUMAN",
+                    },
+                    "role": member_role or "ROLE_MEMBER",
+                }
+                result = await asyncio.to_thread(
+                    chat_service.spaces()
+                    .members()
+                    .create(parent=space_id, body=membership_body)
+                    .execute
+                )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=space_id,
+                    data={"membership": result},
+                    message=f"Added {member_email} to {space_id} as {member_role or 'ROLE_MEMBER'}",
+                )
+
+            elif action == "remove_member":
+                if not member_name:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="member_name is required for remove_member",
+                        error="Missing parameter: member_name",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Failed to create Chat service",
+                        error="Service unavailable",
+                    )
+
+                await asyncio.to_thread(
+                    chat_service.spaces().members().delete(name=member_name).execute
+                )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=None,
+                    data={"removedMember": member_name},
+                    message=f"Removed member {member_name}",
+                )
+
+            elif action == "create_space":
+                if not display_name:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="display_name is required for create_space",
+                        error="Missing parameter: display_name",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="Failed to create Chat service",
+                        error="Service unavailable",
+                    )
+
+                space_body = {
+                    "displayName": display_name,
+                    "spaceType": space_type or "SPACE",
+                }
+                if description:
+                    space_body["spaceDetails"] = {"description": description}
+
+                result = await asyncio.to_thread(
+                    chat_service.spaces().create(body=space_body).execute
+                )
+                new_space_id = result.get("name", "")
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=new_space_id,
+                    data={"space": result},
+                    message=f"Created space '{display_name}' ({new_space_id})",
+                )
+
+            elif action == "update_space":
+                if not space_id:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="space_id is required for update_space",
+                        error="Missing parameter: space_id",
+                    )
+                if not display_name and not description:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=space_id,
+                        data=None,
+                        message="At least one of display_name or description is required for update_space",
+                        error="Missing parameter",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=space_id,
+                        data=None,
+                        message="Failed to create Chat service",
+                        error="Service unavailable",
+                    )
+
+                update_body = {}
+                update_mask_fields = []
+                if display_name:
+                    update_body["displayName"] = display_name
+                    update_mask_fields.append("displayName")
+                if description:
+                    update_body.setdefault("spaceDetails", {})["description"] = (
+                        description
+                    )
+                    update_mask_fields.append("spaceDetails")
+
+                result = await asyncio.to_thread(
+                    chat_service.spaces()
+                    .patch(
+                        name=space_id,
+                        updateMask=",".join(update_mask_fields),
+                        body=update_body,
+                    )
+                    .execute
+                )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=space_id,
+                    data={"space": result},
+                    message=f"Updated space {space_id}",
+                )
+
+            elif action == "delete_space":
+                if not space_id:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=None,
+                        data=None,
+                        message="space_id is required for delete_space",
+                        error="Missing parameter: space_id",
+                    )
+
+                chat_service = await _get_chat_service_with_fallback(user_google_email)
+                if chat_service is None:
+                    return ManageSpaceResponse(
+                        success=False,
+                        action=action,
+                        spaceId=space_id,
+                        data=None,
+                        message="Failed to create Chat service",
+                        error="Service unavailable",
+                    )
+
+                await asyncio.to_thread(
+                    chat_service.spaces().delete(name=space_id).execute
+                )
+                return ManageSpaceResponse(
+                    success=True,
+                    action=action,
+                    spaceId=space_id,
+                    data=None,
+                    message=f"Deleted space {space_id}",
+                )
+
+            else:
+                return ManageSpaceResponse(
+                    success=False,
+                    action=action,
+                    spaceId=None,
+                    data=None,
+                    message=f"Unknown action: {action}",
+                    error=f"Unsupported action: {action}",
+                )
+
+        except HttpError as e:
+            logger.error(f"[manage_space] HTTP error: {e}")
+            return ManageSpaceResponse(
+                success=False,
+                action=action,
+                spaceId=space_id,
+                data=None,
+                message=f"Google API error: {e}",
+                error=str(e),
+            )
+        except Exception as e:
+            logger.error(f"[manage_space] Unexpected error: {e}")
+            return ManageSpaceResponse(
+                success=False,
+                action=action,
+                spaceId=space_id,
+                data=None,
+                message=f"Unexpected error: {str(e)}",
+                error=str(e),
+            )
+
     logger.info(
-        "Basic chat tools registered (list_spaces, list_messages, send_message, search_messages)"
+        "Basic chat tools registered (list_spaces, list_messages, send_message, search_messages, manage_space)"
     )

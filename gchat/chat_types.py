@@ -174,6 +174,28 @@ class SearchMessagesResponse(TypedDict):
     error: NotRequired[Optional[str]]
 
 
+class MemberInfo(TypedDict):
+    """Structure for a single Chat space member."""
+
+    name: str  # Full resource name (spaces/xxx/members/yyy)
+    email: Optional[str]
+    displayName: str
+    role: str  # ROLE_MEMBER or ROLE_MANAGER
+    type: str  # HUMAN or BOT
+    createTime: Optional[str]
+
+
+class ManageSpaceResponse(TypedDict):
+    """Response structure for manage_space tool."""
+
+    success: bool
+    action: str
+    spaceId: Optional[str]
+    data: Optional[dict]
+    message: str
+    error: NotRequired[Optional[str]]
+
+
 class SendCardMessageResponse(TypedDict):
     """Response structure for send_card_message tool."""
 
