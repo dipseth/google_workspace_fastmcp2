@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-from copy import deepcopy
 from typing import Any
 
 from config.enhanced_logging import setup_logger

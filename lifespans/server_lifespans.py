@@ -499,8 +499,12 @@ async def memory_cleanup_lifespan(server: Any):
     async def _watchdog_shutdown():
         await shutdown_event.wait()
         logger.error("Watchdog triggered — initiating server shutdown")
-        # Raise SystemExit to trigger lifespan cleanup chain
-        os._exit(1)
+        # Cancel all running tasks to trigger lifespan cleanup chain
+        loop = asyncio.get_running_loop()
+        for task in asyncio.all_tasks(loop):
+            if task is not asyncio.current_task():
+                task.cancel()
+        raise SystemExit(1)
 
     watchdog_task = asyncio.create_task(_watchdog_shutdown())
 

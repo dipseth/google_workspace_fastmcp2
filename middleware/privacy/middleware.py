@@ -105,7 +105,10 @@ class PrivacyMiddleware(Middleware):
                     strict=self._strict,
                 )
             except Exception:
-                logger.exception("Privacy: error scanning content")
+                logger.exception("Privacy: error scanning content — suppressing response to prevent PII leak")
+                from mcp.types import TextContent
+
+                masked_content = [TextContent(type="text", text="[PRIVACY_ERROR: content redacted]")]
 
         # Process structured_content (encrypted sentinels for round-trip)
         encrypted_structured = result.structured_content
@@ -118,7 +121,8 @@ class PrivacyMiddleware(Middleware):
                     strict=self._strict,
                 )
             except Exception:
-                logger.exception("Privacy: error scanning structured_content")
+                logger.exception("Privacy: error scanning structured_content — suppressing to prevent PII leak")
+                encrypted_structured = None
 
         # Build updated meta
         meta = dict(result.meta) if result.meta else {}

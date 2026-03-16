@@ -5,6 +5,7 @@ Provides caching functionality with time-to-live (TTL) expiration for
 FastMCP resource data to improve performance and reduce redundant API calls.
 """
 
+import threading
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
@@ -49,6 +50,7 @@ class CacheManager:
 
         # Resource cache: {resource_uri: {data: Any, expires_at: datetime}}
         self._resource_cache: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.RLock()
 
     def get_cached_resource(self, resource_uri: str) -> Optional[Any]:
         """
@@ -67,16 +69,17 @@ class CacheManager:
         if not self.enable_caching:
             return None
 
-        if resource_uri not in self._resource_cache:
+        with self._lock:
+            if resource_uri not in self._resource_cache:
+                return None
+
+            cache_entry = self._resource_cache[resource_uri]
+            if datetime.now() < cache_entry["expires_at"]:
+                return cache_entry["data"]
+
+            # Remove expired entry
+            del self._resource_cache[resource_uri]
             return None
-
-        cache_entry = self._resource_cache[resource_uri]
-        if datetime.now() < cache_entry["expires_at"]:
-            return cache_entry["data"]
-
-        # Remove expired entry
-        del self._resource_cache[resource_uri]
-        return None
 
     def cache_resource(self, resource_uri: str, data: Any) -> None:
         """
@@ -93,19 +96,20 @@ class CacheManager:
         if not self.enable_caching:
             return
 
-        self._resource_cache[resource_uri] = {
-            "data": data,
-            "expires_at": datetime.now() + timedelta(seconds=self.cache_ttl_seconds),
-        }
+        with self._lock:
+            self._resource_cache[resource_uri] = {
+                "data": data,
+                "expires_at": datetime.now() + timedelta(seconds=self.cache_ttl_seconds),
+            }
 
-        # Evict if over capacity: first remove expired, then oldest by insertion order
-        if len(self._resource_cache) > self.max_entries:
-            self.cleanup_expired_entries()
-        if len(self._resource_cache) > self.max_entries:
-            # Remove oldest entries (insertion order) until at capacity
-            excess = len(self._resource_cache) - self.max_entries
-            for key in list(self._resource_cache)[:excess]:
-                del self._resource_cache[key]
+            # Evict if over capacity: first remove expired, then oldest by insertion order
+            if len(self._resource_cache) > self.max_entries:
+                self.cleanup_expired_entries()
+            if len(self._resource_cache) > self.max_entries:
+                # Remove oldest entries (insertion order) until at capacity
+                excess = len(self._resource_cache) - self.max_entries
+                for key in list(self._resource_cache)[:excess]:
+                    del self._resource_cache[key]
 
     def clear_cache(self) -> None:
         """

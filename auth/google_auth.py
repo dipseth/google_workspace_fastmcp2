@@ -1497,15 +1497,15 @@ async def handle_oauth_callback(
     oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
 
     # DIAGNOSTIC LOG: OAuth client_secret debugging - callback phase
-    logger.info("🔍 CALLBACK_DEBUG: Creating OAuth flow for token exchange")
-    logger.info(f"🔍 CALLBACK_DEBUG: - oauth_config keys: {list(oauth_config.keys())}")
-    logger.info(
-        f"🔍 CALLBACK_DEBUG: - client_id: {oauth_config.get('client_id', 'MISSING')[:20]}..."
+    logger.debug("CALLBACK_DEBUG: Creating OAuth flow for token exchange")
+    logger.debug(f"CALLBACK_DEBUG: - oauth_config keys: {list(oauth_config.keys())}")
+    logger.debug(
+        f"CALLBACK_DEBUG: - client_id: {oauth_config.get('client_id', 'MISSING')[:8]}..."
     )
-    logger.info(
-        f"🔍 CALLBACK_DEBUG: - client_secret: {'PRESENT' if oauth_config.get('client_secret') else 'MISSING'} (length: {len(oauth_config.get('client_secret', '')) if oauth_config.get('client_secret') else 0})"
+    logger.debug(
+        f"CALLBACK_DEBUG: - client_secret: {'PRESENT' if oauth_config.get('client_secret') else 'MISSING'}"
     )
-    logger.info(f"🔍 CALLBACK_DEBUG: - token_uri: {oauth_config.get('token_uri')}")
+    logger.debug(f"CALLBACK_DEBUG: - token_uri: {oauth_config.get('token_uri')}")
 
     # DIAGNOSTIC LOG: OAuth scope consistency debugging
     logger.info(
@@ -1521,12 +1521,12 @@ async def handle_oauth_callback(
     flow.redirect_uri = settings.dynamic_oauth_redirect_uri
 
     # DIAGNOSTIC LOG: Verify flow has client credentials
-    logger.info("🔍 CALLBACK_DEBUG: Flow configuration after creation:")
-    logger.info(f"🔍 CALLBACK_DEBUG: - flow.client_config: {flow.client_config}")
-    logger.info(
-        f"🔍 CALLBACK_DEBUG: - flow.client_type: {getattr(flow, 'client_type', 'NOT_SET')}"
+    logger.debug("CALLBACK_DEBUG: Flow configuration after creation:")
+    logger.debug(f"CALLBACK_DEBUG: - flow.client_config keys: {list(flow.client_config.get('web', {}).keys()) if isinstance(flow.client_config, dict) else 'N/A'}")
+    logger.debug(
+        f"CALLBACK_DEBUG: - flow.client_type: {getattr(flow, 'client_type', 'NOT_SET')}"
     )
-    logger.info(f"🔍 CALLBACK_DEBUG: - flow redirect_uri: {flow.redirect_uri}")
+    logger.debug(f"CALLBACK_DEBUG: - flow redirect_uri: {flow.redirect_uri}")
 
     # Exchange authorization code for credentials
     try:
