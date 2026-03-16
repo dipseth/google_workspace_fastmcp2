@@ -41,3 +41,6 @@ jobs:
 
       - name: Check for DAG-bypass patterns (advisory)
         run: uv run python scripts/lint_no_dag_bypass.py
+
+      - name: Run tests
+        run: uv run pytest tests/ -v --tb=short

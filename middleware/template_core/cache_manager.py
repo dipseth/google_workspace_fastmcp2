@@ -25,8 +25,12 @@ class CacheManager:
     - TTL-based automatic expiration
     - Cache statistics and monitoring
     - Manual cache management (clear, stats)
-    - Thread-safe operations for concurrent access
+    - Bounded capacity with FIFO eviction when max_entries exceeded
     - Memory-efficient with automatic cleanup of expired entries
+
+    Note:
+        Not thread-safe. Intended for use within a single asyncio event loop
+        where concurrent dict mutation does not occur.
     """
 
     def __init__(

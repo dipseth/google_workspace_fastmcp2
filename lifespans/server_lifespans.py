@@ -498,9 +498,16 @@ async def memory_cleanup_lifespan(server: Any):
     # --- Watchdog shutdown listener ---
     async def _watchdog_shutdown():
         await shutdown_event.wait()
-        logger.error("Watchdog triggered — initiating server shutdown")
-        # Raise SystemExit to trigger lifespan cleanup chain
-        os._exit(1)
+        logger.error("Watchdog triggered — initiating graceful server shutdown")
+        # Cancel the server task to trigger lifespan cleanup chain.
+        # This unwinds all lifespan context managers in reverse order,
+        # ensuring Qdrant client, background tasks, and file handles
+        # are properly closed before the process exits.
+        current_task = asyncio.current_task()
+        loop = asyncio.get_running_loop()
+        for task in asyncio.all_tasks(loop):
+            if task is not current_task and not task.done():
+                task.cancel()
 
     watchdog_task = asyncio.create_task(_watchdog_shutdown())
 
