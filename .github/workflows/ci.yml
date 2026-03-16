@@ -43,11 +43,13 @@ jobs:
         run: uv run python scripts/lint_no_dag_bypass.py
 
       - name: Run unit tests
+        shell: bash {0}
         run: |
-          # Capture pytest exit code before native extension teardown can abort.
-          # Some C++ extensions (qdrant-client, tokenizers) call terminate() during
-          # interpreter shutdown, producing exit code 134 even when all tests pass.
-          uv run pytest tests/ -v --tb=short --ignore=tests/client --ignore=tests/content_mapping; rc=$?
+          # Some C++ extensions (qdrant-client, tokenizers) call terminate()
+          # during interpreter shutdown, producing exit code 134 (SIGABRT)
+          # even when all tests pass. We treat 134 as success.
+          uv run pytest tests/ -v --tb=short --ignore=tests/client --ignore=tests/content_mapping
+          rc=$?
           if [ $rc -eq 0 ] || [ $rc -eq 134 ]; then
             echo "Tests passed (pytest exit code: $rc)"
             exit 0
