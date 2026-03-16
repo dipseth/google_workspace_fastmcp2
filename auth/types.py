@@ -50,3 +50,9 @@ class SessionKey(str, Enum):
     PRIVACY_VAULT_SEED = (
         "privacy_vault_seed"  # Random bytes for shared API key sessions
     )
+
+    # Payment / x402 protocol
+    PAYMENT_VERIFIED = "payment_verified"  # bool
+    PAYMENT_TX_HASH = "payment_tx_hash"  # str
+    PAYMENT_VERIFIED_AT = "payment_verified_at"  # float (timestamp)
+    PAYMENT_AMOUNT = "payment_amount"  # str (USDC amount)

@@ -855,6 +855,24 @@ logger.info(
     f"Privacy middleware registered (default={settings.privacy_mode}, per-session toggle available)"
 )
 
+# 8b. X402 Payment Protocol Middleware (conditional)
+if settings.payment_enabled:
+    from middleware.payment import X402PaymentMiddleware
+
+    payment_middleware = X402PaymentMiddleware(
+        gated_tools=settings.payment_gated_tools,
+        free_for_oauth=settings.payment_free_for_oauth,
+        session_ttl_minutes=settings.payment_session_ttl_minutes,
+    )
+    mcp.add_middleware(payment_middleware)
+    logger.info("X402 Payment middleware enabled")
+    logger.info(f"  Recipient: {settings.payment_recipient_wallet or '(not set)'}")
+    logger.info(f"  Amount: {settings.payment_usdc_amount} USDC")
+    logger.info(f"  Chain: {settings.payment_chain_id}")
+    logger.info(f"  Free for OAuth: {settings.payment_free_for_oauth}")
+else:
+    logger.info("X402 Payment middleware disabled (PAYMENT_ENABLED=false)")
+
 # 9. Add ResponseLimitingMiddleware for tool response size control
 if settings.response_limit_max_size > 0:
     from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware

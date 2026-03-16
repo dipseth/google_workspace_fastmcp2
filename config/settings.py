@@ -280,6 +280,53 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "PRIVACY_EXCLUDE_TOOLS"},
     )
 
+    # X402 Payment Protocol Configuration
+    payment_enabled: bool = Field(
+        default=False,
+        description="Enable x402 payment protocol for tool access gating",
+        json_schema_extra={"env": "PAYMENT_ENABLED"},
+    )
+    payment_recipient_wallet: str = Field(
+        default="",
+        description="Wallet address to receive USDC payments",
+        json_schema_extra={"env": "PAYMENT_RECIPIENT_WALLET"},
+    )
+    payment_usdc_amount: str = Field(
+        default="0.01",
+        description="Required USDC payment amount",
+        json_schema_extra={"env": "PAYMENT_USDC_AMOUNT"},
+    )
+    payment_chain_id: int = Field(
+        default=8453,
+        description="Blockchain chain ID (8453 = Base)",
+        json_schema_extra={"env": "PAYMENT_CHAIN_ID"},
+    )
+    payment_rpc_url: str = Field(
+        default="",
+        description="RPC URL for on-chain verification",
+        json_schema_extra={"env": "PAYMENT_RPC_URL"},
+    )
+    payment_verification_url: str = Field(
+        default="",
+        description="External verification service URL",
+        json_schema_extra={"env": "PAYMENT_VERIFICATION_URL"},
+    )
+    payment_session_ttl_minutes: int = Field(
+        default=60,
+        description="Minutes a payment verification remains valid",
+        json_schema_extra={"env": "PAYMENT_SESSION_TTL_MINUTES"},
+    )
+    payment_gated_tools: str = Field(
+        default="",
+        description="Comma-separated tool names to gate. Empty = all tools.",
+        json_schema_extra={"env": "PAYMENT_GATED_TOOLS"},
+    )
+    payment_free_for_oauth: bool = Field(
+        default=True,
+        description="OAuth and per-user API key sessions bypass payment",
+        json_schema_extra={"env": "PAYMENT_FREE_FOR_OAUTH"},
+    )
+
     # FastMCP 2.12.0 GoogleProvider Configuration
     fastmcp_server_auth: str = ""
     fastmcp_server_auth_google_client_id: str = ""

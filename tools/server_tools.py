@@ -1546,6 +1546,100 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "message": f"Privacy mode set to '{mode}' for this session",
         }
 
+    @mcp.tool(
+        name="verify_payment",
+        description="Verify a blockchain payment to unlock tool access (x402 protocol)",
+        tags={"payment", "x402", "verification"},
+        annotations={
+            "title": "Verify Payment",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def verify_payment(
+        tx_hash: Annotated[str, Field(description="Transaction hash to verify")],
+        chain_id: Annotated[
+            int, Field(description="Chain ID of the transaction")
+        ] = 8453,
+        ctx: Context = None,
+    ) -> dict:
+        """Verify a blockchain payment transaction to unlock tool access.
+
+        After sending a USDC payment to the required wallet, call this tool
+        with the transaction hash to unlock access for your session.
+        """
+        import time as _time
+
+        from middleware.payment.verifier import X402Verifier
+
+        verifier = X402Verifier(
+            chain_id=chain_id,
+            rpc_url=settings.payment_rpc_url,
+            verification_url=settings.payment_verification_url,
+        )
+
+        result = await verifier.verify_payment(
+            tx_hash=tx_hash,
+            expected_amount=settings.payment_usdc_amount,
+            recipient_wallet=settings.payment_recipient_wallet,
+        )
+
+        if result.verified and ctx:
+            # Store payment verification in session
+            try:
+                from auth.context import store_session_data
+                from auth.types import SessionKey
+
+                session_id = ctx.session_id
+                store_session_data(session_id, SessionKey.PAYMENT_VERIFIED, True)
+                store_session_data(session_id, SessionKey.PAYMENT_TX_HASH, tx_hash)
+                store_session_data(
+                    session_id,
+                    SessionKey.PAYMENT_VERIFIED_AT,
+                    _time.time(),
+                )
+                store_session_data(
+                    session_id,
+                    SessionKey.PAYMENT_AMOUNT,
+                    result.amount or "",
+                )
+
+                expires_at = _time.time() + (settings.payment_session_ttl_minutes * 60)
+                logger.info(
+                    "Payment verified and stored for session %s",
+                    session_id,
+                )
+            except Exception as e:
+                logger.warning("Could not store payment in session: %s", e)
+                expires_at = 0
+
+            return {
+                "success": True,
+                "tx_hash": tx_hash,
+                "amount": result.amount,
+                "expires_at": expires_at,
+                "message": (
+                    f"Payment verified! Tool access unlocked for "
+                    f"{settings.payment_session_ttl_minutes} minutes."
+                ),
+            }
+        elif result.verified:
+            return {
+                "success": True,
+                "tx_hash": tx_hash,
+                "amount": result.amount,
+                "message": "Payment verified but session context unavailable -- may need to re-verify.",
+            }
+        else:
+            return {
+                "success": False,
+                "tx_hash": tx_hash,
+                "error": result.error,
+                "message": f"Payment verification failed: {result.error}",
+            }
+
     logger.info(
-        "Server management tools registered: health_check, server_info, manage_credentials, manage_tools, set_privacy_mode"
+        "Server management tools registered: health_check, server_info, manage_credentials, manage_tools, set_privacy_mode, verify_payment"
     )
