@@ -1576,6 +1576,13 @@ def setup_server_tools(mcp: FastMCP) -> None:
         chain_id: Annotated[
             int, Field(description="Chain ID of the transaction")
         ] = 84532,
+        user_google_email: Annotated[
+            str,
+            Field(
+                default="",
+                description="Injected by auth middleware",
+            ),
+        ] = "",
         ctx: Context = None,
     ) -> dict:
         """Verify a blockchain payment transaction to unlock tool access.

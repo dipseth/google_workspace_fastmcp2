@@ -38,6 +38,7 @@ def create_resource_server(
     facilitator = HTTPFacilitatorClient(FacilitatorConfig(url=facilitator_url))
     server = x402ResourceServer(facilitator)
     server.register(network, ExactEvmServerScheme())
+    server.initialize()
     logger.info(
         "x402ResourceServer created (facilitator=%s, network=%s)",
         facilitator_url,
@@ -69,30 +70,50 @@ def get_resource_server(settings: Settings) -> x402ResourceServer:
 def build_payment_requirements(settings: Settings) -> dict:
     """Build x402 v2 payment requirements dict for 402 responses.
 
+    Uses the SDK's ``build_payment_requirements`` to get properly enhanced
+    requirements including EIP-712 domain info in ``extra``.
+
     Returns a JSON-serializable dict that can be base64-encoded and sent
     in ``meta.x402.paymentRequired``.
     """
-    network = settings.payment_network
-    # Derive chain_id from CAIP-2 network string (e.g. "eip155:84532" → 84532)
     try:
-        chain_id = int(network.split(":")[-1])
-    except (ValueError, IndexError):
-        chain_id = settings.payment_chain_id
+        from x402 import ResourceConfig
 
-    usdc_contract = USDC_CONTRACTS.get(chain_id, "")
+        server = get_resource_server(settings)
+        config = ResourceConfig(
+            scheme=settings.payment_scheme,
+            network=settings.payment_network,
+            pay_to=settings.payment_recipient_wallet,
+            price=f"${settings.payment_usdc_amount}",
+        )
+        reqs = server.build_payment_requirements(config)
+        return {
+            "x402Version": 2,
+            "accepts": [r.model_dump(by_alias=True) for r in reqs],
+        }
+    except Exception as e:
+        logger.warning("SDK build_payment_requirements failed (%s), using manual", e)
+        # Fallback to manual construction
+        network = settings.payment_network
+        try:
+            chain_id = int(network.split(":")[-1])
+        except (ValueError, IndexError):
+            chain_id = settings.payment_chain_id
 
-    return {
-        "x402Version": 2,
-        "accepts": [
-            {
-                "scheme": settings.payment_scheme,
-                "network": network,
-                "maxAmountRequired": str(settings.payment_usdc_amount),
-                "asset": usdc_contract,
-                "payTo": settings.payment_recipient_wallet,
-            }
-        ],
-    }
+        usdc_contract = USDC_CONTRACTS.get(chain_id, "")
+
+        return {
+            "x402Version": 2,
+            "accepts": [
+                {
+                    "scheme": settings.payment_scheme,
+                    "network": network,
+                    "maxAmountRequired": str(settings.payment_usdc_amount),
+                    "asset": usdc_contract,
+                    "payTo": settings.payment_recipient_wallet,
+                }
+            ],
+        }
 
 
 def encode_payment_requirements(requirements: dict) -> str:

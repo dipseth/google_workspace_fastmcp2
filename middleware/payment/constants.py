@@ -27,6 +27,8 @@ CAIP2_NETWORKS = {
 X402_TOOL_ARG_KEY = "_x402_payment"
 
 # Tools that are always exempt from payment (infrastructure tools)
+# Includes MCP server wrapper/proxy tools (execute, search, get_schema, tags)
+# which are meta-tools — inner tool calls via execute still go through middleware.
 PAYMENT_EXEMPT_TOOLS = frozenset(
     {
         "verify_payment",
@@ -35,6 +37,11 @@ PAYMENT_EXEMPT_TOOLS = frozenset(
         "check_drive_auth",
         "start_google_auth",
         "set_privacy_mode",
+        # MCP server proxy/wrapper tools
+        "execute",
+        "search",
+        "get_schema",
+        "tags",
     }
 )
 

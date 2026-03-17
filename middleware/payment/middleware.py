@@ -179,32 +179,50 @@ class X402PaymentMiddleware(Middleware):
             return None  # Fall through to legacy 402
 
         try:
-            from middleware.payment.x402_server import build_payment_requirements
+            from x402 import PaymentPayload, PaymentRequirements, ResourceInfo
 
-            requirements_dict = build_payment_requirements(settings)
+            from middleware.payment.x402_server import build_payment_requirements
 
             # Decode the base64 payment payload
             payload_json = base64.b64decode(payload_b64).decode("utf-8")
             payload_dict = json.loads(payload_json)
 
-            # Use the SDK's PaymentPayload model if available, else pass dict
-            try:
-                from x402.types import PaymentPayload
+            # Get SDK-enhanced requirements (includes EIP-712 domain in extra)
+            reqs_dict = build_payment_requirements(settings)
+            accepts_list = reqs_dict.get("accepts", [{}])
+            req_data = accepts_list[0] if accepts_list else {}
+            payment_requirements = PaymentRequirements(**req_data)
 
-                payment_payload = PaymentPayload.model_validate(payload_dict)
-            except (ImportError, Exception):
-                payment_payload = payload_dict
+            # Build the accepted field from payload
+            accepted_data = payload_dict.get("accepted", {})
+            accepted = PaymentRequirements(
+                scheme=accepted_data.get("scheme", settings.payment_scheme),
+                network=accepted_data.get("network", settings.payment_network),
+                asset=accepted_data.get("asset", req_data.get("asset", "")),
+                amount=accepted_data.get(
+                    "maxAmountRequired", accepted_data.get("amount", "0")
+                ),
+                payTo=accepted_data.get("payTo", settings.payment_recipient_wallet),
+                maxTimeoutSeconds=int(accepted_data.get("maxTimeoutSeconds", 300)),
+                extra=accepted_data.get("extra", req_data.get("extra", {})),
+            )
 
-            # Build a PaymentRequirements-like object for the SDK
-            # The SDK expects the 'accepts' entry as payment requirements
-            accepts = requirements_dict.get("accepts", [{}])[0]
+            # Build ResourceInfo if present
+            resource_data = payload_dict.get("resource")
+            resource = None
+            if resource_data:
+                resource = ResourceInfo(
+                    url=resource_data.get("url", ""),
+                    method=resource_data.get("method", "POST"),
+                )
 
-            try:
-                from x402.types import PaymentRequirements
-
-                payment_requirements = PaymentRequirements.model_validate(accepts)
-            except (ImportError, Exception):
-                payment_requirements = accepts
+            # Build PaymentPayload with proper SDK types
+            payment_payload = PaymentPayload(
+                x402Version=payload_dict.get("x402Version", 2),
+                payload=payload_dict.get("payload", {}),
+                accepted=accepted,
+                resource=resource,
+            )
 
             # Verify
             verify_result = await self._resource_server.verify_payment(
