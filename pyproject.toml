@@ -160,6 +160,8 @@ markers = [
     "middleware: middleware tests",
     "analytics: analytics tests",
     "security: security tests",
+    "x402: x402 payment protocol tests (requires TEST_CLIENT_PK)",
+    "payment: payment-related tests",
 ]
 
 [tool.ruff]

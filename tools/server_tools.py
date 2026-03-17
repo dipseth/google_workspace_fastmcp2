@@ -1635,30 +1635,30 @@ def setup_server_tools(mcp: FastMCP) -> None:
             }
 
         if result.verified and ctx:
-            # Store payment verification in session
+            # Store payment verification + HMAC-signed receipt in session
             try:
                 from auth.context import store_session_data
                 from auth.types import SessionKey
+                from middleware.payment.receipt import (
+                    build_payer_identity,
+                    create_payment_receipt,
+                )
 
                 session_id = ctx.session_id
+                ttl_seconds = settings.payment_session_ttl_minutes * 60
+
                 store_session_data(session_id, SessionKey.PAYMENT_VERIFIED, True)
                 store_session_data(
                     session_id, SessionKey.PAYMENT_TX_HASH, verified_hash
                 )
                 store_session_data(
-                    session_id,
-                    SessionKey.PAYMENT_VERIFIED_AT,
-                    _time.time(),
+                    session_id, SessionKey.PAYMENT_VERIFIED_AT, _time.time()
                 )
                 store_session_data(
-                    session_id,
-                    SessionKey.PAYMENT_AMOUNT,
-                    result.amount or "",
+                    session_id, SessionKey.PAYMENT_AMOUNT, result.amount or ""
                 )
                 store_session_data(
-                    session_id,
-                    SessionKey.PAYMENT_NETWORK,
-                    settings.payment_network,
+                    session_id, SessionKey.PAYMENT_NETWORK, settings.payment_network
                 )
                 if result.settlement_tx_hash:
                     store_session_data(
@@ -1667,10 +1667,35 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         result.settlement_tx_hash,
                     )
 
-                expires_at = _time.time() + (settings.payment_session_ttl_minutes * 60)
+                # Build HMAC-signed receipt binding payment to identity
+                payer = build_payer_identity(
+                    session_id, result.payer_address or verified_hash
+                )
+                receipt = create_payment_receipt(
+                    payer=payer,
+                    tool_name="verify_payment",
+                    amount=result.amount or "",
+                    network=settings.payment_network,
+                    tx_hash=verified_hash,
+                    ttl_seconds=ttl_seconds,
+                )
+                store_session_data(
+                    session_id, SessionKey.PAYMENT_PAYER_ADDRESS, payer.wallet_address
+                )
+                store_session_data(
+                    session_id, SessionKey.PAYMENT_RECEIPT, receipt.model_dump()
+                )
+                store_session_data(
+                    session_id, SessionKey.PAYMENT_RECEIPT_HMAC, receipt.hmac
+                )
+
+                expires_at = _time.time() + ttl_seconds
                 logger.info(
-                    "Payment verified and stored for session %s",
+                    "Payment verified and stored for session %s (payer=%s)",
                     session_id,
+                    payer.wallet_address[:12] + "..."
+                    if payer.wallet_address
+                    else "unknown",
                 )
             except Exception as e:
                 logger.warning("Could not store payment in session: %s", e)

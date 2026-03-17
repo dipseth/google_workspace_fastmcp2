@@ -10,7 +10,7 @@ Flow:
   2. Check if the session has auth-based exemption (OAuth/per-user key)
   3. Check if the session has a valid (non-expired) payment verification
   4. Check for x402 payment payload (header or tool arg)
-     → verify via SDK, execute tool, settle, cache in session
+     → verify via SDK, execute tool, settle, cache receipt in session
   5. If none of the above -> return x402-compliant 402 response
 """
 
@@ -19,7 +19,8 @@ from __future__ import annotations
 import base64
 import json
 import time
-from typing import TYPE_CHECKING, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Optional
 
 from fastmcp.server.middleware import Middleware
 from fastmcp.tools.tool import ToolResult
@@ -38,6 +39,21 @@ if TYPE_CHECKING:
     from x402.server import x402ResourceServer
 
 logger = setup_logger()
+
+
+@dataclass
+class _PendingSettlement:
+    """Settlement data returned from verify, consumed by settle.
+
+    Returned by value (not stored on self) to avoid race conditions
+    under concurrent requests.
+    """
+
+    payload: Any  # x402 PaymentPayload
+    requirements: Any  # x402 PaymentRequirements
+    session_id: str | None
+    payer_address: str
+    tool_name: str
 
 
 class X402PaymentMiddleware(Middleware):
@@ -99,7 +115,7 @@ class X402PaymentMiddleware(Middleware):
         return False
 
     def _is_payment_verified(self, session_id: str | None) -> bool:
-        """Check if session has a valid (non-expired) payment."""
+        """Check if session has a valid (non-expired) payment with valid receipt."""
         if not session_id:
             return False
         try:
@@ -118,6 +134,24 @@ class X402PaymentMiddleware(Middleware):
             if time.time() - float(verified_at) > self._session_ttl_seconds:
                 logger.info("Payment expired for session %s", session_id)
                 return False
+
+            # Optional: verify receipt HMAC for defense-in-depth
+            receipt_dict = get_session_data(
+                session_id, SessionKey.PAYMENT_RECEIPT, default=None
+            )
+            if receipt_dict:
+                try:
+                    from middleware.payment.receipt import verify_receipt_hmac
+                    from middleware.payment.types import PaymentReceipt
+
+                    receipt = PaymentReceipt(**receipt_dict)
+                    if not verify_receipt_hmac(receipt):
+                        logger.warning(
+                            "Payment receipt HMAC invalid for session %s", session_id
+                        )
+                        return False
+                except Exception:
+                    pass  # Receipt validation is defense-in-depth, not blocking
 
             return True
         except Exception:
@@ -159,72 +193,63 @@ class X402PaymentMiddleware(Middleware):
         try:
             args = context.message.arguments
             if args and X402_TOOL_ARG_KEY in args:
-                # arguments is a dict; remove our internal key
                 del args[X402_TOOL_ARG_KEY]
         except Exception:
             pass
 
     async def _verify_and_settle(
-        self, payload_b64: str, session_id: str | None
-    ) -> Optional[ToolResult]:
-        """Verify payment via x402 SDK and return error ToolResult or None on success.
+        self,
+        payload_b64: str,
+        session_id: str | None,
+        tool_name: str = "",
+    ) -> tuple[Optional[ToolResult], Optional[_PendingSettlement]]:
+        """Verify payment via x402 SDK.
 
-        On success, caches the payment in session and returns None (caller should proceed).
-        On failure, returns a 402 ToolResult with error details.
+        Returns (error_result, pending_settlement):
+        - On failure: (ToolResult with error, None)
+        - On success: (None, _PendingSettlement for post-execution settle)
         """
         if not self._resource_server:
             logger.warning(
                 "x402 payment payload received but no resource_server configured"
             )
-            return None  # Fall through to legacy 402
+            return None, None  # Fall through to legacy 402
 
         try:
-            from x402 import PaymentPayload, PaymentRequirements, ResourceInfo
+            from middleware.payment.receipt import build_payer_identity, hash_email
+            from middleware.payment.types import PaymentPayloadBuilder
 
-            from middleware.payment.x402_server import build_payment_requirements
-
-            # Decode the base64 payment payload
+            # Decode payload
             payload_json = base64.b64decode(payload_b64).decode("utf-8")
             payload_dict = json.loads(payload_json)
 
-            # Get SDK-enhanced requirements (includes EIP-712 domain in extra)
-            reqs_dict = build_payment_requirements(settings)
-            accepts_list = reqs_dict.get("accepts", [{}])
-            req_data = accepts_list[0] if accepts_list else {}
-            payment_requirements = PaymentRequirements(**req_data)
+            # Get user email hash for non-PII extensions
+            user_email_hash = ""
+            if session_id:
+                try:
+                    from auth.context import get_session_data
+                    from auth.types import SessionKey
 
-            # Build the accepted field from payload
-            accepted_data = payload_dict.get("accepted", {})
-            accepted = PaymentRequirements(
-                scheme=accepted_data.get("scheme", settings.payment_scheme),
-                network=accepted_data.get("network", settings.payment_network),
-                asset=accepted_data.get("asset", req_data.get("asset", "")),
-                amount=accepted_data.get(
-                    "maxAmountRequired", accepted_data.get("amount", "0")
-                ),
-                payTo=accepted_data.get("payTo", settings.payment_recipient_wallet),
-                maxTimeoutSeconds=int(accepted_data.get("maxTimeoutSeconds", 300)),
-                extra=accepted_data.get("extra", req_data.get("extra", {})),
-            )
+                    email = get_session_data(
+                        session_id, SessionKey.USER_EMAIL, default=""
+                    )
+                    if email:
+                        user_email_hash = hash_email(email)
+                except Exception:
+                    pass
 
-            # Build ResourceInfo if present
-            resource_data = payload_dict.get("resource")
-            resource = None
-            if resource_data:
-                resource = ResourceInfo(
-                    url=resource_data.get("url", ""),
-                    method=resource_data.get("method", "POST"),
+            # Build proper SDK types via builder
+            payment_payload, payment_requirements = (
+                PaymentPayloadBuilder.from_raw_payload(
+                    payload_dict,
+                    settings,
+                    tool_name=tool_name,
+                    session_id=session_id or "",
+                    user_email_hash=user_email_hash,
                 )
-
-            # Build PaymentPayload with proper SDK types
-            payment_payload = PaymentPayload(
-                x402Version=payload_dict.get("x402Version", 2),
-                payload=payload_dict.get("payload", {}),
-                accepted=accepted,
-                resource=resource,
             )
 
-            # Verify
+            # Verify via facilitator
             verify_result = await self._resource_server.verify_payment(
                 payment_payload, payment_requirements
             )
@@ -232,87 +257,89 @@ class X402PaymentMiddleware(Middleware):
             if not verify_result.is_valid:
                 reason = getattr(verify_result, "invalid_reason", "Verification failed")
                 logger.warning("x402 payment verification failed: %s", reason)
-                return ToolResult(
-                    content=[
-                        TextContent(
-                            type="text",
-                            text=f"402 Payment Required\n\nPayment verification failed: {reason}",
-                        )
-                    ],
+                return (
+                    ToolResult(
+                        content=[
+                            TextContent(
+                                type="text",
+                                text=f"402 Payment Required\n\nPayment verification failed: {reason}",
+                            )
+                        ],
+                    ),
+                    None,
                 )
 
-            # Verification passed — we'll settle AFTER the tool executes
-            # Cache the payment data for post-execution settlement
-            self._pending_settlement = {
-                "payload": payment_payload,
-                "requirements": payment_requirements,
-                "session_id": session_id,
-            }
+            # Extract payer wallet address from verify result
+            payer_address = getattr(verify_result, "payer", "") or ""
+            if hasattr(payer_address, "hex"):
+                payer_address = str(payer_address)
 
-            # Cache payment in session
-            self._cache_payment_in_session(session_id)
+            # Cache payment + receipt in session
+            self._cache_payment_in_session(
+                session_id,
+                payer_address=payer_address,
+                tool_name=tool_name,
+            )
 
-            return None  # Success — caller should proceed with call_next
+            pending = _PendingSettlement(
+                payload=payment_payload,
+                requirements=payment_requirements,
+                session_id=session_id,
+                payer_address=payer_address,
+                tool_name=tool_name,
+            )
+            return None, pending
 
         except Exception as e:
             logger.error("x402 payment verify error: %s", e, exc_info=True)
-            return ToolResult(
-                content=[
-                    TextContent(
-                        type="text",
-                        text=f"402 Payment Required\n\nPayment processing error: {e}",
-                    )
-                ],
+            return (
+                ToolResult(
+                    content=[
+                        TextContent(
+                            type="text",
+                            text=f"402 Payment Required\n\nPayment processing error: {e}",
+                        )
+                    ],
+                ),
+                None,
             )
 
-    async def _settle_payment(self, result: ToolResult) -> ToolResult:
+    async def _settle_payment(
+        self, result: ToolResult, pending: Optional[_PendingSettlement]
+    ) -> ToolResult:
         """Settle a verified payment after successful tool execution.
 
-        Adds PAYMENT-RESPONSE data to result meta.
+        Adds PAYMENT-RESPONSE data and payer info to result meta.
         """
-        pending = getattr(self, "_pending_settlement", None)
         if not pending or not self._resource_server:
             return result
 
         try:
             settle_result = await self._resource_server.settle_payment(
-                pending["payload"], pending["requirements"]
+                pending.payload, pending.requirements
             )
 
-            # Store settlement tx hash in session
-            session_id = pending.get("session_id")
-            if session_id and settle_result:
+            # Extract settlement tx hash
+            tx_hash = ""
+            settle_b64 = ""
+            if settle_result:
+                settle_dict = settle_result.model_dump(by_alias=True)
+                tx_hash = settle_dict.get("txHash", settle_dict.get("transaction", ""))
+                settle_b64 = base64.b64encode(json.dumps(settle_dict).encode()).decode()
+
+            # Update session with settlement data
+            session_id = pending.session_id
+            if session_id and tx_hash:
                 try:
                     from auth.context import store_session_data
                     from auth.types import SessionKey
 
-                    settle_dump = (
-                        settle_result.model_dump(by_alias=True)
-                        if hasattr(settle_result, "model_dump")
-                        else {}
+                    store_session_data(
+                        session_id, SessionKey.PAYMENT_SETTLE_TX_HASH, tx_hash
                     )
-                    tx_hash = settle_dump.get("txHash", settle_dump.get("tx_hash", ""))
-                    if tx_hash:
-                        store_session_data(
-                            session_id, SessionKey.PAYMENT_SETTLE_TX_HASH, tx_hash
-                        )
+                    store_session_data(session_id, SessionKey.PAYMENT_TX_HASH, tx_hash)
                 except Exception as e:
                     logger.warning("Could not store settlement hash: %s", e)
-
-            # Encode settlement for response meta
-            settle_b64 = ""
-            if settle_result:
-                try:
-                    settle_dict = (
-                        settle_result.model_dump(by_alias=True)
-                        if hasattr(settle_result, "model_dump")
-                        else {}
-                    )
-                    settle_b64 = base64.b64encode(
-                        json.dumps(settle_dict).encode()
-                    ).decode()
-                except Exception:
-                    pass
 
             # Attach x402 response data to result meta
             if result.meta is None:
@@ -321,11 +348,11 @@ class X402PaymentMiddleware(Middleware):
                 "version": 2,
                 "settled": True,
                 "paymentResponse": settle_b64,
+                "payer": pending.payer_address,
             }
 
         except Exception as e:
             logger.error("x402 payment settlement error: %s", e, exc_info=True)
-            # Tool already executed — don't fail the response, just log
             if result.meta is None:
                 result.meta = {}
             result.meta["x402"] = {
@@ -333,34 +360,64 @@ class X402PaymentMiddleware(Middleware):
                 "settled": False,
                 "settlementError": str(e),
             }
-        finally:
-            self._pending_settlement = None
 
         return result
 
-    def _cache_payment_in_session(self, session_id: str | None) -> None:
-        """Store payment verification in session data."""
+    def _cache_payment_in_session(
+        self,
+        session_id: str | None,
+        payer_address: str = "",
+        tool_name: str = "",
+        tx_hash: str = "",
+    ) -> None:
+        """Store payment verification + HMAC-signed receipt in session."""
         if not session_id:
             return
         try:
             from auth.context import store_session_data
             from auth.types import SessionKey
+            from middleware.payment.constants import MCP_RESOURCE_URL_PREFIX
+            from middleware.payment.receipt import (
+                build_payer_identity,
+                create_payment_receipt,
+            )
 
+            now = time.time()
             store_session_data(session_id, SessionKey.PAYMENT_VERIFIED, True)
-            store_session_data(session_id, SessionKey.PAYMENT_VERIFIED_AT, time.time())
+            store_session_data(session_id, SessionKey.PAYMENT_VERIFIED_AT, now)
             store_session_data(
                 session_id, SessionKey.PAYMENT_NETWORK, settings.payment_network
             )
+
+            # Build and store payer identity + HMAC-signed receipt
+            payer = build_payer_identity(session_id, payer_address)
+            receipt = create_payment_receipt(
+                payer=payer,
+                tool_name=tool_name,
+                amount=settings.payment_usdc_amount,
+                network=settings.payment_network,
+                tx_hash=tx_hash,
+                ttl_seconds=self._session_ttl_seconds,
+                resource_url=f"{MCP_RESOURCE_URL_PREFIX}{tool_name}"
+                if tool_name
+                else "",
+            )
+
+            store_session_data(
+                session_id, SessionKey.PAYMENT_PAYER_ADDRESS, payer_address
+            )
+            store_session_data(
+                session_id, SessionKey.PAYMENT_RECEIPT, receipt.model_dump()
+            )
+            store_session_data(
+                session_id, SessionKey.PAYMENT_RECEIPT_HMAC, receipt.hmac
+            )
+
         except Exception as e:
             logger.warning("Could not cache payment in session: %s", e)
 
     def _make_payment_required_response(self) -> ToolResult:
-        """Build an x402-compliant 402 Payment Required response.
-
-        Returns a ToolResult with:
-        - Human-readable text in content (backward compatible with any MCP client)
-        - x402 v2 structured data in meta (for x402-aware clients)
-        """
+        """Build an x402-compliant 402 Payment Required response."""
         chain_id = settings.payment_chain_id
         network = settings.payment_network
         usdc_contract = USDC_CONTRACTS.get(chain_id, "")
@@ -391,7 +448,6 @@ class X402PaymentMiddleware(Middleware):
             f"verify_payment(tx_hash='your_tx_hash') to unlock access."
         )
 
-        # Build x402 v2 payment requirements for structured meta
         from middleware.payment.x402_server import (
             build_payment_requirements,
             encode_payment_requirements,
@@ -417,7 +473,6 @@ class X402PaymentMiddleware(Middleware):
 
             return await get_session_context()
         except Exception:
-            # Fallback: try native context session_id
             try:
                 ctx = context.fastmcp_context
                 return ctx.session_id if ctx else None
@@ -445,17 +500,17 @@ class X402PaymentMiddleware(Middleware):
         # 4. Check for x402 payment payload (Path A: header, Path B: tool arg)
         payment_payload = self._extract_payment_payload(context)
         if payment_payload:
-            # Strip the _x402_payment arg so downstream tools don't see it
             self._strip_payment_arg(context)
 
-            # Verify via SDK
-            error_result = await self._verify_and_settle(payment_payload, session_id)
+            error_result, pending = await self._verify_and_settle(
+                payment_payload, session_id, tool_name
+            )
             if error_result:
                 return error_result
 
             # Verification passed — execute tool, then settle
             result = await call_next(context)
-            return await self._settle_payment(result)
+            return await self._settle_payment(result, pending)
 
         # 5. Not verified, no payment payload -- return 402 response
         logger.info(

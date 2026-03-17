@@ -341,6 +341,11 @@ class Settings(BaseSettings):
         description="OAuth and per-user API key sessions bypass payment",
         json_schema_extra={"env": "PAYMENT_FREE_FOR_OAUTH"},
     )
+    receipt_collection: str = Field(
+        default="mcp_payment_receipts",
+        description="Qdrant collection for payment receipt storage",
+        json_schema_extra={"env": "RECEIPT_COLLECTION"},
+    )
 
     # FastMCP 2.12.0 GoogleProvider Configuration
     fastmcp_server_auth: str = ""

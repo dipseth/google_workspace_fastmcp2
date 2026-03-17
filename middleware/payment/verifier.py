@@ -176,58 +176,14 @@ class X402Verifier:
             import json
 
             from config.settings import settings
-            from middleware.payment.constants import USDC_CONTRACTS
+            from middleware.payment.types import PaymentPayloadBuilder
 
             payload_json = base64.b64decode(payload_b64).decode("utf-8")
             payload_dict = json.loads(payload_json)
 
-            # Derive chain_id from network
-            network = settings.payment_network
-            try:
-                chain_id = int(network.split(":")[-1])
-            except (ValueError, IndexError):
-                chain_id = settings.payment_chain_id
-            usdc_contract = USDC_CONTRACTS.get(chain_id, "")
-
-            from x402 import PaymentPayload, PaymentRequirements, ResourceInfo
-
-            from middleware.payment.x402_server import build_payment_requirements
-
-            # Get SDK-enhanced requirements (includes EIP-712 domain in extra)
-            reqs_dict = build_payment_requirements(settings)
-            accepts_list = reqs_dict.get("accepts", [{}])
-            req_data = accepts_list[0] if accepts_list else {}
-            payment_requirements = PaymentRequirements(**req_data)
-
-            # Build the accepted field from payload
-            accepted_data = payload_dict.get("accepted", {})
-            accepted = PaymentRequirements(
-                scheme=accepted_data.get("scheme", settings.payment_scheme),
-                network=accepted_data.get("network", network),
-                asset=accepted_data.get("asset", usdc_contract),
-                amount=accepted_data.get(
-                    "maxAmountRequired", accepted_data.get("amount", "0")
-                ),
-                payTo=accepted_data.get("payTo", settings.payment_recipient_wallet),
-                maxTimeoutSeconds=int(accepted_data.get("maxTimeoutSeconds", 300)),
-                extra=accepted_data.get("extra", req_data.get("extra", {})),
-            )
-
-            # Build ResourceInfo if present
-            resource_data = payload_dict.get("resource")
-            resource = None
-            if resource_data:
-                resource = ResourceInfo(
-                    url=resource_data.get("url", ""),
-                    method=resource_data.get("method", "POST"),
-                )
-
-            # Build PaymentPayload with proper types
-            payment_payload = PaymentPayload(
-                x402Version=payload_dict.get("x402Version", 2),
-                payload=payload_dict.get("payload", {}),
-                accepted=accepted,
-                resource=resource,
+            # Use builder to construct proper SDK types
+            payment_payload, payment_requirements = (
+                PaymentPayloadBuilder.from_raw_payload(payload_dict, settings)
             )
 
             verify_result = await self._resource_server.verify_payment(
@@ -242,21 +198,29 @@ class X402Verifier:
                     error=str(reason),
                 )
 
+            # Extract payer address from verify result
+            payer_address = getattr(verify_result, "payer", "") or ""
+            if hasattr(payer_address, "hex"):
+                payer_address = str(payer_address)
+
             # Settle
             settle_result = await self._resource_server.settle_payment(
                 payment_payload, payment_requirements
             )
 
             settle_tx = ""
-            if settle_result and hasattr(settle_result, "model_dump"):
+            if settle_result:
                 settle_dict = settle_result.model_dump(by_alias=True)
-                settle_tx = settle_dict.get("txHash", settle_dict.get("tx_hash", ""))
+                settle_tx = settle_dict.get(
+                    "txHash", settle_dict.get("transaction", "")
+                )
 
             return PaymentVerificationResult(
                 verified=True,
                 tx_hash=settle_tx or "x402-settled",
                 amount=expected_amount or settings.payment_usdc_amount,
                 settlement_tx_hash=settle_tx,
+                payer_address=payer_address,
             )
 
         except Exception as e:

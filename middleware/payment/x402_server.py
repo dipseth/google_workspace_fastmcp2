@@ -108,9 +108,11 @@ def build_payment_requirements(settings: Settings) -> dict:
                 {
                     "scheme": settings.payment_scheme,
                     "network": network,
-                    "maxAmountRequired": str(settings.payment_usdc_amount),
+                    "amount": str(int(float(settings.payment_usdc_amount) * 1e6)),
                     "asset": usdc_contract,
                     "payTo": settings.payment_recipient_wallet,
+                    "maxTimeoutSeconds": 300,
+                    "extra": {"name": "USDC", "version": "2"},
                 }
             ],
         }

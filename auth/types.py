@@ -58,6 +58,9 @@ class SessionKey(str, Enum):
     PAYMENT_AMOUNT = "payment_amount"  # str (USDC amount)
     PAYMENT_SETTLE_TX_HASH = "payment_settle_tx_hash"  # str (facilitator settlement)
     PAYMENT_NETWORK = "payment_network"  # str (CAIP-2 network id)
+    PAYMENT_PAYER_ADDRESS = "payment_payer_address"  # str (EVM wallet that paid)
+    PAYMENT_RECEIPT = "payment_receipt"  # dict (HMAC-signed PaymentReceipt)
+    PAYMENT_RECEIPT_HMAC = "payment_receipt_hmac"  # str (HMAC for validation)
 
     # Chat service account (per-user encrypted)
     CHAT_SERVICE_ACCOUNT_JSON = "chat_service_account_json"  # dict (in-memory cache)

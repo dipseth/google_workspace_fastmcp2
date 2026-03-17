@@ -26,6 +26,9 @@ CAIP2_NETWORKS = {
 # MCP tool argument key used to pass x402 payment payload (any transport)
 X402_TOOL_ARG_KEY = "_x402_payment"
 
+# MCP resource URL prefix for on-chain tool identification
+MCP_RESOURCE_URL_PREFIX = "mcp://workspace.mcp/tool/"
+
 # Tools that are always exempt from payment (infrastructure tools)
 # Includes MCP server wrapper/proxy tools (execute, search, get_schema, tags)
 # which are meta-tools — inner tool calls via execute still go through middleware.

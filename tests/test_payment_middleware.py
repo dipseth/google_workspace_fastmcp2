@@ -257,6 +257,7 @@ class TestX402PaymentMiddleware:
         # Prevent Path A (HTTP header) from firing by making fastmcp_context._request None
         context.fastmcp_context._request = None
 
+        mock_pending = MagicMock()
         with patch.object(
             mw, "_get_session_id", new_callable=AsyncMock, return_value="s1"
         ):
@@ -266,7 +267,7 @@ class TestX402PaymentMiddleware:
                         mw,
                         "_verify_and_settle",
                         new_callable=AsyncMock,
-                        return_value=None,
+                        return_value=(None, mock_pending),
                     ) as mock_verify:
                         with patch.object(
                             mw,
@@ -275,7 +276,9 @@ class TestX402PaymentMiddleware:
                             return_value=mock_tool_result,
                         ):
                             result = await mw.on_call_tool(context, call_next)
-                            mock_verify.assert_called_once_with(payload_b64, "s1")
+                            mock_verify.assert_called_once_with(
+                                payload_b64, "s1", "list_spaces"
+                            )
                             call_next.assert_called_once()
                             # _x402_payment should be stripped from args
                             assert X402_TOOL_ARG_KEY not in context.message.arguments
@@ -306,7 +309,7 @@ class TestX402PaymentMiddleware:
                         mw,
                         "_verify_and_settle",
                         new_callable=AsyncMock,
-                        return_value=error_result,
+                        return_value=(error_result, None),
                     ):
                         result = await mw.on_call_tool(context, call_next)
                         call_next.assert_not_called()
@@ -320,6 +323,8 @@ class TestX402PaymentMiddleware:
         from fastmcp.tools.tool import ToolResult
         from mcp.types import TextContent
 
+        from middleware.payment.middleware import _PendingSettlement
+
         mw = self._make_middleware()
 
         mock_settle_result = MagicMock()
@@ -329,29 +334,34 @@ class TestX402PaymentMiddleware:
         mock_resource_server.settle_payment = AsyncMock(return_value=mock_settle_result)
         mw._resource_server = mock_resource_server
 
-        mw._pending_settlement = {
-            "payload": MagicMock(),
-            "requirements": MagicMock(),
-            "session_id": "s1",
-        }
+        pending = _PendingSettlement(
+            payload=MagicMock(),
+            requirements=MagicMock(),
+            session_id="s1",
+            payer_address="0xPayer",
+            tool_name="test_tool",
+        )
 
         tool_result = ToolResult(
             content=[TextContent(type="text", text="Tool output")],
         )
 
         with patch("auth.context.store_session_data"):
-            result = await mw._settle_payment(tool_result)
+            result = await mw._settle_payment(tool_result, pending)
 
         assert result.meta is not None
         assert result.meta["x402"]["version"] == 2
         assert result.meta["x402"]["settled"] is True
         assert result.meta["x402"]["paymentResponse"] != ""
+        assert result.meta["x402"]["payer"] == "0xPayer"
 
     @pytest.mark.asyncio
     async def test_settle_payment_error_logged_not_fatal(self):
         """Settlement errors don't crash the tool response."""
         from fastmcp.tools.tool import ToolResult
         from mcp.types import TextContent
+
+        from middleware.payment.middleware import _PendingSettlement
 
         mw = self._make_middleware()
 
@@ -361,17 +371,19 @@ class TestX402PaymentMiddleware:
         )
         mw._resource_server = mock_resource_server
 
-        mw._pending_settlement = {
-            "payload": MagicMock(),
-            "requirements": MagicMock(),
-            "session_id": "s1",
-        }
+        pending = _PendingSettlement(
+            payload=MagicMock(),
+            requirements=MagicMock(),
+            session_id="s1",
+            payer_address="0xPayer",
+            tool_name="test_tool",
+        )
 
         tool_result = ToolResult(
             content=[TextContent(type="text", text="Tool output")],
         )
 
-        result = await mw._settle_payment(tool_result)
+        result = await mw._settle_payment(tool_result, pending)
         assert result.meta["x402"]["settled"] is False
         assert "settlementError" in result.meta["x402"]
         # Tool output is preserved
@@ -381,13 +393,17 @@ class TestX402PaymentMiddleware:
 
     @pytest.mark.asyncio
     async def test_session_cached_after_x402_payment(self):
-        """After x402 payment, session is cached so subsequent calls pass."""
+        """After x402 payment, session is cached with receipt."""
         mw = self._make_middleware()
 
         with patch("auth.context.store_session_data") as mock_store:
-            mw._cache_payment_in_session("session-abc")
-            # Should store PAYMENT_VERIFIED, PAYMENT_VERIFIED_AT, PAYMENT_NETWORK
-            assert mock_store.call_count == 3
+            with patch("auth.context.get_session_data", return_value=None):
+                mw._cache_payment_in_session(
+                    "session-abc", payer_address="0xPayer", tool_name="test_tool"
+                )
+                # PAYMENT_VERIFIED, PAYMENT_VERIFIED_AT, PAYMENT_NETWORK,
+                # PAYMENT_PAYER_ADDRESS, PAYMENT_RECEIPT, PAYMENT_RECEIPT_HMAC
+                assert mock_store.call_count == 6
 
     # ── Unit tests for helper methods ──
 
