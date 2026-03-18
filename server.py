@@ -70,7 +70,6 @@ from middleware.sampling_middleware import (
     DSLToolConfig,
     EnhancementLevel,
     ValidationAgentConfig,
-    setup_enhanced_sampling_demo_tools,
     setup_enhanced_sampling_middleware,
 )
 from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
@@ -967,12 +966,10 @@ if sampling_middleware:
         "🔗 Enhanced Sampling Middleware connected to Qdrant for historical context"
     )
 
-    # Register sampling demo tools
-    logger.info("🎯 Registering enhanced sampling demo tools...")
-    setup_enhanced_sampling_demo_tools(mcp)
-    logger.info(
-        "✅ Enhanced sampling demo tools registered (intelligent_email_composer, smart_workflow_assistant, template_rendering_demo, resource_discovery_assistant)"
-    )
+    # Demo sampling tools disabled — sampling is focused on validation agents
+    # for the 4 registered tools (send_dynamic_card, compose_dynamic_email,
+    # create_template_macro, qdrant_search). Re-enable with:
+    #   setup_enhanced_sampling_demo_tools(mcp)
 
 # 6. Setup Profile Enrichment Middleware with optional Qdrant integration
 logger.info("👤 Setting up Profile Enrichment Middleware for People API integration...")
