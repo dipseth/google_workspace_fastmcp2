@@ -94,6 +94,7 @@ class ValidationAgentConfig:
     temperature: float = 0.1
     generate_variations: bool = False
     syntax_bypass_confidence: float = 1.0  # skip if DSL syntax already valid
+    tools: Optional[list] = None  # Agent tools for tool-equipped sampling
 
 
 class ValidationResult(BaseModel):
@@ -921,6 +922,7 @@ Provide personalized recommendations based on historical success patterns.""",
         model_preferences: Optional[Union[str, List[str], ModelPreferences]] = None,
         template: Optional[SamplingTemplate] = None,
         result_type: Optional[Any] = None,
+        tools: Optional[list] = None,
     ) -> Any:
         """
         Request text generation from the client's LLM.
@@ -933,6 +935,7 @@ Provide personalized recommendations based on historical success patterns.""",
             model_preferences: Model selection preferences
             template: Pre-defined template for common use cases
             result_type: Pydantic model type for structured output (sets .result on SamplingResult)
+            tools: Optional list of tool functions the agent can call during sampling
 
         Returns:
             SamplingResult — callers access .text for raw text or .result for structured output
@@ -979,6 +982,8 @@ Provide personalized recommendations based on historical success patterns.""",
                 )
             if result_type is not None:
                 sampling_params["result_type"] = result_type
+            if tools is not None:
+                sampling_params["tools"] = tools
 
             if self.enable_debug:
                 logger.debug(

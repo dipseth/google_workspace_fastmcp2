@@ -34,10 +34,10 @@ import asyncio
 import json
 
 # Import MCP-related components
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from fastmcp.dependencies import Progress
-from pydantic import Field
-from typing_extensions import Annotated, Any, Dict, Optional
+from pydantic import BaseModel, Field
+from typing_extensions import Annotated, Any, Dict, List, Optional
 
 # Template middleware integration handled at server level - no imports needed here
 from auth.context import get_injected_service
@@ -531,6 +531,160 @@ def setup_card_tools(mcp: FastMCP) -> None:
         f"{dsl_field_desc}"
     )
 
+    # =========================================================================
+    # DRAFT VARIATIONS — Pydantic models and generation function
+    # =========================================================================
+
+    class CardVariation(BaseModel):
+        """A single card design variation."""
+
+        card_description: str = Field(description="DSL notation for the card structure")
+        card_params: dict = Field(description="Widget content params for the variation")
+        label: str = Field(
+            description="Variation label: Conservative, Enhanced, or Styled"
+        )
+
+    class DraftVariationsResult(BaseModel):
+        """Structured output from the draft variations agent."""
+
+        variations: List[CardVariation] = Field(
+            description="Exactly 3 card variations", min_length=3, max_length=3
+        )
+        reasoning: str = Field(description="Brief explanation of design choices")
+
+    async def _generate_draft_variations(
+        ctx: Context,
+        card_description: str,
+        card_params: dict,
+        webhook_url: Optional[str],
+        space_id: Optional[str],
+        user_google_email: str,
+        thread_key: Optional[str] = None,
+    ) -> SendDynamicCardResponse:
+        """Generate 3 draft card variations via tool-equipped sampling agent.
+
+        Sends each variation to the Chat space in a shared thread for comparison.
+        """
+        import secrets
+
+        from gchat.card_builder.utils import coerce_json_param
+        from gchat.card_delivery import deliver_card_message
+        from middleware.sampling_prompts.card_dsl import (
+            DRAFT_AGENT_TOOLS,
+            get_draft_variations_prompt,
+        )
+
+        card_params = coerce_json_param(card_params, "card_params")
+
+        # Build the agent prompt with original inputs
+        tool_args = {
+            "card_description": card_description,
+            "card_params": card_params,
+        }
+        system_prompt = get_draft_variations_prompt(tool_args)
+
+        # Sample with tools — the agent can validate DSL, search patterns, check relationships
+        user_message = (
+            f"Generate 3 draft variations for this card.\n"
+            f"card_description: {card_description}\n"
+            f"card_params: {json.dumps(card_params, default=str)}"
+        )
+
+        result = await ctx.sample(
+            messages=user_message,
+            system_prompt=system_prompt,
+            tools=DRAFT_AGENT_TOOLS,
+            result_type=DraftVariationsResult,
+            max_tokens=2000,
+            temperature=0.4,
+        )
+
+        # Extract parsed result
+        draft_result = result.result if hasattr(result, "result") else result
+        if not isinstance(draft_result, DraftVariationsResult):
+            return SendDynamicCardResponse(
+                success=False,
+                deliveryMethod="webhook" if webhook_url else "api",
+                cardType="draft_variations",
+                cardDescription=card_description,
+                userEmail=user_google_email,
+                validationPassed=False,
+                message="Draft variations agent did not return structured output",
+                error="Sampling result_type mismatch",
+            )
+
+        # Send each variation to the Chat space in a shared thread
+        draft_thread = thread_key or f"draft_{secrets.token_hex(4)}"
+        variations_sent = []
+
+        # Resolve webhook/service for delivery
+        if not webhook_url and not space_id and settings.mcp_chat_webhook:
+            webhook_url = settings.mcp_chat_webhook
+
+        chat_service = None
+        if not webhook_url and space_id:
+            chat_service = await _get_chat_service_with_fallback(user_google_email)
+
+        for idx, variation in enumerate(draft_result.variations, 1):
+            # Start from original user params as base, overlay agent's variation
+            var_params = dict(card_params)
+            agent_params = coerce_json_param(variation.card_params, "card_params")
+            var_params.update(agent_params)
+
+            # Resolve symbol-keyed params (e.g. δ → items, ᵬ → buttons)
+            if (
+                _card_framework_wrapper
+                and _card_framework_wrapper.reverse_symbol_mapping
+            ):
+                var_params = _card_framework_wrapper.resolve_symbol_params(var_params)
+
+            # Set draft header
+            var_params["title"] = f"Draft {idx}/3 — {variation.label}"
+            var_params.setdefault("subtitle", card_description[:80])
+
+            # Build card via SmartCardBuilder (same path as normal send)
+            builder = get_smart_card_builder()
+            google_format_card = builder.build_from_params(
+                description=variation.card_description,
+                card_params=var_params,
+            )
+
+            if not google_format_card:
+                logger.warning(f"Draft {idx} ({variation.label}) failed to build")
+                continue
+
+            message_body = {"cardsV2": [google_format_card]}
+
+            # Deliver
+            delivery = await deliver_card_message(
+                message_body=message_body,
+                webhook_url=webhook_url,
+                chat_service=chat_service,
+                space_id=space_id,
+                thread_key=draft_thread,
+                builder=builder,
+            )
+
+            if delivery.success:
+                variations_sent.append(variation.label)
+
+            # Rate limit safety between sends
+            if idx < 3:
+                await asyncio.sleep(0.5)
+
+        return SendDynamicCardResponse(
+            success=len(variations_sent) > 0,
+            deliveryMethod="webhook" if webhook_url else "api",
+            cardType="draft_variations",
+            cardDescription=card_description,
+            threadKey=draft_thread,
+            webhookUrl=webhook_url,
+            userEmail=user_google_email,
+            validationPassed=True,
+            message=f"Sent {len(variations_sent)}/3 draft variations: {', '.join(variations_sent)}",
+            alternativeDsl=[v.card_description for v in draft_result.variations],
+        )
+
     @mcp.tool(
         name="send_dynamic_card",
         description=tool_description,
@@ -587,6 +741,16 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 description="Webhook URL. Defaults to MCP_CHAT_WEBHOOK env var if not provided.",
             ),
         ] = None,
+        draft_variations: Annotated[
+            bool,
+            Field(
+                default=False,
+                description="When true, generate 3 draft card variations (Conservative, Enhanced, Creative) "
+                "and send them to the Chat space in a shared thread for comparison instead of sending "
+                "the original card. Uses a tool-equipped sampling agent for informed design.",
+            ),
+        ] = False,
+        ctx: Context = None,  # FastMCP injects this; gives access to ctx.sample()
         progress: Progress = Progress(),  # FastMCP background task progress reporting
     ) -> SendDynamicCardResponse:
         """Send a card to Google Chat using DSL notation for structure control."""
@@ -595,6 +759,21 @@ def setup_card_tools(mcp: FastMCP) -> None:
 
             # Report progress for background task tracking
             await progress.set_message("Initializing card builder...")
+
+            # --- Draft variations mode: generate 3 alternatives via sampling agent ---
+            if draft_variations and ctx:
+                await progress.set_message(
+                    "Generating draft variations via sampling agent..."
+                )
+                return await _generate_draft_variations(
+                    ctx=ctx,
+                    card_description=card_description,
+                    card_params=card_params,
+                    webhook_url=webhook_url,
+                    space_id=space_id,
+                    user_google_email=user_google_email,
+                    thread_key=thread_key,
+                )
 
             # Use default webhook from settings if neither webhook nor space_id provided.
             # When space_id is explicitly given, prefer API delivery over default webhook.

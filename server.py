@@ -889,6 +889,7 @@ if settings.sampling_tools:
                 get_system_prompt_fn=get_card_validation_prompt,
                 mode="pre",
                 generate_variations=True,
+                enabled=False,  # Validation is now opt-in via draft_variations param
             ),
         )
         sampling_middleware.register_validation_agent(
