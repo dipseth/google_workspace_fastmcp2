@@ -566,6 +566,8 @@ async def _build_oauth_success_html(
     # ── Build success page HTML ──
     from auth.ui import (
         build_api_key_section,
+        build_envelope_inventory_section,
+        build_revoke_section,
         build_security_viz_section,
         generate_success_html,
     )
@@ -574,11 +576,15 @@ async def _build_oauth_success_html(
         user_email, user_api_key, user_api_key_exists
     )
     security_viz_section = build_security_viz_section(user_email)
+    envelope_inventory_section = build_envelope_inventory_section(user_email)
+    revoke_section = build_revoke_section(user_email, settings.base_url)
 
     return generate_success_html(
         user_email=user_email,
         api_key_section=api_key_section,
         security_viz_section=security_viz_section,
+        envelope_inventory_section=envelope_inventory_section,
+        revoke_section=revoke_section,
     )
 
 
@@ -2039,6 +2045,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     # Register service selection routes (shared with GoogleProvider path)
     setup_service_selection_routes(mcp)
 
+    # Register status check routes (shared with GoogleProvider path)
+    setup_status_check_routes(mcp)
+
     # Register config API routes (shared with GoogleProvider path)
     # In GoogleProvider mode these are registered separately via setup_config_api_routes()
     # Here they're already inline above, so no separate call needed.
@@ -2404,6 +2413,193 @@ def setup_config_api_routes(mcp) -> None:
             },
         )
 
+    @mcp.custom_route("/api/revoke", methods=["POST", "OPTIONS"])
+    async def revoke_api(request: Any):
+        """Revoke selected credentials and encrypted envelopes for a user."""
+        from starlette.responses import JSONResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            )
+
+        try:
+            body = await request.json()
+            user_email = (body.get("user_email") or "").strip()
+            items = body.get("items", [])
+            confirmation_email = (body.get("confirmation_email") or "").strip()
+
+            if not user_email or not items:
+                return JSONResponse(
+                    {"success": False, "error": "Missing user_email or items"},
+                    status_code=400,
+                )
+
+            if confirmation_email.lower() != user_email.lower():
+                return JSONResponse(
+                    {"success": False, "error": "Confirmation email does not match"},
+                    status_code=400,
+                )
+
+            from auth.context import get_auth_middleware
+
+            auth_mw = get_auth_middleware()
+            revoked = []
+            errors = []
+
+            for item in items:
+                try:
+                    if item == "api_key":
+                        from auth.user_api_keys import revoke_user_key
+
+                        if revoke_user_key(user_email):
+                            revoked.append("api_key")
+                        else:
+                            errors.append("api_key: not found")
+                    elif item == "credentials" and auth_mw:
+                        if auth_mw.delete_credential_file(user_email):
+                            revoked.append("credentials")
+                        else:
+                            errors.append("credentials: not found")
+                    elif item == "chat_sa" and auth_mw:
+                        if auth_mw.delete_chat_service_account(user_email):
+                            revoked.append("chat_sa")
+                        else:
+                            errors.append("chat_sa: not found")
+                    elif item == "sampling_config" and auth_mw:
+                        if auth_mw.delete_sampling_config(user_email):
+                            revoked.append("sampling_config")
+                        else:
+                            errors.append("sampling_config: not found")
+                    elif item == "backup" and auth_mw:
+                        if auth_mw.delete_backup_file(user_email):
+                            revoked.append("backup")
+                        else:
+                            errors.append("backup: not found")
+                    elif item == "links":
+                        from auth.user_api_keys import (
+                            get_accessible_emails,
+                            unlink_accounts,
+                        )
+
+                        accessible = get_accessible_emails(user_email)
+                        linked = [
+                            e for e in accessible if e != user_email.lower().strip()
+                        ]
+                        for linked_email in linked:
+                            unlink_accounts(user_email, linked_email)
+                        if linked:
+                            revoked.append("links")
+                        else:
+                            errors.append("links: none found")
+                    else:
+                        errors.append(f"{item}: unknown or unavailable")
+                except Exception as e:
+                    errors.append(f"{item}: {e}")
+
+            logger.info(
+                "Revoke API: user=%s, revoked=%s, errors=%s",
+                user_email,
+                revoked,
+                errors,
+            )
+
+            return JSONResponse(
+                {"success": True, "revoked": revoked, "errors": errors},
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+        except Exception as e:
+            logger.exception("Revoke API error")
+            return JSONResponse(
+                {"success": False, "error": str(e)},
+                status_code=500,
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
     logger.info(
-        "  ✅ Config API routes registered (/api/privacy-mode, /api/sampling-config, /api/models)"
+        "  ✅ Config API routes registered (/api/privacy-mode, /api/sampling-config, /api/models, /api/revoke)"
     )
+
+
+def setup_status_check_routes(mcp) -> None:
+    """Register /auth/status-check route for viewing credential status in browser."""
+
+    @mcp.custom_route("/auth/status-check", methods=["GET", "OPTIONS"])
+    async def status_check(request: Any):
+        """Show credential status page with envelope inventory and revoke controls."""
+        from starlette.responses import HTMLResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
+
+        query_params = dict(request.query_params)
+        email = (query_params.get("email") or "").strip()
+
+        if not email:
+            from auth.ui import generate_error_html
+
+            return HTMLResponse(
+                content=generate_error_html(
+                    "Missing Email", "The 'email' query parameter is required."
+                ),
+                status_code=400,
+            )
+
+        # Verify credentials exist
+        try:
+            from auth.google_auth import get_valid_credentials
+
+            creds = get_valid_credentials(email)
+        except Exception:
+            creds = None
+
+        if not creds:
+            from auth.ui import generate_error_html
+
+            return HTMLResponse(
+                content=generate_error_html(
+                    "No Credentials Found",
+                    f"No valid credentials found for {email}. "
+                    "Please authenticate first using start_google_auth.",
+                ),
+                status_code=404,
+            )
+
+        from auth.ui import (
+            build_api_key_section,
+            build_envelope_inventory_section,
+            build_revoke_section,
+            build_security_viz_section,
+            generate_success_html,
+        )
+        from auth.user_api_keys import was_key_revealed
+
+        api_key_section = build_api_key_section(email, None, was_key_revealed(email))
+        security_viz_section = build_security_viz_section(email)
+        envelope_inventory_section = build_envelope_inventory_section(email)
+        revoke_section = build_revoke_section(email, settings.base_url)
+
+        page_html = generate_success_html(
+            user_email=email,
+            api_key_section=api_key_section,
+            security_viz_section=security_viz_section,
+            envelope_inventory_section=envelope_inventory_section,
+            revoke_section=revoke_section,
+            page_mode="status_check",
+        )
+
+        return HTMLResponse(content=page_html)
+
+    logger.info("  ✅ Status check route registered (/auth/status-check)")

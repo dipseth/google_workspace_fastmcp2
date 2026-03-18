@@ -1066,10 +1066,9 @@ class AuthMiddleware(Middleware):
                 f"🔐 Saved OAuth-recipient encrypted credentials for {normalized_email}"
             )
         else:
-            encrypted_data = self._encrypt_credentials(credentials)
-            with open(path, "w") as f:
-                f.write(encrypted_data)
-            logger.debug(f"Saved server-encrypted credentials for {normalized_email}")
+            # No per-user key or OAuth recipient — use server-keyed envelope
+            # so the file is always in standard envelope format (v2 JSON)
+            self._save_server_keyed_envelope(path, credentials, normalized_email)
 
     def _reauth_reuse_cek(
         self,
@@ -1477,6 +1476,77 @@ class AuthMiddleware(Middleware):
         except Exception:
             pass  # Non-CPython or restricted environment
 
+    def _save_server_keyed_envelope(
+        self,
+        path: Path,
+        credentials: Credentials,
+        normalized_email: str,
+    ) -> None:
+        """Encrypt credentials with a random CEK wrapped by the server Fernet key.
+
+        Produces a standard v2 JSON envelope with ``"enc": "server"`` so that
+        all credential files use the same envelope format — no more raw base64
+        legacy blobs.  The server Fernet key is the sole recipient.
+
+        Envelope format::
+
+            {
+              "v": 2,
+              "enc": "server",
+              "recipients": {"server": "<CEK wrapped with server Fernet>"},
+              "data": "<credentials encrypted with CEK>",
+              "hmac": "<HMAC-SHA256>"
+            }
+        """
+        from cryptography.fernet import Fernet
+
+        # 1. Generate random Content Encryption Key (CEK)
+        cek = Fernet.generate_key()
+
+        try:
+            # 2. Encrypt credentials with CEK
+            creds_data = {
+                "token": credentials.token,
+                "refresh_token": credentials.refresh_token,
+                "token_uri": credentials.token_uri,
+                "client_id": credentials.client_id,
+                "client_secret": credentials.client_secret,
+                "scopes": credentials.scopes,
+                "expiry": credentials.expiry.isoformat()
+                if credentials.expiry
+                else None,
+                "encrypted_at": datetime.now().isoformat(),
+            }
+            cek_fernet = Fernet(cek)
+            encrypted_creds = cek_fernet.encrypt(json.dumps(creds_data).encode())
+
+            # 3. Wrap CEK with the server Fernet key
+            wrapped_cek = self._fernet.encrypt(cek)
+
+            # 4. Build envelope with integrity HMAC
+            envelope = {
+                "v": 2,
+                "enc": "server",
+                "recipients": {
+                    "server": base64.urlsafe_b64encode(wrapped_cek).decode(),
+                },
+                "data": base64.urlsafe_b64encode(encrypted_creds).decode(),
+                "token_expiry": credentials.expiry.isoformat()
+                if credentials.expiry
+                else None,
+            }
+            envelope["hmac"] = self._compute_envelope_hmac(envelope)
+
+            with open(path, "w") as f:
+                json.dump(envelope, f)
+        finally:
+            # Best-effort zeroing of CEK in memory
+            self._zero_bytes(cek)
+
+        logger.info(
+            f"🔐 Saved server-keyed envelope for {normalized_email} → {path.name}"
+        )
+
     def _save_per_user_encrypted(
         self,
         path: Path,
@@ -1543,6 +1613,9 @@ class AuthMiddleware(Middleware):
                 "enc": "per_user",
                 "recipients": recipients,
                 "data": base64.urlsafe_b64encode(encrypted_creds).decode(),
+                "token_expiry": credentials.expiry.isoformat()
+                if credentials.expiry
+                else None,
             }
             envelope["hmac"] = self._compute_envelope_hmac(envelope)
 
@@ -1593,6 +1666,63 @@ class AuthMiddleware(Middleware):
                 # Legacy single-recipient: per-user key encrypts credentials directly
                 encrypted_bytes = base64.urlsafe_b64decode(envelope["data"].encode())
                 decrypted_data = Fernet(fernet_key).decrypt(encrypted_bytes)
+        finally:
+            if cek:
+                self._zero_bytes(cek)
+
+        creds_data = json.loads(decrypted_data.decode())
+
+        credentials = Credentials(
+            token=creds_data["token"],
+            refresh_token=creds_data["refresh_token"],
+            token_uri=creds_data.get(
+                "token_uri", "https://oauth2.googleapis.com/token"
+            ),
+            client_id=creds_data["client_id"],
+            client_secret=creds_data["client_secret"],
+            scopes=creds_data.get("scopes", settings.drive_scopes),
+        )
+
+        if creds_data.get("expiry"):
+            expiry = datetime.fromisoformat(creds_data["expiry"])
+            if expiry.tzinfo is not None:
+                expiry = expiry.replace(tzinfo=None)
+            credentials.expiry = expiry
+
+        return credentials
+
+    def _load_server_keyed_envelope(self, envelope: dict) -> Credentials:
+        """Decrypt a server-keyed credential envelope (``"enc": "server"``).
+
+        Unwraps the CEK using the server Fernet key, then decrypts the
+        credential data with the CEK.
+        """
+        from cryptography.fernet import Fernet
+
+        # Verify envelope integrity
+        if not self._verify_envelope_hmac(envelope):
+            raise ValueError("Envelope HMAC verification failed — possible tampering")
+
+        wrapped_cek_b64 = envelope["recipients"]["server"]
+        wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
+        cek = None
+
+        try:
+            # Unwrap CEK with server Fernet key (try primary, then legacy)
+            try:
+                cek = self._fernet.decrypt(wrapped_cek)
+            except Exception:
+                if hasattr(self, "_legacy_fernet"):
+                    logger.info(
+                        "🔄 Primary key failed — unwrapping CEK with legacy server key"
+                    )
+                    cek = self._legacy_fernet.decrypt(wrapped_cek)
+                else:
+                    raise
+
+            # Decrypt credentials with CEK
+            encrypted_creds = base64.urlsafe_b64decode(envelope["data"].encode())
+            decrypted_data = Fernet(cek).decrypt(encrypted_creds)
         finally:
             if cek:
                 self._zero_bytes(cek)
@@ -2150,10 +2280,11 @@ class AuthMiddleware(Middleware):
     def _load_encrypted_file(
         self, path: Path, per_user_key: Optional[str] = None
     ) -> Optional[Credentials]:
-        """Load and decrypt a credential file, handling both per-user and server encryption.
+        """Load and decrypt a credential file, handling per-user, server-keyed, and legacy formats.
 
         Detection:
         - JSON with ``{"v": 2, "enc": "per_user"}`` → per-user split-key decryption
+        - JSON with ``{"v": 2, "enc": "server"}`` → server-keyed envelope decryption
         - Raw base64 string → server-wide Fernet decryption (legacy)
         """
         with open(path, "r") as f:
@@ -2162,13 +2293,17 @@ class AuthMiddleware(Middleware):
         # Try JSON envelope first (v2 format)
         try:
             envelope = json.loads(raw)
-            if isinstance(envelope, dict) and envelope.get("enc") == "per_user":
-                if not per_user_key:
-                    logger.warning(
-                        f"🔐 Per-user encrypted file requires bearer token to decrypt: {path.name}"
-                    )
-                    return None
-                return self._load_per_user_encrypted(envelope, per_user_key)
+            if isinstance(envelope, dict):
+                enc_type = envelope.get("enc")
+                if enc_type == "per_user":
+                    if not per_user_key:
+                        logger.warning(
+                            f"🔐 Per-user encrypted file requires bearer token to decrypt: {path.name}"
+                        )
+                        return None
+                    return self._load_per_user_encrypted(envelope, per_user_key)
+                elif enc_type == "server":
+                    return self._load_server_keyed_envelope(envelope)
         except (json.JSONDecodeError, ValueError):
             pass  # Not JSON — treat as legacy raw base64
 
@@ -2212,6 +2347,124 @@ class AuthMiddleware(Middleware):
             summary["file_error"] = str(e)
 
         return summary
+
+    def get_envelope_inventory(self, user_email: str) -> list[dict]:
+        """Scan credentials directory for all .enc files matching a user.
+
+        Returns metadata-only dicts for each file (no decryption).
+        """
+        import os
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        from .google_auth import _normalize_email
+
+        normalized_email = _normalize_email(user_email)
+        safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
+        creds_dir = Path(settings.credentials_dir)
+
+        if not creds_dir.exists():
+            return []
+
+        # Map suffix → (file_type, label)
+        type_map = {
+            "_credentials.enc": ("credentials", "Google OAuth Credentials"),
+            "_chat_sa.enc": ("chat_sa", "Chat Service Account"),
+            "_sampling_config.enc": ("sampling_config", "LLM Sampling Config"),
+            "_backup.enc": ("backup", "Credential Backup"),
+        }
+
+        inventory = []
+        for suffix, (file_type, label) in type_map.items():
+            path = creds_dir / f"{safe_email}{suffix}"
+            if not path.exists():
+                continue
+            entry: dict = {
+                "file_type": file_type,
+                "label": label,
+                "filename": path.name,
+                "version": None,
+                "enc_type": None,
+                "recipient_count": 0,
+                "has_hmac": False,
+                "token_expiry": None,
+                "last_modified": datetime.fromtimestamp(
+                    os.path.getmtime(path), tz=timezone.utc
+                ).isoformat(),
+                "file_size": path.stat().st_size,
+            }
+            try:
+                import json as _json
+
+                raw = path.read_text()
+                envelope = _json.loads(raw)
+                if isinstance(envelope, dict):
+                    entry["version"] = envelope.get("v")
+                    entry["enc_type"] = envelope.get("enc")
+                    entry["recipient_count"] = len(envelope.get("recipients", {}))
+                    entry["has_hmac"] = "hmac" in envelope
+                    entry["token_expiry"] = envelope.get("token_expiry")
+            except (json.JSONDecodeError, ValueError):
+                # Legacy format: raw base64 Fernet-encrypted blob
+                entry["version"] = "legacy"
+                entry["enc_type"] = "server_fernet"
+                entry["recipient_count"] = 1
+                entry["has_hmac"] = False
+            inventory.append(entry)
+        return inventory
+
+    def delete_credential_file(self, user_email: str) -> bool:
+        """Delete the encrypted credentials file for a user.
+
+        Returns True if a file was deleted, False if none existed.
+        """
+        from .google_auth import _normalize_email
+
+        normalized_email = _normalize_email(user_email)
+        safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
+        cred_path = Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
+
+        if cred_path.exists():
+            cred_path.unlink()
+            # Also purge from memory cache
+            self._memory_credentials.pop(normalized_email, None)
+            logger.info(f"Deleted credential file for {normalized_email}")
+            return True
+        return False
+
+    def delete_chat_service_account(self, user_email: str) -> bool:
+        """Delete the encrypted chat service account file for a user.
+
+        Returns True if a file was deleted, False if none existed.
+        """
+        from .google_auth import _normalize_email
+
+        normalized_email = _normalize_email(user_email)
+        safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
+        sa_path = Path(settings.credentials_dir) / f"{safe_email}_chat_sa.enc"
+
+        if sa_path.exists():
+            sa_path.unlink()
+            logger.info(f"Deleted chat service account for {normalized_email}")
+            return True
+        return False
+
+    def delete_backup_file(self, user_email: str) -> bool:
+        """Delete the encrypted backup file for a user.
+
+        Returns True if a file was deleted, False if none existed.
+        """
+        from .google_auth import _normalize_email
+
+        normalized_email = _normalize_email(user_email)
+        safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
+        bak_path = Path(settings.credentials_dir) / f"{safe_email}_backup.enc"
+
+        if bak_path.exists():
+            bak_path.unlink()
+            logger.info(f"Deleted backup file for {normalized_email}")
+            return True
+        return False
 
     def is_service_injection_enabled(self) -> bool:
         """Check if service injection is enabled."""

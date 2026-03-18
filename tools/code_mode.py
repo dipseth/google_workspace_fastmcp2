@@ -6,18 +6,30 @@ so that server.py stays focused on wiring, not implementation details.
 
 from __future__ import annotations
 
+import json
+from typing import Annotated, Any
+
 from fastmcp import FastMCP
 from fastmcp.experimental.transforms.code_mode import (
     CodeMode,
     GetSchemas,
     GetTags,
+    GetToolCatalog,
     MontySandboxProvider,
     Search,
 )
+from fastmcp.server.context import Context
+from fastmcp.tools.tool import Tool, ToolResult
+from mcp.types import TextContent
 
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
+
+# Type alias — middleware auto-injects this; discovery tools accept and forward it.
+UserGoogleEmail = Annotated[
+    str | None, "User's Google email (auto-injected by middleware)"
+]
 
 
 def _format_sandbox_error(exc: Exception) -> str:
@@ -318,6 +330,433 @@ EXECUTE_DESCRIPTION = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Helpers for discovery tools
+# ---------------------------------------------------------------------------
+
+
+def _unwrap_result(result: ToolResult) -> dict[str, Any] | str:
+    """Extract usable data from a ToolResult.
+
+    Mirrors ``_unwrap_tool_result`` from fastmcp code_mode but is local so
+    discovery tools can call it without importing a private helper.
+    """
+    if result.structured_content is not None:
+        return result.structured_content
+
+    parts: list[str] = []
+    for content in result.content:
+        if isinstance(content, TextContent):
+            parts.append(content.text)
+        else:
+            parts.append(str(content))
+    return "\n".join(parts)
+
+
+def _parse_unwrapped(raw: dict[str, Any] | str) -> dict[str, Any] | str:
+    """If *raw* is a JSON string, parse it; otherwise return as-is."""
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return raw
+    return raw
+
+
+# ---------------------------------------------------------------------------
+# Discovery tool: SemanticSearch
+# ---------------------------------------------------------------------------
+
+
+def _get_qdrant_dsl_reference() -> str:
+    """Build a compact DSL symbol reference from the qdrant models wrapper.
+
+    Returns a multi-line string suitable for tool docstrings. Symbols are
+    loaded dynamically — never hardcoded.
+    """
+    try:
+        from middleware.qdrant_core.qdrant_models_wrapper import (
+            get_qdrant_models_wrapper,
+        )
+
+        wrapper = get_qdrant_models_wrapper()
+        symbols = dict(wrapper.symbol_mapping) if wrapper.symbol_mapping else {}
+        if not symbols:
+            return ""
+
+        # Separate filter vs query symbols (same logic as _build_grammar_description)
+        filter_syms: list[str] = []
+        query_syms: list[str] = []
+        for name, sym in sorted(symbols.items()):
+            lower = name.lower()
+            if any(
+                k in lower
+                for k in (
+                    "filter",
+                    "fieldcondition",
+                    "matchvalue",
+                    "matchtext",
+                    "range",
+                    "matchany",
+                    "hasidcondition",
+                    "isnullcondition",
+                    "isemptycondition",
+                    "datetimerange",
+                )
+            ):
+                filter_syms.append(f"{sym}={name}")
+            elif any(
+                k in lower
+                for k in (
+                    "recommend",
+                    "discover",
+                    "fusion",
+                    "prefetch",
+                    "orderby",
+                    "context",
+                    "searchparams",
+                )
+            ):
+                query_syms.append(f"{sym}={name}")
+
+        lines = ["DSL filter symbols: " + ", ".join(filter_syms)]
+        if query_syms:
+            lines.append("Advanced query symbols: " + ", ".join(query_syms))
+
+        # Build dynamic examples from actual symbols
+        f_sym = symbols.get("Filter", "")
+        fc_sym = symbols.get("FieldCondition", "")
+        mv_sym = symbols.get("MatchValue", "")
+        ma_sym = symbols.get("MatchAny", "")
+        if f_sym and fc_sym and mv_sym:
+            lines.append(
+                f'Example: {f_sym}{{must=[{fc_sym}{{key="tool_name", '
+                f'match={mv_sym}{{value="send_dynamic_card"}}}}]}}'
+            )
+        if f_sym and fc_sym and ma_sym:
+            lines.append(
+                f'MatchAny: {f_sym}{{must=[{fc_sym}{{key="tool_name", '
+                f'match={ma_sym}{{any=["tool_a", "tool_b"]}}}}]}}'
+            )
+
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+class SemanticSearch:
+    """Full-featured Qdrant vector search exposed as a discovery tool.
+
+    Wraps ``qdrant_search`` with all its capabilities — semantic search,
+    DSL filters, recommendation, prefetch, and dry-run — so the LLM can
+    search stored responses without writing an execute block.
+    """
+
+    def __init__(
+        self, *, name: str = "semantic_search", default_limit: int = 5
+    ) -> None:
+        self._name = name
+        self._default_limit = default_limit
+
+    def __call__(self, get_catalog: GetToolCatalog) -> Tool:
+        default_limit = self._default_limit
+
+        async def semantic_search(
+            query: Annotated[
+                str,
+                "Search query — natural language, 'service:gmail recent', "
+                "'overview', 'id:<point_id>', or semantic text when filter_dsl is set",
+            ],
+            filter_dsl: Annotated[
+                str | None,
+                "Qdrant DSL filter notation for precise filtering (see docstring for symbols)",
+            ] = None,
+            query_dsl: Annotated[
+                str | None,
+                "Advanced query DSL for recommend, discover, fusion, or order-by queries",
+            ] = None,
+            prefetch_dsl: Annotated[
+                str | None,
+                "Multi-stage prefetch DSL for hierarchical search strategies",
+            ] = None,
+            positive_point_ids: Annotated[
+                list[str] | None,
+                "Point IDs to use as positive examples for recommendation search",
+            ] = None,
+            negative_point_ids: Annotated[
+                list[str] | None,
+                "Point IDs to use as negative examples for recommendation search",
+            ] = None,
+            limit: Annotated[int, "Maximum results to return"] = default_limit,
+            score_threshold: Annotated[
+                float, "Minimum similarity score (0.0-1.0)"
+            ] = 0.3,
+            collection: Annotated[
+                str | None,
+                "Qdrant collection to search. Default: mcp_tool_responses",
+            ] = None,
+            dry_run: Annotated[
+                bool,
+                "If true with filter_dsl, parse and validate DSL without executing the query",
+            ] = False,
+            user_google_email: UserGoogleEmail = None,
+            ctx: Context = None,  # type: ignore[assignment]
+        ) -> str:
+            """Search the Qdrant vector database."""
+            params: dict[str, Any] = {
+                "query": query,
+                "limit": limit,
+                "score_threshold": score_threshold,
+            }
+            if filter_dsl:
+                params["filter_dsl"] = filter_dsl
+            if query_dsl:
+                params["query_dsl"] = query_dsl
+            if prefetch_dsl:
+                params["prefetch_dsl"] = prefetch_dsl
+            if positive_point_ids:
+                params["positive_point_ids"] = positive_point_ids
+            if negative_point_ids:
+                params["negative_point_ids"] = negative_point_ids
+            if collection:
+                params["collection"] = collection
+            if dry_run:
+                params["dry_run"] = dry_run
+            if user_google_email:
+                params["user_google_email"] = user_google_email
+
+            try:
+                result = await ctx.fastmcp.call_tool("qdrant_search", params)
+                raw = _parse_unwrapped(_unwrap_result(result))
+            except Exception as exc:
+                return f"Search failed: {exc}"
+
+            if isinstance(raw, str):
+                return raw
+
+            # Dry-run returns filter repr instead of results
+            if dry_run:
+                return (
+                    f"DSL dry-run:\n"
+                    f"  filter_dsl: {raw.get('dsl_input', filter_dsl)}\n"
+                    f"  built_filter: {raw.get('built_filter_repr', '?')}\n"
+                    f"  error: {raw.get('error', 'none')}"
+                )
+
+            # Format compact results table
+            results = raw.get("results", [])
+            error = raw.get("error")
+            if error:
+                return f"Search error: {error}"
+            if not results:
+                return f"No results for: {query}"
+
+            query_type = raw.get("query_type", "semantic")
+            total = raw.get("total_results", len(results))
+            header = f"Found {total} results for: {query}"
+            if query_type not in ("semantic", "general_search"):
+                header += f"  (type: {query_type})"
+            lines = [header + "\n"]
+            for item in results:
+                score = item.get("score", 0)
+                svc = item.get("service", "?")
+                tool = item.get("tool_name", "?")
+                ts = item.get("timestamp", "?")
+                pid = item.get("id", "?")
+                lines.append(f"  {score:.3f}  {svc}/{tool}  {ts}  id:{pid}")
+
+            return "\n".join(lines)
+
+        # Dynamic docstring — symbols generated from wrapper, never hardcoded
+        dsl_ref = _get_qdrant_dsl_reference()
+        semantic_search.__doc__ = (
+            "Search the Qdrant vector database.\n\n"
+            "Supports multiple search modes:\n"
+            "- Semantic: natural language query matched by embedding similarity\n"
+            "- Service history: 'service:gmail last week', 'tool:search recent'\n"
+            "- Analytics: 'overview', 'dashboard', 'usage stats'\n"
+            "- DSL filter: filter_dsl for precise structured filtering\n"
+            "- Recommendation: find similar via positive/negative point IDs\n"
+            "- Advanced: query_dsl for fusion, discover, order-by queries\n"
+            "- Multi-stage: prefetch_dsl for hierarchical retrieval\n\n"
+            "Returns point IDs usable with fetch_document for content preview.\n"
+            + (f"\n{dsl_ref}" if dsl_ref else "")
+        )
+
+        return Tool.from_function(fn=semantic_search, name=self._name)
+
+
+# ---------------------------------------------------------------------------
+# Discovery tool: FetchDocument
+# ---------------------------------------------------------------------------
+
+
+class FetchDocument:
+    """Discovery tool that peeks at a stored Qdrant document.
+
+    Wraps the ``fetch`` tool and returns a truncated preview so the LLM
+    can inspect content without writing an execute block.
+    """
+
+    PREVIEW_CHARS = 500
+
+    def __init__(
+        self, *, name: str = "fetch_document", preview_chars: int = 500
+    ) -> None:
+        self._name = name
+        self.PREVIEW_CHARS = preview_chars
+
+    def __call__(self, get_catalog: GetToolCatalog) -> Tool:
+        preview_chars = self.PREVIEW_CHARS
+
+        async def fetch_document(
+            point_id: Annotated[str, "Qdrant point ID (UUID) from a search result"],
+            user_google_email: UserGoogleEmail = None,
+            ctx: Context = None,  # type: ignore[assignment]
+        ) -> str:
+            """Peek at a stored response by point ID.
+
+            Returns tool name, service, timestamp, arguments, and a
+            truncated content preview. For full content, use fetch in
+            an execute block.
+            """
+            params: dict[str, Any] = {"point_id": point_id}
+            if user_google_email:
+                params["user_google_email"] = user_google_email
+
+            try:
+                result = await ctx.fastmcp.call_tool("fetch", params)
+                raw = _parse_unwrapped(_unwrap_result(result))
+            except Exception as exc:
+                return f"Fetch failed: {exc}"
+
+            if isinstance(raw, str):
+                return raw
+
+            if not raw.get("found", False):
+                return f"Document not found: {point_id}"
+
+            meta = raw.get("metadata", {})
+            text = raw.get("text", "")
+            preview = text[:preview_chars] + (
+                "..." if len(text) > preview_chars else ""
+            )
+
+            lines = [
+                f"Document: {point_id}",
+                f"  Tool:      {meta.get('tool_name', '?')}",
+                f"  Service:   {meta.get('service', '?')} ({meta.get('service_display_name', '')})",
+                f"  Timestamp: {meta.get('timestamp', '?')}",
+                f"  User:      {meta.get('user_email', '?')}",
+                f"  Args:      {meta.get('arguments_count', 0)} params",
+                f"\nPreview ({len(text)} chars total):",
+                preview,
+            ]
+            return "\n".join(lines)
+
+        return Tool.from_function(fn=fetch_document, name=self._name)
+
+
+# ---------------------------------------------------------------------------
+# Discovery tool: ToolActivity
+# ---------------------------------------------------------------------------
+
+
+class ToolActivity:
+    """Discovery tool that shows a dashboard of recent tool usage.
+
+    Wraps ``get_tool_analytics`` with ``summary_only=True`` so the LLM
+    can understand activity patterns without writing an execute block.
+    """
+
+    def __init__(self, *, name: str = "tool_activity", default_limit: int = 10) -> None:
+        self._name = name
+        self._default_limit = default_limit
+
+    def __call__(self, get_catalog: GetToolCatalog) -> Tool:
+        default_limit = self._default_limit
+
+        async def tool_activity(
+            group_by: Annotated[
+                str,
+                "Group results by 'tool_name' or 'user_email'",
+            ] = "tool_name",
+            limit: Annotated[int, "Maximum groups to show"] = default_limit,
+            user_google_email: UserGoogleEmail = None,
+            ctx: Context = None,  # type: ignore[assignment]
+        ) -> str:
+            """Show a dashboard of tool usage activity.
+
+            Returns which tools have been called, how often, error rates,
+            and sample point IDs for deeper inspection via fetch_document.
+            """
+            params: dict[str, Any] = {"summary_only": True, "group_by": group_by}
+            if user_google_email:
+                params["user_google_email"] = user_google_email
+
+            try:
+                result = await ctx.fastmcp.call_tool(
+                    "get_tool_analytics",
+                    params,
+                )
+                raw = _parse_unwrapped(_unwrap_result(result))
+            except Exception as exc:
+                return f"Analytics failed: {exc}"
+
+            if isinstance(raw, str):
+                return raw
+
+            total = raw.get("total_responses", 0)
+            collection = raw.get("collection_name", "?")
+            date_range = raw.get("date_range", {})
+            summary = raw.get("summary", {})
+            groups = raw.get("groups_summary", raw.get("groups", {}))
+
+            lines = [
+                f"Tool Activity Dashboard  (collection: {collection})",
+                f"  Total responses: {total}",
+            ]
+            if date_range:
+                lines.append(
+                    f"  Date range: {date_range.get('earliest', '?')} → {date_range.get('latest', '?')}"
+                )
+            if summary:
+                lines.append(f"  Unique tools: {summary.get('unique_tools', '?')}")
+                lines.append(f"  Unique users: {summary.get('unique_users', '?')}")
+
+            lines.append(f"\nTop {limit} by {group_by}:")
+            lines.append(
+                f"  {'Group':<35} {'Count':>6}  {'Errors':>6}  {'Last Used':<20}  Sample IDs"
+            )
+            lines.append("  " + "-" * 100)
+
+            count = 0
+            for name, data in groups.items():
+                if count >= limit:
+                    break
+                count += 1
+                cnt = data.get("count", data.get("total", 0))
+                errors = data.get("error_count", data.get("errors", 0))
+                last = data.get("last_used", data.get("latest_timestamp", "?"))
+                # Truncate last-used to date+time
+                if isinstance(last, str) and len(last) > 19:
+                    last = last[:19]
+                sample_ids = data.get("sample_point_ids", data.get("point_ids", []))
+                ids_str = ", ".join(str(s) for s in sample_ids[:3])
+                lines.append(
+                    f"  {name:<35} {cnt:>6}  {errors:>6}  {last:<20}  {ids_str}"
+                )
+
+            return "\n".join(lines)
+
+        return Tool.from_function(fn=tool_activity, name=self._name)
+
+
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
+
+
 def setup_code_mode(mcp: FastMCP) -> None:
     """Register the CodeMode transform on *mcp*."""
     code_mode = CodeMode(
@@ -326,6 +765,9 @@ def setup_code_mode(mcp: FastMCP) -> None:
             GetTags(),
             Search(default_limit=10),
             GetSchemas(),
+            SemanticSearch(),
+            FetchDocument(),
+            ToolActivity(),
         ],
         execute_description=EXECUTE_DESCRIPTION,
     )

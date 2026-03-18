@@ -24,9 +24,29 @@ def generate_success_html(
     user_email: str,
     api_key_section: str = "",
     security_viz_section: str = "",
+    envelope_inventory_section: str = "",
+    revoke_section: str = "",
+    page_mode: str = "authenticated",
 ) -> str:
-    """Generate success page HTML."""
-    return f"""<!DOCTYPE html><html><head><title>Authentication Successful</title>
+    """Generate success page HTML.
+
+    page_mode controls header text:
+      "authenticated" — green checkmark, "Authentication Successful!"
+      "status_check"  — blue info icon, "Credential Status"
+    """
+    if page_mode == "status_check":
+        _icon = '<div class="success-icon" style="filter:hue-rotate(200deg)">&#x2139;&#xFE0F;</div>'
+        _title_color = "#007bff"
+        _title_text = "Credential Status"
+        _saved_text = "<b>&#x1F50D; Existing credentials verified</b><br>All encrypted envelopes intact."
+        _page_title = "Credential Status"
+    else:
+        _icon = '<div class="success-icon">&#x2705;</div>'
+        _title_color = "#28a745"
+        _title_text = "Authentication Successful!"
+        _saved_text = "<b>&#x1F510; Credentials Saved!</b><br>Ready to use."
+        _page_title = "Authentication Successful"
+    return f"""<!DOCTYPE html><html><head><title>{_page_title}</title>
     <style>
         body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
               margin:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
@@ -94,14 +114,16 @@ def generate_success_html(
         .sec-feat span:first-child{{flex-shrink:0}}
         .sec-feat b{{color:#ccd6f6}}
     </style></head><body><div class="container">
-        <div class="success-icon">✅</div>
-        <h1>Authentication Successful!</h1>
+        {_icon}
+        <h1 style="color:{_title_color}">{_title_text}</h1>
         <div class="email">Authenticated: <b>{html.escape(user_email)}</b></div>
-        <div class="saved"><b>🔐 Credentials Saved!</b><br>Ready to use.</div>
+        <div class="saved">{_saved_text}</div>
         {api_key_section}
         {security_viz_section}
-        <div class="services"><h3>🚀 Services Available</h3>
-            <div>Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms</div>
+        {envelope_inventory_section}
+        {revoke_section}
+        <div class="services"><h3>&#x1F680; Services Available</h3>
+            <div>Drive &middot; Gmail &middot; Calendar &middot; Docs &middot; Sheets &middot; Slides &middot; Photos &middot; Chat &middot; Forms</div>
         </div>
         <p>You can close this window and return to your application.</p>
     </div></body></html>"""
@@ -277,6 +299,285 @@ def build_security_viz_section(user_email: str) -> str:
             <div class="sec-feat"><span>🔗</span> Link accounts via <b>OAuth</b>, <b>session</b>, or <b>API key</b></div>
             <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
         </div>
+    </div>"""
+
+
+def build_envelope_inventory_section(user_email: str) -> str:
+    """Build the envelope inventory HTML panel showing encrypted file metadata."""
+    try:
+        from auth.context import get_auth_middleware
+
+        auth_mw = get_auth_middleware()
+        if not auth_mw:
+            return ""
+        inventory = auth_mw.get_envelope_inventory(user_email)
+    except Exception:
+        return ""
+
+    if not inventory:
+        return ""
+
+    rows = ""
+    for item in inventory:
+        version = html.escape(str(item["version"])) if item["version"] else "—"
+        enc_type = html.escape(str(item["enc_type"])) if item["enc_type"] else "—"
+        hmac_badge = (
+            '<span style="color:#64ffda">&#x2705;</span>'
+            if item["has_hmac"]
+            else '<span style="color:#ff6b6b">&#x26A0;&#xFE0F;</span>'
+        )
+        size_kb = item["file_size"] / 1024
+        size_str = f"{size_kb:.1f} KB" if size_kb >= 1 else f"{item['file_size']} B"
+        # Calculate age
+        age_str = ""
+        try:
+            from datetime import datetime, timezone
+
+            modified = datetime.fromisoformat(item["last_modified"])
+            delta = datetime.now(timezone.utc) - modified
+            if delta.days > 0:
+                age_str = f"{delta.days}d ago"
+            elif delta.seconds >= 3600:
+                age_str = f"{delta.seconds // 3600}h ago"
+            else:
+                age_str = f"{max(1, delta.seconds // 60)}m ago"
+        except Exception:
+            age_str = "—"
+
+        # Token expiry display
+        expiry_str = "—"
+        try:
+            from datetime import datetime, timezone
+
+            raw_expiry = item.get("token_expiry")
+            if raw_expiry:
+                expiry_dt = datetime.fromisoformat(raw_expiry)
+                now = datetime.now(timezone.utc)
+                # Make expiry tz-aware if naive (assume UTC)
+                if expiry_dt.tzinfo is None:
+                    expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+                delta_exp = expiry_dt - now
+                if delta_exp.total_seconds() <= 0:
+                    expiry_str = '<span style="color:#ff6b6b">expired</span>'
+                elif delta_exp.total_seconds() < 3600:
+                    expiry_str = f'<span style="color:#ffd93d">{int(delta_exp.total_seconds() // 60)}m</span>'
+                else:
+                    expiry_str = f'<span style="color:#64ffda">{int(delta_exp.total_seconds() // 3600)}h</span>'
+        except Exception:
+            pass
+
+        rows += f"""<tr>
+            <td style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06)">
+                {html.escape(item["label"])}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
+                font-family:monospace;font-size:11px">v{version}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
+                font-family:monospace;font-size:11px">{enc_type}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
+                text-align:center">{item["recipient_count"]}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
+                text-align:center">{hmac_badge}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
+                font-size:11px;color:#8892b0">{size_str}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
+                font-size:11px;color:#8892b0">{age_str}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
+                font-size:11px;text-align:center">{expiry_str}</td>
+        </tr>"""
+
+    return f"""
+    <div class="sec-panel" style="margin-top:24px">
+        <div class="sec-title">&#x1F4E6; Encrypted Envelope Inventory</div>
+        <div class="sec-subtitle">Metadata only — no secrets are displayed</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;color:#ccd6f6;margin-top:12px">
+            <thead><tr style="border-bottom:2px solid rgba(100,255,218,0.3)">
+                <th style="padding:6px 8px;text-align:left;color:#64ffda;font-size:10px;
+                    text-transform:uppercase;letter-spacing:1px">Type</th>
+                <th style="padding:6px 8px;text-align:left;color:#64ffda;font-size:10px;
+                    text-transform:uppercase;letter-spacing:1px">Ver</th>
+                <th style="padding:6px 8px;text-align:left;color:#64ffda;font-size:10px;
+                    text-transform:uppercase;letter-spacing:1px">Enc</th>
+                <th style="padding:6px 8px;text-align:center;color:#64ffda;font-size:10px;
+                    text-transform:uppercase;letter-spacing:1px">Recipients</th>
+                <th style="padding:6px 8px;text-align:center;color:#64ffda;font-size:10px;
+                    text-transform:uppercase;letter-spacing:1px">HMAC</th>
+                <th style="padding:6px 8px;text-align:left;color:#64ffda;font-size:10px;
+                    text-transform:uppercase;letter-spacing:1px">Size</th>
+                <th style="padding:6px 8px;text-align:left;color:#64ffda;font-size:10px;
+                    text-transform:uppercase;letter-spacing:1px">Age</th>
+                <th style="padding:6px 8px;text-align:center;color:#64ffda;font-size:10px;
+                    text-transform:uppercase;letter-spacing:1px">Expires</th>
+            </tr></thead>
+            <tbody>{rows}</tbody>
+        </table>
+    </div>"""
+
+
+def build_revoke_section(user_email: str, base_url: str) -> str:
+    """Build the revoke/danger-zone section with granular deletion controls."""
+    safe_email = html.escape(user_email)
+    safe_base = html.escape(base_url)
+
+    # Determine which items exist for this user
+    items_available: list[dict] = []
+    try:
+        from auth.context import get_auth_middleware
+
+        auth_mw = get_auth_middleware()
+        if auth_mw:
+            inventory = auth_mw.get_envelope_inventory(user_email)
+            type_to_item = {
+                "credentials": ("credentials", "OAuth Credentials"),
+                "chat_sa": ("chat_sa", "Chat Service Account"),
+                "sampling_config": ("sampling_config", "Sampling Config"),
+                "backup": ("backup", "Credential Backup"),
+            }
+            for inv in inventory:
+                key = type_to_item.get(inv["file_type"])
+                if key:
+                    items_available.append({"id": key[0], "label": key[1]})
+    except Exception:
+        pass
+
+    # Always offer API key revocation
+    try:
+        from auth.user_api_keys import was_key_revealed
+
+        if was_key_revealed(user_email):
+            items_available.insert(0, {"id": "api_key", "label": "API Key"})
+    except Exception:
+        pass
+
+    # Check for linked accounts
+    has_links = False
+    try:
+        from auth.user_api_keys import get_accessible_emails
+
+        accessible = get_accessible_emails(user_email)
+        linked = [e for e in accessible if e != user_email.lower().strip()]
+        if linked:
+            has_links = True
+            items_available.append(
+                {"id": "links", "label": f"Account Links ({len(linked)})"}
+            )
+    except Exception:
+        pass
+
+    if not items_available:
+        return ""
+
+    checkboxes = ""
+    for item in items_available:
+        checkboxes += (
+            f'<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;color:#e0e0e0">'
+            f'<input type="checkbox" class="revoke-item" value="{item["id"]}" '
+            f'style="accent-color:#dc3545">'
+            f"<span>{html.escape(item['label'])}</span></label>\n"
+        )
+
+    return f"""
+    <div style="background:#2d1215;border:1.5px solid #dc3545;border-radius:12px;
+                padding:24px;margin:24px 0;text-align:left">
+        <div style="font-size:16px;font-weight:700;color:#dc3545;margin-bottom:4px">
+            &#x26A0;&#xFE0F; Danger Zone</div>
+        <div style="font-size:11px;color:#ff9999;margin-bottom:16px">
+            Revoke credentials and encrypted envelopes. This action cannot be undone.</div>
+
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;
+                      border-bottom:1px solid rgba(220,53,69,0.2);margin-bottom:8px;font-weight:600;color:#ff6b6b">
+            <input type="checkbox" id="selectAll" style="accent-color:#dc3545"
+                   onchange="document.querySelectorAll('.revoke-item').forEach(c=>c.checked=this.checked)">
+            <span>Select All</span>
+        </label>
+
+        {checkboxes}
+
+        <div style="margin-top:16px">
+            <label style="font-size:11px;color:#ffb3b3;display:block;margin-bottom:4px">
+                Type your email to confirm: <b style="color:#ffd6d6">{safe_email}</b></label>
+            <input type="text" id="confirmEmail" placeholder="{safe_email}"
+                   style="width:100%;box-sizing:border-box;padding:8px 12px;border-radius:6px;
+                          border:1px solid rgba(220,53,69,0.4);background:#1a0a0c;color:#f0f0f0;
+                          font-family:monospace;font-size:13px"
+                   oninput="document.getElementById('revokeBtn').disabled=
+                       this.value.trim().toLowerCase()!=='{user_email.lower().strip()}'.toLowerCase()">
+        </div>
+
+        <button id="revokeBtn" disabled
+                style="margin-top:12px;background:#dc3545;color:#fff;border:none;padding:10px 24px;
+                       border-radius:6px;cursor:pointer;font-size:14px;font-weight:700;width:100%;
+                       opacity:0.5;transition:opacity 0.2s;letter-spacing:0.5px"
+                onmouseover="if(!this.disabled)this.style.opacity='0.9'"
+                onmouseout="this.style.opacity=this.disabled?'0.5':'1'"
+                onclick="doRevoke()">
+            Revoke Selected
+        </button>
+
+        <div id="revokeResult" style="margin-top:12px;display:none"></div>
+
+        <script>
+        document.getElementById('revokeBtn').addEventListener('mouseenter', function() {{
+            if(!this.disabled) this.style.opacity='0.9';
+        }});
+        document.getElementById('confirmEmail').addEventListener('input', function() {{
+            var btn = document.getElementById('revokeBtn');
+            var match = this.value.trim().toLowerCase() === '{user_email.lower().strip()}'.toLowerCase();
+            btn.disabled = !match;
+            btn.style.opacity = match ? '1' : '0.5';
+        }});
+
+        function doRevoke() {{
+            var items = Array.from(document.querySelectorAll('.revoke-item:checked')).map(c => c.value);
+            if (items.length === 0) {{ alert('Select at least one item to revoke.'); return; }}
+            var confirmEmail = document.getElementById('confirmEmail').value.trim();
+            var btn = document.getElementById('revokeBtn');
+            btn.disabled = true;
+            btn.textContent = 'Revoking...';
+
+            fetch('{safe_base}/api/revoke', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{
+                    user_email: '{user_email.lower().strip()}',
+                    items: items,
+                    confirmation_email: confirmEmail
+                }})
+            }})
+            .then(r => r.json())
+            .then(data => {{
+                var result = document.getElementById('revokeResult');
+                result.style.display = 'block';
+                if (data.success) {{
+                    result.innerHTML = '<div style="color:#64ffda;padding:8px;background:rgba(100,255,218,0.08);border-radius:6px">' +
+                        '&#x2705; Revoked: ' + data.revoked.join(', ') +
+                        (data.errors && data.errors.length ? '<br>&#x26A0;&#xFE0F; Errors: ' + data.errors.join(', ') : '') +
+                        '</div>';
+                    // Grey out revoked checkboxes
+                    data.revoked.forEach(function(id) {{
+                        var cb = document.querySelector('.revoke-item[value="'+id+'"]');
+                        if (cb) {{
+                            cb.checked = false;
+                            cb.disabled = true;
+                            cb.parentElement.style.opacity = '0.4';
+                            cb.parentElement.style.textDecoration = 'line-through';
+                        }}
+                    }});
+                }} else {{
+                    result.innerHTML = '<div style="color:#dc3545;padding:8px">&#x274C; ' +
+                        (data.error || 'Unknown error') + '</div>';
+                }}
+                btn.textContent = 'Revoke Selected';
+                btn.disabled = false;
+            }})
+            .catch(err => {{
+                document.getElementById('revokeResult').style.display = 'block';
+                document.getElementById('revokeResult').innerHTML =
+                    '<div style="color:#dc3545;padding:8px">&#x274C; Network error: ' + err.message + '</div>';
+                btn.textContent = 'Revoke Selected';
+                btn.disabled = false;
+            }});
+        }}
+        </script>
     </div>"""
 
 

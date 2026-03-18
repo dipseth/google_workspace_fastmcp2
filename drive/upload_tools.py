@@ -279,23 +279,47 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                                 f"with OAuth so success page can display it"
                             )
                         else:
+                            import urllib.parse
+
                             from auth.context import get_session_context
+                            from config.settings import settings as _settings
 
                             current_session_id = await get_session_context()
                             logger.info(
                                 f"Credentials for {user_google_email} already cover requested scopes "
                                 f"— skipping OAuth flow"
                             )
+
+                            status_url = (
+                                f"{_settings.base_url}/auth/status-check"
+                                f"?email={urllib.parse.quote(user_google_email)}"
+                            )
+                            browser_opened = False
+                            if auto_open_browser:
+                                try:
+                                    import webbrowser
+
+                                    browser_opened = webbrowser.open(status_url)
+                                except Exception:
+                                    pass
+
                             return StartAuthResponse(
                                 status="already_authenticated",
                                 message=(
-                                    f"Valid credentials already exist for {user_google_email} "
-                                    f"with all requested service scopes."
+                                    f"Valid credentials already exist for {user_google_email}. "
+                                    f"Status page opened in browser."
                                 ),
+                                authUrl=status_url,
+                                clickableLink=f"[View credential status]({status_url})",
                                 userEmail=user_google_email,
                                 sessionId=current_session_id,
                                 serviceName=requested_services,
                                 scopesIncluded=list(existing_creds.scopes or []),
+                                instructions=[
+                                    "Browser opened with credential status page"
+                                    if browser_opened
+                                    else f"Open this URL to view credential status: {status_url}"
+                                ],
                             )
                     else:
                         logger.info(

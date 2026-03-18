@@ -176,6 +176,9 @@ The `execute` tool runs sandboxed Python with `call_tool()` available for chaini
 | `tags` | List all tool tags for filtering |
 | `search` | BM25 keyword search across tool names/descriptions |
 | `get_schema` | Get full JSON schema for a tool before calling it |
+| `semantic_search` | Full Qdrant vector search — semantic, DSL filters (`filter_dsl`), recommendation (`positive/negative_point_ids`), advanced queries (`query_dsl`, `prefetch_dsl`), and `dry_run` validation |
+| `fetch_document` | Peek at a stored response by point ID (truncated preview) |
+| `tool_activity` | Dashboard of tool usage — counts, error rates, sample IDs |
 | `execute` | Run sandboxed Python code |"""
 
 _JINJA_SECTION = """\
@@ -293,7 +296,7 @@ _MANAGE_TOOLS_SECTION = """\
 
 **Protected tools** (cannot be disabled): `manage_tools`, `qdrant_search`, `health_check`, \
 `start_google_auth`, `check_drive_auth`, and Code Mode meta-tools \
-(`tags`, `search`, `get_schema`, `execute`)."""
+(`tags`, `search`, `get_schema`, `semantic_search`, `fetch_document`, `tool_activity`, `execute`)."""
 
 _SERVICES_SECTION = """\
 ## All Services Quick Reference
@@ -318,7 +321,7 @@ to see currently active tools.
 | **Email Templates** | `create_email_template`, `list_email_templates`, `preview_email_template`, `intelligent_email_composer`, `send_smart_email` |
 | **Module Wrappers** | `list_wrapped_modules`, `wrap_module`, `search_module`, `list_module_components`, `get_module_component` |
 | **Server** | `health_check`, `manage_credentials`, `manage_tools`, `create_template_macro` |
-| **Code Mode** | `tags`, `search`, `get_schema`, `execute` |"""
+| **Code Mode** | `tags`, `search`, `get_schema`, `semantic_search`, `fetch_document`, `tool_activity`, `execute` |"""
 
 _CROSS_CUTTING_SECTION = """\
 ## Cross-Cutting Features

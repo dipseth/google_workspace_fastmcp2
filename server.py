@@ -1370,6 +1370,12 @@ if google_auth_provider:
         # Register config API routes (privacy mode, sampling config) for OAuth success page
         setup_config_api_routes(mcp)
         logger.info("  ✅ Config API routes registered for OAuth success page")
+
+        # Register status-check route for credential status page
+        from auth.fastmcp_oauth_endpoints import setup_status_check_routes
+
+        setup_status_check_routes(mcp)
+        logger.info("  ✅ Status check route registered for credential status page")
     except Exception as e:
         logger.warning(f"⚠️ Could not register supplemental OAuth endpoints: {e}")
 
