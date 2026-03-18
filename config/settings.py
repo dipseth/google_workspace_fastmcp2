@@ -123,6 +123,11 @@ class Settings(BaseSettings):
 
     # Sampling Tools Configuration
     sampling_tools: bool = False  # Enable sampling middleware tools (default: False)
+    sampling_validation_enabled: bool = Field(
+        default=True,
+        description="Enable per-tool validation agents for semantic input validation via sampling",
+        json_schema_extra={"env": "SAMPLING_VALIDATION_ENABLED"},
+    )
     anthropic_api_key: Optional[str] = None  # For sampling fallback handler
 
     # LiteLLM Sampling Configuration
@@ -399,6 +404,28 @@ class Settings(BaseSettings):
         default=0.00005,
         description="Estimated USD cost per Qdrant search operation",
         json_schema_extra={"env": "QDRANT_COST_PER_SEARCH"},
+    )
+
+    # Sampling Cache Configuration
+    sampling_cache_enabled: bool = Field(
+        default=False,
+        description="Enable Qdrant semantic response cache for sampling calls",
+        json_schema_extra={"env": "SAMPLING_CACHE_ENABLED"},
+    )
+    sampling_cache_collection: str = Field(
+        default="mcp_sampling_cache",
+        description="Qdrant collection for semantic sampling cache",
+        json_schema_extra={"env": "SAMPLING_CACHE_COLLECTION"},
+    )
+    sampling_cache_similarity_threshold: float = Field(
+        default=0.85,
+        description="Similarity threshold for cache hits (0.0-1.0). Higher = stricter matching.",
+        json_schema_extra={"env": "SAMPLING_CACHE_SIMILARITY_THRESHOLD"},
+    )
+    sampling_cache_fastembed_model: str = Field(
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description="FastEmbed model for semantic cache embeddings",
+        json_schema_extra={"env": "SAMPLING_CACHE_FASTEMBED_MODEL"},
     )
 
     # Langfuse Observability Configuration

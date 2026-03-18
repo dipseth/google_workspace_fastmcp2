@@ -69,6 +69,7 @@ from middleware.qdrant_middleware import (
 from middleware.sampling_middleware import (
     DSLToolConfig,
     EnhancementLevel,
+    ValidationAgentConfig,
     setup_enhanced_sampling_demo_tools,
     setup_enhanced_sampling_middleware,
 )
@@ -544,11 +545,21 @@ def _create_litellm_handler():
     from middleware.litellm_sampling_handler import LiteLLMSamplingHandler
 
     # Resolve API key: explicit LITELLM_API_KEY > VENICE_INFERENCE_KEY > None (litellm env var fallback)
-    api_key = settings.litellm_api_key or settings.venice_inference_key
-    # Resolve API base: explicit > auto-detect for Venice models
-    api_base = settings.litellm_api_base
-    if not api_base and settings.venice_inference_key and not settings.litellm_api_key:
-        api_base = "https://api.venice.ai/api/v1"
+    # For anthropic/ models, let LiteLLM use ANTHROPIC_API_KEY env var directly
+    # (don't pass Venice key/base which would override the correct provider auth)
+    model = settings.litellm_model
+    if model.startswith("anthropic/"):
+        api_key = settings.litellm_api_key  # Only use explicit override, not Venice
+        api_base = settings.litellm_api_base
+    else:
+        api_key = settings.litellm_api_key or settings.venice_inference_key
+        api_base = settings.litellm_api_base
+        if (
+            not api_base
+            and settings.venice_inference_key
+            and not settings.litellm_api_key
+        ):
+            api_base = "https://api.venice.ai/api/v1"
     return LiteLLMSamplingHandler(
         default_model=settings.litellm_model,
         api_key=api_key,
@@ -860,6 +871,65 @@ if settings.sampling_tools:
     logger.info(
         "✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context"
     )
+
+    # Register validation agents for semantic input validation via sampling
+    if settings.sampling_validation_enabled:
+        from middleware.sampling_prompts import (
+            get_card_validation_prompt,
+            get_email_validation_prompt,
+            get_qdrant_validation_prompt,
+            get_template_macro_validation_prompt,
+        )
+
+        # Tier 1: Pre-validation (sync, corrections applied before tool executes)
+        sampling_middleware.register_validation_agent(
+            "send_dynamic_card",
+            ValidationAgentConfig(
+                tool_name="send_dynamic_card",
+                target_arg_keys=["card_description", "card_params"],
+                get_system_prompt_fn=get_card_validation_prompt,
+                mode="pre",
+                generate_variations=True,
+            ),
+        )
+        sampling_middleware.register_validation_agent(
+            "compose_dynamic_email",
+            ValidationAgentConfig(
+                tool_name="compose_dynamic_email",
+                target_arg_keys=["email_description", "email_params"],
+                get_system_prompt_fn=get_email_validation_prompt,
+                mode="pre",
+            ),
+        )
+        sampling_middleware.register_validation_agent(
+            "create_template_macro",
+            ValidationAgentConfig(
+                tool_name="create_template_macro",
+                target_arg_keys=[
+                    "macro_name",
+                    "macro_body",
+                    "parameters",
+                    "template_content",
+                ],
+                get_system_prompt_fn=get_template_macro_validation_prompt,
+                mode="pre",
+            ),
+        )
+
+        # Tier 2: Parallel validation (async, advisory metadata in response)
+        sampling_middleware.register_validation_agent(
+            "qdrant_search",
+            ValidationAgentConfig(
+                tool_name="qdrant_search",
+                target_arg_keys=["query", "filter_dsl", "query_dsl"],
+                get_system_prompt_fn=get_qdrant_validation_prompt,
+                mode="parallel",
+            ),
+        )
+        logger.info("✅ Validation agents registered for 4 tools (3 pre, 1 parallel)")
+    else:
+        logger.info("⏭️  Validation agents disabled (SAMPLING_VALIDATION_ENABLED=false)")
+
 else:
     logger.info(
         "⏭️  Enhanced Sampling Middleware disabled - set SAMPLING_TOOLS=true in .env to enable"

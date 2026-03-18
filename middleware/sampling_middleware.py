@@ -34,6 +34,7 @@ Usage:
     )
 """
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from enum import Enum
@@ -70,6 +71,40 @@ class DSLToolConfig:
     error_keywords: Optional[List[str]] = field(
         default=None
     )  # domain-specific error keywords
+
+
+# ============================================================================
+# VALIDATION AGENT CONFIG — registration for per-tool semantic validation
+# ============================================================================
+
+
+@dataclass
+class ValidationAgentConfig:
+    """Registration config for a validation agent — carries everything the
+    middleware needs to run a secondary LLM call for semantic validation."""
+
+    tool_name: str
+    target_arg_keys: list  # e.g. ["card_description", "card_params"]
+    get_system_prompt_fn: Callable[[dict], str]  # receives tool args → expert prompt
+    mode: str = (
+        "pre"  # "pre" (sync, applies corrections) or "parallel" (async, advisory)
+    )
+    enabled: bool = True
+    max_tokens: int = 400
+    temperature: float = 0.1
+    generate_variations: bool = False
+    syntax_bypass_confidence: float = 1.0  # skip if DSL syntax already valid
+
+
+class ValidationResult(BaseModel):
+    """Structured output from a validation agent sampling call."""
+
+    is_valid: bool
+    confidence: float = Field(ge=0.0, le=1.0, default=1.0)
+    validated_input: dict = Field(default_factory=dict)  # corrected tool arguments
+    issues: list = Field(default_factory=list)
+    suggestions: list = Field(default_factory=list)
+    variations: list = Field(default_factory=list)  # max 2 alternatives
 
 
 # Fallback for bare SamplingContext (no middleware) — generic preamble only
@@ -1083,6 +1118,7 @@ class EnhancedSamplingMiddleware(Middleware):
         self.default_enhancement_level = default_enhancement_level
         self.transformed_tools = set()  # Track which tools we've transformed
         self._dsl_configs: Dict[str, DSLToolConfig] = dict(dsl_tool_configs or {})
+        self._validation_configs: Dict[str, ValidationAgentConfig] = {}
 
         logger.info("🎯 Enhanced SamplingMiddleware initialized")
         logger.info(f"   Debug logging: {'enabled' if enable_debug else 'disabled'}")
@@ -1102,6 +1138,138 @@ class EnhancedSamplingMiddleware(Middleware):
         """Register a DSL tool config after initialization."""
         self._dsl_configs[tool_name] = config
         logger.info(f"   DSL tool registered: {tool_name} ({config.dsl_type_label})")
+
+    def register_validation_agent(
+        self, tool_name: str, config: "ValidationAgentConfig"
+    ):
+        """Register a validation agent config for a tool."""
+        self._validation_configs[tool_name] = config
+        logger.info(f"   Validation agent registered: {tool_name} (mode={config.mode})")
+
+    async def _run_validation_agent(
+        self,
+        context: "MiddlewareContext",
+        tool_name: str,
+        config: "ValidationAgentConfig",
+    ) -> Optional["ValidationResult"]:
+        """Run a validation agent via sampling for semantic input validation.
+
+        Extracts target arguments, builds the expert system prompt from the
+        config's callable, and calls SamplingContext.sample() with
+        result_type=ValidationResult. Returns None on any failure (advisory,
+        never blocks the tool).
+        """
+        # Global kill switch
+        try:
+            from config.settings import settings as _settings
+
+            if not getattr(_settings, "sampling_validation_enabled", True):
+                return None
+        except Exception:
+            pass
+
+        if not config.enabled:
+            return None
+
+        args = context.message.arguments or {}
+
+        # Extract only the target argument keys for the prompt
+        target_args = {k: args.get(k) for k in config.target_arg_keys if k in args}
+        if not target_args:
+            return None
+
+        try:
+            # Set Langfuse trace phase so the generation name becomes
+            # mcp::{tool_name}::validation (distinct from the tool's own sampling)
+            try:
+                from middleware.langfuse_integration import (
+                    get_sampling_trace_context,
+                    set_sampling_trace_context,
+                )
+
+                set_sampling_trace_context(phase="validation")
+            except Exception:
+                pass
+
+            # Build domain-expert system prompt
+            system_prompt = config.get_system_prompt_fn(target_args)
+
+            # Create a SamplingContext for this validation call
+            sctx = SamplingContext(
+                fastmcp_context=context.fastmcp_context,
+                tool_name=tool_name,
+                enable_debug=self.enable_debug,
+            )
+
+            # Build user message from the target arguments
+            user_message = (
+                f"Validate the following tool arguments for '{tool_name}':\n"
+                + json.dumps(target_args, indent=2, default=str)
+            )
+
+            result = await sctx.sample(
+                messages=user_message,
+                system_prompt=system_prompt,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+                result_type=ValidationResult,
+            )
+
+            # Clear phase so subsequent sampling calls in the tool don't inherit it
+            try:
+                trace_ctx = get_sampling_trace_context()
+                if trace_ctx:
+                    trace_ctx.phase = ""
+            except Exception:
+                pass
+
+            # sample() returns a SamplingResult; .result holds the parsed Pydantic model
+            if hasattr(result, "result") and isinstance(
+                result.result, ValidationResult
+            ):
+                validation = result.result
+            elif isinstance(result, ValidationResult):
+                validation = result
+            else:
+                # Try to parse from text
+                text = getattr(result, "text", str(result))
+                validation = ValidationResult.model_validate_json(text)
+
+            if self.enable_debug:
+                logger.debug(
+                    f"Validation agent for {tool_name}: "
+                    f"valid={validation.is_valid}, confidence={validation.confidence}, "
+                    f"issues={validation.issues}"
+                )
+
+            return validation
+
+        except Exception as exc:
+            logger.warning(
+                f"Validation agent failed for {tool_name}: {exc}. "
+                "Passing original input through."
+            )
+            return None
+
+    def _attach_validation_metadata(self, result, validation: "ValidationResult"):
+        """Append validation info to ToolResult.meta dict."""
+        from fastmcp.tools.tool import ToolResult
+
+        if not isinstance(result, ToolResult):
+            return result
+
+        meta = dict(result.meta or {})
+        meta["validation"] = {
+            "is_valid": validation.is_valid,
+            "confidence": validation.confidence,
+            "issues": validation.issues,
+            "suggestions": validation.suggestions,
+        }
+        if validation.variations:
+            meta["validation"]["variations"] = validation.variations[:2]
+
+        # ToolResult is a Pydantic model — use model_copy to produce an updated instance
+        return result.model_copy(update={"meta": meta})
 
     def _build_dsl_recovery_system_prompt(self) -> str:
         """Build DSL error recovery system prompt from all registered DSLToolConfigs."""
@@ -1159,6 +1327,29 @@ class EnhancedSamplingMiddleware(Middleware):
             if tool_name in self._dsl_configs:
                 await self._pre_validate_dsl(context, tool_name)
 
+            # Semantic validation via sampling agent
+            validation_task = None
+            validation = None
+            if tool_name in self._validation_configs:
+                v_config = self._validation_configs[tool_name]
+                if v_config.mode == "pre":
+                    # Synchronous — block, apply corrections
+                    validation = await self._run_validation_agent(
+                        context, tool_name, v_config
+                    )
+                    if validation and validation.validated_input:
+                        context.message.arguments.update(validation.validated_input)
+                        if self.enable_debug:
+                            logger.debug(
+                                f"Validation agent applied corrections for {tool_name}: "
+                                f"{list(validation.validated_input.keys())}"
+                            )
+                elif v_config.mode == "parallel":
+                    # Asynchronous — fire task, await after tool execution
+                    validation_task = asyncio.create_task(
+                        self._run_validation_agent(context, tool_name, v_config)
+                    )
+
             # Get the tool object to check its tags
             tool = await context.fastmcp_context.fastmcp.get_tool(tool_name)
 
@@ -1186,6 +1377,17 @@ class EnhancedSamplingMiddleware(Middleware):
             # Post-call: enrich DSL errors with diagnostics
             if self._is_dsl_tool(tool_name):
                 result = self._enrich_dsl_errors(result, tool_name)
+
+            # Await parallel validation result and attach metadata
+            if validation_task is not None:
+                try:
+                    validation = await asyncio.wait_for(validation_task, timeout=5.0)
+                except (asyncio.TimeoutError, Exception) as exc:
+                    logger.warning(
+                        f"Parallel validation for {tool_name} did not complete: {exc}"
+                    )
+            if validation is not None:
+                result = self._attach_validation_metadata(result, validation)
 
             return result
 

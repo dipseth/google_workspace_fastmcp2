@@ -28,6 +28,7 @@ class _SamplingCosts:
     total_output_chars: int = 0
     estimated_input_tokens: int = 0
     estimated_output_tokens: int = 0
+    estimated_cached_tokens: int = 0
     estimated_cost_usd: float = 0.0
     model: str = ""
 
@@ -49,6 +50,7 @@ def track_sample_call(
     *,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    cached_tokens: int = 0,
 ) -> None:
     """Record a single sampling call's cost estimate.
 
@@ -61,6 +63,7 @@ def track_sample_call(
         model: Model identifier (for logging; rates come from settings).
         input_tokens: Actual input token count from provider (overrides text estimation).
         output_tokens: Actual output token count from provider (overrides text estimation).
+        cached_tokens: Number of input tokens served from provider cache (cost reduced to 10%).
     """
     costs = _current_costs.get()
     if costs is None:
@@ -89,13 +92,21 @@ def track_sample_call(
         input_rate = 0.000003
         output_rate = 0.000015
 
-    estimated_cost = (in_tok * input_rate) + (out_tok * output_rate)
+    # Cached input tokens cost 10% of normal rate (Anthropic prompt caching)
+    safe_cached = min(cached_tokens, in_tok)
+    non_cached = max(0, in_tok - safe_cached)
+    estimated_cost = (
+        (non_cached * input_rate)
+        + (safe_cached * input_rate * 0.1)
+        + (out_tok * output_rate)
+    )
 
     costs.sample_calls += 1
     costs.total_input_chars += len(input_text) if input_text else 0
     costs.total_output_chars += len(output_text) if output_text else 0
     costs.estimated_input_tokens += in_tok
     costs.estimated_output_tokens += out_tok
+    costs.estimated_cached_tokens += safe_cached
     costs.estimated_cost_usd += estimated_cost
     if model:
         costs.model = model
@@ -129,6 +140,7 @@ def get_current_costs() -> dict:
             "sampling_calls": 0,
             "sampling_estimated_input_tokens": 0,
             "sampling_estimated_output_tokens": 0,
+            "sampling_estimated_cached_tokens": 0,
             "cost_sampling_estimated": 0.0,
             "sampling_model": "",
         }
@@ -137,6 +149,7 @@ def get_current_costs() -> dict:
         "sampling_calls": costs.sample_calls,
         "sampling_estimated_input_tokens": costs.estimated_input_tokens,
         "sampling_estimated_output_tokens": costs.estimated_output_tokens,
+        "sampling_estimated_cached_tokens": costs.estimated_cached_tokens,
         "cost_sampling_estimated": round(costs.estimated_cost_usd, 8),
         "sampling_model": costs.model,
     }

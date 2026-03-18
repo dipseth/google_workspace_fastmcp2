@@ -47,6 +47,9 @@ class _SamplingTraceContext:
     has_tools: bool = False  # whether the sampling call includes tool use
     input_char_count: int = 0  # approximate input size
     tool_tags: list = field(default_factory=list)
+    phase: str = (
+        ""  # e.g. "validation" — disambiguates sub-calls within a tool execution
+    )
 
 
 _current_trace: ContextVar[Optional[_SamplingTraceContext]] = ContextVar(
@@ -79,6 +82,7 @@ def set_sampling_trace_context(
     enhancement_level: str = "",
     has_tools: bool = False,
     input_char_count: int = 0,
+    phase: str = "",
 ) -> None:
     """Enrich the current trace context with per-sample-call details.
 
@@ -100,6 +104,8 @@ def set_sampling_trace_context(
         ctx.has_tools = has_tools
     if input_char_count:
         ctx.input_char_count = input_char_count
+    if phase:
+        ctx.phase = phase
 
 
 def get_sampling_trace_context() -> Optional[_SamplingTraceContext]:
@@ -227,6 +233,7 @@ def wrap_anthropic_handler_with_langfuse(handler: Any) -> Any:
             trace_ctx = get_sampling_trace_context()
             tool_name = trace_ctx.tool_name if trace_ctx else ""
             step_index = trace_ctx.step_index if trace_ctx else 0
+            phase = trace_ctx.phase if trace_ctx else ""
             trace_meta = {
                 "source": "mcp-google-workspace",
                 "mcp_tool": tool_name,
@@ -238,10 +245,14 @@ def wrap_anthropic_handler_with_langfuse(handler: Any) -> Any:
                     trace_meta["result_type"] = trace_ctx.result_type
                 if step_index > 0:
                     trace_meta["step_index"] = str(step_index)
+                if trace_ctx.phase:
+                    trace_meta["phase"] = trace_ctx.phase
 
-            # Build generation name with step info if multi-step
+            # Build generation name with phase/step info
             obs_name = f"mcp::{tool_name}" if tool_name else "anthropic_sampling"
-            if step_index > 0:
+            if phase:
+                obs_name = f"{obs_name}::{phase}"
+            elif step_index > 0:
                 obs_name = f"{obs_name}::step_{step_index}"
 
             with propagate_attributes(

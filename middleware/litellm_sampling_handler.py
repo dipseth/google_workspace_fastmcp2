@@ -58,6 +58,7 @@ class LiteLLMSamplingHandler:
         self.api_key = api_key
         self.api_base = api_base
         self._langfuse_attempted = False
+        self._cache_attempted = False
 
     async def __call__(
         self,
@@ -74,6 +75,16 @@ class LiteLLMSamplingHandler:
                 from middleware.langfuse_integration import enable_litellm_langfuse
 
                 enable_litellm_langfuse()
+            except Exception:
+                pass
+
+        # Lazy semantic cache init (same pattern as Langfuse)
+        if not self._cache_attempted:
+            self._cache_attempted = True
+            try:
+                from middleware.sampling_cache import initialize_sampling_cache
+
+                initialize_sampling_cache()
             except Exception:
                 pass
 
@@ -100,10 +111,20 @@ class LiteLLMSamplingHandler:
         has_tools = bool(params.tools)
         if has_tools:
             kwargs["tools"] = self._convert_tools(params.tools)
+            # Disable semantic cache for tool-use calls — cached tool_call
+            # responses replay with stale IDs and cause infinite iteration
+            # loops in the sampling middleware.
+            kwargs["cache"] = {"no-cache": True, "no-store": True}
         if params.toolChoice:
             tc = self._convert_tool_choice(params.toolChoice)
             if tc is not None:
                 kwargs["tool_choice"] = tc
+
+        # Provider-side prompt caching: only for Anthropic models
+        if self.default_model.startswith("anthropic/"):
+            kwargs["cache_control_injection_points"] = [
+                {"location": "message", "role": "system"},
+            ]
 
         # Add Langfuse trace metadata (session, user, tool context)
         try:
@@ -120,8 +141,11 @@ class LiteLLMSamplingHandler:
             tool_name = trace_ctx.tool_name if trace_ctx else ""
             step_index = trace_ctx.step_index if trace_ctx else 0
 
-            # Build generation name — include step for multi-step tools
-            if step_index > 0 and tool_name:
+            # Build generation name — include step/phase for multi-step tools
+            phase = trace_ctx.phase if trace_ctx else ""
+            if phase and tool_name:
+                gen_name = f"mcp::{tool_name}::{phase}"
+            elif step_index > 0 and tool_name:
                 gen_name = f"mcp::{tool_name}::step_{step_index}"
             elif trace_ctx and trace_ctx.template and "recovery" in trace_ctx.template:
                 gen_name = f"mcp::{tool_name}::dsl_recovery::attempt_{step_index}"
@@ -142,6 +166,8 @@ class LiteLLMSamplingHandler:
                     trace_meta["input_char_count"] = str(trace_ctx.input_char_count)
                 if step_index > 0:
                     trace_meta["step_index"] = str(step_index)
+                if trace_ctx.phase:
+                    trace_meta["phase"] = trace_ctx.phase
 
             add_langfuse_metadata(
                 kwargs,
@@ -171,13 +197,24 @@ class LiteLLMSamplingHandler:
 
             usage = getattr(response, "usage", None)
             if usage:
+                # Extract cached token count — only trust Anthropic's value.
+                # Other providers (Venice/OpenAI-compat) report KV-cache stats
+                # that don't represent actual prompt caching cost savings.
+                cached_tokens = 0
+                if self.default_model.startswith("anthropic/"):
+                    prompt_details = getattr(usage, "prompt_tokens_details", None)
+                    cached_tokens = (
+                        getattr(prompt_details, "cached_tokens", 0) or 0
+                        if prompt_details
+                        else 0
+                    )
                 track_sample_call(
                     input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
                     output_tokens=getattr(usage, "completion_tokens", 0) or 0,
                     model=getattr(response, "model", self.default_model)
                     or self.default_model,
+                    cached_tokens=cached_tokens,
                 )
-            else:
                 # Fallback: estimate from message text lengths
                 input_text = " ".join(
                     m.get("content", "")
@@ -197,6 +234,27 @@ class LiteLLMSamplingHandler:
                 )
         except Exception as e:
             logger.debug("Cost tracking failed (non-fatal): %s", e)
+
+        # Log cached tokens for Anthropic models only — other providers (e.g. Venice)
+        # report cached_tokens from their own KV-cache which is not prompt caching.
+        if self.default_model.startswith("anthropic/"):
+            try:
+                usage = getattr(response, "usage", None)
+                if usage:
+                    prompt_details = getattr(usage, "prompt_tokens_details", None)
+                    ct = (
+                        getattr(prompt_details, "cached_tokens", 0) or 0
+                        if prompt_details
+                        else 0
+                    )
+                    if ct > 0:
+                        logger.info(
+                            "Anthropic cache hit: %d cached tokens (model=%s)",
+                            ct,
+                            self.default_model,
+                        )
+            except Exception:
+                pass
 
         # Convert response back to MCP types
         return self._to_result(response, with_tools=has_tools)

@@ -57,6 +57,7 @@ _INFRA_REQUIREMENTS: list[tuple[list[str], callable, str]] = [
             "qdrant_unified_improved",
             "qdrant_point_resource",
             "qdrant_models_wrapping",
+            "sampling_cache",
             "colbert",
             "nested_dsl",
             "phase1_3_universal_wrapper",
