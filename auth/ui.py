@@ -107,6 +107,179 @@ def generate_success_html(
     </div></body></html>"""
 
 
+def build_api_key_section(
+    user_email: str,
+    user_api_key: str | None,
+    user_api_key_exists: bool,
+) -> str:
+    """Build the API key + linked accounts HTML for the OAuth success page."""
+    accessible_section = ""
+    if user_api_key or user_api_key_exists:
+        try:
+            from auth.user_api_keys import get_accessible_emails
+
+            accessible = get_accessible_emails(user_email)
+            linked = sorted(e for e in accessible if e != user_email.lower().strip())
+            if linked:
+                linked_items = "".join(f"<li>{html.escape(e)}</li>" for e in linked)
+                accessible_section = f"""
+                <div class="linked-accounts">
+                    <b>🔗 Linked Accounts</b>
+                    <small>This key can also access credentials for:</small>
+                    <ul>{linked_items}</ul>
+                </div>"""
+            else:
+                accessible_section = """
+                <div class="linked-accounts solo">
+                    <b>🔒 Single Account</b>
+                    <small>This key only has access to the email above.<br>
+                    Authenticate additional emails in the same session to link them.</small>
+                </div>"""
+        except Exception:
+            pass
+
+    if user_api_key:
+        # Key is being rendered — mark it as revealed so future
+        # re-auths won't force-regenerate and invalidate it.
+        try:
+            from auth.user_api_keys import mark_key_revealed
+
+            mark_key_revealed(user_email)
+        except Exception:
+            pass
+        return f"""
+        <div class="api-key">
+            <b>🔑 Your Personal API Key</b><br>
+            <small>Use this as a Bearer token to connect without re-authenticating.<br>
+            This key is shown <b>once</b> — save it now!</small>
+            <div class="key-value hidden" id="apiKey">{html.escape(user_api_key)}</div>
+            <button id="revealBtn" onclick="document.getElementById('apiKey').classList.remove('hidden');this.style.display='none';document.getElementById('copyBtn').style.display=''">
+                Click to Reveal Key
+            </button>
+            <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
+                Copy to Clipboard
+            </button>
+        </div>
+        {accessible_section}"""
+    elif user_api_key_exists:
+        return f"""
+        <div class="api-key" style="background:#d1ecf1;color:#0c5460;border-color:#bee5eb">
+            <b>🔑 API Key Active</b><br>
+            <small>Your existing per-user API key is still valid.<br>
+            Credentials have been refreshed — no need to update your key.</small>
+        </div>
+        {accessible_section}"""
+    return ""
+
+
+def build_security_viz_section(user_email: str) -> str:
+    """Build the security visualization HTML for the OAuth success page."""
+    import json as _json
+    from pathlib import Path
+
+    from config.settings import settings
+
+    num_recipients = 0
+    has_hmac = False
+    is_encrypted = False
+    try:
+        from auth.google_auth import _normalize_email
+
+        safe_email = _normalize_email(user_email).replace("@", "_at_").replace(".", "_")
+        enc_path = Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
+        if enc_path.exists():
+            is_encrypted = True
+            try:
+                _env = _json.load(open(enc_path))
+                num_recipients = len(_env.get("recipients", {}))
+                has_hmac = "hmac" in _env
+            except (ValueError, KeyError):
+                num_recipients = 1
+                has_hmac = False
+    except Exception:
+        pass
+
+    if not is_encrypted:
+        return ""
+
+    _cur = user_email.lower().strip()
+    _all_emails = [_cur]
+    try:
+        from auth.user_api_keys import get_accessible_emails
+
+        _all_emails = sorted(get_accessible_emails(_cur))
+    except Exception:
+        pass
+
+    try:
+        from auth.user_api_keys import get_link_method
+    except Exception:
+
+        def get_link_method(a, b):
+            return ""
+
+    _recipient_nodes = ""
+    for em in _all_emails:
+        _is_current = em == _cur
+        _highlight = "current" if _is_current else ""
+        _method_badge = ""
+        if not _is_current:
+            _m = get_link_method(_cur, em)
+            if _m == "oauth":
+                _method_badge = '<span class="sec-method oauth">via OAuth</span>'
+            elif _m == "api_key":
+                _method_badge = '<span class="sec-method api_key">via API key</span>'
+            elif _m == "session":
+                _method_badge = '<span class="sec-method session">via session</span>'
+            elif _m == "both":
+                _method_badge = '<span class="sec-method both">OAuth + session</span>'
+            else:
+                _method_badge = '<span class="sec-method">linked</span>'
+        _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span>{_method_badge}</div>'
+
+    _key_lines = ""
+    for em in _all_emails:
+        _cls = "current" if (em == _cur) else ""
+        _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
+
+    _subtitle = (
+        "Your Google Workspace credentials are protected by multi-recipient envelope encryption"
+        if num_recipients > 1
+        else "Your Google Workspace credentials are protected by split-key encryption"
+    )
+
+    return f"""
+    <div class="sec-panel">
+        <div class="sec-title">🛡️ Credential Security Model</div>
+        <div class="sec-subtitle">{_subtitle}</div>
+        <div class="sec-diagram">
+            <div class="sec-col sec-col-users">
+                <div class="sec-col-label">Authorized Users</div>
+                {_recipient_nodes}
+            </div>
+            <div class="sec-col sec-col-keys">
+                <div class="sec-col-label">Key Wrapping</div>
+                {_key_lines}
+            </div>
+            <div class="sec-col sec-col-envelope">
+                <div class="sec-col-label">Encrypted Envelope</div>
+                <div class="sec-envelope">
+                    <div class="sec-env-header">Sealed Envelope</div>
+                    <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {num_recipients} Wrapped CEK(s)</span></div>
+                    <div class="sec-env-row"><span class="sec-env-badge data">🔒 Gmail · Drive · Calendar · Docs · Sheets</span></div>
+                    <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="sec-features">
+            <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
+            <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
+            <div class="sec-feat"><span>🔗</span> Link accounts via <b>OAuth</b>, <b>session</b>, or <b>API key</b></div>
+            <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
+        </div>
+    </div>"""
+
+
 def generate_service_selection_html(
     state: str, flow_type: str, use_pkce: bool = True
 ) -> str:

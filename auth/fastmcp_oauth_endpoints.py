@@ -497,6 +497,91 @@ def setup_service_selection_routes(mcp) -> None:
     logger.info("  POST /auth/services/selected (Service selection form handler)")
 
 
+async def _build_oauth_success_html(
+    user_email: str, credentials: Any, session_id: str | None
+) -> str:
+    """Shared post-OAuth logic for both legacy and main callbacks.
+
+    Applies intro-screen settings (privacy, sampling), handles per-user key
+    force-regeneration, builds the API-key and security-viz sections, and
+    returns the full success-page HTML.
+    """
+    from auth.context import get_auth_middleware, store_session_data
+    from auth.types import SessionKey
+
+    # ── Apply privacy mode and sampling config from intro screen ──
+    _intro_privacy = getattr(credentials, "_privacy_mode", False)
+    _intro_sampling = getattr(credentials, "_sampling_config", None)
+    try:
+        if session_id and _intro_privacy:
+            store_session_data(session_id, SessionKey.PRIVACY_MODE, "auto")
+            logger.info(f"🛡️ Privacy mode enabled from intro screen for {user_email}")
+        if session_id and _intro_sampling and _intro_sampling.get("model"):
+            auth_mw_sampling = get_auth_middleware()
+            if auth_mw_sampling:
+                _cfg = {k: v for k, v in _intro_sampling.items() if v}
+                auth_mw_sampling.save_sampling_config(
+                    user_email,
+                    _cfg,
+                    per_user_key=getattr(credentials, "_user_api_key", None),
+                    google_sub=getattr(credentials, "_google_sub", None),
+                )
+                store_session_data(session_id, SessionKey.SAMPLING_CONFIG, _cfg)
+                logger.info(
+                    f"🤖 Sampling config saved from intro screen for {user_email}: "
+                    f"model={_cfg.get('model', 'default')}"
+                )
+    except Exception as e:
+        logger.warning(f"⚠️ Could not apply intro screen settings: {e}")
+
+    # ── Handle API key retrieval and force-regen ──
+    user_api_key = getattr(credentials, "_user_api_key", None)
+    user_api_key_exists = getattr(credentials, "_user_api_key_exists", False)
+
+    if not user_api_key and user_api_key_exists:
+        try:
+            from auth.user_api_keys import regenerate_unrevealed_key
+
+            new_key = regenerate_unrevealed_key(user_email)
+            if new_key:
+                user_api_key = new_key
+                user_api_key_exists = False
+                try:
+                    auth_mw = get_auth_middleware()
+                    if auth_mw:
+                        auth_mw.save_credentials(
+                            user_email,
+                            credentials,
+                            per_user_key=new_key,
+                            google_sub=getattr(credentials, "_google_sub", None),
+                        )
+                        logger.info(
+                            f"🔑 Force-regenerated per-user key for {user_email}"
+                        )
+                except Exception as re_save_err:
+                    logger.warning(f"Could not re-save with new key: {re_save_err}")
+        except Exception as regen_err:
+            logger.warning(f"Could not regenerate per-user key: {regen_err}")
+
+    # ── Build success page HTML ──
+    from auth.ui import (
+        build_api_key_section,
+        build_security_viz_section,
+        generate_success_html,
+    )
+
+    api_key_section = build_api_key_section(
+        user_email, user_api_key, user_api_key_exists
+    )
+    security_viz_section = build_security_viz_section(user_email)
+
+    return generate_success_html(
+        user_email=user_email,
+        api_key_section=api_key_section,
+        security_viz_section=security_viz_section,
+    )
+
+
 def setup_legacy_callback_route(mcp) -> None:
     """Register only the /oauth2callback route.
 
@@ -589,262 +674,8 @@ def setup_legacy_callback_route(mcp) -> None:
             except Exception as e:
                 logger.warning(f"⚠️ Session storage error (continuing): {e}")
 
-            # Apply privacy mode and sampling config from intro screen
-            _intro_privacy = getattr(credentials, "_privacy_mode", False)
-            _intro_sampling = getattr(credentials, "_sampling_config", None)
-            try:
-                if session_id and _intro_privacy:
-                    store_session_data(session_id, SessionKey.PRIVACY_MODE, "auto")
-                    logger.info(
-                        f"🛡️ Privacy mode enabled from intro screen for {user_email}"
-                    )
-                if session_id and _intro_sampling and _intro_sampling.get("model"):
-                    from auth.context import get_auth_middleware
-
-                    auth_mw_sampling = get_auth_middleware()
-                    if auth_mw_sampling:
-                        # Filter out empty values before saving
-                        _cfg = {k: v for k, v in _intro_sampling.items() if v}
-                        auth_mw_sampling.save_sampling_config(
-                            user_email,
-                            _cfg,
-                            per_user_key=getattr(credentials, "_user_api_key", None),
-                            google_sub=getattr(credentials, "_google_sub", None),
-                        )
-                        store_session_data(session_id, SessionKey.SAMPLING_CONFIG, _cfg)
-                        logger.info(
-                            f"🤖 Sampling config saved from intro screen for {user_email}: "
-                            f"model={_cfg.get('model', 'default')}"
-                        )
-            except Exception as e:
-                logger.warning(f"⚠️ Could not apply intro screen settings: {e}")
-
-            # Retrieve per-user API key if one was generated during credential save
-            user_api_key = getattr(credentials, "_user_api_key", None)
-            user_api_key_exists = getattr(credentials, "_user_api_key_exists", False)
-            api_key_section = ""
-
-            # If key exists but was never revealed to the user, force-regenerate
-            # so they can see it on this success page.  If it WAS already revealed,
-            # keep the existing key to avoid invalidating an active credential.
-            if not user_api_key and user_api_key_exists:
-                try:
-                    from auth.user_api_keys import regenerate_unrevealed_key
-
-                    new_key = regenerate_unrevealed_key(user_email)
-                    if new_key:
-                        user_api_key = new_key
-                        user_api_key_exists = False  # treat as new key
-                        # Re-save credentials with the new key as a recipient
-                        try:
-                            from auth.context import get_auth_middleware
-
-                            auth_mw = get_auth_middleware()
-                            if auth_mw:
-                                auth_mw.save_credentials(
-                                    user_email,
-                                    credentials,
-                                    per_user_key=new_key,
-                                    google_sub=getattr(
-                                        credentials, "_google_sub", None
-                                    ),
-                                )
-                                logger.info(
-                                    f"🔑 Force-regenerated per-user key for {user_email} "
-                                    f"(first display via legacy callback)"
-                                )
-                        except Exception as re_save_err:
-                            logger.warning(
-                                f"Could not re-save with new key: {re_save_err}"
-                            )
-                except Exception as regen_err:
-                    logger.warning(f"Could not regenerate per-user key: {regen_err}")
-
-            # Gather envelope info for security visualization
-            security_viz_section = ""
-            _num_recipients = 0
-            _has_hmac = False
-            _is_encrypted = False
-            try:
-                from pathlib import Path
-
-                from auth.google_auth import _normalize_email
-
-                safe_email = (
-                    _normalize_email(user_email).replace("@", "_at_").replace(".", "_")
-                )
-                enc_path = (
-                    Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
-                )
-                if enc_path.exists():
-                    _is_encrypted = True
-                    import json as _json
-
-                    try:
-                        _env = _json.load(open(enc_path))
-                        _num_recipients = len(_env.get("recipients", {}))
-                        _has_hmac = "hmac" in _env
-                    except (ValueError, KeyError):
-                        # Legacy format (raw Fernet bytes) — still encrypted
-                        _num_recipients = 1
-                        _has_hmac = False
-            except Exception:
-                pass
-
-            # Build linked-accounts section (shown for both new and existing keys)
-            accessible_section = ""
-            if user_api_key or user_api_key_exists:
-                try:
-                    from auth.user_api_keys import get_accessible_emails
-
-                    accessible = get_accessible_emails(user_email)
-                    linked = sorted(
-                        e for e in accessible if e != user_email.lower().strip()
-                    )
-                    if linked:
-                        linked_items = "".join(
-                            f"<li>{html.escape(e)}</li>" for e in linked
-                        )
-                        accessible_section = f"""
-                        <div class="linked-accounts">
-                            <b>🔗 Linked Accounts</b>
-                            <small>This key can also access credentials for:</small>
-                            <ul>{linked_items}</ul>
-                        </div>"""
-                    else:
-                        accessible_section = """
-                        <div class="linked-accounts solo">
-                            <b>🔒 Single Account</b>
-                            <small>This key only has access to the email above.<br>
-                            Authenticate additional emails in the same session to link them.</small>
-                        </div>"""
-                except Exception:
-                    pass
-
-            if user_api_key:
-                # Key is being rendered — mark it as revealed so future
-                # re-auths won't force-regenerate and invalidate it.
-                try:
-                    from auth.user_api_keys import mark_key_revealed
-
-                    mark_key_revealed(user_email)
-                except Exception:
-                    pass
-                api_key_section = f"""
-                <div class="api-key">
-                    <b>🔑 Your Personal API Key</b><br>
-                    <small>Use this as a Bearer token to connect without re-authenticating.<br>
-                    This key is shown <b>once</b> — save it now!</small>
-                    <div class="key-value hidden" id="apiKey">{html.escape(user_api_key)}</div>
-                    <button id="revealBtn" onclick="document.getElementById('apiKey').classList.remove('hidden');this.style.display='none';document.getElementById('copyBtn').style.display=''">
-                        Click to Reveal Key
-                    </button>
-                    <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
-                        Copy to Clipboard
-                    </button>
-                </div>
-                {accessible_section}"""
-            elif user_api_key_exists:
-                api_key_section = f"""
-                <div class="api-key" style="background:#d1ecf1;color:#0c5460;border-color:#bee5eb">
-                    <b>🔑 API Key Active</b><br>
-                    <small>Your existing per-user API key is still valid.<br>
-                    Credentials have been refreshed — no need to update your key.</small>
-                </div>
-                {accessible_section}"""
-
-            # Build security visualization
-            if _is_encrypted:
-                # Build recipient nodes with linkage method badges
-                _cur = user_email.lower().strip()
-                _all_emails = [_cur]
-                try:
-                    _all_emails = sorted(get_accessible_emails(_cur))
-                except Exception:
-                    pass
-
-                try:
-                    from auth.user_api_keys import get_link_method
-                except Exception:
-
-                    def get_link_method(a, b):
-                        return ""
-
-                _recipient_nodes = ""
-                for em in _all_emails:
-                    _is_current = em == _cur
-                    _highlight = "current" if _is_current else ""
-                    _method_badge = ""
-                    if not _is_current:
-                        _m = get_link_method(_cur, em)
-                        if _m == "oauth":
-                            _method_badge = (
-                                '<span class="sec-method oauth">via OAuth</span>'
-                            )
-                        elif _m == "api_key":
-                            _method_badge = (
-                                '<span class="sec-method api_key">via API key</span>'
-                            )
-                        elif _m == "session":
-                            _method_badge = (
-                                '<span class="sec-method session">via session</span>'
-                            )
-                        elif _m == "both":
-                            _method_badge = (
-                                '<span class="sec-method both">multiple methods</span>'
-                            )
-                        else:
-                            _method_badge = '<span class="sec-method">linked</span>'
-                    _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span>{_method_badge}</div>'
-
-                _key_lines = ""
-                for em in _all_emails:
-                    _cls = "current" if (em == _cur) else ""
-                    _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
-
-                _subtitle = (
-                    "Your Google Workspace credentials are protected by multi-recipient envelope encryption"
-                    if _num_recipients > 1
-                    else "Your Google Workspace credentials are protected by split-key encryption"
-                )
-
-                security_viz_section = f"""
-                <div class="sec-panel">
-                    <div class="sec-title">🛡️ Credential Security Model</div>
-                    <div class="sec-subtitle">{_subtitle}</div>
-                    <div class="sec-diagram">
-                        <div class="sec-col sec-col-users">
-                            <div class="sec-col-label">Authorized Users</div>
-                            {_recipient_nodes}
-                        </div>
-                        <div class="sec-col sec-col-keys">
-                            <div class="sec-col-label">Key Wrapping</div>
-                            {_key_lines}
-                        </div>
-                        <div class="sec-col sec-col-envelope">
-                            <div class="sec-col-label">Encrypted Envelope</div>
-                            <div class="sec-envelope">
-                                <div class="sec-env-header">Sealed Envelope</div>
-                                <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
-                                <div class="sec-env-row"><span class="sec-env-badge data">🔒 Gmail · Drive · Calendar · Docs · Sheets</span></div>
-                                <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="sec-features">
-                        <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
-                        <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
-                        <div class="sec-feat"><span>🔗</span> Link accounts via <b>OAuth</b>, <b>session</b>, or <b>API key</b> (30 min window)</div>
-                        <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
-                    </div>
-                </div>"""
-
-            from auth.ui import generate_success_html
-
-            success_html = generate_success_html(
-                user_email=user_email,
-                api_key_section=api_key_section,
-                security_viz_section=security_viz_section,
+            success_html = await _build_oauth_success_html(
+                user_email, credentials, session_id
             )
             return HTMLResponse(content=success_html, status_code=200)
 
@@ -1717,258 +1548,8 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 except Exception as e:
                     logger.warning(f"⚠️ Session storage error (continuing): {e}")
 
-                # Apply privacy mode and sampling config from intro screen
-                _intro_privacy = getattr(credentials, "_privacy_mode", False)
-                _intro_sampling = getattr(credentials, "_sampling_config", None)
-                try:
-                    if session_id and _intro_privacy:
-                        store_session_data(session_id, SessionKey.PRIVACY_MODE, "auto")
-                        logger.info(
-                            f"🛡️ Privacy mode enabled from intro screen for {user_email}"
-                        )
-                    if session_id and _intro_sampling:
-                        from auth.context import get_auth_middleware
-
-                        auth_mw_for_sampling = get_auth_middleware()
-                        if auth_mw_for_sampling:
-                            auth_mw_for_sampling.save_sampling_config(
-                                user_email,
-                                _intro_sampling.get("model", ""),
-                                _intro_sampling.get("api_key", ""),
-                                api_base=_intro_sampling.get("api_base", ""),
-                                session_id=session_id,
-                            )
-                            logger.info(
-                                f"🤖 Sampling config saved from intro screen for {user_email}: "
-                                f"model={_intro_sampling.get('model', 'default')}"
-                            )
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not apply intro screen settings: {e}")
-
-                # Retrieve per-user API key if one was generated
-                user_api_key = getattr(credentials, "_user_api_key", None)
-                user_api_key_exists = getattr(
-                    credentials, "_user_api_key_exists", False
-                )
-                api_key_section = ""
-
-                # If key exists but was never revealed to the user, force-regenerate
-                # so they can see it on this success page.  If it WAS already revealed,
-                # keep the existing key to avoid invalidating an active credential.
-                if not user_api_key and user_api_key_exists:
-                    try:
-                        from auth.user_api_keys import regenerate_unrevealed_key
-
-                        new_key = regenerate_unrevealed_key(user_email)
-                        if new_key:
-                            user_api_key = new_key
-                            user_api_key_exists = False  # treat as new key
-                            # Re-save credentials with the new key as a recipient
-                            try:
-                                from auth.context import get_auth_middleware
-
-                                auth_mw = get_auth_middleware()
-                                if auth_mw:
-                                    auth_mw.save_credentials(
-                                        user_email,
-                                        credentials,
-                                        per_user_key=new_key,
-                                        google_sub=getattr(
-                                            credentials, "_google_sub", None
-                                        ),
-                                    )
-                                    logger.info(
-                                        f"🔑 Force-regenerated per-user key for {user_email} "
-                                        f"(first display via main callback)"
-                                    )
-                            except Exception as re_save_err:
-                                logger.warning(
-                                    f"Could not re-save with new key: {re_save_err}"
-                                )
-                    except Exception as regen_err:
-                        logger.warning(
-                            f"Could not regenerate per-user key: {regen_err}"
-                        )
-
-                # Build linked-accounts section (shown for both new and existing keys)
-                accessible_section = ""
-                if user_api_key or user_api_key_exists:
-                    try:
-                        from auth.user_api_keys import get_accessible_emails
-
-                        accessible = get_accessible_emails(user_email)
-                        linked = sorted(
-                            e for e in accessible if e != user_email.lower().strip()
-                        )
-                        if linked:
-                            linked_items = "".join(
-                                f"<li>{html.escape(e)}</li>" for e in linked
-                            )
-                            accessible_section = f"""
-                            <div class="linked-accounts">
-                                <b>🔗 Linked Accounts</b>
-                                <small>This key can also access credentials for:</small>
-                                <ul>{linked_items}</ul>
-                            </div>"""
-                        else:
-                            accessible_section = """
-                            <div class="linked-accounts solo">
-                                <b>🔒 Single Account</b>
-                                <small>This key only has access to the email above.<br>
-                                Authenticate additional emails in the same session to link them.</small>
-                            </div>"""
-                    except Exception:
-                        pass
-
-                if user_api_key:
-                    # Key is being rendered — mark it as revealed so future
-                    # re-auths won't force-regenerate and invalidate it.
-                    try:
-                        from auth.user_api_keys import mark_key_revealed
-
-                        mark_key_revealed(user_email)
-                    except Exception:
-                        pass
-                    api_key_section = f"""
-                    <div class="api-key">
-                        <b>🔑 Your Personal API Key</b><br>
-                        <small>Use this as a Bearer token to connect without re-authenticating.<br>
-                        This key is shown <b>once</b> — save it now!</small>
-                        <div class="key-value hidden" id="apiKey">{html.escape(user_api_key)}</div>
-                        <button id="revealBtn" onclick="document.getElementById('apiKey').classList.remove('hidden');this.style.display='none';document.getElementById('copyBtn').style.display=''">
-                            Click to Reveal Key
-                        </button>
-                        <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
-                            Copy to Clipboard
-                        </button>
-                    </div>
-                    {accessible_section}"""
-                elif user_api_key_exists:
-                    api_key_section = f"""
-                    <div class="api-key" style="background:#d1ecf1;color:#0c5460;border-color:#bee5eb">
-                        <b>🔑 API Key Active</b><br>
-                        <small>Your existing per-user API key is still valid.<br>
-                        Credentials have been refreshed — no need to update your key.</small>
-                    </div>
-                    {accessible_section}"""
-
-                # Gather envelope info for security visualization
-                security_viz_section = ""
-                _num_recipients = 0
-                _has_hmac = False
-                _is_encrypted = False
-                try:
-                    from pathlib import Path
-
-                    from auth.google_auth import _normalize_email
-
-                    safe_email = (
-                        _normalize_email(user_email)
-                        .replace("@", "_at_")
-                        .replace(".", "_")
-                    )
-                    enc_path = (
-                        Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
-                    )
-                    if enc_path.exists():
-                        _is_encrypted = True
-                        import json as _json
-
-                        try:
-                            _env = _json.load(open(enc_path))
-                            _num_recipients = len(_env.get("recipients", {}))
-                            _has_hmac = "hmac" in _env
-                        except (ValueError, KeyError):
-                            # Legacy format (raw Fernet bytes) — still encrypted
-                            _num_recipients = 1
-                            _has_hmac = False
-                except Exception:
-                    pass
-
-                # Build security visualization
-                if _is_encrypted:
-                    _cur = user_email.lower().strip()
-                    _all_emails = [_cur]
-                    try:
-                        _all_emails = sorted(get_accessible_emails(_cur))
-                    except Exception:
-                        pass
-
-                    try:
-                        from auth.user_api_keys import get_link_method
-                    except Exception:
-
-                        def get_link_method(a, b):
-                            return ""
-
-                    _recipient_nodes = ""
-                    for em in _all_emails:
-                        _is_current = em == _cur
-                        _highlight = "current" if _is_current else ""
-                        _method_badge = ""
-                        if not _is_current:
-                            _m = get_link_method(_cur, em)
-                            if _m == "oauth":
-                                _method_badge = (
-                                    '<span class="sec-method oauth">via OAuth</span>'
-                                )
-                            elif _m == "session":
-                                _method_badge = '<span class="sec-method session">via session</span>'
-                            elif _m == "both":
-                                _method_badge = '<span class="sec-method both">OAuth + session</span>'
-                            else:
-                                _method_badge = '<span class="sec-method">linked</span>'
-                        _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span>{_method_badge}</div>'
-
-                    _key_lines = ""
-                    for em in _all_emails:
-                        _cls = "current" if (em == _cur) else ""
-                        _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
-
-                    _subtitle = (
-                        "Your Google Workspace credentials are protected by multi-recipient envelope encryption"
-                        if _num_recipients > 1
-                        else "Your Google Workspace credentials are protected by split-key encryption"
-                    )
-
-                    security_viz_section = f"""
-                    <div class="sec-panel">
-                        <div class="sec-title">🛡️ Credential Security Model</div>
-                        <div class="sec-subtitle">{_subtitle}</div>
-                        <div class="sec-diagram">
-                            <div class="sec-col sec-col-users">
-                                <div class="sec-col-label">Authorized Users</div>
-                                {_recipient_nodes}
-                            </div>
-                            <div class="sec-col sec-col-keys">
-                                <div class="sec-col-label">Key Wrapping</div>
-                                {_key_lines}
-                            </div>
-                            <div class="sec-col sec-col-envelope">
-                                <div class="sec-col-label">Encrypted Envelope</div>
-                                <div class="sec-envelope">
-                                    <div class="sec-env-header">Sealed Envelope</div>
-                                    <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
-                                    <div class="sec-env-row"><span class="sec-env-badge data">🔒 Gmail · Drive · Calendar · Docs · Sheets</span></div>
-                                    <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="sec-features">
-                            <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
-                            <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
-                            <div class="sec-feat"><span>🔗</span> Linked accounts share access via separate key wraps</div>
-                            <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
-                        </div>
-                    </div>"""
-
-                # Create beautiful success page
-                from auth.ui import generate_success_html
-
-                success_html = generate_success_html(
-                    user_email=user_email,
-                    api_key_section=api_key_section,
-                    security_viz_section=security_viz_section,
+                success_html = await _build_oauth_success_html(
+                    user_email, credentials, session_id
                 )
                 logger.info(
                     f"✅ Returning success page for {user_email} with credential confirmation"
