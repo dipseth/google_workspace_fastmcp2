@@ -196,10 +196,14 @@ class LiteLLMSamplingHandler:
             from middleware.payment.cost_tracker import track_sample_call
 
             usage = getattr(response, "usage", None)
-            if usage:
-                # Extract cached token count — only trust Anthropic's value.
-                # Other providers (Venice/OpenAI-compat) report KV-cache stats
-                # that don't represent actual prompt caching cost savings.
+            model_name = (
+                getattr(response, "model", self.default_model) or self.default_model
+            )
+            if usage and (
+                getattr(usage, "prompt_tokens", 0)
+                or getattr(usage, "completion_tokens", 0)
+            ):
+                # Use actual token counts from provider
                 cached_tokens = 0
                 if self.default_model.startswith("anthropic/"):
                     prompt_details = getattr(usage, "prompt_tokens_details", None)
@@ -211,11 +215,12 @@ class LiteLLMSamplingHandler:
                 track_sample_call(
                     input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
                     output_tokens=getattr(usage, "completion_tokens", 0) or 0,
-                    model=getattr(response, "model", self.default_model)
-                    or self.default_model,
+                    model=model_name,
                     cached_tokens=cached_tokens,
                 )
-                # Fallback: estimate from message text lengths
+            else:
+                # Fallback: estimate from message text lengths when provider
+                # doesn't report token usage
                 input_text = " ".join(
                     m.get("content", "")
                     for m in litellm_messages
@@ -229,8 +234,7 @@ class LiteLLMSamplingHandler:
                 track_sample_call(
                     input_text=input_text,
                     output_text=output_text,
-                    model=getattr(response, "model", self.default_model)
-                    or self.default_model,
+                    model=model_name,
                 )
         except Exception as e:
             logger.debug("Cost tracking failed (non-fatal): %s", e)

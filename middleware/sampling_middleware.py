@@ -1342,7 +1342,11 @@ class EnhancedSamplingMiddleware(Middleware):
                     validation = await self._run_validation_agent(
                         context, tool_name, v_config
                     )
-                    if validation and validation.validated_input:
+                    if (
+                        validation
+                        and not validation.is_valid
+                        and validation.validated_input
+                    ):
                         context.message.arguments.update(validation.validated_input)
                         if self.enable_debug:
                             logger.debug(
