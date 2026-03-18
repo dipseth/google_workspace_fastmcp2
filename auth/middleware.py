@@ -1011,8 +1011,15 @@ class AuthMiddleware(Middleware):
         oauth_recipient_key: Optional[str],
         normalized_email: str,
     ) -> None:
-        """Save credentials with per-user + OAuth recipients, with proper fallbacks."""
+        """Save credentials with per-user + OAuth recipients, with proper fallbacks.
+
+        On re-auth without per_user_key, reuses the existing envelope's CEK so
+        that all existing recipient wrapped CEKs remain valid. New credential
+        data is re-encrypted with the same CEK, and any new recipients (e.g.
+        updated OAuth key) are added.
+        """
         if per_user_key:
+            # Fresh encryption with per-user key as primary recipient
             all_additional = list(additional_keys or [])
             if oauth_recipient_key:
                 all_additional.append(oauth_recipient_key)
@@ -1026,7 +1033,29 @@ class AuthMiddleware(Middleware):
                 f"🔐 Saved per-user encrypted credentials for {normalized_email}"
                 + (" (+OAuth recipient)" if oauth_recipient_key else "")
             )
+        elif oauth_recipient_key and path.exists():
+            # Re-auth without per_user_key: reuse existing CEK to preserve
+            # all recipient access (per-user key, linked accounts, etc.)
+            reused = self._reauth_reuse_cek(
+                path,
+                credentials,
+                oauth_recipient_key,
+                additional_keys,
+                normalized_email,
+            )
+            if not reused:
+                # Fallback: fresh envelope with only OAuth recipient
+                self._save_per_user_encrypted(
+                    path,
+                    credentials,
+                    oauth_recipient_key,
+                    additional_keys=additional_keys,
+                )
+                logger.info(
+                    f"🔐 Saved OAuth-only encrypted credentials for {normalized_email}"
+                )
         elif oauth_recipient_key:
+            # First auth with only OAuth recipient (no existing envelope)
             self._save_per_user_encrypted(
                 path,
                 credentials,
@@ -1034,14 +1063,105 @@ class AuthMiddleware(Middleware):
                 additional_keys=additional_keys,
             )
             logger.info(
-                f"🔐 Saved OAuth-recipient encrypted credentials for {normalized_email} "
-                f"(per-user key recipient restored on next key-based auth)"
+                f"🔐 Saved OAuth-recipient encrypted credentials for {normalized_email}"
             )
         else:
             encrypted_data = self._encrypt_credentials(credentials)
             with open(path, "w") as f:
                 f.write(encrypted_data)
             logger.debug(f"Saved server-encrypted credentials for {normalized_email}")
+
+    def _reauth_reuse_cek(
+        self,
+        path: Path,
+        credentials: Credentials,
+        oauth_recipient_key: str,
+        additional_keys: Optional[list],
+        normalized_email: str,
+    ) -> bool:
+        """Re-encrypt credentials reusing the existing envelope's CEK.
+
+        This preserves all existing recipients (per-user key, linked accounts)
+        without needing their plaintext keys. The existing CEK is recovered
+        using any available recipient key (OAuth or per-user), then the new
+        credential data is encrypted with the same CEK. All wrapped CEKs
+        remain valid.
+
+        Returns True if successful, False if fallback is needed.
+        """
+        from cryptography.fernet import Fernet
+
+        try:
+            old_envelope = json.loads(path.read_text())
+            if old_envelope.get("v") != 2 or "recipients" not in old_envelope:
+                return False
+
+            # Try to recover the old CEK using any available key
+            cek = None
+            # Try OAuth recipient key first (we always have this)
+            oauth_kid = self._key_id(oauth_recipient_key)
+            for try_key in [oauth_recipient_key] + (additional_keys or []):
+                try_kid = self._key_id(try_key)
+                wrapped_cek_b64 = old_envelope["recipients"].get(try_kid)
+                if wrapped_cek_b64:
+                    wrapper_fernet = Fernet(self.derive_per_user_fernet_key(try_key))
+                    wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
+                    cek = wrapper_fernet.decrypt(wrapped_cek)
+                    break
+
+            if not cek:
+                logger.debug(
+                    f"Could not recover CEK from existing envelope for {normalized_email}"
+                )
+                return False
+
+            # Re-encrypt new credential data with the same CEK
+            creds_data = {
+                "token": credentials.token,
+                "refresh_token": credentials.refresh_token,
+                "token_uri": credentials.token_uri,
+                "client_id": credentials.client_id,
+                "client_secret": credentials.client_secret,
+                "scopes": credentials.scopes,
+                "expiry": credentials.expiry.isoformat()
+                if credentials.expiry
+                else None,
+                "encrypted_at": datetime.now().isoformat(),
+            }
+            encrypted_creds = Fernet(cek).encrypt(json.dumps(creds_data).encode())
+
+            # Keep all existing recipients, add new ones if not present
+            recipients = dict(old_envelope["recipients"])
+            for new_key in [oauth_recipient_key] + (additional_keys or []):
+                new_kid = self._key_id(new_key)
+                if new_kid not in recipients:
+                    wrapper_fernet = Fernet(self.derive_per_user_fernet_key(new_key))
+                    wrapped_cek = wrapper_fernet.encrypt(cek)
+                    recipients[new_kid] = base64.urlsafe_b64encode(wrapped_cek).decode()
+
+            # Build updated envelope
+            envelope = {
+                "v": 2,
+                "enc": "per_user",
+                "recipients": recipients,
+                "data": base64.urlsafe_b64encode(encrypted_creds).decode(),
+            }
+            envelope["hmac"] = self._compute_envelope_hmac(envelope)
+
+            with open(path, "w") as f:
+                json.dump(envelope, f)
+
+            self._zero_bytes(cek)
+
+            logger.info(
+                f"🔐 Re-auth: reused CEK for {normalized_email}, "
+                f"{len(recipients)} recipient(s) preserved"
+            )
+            return True
+
+        except Exception as e:
+            logger.warning(f"CEK reuse failed for {normalized_email}: {e}")
+            return False
 
     def _setup_encryption(self):
         """Setup encryption for secure credential storage.
@@ -1839,6 +1959,193 @@ class AuthMiddleware(Middleware):
         except Exception as e:
             logger.warning(f"Failed to load Chat SA for {normalized_email}: {e}")
             return None
+
+    # ── Sampling configuration envelope (per-user encrypted) ─────────
+
+    def save_sampling_config(
+        self,
+        user_email: str,
+        config_dict: dict,
+        per_user_key: Optional[str] = None,
+        additional_keys: Optional[list] = None,
+        google_sub: Optional[str] = None,
+        oauth_linkage_password: str = "",
+    ) -> None:
+        """Encrypt and save per-user sampling configuration as a separate envelope.
+
+        Uses the same CEK/multi-recipient pattern as Chat service accounts,
+        stored in ``{safe_email}_sampling_config.enc``.
+        """
+        from cryptography.fernet import Fernet
+
+        from .google_auth import _normalize_email
+
+        normalized_email = _normalize_email(user_email)
+        safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
+        cfg_path = Path(settings.credentials_dir) / f"{safe_email}_sampling_config.enc"
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+
+        config_json = json.dumps(config_dict)
+
+        oauth_recipient_key = self._resolve_oauth_recipient_key(
+            google_sub, normalized_email, password=oauth_linkage_password
+        )
+
+        # Collect all recipient keys
+        all_keys = []
+        if per_user_key:
+            all_keys.append(per_user_key)
+        if additional_keys:
+            all_keys.extend(additional_keys)
+        if oauth_recipient_key:
+            all_keys.append(oauth_recipient_key)
+
+        if not all_keys:
+            # Fallback to server-level encryption
+            encrypted = self._fernet.encrypt(config_json.encode())
+            with open(cfg_path, "w") as f:
+                f.write(base64.urlsafe_b64encode(encrypted).decode())
+            logger.info(
+                f"Saved server-encrypted sampling config for {normalized_email}"
+            )
+        else:
+            cek = Fernet.generate_key()
+            try:
+                cek_fernet = Fernet(cek)
+                encrypted_data = cek_fernet.encrypt(config_json.encode())
+
+                recipients = {}
+                for key in all_keys:
+                    kid = self._key_id(key)
+                    wrapper_fernet_key = self.derive_per_user_fernet_key(key)
+                    wrapper = Fernet(wrapper_fernet_key)
+                    wrapped_cek = wrapper.encrypt(cek)
+                    recipients[kid] = base64.urlsafe_b64encode(wrapped_cek).decode()
+
+                envelope = {
+                    "v": 2,
+                    "enc": "per_user",
+                    "type": "sampling_config",
+                    "recipients": recipients,
+                    "data": base64.urlsafe_b64encode(encrypted_data).decode(),
+                }
+                envelope["hmac"] = self._compute_envelope_hmac(envelope)
+
+                with open(cfg_path, "w") as f:
+                    json.dump(envelope, f)
+            finally:
+                self._zero_bytes(cek)
+
+            logger.info(
+                f"Saved per-user encrypted sampling config for {normalized_email} "
+                f"({len(recipients)} recipient(s))"
+            )
+
+        try:
+            cfg_path.chmod(0o600)
+        except (OSError, AttributeError):
+            pass
+
+    def load_sampling_config(
+        self,
+        user_email: str,
+        per_user_key: Optional[str] = None,
+        google_sub: Optional[str] = None,
+        oauth_linkage_password: str = "",
+    ) -> Optional[Dict]:
+        """Load and decrypt per-user sampling configuration.
+
+        Returns the parsed config dict, or None if not found/undecryptable.
+        """
+        from cryptography.fernet import Fernet
+
+        from .google_auth import _normalize_email
+
+        normalized_email = _normalize_email(user_email)
+        safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
+        cfg_path = Path(settings.credentials_dir) / f"{safe_email}_sampling_config.enc"
+
+        if not cfg_path.exists():
+            return None
+
+        try:
+            with open(cfg_path) as f:
+                raw = f.read()
+
+            # Try JSON envelope (v2 per-user format)
+            try:
+                envelope = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                # Legacy server-encrypted (raw base64 Fernet)
+                encrypted_bytes = base64.urlsafe_b64decode(raw.encode())
+                decrypted = self._fernet.decrypt(encrypted_bytes)
+                return json.loads(decrypted.decode())
+
+            if not isinstance(envelope, dict) or envelope.get("enc") != "per_user":
+                return None
+
+            if not self._verify_envelope_hmac(envelope):
+                logger.error(f"Sampling config envelope HMAC failed: {cfg_path.name}")
+                return None
+
+            # Build list of keys to try
+            keys_to_try = []
+            if per_user_key:
+                keys_to_try.append(per_user_key)
+
+            oauth_key = self._resolve_oauth_recipient_key(
+                google_sub, normalized_email, password=oauth_linkage_password
+            )
+            if oauth_key:
+                keys_to_try.append(oauth_key)
+
+            for key in keys_to_try:
+                kid = self._key_id(key)
+                wrapped_cek_b64 = envelope.get("recipients", {}).get(kid)
+                if not wrapped_cek_b64:
+                    continue
+
+                cek = None
+                try:
+                    fernet_key = self.derive_per_user_fernet_key(key)
+                    wrapped_cek = base64.urlsafe_b64decode(wrapped_cek_b64.encode())
+                    cek = Fernet(fernet_key).decrypt(wrapped_cek)
+                    encrypted_data = base64.urlsafe_b64decode(envelope["data"].encode())
+                    decrypted = Fernet(cek).decrypt(encrypted_data)
+                    return json.loads(decrypted.decode())
+                except Exception:
+                    continue
+                finally:
+                    if cek:
+                        self._zero_bytes(cek)
+
+            logger.debug(
+                f"Could not decrypt sampling config for {normalized_email} with any key"
+            )
+            return None
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to load sampling config for {normalized_email}: {e}"
+            )
+            return None
+
+    def delete_sampling_config(self, user_email: str) -> bool:
+        """Delete the encrypted sampling configuration file for a user.
+
+        Returns True if a file was deleted, False if none existed.
+        """
+        from .google_auth import _normalize_email
+
+        normalized_email = _normalize_email(user_email)
+        safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
+        cfg_path = Path(settings.credentials_dir) / f"{safe_email}_sampling_config.enc"
+
+        if cfg_path.exists():
+            cfg_path.unlink()
+            logger.info(f"Deleted sampling config for {normalized_email}")
+            return True
+        return False
 
     def _load_encrypted_file(
         self, path: Path, per_user_key: Optional[str] = None

@@ -514,6 +514,7 @@ class QdrantStorageManager:
         execution_time_ms: int = 0,
         session_id: Optional[str] = None,
         user_email: Optional[str] = None,
+        sampling_costs: Optional[Dict[str, Any]] = None,
     ):
         """
         Store tool response in Qdrant with embedding using individual parameters.
@@ -527,6 +528,7 @@ class QdrantStorageManager:
             execution_time_ms: Execution time in milliseconds (enhanced metadata)
             session_id: Session ID
             user_email: User email
+            sampling_costs: Cost tracking data from SamplingCostTracker
         """
         # Ensure client manager is initialized
         if not self.client_manager.is_initialized:
@@ -549,6 +551,16 @@ class QdrantStorageManager:
             now_dt = datetime.now(timezone.utc)
             resolved_session = session_id or str(uuid.uuid4())
             resolved_email = user_email or "unknown"
+            # Merge sampling cost fields (defaults if not provided)
+            cost_fields = sampling_costs or {
+                "sampling_detected": False,
+                "sampling_calls": 0,
+                "sampling_estimated_input_tokens": 0,
+                "sampling_estimated_output_tokens": 0,
+                "cost_sampling_estimated": 0.0,
+                "sampling_model": "",
+            }
+
             response_data = {
                 "tool_name": tool_name,
                 "arguments": tool_args,
@@ -560,6 +572,7 @@ class QdrantStorageManager:
                 "session_id": resolved_session,
                 "payload_type": PayloadType.TOOL_RESPONSE.value,
                 "execution_time_ms": execution_time_ms,
+                **cost_fields,
             }
 
             # Sanitize data while preserving structure
@@ -595,6 +608,13 @@ class QdrantStorageManager:
                 "payload_type": PayloadType.TOOL_RESPONSE.value,
                 "execution_time_ms": execution_time_ms,
                 "compressed": compressed,
+                # Cost tracking fields
+                "sampling_detected": cost_fields.get("sampling_detected", False),
+                "sampling_calls": cost_fields.get("sampling_calls", 0),
+                "cost_sampling_estimated": cost_fields.get(
+                    "cost_sampling_estimated", 0.0
+                ),
+                "sampling_model": cost_fields.get("sampling_model", ""),
             }
 
             if compressed:

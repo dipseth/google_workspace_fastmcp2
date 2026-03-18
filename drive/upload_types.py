@@ -9,7 +9,7 @@ for rich field descriptions in JSON schemas. Other types use TypedDict for simpl
 """
 
 from pydantic import BaseModel, Field
-from typing_extensions import List, Optional, TypedDict
+from typing_extensions import List, Literal, Optional, TypedDict
 
 
 class FileUploadInfo(TypedDict):
@@ -65,9 +65,9 @@ class OAuthScope(TypedDict):
 class StartAuthResponse(BaseModel):
     """Response structure for start_google_auth tool."""
 
-    status: str = Field(
+    status: Literal["success", "already_authenticated", "error"] = Field(
         ...,
-        description="Authentication status: 'success' if auth URL generated, 'error' if failed",
+        description="Authentication status",
     )
     message: str = Field(
         ..., description="Human-readable message describing the authentication status"

@@ -148,6 +148,88 @@ def _save_links(links: dict) -> None:
         logger.warning(f"⚠️ Could not set permissions on {path}: {e}")
 
 
+def mark_key_revealed(user_email: str) -> None:
+    """Record that the per-user API key for *user_email* has been shown to the user.
+
+    Sets ``revealed_at`` on the registry entry so the legacy callback can
+    decide whether a force-regeneration is needed.
+    """
+    from datetime import datetime, timezone
+
+    email = user_email.lower().strip()
+
+    with _lock:
+        registry = _load_registry()
+        for _hash, entry in registry.items():
+            if isinstance(entry, dict) and entry.get("email") == email:
+                entry["revealed_at"] = datetime.now(timezone.utc).isoformat()
+                _save_registry(registry)
+                logger.debug(f"🔑 Marked per-user API key as revealed for {email}")
+                return
+    logger.debug(f"🔑 No registry entry found for {email} — cannot mark revealed")
+
+
+def was_key_revealed(user_email: str) -> bool:
+    """Check whether the per-user API key for *user_email* was ever shown to the user."""
+    email = user_email.lower().strip()
+
+    with _lock:
+        registry = _load_registry()
+
+    for _hash, entry in registry.items():
+        if isinstance(entry, dict) and entry.get("email") == email:
+            return bool(entry.get("revealed_at"))
+    return False
+
+
+def regenerate_unrevealed_key(user_email: str) -> Optional[str]:
+    """Atomically check if key was revealed; if not, force-regenerate and mark revealed.
+
+    Performs a single load/save cycle instead of three separate operations
+    (``was_key_revealed`` + ``generate_user_key`` + ``mark_key_revealed``).
+
+    Returns:
+        The new plaintext key if regenerated, or ``None`` if the key was
+        already revealed (no regeneration needed).
+    """
+    from datetime import datetime, timezone
+
+    email = user_email.lower().strip()
+
+    with _lock:
+        registry = _load_registry()
+
+        # Check if key was already revealed
+        for _hash, entry in registry.items():
+            if isinstance(entry, dict) and entry.get("email") == email:
+                if entry.get("revealed_at"):
+                    logger.info(
+                        f"🔑 Per-user key for {email} was already revealed — "
+                        f"skipping force-regeneration to preserve active key"
+                    )
+                    return None
+                break
+
+        # Not revealed — force-regenerate in the same lock scope
+        key = secrets.token_urlsafe(32)
+        key_hash = _hash_key(key)
+
+        # Remove old entry
+        registry = {h: e for h, e in registry.items() if _reg_email(e) != email}
+
+        # Add new entry with revealed_at already set
+        now = datetime.now(timezone.utc).isoformat()
+        registry[key_hash] = {
+            "email": email,
+            "created_at": now,
+            "revealed_at": now,
+        }
+        _save_registry(registry)
+
+    logger.info(f"🔑 Force-regenerated and revealed per-user API key for {email}")
+    return key
+
+
 def generate_user_key(user_email: str, *, force: bool = False) -> Optional[str]:
     """Generate a new API key for a user.
 

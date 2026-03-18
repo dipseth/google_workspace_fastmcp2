@@ -24,6 +24,7 @@ except PackageNotFoundError:
 from fastmcp import FastMCP
 
 from auth.fastmcp_oauth_endpoints import (
+    setup_config_api_routes,
     setup_legacy_callback_route,
     setup_oauth_endpoints_fastmcp,
     setup_service_selection_routes,
@@ -535,24 +536,123 @@ else:
     logger.info("  💡 To enable: set FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID and")
     logger.info("     FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET in .env")
 
-# Configure sampling fallback handler (uses Anthropic when client doesn't support sampling)
+# Configure sampling fallback handler (routes through LiteLLM or Anthropic)
 _sampling_handler = None
-if settings.anthropic_api_key:
-    try:
-        from anthropic import AsyncAnthropic
-        from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
 
-        _sampling_handler = AnthropicSamplingHandler(
-            default_model="claude-sonnet-4-6",
-            client=AsyncAnthropic(api_key=settings.anthropic_api_key),
-        )
-        logger.info("🤖 Anthropic sampling handler configured (fallback mode)")
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to configure Anthropic sampling handler: {e}")
-else:
-    logger.warning(
-        "⚠️ ANTHROPIC_API_KEY not set — sampling will fail if client doesn't support it"
+
+def _create_litellm_handler():
+    from middleware.litellm_sampling_handler import LiteLLMSamplingHandler
+
+    # Resolve API key: explicit LITELLM_API_KEY > VENICE_INFERENCE_KEY > None (litellm env var fallback)
+    api_key = settings.litellm_api_key or settings.venice_inference_key
+    # Resolve API base: explicit > auto-detect for Venice models
+    api_base = settings.litellm_api_base
+    if not api_base and settings.venice_inference_key and not settings.litellm_api_key:
+        api_base = "https://api.venice.ai/api/v1"
+    return LiteLLMSamplingHandler(
+        default_model=settings.litellm_model,
+        api_key=api_key,
+        api_base=api_base,
     )
+
+
+def _create_anthropic_handler():
+    from anthropic import AsyncAnthropic
+    from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
+
+    handler = AnthropicSamplingHandler(
+        default_model="claude-sonnet-4-6",
+        client=AsyncAnthropic(api_key=settings.anthropic_api_key),
+    )
+
+    # Wrap handler to track sampling costs
+    async def _tracking_wrapper(messages, params, context):
+        result = await handler(messages, params, context)
+        try:
+            from middleware.payment.cost_tracker import track_sample_call
+
+            # Estimate from text since Anthropic handler doesn't expose usage
+            input_text = " ".join(
+                getattr(m.content, "text", "")
+                for m in messages
+                if hasattr(m, "content") and hasattr(m.content, "text")
+            )
+            output_text = ""
+            if hasattr(result, "content"):
+                c = result.content
+                if hasattr(c, "text"):
+                    output_text = c.text
+                elif isinstance(c, list):
+                    output_text = " ".join(
+                        getattr(b, "text", "") for b in c if hasattr(b, "text")
+                    )
+            track_sample_call(
+                input_text=input_text,
+                output_text=output_text,
+                model=getattr(result, "model", "claude-sonnet-4-6")
+                or "claude-sonnet-4-6",
+            )
+        except Exception:
+            pass
+        return result
+
+    # Wrap with Langfuse @observe tracing if configured
+    try:
+        from middleware.langfuse_integration import wrap_anthropic_handler_with_langfuse
+
+        wrapped = wrap_anthropic_handler_with_langfuse(_tracking_wrapper)
+        return wrapped
+    except Exception:
+        return _tracking_wrapper
+
+
+_provider = settings.sampling_provider.lower().strip()
+
+if _provider == "litellm":
+    try:
+        _sampling_handler = _create_litellm_handler()
+        logger.info(
+            f"🤖 LiteLLM sampling handler configured (model: {settings.litellm_model})"
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to configure LiteLLM handler: {e}")
+
+elif _provider == "anthropic":
+    if settings.anthropic_api_key:
+        try:
+            _sampling_handler = _create_anthropic_handler()
+            logger.info("🤖 Anthropic sampling handler configured")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to configure Anthropic handler: {e}")
+
+else:  # "auto"
+    # Try LiteLLM first (if venice key or litellm key set), then Anthropic
+    _has_litellm_key = settings.litellm_api_key or settings.venice_inference_key
+    if _has_litellm_key:
+        try:
+            _sampling_handler = _create_litellm_handler()
+            logger.info(
+                f"🤖 LiteLLM sampling handler configured as default (model: {settings.litellm_model})"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ LiteLLM handler failed, trying Anthropic: {e}")
+
+    if _sampling_handler is None and settings.anthropic_api_key:
+        try:
+            _sampling_handler = _create_anthropic_handler()
+            logger.info("🤖 Anthropic sampling handler configured (fallback)")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to configure Anthropic handler: {e}")
+
+if _sampling_handler is None:
+    logger.warning(
+        "⚠️ No sampling handler — set VENICE_INFERENCE_KEY, LITELLM_API_KEY, or ANTHROPIC_API_KEY"
+    )
+
+# Wrap with session-aware handler for per-user LLM provider configuration
+from middleware.session_sampling_handler import SessionAwareSamplingHandler
+
+_sampling_handler = SessionAwareSamplingHandler(_sampling_handler)
 
 # Create FastMCP instance with composed lifespans for proper lifecycle management
 # Lifespans handle: Qdrant init/shutdown, ColBERT init, session state persistence,
@@ -1198,6 +1298,10 @@ if google_auth_provider:
         # Register the legacy /oauth2callback so start_google_auth can complete
         setup_legacy_callback_route(mcp)
         logger.info("  ✅ Legacy /oauth2callback registered for start_google_auth flow")
+
+        # Register config API routes (privacy mode, sampling config) for OAuth success page
+        setup_config_api_routes(mcp)
+        logger.info("  ✅ Config API routes registered for OAuth success page")
     except Exception as e:
         logger.warning(f"⚠️ Could not register supplemental OAuth endpoints: {e}")
 

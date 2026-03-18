@@ -360,7 +360,10 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
 
         user_key = generate_user_key(normalized_email)
         if user_key:
-            # New key generated — store on credentials so callers can show it
+            # New key generated — store on credentials so callers can show it.
+            # NOTE: mark_key_revealed() is NOT called here — it must only be
+            # called from the success page callback when the key is actually
+            # rendered to the user.
             credentials._user_api_key = user_key
             # Stash in session so linked accounts authed later in the same
             # session can use it for multi-recipient encryption.
@@ -893,6 +896,27 @@ def needs_refresh(credentials: Credentials, buffer_seconds: int = 300) -> bool:
     return needs_refresh_flag
 
 
+def compare_scopes(
+    existing_scopes: list[str] | set[str] | None,
+    requested_scopes: list[str] | set[str],
+) -> tuple[bool, set[str]]:
+    """Compare existing credential scopes against requested scopes.
+
+    Args:
+        existing_scopes: Scopes currently granted on the credentials.
+        requested_scopes: Scopes required for the requested services.
+
+    Returns:
+        (sufficient, missing) — *sufficient* is True when all requested
+        scopes are already granted; *missing* is the set of scopes that
+        would need to be added via a scope-upgrade OAuth flow.
+    """
+    existing = set(existing_scopes or [])
+    requested = set(requested_scopes)
+    missing = requested - existing
+    return (not missing, missing)
+
+
 def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentials:
     """Refresh expired credentials with enhanced error handling."""
     if not credentials.refresh_token:
@@ -1032,6 +1056,8 @@ async def initiate_oauth_flow(
     custom_client_secret: Optional[str] = None,
     oauth_linkage_password: str = "",
     chat_sa_json: Optional[str] = None,
+    privacy_mode: bool = False,
+    sampling_config: Optional[dict] = None,
 ) -> str:
     """
     Initiate OAuth flow for a user with optional service selection and PKCE support.
@@ -1161,6 +1187,8 @@ async def initiate_oauth_flow(
         "custom_client_secret": custom_client_secret,
         "oauth_linkage_password": oauth_linkage_password,
         "chat_sa_json": chat_sa_json,
+        "privacy_mode": privacy_mode,
+        "sampling_config": sampling_config,
     }
 
     # Use enhanced context-based credential storage for persistence
@@ -1289,6 +1317,8 @@ async def handle_service_selection_callback(
         custom_client_secret=custom_client_secret,
         oauth_linkage_password=flow_info.get("oauth_linkage_password", ""),
         chat_sa_json=chat_sa_json,
+        privacy_mode=flow_info.get("privacy_mode", False),
+        sampling_config=flow_info.get("sampling_config"),
     )
 
 
@@ -1352,6 +1382,8 @@ async def handle_oauth_callback(
     custom_client_id = state_info.get("custom_client_id")
     custom_client_secret = state_info.get("custom_client_secret")
     chat_sa_json = state_info.get("chat_sa_json")
+    _privacy_mode = state_info.get("privacy_mode", False)
+    _sampling_config = state_info.get("sampling_config")
 
     # Stash OAuth linkage password in session so _save_credentials can use it
     _oauth_linkage_pw = state_info.get("oauth_linkage_password", "")
@@ -1639,6 +1671,12 @@ async def handle_oauth_callback(
         # Attach Chat SA JSON so _save_credentials can persist it
         if chat_sa_json:
             credentials._chat_sa_json = chat_sa_json
+
+        # Attach privacy mode and sampling config for the callback to apply
+        if _privacy_mode:
+            credentials._privacy_mode = True
+        if _sampling_config:
+            credentials._sampling_config = _sampling_config
 
         # Conditional storage based on auth_method
         if auth_method == "pkce_memory":

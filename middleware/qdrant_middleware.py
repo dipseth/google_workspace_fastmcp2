@@ -347,6 +347,14 @@ class QdrantUnifiedMiddleware(Middleware):
         # Record start time for execution tracking
         start_time = time.time()
 
+        # Reset cost tracker for this tool execution
+        try:
+            from middleware.payment.cost_tracker import reset as reset_costs
+
+            reset_costs()
+        except Exception:
+            pass
+
         try:
             # Execute the tool
             response = await call_next(context)
@@ -403,6 +411,15 @@ class QdrantUnifiedMiddleware(Middleware):
             # Get session_id from context
             session_id = await get_session_context()
 
+            # Read accumulated sampling costs for this tool execution
+            sampling_costs = {}
+            try:
+                from middleware.payment.cost_tracker import get_current_costs
+
+                sampling_costs = get_current_costs()
+            except Exception:
+                pass
+
             # Store response in Qdrant asynchronously (non-blocking via storage manager)
             # Track the task via client_manager so it can be cancelled on shutdown
             # Sanitize before storage to prevent leaking auth/credential metadata
@@ -417,6 +434,7 @@ class QdrantUnifiedMiddleware(Middleware):
                     execution_time_ms=execution_time_ms,
                     session_id=session_id,
                     user_email=user_email,
+                    sampling_costs=sampling_costs,
                 )
             )
             self.client_manager._track_task(store_task)
@@ -577,10 +595,17 @@ class QdrantUnifiedMiddleware(Middleware):
         execution_time_ms: int = 0,
         session_id: Optional[str] = None,
         user_email: Optional[str] = None,
+        sampling_costs: Optional[Dict[str, Any]] = None,
     ):
         """Store tool response with parameters (delegates to storage manager)."""
         return await self.storage_manager._store_response_with_params(
-            tool_name, tool_args, response, execution_time_ms, session_id, user_email
+            tool_name,
+            tool_args,
+            response,
+            execution_time_ms,
+            session_id,
+            user_email,
+            sampling_costs=sampling_costs,
         )
 
     async def _start_background_reindexing(self):

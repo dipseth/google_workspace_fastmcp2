@@ -64,3 +64,6 @@ class SessionKey(str, Enum):
 
     # Chat service account (per-user encrypted)
     CHAT_SERVICE_ACCOUNT_JSON = "chat_service_account_json"  # dict (in-memory cache)
+
+    # Per-user sampling configuration (in-memory cache, encrypted on disk)
+    SAMPLING_CONFIG = "sampling_config"  # dict: {model, api_key, api_base}

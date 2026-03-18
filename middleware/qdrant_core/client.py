@@ -328,6 +328,7 @@ class QdrantClientManager:
         "tool",
         "email",
         "type",
+        "sampling_detected",
     ]
 
     async def _ensure_collection(self):
@@ -355,6 +356,8 @@ class QdrantClientManager:
                 await self._create_indexes_parallel(
                     self._FILTERABLE_FIELDS, qdrant_models, log_prefix="Created"
                 )
+                # Create float index for cost aggregation queries
+                await self._ensure_cost_indexes(qdrant_models)
             else:
                 logger.info(
                     f"✅ Using existing collection: {self.config.collection_name}"
@@ -468,8 +471,34 @@ class QdrantClientManager:
                 await self._create_indexes_parallel(
                     missing_fields, qdrant_models, log_prefix="Created missing"
                 )
+
+            # Ensure cost tracking float indexes exist
+            await self._ensure_cost_indexes(qdrant_models)
         except Exception as e:
             logger.warning(f"⚠️ Could not check existing indexes: {e}")
+
+    async def _ensure_cost_indexes(self, qdrant_models: dict):
+        """Create float/integer payload indexes for cost tracking queries."""
+        try:
+            float_indexes = {
+                "cost_sampling_estimated": qdrant_models["PayloadSchemaType"].FLOAT,
+            }
+            integer_indexes = {
+                "sampling_calls": qdrant_models["PayloadSchemaType"].INTEGER,
+            }
+            for field_name, schema_type in {**float_indexes, **integer_indexes}.items():
+                try:
+                    await asyncio.to_thread(
+                        self.client.create_payload_index,
+                        collection_name=self.config.collection_name,
+                        field_name=field_name,
+                        field_schema=schema_type,
+                    )
+                    logger.debug(f"Created cost index: {field_name}")
+                except Exception:
+                    pass  # Index may already exist
+        except Exception as e:
+            logger.debug(f"Cost index creation skipped: {e}")
 
     async def _create_indexes_parallel(
         self,

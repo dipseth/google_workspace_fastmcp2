@@ -354,6 +354,7 @@ class ScopeRegistry:
             "base.openid",
             "drive.full",  # Full Drive access for MCP - required to access shared/organizational files
             "drive.readonly",
+            "drive.file",
         ],
         "drive_full": ["base.userinfo_email", "base.openid", "drive.full"],
         "gmail_basic": [
@@ -361,6 +362,9 @@ class ScopeRegistry:
             "base.openid",
             "gmail.readonly",
             "gmail.send",
+            "gmail.compose",
+            "gmail.modify",
+            "gmail.labels",
             "gmail.settings_basic",
             "gmail.settings_sharing",
         ],
@@ -419,6 +423,7 @@ class ScopeRegistry:
             "base.userinfo_email",
             "base.openid",
             "forms.body",
+            "forms.body_readonly",
             "forms.responses_readonly",
         ],
         "slides_basic": [
@@ -432,6 +437,7 @@ class ScopeRegistry:
             "base.openid",
             "photos.readonly",
             "photos.appendonly",
+            "photos.full",
             # appcreateddata scopes excluded — restricts API to app-created content only
         ],
         "photos_full": [
@@ -455,6 +461,7 @@ class ScopeRegistry:
             "base.openid",
             "people.readonly",
             "people.contacts",  # Write access needed for contact group management
+            "people.directory_readonly",
         ],
         "people_full": [
             "base.userinfo_email",
@@ -912,7 +919,24 @@ class ScopeRegistry:
                 "required": False,
                 "scopes": cls.get_service_scopes("people", "basic"),
             },
+            "tasks": {
+                "name": "Google Tasks",
+                "description": "Manage task lists and to-do items",
+                "category": "Productivity",
+                "required": False,
+                "default_selected": False,
+                "scopes": cls.get_service_scopes("tasks", "basic"),
+            },
         }
+
+    @classmethod
+    def get_default_services(cls) -> List[str]:
+        """Return optional service keys that are selected by default."""
+        return [
+            key
+            for key, info in cls.get_service_catalog().items()
+            if not info.get("required", False) and info.get("default_selected", True)
+        ]
 
     @classmethod
     def get_scopes_for_services(cls, service_keys: List[str]) -> List[str]:

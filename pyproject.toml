@@ -78,6 +78,7 @@ classifiers = [
 dependencies = [
     # Core MCP Framework
     "fastmcp[anthropic,tasks,code-mode]>=3.1.1",
+    "litellm>=1.80.0",
     # Google APIs
     "google-api-python-client>=2.168.0",
     "google-auth-httplib2>=0.2.0",
@@ -114,6 +115,7 @@ dependencies = [
     # Cryptography (privacy vault Fernet encryption)
     "cryptography>=46.0.5",
     "x402[evm,httpx]>=2.4.0",
+    "langfuse>=4.0.0",
 ]
 
 [project.urls]

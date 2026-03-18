@@ -950,6 +950,26 @@ Provide personalized recommendations based on historical success patterns.""",
                     f"🔧 Sampling parameters: {json.dumps({k: str(v)[:100] + '...' if len(str(v)) > 100 else str(v) for k, v in sampling_params.items()}, indent=2)}"
                 )
 
+            # Enrich Langfuse trace context with per-call details
+            try:
+                from middleware.langfuse_integration import set_sampling_trace_context
+
+                # Estimate input size from prepared messages
+                input_chars = 0
+                for m in sampling_params.get("messages", []):
+                    if hasattr(m, "content") and hasattr(m.content, "text"):
+                        input_chars += len(m.content.text or "")
+                set_sampling_trace_context(
+                    template=template.value if template else "",
+                    result_type=result_type.__name__
+                    if (result_type and hasattr(result_type, "__name__"))
+                    else (type(result_type).__name__ if result_type else ""),
+                    has_tools=bool(sampling_params.get("tools")),
+                    input_char_count=input_chars,
+                )
+            except Exception:
+                pass
+
             # Perform the sampling using FastMCP context
             if not hasattr(self.fastmcp_context, "sample"):
                 raise ToolError("Client does not support LLM sampling")
@@ -1119,6 +1139,14 @@ class EnhancedSamplingMiddleware(Middleware):
 
         if self.enable_debug:
             logger.debug(f"🔧 Processing tool call for elicitation: {tool_name}")
+
+        # Reset Langfuse trace context — fresh trace ID + step=0 per tool execution
+        try:
+            from middleware.langfuse_integration import reset_sampling_trace_context
+
+            reset_sampling_trace_context(tool_name=tool_name)
+        except Exception:
+            pass
 
         # Check if we have FastMCP context
         if not context.fastmcp_context:
@@ -1855,6 +1883,15 @@ async def _validate_and_recover_dsl(
     current_dsl = dsl_string
 
     for attempt in range(max_retries + 1):
+        # Each retry is a distinct LLM call — increment Langfuse step counter
+        if attempt > 0:
+            try:
+                from middleware.langfuse_integration import increment_sampling_step
+
+                increment_sampling_step()
+            except Exception:
+                pass
+
         try:
             parse_result = parser(current_dsl)
         except Exception as exc:
@@ -2134,6 +2171,12 @@ Provide actionable steps with specific tool recommendations.
             messages = [prompt]
             result_text = ""
             while True:
+                try:
+                    from middleware.langfuse_integration import increment_sampling_step
+
+                    increment_sampling_step()
+                except Exception:
+                    pass
                 step = await ctx.sample_step(
                     messages=messages,
                     system_prompt="You are a workflow optimization expert with access to the user's workspace and tools.",

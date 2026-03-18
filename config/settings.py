@@ -125,6 +125,33 @@ class Settings(BaseSettings):
     sampling_tools: bool = False  # Enable sampling middleware tools (default: False)
     anthropic_api_key: Optional[str] = None  # For sampling fallback handler
 
+    # LiteLLM Sampling Configuration
+    litellm_model: str = Field(
+        default="openai/zai-org-glm-4.6",
+        description="LiteLLM model identifier (provider/model format, e.g. 'openai/zai-org-glm-4.6' for Venice AI, 'anthropic/claude-sonnet-4-6')",
+        json_schema_extra={"env": "LITELLM_MODEL"},
+    )
+    litellm_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for the LiteLLM provider. Falls back to VENICE_INFERENCE_KEY or provider-specific env vars.",
+        json_schema_extra={"env": "LITELLM_API_KEY"},
+    )
+    litellm_api_base: Optional[str] = Field(
+        default=None,
+        description="Custom API base URL for OpenAI-compatible providers (e.g. 'https://api.venice.ai/api/v1')",
+        json_schema_extra={"env": "LITELLM_API_BASE"},
+    )
+    venice_inference_key: Optional[str] = Field(
+        default=None,
+        description="Venice AI API key (used as LiteLLM api_key when model targets Venice)",
+        json_schema_extra={"env": "VENICE_INFERENCE_KEY"},
+    )
+    sampling_provider: str = Field(
+        default="auto",
+        description="Sampling provider: 'auto' (LiteLLM if configured, else Anthropic), 'litellm', or 'anthropic'",
+        json_schema_extra={"env": "SAMPLING_PROVIDER"},
+    )
+
     # MCP List Page Size Configuration
     # Controls pagination of tools/resources/prompts listing responses.
     # Set to 0 or None to disable pagination (return all items in one response).
@@ -346,6 +373,55 @@ class Settings(BaseSettings):
         description="Qdrant collection for payment receipt storage",
         json_schema_extra={"env": "RECEIPT_COLLECTION"},
     )
+
+    # Cost Tracking Rates (USD)
+    sampling_input_token_rate: float = Field(
+        default=0.000003,
+        description="Cost per input token in USD (default: Claude Sonnet rate)",
+        json_schema_extra={"env": "SAMPLING_INPUT_TOKEN_RATE"},
+    )
+    sampling_output_token_rate: float = Field(
+        default=0.000015,
+        description="Cost per output token in USD (default: Claude Sonnet rate)",
+        json_schema_extra={"env": "SAMPLING_OUTPUT_TOKEN_RATE"},
+    )
+    sampling_default_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Default model identifier for cost tracking",
+        json_schema_extra={"env": "SAMPLING_DEFAULT_MODEL"},
+    )
+    qdrant_cost_per_upsert: float = Field(
+        default=0.0001,
+        description="Estimated USD cost per Qdrant upsert operation",
+        json_schema_extra={"env": "QDRANT_COST_PER_UPSERT"},
+    )
+    qdrant_cost_per_search: float = Field(
+        default=0.00005,
+        description="Estimated USD cost per Qdrant search operation",
+        json_schema_extra={"env": "QDRANT_COST_PER_SEARCH"},
+    )
+
+    # Langfuse Observability Configuration
+    langfuse_public_key: str = Field(
+        default="",
+        description="Langfuse public key for LLM observability",
+        json_schema_extra={"env": "LANGFUSE_PUBLIC_KEY"},
+    )
+    langfuse_secret_key: str = Field(
+        default="",
+        description="Langfuse secret key for LLM observability",
+        json_schema_extra={"env": "LANGFUSE_SECRET_KEY"},
+    )
+    langfuse_host: str = Field(
+        default="https://us.cloud.langfuse.com",
+        description="Langfuse host URL",
+        json_schema_extra={"env": "LANGFUSE_HOST"},
+    )
+
+    @property
+    def langfuse_enabled(self) -> bool:
+        """Check if Langfuse credentials are configured."""
+        return bool(self.langfuse_public_key and self.langfuse_secret_key)
 
     # FastMCP 2.12.0 GoogleProvider Configuration
     fastmcp_server_auth: str = ""
