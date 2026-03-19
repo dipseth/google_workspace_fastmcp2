@@ -701,6 +701,28 @@ def _build_email_spec_from_dsl(
     if not subject:
         subject = "Email"
 
+    # Guard: if subject is unreasonably long, the caller likely put block
+    # content into email_description instead of email_params.  Truncate to
+    # the first sentence / 120 chars to keep a usable subject line.
+    if len(subject) > 120:
+        # Try to find a natural break point (period, dash separator, colon)
+        for sep in [". ", " - ", ": ", "; "]:
+            idx = subject.find(sep)
+            if 0 < idx <= 120:
+                subject = subject[:idx].strip()
+                break
+        else:
+            subject = subject[:120].rstrip()
+        logger.warning(
+            "[compose_dynamic_email] Subject was truncated — block content "
+            "should go in email_params, not email_description"
+        )
+
+    # Strip leading punctuation/whitespace that can result from DSL removal
+    subject = subject.lstrip("-–—:;, ").strip()
+    if not subject:
+        subject = "Email"
+
     preheader = normalized_params.get("preheader")
 
     return EmailSpec(
@@ -3495,11 +3517,12 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     )
 
     email_description_help = (
-        "DSL notation + optional natural language. "
-        f"Start with DSL symbols to define block structure. "
-        f"Examples: {spec_sym}[{hero_sym}, {text_sym}] = hero + text, "
-        f"{spec_sym}[{hero_sym}, {text_sym}x2, {btn_sym}] = hero + 2 texts + button. "
-        "The natural-language part (after DSL) becomes the email subject. "
+        "ONLY the DSL structure + email subject line. "
+        f"Format: '{spec_sym}[{hero_sym}, {text_sym}] My Subject Here'. "
+        "Do NOT put block content here — use email_params for that. "
+        f"Examples: '{spec_sym}[{hero_sym}, {text_sym}] Welcome aboard', "
+        f"'{spec_sym}[{hero_sym}, {text_sym}x2, {btn_sym}] Monthly Newsletter'. "
+        "Text after the DSL becomes the email subject (keep it short). "
         f"{email_dsl_field_desc}"
     )
 
@@ -3527,11 +3550,11 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             Optional[Union[dict, str]],
             Field(
                 default=None,
-                description="Block content keyed by symbol or class name. "
-                f"Supports _shared/_items merging: "
-                f'{{"'
-                + text_sym
-                + '": {{"_shared": {{}}, "_items": [{{"text": "Hello"}}, ...]}}}}. '
+                description="REQUIRED for content — all block text/titles/URLs go here, "
+                "keyed by symbol or class name. "
+                f'Example: {{"{hero_sym}": {{"title": "Welcome!", "subtitle": "Hi there"}}, '
+                f'"{text_sym}": {{"_items": [{{"text": "Your message here"}}]}}, '
+                f'"{btn_sym}": {{"_items": [{{"text": "Click", "url": "https://..."}}]}}}}. '
                 "Also accepts 'subject' and 'preheader' keys.",
             ),
         ] = None,

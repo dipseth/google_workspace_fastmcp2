@@ -10,7 +10,7 @@ Usage:
 import logging
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import gmail.email_wrapper_setup as _setup
 from config.enhanced_logging import setup_logger
@@ -24,10 +24,26 @@ logger = setup_logger(__name__)
 
 
 class EmailDSLResult(BaseModel):
-    """Structured email DSL generation result."""
+    """Structured email DSL generation result.
 
-    email_description: str  # e.g. "ε[Ħ, ħ, τ×2, Ƀ]"
-    email_params: dict  # content for each symbol key
+    Used by DSL recovery to return corrected DSL. Fields must contain ONLY
+    the corrected values — no explanations, commentary, or reasoning.
+    """
+
+    email_description: str = Field(
+        description=(
+            "The corrected DSL notation followed by the email subject. "
+            "Must start with the DSL expression (e.g. 'ε[ħ, τ×2, Ƀ]') "
+            "followed by the original subject text. "
+            "Do NOT include explanations or commentary — ONLY the DSL and subject."
+        ),
+    )
+    email_params: dict = Field(
+        description=(
+            "Block content keyed by DSL symbol or class name. "
+            "Preserve the original content from the user's request."
+        ),
+    )
 
 
 # =============================================================================
