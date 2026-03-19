@@ -134,6 +134,55 @@ class SearchMixin:
     _MIXIN_INIT_ORDER = 40
 
     # =========================================================================
+    # COLLECTION SCHEMA DETECTION
+    # =========================================================================
+
+    def _resolve_using(
+        self, preferred: str = "components", vector_name: Optional[str] = None
+    ) -> Optional[str]:
+        """Return the named vector to search, or None for single-vector collections.
+
+        For named-vector collections (RIC schema with components/inputs/relationships),
+        Qdrant requires ``using=<name>`` - omitting it causes
+        "Not existing vector name error".
+
+        For single-vector (V1) collections, ``using`` must be omitted.
+
+        Args:
+            preferred: Default named vector when the collection uses named vectors.
+            vector_name: Explicit override - returned as-is when provided.
+
+        Returns:
+            The vector name string for named-vector collections, or None for V1.
+        """
+        # Explicit caller override
+        if vector_name is not None:
+            return vector_name
+
+        # Use cached result if available
+        if hasattr(self, "_named_vectors_cache"):
+            cached = self._named_vectors_cache
+            if cached is not None:
+                return preferred if cached else None
+
+        # Detect schema from collection config
+        try:
+            collection_info = self.client.get_collection(self.collection_name)
+            vectors_config = collection_info.config.params.vectors
+            has_named = isinstance(vectors_config, dict)
+            self._named_vectors_cache = has_named
+            if has_named:
+                logger.debug(
+                    f"Collection {self.collection_name} uses named vectors: "
+                    f"{list(vectors_config.keys())}"
+                )
+            return preferred if has_named else None
+        except Exception as e:
+            logger.warning(f"Could not detect collection schema: {e}")
+            self._named_vectors_cache = False
+            return None
+
+    # =========================================================================
     # EMBEDDING HELPERS (Private)
     # =========================================================================
 
@@ -141,7 +190,7 @@ class SearchMixin:
         """
         Get ColBERT embedder for search operations.
 
-        Tries multiple sources: pipeline mixin, core attribute, or creates new.
+        Tries multiple sources: pipeline mixin, core attribute, or EmbeddingService.
 
         Returns:
             ColBERT embedder instance or None if unavailable
@@ -154,12 +203,12 @@ class SearchMixin:
         if hasattr(self, "colbert_embedder") and self.colbert_embedder is not None:
             return self.colbert_embedder
 
-        # Create new embedder if needed
+        # Get from centralized service
         try:
-            from fastembed import LateInteractionTextEmbedding
+            from config.embedding_service import get_embedding_service
 
-            logger.info("Initializing ColBERT embedder for search...")
-            embedder = LateInteractionTextEmbedding(model_name="colbert-ir/colbertv2.0")
+            logger.info("Getting ColBERT embedder from EmbeddingService...")
+            embedder = get_embedding_service().get_model_sync("colbert")
 
             # Cache it
             if hasattr(self, "_colbert_embedder"):
@@ -169,7 +218,7 @@ class SearchMixin:
 
             return embedder
         except Exception as e:
-            logger.error(f"Failed to initialize ColBERT embedder: {e}")
+            logger.error(f"Failed to get ColBERT embedder: {e}")
             return None
 
     def _get_minilm_embedder(self):
@@ -183,18 +232,16 @@ class SearchMixin:
         if hasattr(self, "embedder") and self.embedder is not None:
             return self.embedder
 
-        # Create new embedder if needed
+        # Get from centralized service
         try:
-            from fastembed import TextEmbedding
+            from config.embedding_service import get_embedding_service
 
-            logger.info("Initializing MiniLM embedder for search...")
-            embedder = TextEmbedding(
-                model_name="sentence-transformers/all-MiniLM-L6-v2"
-            )
+            logger.info("Getting MiniLM embedder from EmbeddingService...")
+            embedder = get_embedding_service().get_model_sync("minilm")
             self.embedder = embedder
             return embedder
         except Exception as e:
-            logger.error(f"Failed to initialize MiniLM embedder: {e}")
+            logger.error(f"Failed to get MiniLM embedder: {e}")
             return None
 
     def _embed_with_colbert(
@@ -262,7 +309,11 @@ class SearchMixin:
     # =========================================================================
 
     def search(
-        self, query: QueryText, limit: int = 5, score_threshold: float = 0.3
+        self,
+        query: QueryText,
+        limit: int = 5,
+        score_threshold: float = 0.3,
+        vector_name: Optional[str] = None,
     ) -> List[Payload]:
         """
         Search for components in the module.
@@ -271,6 +322,9 @@ class SearchMixin:
             query: Search query
             limit: Maximum number of results
             score_threshold: Minimum similarity score
+            vector_name: Explicit named vector to search. When None,
+                auto-detects: ``"components"`` for named-vector collections,
+                omitted for single-vector collections.
 
         Returns:
             List of matching components with their paths
@@ -299,13 +353,17 @@ class SearchMixin:
             else:
                 query_vector = list(query_embedding)
 
-            # Search in Qdrant
-            search_results = self.client.query_points(
-                collection_name=self.collection_name,
-                query=query_vector,
-                limit=limit,
-                score_threshold=score_threshold,
-            )
+            # Search in Qdrant — resolve named vector for RIC collections
+            using = self._resolve_using(preferred="relationships", vector_name=vector_name)
+            kwargs = {
+                "collection_name": self.collection_name,
+                "query": query_vector,
+                "limit": limit,
+                "score_threshold": score_threshold,
+            }
+            if using:
+                kwargs["using"] = using
+            search_results = self.client.query_points(**kwargs)
 
             # Get the actual points from the QueryResponse
             points = []
@@ -327,7 +385,11 @@ class SearchMixin:
             raise
 
     async def search_async(
-        self, query: QueryText, limit: int = 5, score_threshold: float = 0.3
+        self,
+        query: QueryText,
+        limit: int = 5,
+        score_threshold: float = 0.3,
+        vector_name: Optional[str] = None,
     ) -> List[Payload]:
         """
         Search for components in the module asynchronously.
@@ -336,6 +398,9 @@ class SearchMixin:
             query: Search query
             limit: Maximum number of results
             score_threshold: Minimum similarity score
+            vector_name: Explicit named vector to search. When None,
+                auto-detects: ``"components"`` for named-vector collections,
+                omitted for single-vector collections.
 
         Returns:
             List of matching components with their paths
@@ -368,13 +433,19 @@ class SearchMixin:
             else:
                 query_vector = list(query_embedding)
 
-            # Search in Qdrant
+            # Search in Qdrant — resolve named vector for RIC collections
+            using = self._resolve_using(preferred="relationships", vector_name=vector_name)
+            kwargs = {
+                "collection_name": self.collection_name,
+                "query": query_vector,
+                "limit": limit,
+                "score_threshold": score_threshold,
+            }
+            if using:
+                kwargs["using"] = using
             search_results = await asyncio.to_thread(
                 self.client.query_points,
-                collection_name=self.collection_name,
-                query=query_vector,
-                limit=limit,
-                score_threshold=score_threshold,
+                **kwargs,
             )
 
             # Get the actual points

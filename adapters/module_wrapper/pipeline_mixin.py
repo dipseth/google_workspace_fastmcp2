@@ -449,21 +449,17 @@ class PipelineMixin:
 
     def _ensure_pipeline_embedders(self):
         """Ensure ColBERT and relationships embedders are initialized."""
-        if self._colbert_embedder is None:
-            from fastembed import LateInteractionTextEmbedding
+        from config.embedding_service import get_embedding_service
 
-            logger.info("Initializing ColBERT embedder for pipeline...")
-            self._colbert_embedder = LateInteractionTextEmbedding(
-                "colbert-ir/colbertv2.0"
-            )
+        service = get_embedding_service()
+
+        if self._colbert_embedder is None:
+            logger.info("Getting ColBERT embedder from EmbeddingService for pipeline...")
+            self._colbert_embedder = service.get_model_sync("colbert")
 
         if self._relationships_embedder is None:
-            from fastembed import TextEmbedding
-
-            logger.info("Initializing MiniLM embedder for relationships...")
-            self._relationships_embedder = TextEmbedding(
-                "sentence-transformers/all-MiniLM-L6-v2"
-            )
+            logger.info("Getting MiniLM embedder from EmbeddingService for relationships...")
+            self._relationships_embedder = service.get_model_sync("minilm")
 
     def run_ingestion_pipeline(
         self,

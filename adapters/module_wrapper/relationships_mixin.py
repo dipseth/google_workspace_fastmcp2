@@ -1039,20 +1039,17 @@ class RelationshipsMixin:
 
         if use_multi_vector and has_multi_vector and "components" in vector_names:
             try:
-                from fastembed import LateInteractionTextEmbedding, TextEmbedding
+                from config.embedding_service import get_embedding_service
 
+                service = get_embedding_service()
                 # ColBERT for components and inputs (128d multi-vector)
-                colbert_embedder = LateInteractionTextEmbedding(
-                    "colbert-ir/colbertv2.0"
-                )
+                colbert_embedder = service.get_model_sync("colbert")
                 # MiniLM for relationships (384d dense)
-                relationships_embedder = TextEmbedding(
-                    "sentence-transformers/all-MiniLM-L6-v2"
-                )
+                relationships_embedder = service.get_model_sync("minilm")
                 logger.info(
-                    "Initialized ColBERT + MiniLM embedders for 3-vector indexing"
+                    "Got ColBERT + MiniLM embedders from EmbeddingService for 3-vector indexing"
                 )
-            except ImportError as e:
+            except Exception as e:
                 logger.warning(
                     f"FastEmbed models not available, falling back to single vector: {e}"
                 )
