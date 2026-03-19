@@ -194,6 +194,28 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "MINIMAL_STARTUP_SERVICES"},
     )
 
+    # Centralized Embedding Service Configuration
+    embedding_minilm_model: str = Field(
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description="MiniLM model for dense 384-dim embeddings",
+        json_schema_extra={"env": "EMBEDDING_MINILM_MODEL"},
+    )
+    embedding_colbert_model: str = Field(
+        default="colbert-ir/colbertv2.0",
+        description="ColBERT model for multi-vector 128-dim embeddings",
+        json_schema_extra={"env": "EMBEDDING_COLBERT_MODEL"},
+    )
+    embedding_bge_model: str = Field(
+        default="BAAI/bge-small-en-v1.5",
+        description="BGE-small model for icon search embeddings",
+        json_schema_extra={"env": "EMBEDDING_BGE_MODEL"},
+    )
+    embedding_eager_load: str = Field(
+        default="",
+        description="Comma-separated embedding slots to preload on startup (e.g. 'minilm,colbert')",
+        json_schema_extra={"env": "EMBEDDING_EAGER_LOAD"},
+    )
+
     # ColBERT Embedding Configuration (Development/Testing)
     colbert_embedding_dev: bool = Field(
         default=False,
@@ -404,6 +426,13 @@ class Settings(BaseSettings):
         default=0.00005,
         description="Estimated USD cost per Qdrant search operation",
         json_schema_extra={"env": "QDRANT_COST_PER_SEARCH"},
+    )
+
+    # Redis Cloud Configuration
+    redis_io_url_string: Optional[str] = Field(
+        default=None,
+        description="Redis Cloud connection URL (redis://user:pass@host:port). Used for response caching and dashboard cache offloading.",
+        json_schema_extra={"env": "REDIS_IO_URL_STRING"},
     )
 
     # Sampling Cache Configuration
