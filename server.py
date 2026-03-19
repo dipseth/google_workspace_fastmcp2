@@ -1080,6 +1080,35 @@ dashboard_cache_middleware = DashboardCacheMiddleware()
 mcp.add_middleware(dashboard_cache_middleware)
 logger.info("✅ Dashboard cache middleware registered (outermost)")
 
+# 10. Redis-backed response caching (offloads tool response cache to Redis Cloud)
+if settings.redis_io_url_string:
+    try:
+        from key_value.aio.stores.redis import RedisStore
+        from key_value.aio.wrappers.prefix_collections import PrefixCollectionsWrapper
+        from fastmcp.server.middleware.caching import ResponseCachingMiddleware
+
+        _redis_store = RedisStore(url=settings.redis_io_url_string)
+        _namespaced_store = PrefixCollectionsWrapper(
+            key_value=_redis_store, prefix="gw-mcp"
+        )
+        # Cache list operations (tools/resources/prompts) but NOT tool calls —
+        # tool calls have side effects and caching errors breaks Code Mode.
+        mcp.add_middleware(ResponseCachingMiddleware(
+            cache_storage=_namespaced_store,
+            call_tool_settings={"enabled": False},
+        ))
+        logger.info(f"✅ Redis ResponseCachingMiddleware enabled (list ops only, tool calls excluded)")
+
+        # Share Redis store with dashboard cache middleware for offloading
+        from middleware.dashboard_cache_middleware import set_redis_store
+
+        set_redis_store(_redis_store)
+        logger.info("  Redis store shared with dashboard cache middleware")
+    except Exception as _redis_err:
+        logger.warning(f"⚠️ Redis caching setup failed (falling back to in-memory): {_redis_err}")
+else:
+    logger.info("Redis caching disabled (REDIS_IO_URL_STRING not set)")
+
 # Register drive upload tools
 setup_drive_tools(mcp)
 

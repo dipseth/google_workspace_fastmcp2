@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -1127,6 +1127,7 @@ dependencies = [
     { name = "numpy" },
     { name = "objgraph" },
     { name = "psutil" },
+    { name = "py-key-value-aio", extra = ["redis"] },
     { name = "pydantic" },
     { name = "pyjwt" },
     { name = "python-card-framework" },
@@ -1150,6 +1151,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-mock" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -1174,6 +1176,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "objgraph", specifier = ">=3.6.2" },
     { name = "psutil", specifier = ">=7.2.2" },
+    { name = "py-key-value-aio", extras = ["redis"], specifier = ">=0.4.4" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyjwt", specifier = ">=2.8.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
@@ -1194,6 +1197,7 @@ dev = [
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "pytest-mock", specifier = ">=3.12.0" },
+    { name = "ruff", specifier = ">=0.12.11" },
 ]
 
 [[package]]
