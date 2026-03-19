@@ -255,7 +255,22 @@ def _generate_service_selection_html(
     """Generate the service selection page HTML with authentication method choice."""
     from auth.ui import generate_service_selection_html
 
-    return generate_service_selection_html(state, flow_type, use_pkce)
+    # Retrieve the requested email from the OAuth state map for THIS specific flow
+    requested_email = ""
+    try:
+        from auth.google_auth import _oauth_state_map
+
+        state_info = _oauth_state_map.get(state)
+        if state_info:
+            requested_email = state_info.get("user_email", "")
+            if requested_email == "unknown@gmail.com":
+                requested_email = ""
+    except Exception:
+        pass
+
+    return generate_service_selection_html(
+        state, flow_type, use_pkce, requested_email=requested_email
+    )
 
 
 async def _handle_fastmcp_service_selection(
@@ -563,6 +578,12 @@ async def _build_oauth_success_html(
         except Exception as regen_err:
             logger.warning(f"Could not regenerate per-user key: {regen_err}")
 
+    # ── Get originally-requested email from this specific OAuth flow ──
+    requested_email = getattr(credentials, "_requested_email", "") or ""
+    # Skip display if the request was a fallback/unknown value
+    if requested_email in ("unknown@gmail.com", ""):
+        requested_email = ""
+
     # ── Build success page HTML ──
     from auth.ui import (
         build_api_key_section,
@@ -585,6 +606,7 @@ async def _build_oauth_success_html(
         security_viz_section=security_viz_section,
         envelope_inventory_section=envelope_inventory_section,
         revoke_section=revoke_section,
+        requested_email=requested_email or "",
     )
 
 
@@ -672,13 +694,58 @@ def setup_legacy_callback_route(mcp) -> None:
                     f"⚠️ Dual auth bridge registration error (continuing): {e}"
                 )
 
-            # Store in session
+            # Store in session (get_session_context returns None in HTTP context,
+            # so also scan all sessions to fix any with a stale/wrong email)
+            session_id = None
             try:
                 session_id = await get_session_context()
                 if session_id:
                     store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
             except Exception as e:
                 logger.warning(f"⚠️ Session storage error (continuing): {e}")
+
+            # Fix 2: Update ALL sessions that have a wrong/missing email from this OAuth flow
+            try:
+                from auth.context import get_session_data, list_sessions
+
+                _verified = user_email.lower().strip()
+                for sid in list_sessions():
+                    sid_email = get_session_data(sid, SessionKey.USER_EMAIL)
+                    requested = get_session_data(sid, SessionKey.REQUESTED_EMAIL)
+                    owned = set(get_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS) or [])
+                    authed = set(get_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS) or [])
+
+                    # Determine the stale email to replace (from USER_EMAIL or REQUESTED_EMAIL)
+                    old_email = (sid_email or requested or "").lower().strip()
+
+                    # Skip if session already has the correct email
+                    if sid_email and sid_email.lower().strip() == _verified:
+                        # Still ensure owned accounts include the verified email
+                        if _verified not in owned and owned:
+                            owned.add(_verified)
+                            store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                        continue
+
+                    # Update if: session had a wrong email, or had a requested email pending OAuth
+                    if old_email and old_email != _verified:
+                        store_session_data(sid, SessionKey.USER_EMAIL, user_email)
+                        owned.discard(old_email)
+                        owned.add(_verified)
+                        store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                        authed.discard(old_email)
+                        authed.add(_verified)
+                        store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
+                        logger.info(f"Updated session {sid} email from {old_email} to {user_email}")
+                    elif not sid_email and owned:
+                        # Session has no USER_EMAIL but has owned accounts — set the verified email
+                        store_session_data(sid, SessionKey.USER_EMAIL, user_email)
+                        owned.add(_verified)
+                        store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                        authed.add(_verified)
+                        store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
+                        logger.info(f"Set session {sid} email to {user_email} (was empty)")
+            except Exception as e:
+                logger.warning(f"Could not update sessions after OAuth: {e}")
 
             success_html = await _build_oauth_success_html(
                 user_email, credentials, session_id
@@ -1541,7 +1608,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     f"✅ Access granted - credentials saved for user: {user_email}"
                 )
 
-                # Store user email in session context
+                # Store user email in session context (get_session_context returns
+                # None in HTTP context, so also scan all sessions)
+                session_id = None
                 try:
                     session_id = await get_session_context()
                     if session_id:
@@ -1553,6 +1622,47 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         )
                 except Exception as e:
                     logger.warning(f"⚠️ Session storage error (continuing): {e}")
+
+                # Fix 2: Update ALL sessions that have a wrong/missing email from this OAuth flow
+                try:
+                    from auth.context import get_session_data, list_sessions
+
+                    _verified = user_email.lower().strip()
+                    for sid in list_sessions():
+                        sid_email = get_session_data(sid, SessionKey.USER_EMAIL)
+                        requested = get_session_data(sid, SessionKey.REQUESTED_EMAIL)
+                        owned = set(get_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS) or [])
+                        authed = set(get_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS) or [])
+
+                        # Determine the stale email to replace
+                        old_email = (sid_email or requested or "").lower().strip()
+
+                        # Skip if session already has the correct email
+                        if sid_email and sid_email.lower().strip() == _verified:
+                            if _verified not in owned and owned:
+                                owned.add(_verified)
+                                store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                            continue
+
+                        # Update if session had a wrong email or a requested email pending OAuth
+                        if old_email and old_email != _verified:
+                            store_session_data(sid, SessionKey.USER_EMAIL, user_email)
+                            owned.discard(old_email)
+                            owned.add(_verified)
+                            store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                            authed.discard(old_email)
+                            authed.add(_verified)
+                            store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
+                            logger.info(f"Updated session {sid} email from {old_email} to {user_email}")
+                        elif not sid_email and owned:
+                            store_session_data(sid, SessionKey.USER_EMAIL, user_email)
+                            owned.add(_verified)
+                            store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                            authed.add(_verified)
+                            store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
+                            logger.info(f"Set session {sid} email to {user_email} (was empty)")
+                except Exception as e:
+                    logger.warning(f"Could not update sessions after OAuth: {e}")
 
                 success_html = await _build_oauth_success_html(
                     user_email, credentials, session_id

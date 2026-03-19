@@ -343,12 +343,47 @@ class AuthMiddleware(Middleware):
                 ):
                     self._dual_auth_bridge.add_secondary_account(user_email)
                 # Store it in session for future use
-                if session_id:
+                if session_id and tool_name == "start_google_auth":
+                    # Store as unverified requested email — NOT as session identity
+                    store_session_data(
+                        session_id, SessionKey.REQUESTED_EMAIL, user_email
+                    )
+                    logger.debug(
+                        f"📝 Stored LLM-guessed email as REQUESTED_EMAIL (not identity): {user_email}"
+                    )
+                elif session_id:
                     store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
             else:
                 logger.debug(
                     f"🔍 DEBUG: No user email found in tool arguments for tool {tool_name}"
                 )
+
+        # CREDENTIAL CROSS-CHECK: If per-user API key resolves to an email
+        # with no credentials on disk, fall back to .oauth_authentication.json
+        if user_email and auth_provenance == AuthProvenance.USER_API_KEY:
+            try:
+                _safe = user_email.replace("@", "_at_").replace(".", "_")
+                _creds_dir = Path(settings.credentials_dir)
+                _has_creds = (
+                    (_creds_dir / f"{_safe}_credentials.json").exists()
+                    or (_creds_dir / f"{_safe}_credentials.enc").exists()
+                )
+                if not _has_creds:
+                    _oauth_email = self._load_oauth_authentication_data()
+                    if _oauth_email and _oauth_email.lower() != user_email.lower():
+                        logger.warning(
+                            f"API key bound to {user_email} but no credentials found. "
+                            f"Falling back to OAuth email {_oauth_email}."
+                        )
+                        user_email = _oauth_email
+                        if session_id:
+                            store_session_data(
+                                session_id, SessionKey.USER_EMAIL, user_email
+                            )
+                        await set_user_email_context(user_email)
+                        await self._auto_inject_email_parameter(context, user_email)
+            except Exception as e:
+                logger.debug(f"Credential cross-check failed: {e}")
 
         # CREDENTIAL ISOLATION: Shared API key sessions can only use credentials
         # they created via start_google_auth in this session.
@@ -394,27 +429,56 @@ class AuthMiddleware(Middleware):
                             f"🔑 Registered API key owned account (session-scoped): {effective_email}"
                         )
                     elif effective_email not in owned_accounts:
-                        from .audit import log_security_event
+                        # Fresh session after reconnect: if credentials exist on
+                        # disk for this email, auto-register as owned so the user
+                        # isn't locked out of their own credentials.
+                        _auto_registered = False
+                        if not owned_accounts:
+                            try:
+                                _safe = effective_email.replace("@", "_at_").replace(".", "_")
+                                _creds_dir = Path(settings.credentials_dir)
+                                if (
+                                    (_creds_dir / f"{_safe}_credentials.json").exists()
+                                    or (_creds_dir / f"{_safe}_credentials.enc").exists()
+                                ):
+                                    owned_accounts.add(effective_email)
+                                    if session_id:
+                                        store_session_data(
+                                            session_id,
+                                            SessionKey.API_KEY_OWNED_ACCOUNTS,
+                                            list(owned_accounts),
+                                        )
+                                    logger.info(
+                                        f"🔑 Auto-registered {effective_email} in fresh session "
+                                        f"(credentials exist on disk)"
+                                    )
+                                    _auto_registered = True
+                            except Exception as e:
+                                logger.debug(f"Credential existence check failed: {e}")
 
-                        log_security_event(
-                            "api_key_credential_access_blocked",
-                            user_email=effective_email,
-                            details={
-                                "tool_name": tool_name,
-                                "session_id": session_id,
-                                "reason": "API key session attempted to use credentials it did not create",
-                            },
-                        )
-                        raise ValueError(
-                            f"API key sessions can only access credentials they created. "
-                            f"No credentials found for {effective_email} in this API key session.\n\n"
-                            f"Run `start_google_auth` with your email to create credentials."
-                        )
+                        if not _auto_registered:
+                            from .audit import log_security_event
+
+                            log_security_event(
+                                "api_key_credential_access_blocked",
+                                user_email=effective_email,
+                                details={
+                                    "tool_name": tool_name,
+                                    "session_id": session_id,
+                                    "reason": "API key session attempted to use credentials it did not create",
+                                },
+                            )
+                            raise ValueError(
+                                f"API key sessions can only access credentials they created. "
+                                f"No credentials found for {effective_email} in this API key session.\n\n"
+                                f"Run `start_google_auth` with your email to create credentials."
+                            )
 
         # SEED SESSION_AUTHED_EMAILS: Ensure the session's authenticated email
         # (from OAuth, JWT, API key, etc.) is recorded so that subsequent
         # start_google_auth calls for OTHER emails can discover it and link.
-        if session_id and user_email:
+        # Skip for start_google_auth — its email is an LLM guess, not verified.
+        if session_id and user_email and tool_name != "start_google_auth":
             _existing_authed = set(
                 get_session_data(session_id, SessionKey.SESSION_AUTHED_EMAILS) or []
             )
@@ -2696,6 +2760,26 @@ class AuthMiddleware(Middleware):
                 _provenance = (
                     get_session_data(_sid, SessionKey.AUTH_PROVENANCE) if _sid else None
                 )
+
+                # For per-user API key sessions, check if bound email has credentials
+                if _provenance == AuthProvenance.USER_API_KEY and final_email:
+                    try:
+                        _safe = final_email.replace("@", "_at_").replace(".", "_")
+                        _creds_dir = Path(settings.credentials_dir)
+                        _has_creds = (
+                            (_creds_dir / f"{_safe}_credentials.json").exists()
+                            or (_creds_dir / f"{_safe}_credentials.enc").exists()
+                        )
+                        if not _has_creds:
+                            _fallback = self._load_oauth_authentication_data()
+                            if _fallback and _fallback.lower() != final_email.lower():
+                                logger.warning(
+                                    f"API key email {final_email} has no credentials, "
+                                    f"falling back to OAuth email {_fallback}"
+                                )
+                                final_email = _fallback
+                    except Exception:
+                        pass
 
                 # Try to get email from OAuth authentication file (not for API key / per-user key sessions)
                 oauth_email = (

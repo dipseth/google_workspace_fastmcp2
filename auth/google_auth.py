@@ -1666,7 +1666,21 @@ async def handle_oauth_callback(
             logger.warning(
                 f"⚠️ Email mismatch: expected {user_email}, got {authenticated_email} - using actual email"
             )
+            # Rebind any API key from wrong email to actual authenticated email
+            try:
+                from .user_api_keys import rebind_key_email
+
+                if rebind_key_email(user_email, authenticated_email):
+                    logger.info(
+                        f"🔑 Rebound API key binding from {user_email} to {authenticated_email}"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not rebind API key: {e}")
             user_email = authenticated_email  # Use the actual authenticated email
+
+        # Attach the originally-requested email so the success page can show
+        # match/mismatch accurately (instead of reading stale session data)
+        credentials._requested_email = state_info.get("user_email", "")
 
         # Attach Chat SA JSON so _save_credentials can persist it
         if chat_sa_json:

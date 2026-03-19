@@ -351,6 +351,41 @@ def revoke_user_key(user_email: str) -> bool:
     return revoked
 
 
+def rebind_key_email(old_email: str, new_email: str) -> bool:
+    """Rebind all API keys from old_email to new_email.
+
+    When OAuth completes with a different email than originally requested,
+    the client may still hold a key bound to old_email. This updates the
+    registry in place so that same key hash resolves to new_email.
+
+    Returns True if at least one key was rebound.
+    """
+    old = old_email.lower().strip()
+    new = new_email.lower().strip()
+    if old == new:
+        return False
+
+    rebound = False
+    with _lock:
+        registry = _load_registry()
+        # Remove any key already bound to new_email (avoid duplicates)
+        registry = {h: e for h, e in registry.items() if _reg_email(e) != new}
+        # Rebind old_email keys -> new_email
+        for key_hash, entry in registry.items():
+            if _reg_email(entry) == old:
+                if isinstance(entry, dict):
+                    entry["email"] = new
+                else:
+                    registry[key_hash] = new
+                rebound = True
+        if rebound:
+            _save_registry(registry)
+
+    if rebound:
+        logger.info(f"🔑 Rebound API key(s) from {old} to {new}")
+    return rebound
+
+
 # ---------------------------------------------------------------------------
 # Account linking
 # ---------------------------------------------------------------------------

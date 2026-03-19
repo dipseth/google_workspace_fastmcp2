@@ -27,12 +27,16 @@ def generate_success_html(
     envelope_inventory_section: str = "",
     revoke_section: str = "",
     page_mode: str = "authenticated",
+    requested_email: str = "",
 ) -> str:
     """Generate success page HTML.
 
     page_mode controls header text:
       "authenticated" — green checkmark, "Authentication Successful!"
       "status_check"  — blue info icon, "Credential Status"
+
+    requested_email: LLM-guessed email from start_google_auth (if any).
+      Shows match/mismatch indicator when provided.
     """
     if page_mode == "status_check":
         _icon = '<div class="success-icon" style="filter:hue-rotate(200deg)">&#x2139;&#xFE0F;</div>'
@@ -46,6 +50,30 @@ def generate_success_html(
         _title_text = "Authentication Successful!"
         _saved_text = "<b>&#x1F510; Credentials Saved!</b><br>Ready to use."
         _page_title = "Authentication Successful"
+
+    # Build requested email match/mismatch indicator
+    _requested_section = ""
+    if requested_email:
+        _req_norm = requested_email.lower().strip()
+        _auth_norm = user_email.lower().strip()
+        if _req_norm == _auth_norm:
+            _requested_section = (
+                '<div style="background:#d4edda;color:#155724;padding:10px 15px;border-radius:8px;'
+                'margin:10px 0;border:1px solid #c3e6cb;font-size:13px">'
+                f'<span style="background:#28a745;color:white;padding:2px 8px;border-radius:4px;'
+                f'font-size:11px;font-weight:600;margin-right:6px">MATCHES</span>'
+                f'Requested: <code>{html.escape(requested_email)}</code></div>'
+            )
+        else:
+            _requested_section = (
+                '<div style="background:#fff3cd;color:#856404;padding:10px 15px;border-radius:8px;'
+                'margin:10px 0;border:1px solid #ffc107;font-size:13px">'
+                f'<span style="background:#ffc107;color:#856404;padding:2px 8px;border-radius:4px;'
+                f'font-size:11px;font-weight:600;margin-right:6px">CORRECTED</span>'
+                f'Originally requested: <code>{html.escape(requested_email)}</code>'
+                f'<br><small style="color:#6c757d">Session identity updated to match your actual Google account</small></div>'
+            )
+
     return f"""<!DOCTYPE html><html><head><title>{_page_title}</title>
     <style>
         body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
@@ -117,6 +145,7 @@ def generate_success_html(
         {_icon}
         <h1 style="color:{_title_color}">{_title_text}</h1>
         <div class="email">Authenticated: <b>{html.escape(user_email)}</b></div>
+        {_requested_section}
         <div class="saved">{_saved_text}</div>
         {api_key_section}
         {security_viz_section}
@@ -582,7 +611,7 @@ def build_revoke_section(user_email: str, base_url: str) -> str:
 
 
 def generate_service_selection_html(
-    state: str, flow_type: str, use_pkce: bool = True
+    state: str, flow_type: str, use_pkce: bool = True, requested_email: str = ""
 ) -> str:
     """Generate the service selection page HTML with authentication method choice."""
     import logging
@@ -815,6 +844,16 @@ def generate_service_selection_html(
         <p>Select services and configure your auth method for FastMCP</p>
     </div>
     <div class="card-body">
+        {"" if not requested_email else (
+            '<div style="display:flex;align-items:center;gap:10px;background:#e8f4fd;'
+            'border:1px solid #bee5eb;border-radius:10px;padding:12px 16px;margin-bottom:16px">'
+            '<span style="font-size:18px">&#x1F916;</span>'
+            '<div>'
+            '<div style="font-size:13px;font-weight:600;color:#0c5460">Requested by assistant</div>'
+            f'<div style="font-size:12px;color:#5f6368;font-family:monospace;margin-top:2px">{html.escape(requested_email)}</div>'
+            '<div style="font-size:11px;color:#6c757d;margin-top:2px">Sign in with your actual Google account below</div>'
+            '</div></div>'
+        )}
         <form method="POST" action="/auth/services/selected" id="auth-form">
             <input type="hidden" name="state" value="{state}">
             <input type="hidden" name="flow_type" value="{flow_type}">

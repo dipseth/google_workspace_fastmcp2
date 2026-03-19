@@ -67,3 +67,6 @@ class SessionKey(str, Enum):
 
     # Per-user sampling configuration (in-memory cache, encrypted on disk)
     SAMPLING_CONFIG = "sampling_config"  # dict: {model, api_key, api_base}
+
+    # LLM-guessed email from start_google_auth (unverified, for display only)
+    REQUESTED_EMAIL = "requested_email"
