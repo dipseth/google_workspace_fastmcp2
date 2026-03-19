@@ -53,6 +53,39 @@ def register_qdrant_middleware(middleware: Any) -> None:
 
 
 @lifespan
+async def embedding_lifespan(server: Any):
+    """
+    Centralized embedding service lifecycle.
+
+    Preloads configured embedding models and releases them on shutdown.
+    Must run before qdrant_lifespan so models are available for Qdrant init.
+
+    Yields:
+        Dict with 'embedding_service' reference
+    """
+    from config.embedding_service import close_embedding_service, get_embedding_service
+    from config.settings import settings
+
+    service = get_embedding_service()
+
+    # Preload configured slots
+    eager = getattr(settings, "embedding_eager_load", "")
+    if eager:
+        slots = [s.strip() for s in eager.split(",") if s.strip()]
+        if slots:
+            logger.info(f"Embedding lifespan: preloading {slots}...")
+            await service.preload(*slots)
+            logger.info(f"Embedding lifespan: preloaded {slots}")
+
+    try:
+        yield {"embedding_service": service}
+    finally:
+        logger.info("Embedding lifespan: shutting down...")
+        await close_embedding_service()
+        logger.info("Embedding lifespan: shutdown complete")
+
+
+@lifespan
 async def qdrant_lifespan(server: Any):
     """
     Qdrant middleware lifecycle with proper async init and shutdown.
@@ -240,7 +273,7 @@ async def cache_middleware_lifespan(server: Any):
 # before an opaque OOM kill. Configurable via env vars.
 import os
 
-_MEMORY_LIMIT_MB = int(os.getenv("MEMORY_LIMIT_MB", "2048"))
+_MEMORY_LIMIT_MB = int(os.getenv("MEMORY_LIMIT_MB", "3072"))
 _MEMORY_WARN_PCT = float(os.getenv("MEMORY_WARN_PCT", "0.65"))
 _MEMORY_CRITICAL_PCT = float(os.getenv("MEMORY_CRITICAL_PCT", "0.75"))
 _CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "300"))
@@ -414,7 +447,48 @@ async def _periodic_memory_cleanup(
             elif rss_mb > _WARN_THRESHOLD_MB:
                 logger.warning(
                     f"RSS {rss_mb:.0f}MB exceeds warning threshold "
-                    f"{_WARN_THRESHOLD_MB}MB ({_MEMORY_WARN_PCT:.0%} of {_MEMORY_LIMIT_MB}MB)"
+                    f"{_WARN_THRESHOLD_MB}MB ({_MEMORY_WARN_PCT:.0%} of {_MEMORY_LIMIT_MB}MB) "
+                    f"— proactively evicting caches"
+                )
+
+                # Proactive cache eviction to prevent reaching critical threshold
+                evicted_total = 0
+
+                # Clear dashboard cache (in-memory portion)
+                try:
+                    from middleware.dashboard_cache_middleware import clear_dashboard_cache
+
+                    evicted_total += clear_dashboard_cache()
+                except Exception as e:
+                    logger.debug(f"Dashboard cache clear skipped: {e}")
+
+                # Clear profile cache
+                profile_mw = cache_refs.get("profile_middleware")
+                if profile_mw is not None:
+                    try:
+                        profile_mw.clear_cache()
+                        evicted_total += 1  # count as 1 batch operation
+                    except Exception as e:
+                        logger.debug(f"Profile cache clear skipped: {e}")
+
+                # Clear template cache
+                template_mw = cache_refs.get("template_middleware")
+                if template_mw is not None:
+                    try:
+                        cm = getattr(template_mw, "cache_manager", None)
+                        if cm is not None:
+                            evicted_total += cm.cleanup_expired_entries()
+                    except Exception as e:
+                        logger.debug(f"Template cache clear skipped: {e}")
+
+                # Force garbage collection
+                gc.collect()
+
+                rss_after = _get_rss_mb()
+                logger.warning(
+                    f"Proactive eviction complete: {evicted_total} items evicted, "
+                    f"RSS {rss_mb:.0f}MB -> {rss_after:.0f}MB "
+                    f"(freed ~{rss_mb - rss_after:.0f}MB)"
                 )
 
         except Exception as e:
@@ -643,10 +717,50 @@ def get_lifespan_state() -> Dict[str, Any]:
     return _lifespan_state.copy()
 
 
+@lifespan
+async def otel_lifespan(server: Any):
+    """
+    OpenTelemetry TracerProvider lifecycle for Langfuse OTLP export.
+
+    Must be first in the composition chain so the TracerProvider is active
+    before any spans are created by other lifespans or tool calls.
+
+    No-op if Langfuse is not configured.
+
+    Yields:
+        Dict with 'otel_configured' flag
+    """
+    configured = False
+    try:
+        from middleware.otel_setup import configure_otel_for_langfuse
+
+        configured = configure_otel_for_langfuse()
+        if configured:
+            logger.info("✅ OTEL lifespan: TracerProvider active")
+        else:
+            logger.info("⏭️ OTEL lifespan: Skipped (Langfuse not configured)")
+    except Exception as e:
+        logger.warning(f"⚠️ OTEL lifespan: Setup failed: {e}")
+
+    try:
+        yield {"otel_configured": configured}
+    finally:
+        if configured:
+            try:
+                from middleware.otel_setup import shutdown_otel
+
+                shutdown_otel()
+                logger.info("✅ OTEL lifespan shutdown complete")
+            except Exception as e:
+                logger.warning(f"⚠️ OTEL shutdown error: {e}")
+
+
 # Pre-composed lifespan for the full server lifecycle using FastMCP's | operator
 # Composition order: enter left-to-right, exit right-to-left
 combined_server_lifespan = (
-    qdrant_lifespan
+    otel_lifespan  # First — TracerProvider must be active for all other spans
+    | embedding_lifespan  # Second — models must be loaded before Qdrant init
+    | qdrant_lifespan
     | colbert_lifespan
     | session_state_lifespan
     | cache_middleware_lifespan
@@ -657,6 +771,8 @@ combined_server_lifespan = (
 
 # Export for use in server.py
 __all__ = [
+    "otel_lifespan",
+    "embedding_lifespan",
     "qdrant_lifespan",
     "colbert_lifespan",
     "session_state_lifespan",
