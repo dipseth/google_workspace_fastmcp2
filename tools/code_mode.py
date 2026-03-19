@@ -758,7 +758,16 @@ class ToolActivity:
 
 
 def setup_code_mode(mcp: FastMCP) -> None:
-    """Register the CodeMode transform on *mcp*."""
+    """Register the CodeMode transform on *mcp*.
+
+    IMPORTANT: We monkey-patch ``get_tool_catalog`` on the CodeMode instance
+    because the default implementation's ContextVar-based bypass does not
+    reliably propagate through FastMCP's nested ``list_tools`` calls
+    (new Context objects + middleware re-entry).  The patched version reads
+    tools directly from the local provider, which is both simpler and
+    correct — discovery tools (``search``, ``tags``) should see the full
+    catalog regardless of session-level filtering.
+    """
     code_mode = CodeMode(
         sandbox_provider=EnhancedSandboxProvider(),
         discovery_tools=[
@@ -771,7 +780,36 @@ def setup_code_mode(mcp: FastMCP) -> None:
         ],
         execute_description=EXECUTE_DESCRIPTION,
     )
+
+    # ------------------------------------------------------------------
+    # Patch: fetch the real tool catalog directly from the provider
+    # ------------------------------------------------------------------
+    # The upstream CatalogTransform.get_tool_catalog() sets a _bypass
+    # ContextVar then re-enters list_tools(run_middleware=True).  In this
+    # server the session-filtering middleware + nested Context creation
+    # causes the bypass flag to be invisible by the time transforms run,
+    # so the catalog returns the 7 discovery tools instead of 72+ real
+    # tools.  Fix: read from the provider (pre-transform) directly.
+    async def _patched_get_tool_catalog(
+        ctx: Context = None, *, run_middleware: bool = True
+    ):
+        """Return the real registered tools, bypassing transforms."""
+        try:
+            components = mcp.local_provider._components
+            return [v for v in components.values() if isinstance(v, Tool)]
+        except Exception:
+            logger.warning(
+                "code_mode: patched get_tool_catalog failed, "
+                "falling back to upstream"
+            )
+            # Fall back to the original (may still be broken, but is safe)
+            return await code_mode.__class__.get_tool_catalog(
+                code_mode, ctx, run_middleware=run_middleware
+            )
+
+    code_mode.get_tool_catalog = _patched_get_tool_catalog
+
     mcp.add_transform(code_mode)
     logger.info(
-        "Code Mode enabled \u2014 LLMs will use BM25 search + sandboxed execution + stdlib helpers"
+        "Code Mode enabled — LLMs will use BM25 search + sandboxed execution + stdlib helpers"
     )
