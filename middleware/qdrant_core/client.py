@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 from config.enhanced_logging import setup_logger
 
 from .config import CollectionSchema, QdrantConfig
-from .lazy_imports import get_fastembed, get_qdrant_imports
+from .lazy_imports import get_qdrant_imports
 
 logger = setup_logger()
 
@@ -279,34 +279,13 @@ class QdrantClientManager:
         """Load the FastEmbed embedding model if not already loaded."""
         if self.embedder is None:
             try:
-                logger.info(
-                    f"🤖 Loading FastEmbed model: {self.config.embedding_model}"
-                )
+                from config.embedding_service import get_embedding_service
 
-                def load_model():
-                    TextEmbedding = get_fastembed()
-                    return TextEmbedding(model_name=self.config.embedding_model)
+                service = get_embedding_service()
+                self.embedder = await service.get_model("minilm")
+                self.embedding_dim = service.get_dimension("minilm")
 
-                self.embedder = await asyncio.to_thread(load_model)
-
-                # Get embedding dimension by generating a test embedding
-                try:
-                    test_embedding_list = list(self.embedder.embed(["test"]))
-                    test_embedding = (
-                        test_embedding_list[0] if test_embedding_list else None
-                    )
-                    self.embedding_dim = len(test_embedding) if test_embedding else 384
-                except Exception:
-                    # Fallback to known dimensions for common models
-                    model_dims = {
-                        "sentence-transformers/all-MiniLM-L6-v2": 384,
-                        "sentence-transformers/all-mpnet-base-v2": 768,
-                    }
-                    self.embedding_dim = model_dims.get(
-                        self.config.embedding_model, 384
-                    )
-
-                logger.info(f"✅ FastEmbed model loaded (dim: {self.embedding_dim})")
+                logger.info(f"✅ FastEmbed model loaded via EmbeddingService (dim: {self.embedding_dim})")
 
             except Exception as e:
                 logger.error(f"❌ Failed to load FastEmbed model: {e}")
