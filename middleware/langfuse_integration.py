@@ -136,6 +136,8 @@ def configure_langfuse() -> bool:
 
     Must be called early (before LiteLLM imports) so that LiteLLM's
     ``langfuse_otel`` callback picks up the env vars.
+
+    Also configures the OTEL TracerProvider for Langfuse (idempotent).
     """
     global _langfuse_initialized
     if _langfuse_initialized:
@@ -157,6 +159,15 @@ def configure_langfuse() -> bool:
         logger.info(
             "Langfuse v4 observability configured (host=%s)", settings.langfuse_host
         )
+
+        # Also configure OTEL TracerProvider for parent-child span hierarchy
+        try:
+            from middleware.otel_setup import configure_otel_for_langfuse
+
+            configure_otel_for_langfuse()
+        except Exception as e:
+            logger.debug("OTEL TracerProvider setup skipped: %s", e)
+
         return True
 
     except Exception as e:
@@ -269,6 +280,94 @@ def wrap_anthropic_handler_with_langfuse(handler: Any) -> Any:
     except Exception as e:
         logger.warning("Failed to wrap Anthropic handler with Langfuse: %s", e)
         return handler
+
+
+# ── OTEL span management for parent-child hierarchy ──────────────────────
+
+
+def start_tool_span(tool_name: str):
+    """Create a ``sampling::{tool_name}`` span and attach it to the OTEL context.
+
+    Returns a tuple of ``(span, token)`` where *token* is the context token
+    that must be passed to :func:`end_span` to detach the context.
+
+    If OTEL is not configured, returns ``(None, None)`` (no-op).
+    """
+    try:
+        from opentelemetry import context as otel_context
+
+        from middleware.otel_setup import get_mcp_tracer
+
+        tracer = get_mcp_tracer()
+        span = tracer.start_span(
+            f"sampling::{tool_name}",
+            attributes={"mcp.tool": tool_name, "mcp.component": "sampling"},
+        )
+        ctx = otel_context.set_value("current-span", span)
+        # Also set as the active span via trace API
+        from opentelemetry.trace import set_span_in_context
+
+        ctx = set_span_in_context(span, ctx)
+        token = otel_context.attach(ctx)
+        return span, token
+    except Exception:
+        return None, None
+
+
+def start_phase_span(phase: str, tool_name: str = ""):
+    """Create a child span for a sampling phase (validation, dsl_recovery, main_sampling).
+
+    Must be called while a parent tool span is active (via :func:`start_tool_span`).
+    Returns ``(span, token)`` — pass to :func:`end_span`.
+    """
+    try:
+        from opentelemetry import context as otel_context
+
+        from middleware.otel_setup import get_mcp_tracer
+
+        tracer = get_mcp_tracer()
+        span_name = f"sampling::{tool_name}::{phase}" if tool_name else f"sampling::{phase}"
+        span = tracer.start_span(
+            span_name,
+            attributes={
+                "mcp.tool": tool_name,
+                "mcp.phase": phase,
+                "mcp.component": "sampling",
+            },
+        )
+        from opentelemetry.trace import set_span_in_context
+
+        ctx = set_span_in_context(span)
+        token = otel_context.attach(ctx)
+        return span, token
+    except Exception:
+        return None, None
+
+
+def end_span(span, token, error: Optional[Exception] = None) -> None:
+    """End a span and detach its context token.
+
+    Args:
+        span: The OTEL span returned by :func:`start_tool_span` / :func:`start_phase_span`.
+        token: The context token to detach.
+        error: If provided, the exception is recorded on the span and status set to ERROR.
+    """
+    if span is None:
+        return
+    try:
+        from opentelemetry import context as otel_context
+        from opentelemetry.trace import StatusCode
+
+        if error is not None:
+            span.set_status(StatusCode.ERROR, str(error))
+            span.record_exception(error)
+        else:
+            span.set_status(StatusCode.OK)
+        span.end()
+        if token is not None:
+            otel_context.detach(token)
+    except Exception:
+        pass
 
 
 def add_langfuse_metadata(

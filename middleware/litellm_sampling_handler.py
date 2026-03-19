@@ -179,6 +179,20 @@ class LiteLLMSamplingHandler:
                 trace_id=trace_ctx.trace_id if trace_ctx else "",
                 trace_metadata=trace_meta,
             )
+
+            # Forward-looking: propagate current OTEL span as parent for LiteLLM
+            # Currently ignored by LiteLLM's langfuse_otel callback, but positions
+            # us for when that limitation is lifted.
+            try:
+                from opentelemetry import trace as otel_trace
+
+                current_span = otel_trace.get_current_span()
+                if current_span.get_span_context().is_valid:
+                    kwargs.setdefault("metadata", {})[
+                        "litellm_parent_otel_span"
+                    ] = current_span
+            except Exception:
+                pass
         except Exception:
             pass
 
