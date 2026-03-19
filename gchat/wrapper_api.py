@@ -12,7 +12,7 @@ Usage:
 import logging
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import gchat.wrapper_setup as _setup
 from config.enhanced_logging import setup_logger
@@ -26,10 +26,26 @@ logger = setup_logger(__name__)
 
 
 class CardDSLResult(BaseModel):
-    """Structured card DSL generation result."""
+    """Structured card DSL generation result.
 
-    card_description: str  # e.g. "§[δ×3, Ƀ[ᵬ×2]]"
-    card_params: dict  # content for each symbol key
+    Used by DSL recovery to return corrected DSL. Fields must contain ONLY
+    the corrected values — no explanations, commentary, or reasoning.
+    """
+
+    card_description: str = Field(
+        description=(
+            "The corrected DSL notation followed by the card description. "
+            "Must start with the DSL expression (e.g. '§[δ×3, Ƀ[ᵬ×2]]') "
+            "followed by the original description text. "
+            "Do NOT include explanations or commentary — ONLY the DSL and description."
+        ),
+    )
+    card_params: dict = Field(
+        description=(
+            "Block content keyed by DSL symbol or class name. "
+            "Preserve the original content from the user's request."
+        ),
+    )
 
 
 # =============================================================================

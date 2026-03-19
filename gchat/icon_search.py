@@ -44,13 +44,12 @@ def _ensure_index():
         if _icon_embeddings is not None:
             return
 
-        from fastembed import TextEmbedding
-
+        from config.embedding_service import get_embedding_service
         from gchat.material_icons import MATERIAL_ICONS
 
         logger.info(f"Building icon search index ({len(MATERIAL_ICONS)} icons)...")
 
-        _embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        _embedder = get_embedding_service().get_model_sync("bge-small")
 
         # Prepare icon names with readable descriptions for better embeddings
         # "trending_up" -> "trending up" (underscores to spaces for semantic meaning)

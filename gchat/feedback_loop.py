@@ -371,31 +371,27 @@ class FeedbackLoop:
         return self._client
 
     def _get_embedder(self):
-        """Get ColBERT embedder singleton."""
+        """Get ColBERT embedder via centralized EmbeddingService (shared singleton)."""
         if self._embedder is None:
             try:
-                from fastembed import LateInteractionTextEmbedding
+                from config.embedding_service import get_embedding_service
 
-                self._embedder = LateInteractionTextEmbedding(
-                    model_name="colbert-ir/colbertv2.0"
-                )
-                logger.info("✅ ColBERT embedder loaded for feedback loop")
+                self._embedder = get_embedding_service().get_model_sync("colbert")
+                logger.info("ColBERT embedder acquired from EmbeddingService for feedback loop")
             except Exception as e:
-                logger.warning(f"Failed to load ColBERT embedder: {e}")
+                logger.warning(f"Failed to get ColBERT embedder from EmbeddingService: {e}")
         return self._embedder
 
     def _get_relationship_embedder(self):
-        """Get MiniLM embedder singleton for relationship vectors."""
+        """Get MiniLM embedder via centralized EmbeddingService (shared singleton)."""
         if self._relationship_embedder is None:
             try:
-                from fastembed import TextEmbedding
+                from config.embedding_service import get_embedding_service
 
-                self._relationship_embedder = TextEmbedding(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
-                logger.info("✅ MiniLM embedder loaded for relationships")
+                self._relationship_embedder = get_embedding_service().get_model_sync("minilm")
+                logger.info("MiniLM embedder acquired from EmbeddingService for relationships")
             except Exception as e:
-                logger.warning(f"Failed to load MiniLM embedder: {e}")
+                logger.warning(f"Failed to get MiniLM embedder from EmbeddingService: {e}")
         return self._relationship_embedder
 
     def _embed_description(
