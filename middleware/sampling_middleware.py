@@ -1010,11 +1010,51 @@ Provide personalized recommendations based on historical success patterns.""",
             except Exception:
                 pass
 
+            # Start OTEL phase span for main sampling — but only if we're not
+            # already inside a phase span (e.g., validation or dsl_recovery).
+            # Otherwise the main_sampling span becomes a child of the phase
+            # instead of a sibling.
+            _sample_span = None
+            _sample_token = None
+            try:
+                from middleware.langfuse_integration import (
+                    get_sampling_trace_context as _get_ctx,
+                    start_phase_span,
+                )
+
+                _phase = ""
+                _ctx = _get_ctx()
+                if _ctx:
+                    _phase = _ctx.phase
+                if not _phase:
+                    _sample_span, _sample_token = start_phase_span(
+                        "main_sampling", self.tool_name
+                    )
+            except Exception:
+                pass
+
             # Perform the sampling using FastMCP context
             if not hasattr(self.fastmcp_context, "sample"):
                 raise ToolError("Client does not support LLM sampling")
 
-            response = await self.fastmcp_context.sample(**sampling_params)
+            try:
+                response = await self.fastmcp_context.sample(**sampling_params)
+            except Exception as sample_exc:
+                try:
+                    from middleware.langfuse_integration import end_span
+
+                    end_span(_sample_span, _sample_token, error=sample_exc)
+                except Exception:
+                    pass
+                _sample_span = None
+                raise
+            finally:
+                try:
+                    from middleware.langfuse_integration import end_span
+
+                    end_span(_sample_span, _sample_token)
+                except Exception:
+                    pass
 
             if self.enable_debug:
                 logger.debug(f"✅ Sampling completed for tool: {self.tool_name}")
@@ -1183,6 +1223,16 @@ class EnhancedSamplingMiddleware(Middleware):
         if not target_args:
             return None
 
+        # Start OTEL phase span for validation
+        _val_span = None
+        _val_token = None
+        try:
+            from middleware.langfuse_integration import start_phase_span
+
+            _val_span, _val_token = start_phase_span("validation", tool_name)
+        except Exception:
+            pass
+
         try:
             # Set Langfuse trace phase so the generation name becomes
             # mcp::{tool_name}::validation (distinct from the tool's own sampling)
@@ -1254,7 +1304,21 @@ class EnhancedSamplingMiddleware(Middleware):
                 f"Validation agent failed for {tool_name}: {exc}. "
                 "Passing original input through."
             )
+            try:
+                from middleware.langfuse_integration import end_span
+
+                end_span(_val_span, _val_token, error=exc)
+            except Exception:
+                pass
+            _val_span = None  # prevent double-end in finally
             return None
+        finally:
+            try:
+                from middleware.langfuse_integration import end_span
+
+                end_span(_val_span, _val_token)
+            except Exception:
+                pass
 
     def _attach_validation_metadata(self, result, validation: "ValidationResult"):
         """Append validation info to ToolResult.meta dict."""
@@ -1321,11 +1385,29 @@ class EnhancedSamplingMiddleware(Middleware):
         except Exception:
             pass
 
+        # Start OTEL parent span for this tool's sampling phases
+        _tool_span = None
+        _tool_span_token = None
+        try:
+            from middleware.langfuse_integration import start_tool_span
+
+            _tool_span, _tool_span_token = start_tool_span(tool_name)
+        except Exception:
+            pass
+
         # Check if we have FastMCP context
         if not context.fastmcp_context:
             if self.enable_debug:
                 logger.debug(f"⚠️ No FastMCP context available for tool: {tool_name}")
-            return await call_next(context)
+            try:
+                return await call_next(context)
+            finally:
+                try:
+                    from middleware.langfuse_integration import end_span
+
+                    end_span(_tool_span, _tool_span_token)
+                except Exception:
+                    pass
 
         try:
             # Pre-call: DSL validation & recovery for registered DSL tools
@@ -1404,7 +1486,21 @@ class EnhancedSamplingMiddleware(Middleware):
             if self.enable_debug:
                 logger.debug(f"⚠️ Could not check tool tags for {tool_name}: {e}")
             # Continue without elicitation on error
+            try:
+                from middleware.langfuse_integration import end_span
+
+                end_span(_tool_span, _tool_span_token, error=e)
+            except Exception:
+                pass
+            _tool_span = None  # prevent double-end in finally
             return await call_next(context)
+        finally:
+            try:
+                from middleware.langfuse_integration import end_span
+
+                end_span(_tool_span, _tool_span_token)
+            except Exception:
+                pass
 
     def _is_dsl_tool(self, tool_name: str) -> bool:
         """Check if a tool uses DSL notation."""
@@ -2092,6 +2188,52 @@ async def _validate_and_recover_dsl(
 
     warnings: List[str] = []
     current_dsl = dsl_string
+
+    # Start OTEL phase span for DSL recovery
+    _dsl_span = None
+    _dsl_token = None
+    try:
+        from middleware.langfuse_integration import start_phase_span
+
+        _dsl_span, _dsl_token = start_phase_span(
+            "dsl_recovery", sctx.tool_name if hasattr(sctx, "tool_name") else ""
+        )
+    except Exception:
+        pass
+
+    try:
+        return await _validate_and_recover_dsl_inner(
+            sctx, current_dsl, config, original_description, max_retries, parser, dsl_type, warnings
+        )
+    except Exception as exc:
+        try:
+            from middleware.langfuse_integration import end_span
+
+            end_span(_dsl_span, _dsl_token, error=exc)
+        except Exception:
+            pass
+        _dsl_span = None
+        raise
+    finally:
+        try:
+            from middleware.langfuse_integration import end_span
+
+            end_span(_dsl_span, _dsl_token)
+        except Exception:
+            pass
+
+
+async def _validate_and_recover_dsl_inner(
+    sctx: "SamplingContext",
+    current_dsl: str,
+    config: "DSLToolConfig",
+    original_description: str,
+    max_retries: int,
+    parser,
+    dsl_type: str,
+    warnings: List[str],
+) -> Tuple[Any, List[str]]:
+    """Inner loop for DSL validation and recovery (extracted for span wrapping)."""
 
     for attempt in range(max_retries + 1):
         # Each retry is a distinct LLM call — increment Langfuse step counter

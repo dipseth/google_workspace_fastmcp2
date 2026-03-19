@@ -41,6 +41,7 @@ Works across all services: Chat, Gmail, Drive, Calendar, etc.
 """
 
 import asyncio
+from collections import OrderedDict
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from googleapiclient.discovery import build
@@ -72,6 +73,7 @@ class ProfileEnrichmentMiddleware(Middleware):
         cache_ttl_seconds: int = 300,
         qdrant_middleware=None,
         enable_qdrant_cache: bool = False,
+        max_cache_entries: int = 500,
     ):
         """
         Initialize Profile Enrichment Middleware.
@@ -81,12 +83,14 @@ class ProfileEnrichmentMiddleware(Middleware):
             cache_ttl_seconds: Cache TTL in seconds (default: 300 = 5 minutes)
             qdrant_middleware: Optional QdrantUnifiedMiddleware for persistent cache
             enable_qdrant_cache: Whether to use Qdrant for persistent caching
+            max_cache_entries: Maximum number of entries in the LRU cache (default: 500)
         """
         self._enable_caching = enable_caching
         self._cache_ttl = cache_ttl_seconds
-        self._profile_cache: Dict[
+        self._max_cache_entries = max_cache_entries
+        self._profile_cache: OrderedDict[
             str, Dict[str, Any]
-        ] = {}  # In-memory cache (fast tier)
+        ] = OrderedDict()  # LRU-bounded in-memory cache
         self._cache_timestamps: Dict[str, float] = {}
 
         # Optional Qdrant integration for persistent caching
@@ -400,6 +404,7 @@ class ProfileEnrichmentMiddleware(Middleware):
                     # Check if cache is still valid
                     cache_age = current_time - self._cache_timestamps.get(user_id, 0)
                     if cache_age < self._cache_ttl:
+                        self._profile_cache.move_to_end(user_id)  # LRU: mark as recently used
                         profiles[user_id] = self._profile_cache[user_id]
                         user_ids.remove(user_id)
                         logger.debug(f"📦 Cache hit for user {user_id}")
@@ -421,10 +426,15 @@ class ProfileEnrichmentMiddleware(Middleware):
                 if isinstance(result, dict):
                     profiles[user_id] = result
 
-                    # Cache the result
+                    # Cache the result with LRU eviction
                     if self._enable_caching:
                         self._profile_cache[user_id] = result
                         self._cache_timestamps[user_id] = time.time()
+                        self._profile_cache.move_to_end(user_id)
+                        # Evict oldest entries when exceeding max
+                        while len(self._profile_cache) > self._max_cache_entries:
+                            evicted_id, _ = self._profile_cache.popitem(last=False)
+                            self._cache_timestamps.pop(evicted_id, None)
 
         return profiles
 

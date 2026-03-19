@@ -28,9 +28,9 @@ class FastEmbedQdrantCache(QdrantSemanticCache):
         fastembed_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         **kwargs,
     ):
-        from fastembed import TextEmbedding
+        from config.embedding_service import get_embedding_service
 
-        self._fastembed = TextEmbedding(model_name=fastembed_model_name)
+        self._fastembed = get_embedding_service().get_model_sync("minilm")
         # MiniLM-L6-v2 = 384 dims; parent defaults to 1536 (ada-002)
         kwargs.setdefault("vector_size", 384)
         kwargs.setdefault("embedding_model", "fastembed-local")  # placeholder, unused
