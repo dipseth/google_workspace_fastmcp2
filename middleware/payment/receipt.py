@@ -31,14 +31,24 @@ def _get_server_secret() -> str:
     """Read the server secret from ``.auth_encryption_key``.
 
     Same file that ``AuthMiddleware._get_server_secret()`` uses.
+
+    Raises:
+        RuntimeError: If the key file does not exist. Receipt HMAC
+            must never operate with a hardcoded/fallback key.
     """
     secret_path = Path(".auth_encryption_key")
     if secret_path.exists():
-        return secret_path.read_text().strip()
-    # If the file doesn't exist yet (server hasn't created it),
-    # fall back to a deterministic but non-empty value.
-    logger.warning("No .auth_encryption_key found; receipt HMAC will use fallback key")
-    return "x402-payment-receipt-fallback-key"
+        secret = secret_path.read_text().strip()
+        if not secret:
+            raise RuntimeError(
+                "Payment receipts require a non-empty .auth_encryption_key file. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))" > .auth_encryption_key'
+            )
+        return secret
+    raise RuntimeError(
+        "Payment receipts require .auth_encryption_key but the file does not exist. "
+        'Generate one with: python -c "import secrets; print(secrets.token_hex(32))" > .auth_encryption_key'
+    )
 
 
 def _get_hmac_key() -> bytes:

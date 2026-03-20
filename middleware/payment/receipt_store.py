@@ -183,8 +183,13 @@ def store_receipt_async(receipt_dict: dict) -> None:
     Args:
         receipt_dict: Serialized PaymentReceipt (from receipt.model_dump()).
     """
-    # Build a searchable text summary for embedding
+    # Build a searchable text summary for embedding (no raw PII)
+    from middleware.payment.receipt import hash_email
+
     payer = receipt_dict.get("payer", {})
+    email_hash = (
+        hash_email(payer.get("user_email", "")) if payer.get("user_email") else ""
+    )
     parts = [
         f"payment receipt",
         f"tool:{receipt_dict.get('tool_name', '')}",
@@ -192,15 +197,18 @@ def store_receipt_async(receipt_dict: dict) -> None:
         f"network:{receipt_dict.get('network', '')}",
         f"payer:{payer.get('wallet_address', '')}",
     ]
-    if payer.get("user_email"):
-        parts.append(f"user:{payer['user_email']}")
+    if email_hash:
+        parts.append(f"user_hash:{email_hash}")
     embed_text = " ".join(parts)
 
     # Flatten the receipt for Qdrant payload (no nested dicts for indexing)
+    # Store hashed PII only — never store raw email or Google sub
     flat = {
         "payer_wallet": payer.get("wallet_address", ""),
-        "payer_email": payer.get("user_email", ""),
-        "payer_google_sub": payer.get("google_sub", ""),
+        "payer_email_hash": email_hash,
+        "payer_google_sub_hash": hash_email(payer.get("google_sub", ""))
+        if payer.get("google_sub")
+        else "",
         "auth_provenance": payer.get("auth_provenance", ""),
         "tool_name": receipt_dict.get("tool_name", ""),
         "amount": receipt_dict.get("amount", ""),

@@ -50,14 +50,25 @@ _pending_payments: dict[str, dict] = {}
 
 
 def _get_server_secret() -> str:
-    """Read the server secret from ``.auth_encryption_key``."""
+    """Read the server secret from ``.auth_encryption_key``.
+
+    Raises:
+        RuntimeError: If the key file does not exist. Payment flow
+            must never operate with a hardcoded/fallback key.
+    """
     secret_path = Path(".auth_encryption_key")
     if secret_path.exists():
-        return secret_path.read_text().strip()
-    logger.warning(
-        "No .auth_encryption_key found; payment flow HMAC will use fallback key"
+        secret = secret_path.read_text().strip()
+        if not secret:
+            raise RuntimeError(
+                "Payment flow requires a non-empty .auth_encryption_key file. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))" > .auth_encryption_key'
+            )
+        return secret
+    raise RuntimeError(
+        "Payment flow requires .auth_encryption_key but the file does not exist. "
+        'Generate one with: python -c "import secrets; print(secrets.token_hex(32))" > .auth_encryption_key'
     )
-    return "payment-flow-fallback-key"
 
 
 def _get_hmac_key() -> bytes:
@@ -85,9 +96,7 @@ def _compute_signature(params: dict) -> str:
     """Compute HMAC-SHA256 over canonical query params (excluding ``sig``)."""
     data = {k: v for k, v in sorted(params.items()) if k != "sig"}
     canonical = "&".join(f"{k}={v}" for k, v in data.items())
-    return _hmac.new(
-        _get_hmac_key(), canonical.encode(), hashlib.sha256
-    ).hexdigest()
+    return _hmac.new(_get_hmac_key(), canonical.encode(), hashlib.sha256).hexdigest()
 
 
 def generate_payment_url(
@@ -247,7 +256,9 @@ def complete_pending_payment(payment_token: str, payload_b64: str) -> bool:
     """
     pending = _pending_payments.get(payment_token)
     if not pending:
-        logger.warning("Payment completion for unknown token: %s...", payment_token[:16])
+        logger.warning(
+            "Payment completion for unknown token: %s...", payment_token[:16]
+        )
         return False
 
     pending["payload_b64"] = payload_b64

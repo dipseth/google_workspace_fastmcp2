@@ -6,6 +6,8 @@ Provides endpoints for:
 - /payment-status: Returns payment status for a given token (polling fallback)
 """
 
+import html
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fastmcp import FastMCP
@@ -81,26 +83,32 @@ def setup_payment_endpoints(mcp: FastMCP):
             if not is_valid:
                 return HTMLResponse(
                     status_code=403,
-                    content=_render_error_page(f"Invalid payment link: {error}"),
+                    content=_render_error_page(
+                        f"Invalid payment link: {html.escape(error)}"
+                    ),
                 )
 
             # Try to serve the x402 SDK paywall page
-            html = _build_paywall_html(
+            page_html = _build_paywall_html(
                 tool_name=tool_name,
                 amount=amount,
                 network=network,
                 recipient=recipient,
-                chain_id=int(chain_id_str) if chain_id_str else _settings.payment_chain_id,
+                chain_id=int(chain_id_str)
+                if chain_id_str
+                else _settings.payment_chain_id,
                 session_prefix=session_prefix,
                 sig=sig,
             )
-            return HTMLResponse(content=html)
+            return HTMLResponse(content=page_html)
 
         except Exception as exc:
             logger.error("Payment page error: %s", exc, exc_info=True)
             return HTMLResponse(
                 status_code=500,
-                content=_render_error_page(f"Internal error: {exc}"),
+                content=_render_error_page(
+                    "An internal error occurred. Please try again or contact support."
+                ),
             )
 
     @mcp.custom_route("/api/payment-complete", methods=["POST"])
@@ -148,7 +156,7 @@ def setup_payment_endpoints(mcp: FastMCP):
             logger.error("Payment completion error: %s", exc, exc_info=True)
             return JSONResponse(
                 status_code=500,
-                content={"error": str(exc)},
+                content={"error": "An internal error occurred"},
             )
 
     @mcp.custom_route("/payment-status", methods=["GET"])
@@ -344,7 +352,25 @@ def _build_fallback_payment_page(
     testnet = chain_id in (84532,)
     network_name = "Base Sepolia (Testnet)" if testnet else "Base"
     base_url = _settings.payment_base_url or ""
-    callback_url = f"{base_url}/api/payment-complete" if base_url else "/api/payment-complete"
+    callback_url = (
+        f"{base_url}/api/payment-complete" if base_url else "/api/payment-complete"
+    )
+
+    # Sanitize all values for HTML/JS injection
+    safe_amount = html.escape(str(amount))
+    safe_tool_name = html.escape(str(tool_name))
+    safe_recipient = html.escape(str(recipient))
+    safe_usdc_contract = html.escape(str(usdc_contract))
+    safe_network = html.escape(str(network))
+    safe_sig = html.escape(str(sig))
+    safe_callback_url = html.escape(str(callback_url))
+    safe_network_name = html.escape(network_name)
+
+    # Use Decimal for precise USDC amount conversion (6 decimals)
+    try:
+        amount_wei = str(int(Decimal(str(amount)) * 1_000_000))
+    except (InvalidOperation, ValueError, ArithmeticError):
+        amount_wei = "0"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -444,7 +470,7 @@ def _build_fallback_payment_page(
             color: #555;
         }}
         .powered-by a {{ color: #3b82f6; text-decoration: none; }}
-        {''.join(['.testnet-badge { display: inline-block; background: #f59e0b; color: #000; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }'] if testnet else [])}
+        {"".join([".testnet-badge { display: inline-block; background: #f59e0b; color: #000; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }"] if testnet else [])}
     </style>
 </head>
 <body>
@@ -453,28 +479,28 @@ def _build_fallback_payment_page(
             <h1>Payment Required</h1>
             <div class="subtitle">
                 Google Workspace MCP Server
-                {'<span class="testnet-badge">TESTNET</span>' if testnet else ''}
+                {'<span class="testnet-badge">TESTNET</span>' if testnet else ""}
             </div>
         </div>
 
         <div class="amount-display">
-            <span class="value">${amount}</span>
+            <span class="value">${safe_amount}</span>
             <span class="currency">USDC</span>
-            <div class="tool-name">for access to <strong>{tool_name}</strong></div>
+            <div class="tool-name">for access to <strong>{safe_tool_name}</strong></div>
         </div>
 
         <div class="details">
             <div class="row">
                 <span class="label">Network</span>
-                <span class="val">{network_name}</span>
+                <span class="val">{safe_network_name}</span>
             </div>
             <div class="row">
                 <span class="label">Recipient</span>
-                <span class="val">{recipient[:8]}...{recipient[-6:]}</span>
+                <span class="val">{html.escape(recipient[:8])}...{html.escape(recipient[-6:])}</span>
             </div>
             <div class="row">
                 <span class="label">USDC Contract</span>
-                <span class="val">{usdc_contract[:8]}...{usdc_contract[-6:]}</span>
+                <span class="val">{html.escape(usdc_contract[:8])}...{html.escape(usdc_contract[-6:])}</span>
             </div>
             <div class="row">
                 <span class="label">Protocol</span>
@@ -496,14 +522,14 @@ def _build_fallback_payment_page(
 
     <script>
     const PAYMENT_CONFIG = {{
-        amount: '{amount}',
-        amountWei: '{int(float(amount) * 1_000_000)}',
-        recipient: '{recipient}',
-        usdcContract: '{usdc_contract}',
-        chainId: {chain_id},
-        network: '{network}',
-        paymentToken: '{sig}',
-        callbackUrl: '{callback_url}',
+        amount: '{safe_amount}',
+        amountWei: '{amount_wei}',
+        recipient: '{safe_recipient}',
+        usdcContract: '{safe_usdc_contract}',
+        chainId: {int(chain_id)},
+        network: '{safe_network}',
+        paymentToken: '{safe_sig}',
+        callbackUrl: '{safe_callback_url}',
     }};
 
     const EIP712_DOMAIN = {{
@@ -674,7 +700,8 @@ def _build_fallback_payment_page(
 
 
 def _render_error_page(message: str) -> str:
-    """Render a simple error page."""
+    """Render a simple error page with HTML-escaped message."""
+    safe_message = html.escape(message)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -687,7 +714,7 @@ def _render_error_page(message: str) -> str:
     <div style="background:rgba(30,30,60,0.9);border:1px solid rgba(239,68,68,0.3);
         border-radius:16px;padding:40px;max-width:480px;text-align:center;">
         <h1 style="color:#ef4444;margin-bottom:16px;">Payment Error</h1>
-        <p>{message}</p>
+        <p>{safe_message}</p>
         <p style="margin-top:24px;color:#666;font-size:13px;">
             If this error persists, please contact the server administrator.
         </p>

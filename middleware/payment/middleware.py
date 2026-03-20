@@ -89,6 +89,15 @@ class X402PaymentMiddleware(Middleware):
             "yes" if resource_server else "no",
         )
 
+        # Warn loudly if using testnet chain IDs in production
+        if settings.payment_chain_id in (84532,):
+            logger.warning(
+                "SECURITY: Payment middleware is using TESTNET chain ID %d. "
+                "Testnet USDC has no monetary value. Set PAYMENT_CHAIN_ID and "
+                "PAYMENT_NETWORK to mainnet values for production.",
+                settings.payment_chain_id,
+            )
+
     def _is_tool_gated(self, tool_name: str) -> bool:
         """Check if this tool requires payment."""
         if tool_name in PAYMENT_EXEMPT_TOOLS:
@@ -135,7 +144,7 @@ class X402PaymentMiddleware(Middleware):
                 logger.info("Payment expired for session %s", session_id)
                 return False
 
-            # Optional: verify receipt HMAC for defense-in-depth
+            # Verify receipt HMAC integrity
             receipt_dict = get_session_data(
                 session_id, SessionKey.PAYMENT_RECEIPT, default=None
             )
@@ -147,11 +156,19 @@ class X402PaymentMiddleware(Middleware):
                     receipt = PaymentReceipt(**receipt_dict)
                     if not verify_receipt_hmac(receipt):
                         logger.warning(
-                            "Payment receipt HMAC invalid for session %s", session_id
+                            "Payment receipt HMAC invalid for session %s — "
+                            "possible tampering, rejecting cached payment",
+                            session_id,
                         )
                         return False
-                except Exception:
-                    pass  # Receipt validation is defense-in-depth, not blocking
+                except Exception as exc:
+                    logger.warning(
+                        "Receipt HMAC validation error for session %s: %s — "
+                        "rejecting cached payment",
+                        session_id,
+                        exc,
+                    )
+                    return False
 
             return True
         except Exception:
@@ -637,88 +654,91 @@ class X402PaymentMiddleware(Middleware):
                 payment_token, session_id or "anonymous"
             )
 
-            # Open browser if enabled
-            if auto_browser:
-                try:
-                    import webbrowser
-
-                    webbrowser.open(payment_url)
-                    logger.info(
-                        "Opened payment page in browser for tool '%s'", tool_name
-                    )
-                except Exception as exc:
-                    logger.warning("Failed to open browser: %s", exc)
-
-            # Send email if enabled
-            if send_email:
-                try:
-                    recipient_email = self._get_session_email(session_id)
-                    if recipient_email:
-                        from middleware.payment.payment_email import (
-                            send_payment_email,
-                        )
-
-                        await send_payment_email(
-                            tool_name=tool_name,
-                            amount=settings.payment_usdc_amount,
-                            network=settings.payment_network,
-                            recipient_wallet=settings.payment_recipient_wallet,
-                            payment_url=payment_url,
-                            recipient_email=recipient_email,
-                            session_prefix=session_id[:8] if session_id else "",
-                        )
-                    else:
-                        logger.info(
-                            "Cannot send payment email: no email in session"
-                        )
-                except Exception as exc:
-                    logger.warning("Failed to send payment email: %s", exc)
-
-            # Wait for payment completion with timeout
-            timeout = settings.payment_poll_timeout_seconds
             try:
-                await asyncio.wait_for(completion_event.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
+                # Open browser if enabled
+                if auto_browser:
+                    try:
+                        import webbrowser
+
+                        webbrowser.open(payment_url)
+                        logger.info(
+                            "Opened payment page in browser for tool '%s'", tool_name
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to open browser: %s", exc)
+
+                # Send email if enabled
+                if send_email:
+                    try:
+                        recipient_email = self._get_session_email(session_id)
+                        if recipient_email:
+                            from middleware.payment.payment_email import (
+                                send_payment_email,
+                            )
+
+                            await send_payment_email(
+                                tool_name=tool_name,
+                                amount=settings.payment_usdc_amount,
+                                network=settings.payment_network,
+                                recipient_wallet=settings.payment_recipient_wallet,
+                                payment_url=payment_url,
+                                recipient_email=recipient_email,
+                                session_prefix=session_id[:8] if session_id else "",
+                            )
+                        else:
+                            logger.info(
+                                "Cannot send payment email: no email in session"
+                            )
+                    except Exception as exc:
+                        logger.warning("Failed to send payment email: %s", exc)
+
+                # Wait for payment completion with timeout
+                timeout = settings.payment_poll_timeout_seconds
+                try:
+                    await asyncio.wait_for(completion_event.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    logger.info(
+                        "Payment timeout (%ds) for tool '%s' (session=%s)",
+                        timeout,
+                        tool_name,
+                        session_id or "unknown",
+                    )
+                    return self._make_payment_required_response(
+                        session_id=session_id,
+                        tool_name=tool_name,
+                        payment_url=payment_url,
+                    )
+
+                # Payment completed — retrieve the x402 payload
+                pending = get_pending_payment(payment_token)
+
+                if not pending or not pending.get("payload_b64"):
+                    logger.error("Payment completed but no payload found")
+                    return self._make_payment_required_response(
+                        session_id=session_id, tool_name=tool_name
+                    )
+
+                payload_b64 = pending["payload_b64"]
                 logger.info(
-                    "Payment timeout (%ds) for tool '%s' (session=%s)",
-                    timeout,
+                    "Interactive payment received for tool '%s' (session=%s)",
                     tool_name,
                     session_id or "unknown",
                 )
+
+                # Verify and settle the received payment
+                error_result, pending_settlement = await self._verify_and_settle(
+                    payload_b64, session_id, tool_name
+                )
+                if error_result:
+                    return error_result
+
+                # Payment verified — execute tool and settle
+                result = await call_next(context)
+                return await self._settle_payment(result, pending_settlement)
+
+            finally:
+                # Always clean up pending payment entry to prevent memory leaks
                 cleanup_pending_payment(payment_token)
-                return self._make_payment_required_response(
-                    session_id=session_id,
-                    tool_name=tool_name,
-                    payment_url=payment_url,
-                )
-
-            # Payment completed — retrieve the x402 payload
-            pending = get_pending_payment(payment_token)
-            cleanup_pending_payment(payment_token)
-
-            if not pending or not pending.get("payload_b64"):
-                logger.error("Payment completed but no payload found")
-                return self._make_payment_required_response(
-                    session_id=session_id, tool_name=tool_name
-                )
-
-            payload_b64 = pending["payload_b64"]
-            logger.info(
-                "Interactive payment received for tool '%s' (session=%s)",
-                tool_name,
-                session_id or "unknown",
-            )
-
-            # Verify and settle the received payment
-            error_result, pending_settlement = await self._verify_and_settle(
-                payload_b64, session_id, tool_name
-            )
-            if error_result:
-                return error_result
-
-            # Payment verified — execute tool and settle
-            result = await call_next(context)
-            return await self._settle_payment(result, pending_settlement)
 
         except Exception as exc:
             logger.error("Interactive payment flow error: %s", exc, exc_info=True)
@@ -732,8 +752,6 @@ class X402PaymentMiddleware(Middleware):
             from auth.context import get_session_data
             from auth.types import SessionKey
 
-            return get_session_data(
-                session_id, SessionKey.USER_EMAIL, default=None
-            )
+            return get_session_data(session_id, SessionKey.USER_EMAIL, default=None)
         except Exception:
             return None

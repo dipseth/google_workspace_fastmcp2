@@ -24,7 +24,7 @@ class X402Verifier:
     """Verifies x402 payment transactions.
 
     Supports two modes:
-    - Stub mode (test hashes): enabled by default or when PAYMENT_TESTNET_STUBS=true
+    - Stub mode (test hashes): requires explicit PAYMENT_TESTNET_STUBS=true
     - SDK mode: when an x402ResourceServer is provided, delegates to the facilitator
     """
 
@@ -40,7 +40,7 @@ class X402Verifier:
         self._verification_url = verification_url
         self._resource_server = resource_server
         self._testnet_stubs = (
-            os.environ.get("PAYMENT_TESTNET_STUBS", "true").lower() == "true"
+            os.environ.get("PAYMENT_TESTNET_STUBS", "false").lower() == "true"
         )
         mode = "sdk" if resource_server else "stub"
         logger.info("X402Verifier initialized (chain_id=%d, mode=%s)", chain_id, mode)
