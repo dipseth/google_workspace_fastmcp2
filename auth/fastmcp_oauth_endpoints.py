@@ -705,6 +705,9 @@ def setup_legacy_callback_route(mcp) -> None:
                 logger.warning(f"⚠️ Session storage error (continuing): {e}")
 
             # Fix 2: Update ALL sessions that have a wrong/missing email from this OAuth flow
+            # TODO(security): This iterates ALL sessions — safe in single-user/dev mode,
+            # but must be scoped to the originating session before multi-tenant deployment
+            # to prevent Session A being rebound to Session B's email on concurrent auth.
             try:
                 from auth.context import get_session_data, list_sessions
 
@@ -1624,6 +1627,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     logger.warning(f"⚠️ Session storage error (continuing): {e}")
 
                 # Fix 2: Update ALL sessions that have a wrong/missing email from this OAuth flow
+                # TODO(security): Same cross-session concern as legacy callback above.
                 try:
                     from auth.context import get_session_data, list_sessions
 
