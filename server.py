@@ -1081,11 +1081,27 @@ mcp.add_middleware(dashboard_cache_middleware)
 logger.info("✅ Dashboard cache middleware registered (outermost)")
 
 # 10. Redis-backed response caching (offloads tool response cache to Redis Cloud)
+
+def _mask_redis_url(url: str) -> str:
+    """Redact password from Redis URL for safe logging."""
+    from urllib.parse import urlparse, urlunparse
+    try:
+        parsed = urlparse(url)
+        if parsed.password:
+            masked = parsed._replace(
+                netloc=f"{parsed.username or ''}:***@{parsed.hostname}"
+                + (f":{parsed.port}" if parsed.port else "")
+            )
+            return urlunparse(masked)
+    except Exception:
+        pass
+    return "redis://***"
+
 if settings.redis_io_url_string:
     try:
+        from fastmcp.server.middleware.caching import ResponseCachingMiddleware
         from key_value.aio.stores.redis import RedisStore
         from key_value.aio.wrappers.prefix_collections import PrefixCollectionsWrapper
-        from fastmcp.server.middleware.caching import ResponseCachingMiddleware
 
         _redis_store = RedisStore(url=settings.redis_io_url_string)
         _namespaced_store = PrefixCollectionsWrapper(
@@ -1097,7 +1113,8 @@ if settings.redis_io_url_string:
             cache_storage=_namespaced_store,
             call_tool_settings={"enabled": False},
         ))
-        logger.info(f"✅ Redis ResponseCachingMiddleware enabled (list ops only, tool calls excluded)")
+        _safe_url = _mask_redis_url(settings.redis_io_url_string)
+        logger.info(f"✅ Redis ResponseCachingMiddleware enabled ({_safe_url}, list ops only)")
 
         # Share Redis store with dashboard cache middleware for offloading
         from middleware.dashboard_cache_middleware import set_redis_store
