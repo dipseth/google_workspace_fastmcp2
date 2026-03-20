@@ -1318,6 +1318,15 @@ from tools.feedback_endpoints import setup_feedback_endpoints
 
 setup_feedback_endpoints(mcp)
 
+# Setup payment flow endpoints (browser paywall page + completion callback)
+if settings.payment_enabled:
+    from tools.payment_endpoints import setup_payment_endpoints
+
+    setup_payment_endpoints(mcp)
+    logger.info(
+        "Payment flow endpoints registered (/pay, /api/payment-complete, /payment-status)"
+    )
+
 # Register template macro management tools
 logger.info("🎨 Registering template macro management tools...")
 setup_template_macro_tools(mcp)

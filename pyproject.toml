@@ -117,6 +117,8 @@ dependencies = [
     "x402[evm,httpx]>=2.4.0",
     "langfuse>=4.0.0",
     "py-key-value-aio[redis]>=0.4.4",
+    "qrcode>=8.2",
+    "pillow>=11.3.0",
 ]
 
 [project.urls]

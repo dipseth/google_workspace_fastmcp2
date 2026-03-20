@@ -401,6 +401,33 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "RECEIPT_COLLECTION"},
     )
 
+    # Payment Flow UX Configuration
+    payment_auto_open_browser: bool = Field(
+        default=True,
+        description="Automatically open browser payment page on 402 Payment Required",
+        json_schema_extra={"env": "PAYMENT_AUTO_OPEN_BROWSER"},
+    )
+    payment_send_email: bool = Field(
+        default=False,
+        description="Send payment request email on 402 Payment Required",
+        json_schema_extra={"env": "PAYMENT_SEND_EMAIL"},
+    )
+    payment_poll_timeout_seconds: int = Field(
+        default=300,
+        description="Max seconds to wait for browser/email payment completion",
+        json_schema_extra={"env": "PAYMENT_POLL_TIMEOUT_SECONDS"},
+    )
+    payment_poll_interval_seconds: int = Field(
+        default=2,
+        description="Seconds between payment completion polls",
+        json_schema_extra={"env": "PAYMENT_POLL_INTERVAL_SECONDS"},
+    )
+    payment_token_ttl_seconds: int = Field(
+        default=900,
+        description="TTL for HMAC-signed payment tokens (default: 15 minutes)",
+        json_schema_extra={"env": "PAYMENT_TOKEN_TTL_SECONDS"},
+    )
+
     # Cost Tracking Rates (USD)
     sampling_input_token_rate: float = Field(
         default=0.000003,
@@ -948,6 +975,18 @@ class Settings(BaseSettings):
         Useful when BASE_URL points to a proxy that doesn't forward /card-feedback.
         """
         explicit = os.getenv("FEEDBACK_BASE_URL")
+        if explicit:
+            return explicit
+        return self.base_url
+
+    @property
+    def payment_base_url(self) -> str:
+        """Get the base URL for payment flow pages (/pay, /api/payment-complete).
+
+        Uses PAYMENT_BASE_URL env var if set, otherwise falls back to base_url.
+        Same pattern as feedback_base_url.
+        """
+        explicit = os.getenv("PAYMENT_BASE_URL")
         if explicit:
             return explicit
         return self.base_url

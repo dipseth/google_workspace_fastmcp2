@@ -456,17 +456,34 @@ class CacheKeepaliveEngine:
         # Small initial delay to let the server finish startup
         await asyncio.sleep(5)
 
+        last_loop_at = time.time()
+
         while True:
+            now = time.time()
+            elapsed = now - last_loop_at
+            # Detect OS sleep / event loop stalls — if elapsed > 2x interval,
+            # the cache TTL almost certainly expired.
+            if elapsed > interval * 2:
+                logger.warning(
+                    "Cache keepalive: loop gap detected (%.0fs elapsed, "
+                    "expected %ds). Likely OS sleep — cache will be cold.",
+                    elapsed,
+                    interval,
+                )
+            last_loop_at = now
+
             for module in self._modules.values():
                 try:
                     result = await self._send_keepalive(module)
                     ct = result.get("cached_tokens", 0)
                     savings = result.get("savings_usd", 0)
+                    status = "HIT" if ct > 0 else "MISS"
                     logger.info(
-                        "Cache keepalive [%s]: cached_tokens=%d, "
+                        "Cache keepalive [%s]: %s cached_tokens=%d, "
                         "call_savings=$%.6f, cumulative_savings=$%.6f, "
                         "total_calls=%d",
                         module.module_name,
+                        status,
                         ct,
                         savings,
                         module.total_savings_usd,

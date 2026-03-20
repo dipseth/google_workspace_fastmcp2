@@ -238,6 +238,13 @@ class X402PaymentMiddleware(Middleware):
                 except Exception:
                     pass
 
+            # Log the raw payload for debugging
+            logger.info(
+                "x402 raw payload keys: %s, payload.payload keys: %s",
+                list(payload_dict.keys()),
+                list(payload_dict.get("payload", {}).keys()),
+            )
+
             # Build proper SDK types via builder
             payment_payload, payment_requirements = (
                 PaymentPayloadBuilder.from_raw_payload(
@@ -247,6 +254,13 @@ class X402PaymentMiddleware(Middleware):
                     session_id=session_id or "",
                     user_email_hash=user_email_hash,
                 )
+            )
+
+            # Log SDK types for debugging
+            logger.info(
+                "x402 PaymentPayload: x402Version=%s, payload=%s",
+                getattr(payment_payload, "x402Version", "?"),
+                type(getattr(payment_payload, "payload", None)),
             )
 
             # Verify via facilitator
@@ -416,8 +430,17 @@ class X402PaymentMiddleware(Middleware):
         except Exception as e:
             logger.warning("Could not cache payment in session: %s", e)
 
-    def _make_payment_required_response(self) -> ToolResult:
-        """Build an x402-compliant 402 Payment Required response."""
+    def _make_payment_required_response(
+        self,
+        session_id: str | None = None,
+        tool_name: str = "",
+        payment_url: str = "",
+    ) -> ToolResult:
+        """Build an x402-compliant 402 Payment Required response.
+
+        If a payment_url is provided (browser/email flow), it is included
+        in both the human-readable message and the meta for clients.
+        """
         chain_id = settings.payment_chain_id
         network = settings.payment_network
         usdc_contract = USDC_CONTRACTS.get(chain_id, "")
@@ -441,12 +464,24 @@ class X402PaymentMiddleware(Middleware):
             f"  Chain: {details.chain_id}\n"
             f"  USDC Contract: {details.usdc_contract}\n"
             f"  Scheme: {details.scheme}\n\n"
-            f"x402-aware clients: sign an EIP-3009 TransferWithAuthorization and "
-            f"include the base64-encoded payload as a PAYMENT-SIGNATURE header "
-            f"or _x402_payment tool argument.\n\n"
-            f"Legacy clients: send USDC on-chain, then call "
-            f"verify_payment(tx_hash='your_tx_hash') to unlock access."
         )
+
+        if payment_url:
+            message += (
+                f"A payment page has been opened in your browser:\n"
+                f"  {payment_url}\n\n"
+                f"Connect your wallet, review the amount, and sign the "
+                f"gasless authorization. The tool will automatically unlock "
+                f"once payment is confirmed.\n\n"
+            )
+        else:
+            message += (
+                f"x402-aware clients: sign an EIP-3009 TransferWithAuthorization and "
+                f"include the base64-encoded payload as a PAYMENT-SIGNATURE header "
+                f"or _x402_payment tool argument.\n\n"
+                f"Legacy clients: send USDC on-chain, then call "
+                f"verify_payment(tx_hash='your_tx_hash') to unlock access."
+            )
 
         from middleware.payment.x402_server import (
             build_payment_requirements,
@@ -456,14 +491,18 @@ class X402PaymentMiddleware(Middleware):
         requirements = build_payment_requirements(settings)
         requirements_b64 = encode_payment_requirements(requirements)
 
+        meta = {
+            "x402": {
+                "version": 2,
+                "paymentRequired": requirements_b64,
+            }
+        }
+        if payment_url:
+            meta["x402"]["paymentUrl"] = payment_url
+
         return ToolResult(
             content=[TextContent(type="text", text=message)],
-            meta={
-                "x402": {
-                    "version": 2,
-                    "paymentRequired": requirements_b64,
-                }
-            },
+            meta=meta,
         )
 
     async def _get_session_id(self, context) -> Optional[str]:
@@ -512,10 +551,189 @@ class X402PaymentMiddleware(Middleware):
             result = await call_next(context)
             return await self._settle_payment(result, pending)
 
-        # 5. Not verified, no payment payload -- return 402 response
+        # 5. Not verified, no payment payload -- try interactive payment flow
         logger.info(
             "Payment required for tool '%s' (session=%s)",
             tool_name,
             session_id or "unknown",
         )
-        return self._make_payment_required_response()
+
+        # 5a. Attempt browser/email payment flow if configured
+        result = await self._try_interactive_payment(
+            session_id, tool_name, context, call_next
+        )
+        if result is not None:
+            return result
+
+        # 5b. Fall back to static 402 response
+        return self._make_payment_required_response(
+            session_id=session_id, tool_name=tool_name
+        )
+
+    async def _try_interactive_payment(
+        self,
+        session_id: str | None,
+        tool_name: str,
+        context,
+        call_next,
+    ) -> Optional[ToolResult]:
+        """Attempt interactive payment via browser popup and/or email.
+
+        If a base URL is configured and interactive payment is enabled:
+        1. Generate a signed payment URL
+        2. Open browser / send email
+        3. Wait for payment completion (polling with timeout)
+        4. If payment arrives, verify + execute tool + settle
+        5. Return None if interactive flow is not configured
+
+        Returns:
+            ToolResult if interactive payment succeeded or timed out,
+            None if interactive flow is not available.
+        """
+        base_url = settings.payment_base_url
+        if not base_url:
+            return None
+
+        auto_browser = settings.payment_auto_open_browser
+        send_email = settings.payment_send_email
+        if not auto_browser and not send_email:
+            return None
+
+        try:
+            import asyncio
+
+            from middleware.payment.payment_flow import (
+                cleanup_pending_payment,
+                generate_payment_url,
+                get_pending_payment,
+                register_pending_payment,
+            )
+
+            # Generate signed payment URL
+            payment_url = generate_payment_url(
+                base_url=base_url,
+                session_id=session_id or "anonymous",
+                tool_name=tool_name,
+                amount=settings.payment_usdc_amount,
+                network=settings.payment_network,
+                recipient_wallet=settings.payment_recipient_wallet,
+                chain_id=settings.payment_chain_id,
+                ttl_seconds=settings.payment_token_ttl_seconds,
+            )
+
+            # Extract the sig from the URL to use as payment token
+            from urllib.parse import parse_qs, urlparse
+
+            parsed = urlparse(payment_url)
+            params = parse_qs(parsed.query)
+            payment_token = params.get("sig", [""])[0]
+
+            if not payment_token:
+                logger.error("Failed to extract payment token from URL")
+                return None
+
+            # Register pending payment + get completion event
+            completion_event = register_pending_payment(
+                payment_token, session_id or "anonymous"
+            )
+
+            # Open browser if enabled
+            if auto_browser:
+                try:
+                    import webbrowser
+
+                    webbrowser.open(payment_url)
+                    logger.info(
+                        "Opened payment page in browser for tool '%s'", tool_name
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to open browser: %s", exc)
+
+            # Send email if enabled
+            if send_email:
+                try:
+                    recipient_email = self._get_session_email(session_id)
+                    if recipient_email:
+                        from middleware.payment.payment_email import (
+                            send_payment_email,
+                        )
+
+                        await send_payment_email(
+                            tool_name=tool_name,
+                            amount=settings.payment_usdc_amount,
+                            network=settings.payment_network,
+                            recipient_wallet=settings.payment_recipient_wallet,
+                            payment_url=payment_url,
+                            recipient_email=recipient_email,
+                            session_prefix=session_id[:8] if session_id else "",
+                        )
+                    else:
+                        logger.info(
+                            "Cannot send payment email: no email in session"
+                        )
+                except Exception as exc:
+                    logger.warning("Failed to send payment email: %s", exc)
+
+            # Wait for payment completion with timeout
+            timeout = settings.payment_poll_timeout_seconds
+            try:
+                await asyncio.wait_for(completion_event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.info(
+                    "Payment timeout (%ds) for tool '%s' (session=%s)",
+                    timeout,
+                    tool_name,
+                    session_id or "unknown",
+                )
+                cleanup_pending_payment(payment_token)
+                return self._make_payment_required_response(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    payment_url=payment_url,
+                )
+
+            # Payment completed — retrieve the x402 payload
+            pending = get_pending_payment(payment_token)
+            cleanup_pending_payment(payment_token)
+
+            if not pending or not pending.get("payload_b64"):
+                logger.error("Payment completed but no payload found")
+                return self._make_payment_required_response(
+                    session_id=session_id, tool_name=tool_name
+                )
+
+            payload_b64 = pending["payload_b64"]
+            logger.info(
+                "Interactive payment received for tool '%s' (session=%s)",
+                tool_name,
+                session_id or "unknown",
+            )
+
+            # Verify and settle the received payment
+            error_result, pending_settlement = await self._verify_and_settle(
+                payload_b64, session_id, tool_name
+            )
+            if error_result:
+                return error_result
+
+            # Payment verified — execute tool and settle
+            result = await call_next(context)
+            return await self._settle_payment(result, pending_settlement)
+
+        except Exception as exc:
+            logger.error("Interactive payment flow error: %s", exc, exc_info=True)
+            return None
+
+    def _get_session_email(self, session_id: str | None) -> Optional[str]:
+        """Extract user email from session data."""
+        if not session_id:
+            return None
+        try:
+            from auth.context import get_session_data
+            from auth.types import SessionKey
+
+            return get_session_data(
+                session_id, SessionKey.USER_EMAIL, default=None
+            )
+        except Exception:
+            return None

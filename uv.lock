@@ -1126,6 +1126,7 @@ dependencies = [
     { name = "mjml" },
     { name = "numpy" },
     { name = "objgraph" },
+    { name = "pillow" },
     { name = "psutil" },
     { name = "py-key-value-aio", extra = ["redis"] },
     { name = "pydantic" },
@@ -1133,6 +1134,7 @@ dependencies = [
     { name = "python-card-framework" },
     { name = "python-dotenv" },
     { name = "qdrant-client" },
+    { name = "qrcode" },
     { name = "rich" },
     { name = "rustworkx" },
     { name = "x402", extra = ["evm", "httpx"] },
@@ -1175,6 +1177,7 @@ requires-dist = [
     { name = "mjml", specifier = ">=0.12.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "objgraph", specifier = ">=3.6.2" },
+    { name = "pillow", specifier = ">=11.3.0" },
     { name = "psutil", specifier = ">=7.2.2" },
     { name = "py-key-value-aio", extras = ["redis"], specifier = ">=0.4.4" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1185,6 +1188,7 @@ requires-dist = [
     { name = "python-card-framework", specifier = ">=2.2.5" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "qdrant-client", specifier = ">=1.17.0" },
+    { name = "qrcode", specifier = ">=8.2" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "rustworkx", specifier = ">=0.15.0" },
@@ -2790,6 +2794,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/20/fb/c9c4cecf6e7fdff2dbaeee0de40e93fe495379eb5fe2775b184ea45315da/qdrant_client-1.17.0.tar.gz", hash = "sha256:47eb033edb9be33a4babb4d87b0d8d5eaf03d52112dca0218db7f2030bf41ba9", size = 344839, upload-time = "2026-02-19T16:03:17.069Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/15/dfadbc9d8c9872e8ac45fa96f5099bb2855f23426bfea1bbcdc85e64ef6e/qdrant_client-1.17.0-py3-none-any.whl", hash = "sha256:f5b452c68c42b3580d3d266446fb00d3c6e3aae89c916e16585b3c704e108438", size = 390381, upload-time = "2026-02-19T16:03:15.486Z" },
+]
+
+[[package]]
+name = "qrcode"
+version = "8.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/b2/7fc2931bfae0af02d5f53b174e9cf701adbb35f39d69c2af63d4a39f81a9/qrcode-8.2.tar.gz", hash = "sha256:35c3f2a4172b33136ab9f6b3ef1c00260dd2f66f858f24d88418a015f446506c", size = 43317, upload-time = "2025-05-01T15:44:24.726Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dd/b8/d2d6d731733f51684bbf76bf34dab3b70a9148e8f2cef2bb544fccec681a/qrcode-8.2-py3-none-any.whl", hash = "sha256:16e64e0716c14960108e85d853062c9e8bba5ca8252c0b4d0231b9df4060ff4f", size = 45986, upload-time = "2025-05-01T15:44:22.781Z" },
 ]
 
 [[package]]
