@@ -429,32 +429,32 @@ class AuthMiddleware(Middleware):
                             f"🔑 Registered API key owned account (session-scoped): {effective_email}"
                         )
                     elif effective_email not in owned_accounts:
-                        # Fresh session after reconnect: if credentials exist on
-                        # disk for this email, auto-register as owned so the user
-                        # isn't locked out of their own credentials.
+                        # Auto-register if credentials exist on disk for this
+                        # email — supports multi-account sessions where the same
+                        # API key user has encrypted envelopes for multiple
+                        # Google accounts.
                         _auto_registered = False
-                        if not owned_accounts:
-                            try:
-                                _safe = effective_email.replace("@", "_at_").replace(".", "_")
-                                _creds_dir = Path(settings.credentials_dir)
-                                if (
-                                    (_creds_dir / f"{_safe}_credentials.json").exists()
-                                    or (_creds_dir / f"{_safe}_credentials.enc").exists()
-                                ):
-                                    owned_accounts.add(effective_email)
-                                    if session_id:
-                                        store_session_data(
-                                            session_id,
-                                            SessionKey.API_KEY_OWNED_ACCOUNTS,
-                                            list(owned_accounts),
-                                        )
-                                    logger.info(
-                                        f"🔑 Auto-registered {effective_email} in fresh session "
-                                        f"(credentials exist on disk)"
+                        try:
+                            _safe = effective_email.replace("@", "_at_").replace(".", "_")
+                            _creds_dir = Path(settings.credentials_dir)
+                            if (
+                                (_creds_dir / f"{_safe}_credentials.json").exists()
+                                or (_creds_dir / f"{_safe}_credentials.enc").exists()
+                            ):
+                                owned_accounts.add(effective_email)
+                                if session_id:
+                                    store_session_data(
+                                        session_id,
+                                        SessionKey.API_KEY_OWNED_ACCOUNTS,
+                                        list(owned_accounts),
                                     )
-                                    _auto_registered = True
-                            except Exception as e:
-                                logger.debug(f"Credential existence check failed: {e}")
+                                logger.info(
+                                    f"🔑 Auto-registered {effective_email} "
+                                    f"(credentials exist on disk)"
+                                )
+                                _auto_registered = True
+                        except Exception as e:
+                            logger.debug(f"Credential existence check failed: {e}")
 
                         if not _auto_registered:
                             from .audit import log_security_event
