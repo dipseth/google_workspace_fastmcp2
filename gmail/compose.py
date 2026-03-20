@@ -484,13 +484,71 @@ async def _filter_recipients_allowed_by_groups(
     return allowed_recipients
 
 
+def _maybe_append_feedback_blocks(
+    email_spec: EmailSpec,
+    email_id: Optional[str] = None,
+) -> EmailSpec:
+    """Append feedback blocks to an EmailSpec if email feedback is enabled.
+
+    Checks ``ENABLE_EMAIL_FEEDBACK`` env var (default: ``false``).
+    Uses ``settings.feedback_base_url`` for redirect URL generation —
+    the same base URL that the card feedback system uses (``FEEDBACK_BASE_URL``
+    env var, falling back to ``settings.base_url``).
+
+    Args:
+        email_spec: The email spec to augment.
+        email_id: Unique identifier for the email (for URL signing).
+            If None, a random ID is generated.
+
+    Returns:
+        The same EmailSpec with feedback blocks appended (if enabled),
+        or unmodified if disabled.
+    """
+    import os
+
+    if os.getenv("ENABLE_EMAIL_FEEDBACK", "false").lower() != "true":
+        return email_spec
+
+    # Reuse the same feedback_base_url as card feedback
+    # (FEEDBACK_BASE_URL env var → settings.base_url fallback)
+    base_url = settings.feedback_base_url
+    if not base_url:
+        logger.debug("No feedback_base_url configured; skipping feedback blocks")
+        return email_spec
+
+    if not email_id:
+        import secrets
+
+        email_id = secrets.token_urlsafe(16)
+
+    try:
+        from gmail.email_feedback.dynamic import get_email_feedback_builder
+
+        builder = get_email_feedback_builder()
+        feedback_blocks = builder.build_feedback_blocks(
+            email_id=email_id,
+            base_url=base_url,
+            feedback_type="content",
+            layout="with_divider",
+        )
+        email_spec.blocks.extend(feedback_blocks)
+    except Exception as e:
+        logger.warning(f"Could not add email feedback blocks: {e}")
+
+    return email_spec
+
+
 def _render_email_spec(
     email_spec: Union[dict, EmailSpec],
+    email_id: Optional[str] = None,
 ) -> tuple:
     """Render an EmailSpec to (subject, html_body).
 
+    Optionally appends feedback blocks if ``ENABLE_EMAIL_FEEDBACK=true``.
+
     Args:
         email_spec: EmailSpec object or dict with EmailSpec fields
+        email_id: Optional email ID for feedback URL signing.
 
     Returns:
         (subject, html_body) tuple
@@ -500,6 +558,9 @@ def _render_email_spec(
     """
     if isinstance(email_spec, dict):
         email_spec = EmailSpec(**email_spec)
+
+    # Optionally append feedback blocks before rendering
+    email_spec = _maybe_append_feedback_blocks(email_spec, email_id)
 
     result = email_spec.render()
     if not result.success:

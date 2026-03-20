@@ -644,7 +644,12 @@ class InstancePatternMixin:
         return pattern.pattern_id if stored else None
 
     def _store_pattern_to_qdrant(self, pattern: InstancePattern) -> bool:
-        """Store pattern to Qdrant collection."""
+        """Store pattern to Qdrant collection.
+
+        Uses named vectors (``relationships`` for MiniLM 384d) to match
+        the multi-vector schema used by the module wrapper collections.
+        Falls back to unnamed vector if the collection doesn't use named vectors.
+        """
         client = getattr(self, "client", None)
         collection_name = getattr(self, "collection_name", None)
 
@@ -653,7 +658,7 @@ class InstancePatternMixin:
             return True  # Still return True - pattern exists in memory
 
         try:
-            # Get embedder
+            # Get embedder (MiniLM — produces relationships-dimension vectors)
             embedder = getattr(self, "embedder", None)
             if not embedder:
                 logger.warning("No embedder available for pattern storage")
@@ -670,14 +675,38 @@ class InstancePatternMixin:
                 logger.warning(f"Failed to embed pattern: {e}")
                 return False
 
-            # Create point
+            # Detect whether the collection uses named vectors
+            # by checking if the wrapper has a known vector name attribute
+            vector_name = None
+            try:
+                info = client.get_collection(collection_name)
+                config = info.config.params.vectors
+                # Named vectors: config is a dict-like mapping
+                if hasattr(config, "keys") or isinstance(config, dict):
+                    # Prefer "relationships" (MiniLM), fall back to first name
+                    names = list(config.keys()) if hasattr(config, "keys") else []
+                    if "relationships" in names:
+                        vector_name = "relationships"
+                    elif names:
+                        vector_name = names[0]
+            except Exception:
+                pass  # Fall back to unnamed vector
+
+            # Create point with named or unnamed vector
             from qdrant_client.models import PointStruct
 
-            point = PointStruct(
-                id=pattern.pattern_id,
-                vector=vectors,
-                payload=pattern.to_payload(),
-            )
+            if vector_name:
+                point = PointStruct(
+                    id=pattern.pattern_id,
+                    vector={vector_name: vectors},
+                    payload=pattern.to_payload(),
+                )
+            else:
+                point = PointStruct(
+                    id=pattern.pattern_id,
+                    vector=vectors,
+                    payload=pattern.to_payload(),
+                )
 
             # Upsert
             client.upsert(
