@@ -5,11 +5,6 @@ This module provides a centralized registry for all Google API scopes used acros
 the FastMCP2 system, eliminating the previous fragmentation across 7+ files.
 """
 
-import logging
-
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 from dataclasses import dataclass
 
 from typing_extensions import Any, Dict, List, Optional
@@ -968,7 +963,7 @@ class ServiceScopeManager:
             service_name: Name of the Google service
         """
         self.service_name = service_name
-        self.logger = logging.getLogger(f"{__name__}.{service_name}")
+        self.logger = setup_logger()
 
         if service_name not in ScopeRegistry.GOOGLE_API_SCOPES:
             available_services = list(ScopeRegistry.GOOGLE_API_SCOPES.keys())

@@ -14,7 +14,6 @@ from adapters.module_wrapper.types import ComponentName, JsonDict
 # KEY CONVERSION UTILITIES
 # =============================================================================
 
-
 def get_json_key(component_name: ComponentName) -> str:
     """Get camelCase JSON key from component name.
 
@@ -35,7 +34,6 @@ def get_json_key(component_name: ComponentName) -> str:
     if not component_name:
         return ""
     return component_name[0].lower() + component_name[1:]
-
 
 # Mapping from JSON keys to component names for reverse lookup
 _JSON_KEY_TO_COMPONENT = {
@@ -58,7 +56,6 @@ _JSON_KEY_TO_COMPONENT = {
     "chip": "Chip",
 }
 
-
 def json_key_to_component_name(json_key: str) -> ComponentName:
     """Convert JSON key to component name.
 
@@ -75,7 +72,6 @@ def json_key_to_component_name(json_key: str) -> ComponentName:
         "ButtonList"
     """
     return _JSON_KEY_TO_COMPONENT.get(json_key, json_key.title().replace("_", ""))
-
 
 def convert_to_camel_case(data: Any) -> Any:
     """Convert snake_case keys to camelCase for Google Chat API.
@@ -115,7 +111,6 @@ def convert_to_camel_case(data: Any) -> Any:
     else:
         return data
 
-
 # JSON keys for components that are array items (should NOT have wrapper key)
 # When these components appear as children of a container, they should be unwrapped
 _ARRAY_ITEM_JSON_KEYS = {
@@ -125,7 +120,6 @@ _ARRAY_ITEM_JSON_KEYS = {
     "button",  # Items in ButtonList.buttons
     "chip",  # Items in ChipList.chips
 }
-
 
 def unwrap_array_item(item: JsonDict) -> JsonDict:
     """
@@ -159,7 +153,6 @@ def unwrap_array_item(item: JsonDict) -> JsonDict:
 
     return item
 
-
 def unwrap_array_items(items: List[JsonDict]) -> List[JsonDict]:
     """
     Unwrap multiple array items.
@@ -171,7 +164,6 @@ def unwrap_array_items(items: List[JsonDict]) -> List[JsonDict]:
         List with array items unwrapped
     """
     return [unwrap_array_item(item) for item in items]
-
 
 def should_unwrap_children(container: ComponentName, children_field: str) -> bool:
     """
@@ -195,7 +187,6 @@ def should_unwrap_children(container: ComponentName, children_field: str) -> boo
         "chips",  # ChipList -> Chip[]
     }
     return children_field in array_fields
-
 
 def prepare_children_for_container(
     container: ComponentName,
@@ -225,17 +216,15 @@ def prepare_children_for_container(
         return unwrap_array_items(children)
     return children
 
-
 # =============================================================================
 # ICON BUILDING
 # =============================================================================
 
-import logging
+from config.enhanced_logging import setup_logger
 
 from adapters.module_wrapper.strict import warn_strict
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 def build_material_icon(
     icon_name: str,
@@ -296,7 +285,6 @@ def build_material_icon(
             result["materialIcon"]["weight"] = weight
         return result
 
-
 def build_start_icon(icon_name: str) -> JsonDict:
     """Build a startIcon dict for decoratedText using materialIcon.
 
@@ -312,13 +300,11 @@ def build_start_icon(icon_name: str) -> JsonDict:
     """
     return build_material_icon(icon_name)
 
-
 # =============================================================================
 # SPECIALIZED COMPONENT BUILDERS (via wrapper)
 # =============================================================================
 # These builders handle components with special requirements (enums, nested objects)
 # They take wrapper as parameter for proper component class access.
-
 
 def build_button_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
     """Build a Button using wrapper component classes.
@@ -393,7 +379,6 @@ def build_button_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
 
     return None
 
-
 def build_icon_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
     """Build an Icon using wrapper component classes.
 
@@ -439,7 +424,6 @@ def build_icon_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
 
     return None
 
-
 def build_switch_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
     """Build a SwitchControl using wrapper component classes.
 
@@ -470,7 +454,6 @@ def build_switch_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
         logger.debug(f"Failed to create SwitchControl: {e}")
 
     return None
-
 
 def build_onclick_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
     """Build an OnClick using wrapper component classes.
@@ -509,7 +492,6 @@ def build_onclick_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
         logger.debug(f"Failed to create OnClick: {e}")
 
     return None
-
 
 __all__ = [
     # Key conversion utilities

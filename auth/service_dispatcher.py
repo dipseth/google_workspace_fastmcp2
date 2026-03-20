@@ -5,11 +5,6 @@ This module provides an enhanced service dispatcher that uses metadata-driven ro
 with confidence scoring and intelligent fallbacks.
 """
 
-import logging
-
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP
@@ -90,7 +85,7 @@ class EnhancedServiceDispatcher:
         self.service_router = ServiceRouter(mcp_server)
         self.categorizer = ServiceCategorizer(mcp_server)
         self.metadata_handler = MCPMetadataHandler(mcp_server)
-        self.logger = logging.getLogger(f"{__name__}.EnhancedServiceDispatcher")
+        self.logger = setup_logger()
 
         # Service instance cache
         self._service_instances = {}

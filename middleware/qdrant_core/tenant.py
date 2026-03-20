@@ -9,17 +9,15 @@ Two-layer defence:
 2. Qdrant JWT RBAC with payload-filtered access (opt-in via config).
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 import time
 from typing import Optional
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # ---------------------------------------------------------------------------
 # Application-level tenant filter helpers
 # ---------------------------------------------------------------------------
-
 
 def build_tenant_filter(user_email: str):
     """Return a Qdrant ``Filter`` with a ``must`` condition on ``user_email``.
@@ -40,7 +38,6 @@ def build_tenant_filter(user_email: str):
             )
         ]
     )
-
 
 def merge_tenant_filter(existing_filter, user_email: str):
     """Merge the mandatory tenant filter into an existing Qdrant filter.
@@ -78,7 +75,6 @@ def merge_tenant_filter(existing_filter, user_email: str):
         min_should=getattr(existing_filter, "min_should", None),
     )
 
-
 def verify_point_ownership(point_payload: dict, user_email: str) -> bool:
     """Check whether a retrieved point belongs to *user_email*.
 
@@ -95,11 +91,9 @@ def verify_point_ownership(point_payload: dict, user_email: str) -> bool:
     stored = (point_payload or {}).get("user_email", "")
     return stored.lower().strip() == user_email.lower().strip()
 
-
 # ---------------------------------------------------------------------------
 # Qdrant JWT RBAC (Layer 2 — opt-in)
 # ---------------------------------------------------------------------------
-
 
 def generate_tenant_jwt(
     user_email: str,

@@ -5,17 +5,22 @@ Handles parsing of Google Docs structure to identify line positions
 and character indices for targeted editing operations.
 """
 
-import logging
 from typing import Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 
 class DocumentLine:
     """Represents a single line in a Google Doc with its position metadata."""
 
     def __init__(
-        self, line_number: int, start_index: int, end_index: int, content: str
+        self,
+        line_number: int,
+        start_index: int,
+        end_index: int,
+        content: str,
     ):
         self.line_number = line_number
         self.start_index = start_index
@@ -70,7 +75,9 @@ def parse_document_lines(doc_data: Dict) -> List[DocumentLine]:
                     if (
                         line_text or i < len(text_lines) - 1
                     ):  # Include empty lines except trailing
-                        line_end = current_pos + len(line_text) + 1  # +1 for newline
+                        line_end = (
+                            current_pos + len(line_text) + 1
+                        )  # +1 for newline
 
                         lines.append(
                             DocumentLine(
@@ -83,11 +90,15 @@ def parse_document_lines(doc_data: Dict) -> List[DocumentLine]:
                         current_line_number += 1
                         current_pos = line_end
 
-    logger.info(f"[parse_document_lines] Parsed {len(lines)} lines from document")
+    logger.info(
+        f"[parse_document_lines] Parsed {len(lines)} lines from document"
+    )
     return lines
 
 
-def find_line_position(lines: List[DocumentLine], target_line: int) -> Optional[int]:
+def find_line_position(
+    lines: List[DocumentLine], target_line: int
+) -> Optional[int]:
     """
     Find the character index for a specific line number.
 
@@ -102,7 +113,9 @@ def find_line_position(lines: List[DocumentLine], target_line: int) -> Optional[
         if line.line_number == target_line:
             return line.start_index
 
-    logger.warning(f"[find_line_position] Line {target_line} not found in document")
+    logger.warning(
+        f"[find_line_position] Line {target_line} not found in document"
+    )
     return None
 
 

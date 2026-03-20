@@ -9,7 +9,6 @@ Usage:
     from gchat.wrapper_api import get_gchat_symbols, parse_dsl
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -17,13 +16,11 @@ from pydantic import BaseModel, Field
 import gchat.wrapper_setup as _setup
 from config.enhanced_logging import setup_logger
 
-logger = setup_logger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # PYDANTIC RESULT TYPES
 # =============================================================================
-
 
 class CardDSLResult(BaseModel):
     """Structured card DSL generation result.
@@ -47,11 +44,9 @@ class CardDSLResult(BaseModel):
         ),
     )
 
-
 # =============================================================================
 # SYMBOL GENERATION
 # =============================================================================
-
 
 def get_gchat_symbols(force_regenerate: bool = False) -> Dict[str, str]:
     """
@@ -71,7 +66,6 @@ def get_gchat_symbols(force_regenerate: bool = False) -> Dict[str, str]:
             _setup._symbols = _generate_gchat_symbols()
 
     return _setup._symbols
-
 
 def _generate_gchat_symbols() -> Dict[str, str]:
     """Load symbols from the ModuleWrapper (Single Source of Truth).
@@ -151,7 +145,6 @@ def _generate_gchat_symbols() -> Dict[str, str]:
     logger.info(f"✅ Generated {len(symbols)} symbols (fallback)")
     return symbols
 
-
 def get_gchat_symbol_table_text() -> str:
     """
     Get a formatted symbol table for LLM instructions.
@@ -175,7 +168,6 @@ def get_gchat_symbol_table_text() -> str:
         lines.append(f"**{letter}:** {', '.join(mappings)}")
 
     return "\n".join(lines)
-
 
 def configure_structure_dsl_symbols():
     """
@@ -215,11 +207,9 @@ def configure_structure_dsl_symbols():
 
     logger.info(f"🔣 Configured structure_dsl with {len(symbols)} symbols")
 
-
 # =============================================================================
 # CONVENIENCE SEARCH FUNCTIONS
 # =============================================================================
-
 
 def search_components(
     query: str,
@@ -248,7 +238,6 @@ def search_components(
     else:  # hybrid
         return wrapper.hybrid_search(query, limit=limit)
 
-
 def find_component_by_symbol(symbol: str) -> Optional[Dict]:
     """
     Find a component by its symbol.
@@ -275,7 +264,6 @@ def find_component_by_symbol(symbol: str) -> Optional[Dict]:
     )
 
     return results[0] if results else None
-
 
 def search_patterns_for_card(
     description: str,
@@ -365,11 +353,9 @@ def search_patterns_for_card(
 
     return result
 
-
 # =============================================================================
 # AUTO-GENERATED DSL DOCUMENTATION
 # =============================================================================
-
 
 def get_dsl_documentation(
     include_examples: bool = True, include_hierarchy: bool = True
@@ -508,7 +494,6 @@ def get_dsl_documentation(
 
     return "\n".join(lines)
 
-
 def get_dsl_field_description() -> str:
     """
     Get a compact field description for the structure_dsl parameter.
@@ -542,7 +527,6 @@ def get_dsl_field_description() -> str:
         f"Symbols: {', '.join(key_mappings)}. "
         f"Read skill://gchat-cards/ for full reference."
     )
-
 
 def get_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
     """
@@ -651,7 +635,6 @@ def get_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
 
     return all_examples[:max_examples]
 
-
 def get_hierarchy_tree_text(
     root_components: Optional[List[str]] = None,
     max_depth: int = 3,
@@ -683,7 +666,6 @@ def get_hierarchy_tree_text(
         include_symbols=include_symbols,
     )
 
-
 def get_full_hierarchy_documentation(include_tree: bool = True) -> str:
     """
     Generate complete hierarchy documentation with symbols and tree visualization.
@@ -703,7 +685,6 @@ def get_full_hierarchy_documentation(include_tree: bool = True) -> str:
         include_symbols=True,
         include_examples=True,
     )
-
 
 def get_component_relationships_for_dsl() -> Dict[str, List[str]]:
     """
@@ -781,7 +762,6 @@ def get_component_relationships_for_dsl() -> Dict[str, List[str]]:
         logger.warning(f"Failed to load relationships from Qdrant: {e}")
         return _build_relationships_from_introspection(widget_subclasses)
 
-
 def _get_widget_subclasses() -> List[str]:
     """Get all Widget subclasses via Python introspection."""
     try:
@@ -817,7 +797,6 @@ def _get_widget_subclasses() -> List[str]:
             "UpdatedWidget",
         ]
 
-
 def _build_relationships_from_introspection(
     widget_subclasses: List[str],
 ) -> Dict[str, List[str]]:
@@ -850,11 +829,9 @@ def _build_relationships_from_introspection(
 
     return base_relationships
 
-
 # =============================================================================
 # DSL PARSING HELPERS (using refactored module_wrapper.dsl_parser)
 # =============================================================================
-
 
 def get_dsl_parser():
     """
@@ -881,7 +858,6 @@ def get_dsl_parser():
         relationships=relationships,
     )
 
-
 def parse_dsl(dsl_string: str):
     """
     Parse a DSL string using the refactored DSL parser.
@@ -906,7 +882,6 @@ def parse_dsl(dsl_string: str):
     parser = get_dsl_parser()
     return parser.parse(dsl_string)
 
-
 def extract_dsl_from_description(description: str) -> Optional[str]:
     """
     Extract DSL notation from a description string.
@@ -930,7 +905,6 @@ def extract_dsl_from_description(description: str) -> Optional[str]:
 
     parser = get_dsl_parser()
     return parser.extract_dsl_from_text(description)
-
 
 def dsl_to_qdrant_queries(
     dsl_string: str, collection_name: Optional[str] = None
@@ -970,7 +944,6 @@ def dsl_to_qdrant_queries(
 
     return [q.to_dict() for q in queries]
 
-
 def validate_dsl(dsl_string: str) -> tuple:
     """
     Validate a DSL structure against the component hierarchy.
@@ -990,7 +963,6 @@ def validate_dsl(dsl_string: str) -> tuple:
     result = parser.parse(dsl_string)
     return result.is_valid, result.issues
 
-
 def expand_dsl(dsl_string: str) -> str:
     """
     Expand DSL symbols to full component names.
@@ -1003,7 +975,6 @@ def expand_dsl(dsl_string: str) -> str:
     """
     parser = get_dsl_parser()
     return parser.expand_dsl(dsl_string)
-
 
 def compact_dsl(component_notation: str) -> str:
     """
@@ -1018,11 +989,9 @@ def compact_dsl(component_notation: str) -> str:
     parser = get_dsl_parser()
     return parser.compact_to_dsl(component_notation)
 
-
 # =============================================================================
 # CONTENT DSL HELPERS
 # =============================================================================
-
 
 def parse_content_dsl(content_text: str):
     """
@@ -1063,7 +1032,6 @@ def parse_content_dsl(content_text: str):
     parser = get_dsl_parser()
     return parser.parse_content_dsl(content_text)
 
-
 def content_to_jinja(content_text: str) -> List[str]:
     """
     Convert Content DSL directly to Jinja expressions.
@@ -1084,7 +1052,6 @@ def content_to_jinja(content_text: str) -> List[str]:
     parser = get_dsl_parser()
     result = parser.parse_content_dsl(content_text)
     return result.to_jinja_list()
-
 
 def content_to_params(content_text: str) -> List[Dict]:
     """
@@ -1118,7 +1085,6 @@ def content_to_params(content_text: str) -> List[Dict]:
     parser = get_dsl_parser()
     result = parser.parse_content_dsl(content_text)
     return parser.content_to_component_params(result)
-
 
 def get_available_style_modifiers() -> Dict[str, str]:
     """

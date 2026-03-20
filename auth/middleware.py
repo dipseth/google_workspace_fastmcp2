@@ -1,8 +1,5 @@
 """Authentication middleware for session management and service injection."""
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import base64
 import json
 import os
@@ -41,7 +38,6 @@ from .types import AuthProvenance, SessionKey
 
 logger = setup_logger()
 
-
 class CredentialStorageMode(Enum):
     """Credential storage modes."""
 
@@ -49,7 +45,6 @@ class CredentialStorageMode(Enum):
     FILE_ENCRYPTED = "file_encrypted"  # New: Encrypted JSON files
     MEMORY_ONLY = "memory_only"  # New: In-memory only (no persistence)
     MEMORY_WITH_BACKUP = "memory_with_backup"  # New: Memory + encrypted backup
-
 
 class AuthMiddleware(Middleware):
     """Enhanced middleware for secure credential management, session context, service injection, and FastMCP GoogleProvider integration."""
@@ -3125,7 +3120,6 @@ class AuthMiddleware(Middleware):
             logger.debug(f"Could not load OAuth authentication data: {e}")
             return None
 
-
 def setup_oauth_coordination(mcp, google_auth_provider):
     """
     Setup OAuth coordination between modern GoogleProvider and legacy system.
@@ -3203,7 +3197,6 @@ def setup_oauth_coordination(mcp, google_auth_provider):
     else:
         logger.info("🔄 No GoogleProvider - using full legacy OAuth system")
 
-
 def log_oauth_transition_status(google_auth_provider):
     """Log the current OAuth transition status."""
 
@@ -3219,7 +3212,6 @@ def log_oauth_transition_status(google_auth_provider):
         logger.info("  🔧 Architecture: Custom OAuth proxy and endpoints")
         logger.info("  📁 Credentials: File-based storage")
         logger.info("  📋 Scope Management: Manual ScopeRegistry integration")
-
 
 def create_enhanced_auth_middleware(
     storage_mode: CredentialStorageMode = CredentialStorageMode.FILE_PLAINTEXT,

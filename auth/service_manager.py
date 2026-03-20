@@ -6,9 +6,6 @@ import os
 import google_auth_httplib2
 import httplib2
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 from datetime import datetime, timedelta
 
 from google.auth.exceptions import RefreshError
@@ -27,7 +24,6 @@ _DEFAULT_API_TIMEOUT = int(os.environ.get("GOOGLE_API_TIMEOUT", "30"))
 # Same env var as service_helpers.execute_google_api() to keep them in sync.
 _DEFAULT_NUM_RETRIES = int(os.environ.get("GOOGLE_API_NUM_RETRIES", "3"))
 
-
 class RetryHttpRequest(HttpRequest):
     """HttpRequest subclass that defaults num_retries for every .execute() call.
 
@@ -43,7 +39,6 @@ class RetryHttpRequest(HttpRequest):
         if num_retries is None:
             num_retries = self._default_num_retries
         return super().execute(http=http, num_retries=num_retries)
-
 
 def _create_authorized_http(
     credentials: "Credentials", timeout: Optional[int] = None
@@ -61,7 +56,6 @@ def _create_authorized_http(
     effective_timeout = timeout if timeout is not None else _DEFAULT_API_TIMEOUT
     http = httplib2.Http(timeout=effective_timeout)
     return google_auth_httplib2.AuthorizedHttp(credentials, http=http)
-
 
 # Import compatibility shim for OAuth scope management
 try:
@@ -135,7 +129,6 @@ from .scope_registry import ScopeRegistry
 # Legacy fallback for compatibility - now redirects to scope_registry
 _FALLBACK_SCOPE_GROUPS = {}  # Empty - now uses ScopeRegistry
 
-
 def _get_scope_groups() -> Dict[str, str]:
     """
     Get scope groups dictionary from centralized registry.
@@ -157,7 +150,6 @@ def _get_scope_groups() -> Dict[str, str]:
             return _FALLBACK_SCOPE_GROUPS
     else:
         return _FALLBACK_SCOPE_GROUPS
-
 
 # Create a dynamic SCOPE_GROUPS that uses the compatibility shim
 # This maintains the same interface for existing code
@@ -185,7 +177,6 @@ class ScopeGroupsProxy:
     def copy(self) -> Dict[str, str]:
         return _get_scope_groups().copy()
 
-
 # Create the proxy instance that behaves like the original SCOPE_GROUPS dictionary
 SCOPE_GROUPS = ScopeGroupsProxy()
 
@@ -193,12 +184,10 @@ SCOPE_GROUPS = ScopeGroupsProxy()
 _service_cache: Dict[str, tuple[Any, datetime, str]] = {}
 _cache_ttl = timedelta(minutes=30)  # Cache services for 30 minutes
 
-
 class GoogleServiceError(Exception):
     """Custom exception for Google service errors."""
 
     pass
-
 
 def _get_cache_key(
     user_email: str, service_name: str, version: str, scopes: List[str]
@@ -207,11 +196,9 @@ def _get_cache_key(
     sorted_scopes = sorted(scopes)
     return f"{user_email}:{service_name}:{version}:{':'.join(sorted_scopes)}"
 
-
 def _is_cache_valid(cached_time: datetime) -> bool:
     """Check if cached service is still valid."""
     return datetime.now() - cached_time < _cache_ttl
-
 
 def _get_cached_service(cache_key: str) -> Optional[tuple[Any, str]]:
     """Retrieve cached service if valid, with token freshness validation."""
@@ -247,12 +234,10 @@ def _get_cached_service(cache_key: str) -> Optional[tuple[Any, str]]:
 
     return None
 
-
 def _cache_service(cache_key: str, service: Any, user_email: str) -> None:
     """Cache a service instance."""
     _service_cache[cache_key] = (service, datetime.now(), user_email)
     logger.debug(f"Cached service for key: {cache_key}")
-
 
 def _resolve_scopes(scopes: Union[str, List[str]]) -> List[str]:
     """Resolve scope names to actual scope URLs."""
@@ -285,7 +270,6 @@ def _resolve_scopes(scopes: Union[str, List[str]]) -> List[str]:
     logger.debug(f"OAUTH_SCOPE_DEBUG: Final resolved scopes: {resolved}")
     return resolved
 
-
 def _validate_service_scopes(
     credentials: Credentials, required_scopes: List[str]
 ) -> bool:
@@ -308,7 +292,6 @@ def _validate_service_scopes(
         return False
 
     return True
-
 
 async def get_google_service(
     user_email: str,
@@ -464,7 +447,6 @@ async def get_google_service(
         logger.error(f"Failed to create {service_type} service for {user_email}: {e}")
         raise GoogleServiceError(f"Failed to create {service_type} service: {e}")
 
-
 def _handle_token_refresh_error(
     error: RefreshError, user_email: str, service_type: str
 ) -> str:
@@ -515,7 +497,6 @@ def _handle_token_refresh_error(
             f"Please try running `start_google_auth` with your email and the appropriate service name to reauthenticate."
         )
 
-
 def clear_service_cache(user_email: Optional[str] = None) -> int:
     """
     Clear service cache entries.
@@ -545,7 +526,6 @@ def clear_service_cache(user_email: Optional[str] = None) -> int:
     )
     return len(keys_to_remove)
 
-
 def get_cache_stats() -> Dict[str, Any]:
     """Get service cache statistics."""
     now = datetime.now()
@@ -565,16 +545,13 @@ def get_cache_stats() -> Dict[str, Any]:
         "cache_ttl_minutes": _cache_ttl.total_seconds() / 60,
     }
 
-
 def get_available_services() -> Dict[str, Dict[str, str]]:
     """Get list of available Google services and their configurations."""
     return SERVICE_CONFIGS.copy()
 
-
 def get_available_scope_groups() -> Dict[str, str]:
     """Get list of available scope groups and their URLs."""
     return SCOPE_GROUPS.copy()
-
 
 # Maintain backward compatibility - keep the original get_drive_service function
 # but implement it using the new generic system

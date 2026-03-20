@@ -14,7 +14,7 @@ Idempotent — safe to call multiple times.  No-op when Langfuse is not configur
 from __future__ import annotations
 
 import base64
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Optional
 
 from opentelemetry import trace
@@ -23,14 +23,13 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 _provider: Optional[TracerProvider] = None
 _tracer: Optional[trace.Tracer] = None
 
 SERVICE_NAME = "google-workspace-mcp"
 TRACER_NAME = "mcp.sampling"
-
 
 def configure_otel_for_langfuse() -> bool:
     """Create and register a global TracerProvider exporting to Langfuse OTLP.
@@ -87,14 +86,12 @@ def configure_otel_for_langfuse() -> bool:
         logger.warning("Failed to configure OTEL TracerProvider: %s", e)
         return False
 
-
 def get_mcp_tracer() -> trace.Tracer:
     """Return the MCP tracer, creating a no-op tracer if not configured."""
     global _tracer
     if _tracer is not None:
         return _tracer
     return trace.get_tracer(TRACER_NAME)
-
 
 def shutdown_otel() -> None:
     """Flush pending spans and shut down the TracerProvider."""

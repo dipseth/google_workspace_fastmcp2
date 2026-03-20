@@ -24,13 +24,12 @@ Usage:
     text = validator.get_enriched_relationship_text("Section")
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 @dataclass
 class ValidationResult:
@@ -44,7 +43,6 @@ class ValidationResult:
         default_factory=dict
     )  # symbol → component name
 
-
 @dataclass
 class ComponentSlot:
     """A slot in a structure that can accept inputs."""
@@ -54,7 +52,6 @@ class ComponentSlot:
     field_name: Optional[str] = None
     accepts_types: List[str] = field(default_factory=list)
     multiplier: int = 1
-
 
 # =============================================================================
 # INPUT TYPE INFERENCE
@@ -115,7 +112,6 @@ NEEDS_WRAPPER = {
     "GridItem": "Grid",  # GridItem needs to be in Grid
     "Column": "Columns",  # Column needs to be in Columns
 }
-
 
 class StructureValidator:
     """
@@ -607,11 +603,9 @@ class StructureValidator:
 
         return structure, inputs
 
-
 # =============================================================================
 # FACTORY FUNCTION
 # =============================================================================
-
 
 def create_validator(wrapper: "ModuleWrapper") -> StructureValidator:
     """

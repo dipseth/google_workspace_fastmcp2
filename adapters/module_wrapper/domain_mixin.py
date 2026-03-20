@@ -13,15 +13,14 @@ Init order: 55 (after InputResolverMixin:52, before CacheMixin)
 import importlib
 import importlib.metadata
 import importlib.util
-import logging
+from config.enhanced_logging import setup_logger
 import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Union
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 @dataclass
 class DomainConfig:
@@ -46,7 +45,6 @@ class DomainConfig:
     def __post_init__(self):
         if not self.domain_label:
             self.domain_label = self.module_name
-
 
 class DomainMixin:
     """

@@ -614,8 +614,6 @@ def generate_service_selection_html(
     state: str, flow_type: str, use_pkce: bool = True, requested_email: str = ""
 ) -> str:
     """Generate the service selection page HTML with authentication method choice."""
-    import logging
-
     from config.settings import settings as _settings
 
     _env_client_id = (
@@ -1334,9 +1332,9 @@ def generate_service_selection_html(
         return html_out
 
     except Exception as e:
-        import logging
+        from config.enhanced_logging import setup_logger
 
-        logging.getLogger(__name__).error(
+        setup_logger().error(
             f"Error generating service selection HTML: {e}"
         )
         return f"""<!DOCTYPE html>

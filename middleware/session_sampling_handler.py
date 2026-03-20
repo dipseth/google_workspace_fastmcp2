@@ -6,7 +6,7 @@ their own LLM provider (model, api_key, api_base), their sampling calls
 are routed through that provider instead of the server default.
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any, Optional
 
 from mcp.types import CreateMessageRequestParams as SamplingParams
@@ -16,8 +16,7 @@ from mcp.types import (
     SamplingMessage,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 class SessionAwareSamplingHandler:
     """Sampling handler that checks per-session config before falling back to default.

@@ -20,7 +20,7 @@ Usage:
     entry = wrapper.get_cached_entry("my_card")
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any, Dict, List, Optional, Type
 
 from adapters.module_wrapper.strict import warn_strict
@@ -34,8 +34,7 @@ from adapters.module_wrapper.types import (
     WrapperGetter,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 class CacheMixin:
     """
@@ -438,7 +437,6 @@ class CacheMixin:
         """Get cache statistics."""
         cache = self._get_component_cache()
         return cache.stats
-
 
 # Import CacheEntry for type hints
 try:

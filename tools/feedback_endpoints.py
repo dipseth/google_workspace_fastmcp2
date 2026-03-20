@@ -4,15 +4,15 @@ This module provides HTTP endpoints for capturing card feedback from users.
 When users click 👍/👎 buttons on cards, they're directed here to record feedback.
 """
 
-import logging
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from fastmcp import FastMCP
 
+from config.enhanced_logging import setup_logger
 from config.settings import settings as _settings
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def setup_feedback_endpoints(mcp: FastMCP):

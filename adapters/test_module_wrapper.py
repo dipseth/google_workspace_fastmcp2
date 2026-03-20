@@ -7,6 +7,8 @@ the 'json' module and performing various operations on it.
 """
 
 import logging
+
+from config.enhanced_logging import setup_logger
 import sys
 import time
 
@@ -17,8 +19,7 @@ from module_wrapper import ModuleWrapper
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 def test_basic_wrapping():
     """Test basic module wrapping and component listing."""
@@ -45,7 +46,6 @@ def test_basic_wrapping():
 
     return wrapper
 
-
 def test_search(wrapper):
     """Test searching for components."""
     logger.info("\n🧪 Testing component search...")
@@ -64,7 +64,6 @@ def test_search(wrapper):
         )
         if result["docstring"]:
             logger.info(f"   {result['docstring'][:100]}...")
-
 
 def test_component_retrieval(wrapper):
     """Test retrieving and using components."""
@@ -87,7 +86,6 @@ def test_component_retrieval(wrapper):
         logger.info(f"Parsed result: {parsed}")
     else:
         logger.error(f"Failed to retrieve {loads_path}")
-
 
 def test_nested_components(wrapper):
     """Test accessing nested components."""
@@ -125,7 +123,6 @@ def test_nested_components(wrapper):
             logger.error(f"Failed to retrieve {encode_path}")
     else:
         logger.error(f"Failed to retrieve {encoder_path}")
-
 
 def test_performance(module_name="json"):
     """Test performance of wrapping and searching."""
@@ -165,7 +162,6 @@ def test_performance(module_name="json"):
 
     return wrapper
 
-
 def main():
     """Main test function."""
     logger.info("🚀 Starting ModuleWrapper tests...")
@@ -196,7 +192,6 @@ def main():
         return 1
 
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

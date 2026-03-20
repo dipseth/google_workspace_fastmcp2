@@ -38,6 +38,12 @@ logger = setup_logger()
 _lifespan_state: Dict[str, Any] = {}
 
 
+def register_litellm_handler(handler: Any) -> None:
+    """Register the LiteLLM sampling handler for cache keepalive access."""
+    _lifespan_state["litellm_handler"] = handler
+    logger.debug("Registered LiteLLM handler for lifespan management")
+
+
 def register_qdrant_middleware(middleware: Any) -> None:
     """
     Register the Qdrant middleware instance created in server.py.
@@ -456,7 +462,9 @@ async def _periodic_memory_cleanup(
 
                 # Clear dashboard cache (in-memory portion)
                 try:
-                    from middleware.dashboard_cache_middleware import clear_dashboard_cache
+                    from middleware.dashboard_cache_middleware import (
+                        clear_dashboard_cache,
+                    )
 
                     evicted_total += clear_dashboard_cache()
                 except Exception as e:
@@ -755,6 +763,57 @@ async def otel_lifespan(server: Any):
                 logger.warning(f"⚠️ OTEL shutdown error: {e}")
 
 
+@lifespan
+async def cache_keepalive_lifespan(server: Any):
+    """Prompt cache keepalive lifecycle.
+
+    Sends periodic sampling calls to keep Anthropic prompt cache warm.
+    Must run after embedding and qdrant lifespans (needs DSL docs available).
+    No-op if disabled or model is not Anthropic.
+    """
+    from config.settings import settings
+
+    if not settings.cache_keepalive_enabled:
+        logger.info("Cache keepalive: disabled")
+        yield {"cache_keepalive_engine": None}
+        return
+
+    try:
+        from middleware.litellm_sampling_handler import is_anthropic_model
+    except ImportError:
+        is_anthropic_model = lambda m: m.startswith("anthropic/")  # noqa: E731
+
+    if not is_anthropic_model(settings.litellm_model):
+        logger.info("Cache keepalive: skipped (model is not Anthropic)")
+        yield {"cache_keepalive_engine": None}
+        return
+
+    try:
+        from middleware.cache_keepalive import (
+            CacheKeepaliveEngine,
+            register_default_modules,
+        )
+
+        engine = CacheKeepaliveEngine(settings=settings)
+        register_default_modules(engine, settings)
+
+        await engine.start()
+        logger.info(
+            "Cache keepalive: started (%d modules, interval=%ds)",
+            len(engine._modules),
+            settings.cache_keepalive_interval_seconds,
+        )
+    except Exception as e:
+        logger.warning("Cache keepalive: failed to start: %s", e)
+        yield {"cache_keepalive_engine": None}
+        return
+
+    try:
+        yield {"cache_keepalive_engine": engine}
+    finally:
+        await engine.stop()
+
+
 # Pre-composed lifespan for the full server lifecycle using FastMCP's | operator
 # Composition order: enter left-to-right, exit right-to-left
 combined_server_lifespan = (
@@ -765,6 +824,7 @@ combined_server_lifespan = (
     | session_state_lifespan
     | cache_middleware_lifespan
     | memory_cleanup_lifespan
+    | cache_keepalive_lifespan  # After cleanup — needs DSL docs available
     | dynamic_instructions_lifespan
 )
 
@@ -778,8 +838,10 @@ __all__ = [
     "session_state_lifespan",
     "cache_middleware_lifespan",
     "memory_cleanup_lifespan",
+    "cache_keepalive_lifespan",
     "dynamic_instructions_lifespan",
     "combined_server_lifespan",
+    "register_litellm_handler",
     "register_profile_middleware",
     "register_template_middleware",
     "get_lifespan_state",

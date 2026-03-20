@@ -10,16 +10,14 @@ RelationshipsMixin._extract_relationships_from_class(), which inspects
 class field type hints for containment relationships.
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # RELATIONSHIP STRATEGY PROTOCOL
 # =============================================================================
-
 
 @runtime_checkable
 class RelationshipStrategy(Protocol):
@@ -47,11 +45,9 @@ class RelationshipStrategy(Protocol):
         """
         ...
 
-
 # =============================================================================
 # STRUCTURAL STRATEGY (wrapper around existing logic)
 # =============================================================================
-
 
 class StructuralRelationshipStrategy:
     """Extracts relationships from class field type hints (containment).
@@ -90,11 +86,9 @@ class StructuralRelationshipStrategy:
         comp_type = comp.component_type if comp else "class"
         return build_compact_relationship_text(component_name, rels, comp_type)
 
-
 # =============================================================================
 # BEHAVIORAL STRATEGY (graph-based)
 # =============================================================================
-
 
 class BehavioralRelationshipStrategy:
     """Extracts relationships from ToolRelationshipGraph co-occurrence patterns.
@@ -197,7 +191,6 @@ class BehavioralRelationshipStrategy:
             user_email=user_email,
             session_id=session_id,
         )
-
 
 __all__ = [
     "RelationshipStrategy",

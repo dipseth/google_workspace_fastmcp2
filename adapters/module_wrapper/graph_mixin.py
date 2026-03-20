@@ -30,7 +30,7 @@ Usage:
 """
 
 import json
-import logging
+from config.enhanced_logging import setup_logger
 from collections import deque
 from typing import Any, Dict, List, Optional, Protocol, Set, Tuple, runtime_checkable
 
@@ -42,15 +42,13 @@ from adapters.module_wrapper.types import (
     SymbolMapping,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # COMPONENT METADATA PROTOCOL
 # =============================================================================
 # Defines the interface for component metadata queries.
 # Any class implementing this protocol can be used as a metadata provider.
-
 
 @runtime_checkable
 class ComponentMetadataProvider(Protocol):
@@ -88,13 +86,11 @@ class ComponentMetadataProvider(Protocol):
         """Check if component is empty (no content params)."""
         ...
 
-
 # Lazy import for Rustworkx
 _rustworkx = None
 
 # Type alias for graph return types
 GraphType = Any  # rx.PyDiGraph at runtime
-
 
 def _get_rustworkx():
     """Lazy load Rustworkx to avoid import overhead."""
@@ -111,7 +107,6 @@ def _get_rustworkx():
             )
             raise
     return _rustworkx
-
 
 class GraphMixin:
     """
@@ -1442,7 +1437,6 @@ class GraphMixin:
     def get_heterogeneous_containers(self) -> Set[str]:
         """Get all registered heterogeneous containers."""
         return self._heterogeneous_containers.copy()
-
 
 # Export for convenience
 __all__ = [

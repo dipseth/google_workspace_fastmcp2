@@ -13,7 +13,7 @@ This module is maintained for backwards compatibility with existing code
 that uses VariationGenerator and related classes directly.
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any, Dict, List, Optional
 
 from adapters.module_wrapper.types import (
@@ -23,7 +23,7 @@ from adapters.module_wrapper.types import (
     RelationshipDict,
 )
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Re-export from instance_pattern_mixin for backwards compatibility
 from adapters.module_wrapper.instance_pattern_mixin import (
@@ -35,7 +35,6 @@ from adapters.module_wrapper.instance_pattern_mixin import (
 from adapters.module_wrapper.instance_pattern_mixin import (
     PatternVariation as Variation,  # Alias for backwards compatibility
 )
-
 
 class VariationGenerator:
     """
@@ -219,13 +218,11 @@ class VariationGenerator:
             "avg_variations_per_family": 0,
         }
 
-
 # =============================================================================
 # CONVENIENCE FUNCTIONS (Backwards Compatibility)
 # =============================================================================
 
 _generator_instance: Optional[VariationGenerator] = None
-
 
 def get_variation_generator() -> VariationGenerator:
     """
@@ -237,7 +234,6 @@ def get_variation_generator() -> VariationGenerator:
     if _generator_instance is None:
         _generator_instance = VariationGenerator()
     return _generator_instance
-
 
 def generate_and_cache_variations(
     pattern: Payload,

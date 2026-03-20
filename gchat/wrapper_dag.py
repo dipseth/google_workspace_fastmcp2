@@ -5,11 +5,9 @@ Self-contained leaf module — all dependencies are lazy imports
 in the function body to avoid circular imports.
 """
 
-import logging
-
 from config.enhanced_logging import setup_logger
 
-logger = setup_logger(__name__)
+logger = setup_logger()
 
 # Diverse structure recipes for DAG warm-start.
 # Each recipe generates a different card structure pattern.
@@ -48,7 +46,6 @@ _DAG_WARMSTART_RECIPES = [
     # Carousel patterns
     {"root": "Carousel", "required": [], "desc": "Carousel of cards"},
 ]
-
 
 def _warm_start_with_dag_patterns(wrapper, count_per_recipe: int = 2) -> int:
     """

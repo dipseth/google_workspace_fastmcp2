@@ -11,18 +11,17 @@ Usage:
     CARD_BUILDER_STRICT=1 uv run python my_script.py
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 import os
 import traceback
 
-logger = logging.getLogger("card_builder.strict")
+logger = setup_logger()
 
 CARD_BUILDER_STRICT: bool = os.environ.get("CARD_BUILDER_STRICT", "").lower() in (
     "1",
     "true",
     "yes",
 )
-
 
 def warn_strict(message: str) -> None:
     """Log a WARNING with traceback when strict mode is enabled."""

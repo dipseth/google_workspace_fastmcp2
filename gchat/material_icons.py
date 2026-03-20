@@ -2238,7 +2238,6 @@ MATERIAL_ICONS: frozenset[str] = frozenset(
     }
 )
 
-
 def is_valid_icon(icon_name: str) -> bool:
     """Check if an icon name is a valid Material Design icon.
 
@@ -2249,7 +2248,6 @@ def is_valid_icon(icon_name: str) -> bool:
         True if the icon name is valid, False otherwise
     """
     return icon_name in MATERIAL_ICONS
-
 
 def get_icons_by_prefix(prefix: str) -> list[str]:
     """Get all icon names that start with a given prefix.
@@ -2262,7 +2260,6 @@ def get_icons_by_prefix(prefix: str) -> list[str]:
     """
     return sorted(icon for icon in MATERIAL_ICONS if icon.startswith(prefix))
 
-
 def get_icons_containing(substring: str) -> list[str]:
     """Get all icon names that contain a given substring.
 
@@ -2274,7 +2271,6 @@ def get_icons_containing(substring: str) -> list[str]:
     """
     return sorted(icon for icon in MATERIAL_ICONS if substring in icon)
 
-
 # Common icon categories for quick reference
 ARROW_ICONS = get_icons_by_prefix("arrow")
 KEYBOARD_ICONS = get_icons_by_prefix("keyboard")
@@ -2285,7 +2281,6 @@ EDIT_ICONS = get_icons_by_prefix("edit")
 DELETE_ICONS = get_icons_by_prefix("delete")
 STAR_ICONS = get_icons_by_prefix("star")
 SETTINGS_ICONS = get_icons_by_prefix("settings")
-
 
 # =============================================================================
 # SEMANTIC ICON MAPPINGS
@@ -2380,7 +2375,6 @@ SEMANTIC_ICONS: dict[str, str] = {
     "secure": "security",
 }
 
-
 def get_semantic_icon(meaning: str) -> str | None:
     """Get the recommended icon for a semantic meaning.
 
@@ -2397,7 +2391,6 @@ def get_semantic_icon(meaning: str) -> str | None:
         "error"
     """
     return SEMANTIC_ICONS.get(meaning.lower())
-
 
 def suggest_icons(query: str, limit: int = 10) -> list[str]:
     """Suggest icon names based on a search query.
@@ -2431,7 +2424,6 @@ def suggest_icons(query: str, limit: int = 10) -> list[str]:
 
     return all_matches[:limit]
 
-
 def resolve_icon_name(icon_name: str, strict: bool = False) -> str:
     """Resolve an icon name: normalize case, try semantic lookup, validate.
 
@@ -2459,9 +2451,9 @@ def resolve_icon_name(icon_name: str, strict: bool = False) -> str:
         >>> resolve_icon_name("check_circle")
         "check_circle"
     """
-    import logging
+    from config.enhanced_logging import setup_logger
 
-    logger = logging.getLogger(__name__)
+    logger = setup_logger()
 
     normalized = icon_name.strip().lower()
 
@@ -2502,7 +2494,6 @@ def resolve_icon_name(icon_name: str, strict: bool = False) -> str:
     )
     return normalized
 
-
 def create_material_icon(icon_name: str, fill: bool = False) -> dict:
     """Create a materialIcon dict for use in Google Chat cards.
 
@@ -2534,7 +2525,6 @@ def create_material_icon(icon_name: str, fill: bool = False) -> dict:
     if fill:
         icon_dict["materialIcon"]["fill"] = True
     return icon_dict
-
 
 def create_icon_widget(
     icon_name: str,
@@ -2579,7 +2569,6 @@ def create_icon_widget(
 
     return widget
 
-
 # =============================================================================
 # COLOR UTILITIES
 # =============================================================================
@@ -2607,7 +2596,6 @@ ICON_COLORS: dict[str, dict[str, float]] = {
     "dark": {"red": 0.26, "green": 0.26, "blue": 0.26, "alpha": 1.0},
 }
 
-
 def hex_to_color(hex_color: str) -> dict[str, float]:
     """Convert a hex color string to Google Chat color dict.
 
@@ -2631,7 +2619,6 @@ def hex_to_color(hex_color: str) -> dict[str, float]:
 
     return {"red": round(r, 3), "green": round(g, 3), "blue": round(b, 3), "alpha": 1.0}
 
-
 def get_icon_color(color_name: str) -> dict[str, float] | None:
     """Get a predefined icon color by name.
 
@@ -2642,7 +2629,6 @@ def get_icon_color(color_name: str) -> dict[str, float] | None:
         Color dict if found, None otherwise
     """
     return ICON_COLORS.get(color_name.lower())
-
 
 def create_icon_button(
     icon_name: str,
@@ -2713,7 +2699,6 @@ def create_icon_button(
 
     return button
 
-
 def create_icon_button_list(
     buttons: list[dict],
 ) -> dict:
@@ -2732,7 +2717,6 @@ def create_icon_button_list(
         ... ])
     """
     return {"buttonList": {"buttons": buttons}}
-
 
 __all__ = [
     # Core

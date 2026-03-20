@@ -2,7 +2,6 @@
 TODO:
 Make sure pipeline can support a paramter for warming up in intitiating.  this involves gnerating a bunch of random valid copmoment combinations use those (if approved by an outside process) to populate with additional instance_pattern points
 
-
 Ingestion Pipeline Mixin
 
 Provides the ingestion pipeline for creating/updating Qdrant collections
@@ -15,7 +14,7 @@ the ModuleWrapper class so the pipeline can be run programmatically.
 import dataclasses
 import hashlib
 import inspect
-import logging
+from config.enhanced_logging import setup_logger
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
@@ -35,8 +34,7 @@ from adapters.module_wrapper.types import (
     RelationshipList,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # CONSTANTS
@@ -46,11 +44,9 @@ logger = logging.getLogger(__name__)
 COLBERT_DIM = _COLBERT_DIM  # ColBERT multi-vector
 RELATIONSHIPS_DIM = _RELATIONSHIPS_DIM  # MiniLM dense vector
 
-
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
-
 
 def extract_input_values(component) -> str:
     """
@@ -98,7 +94,6 @@ def extract_input_values(component) -> str:
         parts.append(f"{component.name} {comp_type}")
 
     return ", ".join(parts)
-
 
 def build_compact_relationship_text(
     component_name: ComponentName,
@@ -158,7 +153,6 @@ def build_compact_relationship_text(
 
     return f"{component_name}[{', '.join(parts)}]"
 
-
 def format_instance_params(params: dict) -> str:
     """Format instance_params for the inputs vector."""
     if not params:
@@ -208,11 +202,9 @@ def format_instance_params(params: dict) -> str:
 
     return ", ".join(parts) if parts else "basic card"
 
-
 # =============================================================================
 # PIPELINE MIXIN
 # =============================================================================
-
 
 class PipelineMixin:
     """
@@ -834,7 +826,6 @@ class PipelineMixin:
 
         except Exception as e:
             return {"error": str(e)}
-
 
 # Export for convenience
 __all__ = [

@@ -20,16 +20,17 @@ Usage:
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict
+
+from config.enhanced_logging import setup_logger
 
 if TYPE_CHECKING:
     from adapters.module_wrapper import ModuleWrapper
 
 from adapters.module_wrapper.skill_types import SkillDocument
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # U+00D7 MULTIPLICATION SIGN — DSL repeat multiplier (e.g., block*3 notation).
 # Stored via named unicode escape so the source file stays symbol-free.
@@ -350,7 +351,11 @@ _CROSS_CUTTING_SECTION = """\
 
 
 def _email_symbol_table(email_symbols: Dict[str, str]) -> str:
-    lines = ["**Email DSL Symbols:**\n", "| Symbol | Block |", "|--------|-------|"]
+    lines = [
+        "**Email DSL Symbols:**\n",
+        "| Symbol | Block |",
+        "|--------|-------|",
+    ]
     for name in EMAIL_BUILDING_BLOCKS:
         sym = email_symbols.get(name)
         if sym:
@@ -663,6 +668,10 @@ def write_server_skill(
     )
     skill_dir = Path(output_dir) / "google-workspace-mcp"
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(doc.content, encoding="utf-8")
-    logger.info("Generated server skill: %s", skill_dir / "SKILL.md")
+    (skill_dir / "SKILL.md").write_text(
+        doc.content, encoding="utf-8"
+    )
+    logger.info(
+        "Generated server skill: %s", skill_dir / "SKILL.md"
+    )
     return skill_dir

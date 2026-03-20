@@ -30,7 +30,7 @@ Usage:
 """
 
 import asyncio
-import logging
+from config.enhanced_logging import setup_logger
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -44,8 +44,7 @@ if TYPE_CHECKING:
     from middleware.qdrant_core.client import QdrantClientManager
     from middleware.qdrant_core.dsl_query_builder import QueryBuilder
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 class SearchV2Executor:
     """Executes DSL-built queries against Qdrant."""
@@ -460,7 +459,6 @@ class SearchV2Executor:
                 )
             )
         return items
-
 
 def _elapsed_ms(start: float) -> float:
     """Calculate elapsed milliseconds since start."""

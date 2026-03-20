@@ -5,14 +5,13 @@ This module provides standalone functions for extracting component information
 from Qdrant search results and pattern data.
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 import re
 from typing import Any, Dict, List
 
 from adapters.module_wrapper.types import ComponentPaths, JsonDict, Payload
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 def extract_paths_from_pattern(pattern: Payload) -> ComponentPaths:
     """
@@ -67,7 +66,6 @@ def extract_paths_from_pattern(pattern: Payload) -> ComponentPaths:
 
     return []
 
-
 def extract_style_metadata_from_pattern(pattern: Payload) -> JsonDict:
     """
     Extract style metadata from a pattern's instance_params.
@@ -85,12 +83,10 @@ def extract_style_metadata_from_pattern(pattern: Payload) -> JsonDict:
     instance_params = pattern.get("instance_params", {})
     return instance_params.get("style_metadata", {})
 
-
 def has_style_metadata(pattern: Payload) -> bool:
     """Check if a pattern has meaningful style metadata."""
     style_meta = extract_style_metadata_from_pattern(pattern)
     return bool(style_meta.get("semantic_styles") or style_meta.get("jinja_filters"))
-
 
 def find_pattern_with_styles(patterns: List[Payload]) -> Payload:
     """Find the first pattern with style metadata from a list.
@@ -105,7 +101,6 @@ def find_pattern_with_styles(patterns: List[Payload]) -> Payload:
         if has_style_metadata(pattern):
             return pattern
     return {}
-
 
 __all__ = [
     "extract_paths_from_pattern",

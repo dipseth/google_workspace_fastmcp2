@@ -5,9 +5,9 @@ Coordinates the application of different editing modes (replace_all, insert_at_l
 regex_replace, append) to Google Docs using the Docs API batch update mechanism.
 """
 
-import logging
 from typing import Any, Dict, List, Tuple
 
+from config.enhanced_logging import setup_logger
 from docs.docs_types import EditConfig
 
 from .line_parser import (
@@ -16,9 +16,12 @@ from .line_parser import (
     get_document_end_index,
     parse_document_lines,
 )
-from .regex_operations import apply_regex_replacements, validate_regex_operations
+from .regex_operations import (
+    apply_regex_replacements,
+    validate_regex_operations,
+)
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 async def apply_edit_config(
@@ -57,13 +60,18 @@ async def apply_edit_config(
             requests.append(
                 {
                     "deleteContentRange": {
-                        "range": {"startIndex": 1, "endIndex": end_index - 1}
+                        "range": {
+                            "startIndex": 1,
+                            "endIndex": end_index - 1,
+                        }
                     }
                 }
             )
 
         # Insert new content at the beginning
-        requests.append({"insertText": {"location": {"index": 1}, "text": content}})
+        requests.append(
+            {"insertText": {"location": {"index": 1}, "text": content}}
+        )
 
         message = "Replaced all document content"
 
@@ -73,7 +81,9 @@ async def apply_edit_config(
         )
 
         if not edit_config.line_number:
-            raise ValueError("line_number is required for insert_at_line mode")
+            raise ValueError(
+                "line_number is required for insert_at_line mode"
+            )
 
         # Parse document lines
         lines = parse_document_lines(doc_data)
@@ -94,12 +104,15 @@ async def apply_edit_config(
             {
                 "insertText": {
                     "location": {"index": insert_index},
-                    "text": content + "\n",  # Add newline after inserted content
+                    "text": content
+                    + "\n",  # Add newline after inserted content
                 }
             }
         )
 
-        message = f"Inserted content at line {edit_config.line_number}"
+        message = (
+            f"Inserted content at line {edit_config.line_number}"
+        )
 
     elif edit_config.mode == "append":
         logger.info("[apply_edit_config] Mode: append")
@@ -112,7 +125,8 @@ async def apply_edit_config(
             {
                 "insertText": {
                     "location": {"index": end_index - 1},
-                    "text": "\n" + content,  # Add newline before appended content
+                    "text": "\n"
+                    + content,  # Add newline before appended content
                 }
             }
         )
@@ -123,10 +137,14 @@ async def apply_edit_config(
         logger.info("[apply_edit_config] Mode: regex_replace")
 
         if not edit_config.regex_operations:
-            raise ValueError("regex_operations is required for regex_replace mode")
+            raise ValueError(
+                "regex_operations is required for regex_replace mode"
+            )
 
         # Validate regex operations first
-        is_valid, error_msg = validate_regex_operations(edit_config.regex_operations)
+        is_valid, error_msg = validate_regex_operations(
+            edit_config.regex_operations
+        )
         if not is_valid:
             raise ValueError(f"Invalid regex operations: {error_msg}")
 
@@ -136,7 +154,9 @@ async def apply_edit_config(
         logger.info(
             f"[apply_edit_config] Extracted {len(current_text)} characters from document"
         )
-        logger.info(f"[apply_edit_config] First 200 chars: {repr(current_text[:200])}")
+        logger.info(
+            f"[apply_edit_config] First 200 chars: {repr(current_text[:200])}"
+        )
 
         # Validate that we extracted some text
         if not current_text or len(current_text) <= 1:
@@ -157,14 +177,22 @@ async def apply_edit_config(
             requests.append(
                 {
                     "deleteContentRange": {
-                        "range": {"startIndex": 1, "endIndex": end_index - 1}
+                        "range": {
+                            "startIndex": 1,
+                            "endIndex": end_index - 1,
+                        }
                     }
                 }
             )
 
         # Insert modified content
         requests.append(
-            {"insertText": {"location": {"index": 1}, "text": modified_text}}
+            {
+                "insertText": {
+                    "location": {"index": 1},
+                    "text": modified_text,
+                }
+            }
         )
 
         message = f"Applied {len(edit_config.regex_operations)} regex operations ({replacement_count} replacements)"
@@ -172,5 +200,7 @@ async def apply_edit_config(
     else:
         raise ValueError(f"Unknown edit mode: {edit_config.mode}")
 
-    logger.info(f"[apply_edit_config] Generated {len(requests)} batch update requests")
+    logger.info(
+        f"[apply_edit_config] Generated {len(requests)} batch update requests"
+    )
     return requests, message

@@ -3,16 +3,15 @@ Utility functions and decorators for the card builder.
 """
 
 import json
-import logging
+from config.enhanced_logging import setup_logger
 import re
 import threading
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 F = TypeVar("F", bound=Callable[..., None])
-
 
 def fire_and_forget(func: F) -> F:
     """Run a method in a background daemon thread.
@@ -41,7 +40,6 @@ def fire_and_forget(func: F) -> F:
     # Preserve sync version for testing
     wrapper.sync = func  # type: ignore[attr-defined]
     return wrapper  # type: ignore[return-value]
-
 
 def coerce_json_param(value: Any, param_name: str = "params") -> Dict[str, Any]:
     """Coerce a JSON string parameter to a dict.
@@ -78,7 +76,6 @@ def coerce_json_param(value: Any, param_name: str = "params") -> Dict[str, Any]:
     logger.warning(f"Unexpected type for {param_name}: {type(value).__name__}")
     return {}
 
-
 def extract_urls_from_text(
     text: str,
 ) -> Tuple[List[Dict[str, str]], Optional[str]]:
@@ -110,7 +107,6 @@ def extract_urls_from_text(
     clean_text = re.sub(r"\s+", " ", clean_text).strip(" .,;:")
 
     return buttons, clean_text if clean_text else None
-
 
 __all__ = [
     "fire_and_forget",

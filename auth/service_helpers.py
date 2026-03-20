@@ -5,9 +5,6 @@ import logging
 import os
 import ssl
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 from googleapiclient.errors import HttpError
 from typing_extensions import Any, Dict, List, Optional, Union
 
@@ -41,7 +38,6 @@ from .scope_registry import ScopeRegistry
 
 # Legacy fallback for compatibility - now redirects to scope_registry
 _FALLBACK_SERVICE_DEFAULTS = {}  # Empty - now uses ScopeRegistry
-
 
 def _get_service_defaults() -> Dict[str, Dict]:
     """
@@ -80,7 +76,6 @@ def _get_service_defaults() -> Dict[str, Dict]:
     else:
         return {}
 
-
 # Create a dynamic SERVICE_DEFAULTS that uses the compatibility shim
 # This maintains the same interface for existing code
 class ServiceDefaultsProxy:
@@ -107,10 +102,8 @@ class ServiceDefaultsProxy:
     def copy(self) -> Dict[str, Dict]:
         return _get_service_defaults().copy()
 
-
 # Create the proxy instance that behaves like the original SERVICE_DEFAULTS dictionary
 SERVICE_DEFAULTS = ServiceDefaultsProxy()
-
 
 async def get_service(
     service_type: str,
@@ -187,7 +180,6 @@ async def get_service(
         version=final_version,
     )
 
-
 async def request_service(
     service_type: str,
     scopes: Union[str, List[str]] = None,
@@ -232,11 +224,9 @@ async def request_service(
         cache_enabled=cache_enabled,
     )
 
-
 def get_current_user_email() -> Optional[str]:
     """Get the current user email from context (sync version using OAuth file fallback)."""
     return get_user_email_context_sync()
-
 
 def get_service_defaults(service_type: str) -> Optional[Dict]:
     """
@@ -250,7 +240,6 @@ def get_service_defaults(service_type: str) -> Optional[Dict]:
     """
     return SERVICE_DEFAULTS.get(service_type)
 
-
 def list_supported_services() -> List[str]:
     """
     Get list of services with configured defaults.
@@ -259,7 +248,6 @@ def list_supported_services() -> List[str]:
         List of service type names with defaults
     """
     return list(SERVICE_DEFAULTS.keys())
-
 
 def create_service_info_summary() -> str:
     """
@@ -304,7 +292,6 @@ def create_service_info_summary() -> str:
     summary += "```"
 
     return summary
-
 
 async def create_multi_service_session(
     user_email: str, service_types: Union[List[str], List[dict]]
@@ -367,7 +354,6 @@ async def create_multi_service_session(
 
     return result
 
-
 # Convenience aliases for backward compatibility and ease of use
 async def get_drive_service(
     user_email: Optional[str] = None, scopes: Union[str, List[str]] = None
@@ -375,13 +361,11 @@ async def get_drive_service(
     """Get Drive service - supports both explicit and GoogleProvider auth."""
     return await get_service("drive", user_email, scopes)
 
-
 async def get_gmail_service(
     user_email: Optional[str] = None, scopes: Union[str, List[str]] = None
 ) -> Any:
     """Get Gmail service - supports both explicit and GoogleProvider auth."""
     return await get_service("gmail", user_email, scopes)
-
 
 async def get_calendar_service(
     user_email: Optional[str] = None, scopes: Union[str, List[str]] = None
@@ -389,16 +373,13 @@ async def get_calendar_service(
     """Get Calendar service - supports both explicit and GoogleProvider auth."""
     return await get_service("calendar", user_email, scopes)
 
-
 async def request_drive_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Drive service through middleware - convenience alias."""
     return await request_service("drive", scopes)
 
-
 async def request_gmail_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Gmail service through middleware - convenience alias."""
     return await request_service("gmail", scopes)
-
 
 async def get_photos_service(
     user_email: Optional[str] = None, scopes: Union[str, List[str]] = None
@@ -406,11 +387,9 @@ async def get_photos_service(
     """Get Photos service - supports both explicit and GoogleProvider auth."""
     return await get_service("photos", user_email, scopes)
 
-
 async def request_photos_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Photos service through middleware - convenience alias."""
     return await request_service("photos", scopes)
-
 
 async def get_tasks_service(
     user_email: Optional[str] = None, scopes: Union[str, List[str]] = None
@@ -418,11 +397,9 @@ async def get_tasks_service(
     """Get Tasks service - supports both explicit and GoogleProvider auth."""
     return await get_service("tasks", user_email, scopes)
 
-
 async def request_tasks_service(scopes: Union[str, List[str]] = None) -> str:
     """Request Tasks service through middleware - convenience alias."""
     return await request_service("tasks", scopes)
-
 
 # ============================================
 # Google API Resilience Helpers
@@ -430,7 +407,6 @@ async def request_tasks_service(scopes: Union[str, List[str]] = None) -> str:
 
 _DEFAULT_NUM_RETRIES = int(os.environ.get("GOOGLE_API_NUM_RETRIES", "3"))
 _DEFAULT_BATCH_SIZE = int(os.environ.get("GOOGLE_API_BATCH_SIZE", "15"))
-
 
 def _is_retryable_error(error: Exception) -> bool:
     """Return ``True`` if *error* is a transient/retryable Google API error.
@@ -451,7 +427,6 @@ def _is_retryable_error(error: Exception) -> bool:
         status = error.resp.status
         return status == 429 or status >= 500
     return False
-
 
 async def execute_google_api(
     request: Any,
@@ -479,7 +454,6 @@ async def execute_google_api(
     """
     retries = num_retries if num_retries is not None else _DEFAULT_NUM_RETRIES
     return await asyncio.to_thread(request.execute, num_retries=retries)
-
 
 async def execute_batch_with_retry(
     batch: Any,

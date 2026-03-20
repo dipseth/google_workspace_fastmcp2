@@ -5,7 +5,6 @@ This module provides utilities for extracting, validating, and managing MCP tool
 including required scopes, service categorization, and operation validation.
 """
 
-import logging
 from typing import Any, Dict, List, Optional, Set, Union
 
 from fastmcp import FastMCP
@@ -14,7 +13,6 @@ from auth.scope_registry import ScopeRegistry, ValidationResult
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-
 
 class MCPMetadataHandler:
     """Handler for MCP tool metadata operations"""
@@ -27,7 +25,7 @@ class MCPMetadataHandler:
             mcp_server: FastMCP server instance
         """
         self.mcp_server = mcp_server
-        self.logger = logging.getLogger(f"{__name__}.MCPMetadataHandler")
+        self.logger = setup_logger()
 
     def get_registered_tools(self) -> Dict[str, Any]:
         """
@@ -332,7 +330,6 @@ class MCPMetadataHandler:
         report["services_detected"] = list(report["services_detected"])
         return report
 
-
 def extract_tool_metadata_from_registry(
     mcp_server: FastMCP,
 ) -> Dict[str, Dict[str, Any]]:
@@ -355,7 +352,6 @@ def extract_tool_metadata_from_registry(
             tool_metadata[tool_name] = metadata
 
     return tool_metadata
-
 
 def validate_tool_scopes_against_registry(
     mcp_server: FastMCP, available_scopes: List[str]

@@ -16,11 +16,9 @@ from auth.context import (
     set_user_email_context,
 )
 from auth.types import SessionKey
-from config.enhanced_logging import setup_logger
 from config.settings import settings
 
 # Initialize logger early
-logger = setup_logger()
 
 # Import OAuth proxy at module level to ensure singleton behavior
 from auth.oauth_proxy import handle_token_exchange, oauth_proxy, refresh_access_token
@@ -48,7 +46,6 @@ _FALLBACK_OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/gmail.settings.sharing",
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
-
 
 def _get_oauth_endpoint_scopes():
     """
@@ -89,11 +86,9 @@ def _get_oauth_endpoint_scopes():
         logger.warning("Compatibility shim not available, using fallback scopes")
         return _FALLBACK_OAUTH_SCOPES
 
-
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-
 
 async def _store_oauth_user_data_async(
     client_id: str, token_data: Dict[str, Any]
@@ -248,7 +243,6 @@ async def _store_oauth_user_data_async(
         )
         # This is background processing, so we don't want to crash anything
 
-
 def _generate_service_selection_html(
     state: str, flow_type: str, use_pkce: bool = True
 ) -> str:
@@ -271,7 +265,6 @@ def _generate_service_selection_html(
     return generate_service_selection_html(
         state, flow_type, use_pkce, requested_email=requested_email
     )
-
 
 async def _handle_fastmcp_service_selection(
     state: str, services: List[str], use_pkce: bool = True
@@ -303,7 +296,6 @@ async def _handle_fastmcp_service_selection(
     except Exception as e:
         logger.error(f"Error handling FastMCP service selection: {e}")
         raise
-
 
 def setup_service_selection_routes(mcp) -> None:
     """Register /auth/services/select and /auth/services/selected routes.
@@ -511,7 +503,6 @@ def setup_service_selection_routes(mcp) -> None:
     logger.info("  GET /auth/services/select (Service selection page)")
     logger.info("  POST /auth/services/selected (Service selection form handler)")
 
-
 async def _build_oauth_success_html(
     user_email: str, credentials: Any, session_id: str | None
 ) -> str:
@@ -608,7 +599,6 @@ async def _build_oauth_success_html(
         revoke_section=revoke_section,
         requested_email=requested_email or "",
     )
-
 
 def setup_legacy_callback_route(mcp) -> None:
     """Register only the /oauth2callback route.
@@ -765,7 +755,6 @@ def setup_legacy_callback_route(mcp) -> None:
             )
 
     logger.info("  ✅ Legacy /oauth2callback route registered (GoogleProvider mode)")
-
 
 def setup_oauth_endpoints_fastmcp(mcp) -> None:
     """Setup OAuth discovery and DCR endpoints using FastMCP custom routes.
@@ -2166,7 +2155,6 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     # In GoogleProvider mode these are registered separately via setup_config_api_routes()
     # Here they're already inline above, so no separate call needed.
 
-
 def setup_config_api_routes(mcp) -> None:
     """Register /api/privacy-mode and /api/sampling-config routes.
 
@@ -2638,7 +2626,6 @@ def setup_config_api_routes(mcp) -> None:
     logger.info(
         "  ✅ Config API routes registered (/api/privacy-mode, /api/sampling-config, /api/models, /api/revoke)"
     )
-
 
 def setup_status_check_routes(mcp) -> None:
     """Register /auth/status-check route for viewing credential status in browser."""

@@ -11,19 +11,18 @@ Architecture:
 """
 
 import importlib
-import logging
+from config.enhanced_logging import setup_logger
 import os
 from typing import Any, Dict, List, Optional
 
 import yaml
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Directory for promoted template YAML files
 TEMPLATES_DIR = os.path.join(
     os.path.dirname(__file__), "..", "card_framework", "patterns"
 )
-
 
 class TemplateComponent:
     """
@@ -233,7 +232,6 @@ class TemplateComponent:
 
         return card
 
-
 class TemplateRegistry:
     """
     Registry for loading and managing templates.
@@ -367,10 +365,8 @@ class TemplateRegistry:
 
         return TemplateComponent(template_data, module_wrapper, **params)
 
-
 # Global registry instance
 _registry: Optional[TemplateRegistry] = None
-
 
 def get_template_registry() -> TemplateRegistry:
     """Get the global TemplateRegistry instance."""

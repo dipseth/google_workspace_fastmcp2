@@ -21,15 +21,15 @@ Security model:
 import hashlib
 import hmac
 import json
-import logging
 import secrets
 import threading
 from pathlib import Path
 from typing import Optional, Set
 
+from config.enhanced_logging import setup_logger
 from config.settings import settings
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 _REGISTRY_FILENAME = ".user_api_keys.json"
 _LINKS_FILENAME = ".user_api_key_links.json"

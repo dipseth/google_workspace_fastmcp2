@@ -17,7 +17,7 @@ Usage:
     # result is a qdrant_client.models.Filter instance
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from adapters.module_wrapper.dsl_parser import DSLNode, DSLParseResult
@@ -25,8 +25,7 @@ from adapters.module_wrapper.dsl_parser import DSLNode, DSLParseResult
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 class QueryBuilder:
     """Builds qdrant_client.models objects from parsed DSL trees."""

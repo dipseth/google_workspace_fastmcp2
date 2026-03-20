@@ -2,9 +2,6 @@
 
 import logging
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import json
 import os
 import secrets
@@ -42,7 +39,6 @@ _oauth_state_map: dict[str, dict[str, Any]] = {}
 # Service selection cache for OAuth flows
 _service_selection_cache: Dict[str, Dict[str, Any]] = {}
 
-
 class AuthErrorType(Enum):
     """Types of authentication errors in modern FastMCP system."""
 
@@ -67,7 +63,6 @@ class AuthErrorType(Enum):
     SESSION_EXPIRED = "session_expired"
     INVALID_SESSION = "invalid_session"
 
-
 @dataclass
 class AuthError:
     """Structured authentication error with modern context."""
@@ -77,7 +72,6 @@ class AuthError:
     details: Optional[Dict[str, Any]] = None
     user_message: Optional[str] = None
     resolution_steps: Optional[list] = None
-
 
 class ModernAuthErrorHandler:
     """Enhanced error handling for FastMCP 2.12.x authentication."""
@@ -230,13 +224,11 @@ class ModernAuthErrorHandler:
             },
         }
 
-
 # Legacy exception for backward compatibility
 class GoogleAuthError(Exception):
     """Legacy exception for Google authentication errors. Use AuthError instead."""
 
     pass
-
 
 # Convenience functions for common error scenarios
 def handle_missing_credentials(service_name: str = "Google") -> AuthError:
@@ -246,14 +238,12 @@ def handle_missing_credentials(service_name: str = "Google") -> AuthError:
         context=f"{service_name}_credentials_check",
     )
 
-
 def handle_network_timeout(service_name: str = "Google") -> AuthError:
     """Handle network timeout during authentication."""
     return ModernAuthErrorHandler.handle_provider_error(
         Exception(f"Connection timeout to {service_name} OAuth servers"),
         context=f"{service_name}_network_timeout",
     )
-
 
 def handle_expired_session(user_email: str = "") -> AuthError:
     """Handle expired authentication session."""
@@ -269,7 +259,6 @@ def handle_expired_session(user_email: str = "") -> AuthError:
         ],
     )
 
-
 def _normalize_email(email: str) -> str:
     """Normalize email address to lowercase for consistent credential storage.
 
@@ -280,7 +269,6 @@ def _normalize_email(email: str) -> str:
         Lowercase email address
     """
     return email.lower().strip() if email else ""
-
 
 def _get_credentials_path(user_email: str) -> Path:
     """Get the path to store credentials for a specific user.
@@ -293,7 +281,6 @@ def _get_credentials_path(user_email: str) -> Path:
     normalized_email = _normalize_email(user_email)
     safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
     return Path(settings.credentials_dir) / f"{safe_email}_credentials.json"
-
 
 def _update_oauth_session_marker(
     user_email: str,
@@ -344,7 +331,6 @@ def _update_oauth_session_marker(
     except Exception as e:
         logger.warning(f"⚠️ Failed to update .oauth_authentication.json: {e}")
         # Don't fail the whole auth flow if this fails
-
 
 def _save_credentials(user_email: str, credentials: Credentials) -> None:
     """Save credentials to disk with proper permissions and validation.
@@ -656,7 +642,6 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
         logger.error(f"Failed to save credentials for {user_email}: {e}")
         raise GoogleAuthError(f"Failed to save credentials: {e}")
 
-
 def _load_credentials(user_email: str) -> Optional[Credentials]:
     """Load credentials from disk with validation and error recovery.
 
@@ -852,7 +837,6 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
         logger.error(f"Unexpected error loading credentials for {user_email}: {e}")
         return None
 
-
 def needs_refresh(credentials: Credentials, buffer_seconds: int = 300) -> bool:
     """
     Check if credentials need to be refreshed proactively.
@@ -895,7 +879,6 @@ def needs_refresh(credentials: Credentials, buffer_seconds: int = 300) -> bool:
 
     return needs_refresh_flag
 
-
 def compare_scopes(
     existing_scopes: list[str] | set[str] | None,
     requested_scopes: list[str] | set[str],
@@ -915,7 +898,6 @@ def compare_scopes(
     requested = set(requested_scopes)
     missing = requested - existing
     return (not missing, missing)
-
 
 def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentials:
     """Refresh expired credentials with enhanced error handling."""
@@ -977,7 +959,6 @@ def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentia
         logger.error(f"Unexpected error refreshing credentials for {user_email}: {e}")
         raise GoogleAuthError(f"Failed to refresh credentials: {e}")
 
-
 def get_valid_credentials(user_email: str) -> Optional[Credentials]:
     """Get valid credentials for a user, refreshing proactively if needed.
 
@@ -1006,7 +987,6 @@ def get_valid_credentials(user_email: str) -> Optional[Credentials]:
             return None
 
     return credentials
-
 
 def get_all_stored_users() -> list[str]:
     """Get a list of all users who have stored credentials.
@@ -1043,7 +1023,6 @@ def get_all_stored_users() -> list[str]:
     except Exception as e:
         logger.error(f"Error getting stored users: {e}")
         return []
-
 
 async def initiate_oauth_flow(
     user_email: str,
@@ -1223,7 +1202,6 @@ async def initiate_oauth_flow(
     logger.info(f"Generated OAuth URL for {user_email} (auth_method: {auth_method})")
     return auth_url
 
-
 async def _create_service_selection_url(
     user_email: str, flow_type: str, use_pkce: bool = True
 ) -> str:
@@ -1246,7 +1224,6 @@ async def _create_service_selection_url(
     pkce_param = "&use_pkce=true" if use_pkce else "&use_pkce=false"
     return f"{base_url}/auth/services/select?state={state}&flow_type={flow_type}{pkce_param}"
 
-
 def _cleanup_service_selection_cache():
     """Clean up expired cache entries."""
     cutoff = datetime.now() - timedelta(minutes=30)
@@ -1257,7 +1234,6 @@ def _cleanup_service_selection_cache():
     ]
     for key in expired_keys:
         _service_selection_cache.pop(key, None)
-
 
 async def handle_service_selection_callback(
     state: str,
@@ -1320,7 +1296,6 @@ async def handle_service_selection_callback(
         privacy_mode=flow_info.get("privacy_mode", False),
         sampling_config=flow_info.get("sampling_config"),
     )
-
 
 async def handle_oauth_callback(
     authorization_response: str, state: str, code_verifier: Optional[str] = None
@@ -1732,7 +1707,6 @@ async def handle_oauth_callback(
 
         logger.error(f"OAuth callback failed: {e}")
         raise GoogleAuthError(f"Authentication failed: {e}")
-
 
 async def get_drive_service(user_email: str):
     """

@@ -42,9 +42,6 @@ shared between authentication methods when needed.
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 from typing import Any, Dict, Optional, Tuple
 
 from google.oauth2.credentials import Credentials
@@ -60,7 +57,6 @@ from .context import (
 )
 
 logger = setup_logger()
-
 
 class DualAuthBridge:
     """
@@ -432,10 +428,8 @@ class DualAuthBridge:
 
         return accounts
 
-
 # Global bridge instance
 _dual_auth_bridge: Optional[DualAuthBridge] = None
-
 
 def get_dual_auth_bridge() -> DualAuthBridge:
     """Get or create the global dual auth bridge instance."""
@@ -443,7 +437,6 @@ def get_dual_auth_bridge() -> DualAuthBridge:
     if _dual_auth_bridge is None:
         _dual_auth_bridge = DualAuthBridge()
     return _dual_auth_bridge
-
 
 def validate_dual_auth_setup() -> Dict[str, Any]:
     """

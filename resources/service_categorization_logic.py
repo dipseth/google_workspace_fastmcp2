@@ -5,7 +5,6 @@ This module provides logic for categorizing tools and discovering services
 based on MCP tool tags and metadata.
 """
 
-import logging
 from typing import Any, Dict, List
 
 from fastmcp import FastMCP
@@ -29,7 +28,7 @@ class ServiceCategorizer:
         """
         self.mcp_server = mcp_server
         self.metadata_handler = MCPMetadataHandler(mcp_server)
-        self.logger = logging.getLogger(f"{__name__}.ServiceCategorizer")
+        self.logger = setup_logger()
 
     def discover_services_from_tools(self) -> Dict[str, Any]:
         """
@@ -51,7 +50,9 @@ class ServiceCategorizer:
                 continue
 
             if service not in discovered_services:
-                service_metadata = ScopeRegistry.get_service_metadata(service)
+                service_metadata = ScopeRegistry.get_service_metadata(
+                    service
+                )
                 discovered_services[service] = {
                     "name": service,
                     "tools": [],
@@ -65,8 +66,12 @@ class ServiceCategorizer:
                 {
                     "name": tool_name,
                     "description": metadata.get("description", ""),
-                    "operation_type": metadata.get("operation_type", "unknown"),
-                    "required_scopes": metadata.get("required_scopes", []),
+                    "operation_type": metadata.get(
+                        "operation_type", "unknown"
+                    ),
+                    "required_scopes": metadata.get(
+                        "required_scopes", []
+                    ),
                 }
             )
 
@@ -79,8 +84,12 @@ class ServiceCategorizer:
 
         # Convert sets to lists for JSON serialization
         for service_info in discovered_services.values():
-            service_info["operations"] = list(service_info["operations"])
-            service_info["required_scopes"] = list(service_info["required_scopes"])
+            service_info["operations"] = list(
+                service_info["operations"]
+            )
+            service_info["required_scopes"] = list(
+                service_info["required_scopes"]
+            )
 
         self.logger.info(
             f"Discovered {len(discovered_services)} services from {len(tools)} tools"
@@ -129,11 +138,19 @@ class ServiceCategorizer:
         matching_tools = []
 
         for tool_name in tools:
-            tool_scopes = self.metadata_handler.get_required_scopes_for_tool(tool_name)
+            tool_scopes = (
+                self.metadata_handler.get_required_scopes_for_tool(
+                    tool_name
+                )
+            )
 
             # Check if tool requires any of the specified scopes
-            if any(scope in tool_scopes for scope in required_scopes):
-                metadata = self.metadata_handler.get_tool_metadata(tool_name)
+            if any(
+                scope in tool_scopes for scope in required_scopes
+            ):
+                metadata = self.metadata_handler.get_tool_metadata(
+                    tool_name
+                )
                 matching_tools.append(
                     {
                         "name": tool_name,
@@ -144,7 +161,9 @@ class ServiceCategorizer:
 
         return matching_tools
 
-    def get_service_capabilities(self, service: str) -> Dict[str, Any]:
+    def get_service_capabilities(
+        self, service: str
+    ) -> Dict[str, Any]:
         """
         Get capabilities for a specific service based on its tools.
 
@@ -167,12 +186,16 @@ class ServiceCategorizer:
         }
 
         for tool_name in tools:
-            metadata = self.metadata_handler.get_tool_metadata(tool_name)
+            metadata = self.metadata_handler.get_tool_metadata(
+                tool_name
+            )
             if not metadata:
                 continue
 
             # Extract capabilities from metadata
-            capabilities["operations"].add(metadata.get("operation_type", "unknown"))
+            capabilities["operations"].add(
+                metadata.get("operation_type", "unknown")
+            )
 
             # Extract features from tags
             tags = metadata.get("tags", set())
@@ -180,7 +203,9 @@ class ServiceCategorizer:
                 tags = list(tags)
 
             for tag in tags:
-                if tag != service:  # Don't include the service name itself
+                if (
+                    tag != service
+                ):  # Don't include the service name itself
                     capabilities["features"].add(tag)
 
             # Track scopes
@@ -215,7 +240,9 @@ class ServiceCategorizer:
                     else service_name.title()
                 ),
                 "icon": (
-                    capabilities["metadata"].icon if capabilities["metadata"] else "🔧"
+                    capabilities["metadata"].icon
+                    if capabilities["metadata"]
+                    else "🔧"
                 ),
                 "description": (
                     capabilities["metadata"].description
@@ -247,7 +274,9 @@ class ServiceCategorizer:
         return service_map
 
 
-def get_dynamic_service_list(mcp_server: FastMCP) -> List[Dict[str, Any]]:
+def get_dynamic_service_list(
+    mcp_server: FastMCP,
+) -> List[Dict[str, Any]]:
     """
     Get dynamic list of available services based on registered tools.
 
@@ -268,7 +297,9 @@ def get_dynamic_service_list(mcp_server: FastMCP) -> List[Dict[str, Any]]:
             "description": service_info["description"],
             "tool_count": service_info["total_tools"],
             "operations": service_info["operations"],
-            "features": service_info["features"][:5],  # Limit features for display
+            "features": service_info["features"][
+                :5
+            ],  # Limit features for display
         }
         for service_name, service_info in service_map.items()
     ]
@@ -315,11 +346,14 @@ def categorize_tool_by_tags(tags: List[str]) -> Dict[str, Any]:
         "service": service,
         "operation_type": operation,
         "features": features,
-        "inferred": service is None,  # Whether service was inferred vs explicit
+        "inferred": service
+        is None,  # Whether service was inferred vs explicit
     }
 
 
-def validate_service_tool_coverage(mcp_server: FastMCP) -> Dict[str, Any]:
+def validate_service_tool_coverage(
+    mcp_server: FastMCP,
+) -> Dict[str, Any]:
     """
     Validate that all known services have tool coverage.
 
@@ -336,7 +370,10 @@ def validate_service_tool_coverage(mcp_server: FastMCP) -> Dict[str, Any]:
     report = {
         "total_known_services": len(known_services),
         "services_with_tools": len(discovered_services),
-        "coverage_percentage": (len(discovered_services) / len(known_services)) * 100,
+        "coverage_percentage": (
+            len(discovered_services) / len(known_services)
+        )
+        * 100,
         "services_without_tools": [],
         "tool_distribution": {},
     }
@@ -348,6 +385,8 @@ def validate_service_tool_coverage(mcp_server: FastMCP) -> Dict[str, Any]:
 
     # Tool distribution
     for service, service_info in discovered_services.items():
-        report["tool_distribution"][service] = service_info["total_tools"]
+        report["tool_distribution"][service] = service_info[
+            "total_tools"
+        ]
 
     return report

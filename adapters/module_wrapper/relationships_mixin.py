@@ -7,7 +7,7 @@ for the ModuleWrapper system.
 
 import dataclasses
 import inspect
-import logging
+from config.enhanced_logging import setup_logger
 from collections import defaultdict
 from typing import (
     Any,
@@ -32,8 +32,7 @@ from adapters.module_wrapper.types import (
 
 from .core import BUILTIN_PREFIXES, PRIMITIVE_TYPES, ModuleComponent
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 def _get_nl_relationship_patterns() -> Dict[tuple, str]:
     """Get NL relationship patterns (empty by default — domain wrappers provide these).
@@ -43,11 +42,9 @@ def _get_nl_relationship_patterns() -> Dict[tuple, str]:
     """
     return {}
 
-
 # =============================================================================
 # RELATIONSHIPS MIXIN
 # =============================================================================
-
 
 class RelationshipsMixin:
     """
@@ -1247,7 +1244,6 @@ class RelationshipsMixin:
         except Exception as e:
             logger.error(f"Failed to upsert custom components: {e}", exc_info=True)
             return 0
-
 
 # Export for convenience
 __all__ = [

@@ -4,19 +4,21 @@ This module provides HTTP endpoints for container orchestration health checks,
 following Kubernetes best practices with liveness and readiness probes.
 """
 
-import logging
 from typing import Any
 
 from fastmcp import FastMCP
 
+from config.enhanced_logging import setup_logger
 from config.settings import settings
 from tools.server_tools import health_check as check_server_health
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def setup_health_endpoints(
-    mcp: FastMCP, google_auth_provider=None, credential_storage_mode=None
+    mcp: FastMCP,
+    google_auth_provider=None,
+    credential_storage_mode=None,
 ):
     """
     Setup health check endpoints for container orchestration.
@@ -58,7 +60,11 @@ def setup_health_endpoints(
             )
 
             # Use 503 for unhealthy (critical memory) so orchestrators can act
-            http_status = 503 if health_status.status == "unhealthy" else 200
+            http_status = (
+                503
+                if health_status.status == "unhealthy"
+                else 200
+            )
 
             return JSONResponse(
                 status_code=http_status,
@@ -92,14 +98,25 @@ def setup_health_endpoints(
             # Basic readiness check - is the server running?
             return JSONResponse(
                 status_code=200,
-                content={"status": "ready", "service": settings.server_name},
+                content={
+                    "status": "ready",
+                    "service": settings.server_name,
+                },
             )
         except Exception as e:
             logger.error(f"Readiness check failed: {e}")
             return JSONResponse(
-                status_code=503, content={"status": "not_ready", "error": str(e)}
+                status_code=503,
+                content={
+                    "status": "not_ready",
+                    "error": str(e),
+                },
             )
 
     logger.info("✅ Health check endpoints registered:")
-    logger.info("   • /health - Comprehensive health status (for liveness probe)")
-    logger.info("   • /ready - Readiness check (for readiness probe)")
+    logger.info(
+        "   • /health - Comprehensive health status (for liveness probe)"
+    )
+    logger.info(
+        "   • /ready - Readiness check (for readiness probe)"
+    )

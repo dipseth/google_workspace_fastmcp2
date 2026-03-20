@@ -11,7 +11,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import logging
 import threading
 from datetime import datetime, timezone
 
@@ -20,7 +19,6 @@ from cryptography.fernet import Fernet, InvalidToken
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-
 
 def derive_privacy_vault_key(
     session_id: str,
@@ -49,7 +47,6 @@ def derive_privacy_vault_key(
         info=b"privacy-vault-v1",
     )
     return base64.urlsafe_b64encode(hkdf.derive(auth_material))
-
 
 class PrivacyVault:
     """Per-session store mapping opaque tokens to Fernet-encrypted ciphertexts.

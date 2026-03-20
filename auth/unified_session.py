@@ -4,9 +4,6 @@ This module provides a unified session management interface that works with
 both FastMCP 2.12.0 GoogleProvider and legacy OAuth flows.
 """
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional
@@ -18,7 +15,6 @@ from pydantic import BaseModel, Field
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-
 
 class SessionState(BaseModel):
     """Session state model for tracking authentication status."""
@@ -45,7 +41,6 @@ class SessionState(BaseModel):
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional session metadata"
     )
-
 
 class UnifiedSession:
     """Unified session management for OAuth migration.

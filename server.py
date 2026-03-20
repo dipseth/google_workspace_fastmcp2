@@ -659,6 +659,11 @@ if _sampling_handler is None:
         "⚠️ No sampling handler — set VENICE_INFERENCE_KEY, LITELLM_API_KEY, or ANTHROPIC_API_KEY"
     )
 
+# Register LiteLLM handler for cache keepalive lifespan access
+from lifespans.server_lifespans import register_litellm_handler
+
+register_litellm_handler(_sampling_handler)
+
 # Wrap with session-aware handler for per-user LLM provider configuration
 from middleware.session_sampling_handler import SessionAwareSamplingHandler
 
@@ -1082,9 +1087,11 @@ logger.info("✅ Dashboard cache middleware registered (outermost)")
 
 # 10. Redis-backed response caching (offloads tool response cache to Redis Cloud)
 
+
 def _mask_redis_url(url: str) -> str:
     """Redact password from Redis URL for safe logging."""
     from urllib.parse import urlparse, urlunparse
+
     try:
         parsed = urlparse(url)
         if parsed.password:
@@ -1096,6 +1103,7 @@ def _mask_redis_url(url: str) -> str:
     except Exception:
         pass
     return "redis://***"
+
 
 if settings.redis_io_url_string:
     try:
@@ -1109,12 +1117,16 @@ if settings.redis_io_url_string:
         )
         # Cache list operations (tools/resources/prompts) but NOT tool calls —
         # tool calls have side effects and caching errors breaks Code Mode.
-        mcp.add_middleware(ResponseCachingMiddleware(
-            cache_storage=_namespaced_store,
-            call_tool_settings={"enabled": False},
-        ))
+        mcp.add_middleware(
+            ResponseCachingMiddleware(
+                cache_storage=_namespaced_store,
+                call_tool_settings={"enabled": False},
+            )
+        )
         _safe_url = _mask_redis_url(settings.redis_io_url_string)
-        logger.info(f"✅ Redis ResponseCachingMiddleware enabled ({_safe_url}, list ops only)")
+        logger.info(
+            f"✅ Redis ResponseCachingMiddleware enabled ({_safe_url}, list ops only)"
+        )
 
         # Share Redis store with dashboard cache middleware for offloading
         from middleware.dashboard_cache_middleware import set_redis_store
@@ -1122,7 +1134,9 @@ if settings.redis_io_url_string:
         set_redis_store(_redis_store)
         logger.info("  Redis store shared with dashboard cache middleware")
     except Exception as _redis_err:
-        logger.warning(f"⚠️ Redis caching setup failed (falling back to in-memory): {_redis_err}")
+        logger.warning(
+            f"⚠️ Redis caching setup failed (falling back to in-memory): {_redis_err}"
+        )
 else:
     logger.info("Redis caching disabled (REDIS_IO_URL_STRING not set)")
 

@@ -8,7 +8,7 @@ for the ModuleWrapper system.
 import hashlib
 import importlib
 import inspect
-import logging
+from config.enhanced_logging import setup_logger
 from datetime import UTC, datetime
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
@@ -22,8 +22,7 @@ from adapters.module_wrapper.types import (
 
 from .core import ModuleComponent
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # STANDARD LIBRARY DETECTION
@@ -124,11 +123,9 @@ THIRD_PARTY_PREFIXES = [
     "sentence_transformers",
 ]
 
-
 # =============================================================================
 # INDEXING MIXIN
 # =============================================================================
-
 
 class IndexingMixin:
     """
@@ -958,7 +955,6 @@ class IndexingMixin:
         except Exception as e:
             logger.error(f"Failed to index components with ColBERT: {e}", exc_info=True)
             raise
-
 
 # Export for convenience
 __all__ = [

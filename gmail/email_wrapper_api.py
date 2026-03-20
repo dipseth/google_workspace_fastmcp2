@@ -7,7 +7,6 @@ Usage:
     from gmail.email_wrapper_api import get_email_symbols, parse_email_dsl
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -15,7 +14,7 @@ from pydantic import BaseModel, Field
 import gmail.email_wrapper_setup as _setup
 from config.enhanced_logging import setup_logger
 
-logger = setup_logger(__name__)
+logger = setup_logger()
 
 
 # =============================================================================
@@ -96,7 +95,12 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
         "Layout": ["ColumnsBlock", "Column"],
         "Content": ["HeroBlock", "TextBlock", "ButtonBlock", "ImageBlock"],
         "Structure": ["SpacerBlock", "DividerBlock"],
-        "Chrome": ["HeaderBlock", "FooterBlock", "SocialBlock", "TableBlock"],
+        "Chrome": [
+            "HeaderBlock",
+            "FooterBlock",
+            "SocialBlock",
+            "TableBlock",
+        ],
         "Interactive": ["AccordionBlock", "CarouselBlock"],
     }
 
@@ -105,7 +109,9 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
     # Core symbols organized by category
     lines.append("### Symbols")
     for category, components in CATEGORIES.items():
-        mappings = [f"{symbols.get(c, '?')}={c}" for c in components if c in symbols]
+        mappings = [
+            f"{symbols.get(c, '?')}={c}" for c in components if c in symbols
+        ]
         if mappings:
             lines.append(f"**{category}:** {', '.join(mappings)}")
 
@@ -115,7 +121,9 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
     col_sym = symbols["Column"]
 
     lines.append("\n### Containment Rules")
-    lines.append(f"- {spec_sym} EmailSpec → all block types (top-level container)")
+    lines.append(
+        f"- {spec_sym} EmailSpec → all block types (top-level container)"
+    )
     lines.append(f"- {cols_sym} ColumnsBlock → {col_sym} Column")
     lines.append(
         f"- {col_sym} Column → content blocks (TextBlock, ButtonBlock, ImageBlock)"
@@ -132,7 +140,9 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
         footer_sym = symbols["FooterBlock"]
 
         lines.append("\n### Examples")
-        lines.append(f"- `{spec_sym}[{hero_sym}, {text_sym}]` = hero + text email")
+        lines.append(
+            f"- `{spec_sym}[{hero_sym}, {text_sym}]` = hero + text email"
+        )
         lines.append(
             f"- `{spec_sym}[{hero_sym}, {text_sym}x2, {btn_sym}]` = hero + 2 text blocks + button"
         )
@@ -144,7 +154,9 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
             f"- `{spec_sym}[{hero_sym}, {cols_sym}[{col_sym}x2], {btn_sym}]` = "
             "hero + 2-column layout + button"
         )
-        lines.append("- Syntax: `xN` = multiplier, `[]` = children, `,` = siblings")
+        lines.append(
+            "- Syntax: `xN` = multiplier, `[]` = children, `,` = siblings"
+        )
 
     return "\n".join(lines)
 
@@ -176,10 +188,14 @@ def get_email_dsl_field_description() -> str:
         if comp in symbols:
             key_mappings.append(f"{symbols[comp]}={comp}")
 
-    return f"DSL structure using symbols. Symbols: {', '.join(key_mappings)}."
+    return (
+        f"DSL structure using symbols. Symbols: {', '.join(key_mappings)}."
+    )
 
 
-def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
+def get_email_tool_examples(
+    max_examples: int = 5,
+) -> List[Dict[str, Any]]:
     """
     Generate dynamic tool examples using symbols.
 
@@ -209,22 +225,37 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
             "description": "Simple welcome email",
             "email_description": f"{spec}[{hero}, {text}] Welcome email",
             "email_params": {
-                hero: {"title": "Welcome!", "subtitle": "Thanks for joining"},
-                text: {"_items": [{"text": "We're glad to have you."}]},
+                hero: {
+                    "title": "Welcome!",
+                    "subtitle": "Thanks for joining",
+                },
+                text: {
+                    "_items": [{"text": "We're glad to have you."}]
+                },
             },
         },
         {
             "description": "Newsletter with CTA",
             "email_description": f"{spec}[{hero}, {text}x2, {btn}]",
             "email_params": {
-                hero: {"title": "Monthly Update", "subtitle": "March 2026"},
+                hero: {
+                    "title": "Monthly Update",
+                    "subtitle": "March 2026",
+                },
                 text: {
                     "_items": [
                         {"text": "Here's what happened this month."},
                         {"text": "Check out our latest features."},
                     ]
                 },
-                btn: {"_items": [{"text": "Read More", "url": "https://example.com"}]},
+                btn: {
+                    "_items": [
+                        {
+                            "text": "Read More",
+                            "url": "https://example.com",
+                        }
+                    ]
+                },
             },
         },
         {
@@ -232,8 +263,16 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
             "email_description": f"{spec}[{header}, {text}, {divider}, {footer}]",
             "email_params": {
                 header: {"title": "Acme Corp"},
-                text: {"_items": [{"text": "Important announcement."}]},
-                footer: {"_items": [{"text": "2026 Acme Corp. All rights reserved."}]},
+                text: {
+                    "_items": [{"text": "Important announcement."}]
+                },
+                footer: {
+                    "_items": [
+                        {
+                            "text": "2026 Acme Corp. All rights reserved."
+                        }
+                    ]
+                },
             },
         },
         {
@@ -243,13 +282,30 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
                 hero: {"title": "Compare Plans"},
                 col: {
                     "_items": [
-                        {"blocks": [{"block_type": "text", "text": "Basic: $10/mo"}]},
-                        {"blocks": [{"block_type": "text", "text": "Pro: $25/mo"}]},
+                        {
+                            "blocks": [
+                                {
+                                    "block_type": "text",
+                                    "text": "Basic: $10/mo",
+                                }
+                            ]
+                        },
+                        {
+                            "blocks": [
+                                {
+                                    "block_type": "text",
+                                    "text": "Pro: $25/mo",
+                                }
+                            ]
+                        },
                     ]
                 },
                 btn: {
                     "_items": [
-                        {"text": "Choose Plan", "url": "https://example.com/plans"}
+                        {
+                            "text": "Choose Plan",
+                            "url": "https://example.com/plans",
+                        }
                     ]
                 },
             },
@@ -260,12 +316,24 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
             "email_params": {
                 img: {
                     "_items": [
-                        {"src": "https://picsum.photos/600/300", "alt": "Banner"}
+                        {
+                            "src": "https://picsum.photos/600/300",
+                            "alt": "Banner",
+                        }
                     ]
                 },
-                text: {"_items": [{"text": "Check out our new product."}]},
+                text: {
+                    "_items": [
+                        {"text": "Check out our new product."}
+                    ]
+                },
                 btn: {
-                    "_items": [{"text": "Shop Now", "url": "https://example.com/shop"}]
+                    "_items": [
+                        {
+                            "text": "Shop Now",
+                            "url": "https://example.com/shop",
+                        }
+                    ]
                 },
             },
         },
@@ -292,7 +360,10 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
                 },
                 btn: {
                     "_items": [
-                        {"text": "Contact Us", "url": "https://example.com/contact"}
+                        {
+                            "text": "Contact Us",
+                            "url": "https://example.com/contact",
+                        }
                     ]
                 },
             },
@@ -389,7 +460,9 @@ def parse_email_dsl(dsl_string: str):
     return parser.parse(dsl_string)
 
 
-def extract_email_dsl_from_description(description: str) -> Optional[str]:
+def extract_email_dsl_from_description(
+    description: str,
+) -> Optional[str]:
     """
     Extract DSL notation from a description string.
 

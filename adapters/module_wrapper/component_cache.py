@@ -35,7 +35,7 @@ Architecture:
 """
 
 import hashlib
-import logging
+from config.enhanced_logging import setup_logger
 import os
 import pickle
 import threading
@@ -57,8 +57,7 @@ from adapters.module_wrapper.types import (
     WrapperGetter,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 @dataclass
 class CacheEntry:
@@ -116,7 +115,6 @@ class CacheEntry:
         """Update access timestamp and count."""
         self.last_accessed = time.time()
         self.access_count += 1
-
 
 class LRUCache:
     """
@@ -191,7 +189,6 @@ class LRUCache:
     def __len__(self) -> int:
         with self._lock:
             return len(self._cache)
-
 
 class ComponentCache:
     """
@@ -671,14 +668,12 @@ class ComponentCache:
             f"L2={stats['l2_size']}, hit_rate={stats['hit_rate']:.1%})"
         )
 
-
 # =============================================================================
 # SINGLETON & INTEGRATION
 # =============================================================================
 
 _cache_instance: Optional[ComponentCache] = None
 _cache_lock = threading.Lock()
-
 
 def get_component_cache(
     memory_limit: int = 100,
@@ -717,7 +712,6 @@ def get_component_cache(
 
         return _cache_instance
 
-
 def cache_pattern(pattern: Payload, key: Optional[CacheKey] = None) -> CacheEntry:
     """
     Convenience function to cache an instance pattern.
@@ -731,7 +725,6 @@ def cache_pattern(pattern: Payload, key: Optional[CacheKey] = None) -> CacheEntr
     """
     cache = get_component_cache()
     return cache.put_from_pattern(pattern, key)
-
 
 def get_cached_components(
     key: CacheKey,

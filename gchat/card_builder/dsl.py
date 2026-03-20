@@ -7,7 +7,7 @@ This module provides standalone functions for:
 - Converting between card JSON and component paths
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any, Dict, List, Optional
 
 from adapters.module_wrapper.types import (
@@ -20,8 +20,7 @@ from adapters.module_wrapper.types import (
 from gchat.card_builder.metadata import get_children_field, get_container_child_type
 from gchat.card_builder.rendering import json_key_to_component_name
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # WIDGET TYPE MAPPINGS
@@ -33,11 +32,9 @@ from gchat.card_builder.rendering import _JSON_KEY_TO_COMPONENT
 
 WIDGET_JSON_KEYS = frozenset(_JSON_KEY_TO_COMPONENT.keys())
 
-
 # =============================================================================
 # COMPONENT PATH EXTRACTION
 # =============================================================================
-
 
 def extract_component_paths(card: JsonDict) -> ComponentPaths:
     """
@@ -81,11 +78,9 @@ def extract_component_paths(card: JsonDict) -> ComponentPaths:
 
     return paths
 
-
 # =============================================================================
 # DSL SUGGESTION
 # =============================================================================
-
 
 def suggest_dsl_for_params(
     card_params: JsonDict, symbols: SymbolMapping
@@ -162,11 +157,9 @@ def suggest_dsl_for_params(
 
     return f"{sec}[{', '.join(widgets)}]"
 
-
 # =============================================================================
 # DSL GENERATION FROM CARD
 # =============================================================================
-
 
 def _count_children(
     widget_data: JsonDict,
@@ -190,7 +183,6 @@ def _count_children(
     if not children_field:
         return 0
     return len(widget_data.get(children_field, []))
-
 
 def _widget_to_dsl(
     widget: JsonDict,
@@ -240,7 +232,6 @@ def _widget_to_dsl(
             return f"{symbol}[{nested}]"
 
     return symbol
-
 
 def generate_dsl_notation(
     card: JsonDict,
@@ -325,7 +316,6 @@ def generate_dsl_notation(
 
     # For multiple sections, join with separator
     return " | ".join(section_dsls)
-
 
 __all__ = [
     "WIDGET_JSON_KEYS",

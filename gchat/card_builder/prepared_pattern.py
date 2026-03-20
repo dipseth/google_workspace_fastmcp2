@@ -5,7 +5,7 @@ This module provides PreparedPattern for deferred card rendering,
 using the card_builder package utilities for metadata and rendering.
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -24,13 +24,11 @@ from gchat.card_builder.metadata import (
 )
 from gchat.card_builder.rendering import get_json_key
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # INPUT MAPPING REPORT - Tracks how inputs are consumed during card building
 # =============================================================================
-
 
 @dataclass
 class InputMappingReport:
@@ -79,11 +77,9 @@ class InputMappingReport:
             }
         return result
 
-
 # =============================================================================
 # PREPARED PATTERN - Deferred Rendering Support
 # =============================================================================
-
 
 class PreparedPattern:
     """
@@ -416,7 +412,6 @@ class PreparedPattern:
 
         return cls(result.component_paths, wrapper)
 
-
 def prepare_pattern(
     pattern: Dict[str, Any],
     wrapper=None,
@@ -448,7 +443,6 @@ def prepare_pattern(
 
     return PreparedPattern.from_pattern(pattern, wrapper)
 
-
 def prepare_pattern_from_dsl(
     dsl_string: str,
     wrapper=None,
@@ -478,7 +472,6 @@ def prepare_pattern_from_dsl(
         wrapper = get_card_framework_wrapper()
 
     return PreparedPattern.from_dsl(dsl_string, wrapper)
-
 
 __all__ = [
     "InputMappingReport",

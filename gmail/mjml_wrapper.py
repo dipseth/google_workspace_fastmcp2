@@ -7,11 +7,11 @@ Provides:
 - normalize_html_for_snapshot() — normalize HTML for snapshot testing
 """
 
-import logging
 import re
 import subprocess
 from typing import Optional
 
+from config.enhanced_logging import setup_logger
 from gmail.mjml_types import (
     EmailSpec,
     MjmlDiagnostic,
@@ -19,7 +19,7 @@ from gmail.mjml_types import (
     MjmlRenderResult,
 )
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def email_spec_to_mjml(spec: EmailSpec) -> str:
@@ -54,7 +54,9 @@ def render_email_spec(
             return MjmlRenderResult(
                 success=False,
                 mjml_source=mjml_source,
-                diagnostics=[MjmlDiagnostic(message=str(e)) for e in result.errors],
+                diagnostics=[
+                    MjmlDiagnostic(message=str(e)) for e in result.errors
+                ],
             )
         return MjmlRenderResult(
             success=True,
@@ -69,7 +71,9 @@ def render_email_spec(
         return MjmlRenderResult(
             success=False,
             mjml_source=mjml_source,
-            diagnostics=[MjmlDiagnostic(message=f"mjml Python render error: {e}")],
+            diagnostics=[
+                MjmlDiagnostic(message=f"mjml Python render error: {e}")
+            ],
         )
 
     # Strategy 2: MJML CLI
@@ -94,7 +98,9 @@ def render_email_spec(
                 success=False,
                 mjml_source=mjml_source,
                 diagnostics=[
-                    MjmlDiagnostic(message=f"MJML CLI error: {result.stderr}")
+                    MjmlDiagnostic(
+                        message=f"MJML CLI error: {result.stderr}"
+                    )
                 ],
             )
     except FileNotFoundError:

@@ -5,9 +5,6 @@ This proxy generates temporary credentials for MCP clients and maps them interna
 to real Google OAuth credentials, ensuring the real credentials are never exposed.
 """
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import secrets
 import threading
 import time
@@ -20,7 +17,6 @@ from config.enhanced_logging import setup_logger
 from config.settings import settings
 
 logger = setup_logger()
-
 
 @dataclass
 class ProxyClient:
@@ -51,7 +47,6 @@ class ProxyClient:
         """Store PKCE parameters from authorization request."""
         self.code_challenge = code_challenge
         self.code_challenge_method = code_challenge_method
-
 
 class OAuthProxy:
     """
@@ -352,10 +347,8 @@ class OAuthProxy:
                 ),
             }
 
-
 # Global OAuth Proxy instance
 oauth_proxy = OAuthProxy()
-
 
 def handle_token_exchange(
     auth_code: str,
@@ -457,7 +450,6 @@ def handle_token_exchange(
             logger.error(f"   Response status: {e.response.status_code}")
             logger.error(f"   Response body: {e.response.text}")
         raise ValueError(f"Token exchange failed: {str(e)}")
-
 
 def refresh_access_token(
     refresh_token: str, client_id: str, client_secret: str

@@ -6,7 +6,7 @@ using a provider/model naming convention (e.g., 'openai/zai-org-glm-4.6').
 """
 
 import json
-import logging
+from config.enhanced_logging import setup_logger
 import os
 import sys
 from typing import Any
@@ -33,8 +33,25 @@ from mcp.types import (
     ToolUseContent,
 )
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
+# Anthropic model names that may appear behind any LiteLLM provider prefix.
+# Venice AI, for example, exposes Claude models via its OpenAI-compatible
+# endpoint (openai/claude-sonnet-4-6).  We need to recognise these so that
+# Anthropic-specific features (prompt caching, cached-token tracking) are
+# enabled regardless of the routing provider.
+_ANTHROPIC_MODEL_STEMS = ("claude-",)
+
+def is_anthropic_model(model: str) -> bool:
+    """Return True if *model* is an Anthropic Claude model.
+
+    Handles both direct Anthropic routing (``anthropic/claude-…``) and
+    proxy routing through OpenAI-compatible providers like Venice AI
+    (``openai/claude-…``).
+    """
+    # Strip the provider prefix (e.g. "anthropic/", "openai/")
+    bare = model.split("/", 1)[-1] if "/" in model else model
+    return any(bare.startswith(stem) for stem in _ANTHROPIC_MODEL_STEMS)
 
 class LiteLLMSamplingHandler:
     """FastMCP sampling handler that routes through LiteLLM.
@@ -120,8 +137,8 @@ class LiteLLMSamplingHandler:
             if tc is not None:
                 kwargs["tool_choice"] = tc
 
-        # Provider-side prompt caching: only for Anthropic models
-        if self.default_model.startswith("anthropic/"):
+        # Provider-side prompt caching: for Anthropic models (direct or proxied)
+        if is_anthropic_model(self.default_model):
             kwargs["cache_control_injection_points"] = [
                 {"location": "message", "role": "system"},
             ]
@@ -188,9 +205,9 @@ class LiteLLMSamplingHandler:
 
                 current_span = otel_trace.get_current_span()
                 if current_span.get_span_context().is_valid:
-                    kwargs.setdefault("metadata", {})[
-                        "litellm_parent_otel_span"
-                    ] = current_span
+                    kwargs.setdefault("metadata", {})["litellm_parent_otel_span"] = (
+                        current_span
+                    )
             except Exception:
                 pass
         except Exception:
@@ -219,7 +236,7 @@ class LiteLLMSamplingHandler:
             ):
                 # Use actual token counts from provider
                 cached_tokens = 0
-                if self.default_model.startswith("anthropic/"):
+                if is_anthropic_model(self.default_model):
                     prompt_details = getattr(usage, "prompt_tokens_details", None)
                     cached_tokens = (
                         getattr(prompt_details, "cached_tokens", 0) or 0
@@ -253,9 +270,8 @@ class LiteLLMSamplingHandler:
         except Exception as e:
             logger.debug("Cost tracking failed (non-fatal): %s", e)
 
-        # Log cached tokens for Anthropic models only — other providers (e.g. Venice)
-        # report cached_tokens from their own KV-cache which is not prompt caching.
-        if self.default_model.startswith("anthropic/"):
+        # Log cached tokens for Anthropic models (direct or Venice-proxied).
+        if is_anthropic_model(self.default_model):
             try:
                 usage = getattr(response, "usage", None)
                 if usage:

@@ -457,6 +457,38 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "SAMPLING_CACHE_FASTEMBED_MODEL"},
     )
 
+    # Prompt Cache Keepalive Configuration
+    cache_keepalive_enabled: bool = Field(
+        default=False,
+        description="Enable periodic keepalive to keep Anthropic prompt cache warm",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_ENABLED"},
+    )
+    cache_keepalive_interval_seconds: int = Field(
+        default=240,
+        description="Seconds between keepalive calls per module (4 min default for 5-min TTL)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_INTERVAL_SECONDS"},
+    )
+    cache_keepalive_modules: str = Field(
+        default="gchat,email,qdrant",
+        description="Comma-separated module names to keep warm",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_MODULES"},
+    )
+    cache_keepalive_mode: str = Field(
+        default="explore",
+        description="'ping' (minimal output) or 'explore' (generate DSL variations)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_MODE"},
+    )
+    cache_keepalive_max_tokens: int = Field(
+        default=100,
+        description="Max output tokens for keepalive calls",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_MAX_TOKENS"},
+    )
+    cache_keepalive_index_results: bool = Field(
+        default=True,
+        description="Index exploration results into Qdrant",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_INDEX_RESULTS"},
+    )
+
     # Langfuse Observability Configuration
     langfuse_public_key: str = Field(
         default="",

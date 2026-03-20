@@ -8,9 +8,6 @@ This middleware follows the FastMCP pattern with proper hooks for request handli
 tool execution, and resource access, similar to the auth middleware.
 """
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import asyncio
 import importlib
 import inspect
@@ -36,7 +33,6 @@ from .adapter_types import (
 from .module_wrapper import ModuleWrapper
 
 logger = setup_logger()
-
 
 class ModuleWrapperMiddleware(Middleware):
     """
@@ -311,7 +307,6 @@ class ModuleWrapperMiddleware(Middleware):
             List of module names
         """
         return list(self.wrappers.keys())
-
 
 def setup_module_wrapper_tools(mcp):
     """Setup MCP tools for ModuleWrapper using FastMCP context pattern."""
@@ -669,7 +664,6 @@ def setup_module_wrapper_tools(mcp):
             return WrappedModulesResponse(
                 modules=[], count=0, error=f"Error listing modules: {str(e)}"
             )
-
 
 def setup_module_wrapper_middleware(mcp, modules_to_wrap=None, tool_pushdown=False):
     """

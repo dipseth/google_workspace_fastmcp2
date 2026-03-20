@@ -41,7 +41,7 @@ Search Strategy Overview:
 
 import asyncio
 import importlib
-import logging
+from config.enhanced_logging import setup_logger
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -69,17 +69,15 @@ from adapters.module_wrapper.types import (
     SymbolMapping,
 )
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Re-export constants for backwards compatibility
 COLBERT_DIM = _COLBERT_DIM  # ColBERT embedding dimension
 RELATIONSHIPS_DIM = _RELATIONSHIPS_DIM  # MiniLM embedding dimension for relationships
 
-
 # =============================================================================
 # SEARCH MIXIN
 # =============================================================================
-
 
 class SearchMixin:
     """
@@ -1791,7 +1789,6 @@ class SearchMixin:
             f"RRF merged {sum(len(r) for r in result_lists)} results into {len(merged)}"
         )
         return merged
-
 
 # Export for convenience
 __all__ = [

@@ -16,10 +16,10 @@ Usage:
     # Returns list of EmailBlock instances to append to EmailSpec.blocks
 """
 
-import logging
 import random
 from typing import Any, Dict, List, Optional
 
+from config.enhanced_logging import setup_logger
 from gmail.email_feedback.components import BUTTON_STYLES, LAYOUT_WRAPPERS
 from gmail.email_feedback.prompts import (
     CONTENT_FEEDBACK_PROMPTS,
@@ -32,8 +32,7 @@ from gmail.email_feedback.prompts import (
 from gmail.email_feedback.urls import generate_feedback_url
 from gmail.mjml_types import ButtonBlock, DividerBlock, EmailBlock, TextBlock
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 class EmailFeedbackBuilder:
     """
@@ -443,10 +442,8 @@ class EmailFeedbackBuilder:
             logger.warning(f"Failed to store email feedback pattern: {e}")
             return None
 
-
 # Global singleton
 _email_feedback_builder: Optional[EmailFeedbackBuilder] = None
-
 
 def get_email_feedback_builder() -> EmailFeedbackBuilder:
     """Get the singleton EmailFeedbackBuilder instance."""
@@ -454,7 +451,6 @@ def get_email_feedback_builder() -> EmailFeedbackBuilder:
     if _email_feedback_builder is None:
         _email_feedback_builder = EmailFeedbackBuilder()
     return _email_feedback_builder
-
 
 __all__ = [
     "EmailFeedbackBuilder",

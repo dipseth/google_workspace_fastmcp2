@@ -14,7 +14,6 @@ Per-session toggle: sessions can override the server default via
 
 from __future__ import annotations
 
-import logging
 import secrets
 from typing import Optional
 
@@ -32,7 +31,6 @@ from middleware.privacy.scanner import (
 from middleware.privacy.vault import derive_privacy_vault_key
 
 logger = setup_logger()
-
 
 class PrivacyMiddleware(Middleware):
     """Encrypts sensitive values in tool responses, masks them for the LLM.

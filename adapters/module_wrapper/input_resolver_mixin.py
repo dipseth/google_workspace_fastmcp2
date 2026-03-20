@@ -14,19 +14,18 @@ at setup time. The mixin handles:
 Init order: 52 (after GraphMixin:50, SymbolsMixin:45)
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any, Callable, Dict, FrozenSet, Optional, Set, Tuple
 
 from adapters.module_wrapper.types import ComponentName, JsonDict
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Type aliases for registered callables
 FieldExtractor = Callable[[dict, int], dict]  # (resource, index) -> extracted params
 OverflowHandler = Callable[
     [str, int], dict
 ]  # (component_name, index) -> fallback params
-
 
 class InputResolverMixin:
     """
@@ -302,7 +301,6 @@ class InputResolverMixin:
             context[index_key] = current_index + 1
 
         return params
-
 
 __all__ = [
     "InputResolverMixin",

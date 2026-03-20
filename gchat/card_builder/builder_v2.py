@@ -24,7 +24,7 @@ Usage:
 """
 
 import json
-import logging
+from config.enhanced_logging import setup_logger
 import os
 import random
 import threading
@@ -49,11 +49,10 @@ from middleware.template_core.jinja_environment import JinjaEnvironmentManager
 
 load_dotenv()
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Feature flag for feedback buttons
 ENABLE_FEEDBACK_BUTTONS = os.getenv("ENABLE_CARD_FEEDBACK", "true").lower() == "true"
-
 
 # =============================================================================
 # IMPORTS FROM card_builder PACKAGE (migrated modules)
@@ -137,7 +136,6 @@ from gchat.card_builder.prepared_pattern import (
     prepare_pattern_from_dsl,
 )
 from gchat.card_builder.utils import fire_and_forget
-
 
 class SmartCardBuilderV2:
     """
@@ -3671,11 +3669,9 @@ class SmartCardBuilderV2:
         # V2 initializes lazily, this is a no-op for compatibility
         pass
 
-
 # =============================================================================
 # DSL SUGGESTION - Suggest DSL based on card_params
 # =============================================================================
-
 
 def suggest_dsl_for_params(
     card_params: Dict[str, Any], symbols: Dict[str, str]
@@ -3695,13 +3691,11 @@ def suggest_dsl_for_params(
 
     return _suggest_dsl(card_params, symbols)
 
-
 # =============================================================================
 # SINGLETON AND CONVENIENCE FUNCTIONS
 # =============================================================================
 
 _builder: Optional[SmartCardBuilderV2] = None
-
 
 def get_smart_card_builder() -> SmartCardBuilderV2:
     """Get the global SmartCardBuilderV2 instance (v1 compatible)."""
@@ -3710,12 +3704,10 @@ def get_smart_card_builder() -> SmartCardBuilderV2:
         _builder = SmartCardBuilderV2()
     return _builder
 
-
 def reset_builder():
     """Reset the singleton builder."""
     global _builder
     _builder = None
-
 
 def build_card(
     description: str,
@@ -3728,7 +3720,6 @@ def build_card(
     return builder.build(
         description=description, title=title, subtitle=subtitle, **kwargs
     )
-
 
 # Backwards compatibility alias
 SmartCardBuilder = SmartCardBuilderV2

@@ -6,7 +6,7 @@ for the ModuleWrapper system. Delegates to the centralized EmbeddingService
 for model instances (thread-safe, deduplicated).
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any, Dict, Optional
 
 from adapters.module_wrapper.types import (
@@ -18,8 +18,7 @@ from adapters.module_wrapper.types import (
     MultiVector,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # LEGACY COMPAT — lazy class loaders (kept for any remaining direct callers)
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 _fastembed = None
 _colbert_embed = None
-
 
 def _get_fastembed():
     """Lazy load FastEmbed TextEmbedding class (legacy compat)."""
@@ -38,7 +36,6 @@ def _get_fastembed():
         _fastembed = TextEmbedding
     return _fastembed
 
-
 def _get_colbert_embed():
     """Lazy load ColBERT LateInteractionTextEmbedding class (legacy compat)."""
     global _colbert_embed
@@ -48,11 +45,9 @@ def _get_colbert_embed():
         _colbert_embed = LateInteractionTextEmbedding
     return _colbert_embed
 
-
 # =============================================================================
 # EMBEDDING MIXIN
 # =============================================================================
-
 
 class EmbeddingMixin:
     """
@@ -147,7 +142,6 @@ class EmbeddingMixin:
                 else None
             ),
         }
-
 
 # Export for convenience
 __all__ = [

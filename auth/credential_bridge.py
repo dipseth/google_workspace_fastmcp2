@@ -37,9 +37,6 @@ both new FastMCP 2.12.0 format and legacy credential formats during migration.
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import json
 import os
 from datetime import UTC, datetime
@@ -53,14 +50,12 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
-
 class CredentialFormat(Enum):
     """Credential storage formats."""
 
     LEGACY = "legacy"  # Original format with token, refresh_token, etc.
     FASTMCP = "fastmcp"  # FastMCP 2.12.0 format
     UNIFIED = "unified"  # New unified format for migration
-
 
 class CredentialMetadata(BaseModel):
     """Metadata for stored credentials."""
@@ -81,7 +76,6 @@ class CredentialMetadata(BaseModel):
     )
     version: str = Field("1.0.0", description="Credential format version")
 
-
 class StoredCredential(BaseModel):
     """Model for stored credentials."""
 
@@ -90,7 +84,6 @@ class StoredCredential(BaseModel):
     metadata: CredentialMetadata = Field(
         default_factory=CredentialMetadata, description="Credential metadata"
     )
-
 
 class CredentialBridge:
     """Bridge for managing credentials across different storage formats.

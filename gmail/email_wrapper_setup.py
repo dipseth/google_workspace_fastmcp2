@@ -10,13 +10,12 @@ Usage:
     symbols = wrapper.symbol_mapping
 """
 
-import logging
 import threading
 from typing import Dict, Optional
 
 from config.enhanced_logging import setup_logger
 
-logger = setup_logger(__name__)
+logger = setup_logger()
 
 # Thread-safe singleton
 _wrapper: Optional["ModuleWrapper"] = None
@@ -218,8 +217,12 @@ def _register_email_skill_templates(wrapper) -> None:
 
     Called during wrapper initialization via post_init_hooks.
     """
-    wrapper.register_skill_template("email-dsl-syntax", _generate_email_dsl_template)
-    wrapper.register_skill_template("jinja-filters", _generate_email_jinja_template)
+    wrapper.register_skill_template(
+        "email-dsl-syntax", _generate_email_dsl_template
+    )
+    wrapper.register_skill_template(
+        "jinja-filters", _generate_email_jinja_template
+    )
 
     for skill_type, examples in EMAIL_SKILL_EXAMPLES.items():
         wrapper.register_skill_examples(skill_type, examples)
@@ -294,7 +297,9 @@ def _create_email_wrapper() -> "ModuleWrapper":
         module_or_name=domain_config.module_name,
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
-        collection_name=getattr(settings, "email_collection", "email_blocks"),
+        collection_name=getattr(
+            settings, "email_collection", "email_blocks"
+        ),
         auto_initialize=False,
         index_nested=True,
         index_private=False,
@@ -311,11 +316,17 @@ def _create_email_wrapper() -> "ModuleWrapper":
     RELEVANT_TYPES = EMAIL_WIDGET_TYPES | {"EmailSpec", "Column"}
     raw_symbols = wrapper.symbol_mapping  # triggers lazy generation
     wrapper._symbol_mapping = {
-        name: sym for name, sym in raw_symbols.items() if name in RELEVANT_TYPES
+        name: sym
+        for name, sym in raw_symbols.items()
+        if name in RELEVANT_TYPES
     }
-    wrapper._reverse_symbol_mapping = {v: k for k, v in wrapper._symbol_mapping.items()}
+    wrapper._reverse_symbol_mapping = {
+        v: k for k, v in wrapper._symbol_mapping.items()
+    }
 
-    component_count = len(wrapper.components) if wrapper.components else 0
+    component_count = (
+        len(wrapper.components) if wrapper.components else 0
+    )
     symbol_count = len(wrapper._symbol_mapping)
     logger.info(
         f"Email ModuleWrapper ready: {component_count} components, "

@@ -22,17 +22,16 @@ All env vars are read from settings (which loads from .env).
 
 from __future__ import annotations
 
-import logging
+from config.enhanced_logging import setup_logger
 import os
 import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # ── Per-request sampling trace context via ContextVar ────────────────────────
-
 
 @dataclass
 class _SamplingTraceContext:
@@ -51,11 +50,9 @@ class _SamplingTraceContext:
         ""  # e.g. "validation" — disambiguates sub-calls within a tool execution
     )
 
-
 _current_trace: ContextVar[Optional[_SamplingTraceContext]] = ContextVar(
     "langfuse_trace_ctx", default=None
 )
-
 
 def reset_sampling_trace_context(
     tool_name: str = "",
@@ -73,7 +70,6 @@ def reset_sampling_trace_context(
             tool_tags=list(tool_tags or []),
         )
     )
-
 
 def set_sampling_trace_context(
     *,
@@ -107,11 +103,9 @@ def set_sampling_trace_context(
     if phase:
         ctx.phase = phase
 
-
 def get_sampling_trace_context() -> Optional[_SamplingTraceContext]:
     """Return the current trace context, or None if not set."""
     return _current_trace.get()
-
 
 def increment_sampling_step() -> int:
     """Increment the step counter and return the new value.
@@ -127,9 +121,7 @@ def increment_sampling_step() -> int:
     ctx.step_index += 1
     return ctx.step_index
 
-
 _langfuse_initialized = False
-
 
 def configure_langfuse() -> bool:
     """Set up Langfuse env vars and return True if configured.
@@ -174,7 +166,6 @@ def configure_langfuse() -> bool:
         logger.warning("Failed to configure Langfuse: %s", e)
         return False
 
-
 def enable_litellm_langfuse() -> bool:
     """Enable the Langfuse OTel callback on LiteLLM.
 
@@ -203,7 +194,6 @@ def enable_litellm_langfuse() -> bool:
     except Exception as e:
         logger.warning("Failed to enable LiteLLM Langfuse callback: %s", e)
         return False
-
 
 def wrap_anthropic_handler_with_langfuse(handler: Any) -> Any:
     """Wrap an Anthropic sampling handler with Langfuse ``@observe`` tracing.
@@ -281,9 +271,7 @@ def wrap_anthropic_handler_with_langfuse(handler: Any) -> Any:
         logger.warning("Failed to wrap Anthropic handler with Langfuse: %s", e)
         return handler
 
-
 # ── OTEL span management for parent-child hierarchy ──────────────────────
-
 
 def start_tool_span(tool_name: str):
     """Create a ``sampling::{tool_name}`` span and attach it to the OTEL context.
@@ -312,7 +300,6 @@ def start_tool_span(tool_name: str):
         return span, token
     except Exception:
         return None, None
-
 
 def start_phase_span(phase: str, tool_name: str = ""):
     """Create a child span for a sampling phase (validation, dsl_recovery, main_sampling).
@@ -343,7 +330,6 @@ def start_phase_span(phase: str, tool_name: str = ""):
     except Exception:
         return None, None
 
-
 def end_span(span, token, error: Optional[Exception] = None) -> None:
     """End a span and detach its context token.
 
@@ -368,7 +354,6 @@ def end_span(span, token, error: Optional[Exception] = None) -> None:
             otel_context.detach(token)
     except Exception:
         pass
-
 
 def add_langfuse_metadata(
     kwargs: dict,

@@ -5,7 +5,7 @@ Provides symbol generation, DSL parsing, backfill, and embedding text
 generation for the ModuleWrapper system.
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
@@ -20,13 +20,11 @@ from adapters.module_wrapper.types import (
     SymbolMapping,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # SYMBOLS MIXIN
 # =============================================================================
-
 
 class SymbolsMixin:
     """
@@ -761,7 +759,6 @@ class SymbolsMixin:
     # both SymbolsMixin and SearchMixin, the methods are available through
     # the SearchMixin. No wrapper methods needed here as Python's MRO will
     # resolve to the SearchMixin implementations.
-
 
 # Export for convenience
 __all__ = [

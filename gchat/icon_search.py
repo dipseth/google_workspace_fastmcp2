@@ -17,20 +17,19 @@ Usage:
     result = semantic_icon_search("TREND_UP")
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 import threading
 from typing import List, Optional, Tuple
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Lazy-loaded singletons (guarded by _init_lock)
 _embedder = None
 _icon_names: Optional[List[str]] = None
 _icon_embeddings: Optional[np.ndarray] = None
 _init_lock = threading.Lock()
-
 
 def _ensure_index():
     """Build the in-memory icon embedding index on first use."""
@@ -66,7 +65,6 @@ def _ensure_index():
         _icon_embeddings = _icon_embeddings / norms
 
     logger.info(f"Icon search index ready: {_icon_embeddings.shape}")
-
 
 def semantic_icon_search(
     query: str,
@@ -113,7 +111,6 @@ def semantic_icon_search(
     result = _icon_names[best_idx]
     logger.debug(f"Icon search: '{query}' -> '{result}' (score={best_score:.3f})")
     return result
-
 
 def semantic_icon_search_top_k(
     query: str,

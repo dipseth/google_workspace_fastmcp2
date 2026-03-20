@@ -22,12 +22,13 @@ Usage:
 """
 
 import html
-import logging
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Discriminator, Field, Tag, model_validator
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 
 def _safe_url(url: Optional[str]) -> str:
@@ -453,13 +454,17 @@ class AccordionBlock(EmailBlock):
         for item in self.items:
             title_attrs = []
             if item.title_background_color:
-                title_attrs.append(f'background-color="{item.title_background_color}"')
+                title_attrs.append(
+                    f'background-color="{item.title_background_color}"'
+                )
             if item.title_color:
                 title_attrs.append(f'color="{item.title_color}"')
 
             text_attrs = []
             if item.content_background_color:
-                text_attrs.append(f'background-color="{item.content_background_color}"')
+                text_attrs.append(
+                    f'background-color="{item.content_background_color}"'
+                )
 
             elements.append(
                 f"<mj-accordion-element>\n"
@@ -515,9 +520,13 @@ class CarouselBlock(EmailBlock):
             if img.href:
                 img_attrs.append(f'href="{_safe_url(img.href)}"')
             if img.thumbnails_src:
-                img_attrs.append(f'thumbnails-src="{_safe_url(img.thumbnails_src)}"')
+                img_attrs.append(
+                    f'thumbnails-src="{_safe_url(img.thumbnails_src)}"'
+                )
             if img.title:
-                img_attrs.append(f'title="{html.escape(img.title, quote=True)}"')
+                img_attrs.append(
+                    f'title="{html.escape(img.title, quote=True)}"'
+                )
             img_elements.append(f"<mj-carousel-image {' '.join(img_attrs)} />")
 
         inner = "\n".join(img_elements)
@@ -653,7 +662,9 @@ class EmailSpec(BaseModel):
                 _flush_inline(inline_blocks)
                 inline_blocks = []
                 bg = block.background_color
-                parts.append(f'<mj-section background-color="{bg}" padding="24px">')
+                parts.append(
+                    f'<mj-section background-color="{bg}" padding="24px">'
+                )
                 parts.append("<mj-column>")
                 parts.append(block.to_mjml(theme))
                 parts.append("</mj-column>")
@@ -669,7 +680,9 @@ class EmailSpec(BaseModel):
 
         return "\n".join(parts)
 
-    def render(self, options: Optional[MjmlRenderOptions] = None) -> MjmlRenderResult:
+    def render(
+        self, options: Optional[MjmlRenderOptions] = None
+    ) -> MjmlRenderResult:
         """Render to HTML via mjml_to_html. Delegates to mjml_wrapper."""
         from gmail.mjml_wrapper import render_email_spec
 

@@ -15,11 +15,10 @@ The default IntrospectionProvider wraps the existing helper functions in
 pipeline_mixin.py so existing embeddings are identical.
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any, Dict, Protocol, runtime_checkable
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 @runtime_checkable
 class RICTextProvider(Protocol):
@@ -45,7 +44,6 @@ class RICTextProvider(Protocol):
     def relationships_text(self, name: str, metadata: Dict[str, Any]) -> str:
         """Graph: 'How does it relate to others?' -> relationships vector (MiniLM 384d)"""
         ...
-
 
 class IntrospectionProvider:
     """Default RIC text provider for introspected Python components.
@@ -115,7 +113,6 @@ class IntrospectionProvider:
 
         rels = metadata.get("relationships", [])
         return build_compact_relationship_text(name, rels, comp_type)
-
 
 __all__ = [
     "RICTextProvider",

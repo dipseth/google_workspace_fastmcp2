@@ -29,12 +29,11 @@ Usage:
 """
 
 import functools
-import logging
+from config.enhanced_logging import setup_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Type
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 @dataclass(frozen=True)
 class MixinContract:
@@ -45,11 +44,9 @@ class MixinContract:
     requires: FrozenSet[str]
     init_order: int
 
-
 def _get_mixin_classes(cls: Type) -> List[Type]:
     """Extract mixin classes from the MRO (excluding object)."""
     return [c for c in cls.__mro__ if c is not object and c is not cls]
-
 
 def _extract_contract(mixin_cls: Type) -> Optional[MixinContract]:
     """Extract the dependency contract from a mixin class, if declared."""
@@ -66,7 +63,6 @@ def _extract_contract(mixin_cls: Type) -> Optional[MixinContract]:
         requires=frozenset(requires) if requires else frozenset(),
         init_order=init_order if init_order is not None else 999,
     )
-
 
 def get_all_contracts(cls: Type) -> Dict[str, MixinContract]:
     """Get contracts for all mixins in the MRO that have declarations.
@@ -95,7 +91,6 @@ def get_all_contracts(cls: Type) -> Dict[str, MixinContract]:
                 contracts[contract.name] = contract
 
     return contracts
-
 
 def validate_mixin_dependencies(cls: Type) -> List[str]:
     """Static check: all requires satisfied by some provides in MRO.
@@ -144,7 +139,6 @@ def validate_mixin_dependencies(cls: Type) -> List[str]:
 
     return issues
 
-
 def check_runtime_dependencies(
     instance: Any, mixin_cls: Optional[Type] = None
 ) -> List[str]:
@@ -177,7 +171,6 @@ def check_runtime_dependencies(
                 issues.append(f"{contract.name}: required attribute '{attr}' is None")
 
     return issues
-
 
 def generate_mermaid_dependency_graph(cls: Type) -> str:
     """Auto-generate a Mermaid diagram from mixin dependency declarations.
@@ -235,7 +228,6 @@ def generate_mermaid_dependency_graph(cls: Type) -> str:
 
     return "\n".join(lines)
 
-
 def generate_provides_requires_table(cls: Type) -> str:
     """Generate a markdown table of mixin contracts.
 
@@ -264,7 +256,6 @@ def generate_provides_requires_table(cls: Type) -> str:
         )
 
     return "\n".join(lines)
-
 
 def requires_deps(*attrs: str):
     """Decorator for strict-mode runtime checks on critical methods.

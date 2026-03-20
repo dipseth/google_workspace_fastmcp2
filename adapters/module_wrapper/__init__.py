@@ -31,11 +31,11 @@ Usage:
     )
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 import threading
 from typing import Any, Dict, List, Optional, Set, Union
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # =============================================================================
 # TYPE DEFINITIONS (Import First for Use by Other Modules)
@@ -243,7 +243,6 @@ from adapters.module_wrapper.types import (
 # =============================================================================
 # FULL MODULE WRAPPER - COMPOSED FROM MIXINS
 # =============================================================================
-
 
 class ModuleWrapper(
     QdrantMixin,
@@ -794,7 +793,6 @@ class ModuleWrapper(
                 logger.warning(msg)
 
         return issues
-
 
 # =============================================================================
 # EXPORTS

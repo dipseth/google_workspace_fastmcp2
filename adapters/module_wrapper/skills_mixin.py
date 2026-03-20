@@ -25,7 +25,7 @@ Usage:
 """
 
 import json
-import logging
+from config.enhanced_logging import setup_logger
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -44,8 +44,7 @@ from adapters.module_wrapper.types import (
     SymbolMapping,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 class SkillsMixin:
     """
@@ -640,7 +639,6 @@ class SkillsMixin:
         """Clear the cached skill documents."""
         self._skills_cache.clear()
         logger.debug("Invalidated skills cache")
-
 
 # Export for convenience
 __all__ = [

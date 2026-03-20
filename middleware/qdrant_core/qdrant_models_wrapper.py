@@ -18,16 +18,15 @@ Usage:
     parser = wrapper.get_dsl_parser()
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 import threading
 from typing import Dict, Optional
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Thread-safe singleton
 _wrapper: Optional["ModuleWrapper"] = None
 _wrapper_lock = threading.Lock()
-
 
 def get_qdrant_models_wrapper(
     force_reinitialize: bool = False,
@@ -48,7 +47,6 @@ def get_qdrant_models_wrapper(
             _wrapper = _create_wrapper()
 
     return _wrapper
-
 
 def _create_wrapper() -> "ModuleWrapper":
     """Create and configure the ModuleWrapper for qdrant_client.models."""
@@ -80,7 +78,6 @@ def _create_wrapper() -> "ModuleWrapper":
     )
 
     return wrapper
-
 
 def reset_wrapper():
     """Reset the singleton wrapper."""

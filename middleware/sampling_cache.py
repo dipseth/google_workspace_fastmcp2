@@ -7,14 +7,13 @@ loaded elsewhere in the project.
 """
 
 import asyncio
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any
 
 from litellm._logging import print_verbose
 from litellm.caching.qdrant_semantic_cache import QdrantSemanticCache
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 class FastEmbedQdrantCache(QdrantSemanticCache):
     """Qdrant semantic cache using FastEmbed instead of litellm.embedding().
@@ -212,7 +211,6 @@ class FastEmbedQdrantCache(QdrantSemanticCache):
             )
             return self._get_cache_logic(cached_response=cached_value)
         return None
-
 
 def initialize_sampling_cache() -> bool:
     """Lazily initialize the FastEmbed Qdrant semantic cache for sampling.

@@ -10,12 +10,12 @@ Example:
     {"items": [{"top_label": "Service", "text": "Drive"}, {"top_label": "Service", "text": "Gmail"}]}
 """
 
-import logging
+from config.enhanced_logging import setup_logger
 from typing import Any, Dict, Optional
 
 from gchat.card_builder.metadata import get_context_resource
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Bridge between builder context keys and the flat card_params keys.
 # Only entries where context_key != param_key need to be listed.
@@ -27,7 +27,6 @@ _CONTEXT_KEY_TO_PARAM: Dict[str, str] = {
 
 # Scalar param keys (value is a single string, not a list)
 _SCALAR_PARAMS = frozenset({"image_url"})
-
 
 def _resolve_param_key(
     component_name: str, wrapper: Optional[Any] = None
@@ -42,7 +41,6 @@ def _resolve_param_key(
         context_key, _ = resource_info
         return _CONTEXT_KEY_TO_PARAM.get(context_key, context_key)
     return None
-
 
 def resolve_symbol_params(
     card_params: Dict[str, Any],
@@ -98,7 +96,6 @@ def resolve_symbol_params(
             )
 
     return result
-
 
 def _normalize_value(value: Any, flat_key: str) -> Any:
     """Normalize a symbol-keyed value to the format the builder expects.

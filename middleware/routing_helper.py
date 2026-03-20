@@ -6,7 +6,6 @@ metadata-driven analysis, using ServiceCategorizer and confidence scoring.
 It serves as a routing engine component for the service dispatcher.
 """
 
-import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastmcp import FastMCP
@@ -16,7 +15,6 @@ from middleware.mcp_metadata_handler import MCPMetadataHandler
 from resources.service_categorization_logic import ServiceCategorizer
 
 logger = setup_logger()
-
 
 class RoutingConfidence:
     """Represents routing confidence with scoring details"""
@@ -36,7 +34,6 @@ class RoutingConfidence:
         self.is_confident = confidence_score >= 0.8  # High confidence threshold
         self.needs_fallback = confidence_score < 0.5  # Low confidence threshold
 
-
 class ServiceRoutingDecision:
     """Represents a complete routing decision with alternatives"""
 
@@ -54,7 +51,6 @@ class ServiceRoutingDecision:
         self.alternatives = alternatives or []
         self.fallback_available = len(self.alternatives) > 0
 
-
 class ServiceRouter:
     """Service router for metadata-driven request routing"""
 
@@ -68,7 +64,7 @@ class ServiceRouter:
         self.mcp_server = mcp_server
         self.categorizer = ServiceCategorizer(mcp_server)
         self.metadata_handler = MCPMetadataHandler(mcp_server)
-        self.logger = logging.getLogger(f"{__name__}.ServiceRouter")
+        self.logger = setup_logger()
 
         # Cache for service mappings
         self._service_cache = {}
@@ -423,7 +419,6 @@ class ServiceRouter:
         """Refresh the service registry from current tool metadata"""
         self.logger.info("Refreshing service registry")
         self._initialize_service_registry()
-
 
 def create_service_router(mcp_server: FastMCP) -> ServiceRouter:
     """

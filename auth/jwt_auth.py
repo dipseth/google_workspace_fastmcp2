@@ -11,14 +11,10 @@ from typing_extensions import Dict, List, Optional, Union
 
 # Import centralized scope registry
 from auth.scope_registry import ScopeRegistry
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 
 # Global key pair for development (in production, use proper key management)
 _key_pair: Optional[RSAKeyPair] = None
 _auth_provider: Optional[JWTVerifier] = None
-
 
 def setup_jwt_auth() -> JWTVerifier:
     """Setup JWT authentication for development using FastMCP 2's JWTVerifier.
@@ -54,7 +50,6 @@ def setup_jwt_auth() -> JWTVerifier:
     logger.info(f"📋 Required scopes from registry: {base_scopes}")
 
     return _auth_provider
-
 
 def generate_user_token(
     user_email: str,
@@ -145,7 +140,6 @@ def generate_user_token(
 
     return token
 
-
 def create_test_tokens() -> Dict[str, str]:
     """Create test tokens for development using scope registry.
 
@@ -170,7 +164,6 @@ def create_test_tokens() -> Dict[str, str]:
             logger.error(f"❌ Failed to create token for {user_email}: {e}")
 
     return tokens
-
 
 def get_user_email_from_token() -> str:
     """Get user email from current JWT token context.
@@ -219,7 +212,6 @@ def get_user_email_from_token() -> str:
         raise RuntimeError(
             f"Authentication error: Could not extract user email from JWT token: {e}"
         )
-
 
 if __name__ == "__main__":
     # Development test using FastMCP 2 JWTVerifier and scope registry
