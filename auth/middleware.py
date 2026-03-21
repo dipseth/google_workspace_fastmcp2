@@ -54,6 +54,7 @@ class AuthMiddleware(Middleware):
         storage_mode: CredentialStorageMode = CredentialStorageMode.FILE_ENCRYPTED,
         encryption_key: Optional[str] = None,
         google_provider: Optional["GoogleProvider"] = None,
+        github_provider=None,
     ):
         """
         Initialize AuthMiddleware with configurable credential storage and GoogleProvider integration.
@@ -62,6 +63,7 @@ class AuthMiddleware(Middleware):
             storage_mode: How to store credentials (file_plaintext, file_encrypted, memory_only, memory_with_backup)
             encryption_key: Custom encryption key (auto-generated if not provided for encrypted modes)
             google_provider: FastMCP 2.12.0 GoogleProvider instance for unified authentication
+            github_provider: SSOGitHubProvider instance for GitHub OAuth session enrichment
         """
         self._last_cleanup = datetime.now()
         self._cleanup_interval_minutes = 30
@@ -74,6 +76,7 @@ class AuthMiddleware(Middleware):
 
         # GoogleProvider integration for unified authentication
         self._google_provider = google_provider
+        self._github_provider = github_provider
         self._unified_auth_enabled = bool(
             google_provider and settings.enable_unified_auth
         )
@@ -265,6 +268,18 @@ class AuthMiddleware(Middleware):
             await self._auto_inject_email_parameter(context, user_email)
         else:
             logger.debug(f"No JWT token authentication found for tool {tool_name}")
+
+        # GITHUB AUTH: Extract user identity from GitHub OAuth token claims
+        if not user_email and auth_provenance == AuthProvenance.GITHUB_OAUTH:
+            user_email = self._extract_user_from_github_token(session_id)
+            if user_email:
+                logger.debug(
+                    f"🐙 Extracted GitHub user for tool {tool_name}: {user_email}"
+                )
+                if session_id:
+                    store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
+                await set_user_email_context(user_email)
+                await self._auto_inject_email_parameter(context, user_email)
 
         # UNIFIED AUTH: Secondary - try GoogleProvider if configured
         if not user_email and self._unified_auth_enabled:
@@ -3042,7 +3057,8 @@ class AuthMiddleware(Middleware):
         Returns:
             "api_key" for shared MCP_API_KEY sessions
             "user_api_key" for per-user API key sessions
-            None for normal OAuth sessions
+            "github_oauth" for GitHub OAuth sessions
+            None for normal Google OAuth sessions
         """
         try:
             from fastmcp.server.dependencies import get_access_token
@@ -3061,8 +3077,72 @@ class AuthMiddleware(Middleware):
                     logger.debug("🔑 Detected per-user API key session")
                     return AuthProvenance.USER_API_KEY
 
+                # Detect GitHub OAuth via token claims
+                # GitHubTokenVerifier sets "login" and "github_user_data" in claims
+                if access_token.claims.get("login") or access_token.claims.get(
+                    "github_user_data"
+                ):
+                    logger.debug(
+                        f"🐙 Detected GitHub OAuth session: "
+                        f"{access_token.claims.get('login')}"
+                    )
+                    return AuthProvenance.GITHUB_OAUTH
+
             return None
         except Exception:
+            return None
+
+    def _extract_user_from_github_token(self, session_id: Optional[str] = None) -> Optional[str]:
+        """Extract user identity from GitHub OAuth token claims.
+
+        GitHub tokens carry login, email, and user data in claims set by
+        GitHubTokenVerifier. Returns the email (or login@github if no email).
+        Also stores GitHub-specific session data.
+        """
+        try:
+            from fastmcp.server.dependencies import get_access_token
+
+            try:
+                access_token = get_access_token()
+            except RuntimeError:
+                return None
+
+            if not hasattr(access_token, "claims"):
+                return None
+
+            claims = access_token.claims
+            github_login = claims.get("login")
+            github_email = claims.get("email")
+            github_user_id = claims.get("sub")
+
+            if not github_login:
+                return None
+
+            # Store GitHub-specific session data
+            if session_id:
+                from .context import store_session_data
+
+                store_session_data(session_id, SessionKey.GITHUB_LOGIN, github_login)
+                store_session_data(
+                    session_id, SessionKey.GITHUB_USER_ID, str(github_user_id)
+                )
+                if github_email:
+                    store_session_data(
+                        session_id, SessionKey.GITHUB_EMAIL, github_email
+                    )
+                store_session_data(
+                    session_id, SessionKey.GITHUB_STARRED_REPO, True
+                )
+
+            # Use GitHub email if available, otherwise construct one from login
+            user_email = github_email or f"{github_login}@github"
+            logger.debug(
+                f"🐙 GitHub user identity: {user_email} (login: {github_login})"
+            )
+            return user_email
+
+        except Exception as e:
+            logger.debug(f"Failed to extract GitHub user: {e}")
             return None
 
     def _load_oauth_authentication_data(self) -> Optional[str]:
@@ -3217,6 +3297,7 @@ def create_enhanced_auth_middleware(
     storage_mode: CredentialStorageMode = CredentialStorageMode.FILE_PLAINTEXT,
     encryption_key: Optional[str] = None,
     google_provider: Optional["GoogleProvider"] = None,
+    github_provider=None,
 ) -> AuthMiddleware:
     """
     Factory function to create AuthMiddleware with unified authentication support.
@@ -3228,6 +3309,7 @@ def create_enhanced_auth_middleware(
         storage_mode: Credential storage mode
         encryption_key: Optional encryption key
         google_provider: GoogleProvider instance for unified auth
+        github_provider: SSOGitHubProvider for GitHub OAuth session enrichment
 
     Returns:
         Configured AuthMiddleware with unified authentication capabilities
@@ -3236,6 +3318,7 @@ def create_enhanced_auth_middleware(
         storage_mode=storage_mode,
         encryption_key=encryption_key,
         google_provider=google_provider,
+        github_provider=github_provider,
     )
 
     if middleware.is_unified_auth_enabled():

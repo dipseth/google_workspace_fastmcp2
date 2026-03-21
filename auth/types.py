@@ -19,7 +19,8 @@ class AuthProvenance(str, Enum):
 
     API_KEY = "api_key"  # Shared MCP_API_KEY (admin token)
     USER_API_KEY = "user_api_key"  # Per-user key (generated on OAuth)
-    OAUTH = "oauth"  # Browser-based OAuth flow
+    OAUTH = "oauth"  # Browser-based OAuth flow (Google)
+    GITHUB_OAUTH = "github_oauth"  # GitHub OAuth flow
 
 
 class SessionKey(str, Enum):
@@ -70,3 +71,9 @@ class SessionKey(str, Enum):
 
     # LLM-guessed email from start_google_auth (unverified, for display only)
     REQUESTED_EMAIL = "requested_email"
+
+    # GitHub OAuth session data
+    GITHUB_LOGIN = "github_login"  # str (GitHub username)
+    GITHUB_EMAIL = "github_email"  # str (GitHub email, may be None)
+    GITHUB_USER_ID = "github_user_id"  # str (GitHub numeric user ID)
+    GITHUB_STARRED_REPO = "github_starred_repo"  # bool (has user starred the gating repo)

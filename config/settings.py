@@ -544,6 +544,17 @@ class Settings(BaseSettings):
     fastmcp_server_auth_google_client_secret: str = ""
     fastmcp_server_auth_google_base_url: str = ""
 
+    # GitHub OAuth Configuration (for alpha access via repo star gating)
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+    github_oauth_required_scopes: str = "user:email"  # Comma-separated GitHub scopes
+    github_oauth_gating_repo: str = ""  # owner/repo to check for star (e.g. "myorg/myrepo")
+
+    # Alpha Access Control
+    alpha_mode: bool = False  # Enable alpha access gating
+    alpha_google_email_allowlist: str = ""  # Comma-separated emails allowed via Google OAuth
+    alpha_github_require_star: bool = True  # Require GitHub users to star the gating repo
+
     # Legacy OAuth scopes - maintained for backward compatibility
     # These are now managed through the centralized scope registry
     _fallback_drive_scopes: list[str] = [
