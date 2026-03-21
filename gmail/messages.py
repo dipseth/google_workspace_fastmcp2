@@ -6,9 +6,12 @@ This module provides tools for:
 - Retrieving individual message content
 - Batch message content retrieval
 - Thread content retrieval
+- Downloading message attachments
 """
 
 import asyncio
+import base64
+import os
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
@@ -22,6 +25,7 @@ from tools.common_types import UserGoogleEmail
 
 from .gmail_types import (
     BatchMessageResult,
+    DownloadGmailAttachmentResponse,
     GetGmailMessageContentResponse,
     GetGmailMessagesBatchResponse,
     GetGmailThreadContentResponse,
@@ -31,7 +35,12 @@ from .gmail_types import (
     ThreadMessageInfo,
 )
 from .service import _get_gmail_service_with_fallback
-from .utils import _extract_headers, _extract_message_body, _generate_gmail_web_url
+from .utils import (
+    _extract_attachment_metadata,
+    _extract_headers,
+    _extract_message_body,
+    _generate_gmail_web_url,
+)
 
 logger = setup_logger()
 
@@ -248,6 +257,9 @@ async def get_gmail_message_content(
         payload = message_full.get("payload", {})
         body_data = _extract_message_body(payload)
 
+        # Extract attachment metadata from the full payload
+        attachment_metadata = _extract_attachment_metadata(payload)
+
         message_content: GmailMessageContent = {
             "id": message_id,
             "subject": subject,
@@ -256,6 +268,8 @@ async def get_gmail_message_content(
             "body": body_data or "[No text/plain body found]",
             "web_url": _generate_gmail_web_url(message_id),
         }
+        if attachment_metadata:
+            message_content["attachments"] = attachment_metadata
 
         return GetGmailMessageContentResponse(
             success=True, message_content=message_content, userEmail=user_google_email
@@ -600,6 +614,193 @@ async def get_gmail_thread_content(
         )
 
 
+# 10 MB limit for attachment downloads to keep MCP responses manageable
+MAX_ATTACHMENT_DOWNLOAD_BYTES = 10 * 1024 * 1024
+
+
+DEFAULT_ATTACHMENT_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
+
+
+async def download_gmail_attachment(
+    message_id: Annotated[
+        str,
+        Field(description="The Gmail message ID that contains the attachment"),
+    ],
+    filename: Annotated[
+        str,
+        Field(
+            description="The attachment filename from get_gmail_message_content response"
+        ),
+    ],
+    save_dir: Annotated[
+        str,
+        Field(
+            description="Directory to save the attachment to. Defaults to ~/Downloads. Ignored when return_content is true."
+        ),
+    ] = "",
+    return_content: Annotated[
+        bool,
+        Field(
+            description="If true, return base64-encoded file content instead of saving to disk. Use for remote clients that cannot access the server filesystem."
+        ),
+    ] = False,
+    user_google_email: Annotated[
+        Optional[str],
+        Field(
+            description="The user's Google email address for Gmail access. If None, uses the current authenticated user from FastMCP context (auto-injected by middleware)."
+        ),
+    ] = None,
+) -> DownloadGmailAttachmentResponse:
+    """
+    Download a specific attachment from a Gmail message.
+
+    By default, saves the file to disk (save_dir, defaults to ~/Downloads).
+    Set return_content=True to return base64-encoded data instead (for remote clients).
+
+    Use get_gmail_message_content first to discover available attachments.
+
+    Args:
+        message_id: The Gmail message ID that contains the attachment
+        filename: The attachment filename from get_gmail_message_content response
+        save_dir: Directory to save the file to. Defaults to ~/Downloads.
+        return_content: If True, return base64 data instead of saving to disk.
+        user_google_email: The user's Google email address. If None, uses the
+            current authenticated user from FastMCP context (auto-injected by middleware).
+
+    Returns:
+        DownloadGmailAttachmentResponse: Response with file_path (disk) or data (base64)
+    """
+    if not save_dir:
+        save_dir = DEFAULT_ATTACHMENT_DIR
+
+    logger.info(
+        f"[download_gmail_attachment] Message: '{message_id}', "
+        f"Filename: '{filename}', Save dir: '{save_dir}', "
+        f"Return content: {return_content}, Email: '{user_google_email}'"
+    )
+
+    try:
+        gmail_service = await _get_gmail_service_with_fallback(user_google_email)
+
+        # Fetch the full message to find the attachment by filename
+        # Gmail attachment IDs are ephemeral and change between API calls,
+        # so we match by filename and get a fresh attachmentId each time.
+        message_full = await asyncio.to_thread(
+            gmail_service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute
+        )
+
+        payload = message_full.get("payload", {})
+        attachment_metadata = _extract_attachment_metadata(payload)
+        matching = [a for a in attachment_metadata if a["filename"] == filename]
+
+        if not matching:
+            available = [a["filename"] for a in attachment_metadata]
+            return DownloadGmailAttachmentResponse(
+                success=False,
+                message_id=message_id,
+                filename=filename,
+                userEmail=user_google_email,
+                error=(
+                    f"Attachment '{filename}' not found in message '{message_id}'. "
+                    f"Available attachments: {available}"
+                ),
+            )
+
+        att_info = matching[0]
+        attachment_id = att_info["attachmentId"]
+
+        # Check size limit
+        if att_info["size"] > MAX_ATTACHMENT_DOWNLOAD_BYTES:
+            size_mb = att_info["size"] / (1024 * 1024)
+            limit_mb = MAX_ATTACHMENT_DOWNLOAD_BYTES / (1024 * 1024)
+            return DownloadGmailAttachmentResponse(
+                success=False,
+                message_id=message_id,
+                attachment_id=attachment_id,
+                filename=filename,
+                mimeType=att_info["mimeType"],
+                size=att_info["size"],
+                userEmail=user_google_email,
+                error=(
+                    f"Attachment too large ({size_mb:.1f} MB). "
+                    f"Limit is {limit_mb:.0f} MB. "
+                    f"Access via Gmail web: {_generate_gmail_web_url(message_id)}"
+                ),
+            )
+
+        # Download the attachment using the fresh attachmentId
+        attachment_response = await asyncio.to_thread(
+            gmail_service.users()
+            .messages()
+            .attachments()
+            .get(userId="me", messageId=message_id, id=attachment_id)
+            .execute
+        )
+
+        raw_bytes = base64.urlsafe_b64decode(attachment_response["data"])
+
+        response = DownloadGmailAttachmentResponse(
+            success=True,
+            message_id=message_id,
+            attachment_id=attachment_id,
+            filename=filename,
+            mimeType=att_info["mimeType"],
+            size=len(raw_bytes),
+            userEmail=user_google_email,
+        )
+
+        if return_content:
+            # Return base64 data for remote clients
+            response["data"] = base64.b64encode(raw_bytes).decode("ascii")
+            logger.info(
+                f"[download_gmail_attachment] Returning {len(raw_bytes)} bytes as base64"
+            )
+        else:
+            # Save to disk for local clients
+            os.makedirs(save_dir, exist_ok=True)
+            file_path = os.path.join(save_dir, filename)
+
+            # Avoid overwriting existing files by appending a counter
+            base, ext = os.path.splitext(file_path)
+            counter = 1
+            while os.path.exists(file_path):
+                file_path = f"{base} ({counter}){ext}"
+                counter += 1
+
+            with open(file_path, "wb") as f:
+                f.write(raw_bytes)
+
+            response["file_path"] = file_path
+            logger.info(
+                f"[download_gmail_attachment] Saved {len(raw_bytes)} bytes to {file_path}"
+            )
+
+        return response
+
+    except HttpError as e:
+        logger.error(f"Gmail API error in download_gmail_attachment: {e}")
+        return DownloadGmailAttachmentResponse(
+            success=False,
+            message_id=message_id,
+            filename=filename,
+            userEmail=user_google_email,
+            error=f"Gmail API error: {e}",
+        )
+
+    except Exception as e:
+        logger.error(f"Unexpected error in download_gmail_attachment: {e}")
+        return DownloadGmailAttachmentResponse(
+            success=False,
+            message_id=message_id,
+            attachment_id=attachment_id,
+            userEmail=user_google_email,
+            error=f"Unexpected error: {e}",
+        )
+
+
 def setup_message_tools(mcp: FastMCP) -> None:
     """Register Gmail message tools with the FastMCP server."""
 
@@ -703,3 +904,44 @@ def setup_message_tools(mcp: FastMCP) -> None:
         user_google_email: UserGoogleEmail = None,
     ) -> GetGmailThreadContentResponse:
         return await get_gmail_thread_content(thread_id, user_google_email)
+
+    @mcp.tool(
+        name="download_gmail_attachment",
+        description="Download a specific attachment from a Gmail message. Saves to disk by default (~/Downloads), or set return_content=true for base64 data. First use get_gmail_message_content to list attachments.",
+        tags={"gmail", "attachment", "download", "email"},
+        annotations={
+            "title": "Gmail Attachment Download",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def download_gmail_attachment_tool(
+        message_id: Annotated[
+            str,
+            Field(description="The Gmail message ID that contains the attachment"),
+        ],
+        filename: Annotated[
+            str,
+            Field(
+                description="The attachment filename from get_gmail_message_content response"
+            ),
+        ],
+        save_dir: Annotated[
+            str,
+            Field(
+                description="Directory to save the attachment to. Defaults to ~/Downloads. Ignored when return_content is true."
+            ),
+        ] = "",
+        return_content: Annotated[
+            bool,
+            Field(
+                description="If true, return base64-encoded file content instead of saving to disk. Use for remote clients."
+            ),
+        ] = False,
+        user_google_email: UserGoogleEmail = None,
+    ) -> DownloadGmailAttachmentResponse:
+        return await download_gmail_attachment(
+            message_id, filename, save_dir, return_content, user_google_email
+        )

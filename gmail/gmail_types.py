@@ -266,6 +266,15 @@ class SearchGmailMessagesResponse(TypedDict):
     error: NotRequired[Optional[str]]
 
 
+class GmailAttachmentInfo(TypedDict):
+    """Metadata for a single Gmail message attachment."""
+
+    filename: str
+    mimeType: str
+    size: int
+    attachmentId: str
+
+
 class GmailMessageContent(TypedDict):
     """Structure for Gmail message content."""
 
@@ -275,6 +284,7 @@ class GmailMessageContent(TypedDict):
     date: NotRequired[Optional[str]]
     body: str
     web_url: str
+    attachments: NotRequired[List[GmailAttachmentInfo]]
 
 
 class GetGmailMessageContentResponse(TypedDict):
@@ -282,6 +292,21 @@ class GetGmailMessageContentResponse(TypedDict):
 
     success: bool
     message_content: NotRequired[Optional[GmailMessageContent]]
+    userEmail: str
+    error: NotRequired[Optional[str]]
+
+
+class DownloadGmailAttachmentResponse(TypedDict):
+    """Response structure for download_gmail_attachment tool."""
+
+    success: bool
+    message_id: NotRequired[str]
+    attachment_id: NotRequired[str]
+    filename: NotRequired[str]
+    mimeType: NotRequired[str]
+    size: NotRequired[int]
+    file_path: NotRequired[str]
+    data: NotRequired[str]
     userEmail: str
     error: NotRequired[Optional[str]]
 

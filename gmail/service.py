@@ -137,7 +137,7 @@ def setup_gmail_tools(mcp: FastMCP) -> None:
         logger.info("✅ Gmail tools setup completed successfully")
         logger.info("Available Gmail tools:")
         logger.info(
-            "  📧 Message tools: search_gmail_messages, get_gmail_message_content, get_gmail_messages_content_batch, get_gmail_thread_content"
+            "  📧 Message tools: search_gmail_messages, get_gmail_message_content, get_gmail_messages_content_batch, get_gmail_thread_content, download_gmail_attachment"
         )
         logger.info(
             "  ✍️  Compose tools: send_gmail_message, draft_gmail_message, reply_to_gmail_message, draft_gmail_reply"

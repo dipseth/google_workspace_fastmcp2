@@ -313,6 +313,44 @@ def _extract_message_body(payload):
     return body_data
 
 
+def _extract_attachment_metadata(payload: dict) -> List[dict]:
+    """
+    Extract attachment metadata from a Gmail message payload.
+
+    Uses BFS traversal of MIME parts (same pattern as _extract_message_body).
+    Identifies parts that have a filename and an attachmentId.
+
+    Args:
+        payload: The message payload from Gmail API (format="full")
+
+    Returns:
+        List of dicts with keys: filename, mimeType, size, attachmentId
+    """
+    attachments = []
+    parts = [payload] if "parts" not in payload else payload.get("parts", [])
+
+    part_queue = list(parts)
+    while part_queue:
+        part = part_queue.pop(0)
+        filename = part.get("filename")
+        body = part.get("body", {})
+        attachment_id = body.get("attachmentId")
+
+        if filename and attachment_id:
+            attachments.append(
+                {
+                    "filename": filename,
+                    "mimeType": part.get("mimeType", "application/octet-stream"),
+                    "size": body.get("size", 0),
+                    "attachmentId": attachment_id,
+                }
+            )
+        elif part.get("mimeType", "").startswith("multipart/") and "parts" in part:
+            part_queue.extend(part.get("parts", []))
+
+    return attachments
+
+
 def _extract_headers(payload: dict, header_names: List[str]) -> Dict[str, str]:
     """
     Extract specified headers from a Gmail message payload.
