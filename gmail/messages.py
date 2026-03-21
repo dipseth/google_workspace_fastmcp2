@@ -761,7 +761,21 @@ async def download_gmail_attachment(
         else:
             # Save to disk for local clients
             os.makedirs(save_dir, exist_ok=True)
+            # Sanitize filename to prevent path traversal attacks
+            filename = os.path.basename(filename)
+            if not filename:
+                filename = f"attachment_{attachment_id or 'unknown'}"
             file_path = os.path.join(save_dir, filename)
+            # Verify resolved path stays within save_dir
+            resolved = os.path.realpath(file_path)
+            if not resolved.startswith(os.path.realpath(save_dir)):
+                return DownloadGmailAttachmentResponse(
+                    success=False,
+                    message_id=message_id,
+                    filename=filename,
+                    userEmail=user_google_email,
+                    error="Invalid filename: path traversal detected",
+                )
 
             # Avoid overwriting existing files by appending a counter
             base, ext = os.path.splitext(file_path)

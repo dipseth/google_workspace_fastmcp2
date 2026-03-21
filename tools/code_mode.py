@@ -98,19 +98,19 @@ class EnhancedSandboxProvider(MontySandboxProvider):
         import urllib.parse
         from collections import Counter
 
-        def _tz(offset=-6):
+        def _tz(offset=0):
             return datetime.timezone(datetime.timedelta(hours=offset))
 
         helpers = {
             # --- datetime ---
-            "now": lambda tz_offset=-6: str(datetime.datetime.now(_tz(tz_offset))),
-            "today": lambda tz_offset=-6: datetime.datetime.now(
-                _tz(tz_offset)
-            ).strftime("%Y-%m-%d"),
-            "days_ago": lambda n, tz_offset=-6: (
+            "now": lambda tz_offset=0: str(datetime.datetime.now(_tz(tz_offset))),
+            "today": lambda tz_offset=0: datetime.datetime.now(_tz(tz_offset)).strftime(
+                "%Y-%m-%d"
+            ),
+            "days_ago": lambda n, tz_offset=0: (
                 datetime.datetime.now(_tz(tz_offset)) - datetime.timedelta(days=n)
             ).isoformat(),
-            "hours_ago": lambda n, tz_offset=-6: (
+            "hours_ago": lambda n, tz_offset=0: (
                 datetime.datetime.now(_tz(tz_offset)) - datetime.timedelta(hours=n)
             ).isoformat(),
             "format_date": lambda iso_str, fmt="%Y-%m-%d %H:%M": (
@@ -292,10 +292,10 @@ EXECUTE_DESCRIPTION = (
     "- `import` is sandboxed — use only the built-in helpers listed below\n"
     "\n"
     "**Built-in helpers (`import` is not available — use these instead):**\n"
-    "- `now(tz_offset=-6)` \u2192 current datetime string\n"
-    "- `today(tz_offset=-6)` \u2192 current date 'YYYY-MM-DD'\n"
-    "- `days_ago(n, tz_offset=-6)` \u2192 ISO datetime string N days ago\n"
-    "- `hours_ago(n, tz_offset=-6)` \u2192 ISO datetime string N hours ago\n"
+    "- `now(tz_offset=0)` \u2192 current datetime string (UTC by default)\n"
+    "- `today(tz_offset=0)` \u2192 current date 'YYYY-MM-DD' (UTC by default)\n"
+    "- `days_ago(n, tz_offset=0)` \u2192 ISO datetime string N days ago\n"
+    "- `hours_ago(n, tz_offset=0)` \u2192 ISO datetime string N hours ago\n"
     "- `format_date(iso_str, fmt='%Y-%m-%d %H:%M')` \u2192 formatted date\n"
     "- `parse_date(iso_str)` \u2192 normalized ISO datetime\n"
     "- `timestamp()` \u2192 current unix timestamp (int)\n"
@@ -799,8 +799,7 @@ def setup_code_mode(mcp: FastMCP) -> None:
             return [v for v in components.values() if isinstance(v, Tool)]
         except Exception:
             logger.warning(
-                "code_mode: patched get_tool_catalog failed, "
-                "falling back to upstream"
+                "code_mode: patched get_tool_catalog failed, falling back to upstream"
             )
             # Fall back to the original (may still be broken, but is safe)
             return await code_mode.__class__.get_tool_catalog(

@@ -52,10 +52,15 @@ def _get_server_secret() -> str:
     secret_path = Path(".auth_encryption_key")
     if secret_path.exists():
         return secret_path.read_text().strip()
+    import secrets as _secrets
+
+    fallback = _secrets.token_urlsafe(32)
     logger.warning(
-        "No .auth_encryption_key found; email feedback HMAC will use fallback key"
+        "No .auth_encryption_key found; email feedback HMAC using random ephemeral key. "
+        "Feedback URLs will NOT survive server restarts. "
+        "Create .auth_encryption_key for persistent HMAC signing."
     )
-    return "email-feedback-fallback-key"
+    return fallback
 
 
 def _get_hmac_key() -> bytes:
@@ -83,9 +88,7 @@ def _compute_signature(params: dict) -> str:
     """Compute HMAC-SHA256 over canonical query params (excluding ``sig``)."""
     data = {k: v for k, v in sorted(params.items()) if k != "sig"}
     canonical = "&".join(f"{k}={v}" for k, v in data.items())
-    return _hmac.new(
-        _get_hmac_key(), canonical.encode(), hashlib.sha256
-    ).hexdigest()
+    return _hmac.new(_get_hmac_key(), canonical.encode(), hashlib.sha256).hexdigest()
 
 
 def generate_feedback_url(
