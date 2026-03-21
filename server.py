@@ -536,6 +536,86 @@ else:
     logger.info("  💡 To enable: set FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID and")
     logger.info("     FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET in .env")
 
+# ─── GitHub OAuth Provider Setup (Alpha Access via Repo Star Gating) ─────────
+# When GITHUB_OAUTH_CLIENT_ID and SECRET are set, we add GitHub as an
+# alternative auth provider using MultiAuth. GitHub-authed users are validated
+# via repo star check (alpha mode) and receive limited access (no Google API).
+github_auth_provider = None
+_dual_oauth_router = None
+
+_github_client_id = settings.github_oauth_client_id or os.getenv(
+    "GITHUB_OAUTH_CLIENT_ID", ""
+)
+_github_client_secret = settings.github_oauth_client_secret or os.getenv(
+    "GITHUB_OAUTH_CLIENT_SECRET", ""
+)
+
+if _github_client_id and _github_client_secret:
+    try:
+        from auth.github_provider import SSOGitHubProvider
+        from fastmcp.server.auth.providers.github import GitHubTokenVerifier
+
+        _github_scopes = [
+            s.strip()
+            for s in settings.github_oauth_required_scopes.split(",")
+            if s.strip()
+        ]
+
+        github_auth_provider = SSOGitHubProvider(
+            client_id=_github_client_id,
+            client_secret=_github_client_secret,
+            base_url=settings.base_url,
+            required_scopes=_github_scopes,
+            gating_repo=settings.github_oauth_gating_repo,
+            alpha_mode=settings.alpha_mode,
+            require_authorization_consent=False,  # We use our own provider select page
+        )
+
+        logger.info("✅ GitHubProvider configured for alpha OAuth")
+        logger.info(f"  🔒 Required scopes: {_github_scopes}")
+        if settings.alpha_mode and settings.github_oauth_gating_repo:
+            logger.info(
+                f"  ⭐ Repo star gating: {settings.github_oauth_gating_repo}"
+            )
+
+        # If both Google and GitHub are configured, wrap with MultiAuth
+        if google_auth_provider:
+            from fastmcp.server.auth import MultiAuth
+
+            _github_token_verifier = GitHubTokenVerifier(
+                required_scopes=_github_scopes,
+            )
+
+            _multi_auth_provider = MultiAuth(
+                server=google_auth_provider,  # Google owns the OAuth routes/metadata
+                verifiers=[_github_token_verifier],  # GitHub validates opaque tokens
+            )
+
+            # Replace google_auth_provider with MultiAuth for FastMCP app creation
+            google_auth_provider = _multi_auth_provider
+            logger.info("✅ MultiAuth configured: Google (primary) + GitHub (verifier)")
+
+            # Set up dual OAuth router for provider selection
+            from auth.dual_oauth_provider import DualOAuthRouter
+
+            _dual_oauth_router = DualOAuthRouter(
+                google_provider=_multi_auth_provider.server,
+                github_provider=github_auth_provider,
+                settings=settings,
+            )
+            # Patch authorize to redirect to /auth/select instead of Google
+            _dual_oauth_router.patch_authorize()
+            logger.info("  🔀 Provider selection page: /auth/select")
+        else:
+            # GitHub-only mode: use GitHubProvider directly
+            google_auth_provider = github_auth_provider
+            logger.info("✅ GitHub-only OAuth mode (no Google provider)")
+
+    except ImportError as e:
+        logger.warning(f"⚠️ GitHubProvider not available: {e}")
+    except Exception as e:
+        logger.error(f"❌ Failed to create GitHubProvider: {e}", exc_info=True)
+
 # Configure sampling fallback handler (routes through LiteLLM or Anthropic)
 _sampling_handler = None
 
@@ -722,6 +802,14 @@ else:
     logger.info("🔐 FastMCP running with legacy OAuth system (no GoogleProvider)")
     logger.info("  Custom OAuth endpoints will be registered below")
 
+# ─── Register Dual OAuth Routes (GitHub + Google provider selection) ──────────
+if _dual_oauth_router:
+    from starlette.routing import Route as _StarletteRoute
+
+    for _route in _dual_oauth_router.get_custom_routes():
+        mcp._additional_http_routes.append(_route)
+        logger.info(f"  🔀 Registered dual OAuth route: {_route.path}")
+
 # --- Code Mode Transform (opt-in) ---
 if settings.enable_code_mode:
     from tools.code_mode import setup_code_mode
@@ -735,7 +823,8 @@ from auth.middleware import create_enhanced_auth_middleware
 
 auth_middleware = create_enhanced_auth_middleware(
     storage_mode=credential_storage_mode,
-    google_provider=google_auth_provider,  # Pass GoogleProvider for unified auth when available
+    google_provider=google_auth_provider,  # GoogleProvider/MultiAuth when configured
+    github_provider=github_auth_provider,  # GitHubProvider when configured (for session enrichment)
 )
 # Enable service selection for existing OAuth system
 logger.info("🔧 Configuring service selection for OAuth system")
