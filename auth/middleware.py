@@ -196,7 +196,8 @@ class AuthMiddleware(Middleware):
             result = await call_next(context)
             return result
         except Exception as e:
-            logger.error(f"Error in request processing: {e}")
+            import traceback
+            logger.error(f"Error in request processing: {e}\n{traceback.format_exc()}")
             raise
         finally:
             # PHASE 1 FIX: Clean up request-session mapping after request completes

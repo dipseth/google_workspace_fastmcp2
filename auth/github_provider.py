@@ -8,11 +8,39 @@ Extends FastMCP's built-in GitHubProvider to:
 
 from __future__ import annotations
 
+import time
+
 from fastmcp.server.auth.providers.github import GitHubProvider
 
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
+
+_GITHUB_CACHE_TTL = 3600  # 1 hour
+
+
+class _TTLDict:
+    """Minimal dict-like container with per-entry TTL eviction on read."""
+
+    def __init__(self, ttl_seconds: int = _GITHUB_CACHE_TTL):
+        self._ttl = ttl_seconds
+        self._data: dict[str, tuple[float, dict]] = {}
+
+    def get(self, key: str, default=None):
+        entry = self._data.get(key)
+        if entry is None:
+            return default
+        ts, value = entry
+        if time.time() - ts > self._ttl:
+            del self._data[key]
+            return default
+        return value
+
+    def __setitem__(self, key: str, value):
+        self._data[key] = (time.time(), value)
+
+    def __contains__(self, key: str) -> bool:
+        return self.get(key) is not None
 
 
 class SSOGitHubProvider(GitHubProvider):
@@ -31,7 +59,7 @@ class SSOGitHubProvider(GitHubProvider):
         self._alpha_mode = alpha_mode
         # Store GitHub user data from the last successful auth, keyed by token
         # This is consumed by AuthMiddleware to set session context
-        self._github_user_cache: dict[str, dict] = {}
+        self._github_user_cache: _TTLDict = _TTLDict(ttl_seconds=_GITHUB_CACHE_TTL)
 
     async def exchange_authorization_code(self, client, authorization_code):
         """Intercept token exchange to enforce star gating and cache user data."""

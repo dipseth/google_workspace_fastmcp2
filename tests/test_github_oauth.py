@@ -185,7 +185,7 @@ class TestSSOGitHubProvider:
         )
         assert provider._gating_repo == "myorg/myrepo"
         assert provider._alpha_mode is True
-        assert provider._github_user_cache == {}
+        assert provider._github_user_cache.get("nonexistent") is None
 
     def test_get_cached_user_returns_none_for_unknown(self):
         from auth.github_provider import SSOGitHubProvider

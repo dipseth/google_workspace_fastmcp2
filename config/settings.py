@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     credential_storage_mode: str = "FILE_ENCRYPTED"
     chat_service_account_file: str = ""
 
+    # Attachment download temp directory (for signed URL mode)
+    attachment_temp_dir: str = "/tmp/gw-mcp-attachments"
+
     @property
     def is_cloud_deployment(self) -> bool:
         """Detect if running in FastMCP Cloud."""
@@ -491,9 +494,14 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "CACHE_KEEPALIVE_ENABLED"},
     )
     cache_keepalive_interval_seconds: int = Field(
-        default=240,
-        description="Seconds between keepalive calls per module (4 min default for 5-min TTL)",
+        default=2700,
+        description="Seconds between keepalive calls per module (45 min default; cache may go cold between calls)",
         json_schema_extra={"env": "CACHE_KEEPALIVE_INTERVAL_SECONDS"},
+    )
+    cache_keepalive_jitter_seconds: int = Field(
+        default=300,
+        description="Jitter range (+/-) around keepalive interval (default 300 = 40-50 min range)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_JITTER_SECONDS"},
     )
     cache_keepalive_modules: str = Field(
         default="gchat,email,qdrant",
@@ -514,6 +522,20 @@ class Settings(BaseSettings):
         default=True,
         description="Index exploration results into Qdrant",
         json_schema_extra={"env": "CACHE_KEEPALIVE_INDEX_RESULTS"},
+    )
+
+    # Sampling Cost Persistence
+    sampling_cost_persistence_file: str = Field(
+        default="data/sampling_costs.json",
+        description="JSON file for persistent sampling cost tracking (empty to disable)",
+        json_schema_extra={"env": "SAMPLING_COST_PERSISTENCE_FILE"},
+    )
+
+    # Argument Recovery
+    sampling_argument_recovery_enabled: bool = Field(
+        default=True,
+        description="Enable LLM-assisted argument recovery on Pydantic ValidationError",
+        json_schema_extra={"env": "SAMPLING_ARGUMENT_RECOVERY_ENABLED"},
     )
 
     # Langfuse Observability Configuration
