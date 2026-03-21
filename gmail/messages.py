@@ -638,10 +638,16 @@ async def download_gmail_attachment(
             description="Directory to save the attachment to. Defaults to ~/Downloads. Ignored when return_content is true."
         ),
     ] = "",
+    return_url: Annotated[
+        bool,
+        Field(
+            description="If true (default), return a temporary signed download URL instead of saving to disk or base64. URL expires after 15 minutes and is one-time use. Best for remote clients. Set to false to use save_dir or return_content instead."
+        ),
+    ] = True,
     return_content: Annotated[
         bool,
         Field(
-            description="If true, return base64-encoded file content instead of saving to disk. Use for remote clients that cannot access the server filesystem."
+            description="If true, return base64-encoded file content instead of saving to disk. Only used when return_url is false. Prefer return_url for large files."
         ),
     ] = False,
     user_google_email: Annotated[
@@ -654,8 +660,8 @@ async def download_gmail_attachment(
     """
     Download a specific attachment from a Gmail message.
 
-    By default, saves the file to disk (save_dir, defaults to ~/Downloads).
-    Set return_content=True to return base64-encoded data instead (for remote clients).
+    By default, returns a temporary signed download URL (expires in 15 minutes, one-time use).
+    Set return_url=False to save to disk instead, or use return_content=True for base64.
 
     Use get_gmail_message_content first to discover available attachments.
 
@@ -752,7 +758,18 @@ async def download_gmail_attachment(
             userEmail=user_google_email,
         )
 
-        if return_content:
+        if return_url:
+            # Return a temporary signed download URL
+            from config.settings import settings
+            from gmail.attachment_server import generate_attachment_url, save_attachment
+
+            file_id = save_attachment(raw_bytes, filename)
+            url = generate_attachment_url(settings.base_url, file_id, filename)
+            response["download_url"] = url
+            logger.info(
+                f"[download_gmail_attachment] Returning signed URL for {len(raw_bytes)} bytes"
+            )
+        elif return_content:
             # Return base64 data for remote clients
             response["data"] = base64.b64encode(raw_bytes).decode("ascii")
             logger.info(
@@ -921,7 +938,7 @@ def setup_message_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="download_gmail_attachment",
-        description="Download a specific attachment from a Gmail message. Saves to disk by default (~/Downloads), or set return_content=true for base64 data. First use get_gmail_message_content to list attachments.",
+        description="Download a specific attachment from a Gmail message. By default returns a temporary signed download URL (15 min, one-time use). Set return_url=false to save to disk, or return_content=true for base64. First use get_gmail_message_content to list attachments.",
         tags={"gmail", "attachment", "download", "email"},
         annotations={
             "title": "Gmail Attachment Download",
@@ -945,17 +962,28 @@ def setup_message_tools(mcp: FastMCP) -> None:
         save_dir: Annotated[
             str,
             Field(
-                description="Directory to save the attachment to. Defaults to ~/Downloads. Ignored when return_content is true."
+                description="Directory to save the attachment to. Defaults to ~/Downloads. Only used when return_url and return_content are both false."
             ),
         ] = "",
+        return_url: Annotated[
+            bool,
+            Field(
+                description="If true (default), return a temporary signed download URL (15 min, one-time use). Best for remote clients. Set to false to use save_dir or return_content instead."
+            ),
+        ] = True,
         return_content: Annotated[
             bool,
             Field(
-                description="If true, return base64-encoded file content instead of saving to disk. Use for remote clients."
+                description="If true, return base64-encoded file content instead of saving to disk. Only used when return_url is false."
             ),
         ] = False,
         user_google_email: UserGoogleEmail = None,
     ) -> DownloadGmailAttachmentResponse:
         return await download_gmail_attachment(
-            message_id, filename, save_dir, return_content, user_google_email
+            message_id,
+            filename,
+            save_dir=save_dir,
+            return_url=return_url,
+            return_content=return_content,
+            user_google_email=user_google_email,
         )

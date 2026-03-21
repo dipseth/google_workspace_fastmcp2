@@ -307,6 +307,7 @@ class DownloadGmailAttachmentResponse(TypedDict):
     size: NotRequired[int]
     file_path: NotRequired[str]
     data: NotRequired[str]
+    download_url: NotRequired[str]
     userEmail: str
     error: NotRequired[Optional[str]]
 

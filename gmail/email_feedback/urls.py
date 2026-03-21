@@ -22,7 +22,7 @@ import hashlib
 import hmac as _hmac
 import time
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional
 from urllib.parse import urlencode
 
 from cryptography.hazmat.primitives import hashes
@@ -35,9 +35,10 @@ logger = setup_logger()
 # Cache derived HMAC key (read file + HKDF once per process)
 _hmac_key_cache: Optional[bytes] = None
 
-# In-memory set of consumed tokens (prevents replay).
-# In production, this would be backed by Qdrant or Redis.
-_consumed_tokens: Set[str] = set()
+# One-time-use token tracking (Redis-backed with in-memory fallback).
+from middleware.token_store import ConsumedTokenStore
+
+_consumed_tokens = ConsumedTokenStore("email-feedback", default_ttl_seconds=30 * 24 * 3600)
 
 # Default TTL: 30 days
 DEFAULT_TTL_SECONDS = 30 * 24 * 3600
