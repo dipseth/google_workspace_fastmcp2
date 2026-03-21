@@ -22,12 +22,13 @@ All env vars are read from settings (which loads from .env).
 
 from __future__ import annotations
 
-from config.enhanced_logging import setup_logger
 import os
 import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
@@ -129,7 +130,7 @@ def configure_langfuse() -> bool:
     Must be called early (before LiteLLM imports) so that LiteLLM's
     ``langfuse_otel`` callback picks up the env vars.
 
-    Also configures the OTEL TracerProvider for Langfuse (idempotent).
+    OTel TracerProvider is configured by otel_lifespan at server startup.
     """
     global _langfuse_initialized
     if _langfuse_initialized:
@@ -152,13 +153,7 @@ def configure_langfuse() -> bool:
             "Langfuse v4 observability configured (host=%s)", settings.langfuse_host
         )
 
-        # Also configure OTEL TracerProvider for parent-child span hierarchy
-        try:
-            from middleware.otel_setup import configure_otel_for_langfuse
-
-            configure_otel_for_langfuse()
-        except Exception as e:
-            logger.debug("OTEL TracerProvider setup skipped: %s", e)
+        # OTel TracerProvider is configured by otel_lifespan at server startup
 
         return True
 

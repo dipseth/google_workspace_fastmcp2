@@ -26,7 +26,7 @@ import hashlib
 import hmac as _hmac
 import time
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional
 from urllib.parse import urlencode
 
 from cryptography.hazmat.primitives import hashes
@@ -39,9 +39,10 @@ logger = setup_logger()
 # Cache derived HMAC key (read file + HKDF once per process)
 _hmac_key_cache: Optional[bytes] = None
 
-# In-memory set of consumed tokens (prevents replay).
-# Production: backed by Redis via _pending_payments.
-_consumed_tokens: Set[str] = set()
+# One-time-use token tracking (Redis-backed with in-memory fallback).
+from middleware.token_store import ConsumedTokenStore
+
+_consumed_tokens = ConsumedTokenStore("payment", default_ttl_seconds=900)
 
 # In-memory store for pending payment completions.
 # Key: payment_token (sig), Value: asyncio.Event + payload data.

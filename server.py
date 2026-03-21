@@ -552,8 +552,9 @@ _github_client_secret = settings.github_oauth_client_secret or os.getenv(
 
 if _github_client_id and _github_client_secret:
     try:
-        from auth.github_provider import SSOGitHubProvider
         from fastmcp.server.auth.providers.github import GitHubTokenVerifier
+
+        from auth.github_provider import SSOGitHubProvider
 
         _github_scopes = [
             s.strip()
@@ -1222,6 +1223,12 @@ if settings.redis_io_url_string:
 
         set_redis_store(_redis_store)
         logger.info("  Redis store shared with dashboard cache middleware")
+
+        # Share Redis client with consumed token stores (payment, email feedback)
+        from middleware.token_store import set_redis_client
+
+        set_redis_client(_redis_store)
+        logger.info("  Redis client shared with token store")
     except Exception as _redis_err:
         logger.warning(
             f"⚠️ Redis caching setup failed (falling back to in-memory): {_redis_err}"
@@ -1415,6 +1422,15 @@ if settings.payment_enabled:
     logger.info(
         "Payment flow endpoints registered (/pay, /api/payment-complete, /payment-status)"
     )
+
+# Setup attachment download endpoint (signed URL serving)
+from tools.attachment_endpoints import setup_attachment_endpoints
+
+setup_attachment_endpoints(mcp)
+logger.info("Attachment download endpoint registered (/attachment-download)")
+
+# Attachment cleanup task is started lazily on first download or via lifespan
+# (asyncio.create_task requires a running event loop, so defer to runtime)
 
 # Register template macro management tools
 logger.info("🎨 Registering template macro management tools...")

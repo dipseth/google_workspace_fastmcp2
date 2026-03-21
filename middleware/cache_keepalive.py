@@ -8,8 +8,13 @@ patterns that can be indexed back into Qdrant.
 """
 
 import asyncio
+import json as _json
+import os
+import random
+import tempfile
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from config.enhanced_logging import setup_logger
@@ -415,6 +420,9 @@ class CacheKeepaliveEngine:
         self._modules: Dict[str, KeepaliveModuleConfig] = {}
         self._exploration_idx: int = 0
         self._task: Optional[asyncio.Task] = None
+        # Aggregate validation agent costs (fed by sampling middleware)
+        self._validation_total_cost_usd: float = 0.0
+        self._validation_total_calls: int = 0
 
     # -- registration -------------------------------------------------------
 
@@ -427,6 +435,7 @@ class CacheKeepaliveEngine:
     async def start(self) -> None:
         if self._task is not None:
             return
+        self._load_persisted_stats()
         self._task = asyncio.create_task(
             self._keepalive_loop(), name="cache-keepalive-loop"
         )
@@ -440,6 +449,7 @@ class CacheKeepaliveEngine:
         except asyncio.CancelledError:
             pass
         self._task = None
+        self._save_persisted_stats()
         stats = self.get_stats()
         logger.info("Cache keepalive stopped. Stats: %s", stats)
 
