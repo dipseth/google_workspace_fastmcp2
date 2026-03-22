@@ -333,7 +333,7 @@ def search_patterns_for_card(
         # Use hybrid search
         feedback_filter = "positive" if require_positive_feedback else None
 
-        class_results, content_patterns, form_patterns = wrapper.search_hybrid(
+        class_results, content_patterns, form_patterns = wrapper.search_hybrid_dispatch(
             description=description,
             component_paths=None,
             limit=limit,

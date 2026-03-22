@@ -351,7 +351,7 @@ class SmartCardBuilderV2:
             with ThreadPoolExecutor(max_workers=2) as executor:
                 # Always submit hybrid search for style_metadata extraction
                 hybrid_future = executor.submit(
-                    wrapper.search_hybrid,
+                    wrapper.search_hybrid_dispatch,
                     description=description,
                     component_paths=None,
                     limit=5,

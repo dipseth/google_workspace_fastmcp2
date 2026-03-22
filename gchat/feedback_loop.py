@@ -2184,8 +2184,8 @@ class FeedbackLoop:
             return None
 
         try:
-            # Use wrapper's search_hybrid with positive feedback filters
-            class_results, content_patterns, form_patterns = wrapper.search_hybrid(
+            # Use wrapper's search_hybrid_dispatch (respects ENABLE_MULTIDIM_SEARCH)
+            class_results, content_patterns, form_patterns = wrapper.search_hybrid_dispatch(
                 description=description,
                 component_paths=component_paths,
                 limit=limit,

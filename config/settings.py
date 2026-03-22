@@ -308,6 +308,15 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "ENABLE_CODE_MODE"},
     )
 
+    # Multi-Dimensional Search (Horizon 1 — RIC-TRM)
+    # When enabled, callers use search_hybrid_multidim (multiplicative cross-dim scoring)
+    # instead of search_hybrid (RRF rank fusion). POC validated: +9.5% Top-1 accuracy.
+    enable_multidim_search: bool = Field(
+        default=False,
+        description="Use multi-dimensional scoring instead of RRF for hybrid search",
+        json_schema_extra={"env": "ENABLE_MULTIDIM_SEARCH"},
+    )
+
     # Response Limiting Configuration
     response_limit_max_size: int = Field(
         default=500_000,

@@ -1,0 +1,25 @@
+[project]
+name = "ric-trm-poc"
+version = "0.1.0"
+description = "POC: Recursive Vector Arithmetic on RIC Embeddings for Solved Games"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.24",
+    "qdrant-client>=1.12",
+    "fastembed>=0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["games", "evaluation"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
