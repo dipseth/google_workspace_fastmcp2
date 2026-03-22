@@ -1289,10 +1289,25 @@ if settings.enable_skills_provider:
 
         card_wrapper = get_card_framework_wrapper()
         email_wrapper = get_email_wrapper()
+
+        # Qdrant wrapper is optional — only include if available
+        qdrant_wrapper = None
+        try:
+            from middleware.qdrant_core.qdrant_models_wrapper import get_qdrant_models_wrapper
+            qdrant_wrapper = get_qdrant_models_wrapper()
+        except Exception as e:
+            logger.debug(f"Qdrant models wrapper not available for skills: {e}")
+
+        skill_wrappers = [card_wrapper, email_wrapper]
+        skill_modules = ["card_framework", "gmail.mjml_types"]
+        if qdrant_wrapper:
+            skill_wrappers.append(qdrant_wrapper)
+            skill_modules.append("qdrant_client.models")
+
         skills_path = setup_skills_provider(
             mcp=mcp,
-            wrappers=[card_wrapper, email_wrapper],
-            enabled_modules=["card_framework", "gmail.mjml_types"],
+            wrappers=skill_wrappers,
+            enabled_modules=skill_modules,
             skills_root=settings.skills_directory_path,
             auto_regenerate=settings.skills_auto_regenerate,
         )

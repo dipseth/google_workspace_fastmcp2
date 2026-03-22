@@ -32,6 +32,7 @@ logger = setup_logger()
 SKILL_NAMES = {
     "card_framework": "gchat-cards",
     "gmail.mjml_types": "mjml-email",
+    "qdrant_client.models": "qdrant-search",
     "google_drive": "drive-files",
     "google_gmail": "gmail-automation",
 }
@@ -40,6 +41,7 @@ SKILL_NAMES = {
 SKILL_TITLES = {
     "card_framework": "Google Chat Card Builder",
     "gmail.mjml_types": "MJML Email Composer",
+    "qdrant_client.models": "Qdrant Vector Search",
     "google_drive": "Google Drive File Operations",
     "google_gmail": "Gmail Automation",
 }

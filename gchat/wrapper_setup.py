@@ -695,6 +695,159 @@ def _generate_gchat_dsl_template(wrapper) -> str:
         examples=examples_text,
     )
 
+def _generate_gchat_card_params_template(wrapper) -> str:
+    """
+    Generate the card_params skill document dynamically from wrapper symbols.
+
+    All symbols are pulled from wrapper.symbol_mapping — no hardcoded Unicode.
+
+    Args:
+        wrapper: ModuleWrapper instance
+
+    Returns:
+        Markdown content for card_params guide
+    """
+    symbols = getattr(wrapper, "symbol_mapping", {})
+
+    # Get symbols dynamically
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
+
+    # Symbol-to-flat-key mapping table (from symbol_params.py resolution rules)
+    # These are the components that have context_resources and resolve to flat keys
+    param_rows = [
+        (s("DecoratedText"), "DecoratedText", "items", "List of decorated text widgets"),
+        (s("TextParagraph"), "TextParagraph", "items", "List of text paragraph widgets"),
+        (s("Button"), "Button", "buttons", "List of button widgets"),
+        (s("GridItem"), "GridItem", "grid_items", "List of grid cells"),
+        (s("CarouselCard"), "CarouselCard", "cards", "List of carousel card widgets"),
+        (s("Chip"), "Chip", "chips", "List of chip widgets"),
+    ]
+
+    # Container symbols (no param key — use children's symbols)
+    container_syms = ", ".join(
+        f"`{s(c)}`" for c in ["Section", "ButtonList", "Grid", "Carousel", "Columns", "ChipList"]
+        if s(c, None) is not None
+    )
+
+    # Build the mapping table
+    table_rows = "\n".join(
+        f"| `{sym}` | {comp} | `{key}` | {purpose} |"
+        for sym, comp, key, purpose in param_rows
+    )
+
+    # Build dynamic examples using actual symbols
+    dtext = s("DecoratedText")
+    btn = s("Button")
+    gitem = s("GridItem")
+    ccard = s("CarouselCard")
+    section = s("Section")
+    divider = s("Divider")
+    btnlist = s("ButtonList")
+
+    lines = [
+        "# Card Params Reference",
+        "",
+        "How to structure `card_params` when using DSL notation with `send_dynamic_card`.",
+        "",
+        "## Symbol-Keyed Params",
+        "",
+        "Use DSL symbols as keys in `card_params` for direct correspondence with the DSL structure.",
+        "",
+        "### Symbol to Flat Key Mapping",
+        "",
+        "| Symbol | Component | Flat Key | Purpose |",
+        "|--------|-----------|----------|---------|",
+        table_rows,
+        "",
+        f"Container symbols ({container_syms}) have no param key — use their children's symbols.",
+        "",
+        "## Three Formats",
+        "",
+        "### Format A: Direct List",
+        "```json",
+        f'{{"{dtext}": [{{"text": "Item 1", "top_label": "Status"}}, {{"text": "Item 2"}}]}}',
+        "```",
+        "",
+        "### Format B: _shared/_items (DRY — recommended)",
+        "```json",
+        "{",
+        f'  "{dtext}": {{',
+        '    "_shared": {"top_label": "Status", "icon": "check_circle"},',
+        '    "_items": [',
+        '      {"text": "Drive: Online"},',
+        '      {"text": "Gmail: Online"}',
+        "    ]",
+        "  }",
+        "}",
+        "```",
+        "Each `_items` entry is merged with `_shared` (item fields override shared).",
+        "",
+        "### Format C: Single Dict (auto-wrapped in list)",
+        "```json",
+        f'{{"{btn}": {{"text": "Click Me", "url": "https://example.com"}}}}',
+        "```",
+        "",
+        "## Component Field Reference",
+        "",
+        f"### DecoratedText (`{dtext}`)",
+        "- `text` (**required**) — Main content (supports HTML: `<b>`, `<font color=\"...\">`)",
+        "- `top_label` — Small label above text",
+        "- `bottom_label` — Small label below text",
+        "- `icon` — Google Material icon name (e.g., `star`, `check_circle`, `error`)",
+        "",
+        f"### Button (`{btn}`)",
+        "- `text` (**required**) — Button label",
+        "- `url` — Click target URL",
+        "- `icon` — Optional icon name",
+        "",
+        f"### GridItem (`{gitem}`)",
+        "- `title` (**required**) — Item title",
+        "- `subtitle` — Optional subtitle",
+        "- `image_url` — Optional image URL",
+        "",
+        f"### CarouselCard (`{ccard}`)",
+        "- `title` (**required**) — Card title",
+        "- `subtitle` — Optional subtitle",
+        "- `text` — Optional card body",
+        "- `image_url` — Optional image",
+        "- `buttons` — Optional list of `{text, url}` dicts",
+        "",
+        f"### TextParagraph (`{s('TextParagraph')}`)",
+        "- `text` (**required**) — Paragraph text (supports HTML)",
+        "",
+        "## Important Rules",
+        "",
+        f"1. **Item count must match DSL multiplier**: `{dtext}×3` requires exactly 3 items in `_items`",
+        f"2. **Symbol keys override flat keys**: If both `{dtext}` and `items` exist, `{dtext}` wins",
+        "3. **Backward compatible**: Flat keys (`items`, `buttons`, `grid_items`) still work",
+        "4. **`title` and `subtitle`** are card-level params, not symbol-keyed",
+        "",
+        "## Full Example",
+        "",
+        f"DSL: `{section}[{dtext}×2, {divider}, {btnlist}[{btn}×2]]`",
+        "",
+        "```json",
+        "{",
+        '  "title": "System Status",',
+        '  "subtitle": "All services",',
+        f'  "{dtext}": {{',
+        '    "_shared": {"icon": "monitoring", "top_label": "Service"},',
+        '    "_items": [',
+        '      {"text": "API: <font color=\\"#34a853\\"><b>Online</b></font>"},',
+        '      {"text": "DB: <font color=\\"#fbbc04\\"><b>Warning</b></font>"}',
+        "    ]",
+        "  },",
+        f'  "{btn}": [',
+        '    {"text": "View Details", "url": "https://example.com/details"},',
+        '    {"text": "Export CSV", "url": "https://example.com/export"}',
+        "  ]",
+        "}",
+        "```",
+        "",
+    ]
+
+    return "\n".join(lines)
+
 def _generate_gchat_jinja_template(wrapper) -> str:
     """
     Generate the Jinja filters skill document.
@@ -724,6 +877,9 @@ def _register_gchat_skill_templates(wrapper) -> None:
     """
     # Register DSL syntax template
     wrapper.register_skill_template("dsl-syntax", _generate_gchat_dsl_template)
+
+    # Register card_params guide (symbol keys, _shared/_items, field reference)
+    wrapper.register_skill_template("card-params", _generate_gchat_card_params_template)
 
     # Register Jinja filter guide
     wrapper.register_skill_template("jinja-filters", _generate_gchat_jinja_template)
