@@ -45,16 +45,13 @@ Key filter types:
 5. **Score threshold**: If set, verify it's a reasonable value (typically 0.0-1.0 for
    cosine similarity).
 
-## Response Format
-Return a JSON object matching this schema:
-{{
-  "is_valid": bool,
-  "confidence": float (0.0-1.0),
-  "validated_input": {{corrected tool arguments}} or {{}},
-  "issues": ["list of problems found"],
-  "suggestions": ["list of query optimizations"],
-  "variations": []
-}}
+## Validation Output
+Assess the search query and provide:
+- **is_valid**: Whether the input passes all checks
+- **confidence**: Your confidence in the assessment (0.0-1.0)
+- **validated_input**: If corrections are needed, provide corrected tool arguments; leave empty if valid
+- **issues**: List of problems found (empty if none)
+- **suggestions**: List of query optimization recommendations
 
 ## Current Tool Arguments
 query: {tool_args.get("query", "(not provided)")}

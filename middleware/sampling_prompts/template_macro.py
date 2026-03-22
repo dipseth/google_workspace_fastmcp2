@@ -29,16 +29,13 @@ maintainability, and best practices.
 - Using `{{{{ self }}}}` outside of block inheritance context
 - Forgetting to import macros in consuming templates
 
-## Response Format
-Return a JSON object matching this schema:
-{{
-  "is_valid": bool,
-  "confidence": float (0.0-1.0),
-  "validated_input": {{corrected tool arguments}} or {{}},
-  "issues": ["list of problems found"],
-  "suggestions": ["list of improvements"],
-  "variations": []
-}}
+## Validation Output
+Assess the macro definition and provide:
+- **is_valid**: Whether the input passes all checks
+- **confidence**: Your confidence in the assessment (0.0-1.0)
+- **validated_input**: If corrections are needed, provide corrected tool arguments; leave empty if valid
+- **issues**: List of problems found (empty if none)
+- **suggestions**: List of improvement recommendations
 
 ## Current Tool Arguments
 macro_name: {tool_args.get("macro_name", "(not provided)")}

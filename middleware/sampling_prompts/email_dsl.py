@@ -40,19 +40,13 @@ responsive design best practices, and proper MJML structure.
 5. **Template variables**: If Jinja2 template syntax is used (`{{{{ }}}}`, `{{% %}}`),
    verify matching braces and valid variable names.
 
-## Response Format
-Return a JSON object matching this schema:
-{{
-  "is_valid": bool,
-  "confidence": float (0.0-1.0),
-  "validated_input": {{corrected tool arguments}} or {{}},
-  "issues": ["list of problems found"],
-  "suggestions": ["list of improvements"],
-  "variations": []
-}}
-
-If the input is valid, set is_valid=true and leave validated_input empty.
-If corrections are needed, provide corrected values in validated_input.
+## Validation Output
+Assess the email and provide:
+- **is_valid**: Whether the input passes all checks
+- **confidence**: Your confidence in the assessment (0.0-1.0)
+- **validated_input**: If corrections are needed, provide the corrected tool arguments dict; leave empty if valid
+- **issues**: List of problems found (empty if none)
+- **suggestions**: List of improvement recommendations
 
 ## Current Tool Arguments
 {body_preview if body_preview else "(no email body arguments provided)"}

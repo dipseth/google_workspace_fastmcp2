@@ -62,19 +62,14 @@ follows best practices.
 5. **Content completeness**: DecoratedText should have at least `text`; Buttons need
    `text` and either `url` or `action`.
 
-## Response Format
-Return a JSON object matching this schema:
-{{
-  "is_valid": bool,
-  "confidence": float (0.0-1.0),
-  "validated_input": {{"card_description": "...", "card_params": {{...}}}} or {{}},
-  "issues": ["list of problems found"],
-  "suggestions": ["list of improvements"],
-  "variations": [optional alternative card_description/card_params dicts]
-}}
-
-If the input is valid, set is_valid=true, confidence near 1.0, and leave validated_input
-empty. If corrections are needed, provide the corrected values in validated_input.
+## Validation Output
+Assess the card DSL and provide:
+- **is_valid**: Whether the input passes all checks
+- **confidence**: Your confidence in the assessment (0.0-1.0)
+- **validated_input**: If corrections are needed, provide corrected card_description and card_params; leave empty if valid
+- **issues**: List of problems found (empty if none)
+- **suggestions**: List of improvement recommendations
+- **variations**: Optional alternative card_description/card_params dicts
 
 ## Current Tool Arguments
 card_description: {tool_args.get("card_description", "(not provided)")}
