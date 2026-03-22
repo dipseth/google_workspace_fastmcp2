@@ -374,6 +374,7 @@ The module wrapper's 3 small vectors are the RIC equivalent of TRM's 2-layer net
 | Existing Component | File | TRM Role |
 |---|---|---|
 | `search_hybrid()` RRF fusion | search_mixin.py:1533 | One "forward pass" through the network — fusing 3 vectors |
+| `search_hybrid_multidim()` cross-dim scoring | search_mixin.py | Multi-dimensional candidate evaluation (H1 — live) |
 | `StructureVariator.swap_sibling()` | instance_pattern_mixin.py:123 | Structural mutation = exploring z_H variations |
 | `ParameterVariator` | instance_pattern_mixin.py | Input variation = exploring x space |
 | `can_contain(parent, child)` via BFS | graph_mixin.py | Structural constraint = TRM's grid rules |
@@ -383,6 +384,9 @@ The module wrapper's 3 small vectors are the RIC equivalent of TRM's 2-layer net
 | Instance pattern feedback | instance_pattern_mixin.py | Deep supervision signal from successful execution |
 | Confidence threshold (0.85) | search_mixin.py | Halting criterion = q_head > 0 |
 | L1/L2/L3 cache | cache_mixin.py | EMA-like smoothing of latent states across sessions |
+| `WrapperRegistry` singleton registry | wrapper_factory.py | Domain-agnostic wrapper lifecycle — "module_name + config → operational wrapper" |
+| `DomainConfig` declarative config | domain_mixin.py | Per-domain knobs (cache priorities, DSL categories, symbol filters) without adapter changes |
+| `get_skill_resources_safe()` | wrapper_factory.py | Shared skill resource annotation — one helper for all domains |
 
 ### The Feedback Loop Already Exists
 
@@ -413,6 +417,12 @@ halting exists. What's missing is:
 1. Explicit latent state management (z_H and z_L as first-class objects between cycles)
 2. A tiny learned network that replaces "re-embed and re-search" with "transform the latent state directly"
 3. Deep supervision at every cycle (not just final execution feedback)
+
+What's been UNBLOCKED (2026-03-22 — wrapper consolidation):
+4. **Domain-agnosticism achieved.** The adapter layer (`adapters/module_wrapper/`) has zero domain imports.
+   Adding a 4th wrapped module requires only `DomainConfig` + factory + `WrapperRegistry.register()` (~40 lines).
+   This was a prerequisite for Horizon 3's "any module we wrap" vision — previously blocked by gchat-specific
+   coupling in 6 adapter files.
 
 ---
 
@@ -500,7 +510,9 @@ Training data: Every successful tool execution with feedback is a training examp
 ### Horizon 3: Full Recursive Embedding Network (The Vision)
 
 **Difficulty:** High | **Impact:** Transformative | **Timeline:** Months
-**Status:** Vision. Depends on Horizon 2.
+**Status:** Vision. Depends on Horizon 2. **Prerequisite unblocked:** wrapper consolidation
+(2026-03-22) achieved domain-agnosticism — the adapter layer has zero domain imports and
+new domains require only `DomainConfig` + `WrapperRegistry.register()`.
 
 A domain-agnostic recursive network that operates in RIC embedding space:
 
@@ -693,9 +705,10 @@ This is exactly TRM's "self-improving patterns" — but operating in embedding s
 
 | Horizon | Description | Status | Blocker | Next Step |
 |---------|------------|--------|---------|-----------|
+| **H0** | Wrapper-Agnosticism | **Complete 2026-03-22** | None | — (prerequisite for H3) |
 | **H1** | Multi-Dimensional Scoring | **Live-tested 2026-03-22** | None | Comparative A/B metrics (multidim vs RRF) in production |
 | **H2** | Tiny Projection Network | Not started | Needs H1 A/B data | Design training data pipeline from Qdrant history |
-| **H3** | Full Recursive Embedding Network | Vision | Needs H2 | — |
+| **H3** | Full Recursive Embedding Network | Vision | Needs H2 | Domain-agnosticism prerequisite met (H0) |
 
 ### H1 Implementation Details
 
@@ -720,6 +733,32 @@ Tested with `ENABLE_MULTIDIM_SEARCH=true` against live Qdrant, 3 card generation
 | NL-only notification | Pure NL (no DSL) | None | Passed | 3/3 |
 
 All tests exercised the full path: `send_dynamic_card` → `builder_v2.py` → `search_hybrid_dispatch` → `search_hybrid_multidim` → Qdrant prefetch pipeline → client-side cross-dim rerank.
+
+### H0 Implementation Details (Wrapper Consolidation — 2026-03-22)
+
+The adapter layer (`adapters/module_wrapper/`) had 3 critical violations (direct `gchat.*` imports) and
+3 design violations (hardcoded card-framework values) that blocked adding new wrapped domains without
+modifying adapter internals. This was the #1 prerequisite for Horizon 3's "any module we wrap" vision.
+
+**What was done:**
+
+| Phase | Change | Files |
+|-------|--------|-------|
+| Fix critical violations | Removed `from gchat.*` imports via callback registration (`register_default_wrapper_getter`), wrapper `symbol_mapping` as SSoT, explicit `wrapper_getter` param | `variation_generator.py`, `structure_validator.py`, `component_cache.py` |
+| Fix design violations | `register_module_prefix()` API, `DomainConfig.cache_priority_components`, generic `self.module_name` paths, generic collection defaults | `symbol_generator.py`, `cache_mixin.py`, `text_indexing.py`, `dsl_parser.py` |
+| Shared infrastructure | `WrapperRegistry` (thread-safe singleton), `generate_dsl_quick_reference()`, `generate_dsl_field_description()`, `get_skill_resources_safe()` | `wrapper_factory.py` (NEW) |
+| Consumer refactors | All 3 wrapper setups use `WrapperRegistry`; all 3 tool files use `get_skill_resources_safe()` | `gchat/wrapper_setup.py`, `gmail/email_wrapper_setup.py`, `middleware/qdrant_core/qdrant_models_wrapper.py`, `gchat/card_tools.py`, `gmail/compose.py`, `middleware/qdrant_core/tools.py` |
+| DomainConfig extensions | `cache_priority_components`, `dsl_categories`, `symbol_filter` | `domain_mixin.py` |
+| Guardrail test | AST scan of `adapters/module_wrapper/*.py` for domain imports — fails CI if any added | `tests/module/test_wrapper_agnostic.py` (NEW) |
+
+**New wrapper onboarding cost:** ~40 lines (DomainConfig + factory + register) vs. 150+ lines previously.
+
+**Tests:** 245 passed, 0 failures. Guardrail test confirms zero domain imports in adapter layer.
+
+**TRM relevance:** Horizon 3 requires the recursive embedding network to operate identically across
+any wrapped module. That requires the wrapper system itself to be domain-agnostic — domain-specific
+behavior must come from `DomainConfig`, not from `if module == "gchat"` branches in shared code.
+This is now the case.
 
 ---
 
@@ -765,6 +804,46 @@ Using `search_hybrid_dispatch()` with `ENABLE_MULTIDIM_SEARCH` env var means:
 
 ---
 
+## 14. RETROSPECTIVE — What We Learned Building H0 (Wrapper Consolidation)
+
+### The Real Blocker Was Coupling, Not Complexity
+
+Horizon 3 envisions a recursive embedding network that works across "any module we wrap." But the adapter
+layer had 3 direct `gchat.*` imports — meaning adding a 4th domain required modifying shared adapter code.
+This coupling was invisible until we tried to reason about domain-agnosticism explicitly.
+
+**Lesson:** Architectural constraints for future work should be validated with guardrail tests, not just
+documented. The `test_wrapper_agnostic.py` AST scan catches regressions at CI time.
+
+### DomainConfig as the Extensibility Surface
+
+TRM's key insight is "one network, different behavior via input context." The wrapper equivalent is
+"one adapter layer, different behavior via DomainConfig." Before consolidation, domain differences were
+encoded as code changes across 6 adapter files. After: they're data in a config dataclass.
+
+| Before | After |
+|--------|-------|
+| Hardcoded `priority_components` list in `cache_mixin.py` | `DomainConfig.cache_priority_components` |
+| Hardcoded `"card_framework.v2."` path patterns | `self.module_name` (from config) |
+| 3x duplicated `_wrapper`/`_wrapper_lock` | `WrapperRegistry.register(name, factory)` |
+| 3x duplicated try/except `get_skill_resources_annotation` | `get_skill_resources_safe(wrapper, ...)` |
+
+**Lesson:** Before building recursive networks (H2/H3), ensure the substrate they operate on doesn't
+have domain-specific assumptions baked in. Fix the foundation first.
+
+### What This Unlocks for H2/H3
+
+A Horizon 2 tiny projection network needs to:
+1. Accept RIC vectors from ANY domain's Qdrant collection
+2. Project them into a shared latent space
+3. Recurse without knowing which domain produced the vectors
+
+This is only possible if the wrapper system itself doesn't hardcode domain assumptions. With H0
+complete, the path from "DomainConfig → ModuleWrapper → Qdrant collection → RIC vectors → projection
+network" is clean end-to-end.
+
+---
+
 ## References
 
 - TRM Paper: "Less is More: Recursive Reasoning with Tiny Networks" (arXiv:2510.04871)
@@ -774,5 +853,7 @@ Using `search_hybrid_dispatch()` with `ENABLE_MULTIDIM_SEARCH` env var means:
 - 3-Vector Schema: adapters/module_wrapper/types.py (COLBERT_DIM=128, MINILM_DIM=384)
 - Instance Patterns: adapters/module_wrapper/instance_pattern_mixin.py
 - DAG Validation: adapters/module_wrapper/graph_mixin.py
+- Wrapper Factory: adapters/module_wrapper/wrapper_factory.py (WrapperRegistry, shared helpers)
+- Wrapper Agnosticism Guardrail: tests/module/test_wrapper_agnostic.py
 - POC Code: research/trm/poc/ (games, evaluation, recursive search)
 - POC Results: research/trm/poc/README.md
