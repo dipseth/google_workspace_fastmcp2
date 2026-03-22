@@ -193,6 +193,13 @@ from adapters.module_wrapper.text_indexing import (
     search_within_module,
 )
 from adapters.module_wrapper.tool_relationship_graph import ToolRelationshipGraph
+from adapters.module_wrapper.variation_generator import register_default_wrapper_getter
+from adapters.module_wrapper.wrapper_factory import (
+    WrapperRegistry,
+    generate_dsl_field_description,
+    generate_dsl_quick_reference,
+    get_skill_resources_safe,
+)
 from adapters.module_wrapper.types import (
     # Constants (also available from core, but centralized here)
     COLBERT_DIM as TYPES_COLBERT_DIM,
@@ -900,6 +907,12 @@ __all__ = [
     # Search constants
     "COLBERT_DIM",
     "RELATIONSHIPS_DIM",
+    # Wrapper factory
+    "WrapperRegistry",
+    "generate_dsl_quick_reference",
+    "generate_dsl_field_description",
+    "get_skill_resources_safe",
+    "register_default_wrapper_getter",
     # Mixin dependency contracts
     "MixinContract",
     "validate_mixin_dependencies",

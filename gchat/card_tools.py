@@ -502,25 +502,26 @@ def setup_card_tools(mcp: FastMCP) -> None:
     symbols = get_gchat_symbols()
 
     # Generate skill_resources annotation from wrapper (if available)
-    skill_resources = []
-    if _card_framework_wrapper and hasattr(_card_framework_wrapper, "get_skill_resources_annotation"):
-        skill_resources = _card_framework_wrapper.get_skill_resources_annotation(
-            skill_name="gchat-cards",
-            resource_hints={
-                "card-params.md": {
-                    "purpose": "How to structure card_params with symbol keys, _shared/_items format, and per-component field reference",
-                    "when_to_read": "BEFORE first call — required for correct card rendering",
-                },
-                "dsl-syntax.md": {
-                    "purpose": "DSL notation syntax, symbol table, containment rules",
-                    "when_to_read": "When constructing card_description DSL strings",
-                },
-                "jinja-filters.md": {
-                    "purpose": "Jinja2 template filters for text styling (colors, bold, etc.)",
-                    "when_to_read": "When styling text content in cards",
-                },
+    from adapters.module_wrapper.wrapper_factory import get_skill_resources_safe
+
+    skill_resources = get_skill_resources_safe(
+        _card_framework_wrapper,
+        skill_name="gchat-cards",
+        resource_hints={
+            "card-params.md": {
+                "purpose": "How to structure card_params with symbol keys, _shared/_items format, and per-component field reference",
+                "when_to_read": "BEFORE first call — required for correct card rendering",
             },
-        )
+            "dsl-syntax.md": {
+                "purpose": "DSL notation syntax, symbol table, containment rules",
+                "when_to_read": "When constructing card_description DSL strings",
+            },
+            "jinja-filters.md": {
+                "purpose": "Jinja2 template filters for text styling (colors, bold, etc.)",
+                "when_to_read": "When styling text content in cards",
+            },
+        },
+    )
 
     # Build dynamic tool description with actual symbols from DAG
     section_sym = symbols.get("Section", "§")

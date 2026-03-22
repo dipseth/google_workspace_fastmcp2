@@ -500,10 +500,9 @@ def get_dsl_field_description() -> str:
 
     Returns a single-line description suitable for Field(description=...).
     """
-    symbols = get_gchat_symbols()
+    from adapters.module_wrapper.wrapper_factory import generate_dsl_field_description
 
-    # Core symbols - most commonly used components
-    key_mappings = []
+    wrapper = _setup.get_card_framework_wrapper()
     key_components = [
         "Section",
         "DecoratedText",
@@ -516,16 +515,31 @@ def get_dsl_field_description() -> str:
         "NestedWidget",
     ]
 
-    for comp in key_components:
-        if comp in symbols:
-            key_mappings.append(f"{symbols[comp]}={comp}")
+    symbols = wrapper.symbol_mapping or {}
+    s = symbols.get
 
+    # Build dynamic examples using actual symbols
+    section = s("Section", "§")
+    dtext = s("DecoratedText", "δ")
+    btnlist = s("ButtonList", "Ƀ")
+    btn = s("Button", "ᵬ")
+    carousel = s("Carousel", "◦")
+    ccard = s("CarouselCard", "▲")
+
+    base = generate_dsl_field_description(
+        wrapper,
+        key_components=key_components,
+        skill_uri="skill://gchat-cards/",
+    )
+
+    # Add dynamic examples to the description
     return (
         f"DSL structure using symbols. "
-        f"Examples: '§[δ, Ƀ[ᵬ×2]]' = Section + text + 2 buttons, "
-        f"'◦[▲×3]' = Carousel with 3 cards. "
-        f"Symbols: {', '.join(key_mappings)}. "
-        f"Read skill://gchat-cards/ for full reference."
+        f"Examples: '{section}[{dtext}, {btnlist}[{btn}×2]]' = Section + text + 2 buttons, "
+        f"'{carousel}[{ccard}×3]' = Carousel with 3 cards. "
+        + base.split("Symbols:", 1)[-1].strip()
+        if "Symbols:" in base
+        else base
     )
 
 def get_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:

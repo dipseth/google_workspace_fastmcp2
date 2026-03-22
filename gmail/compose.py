@@ -3571,31 +3571,33 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     email_dsl_field_desc = get_email_dsl_field_description()
 
     # Generate skill_resources annotation from wrapper (if available)
-    email_skill_resources = []
-    try:
-        from gmail.email_wrapper_setup import get_email_wrapper
+    from adapters.module_wrapper.wrapper_factory import get_skill_resources_safe
+    from gmail.email_wrapper_setup import get_email_wrapper
 
+    _email_wrapper = None
+    try:
         _email_wrapper = get_email_wrapper()
-        if hasattr(_email_wrapper, "get_skill_resources_annotation"):
-            email_skill_resources = _email_wrapper.get_skill_resources_annotation(
-                skill_name="mjml-email",
-                resource_hints={
-                    "email-params.md": {
-                        "purpose": "How to structure email_params with symbol keys, _shared/_items format, and per-block field reference",
-                        "when_to_read": "BEFORE first call — required for correct email rendering",
-                    },
-                    "email-dsl-syntax.md": {
-                        "purpose": "Email DSL notation syntax, symbol table, containment rules",
-                        "when_to_read": "When constructing email_description DSL strings",
-                    },
-                    "jinja-filters.md": {
-                        "purpose": "Jinja2 template filters for text styling in email content",
-                        "when_to_read": "When styling text content in emails",
-                    },
-                },
-            )
     except Exception:
-        pass  # Non-fatal — skill_resources is optional
+        pass
+
+    email_skill_resources = get_skill_resources_safe(
+        _email_wrapper,
+        skill_name="mjml-email",
+        resource_hints={
+            "email-params.md": {
+                "purpose": "How to structure email_params with symbol keys, _shared/_items format, and per-block field reference",
+                "when_to_read": "BEFORE first call — required for correct email rendering",
+            },
+            "email-dsl-syntax.md": {
+                "purpose": "Email DSL notation syntax, symbol table, containment rules",
+                "when_to_read": "When constructing email_description DSL strings",
+            },
+            "jinja-filters.md": {
+                "purpose": "Jinja2 template filters for text styling in email content",
+                "when_to_read": "When styling text content in emails",
+            },
+        },
+    )
 
     compose_tool_description = (
         "Compose responsive HTML emails using DSL notation for block structure. "

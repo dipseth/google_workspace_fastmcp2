@@ -20,11 +20,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
-# Thread-safe singleton
-_wrapper: Optional["ModuleWrapper"] = None
-_wrapper_lock = threading.Lock()
-
-# Cached symbols
+# Cached symbols (wrapper singleton is now managed by WrapperRegistry)
 _symbols: Optional[Dict[str, str]] = None
 _symbols_lock = threading.Lock()
 
@@ -353,13 +349,15 @@ def get_card_framework_wrapper(
     Returns:
         Shared ModuleWrapper instance configured for card_framework
     """
-    global _wrapper
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
 
-    with _wrapper_lock:
-        if _wrapper is None or force_reinitialize:
-            _wrapper = _create_wrapper(ensure_text_indices=ensure_text_indices)
+    if not WrapperRegistry.is_registered("card_framework"):
+        WrapperRegistry.register(
+            "card_framework",
+            lambda: _create_wrapper(ensure_text_indices=ensure_text_indices),
+        )
 
-    return _wrapper
+    return WrapperRegistry.get("card_framework", force_reinitialize=force_reinitialize)
 
 def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
     """Create and configure the ModuleWrapper instance using DomainConfig."""
@@ -485,6 +483,35 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
             _hook_post_pipeline_qdrant_writes,
         ],
         domain_label="Google Chat Cards",
+        cache_priority_components=[
+            "Section",
+            "DecoratedText",
+            "TextParagraph",
+            "ButtonList",
+            "Button",
+            "Image",
+            "Icon",
+            "Card",
+            "CardHeader",
+            "OnClick",
+            "OpenLink",
+            "Color",
+            "Divider",
+            "Grid",
+            "GridItem",
+            "Columns",
+            "Column",
+            "Carousel",
+            "CarouselCard",
+        ],
+        dsl_categories={
+            "card_structure": ["Card", "CardHeader", "Section"],
+            "carousel": ["Carousel", "CarouselCard", "NestedWidget"],
+            "containers": ["ButtonList", "ChipList", "Grid", "Columns"],
+            "widgets": ["DecoratedText", "TextParagraph", "Image", "Divider"],
+            "items": ["Button", "Chip", "GridItem", "Column"],
+            "message": ["AccessoryWidget"],
+        },
     )
 
     wrapper = ModuleWrapper(
@@ -553,6 +580,14 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
             except Exception as e:
                 logger.debug(f"Could not check instance patterns: {e}")
 
+    # Register this wrapper as the default for backwards-compatible code
+    # (e.g. VariationGenerator._ensure_wrapper fallback)
+    from adapters.module_wrapper.variation_generator import (
+        register_default_wrapper_getter,
+    )
+
+    register_default_wrapper_getter(get_card_framework_wrapper)
+
     return wrapper
 
 def reset_wrapper():
@@ -564,12 +599,11 @@ def reset_wrapper():
         - During testing
         - After configuration changes
     """
-    global _wrapper, _symbols
+    global _symbols
 
-    with _wrapper_lock:
-        if _wrapper is not None:
-            logger.info("🔄 Resetting singleton ModuleWrapper")
-            _wrapper = None
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
+
+    WrapperRegistry.reset("card_framework")
 
     with _symbols_lock:
         _symbols = None

@@ -19,14 +19,10 @@ Usage:
 """
 
 from config.enhanced_logging import setup_logger
-import threading
 from typing import Dict, Optional
 
 logger = setup_logger()
 
-# Thread-safe singleton
-_wrapper: Optional["ModuleWrapper"] = None
-_wrapper_lock = threading.Lock()
 
 def get_qdrant_models_wrapper(
     force_reinitialize: bool = False,
@@ -40,13 +36,14 @@ def get_qdrant_models_wrapper(
     Returns:
         Shared ModuleWrapper instance configured for qdrant_client.models
     """
-    global _wrapper
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
 
-    with _wrapper_lock:
-        if _wrapper is None or force_reinitialize:
-            _wrapper = _create_wrapper()
+    if not WrapperRegistry.is_registered("qdrant_models"):
+        WrapperRegistry.register("qdrant_models", _create_wrapper)
 
-    return _wrapper
+    return WrapperRegistry.get(
+        "qdrant_models", force_reinitialize=force_reinitialize
+    )
 
 def _create_wrapper() -> "ModuleWrapper":
     """Create and configure the ModuleWrapper for qdrant_client.models."""
@@ -246,8 +243,6 @@ def _generate_qdrant_dsl_params_template(wrapper) -> str:
 
 def reset_wrapper():
     """Reset the singleton wrapper."""
-    global _wrapper
-    with _wrapper_lock:
-        if _wrapper is not None:
-            logger.info("Resetting qdrant_client.models ModuleWrapper")
-            _wrapper = None
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
+
+    WrapperRegistry.reset("qdrant_models")

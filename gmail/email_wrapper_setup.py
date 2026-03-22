@@ -10,16 +10,11 @@ Usage:
     symbols = wrapper.symbol_mapping
 """
 
-import threading
 from typing import Dict, Optional
 
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
-
-# Thread-safe singleton
-_wrapper: Optional["ModuleWrapper"] = None
-_wrapper_lock = threading.Lock()
 
 # =============================================================================
 # EMAIL-SPECIFIC CONFIGURATION
@@ -419,13 +414,12 @@ def get_email_wrapper(
     Returns:
         Shared ModuleWrapper instance configured for email blocks
     """
-    global _wrapper
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
 
-    with _wrapper_lock:
-        if _wrapper is None or force_reinitialize:
-            _wrapper = _create_email_wrapper()
+    if not WrapperRegistry.is_registered("email"):
+        WrapperRegistry.register("email", _create_email_wrapper)
 
-    return _wrapper
+    return WrapperRegistry.get("email", force_reinitialize=force_reinitialize)
 
 
 def _create_email_wrapper() -> "ModuleWrapper":
@@ -446,6 +440,15 @@ def _create_email_wrapper() -> "ModuleWrapper":
         ],
         post_pipeline_hooks=[],
         domain_label="Email Blocks (MJML)",
+        symbol_filter=EMAIL_WIDGET_TYPES | {"EmailSpec", "Column"},
+        dsl_categories={
+            "Container": ["EmailSpec"],
+            "Layout": ["ColumnsBlock", "Column"],
+            "Content": ["HeroBlock", "TextBlock", "ButtonBlock", "ImageBlock"],
+            "Structure": ["SpacerBlock", "DividerBlock"],
+            "Chrome": ["HeaderBlock", "FooterBlock", "SocialBlock", "TableBlock"],
+            "Interactive": ["AccordionBlock", "CarouselBlock"],
+        },
     )
 
     wrapper = ModuleWrapper(
@@ -495,9 +498,6 @@ def _create_email_wrapper() -> "ModuleWrapper":
 
 def reset_wrapper():
     """Reset the singleton wrapper."""
-    global _wrapper
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
 
-    with _wrapper_lock:
-        if _wrapper is not None:
-            logger.info("Resetting email ModuleWrapper")
-            _wrapper = None
+    WrapperRegistry.reset("email")

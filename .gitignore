@@ -136,3 +136,4 @@ adapters/discovery_manager.py
 credentials copy/**
 prompts/LinkedIn Digest.md
 .claude/skills/google-workspace-mcp/SKILL copy.md
+data/sampling_costs.json

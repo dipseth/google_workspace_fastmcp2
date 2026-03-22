@@ -102,28 +102,21 @@ class CacheMixin:
         cache = self._component_cache
         warmed = 0
 
-        # Priority components (most commonly used in cards)
-        priority_components = [
-            "Section",
-            "DecoratedText",
-            "TextParagraph",
-            "ButtonList",
-            "Button",
-            "Image",
-            "Icon",
-            "Card",
-            "CardHeader",
-            "OnClick",
-            "OpenLink",
-            "Color",
-            "Divider",
-            "Grid",
-            "GridItem",
-            "Columns",
-            "Column",
-            "Carousel",
-            "CarouselCard",
-        ]
+        # Use domain-specific priority list if available, otherwise fall back
+        # to top N components by relationship count
+        priority_components = None
+        if hasattr(self, "_domain_config") and self._domain_config:
+            priority_components = getattr(
+                self._domain_config, "cache_priority_components", None
+            )
+
+        if not priority_components:
+            # Fallback: use all class components (up to 30)
+            priority_components = [
+                comp.name
+                for comp in list(self.components.values())[:30]
+                if comp.component_type == "class"
+            ]
 
         for name in priority_components:
             if name not in self.components:
@@ -260,7 +253,7 @@ class CacheMixin:
             component_name: Simple name like "Button" or full path
 
         Returns:
-            Full importable path like "card_framework.v2.widgets.button.Button"
+            Full importable path like "module_name.widgets.button.Button"
         """
         # If already a full path, return it
         if "." in component_name and component_name.count(".") >= 2:
@@ -289,12 +282,13 @@ class CacheMixin:
                 return v2_paths[0]
             return matching_paths[0]
 
-        # Try common patterns for card_framework
+        # Try common patterns using the wrapper's own module_name
+        module = self.module_name
         common_patterns = [
-            f"card_framework.v2.widgets.{component_name.lower()}.{component_name}",
-            f"card_framework.v2.{component_name.lower()}.{component_name}",
-            f"card_framework.v2.widgets.{component_name}",
-            f"card_framework.v2.{component_name}",
+            f"{module}.widgets.{component_name.lower()}.{component_name}",
+            f"{module}.{component_name.lower()}.{component_name}",
+            f"{module}.widgets.{component_name}",
+            f"{module}.{component_name}",
         ]
 
         for pattern in common_patterns:

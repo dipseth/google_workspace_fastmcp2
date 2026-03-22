@@ -151,24 +151,12 @@ class StructureValidator:
     def symbols(self) -> SymbolMapping:
         """Get symbol mappings (cached).
 
-        Uses shared symbols from structure_dsl for consistency with the DSL parser.
-        Falls back to ModuleWrapper-generated symbols if structure_dsl not available.
+        Uses wrapper.symbol_mapping as the single source of truth.
         """
         if self._symbols is None:
-            try:
-                # Use shared symbols from structure_dsl for consistency
-                from gchat.structure_dsl import COMPONENT_TO_SYMBOL, ensure_initialized
-
-                ensure_initialized()
-                if COMPONENT_TO_SYMBOL:
-                    self._symbols = COMPONENT_TO_SYMBOL.copy()
-                else:
-                    # Fallback to ModuleWrapper-generated symbols
-                    self._symbols = self.wrapper.generate_component_symbols(
-                        use_prefix=False
-                    )
-            except ImportError:
-                # structure_dsl not available, use ModuleWrapper symbols
+            if hasattr(self.wrapper, "symbol_mapping") and self.wrapper.symbol_mapping:
+                self._symbols = dict(self.wrapper.symbol_mapping)
+            else:
                 self._symbols = self.wrapper.generate_component_symbols(
                     use_prefix=False
                 )
