@@ -3,8 +3,8 @@ Singleton ModuleWrapper for card_framework — setup, constants, and initializat
 
 This module owns:
     - All card-specific constants and metadata
-    - Singleton state (_wrapper, _wrapper_lock, _symbols, _symbols_lock)
-    - Wrapper creation and initialization
+    - Cached symbol state (_symbols, _symbols_lock)
+    - Wrapper creation and initialization (singleton via WrapperRegistry)
     - Skill template registration
 
 Usage:
