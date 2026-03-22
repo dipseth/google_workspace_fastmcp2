@@ -25,7 +25,6 @@ Usage:
 """
 
 import json
-from config.enhanced_logging import setup_logger
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +42,7 @@ from adapters.module_wrapper.types import (
     RelationshipDict,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
@@ -296,14 +296,28 @@ class SkillsMixin:
 
             # Add field information if available
             if hasattr(comp, "fields") and comp.fields:
-                lines.append("## Fields\n")
-                lines.append("| Field | Type | Required |")
-                lines.append("|-------|------|----------|")
-                for field_name, field_info in comp.fields.items():
-                    required = "Yes" if field_info.get("required") else "No"
-                    field_type = field_info.get("type", "unknown")
-                    lines.append(f"| `{field_name}` | {field_type} | {required} |")
-                lines.append("")
+                # Filter out internal/discriminator fields LLMs shouldn't supply
+                _skip = {"block_type", "component_type", "model_config"}
+                visible = {
+                    k: v
+                    for k, v in comp.fields.items()
+                    if k not in _skip
+                }
+                if visible:
+                    lines.append("## Fields\n")
+                    lines.append("| Field | Type | Required | Default | Description |")
+                    lines.append("|-------|------|----------|---------|-------------|")
+                    for field_name, field_info in visible.items():
+                        required = "Yes" if field_info.get("required") else "No"
+                        field_type = field_info.get("type", "unknown")
+                        default = field_info.get("default")
+                        default_str = f"`{default}`" if default is not None else "—"
+                        desc = field_info.get("description", "")
+                        lines.append(
+                            f"| `{field_name}` | {field_type} | {required} "
+                            f"| {default_str} | {desc} |"
+                        )
+                    lines.append("")
 
             content = "\n".join(lines)
 

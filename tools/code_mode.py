@@ -21,6 +21,7 @@ from fastmcp.experimental.transforms.code_mode import (
 from fastmcp.server.context import Context
 from fastmcp.tools.tool import Tool, ToolResult
 from mcp.types import TextContent
+from pydantic import Field
 
 from config.enhanced_logging import setup_logger
 
@@ -807,6 +808,191 @@ def setup_code_mode(mcp: FastMCP) -> None:
             )
 
     code_mode.get_tool_catalog = _patched_get_tool_catalog
+
+    # ------------------------------------------------------------------
+    # Patch: wrap the execute tool's inner call_tool with argument
+    # recovery so that ValidationErrors inside the sandbox get a chance
+    # to be fixed by an LLM before surfacing as SandboxError.
+    # ------------------------------------------------------------------
+    _original_make_execute = code_mode._make_execute_tool
+
+    def _patched_make_execute() -> Tool:
+        from collections.abc import Sequence as _Seq
+
+        from fastmcp.experimental.transforms.code_mode import (
+            NotFoundError,
+            _unwrap_tool_result,
+        )
+        from pydantic import ValidationError as _VE
+
+        transform = code_mode
+
+        async def execute(
+            code: Annotated[
+                str,
+                Field(
+                    description=(
+                        "Python async code to execute tool calls"
+                        " via call_tool(name, arguments)"
+                    )
+                ),
+            ],
+            ctx: Context = None,  # type: ignore[assignment]
+        ) -> Any:
+            """Execute tool calls using Python code."""
+            cached_tools: _Seq[Tool] | None = None
+
+            async def _get_cached_tools() -> _Seq[Tool]:
+                nonlocal cached_tools
+                if cached_tools is None:
+                    cached_tools = await transform.get_tool_catalog(ctx)
+                return cached_tools
+
+            async def call_tool(tool_name: str, params: dict[str, Any]) -> Any:
+                backend_tools = await _get_cached_tools()
+                tool = transform._find_tool(tool_name, backend_tools)
+                if tool is None:
+                    raise NotFoundError(f"Unknown tool: {tool_name}")
+
+                try:
+                    result = await ctx.fastmcp.call_tool(tool.name, params)
+                    return _unwrap_tool_result(result)
+                except _VE as ve:
+                    # Attempt argument recovery via LLM
+                    corrected = await _recover_args(
+                        ctx, tool, tool_name, params, ve
+                    )
+                    if corrected is not None:
+                        result = await ctx.fastmcp.call_tool(
+                            tool.name, corrected
+                        )
+                        return _unwrap_tool_result(result)
+                    raise  # re-raise if recovery failed
+
+            return await transform.sandbox_provider.run(
+                code,
+                external_functions={"call_tool": call_tool},
+            )
+
+        return Tool.from_function(
+            fn=execute,
+            name=transform.execute_tool_name,
+            description=transform._build_execute_description(),
+        )
+
+    async def _recover_args(
+        ctx: Context,
+        tool: Tool,
+        tool_name: str,
+        original_params: dict,
+        error: Exception,
+    ) -> dict | None:
+        """Use LLM sampling to fix tool arguments on ValidationError."""
+        try:
+            from config.settings import settings as _s
+
+            if not getattr(_s, "sampling_argument_recovery_enabled", True):
+                return None
+        except Exception:
+            pass
+
+        try:
+            schema = tool.parameters
+            error_details = str(error)
+
+            # Use the shared keepalive system prompt so the Anthropic
+            # prompt cache prefix matches the keepalive engine's calls.
+            try:
+                from middleware.cache_keepalive import _build_execute_system_prompt
+
+                system_prompt = _build_execute_system_prompt()
+            except Exception:
+                system_prompt = (
+                    "You are a tool argument correction agent. A tool call "
+                    "failed because the arguments did not match the expected "
+                    "schema. Fix the arguments by mapping incorrect parameter "
+                    "names to the correct ones, adding missing required "
+                    "parameters with sensible defaults, and removing unknown "
+                    "parameters.\n\n"
+                    "IMPORTANT: Return ONLY a valid JSON object with the "
+                    "corrected arguments. No explanation, no markdown, "
+                    "no code fences — just the JSON object."
+                )
+
+            user_message = (
+                f"Tool: {tool_name}\n"
+                f"Description: {tool.description or 'N/A'}\n\n"
+                f"Expected parameter schema:\n"
+                f"{json.dumps(schema, indent=2)}\n\n"
+                f"Original arguments provided:\n"
+                f"{json.dumps(original_params, indent=2, default=str)}\n\n"
+                f"Validation error:\n{error_details}\n\n"
+                "Return the corrected arguments as a JSON object."
+            )
+
+            # Use LiteLLM directly (same as keepalive engine) since we
+            # don't have a SamplingContext inside the sandbox.
+            import litellm
+
+            from config.settings import settings as _settings
+
+            model = _settings.litellm_model
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                "max_tokens": 300,
+                "temperature": 0.0,
+            }
+            api_key = getattr(_settings, "litellm_api_key", None)
+            api_base = getattr(_settings, "litellm_api_base", None)
+            if api_key:
+                kwargs["api_key"] = api_key
+            if api_base:
+                kwargs["api_base"] = api_base
+
+            response = await litellm.acompletion(**kwargs)
+
+            text = ""
+            choices = getattr(response, "choices", [])
+            if choices:
+                msg = getattr(choices[0], "message", None)
+                if msg:
+                    text = (getattr(msg, "content", "") or "").strip()
+
+            # Strip markdown fences
+            if text.startswith("```"):
+                lines = text.split("\n")
+                text = "\n".join(
+                    ln for ln in lines if not ln.strip().startswith("```")
+                )
+
+            corrected = json.loads(text)
+            if not isinstance(corrected, dict):
+                return None
+
+            logger.info(
+                "Argument recovery (execute) for %s: "
+                "original_keys=%s corrected_keys=%s",
+                tool_name,
+                list(original_params.keys()),
+                list(corrected.keys()),
+            )
+            return corrected
+
+        except Exception as exc:
+            logger.warning(
+                "Argument recovery (execute) failed for %s: %s",
+                tool_name,
+                exc,
+            )
+            return None
+
+    # Replace the cached execute tool with our patched version
+    code_mode._make_execute_tool = _patched_make_execute
+    code_mode._cached_execute_tool = None  # force re-creation
 
     mcp.add_transform(code_mode)
     logger.info(

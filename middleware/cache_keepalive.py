@@ -167,10 +167,90 @@ QDRANT_EXPLORATION_PROMPTS: List[str] = [
     ),
 ]
 
+EXECUTE_EXPLORATION_PROMPTS: List[str] = [
+    (
+        "Fix this broken tool call. Tool: search_gmail_messages. "
+        'Args: {"query": "from:alice@example.com", "max_results": 5}. '
+        "Error: max_results — Unexpected keyword argument. "
+        "Expected schema: query (str, required), page_size (int, default 10). "
+        "Return the corrected arguments as a JSON object."
+    ),
+    (
+        "Fix this broken tool call. Tool: send_gmail_message. "
+        'Args: {"recipient": "bob@example.com", "text": "Hello Bob"}. '
+        "Error: recipient — Unexpected keyword argument; text — Unexpected keyword argument. "
+        "Expected schema: subject (str, required), body (str, required), "
+        "to (str, default 'myself'), content_type ('plain'|'html'|'mixed'). "
+        "Return the corrected arguments as a JSON object."
+    ),
+    (
+        "Fix this broken tool call. Tool: list_drive_files. "
+        'Args: {"query": "type:pdf", "limit": 10}. '
+        "Error: limit — Unexpected keyword argument. "
+        "Expected schema: query (str), page_size (int, default 10), folder_id (str, optional). "
+        "Return the corrected arguments as a JSON object."
+    ),
+    (
+        "Fix this broken tool call. Tool: get_document_content. "
+        'Args: {"doc_id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"}. '
+        "Error: doc_id — Unexpected keyword argument. "
+        "Expected schema: document_id (str, required). "
+        "Return the corrected arguments as a JSON object."
+    ),
+    (
+        "Fix this broken tool call. Tool: read_sheet_data. "
+        'Args: {"spreadsheet_id": "abc123", "sheet_range": "Sheet1!A1:D10"}. '
+        "Error: sheet_range — Unexpected keyword argument. "
+        "Expected schema: spreadsheet_id (str, required), range (str, required). "
+        "Return the corrected arguments as a JSON object."
+    ),
+    (
+        "Fix this broken tool call. Tool: create_calendar_event. "
+        'Args: {"title": "Team standup", "start": "2026-03-22T09:00:00", '
+        '"end": "2026-03-22T09:30:00"}. '
+        "Error: title — Unexpected keyword argument; start — Unexpected keyword argument. "
+        "Expected schema: summary (str, required), start_time (str, required), "
+        "end_time (str, required), attendees (list, optional). "
+        "Return the corrected arguments as a JSON object."
+    ),
+    (
+        "Fix this broken tool call. Tool: get_gmail_message_content. "
+        'Args: {"id": "19d1019cf701ba98"}. '
+        "Error: id — Unexpected keyword argument. "
+        "Expected schema: message_id (str, required). "
+        "Return the corrected arguments as a JSON object."
+    ),
+    (
+        "Fix this broken tool call. Tool: search_calendar_events. "
+        'Args: {"query": "standup", "count": 5, "calendar": "primary"}. '
+        "Error: count — Unexpected keyword argument; calendar — Unexpected keyword argument. "
+        "Expected schema: query (str), time_min (str, optional), time_max (str, optional), "
+        "max_results (int, default 10). "
+        "Return the corrected arguments as a JSON object."
+    ),
+    (
+        "Fix this broken tool call. Tool: send_gmail_message. "
+        'Args: {"subject": "Update", "content": "Here is the update", "type": "html"}. '
+        "Error: content — Unexpected keyword argument; type — Unexpected keyword argument. "
+        "Expected schema: subject (str), body (str), to (str), "
+        "content_type ('plain'|'html'|'mixed'). "
+        "Return the corrected arguments as a JSON object."
+    ),
+    (
+        "Fix this broken tool call. Tool: write_sheet_data. "
+        'Args: {"spreadsheet_id": "abc123", "range": "Sheet1!A1", '
+        '"data": [["Name", "Age"], ["Alice", 30]], "page_size": "10"}. '
+        "Error: data — Unexpected keyword argument; page_size — Unexpected keyword argument. "
+        "Expected schema: spreadsheet_id (str), range (str), values (list, required). "
+        "Return the corrected arguments as a JSON object."
+    ),
+]
+
 _MODULE_EXPLORATION_PROMPTS: Dict[str, List[str]] = {
     "gchat": GCHAT_EXPLORATION_PROMPTS,
     "email": EMAIL_EXPLORATION_PROMPTS,
     "qdrant": QDRANT_EXPLORATION_PROMPTS,
+    "execute": EXECUTE_EXPLORATION_PROMPTS,
 }
 
 # ---------------------------------------------------------------------------
@@ -395,10 +475,156 @@ def _build_qdrant_system_prompt() -> str:
 
     return "\n\n".join(parts)
 
+
+def _build_execute_system_prompt() -> str:
+    """Assemble the cacheable system prompt for the execute sandbox argument
+    recovery agent.
+
+    Focuses on the sandbox environment, MCP tool catalog, parameter naming
+    conventions, and common validation error patterns.  Must exceed
+    Anthropic's 1,024-token minimum for caching.
+    """
+    parts: List[str] = [
+        "You are a tool argument correction agent for a Google Workspace "
+        "MCP server's execute sandbox environment. When a tool call fails "
+        "due to wrong parameter names, missing required parameters, or type "
+        "mismatches, you fix the arguments and return corrected JSON.\n\n"
+        "IMPORTANT: Return ONLY a valid JSON object with the corrected "
+        "arguments. No explanation, no markdown, no code fences — just "
+        "the JSON object."
+    ]
+
+    # Include the execute sandbox description (helpers, restrictions)
+    try:
+        from tools.code_mode import EXECUTE_DESCRIPTION
+
+        parts.append(
+            "## Execute Sandbox Environment\n"
+            "The execute tool provides a sandboxed Python environment with "
+            "`call_tool(tool_name, params)` as the primary interface. "
+            "Available helpers and restrictions:\n\n" + EXECUTE_DESCRIPTION
+        )
+    except Exception:
+        parts.append("(Execute sandbox description unavailable)")
+
+    # MCP tool catalog with correct parameter schemas
+    parts.append(
+        "## MCP Tool Catalog — Correct Parameter Names\n"
+        "Below are the core Google Workspace tools available via "
+        "`call_tool()` with their correct parameter names and types.\n\n"
+        "### Gmail Tools\n"
+        "- `search_gmail_messages(query: str, page_size: int = 10)` — "
+        "Search messages. Note: the parameter is `page_size`, NOT "
+        "`max_results`, `limit`, or `count`.\n"
+        "- `get_gmail_message_content(message_id: str)` — Get full message "
+        "content. Note: `message_id`, NOT `id` or `msg_id`.\n"
+        "- `get_gmail_messages_content_batch(message_ids: list[str])` — "
+        "Get multiple messages at once.\n"
+        "- `get_gmail_thread_content(thread_id: str)` — Get all messages "
+        "in a thread.\n"
+        "- `send_gmail_message(subject: str, body: str, to: str = 'myself', "
+        "content_type: 'plain'|'html'|'mixed' = 'mixed', html_body: str = None, "
+        "cc: str = None, bcc: str = None)` — Send email. Note: `body` "
+        "(NOT `content`/`text`/`message`), `to` (NOT `recipient`/`recipients`), "
+        "`content_type` (NOT `type`/`format`).\n"
+        "- `draft_gmail_message(subject: str, body: str, to: str = 'myself', "
+        "content_type: str = 'mixed')` — Create draft without sending.\n"
+        "- `reply_to_gmail_message(message_id: str, body: str, "
+        "content_type: str = 'mixed')` — Reply to a message.\n"
+        "- `draft_gmail_reply(message_id: str, body: str)` — Draft a reply.\n"
+        "- `download_gmail_attachment(message_id: str, attachment_id: str)` — "
+        "Download an attachment.\n\n"
+        "### Drive Tools\n"
+        "- `list_drive_files(query: str = None, page_size: int = 10, "
+        "folder_id: str = None)` — List files. Note: `page_size`, NOT "
+        "`limit` or `max_results`.\n"
+        "- `get_drive_file_content(file_id: str)` — Get file content.\n"
+        "- `upload_drive_file(file_name: str, content: str, "
+        "mime_type: str = 'text/plain', folder_id: str = None)` — Upload.\n"
+        "- `create_drive_folder(name: str, parent_folder_id: str = None)` — "
+        "Create folder.\n\n"
+        "### Calendar Tools\n"
+        "- `search_calendar_events(query: str = None, time_min: str = None, "
+        "time_max: str = None, max_results: int = 10)` — Search events. "
+        "Note: Calendar uses `max_results` (unlike Gmail/Drive `page_size`).\n"
+        "- `create_calendar_event(summary: str, start_time: str, "
+        "end_time: str, description: str = None, location: str = None, "
+        "attendees: list = None)` — Create event. Note: `summary` "
+        "(NOT `title`/`name`), `start_time`/`end_time` (NOT `start`/`end`).\n"
+        "- `get_calendar_event(event_id: str)` — Get event details.\n"
+        "- `update_calendar_event(event_id: str, ...)` — Update event.\n"
+        "- `delete_calendar_event(event_id: str)` — Delete event.\n\n"
+        "### Docs Tools\n"
+        "- `get_document_content(document_id: str)` — Get doc content. "
+        "Note: `document_id`, NOT `doc_id` or `file_id`.\n"
+        "- `create_document(title: str, content: str = None)` — Create doc.\n"
+        "- `append_to_document(document_id: str, content: str)` — Append.\n\n"
+        "### Sheets Tools\n"
+        "- `get_spreadsheet_info(spreadsheet_id: str)` — Get sheet info.\n"
+        "- `read_sheet_data(spreadsheet_id: str, range: str)` — Read cells. "
+        "Note: `range` (NOT `sheet_range`/`cell_range`).\n"
+        "- `write_sheet_data(spreadsheet_id: str, range: str, "
+        "values: list)` — Write cells. Note: `values` "
+        "(NOT `data`/`cells`).\n"
+        "- `create_spreadsheet(title: str)` — Create new spreadsheet.\n\n"
+        "### Chat Tools\n"
+        "- `list_chat_spaces()` — List available spaces.\n"
+        "- `send_chat_message(space_name: str, text: str)` — Send text.\n"
+        "- `get_chat_space_info(space_name: str)` — Get space info.\n\n"
+        "### People / Profile Tools\n"
+        "- `get_user_profile()` — Get authenticated user's profile.\n"
+        "- `search_contacts(query: str, page_size: int = 10)` — Search.\n\n"
+        "### Utility Tools\n"
+        "- `health_check()` — Check server health.\n"
+        "- `manage_tools(action: 'list'|'enable'|'disable', "
+        "tools: list = None)` — Enable/disable tools.\n"
+        "- `manage_credentials(action: str)` — Credential management."
+    )
+
+    # Parameter naming conventions
+    parts.append(
+        "## Parameter Naming Conventions\n"
+        "- `user_google_email` — Auto-injected by auth middleware. "
+        "NEVER supply manually; it will be added automatically.\n"
+        "- `page_size` — Used by Gmail and Drive for pagination "
+        "(NOT `max_results`, `limit`, or `count`).\n"
+        "- `max_results` — Used ONLY by Calendar tools.\n"
+        "- Resource IDs follow service-specific patterns: `message_id`, "
+        "`thread_id`, `document_id`, `spreadsheet_id`, `file_id`, "
+        "`event_id`, `space_name`, `attachment_id`.\n"
+        "- `query` — Standard search parameter across all services.\n"
+        "- All string parameters must be actual strings, not integers. "
+        "All integer parameters (page_size, max_results) must be actual "
+        "integers, not strings."
+    )
+
+    # Common validation errors and fixes
+    parts.append(
+        "## Common Validation Errors and Fixes\n"
+        "| Wrong Parameter | Correct Parameter | Affected Tools |\n"
+        "|---|---|---|\n"
+        "| `max_results` | `page_size` | search_gmail_messages, list_drive_files |\n"
+        "| `limit` | `page_size` | search_gmail_messages, list_drive_files |\n"
+        "| `count` | `page_size` or `max_results` | all search tools |\n"
+        "| `recipient` / `recipients` | `to` | send_gmail_message |\n"
+        "| `content` / `text` / `message` | `body` | send_gmail_message |\n"
+        "| `type` / `format` | `content_type` | send_gmail_message |\n"
+        "| `doc_id` / `file_id` | `document_id` | get_document_content |\n"
+        "| `id` / `msg_id` | `message_id` | get_gmail_message_content |\n"
+        "| `title` / `name` | `summary` | create_calendar_event |\n"
+        "| `start` / `end` | `start_time` / `end_time` | create_calendar_event |\n"
+        "| `sheet_range` / `cell_range` | `range` | read_sheet_data, write_sheet_data |\n"
+        "| `data` / `cells` | `values` | write_sheet_data |"
+    )
+
+    return "\n\n".join(parts)
+
+
 _MODULE_PROMPT_BUILDERS: Dict[str, Callable[[], str]] = {
     "gchat": _build_gchat_system_prompt,
     "email": _build_email_system_prompt,
     "qdrant": _build_qdrant_system_prompt,
+    "execute": _build_execute_system_prompt,
 }
 
 # ---------------------------------------------------------------------------
@@ -457,9 +683,11 @@ class CacheKeepaliveEngine:
 
     async def _keepalive_loop(self) -> None:
         interval = self._settings.cache_keepalive_interval_seconds
+        jitter = getattr(self._settings, "cache_keepalive_jitter_seconds", 300)
         logger.info(
-            "Cache keepalive loop started (interval=%ds, modules=%s)",
+            "Cache keepalive loop started (interval=%ds, jitter=+/-%ds, modules=%s)",
             interval,
+            jitter,
             list(self._modules.keys()),
         )
 
@@ -503,7 +731,14 @@ class CacheKeepaliveEngine:
                     logger.exception(
                         "Cache keepalive [%s]: send failed", module.module_name
                     )
-            await asyncio.sleep(interval)
+
+            # Persist stats after each cycle
+            self._save_persisted_stats()
+
+            # Jittered sleep — randomize within [interval - jitter, interval + jitter]
+            sleep_time = interval + random.uniform(-jitter, jitter)
+            sleep_time = max(60, sleep_time)  # floor at 60s
+            await asyncio.sleep(sleep_time)
 
     # -- send a single keepalive call ---------------------------------------
 
@@ -603,15 +838,21 @@ class CacheKeepaliveEngine:
         module.total_full_price_usd += full_price
         module.total_savings_usd += savings
 
-        # Optionally index exploration results
-        if (
-            self._settings.cache_keepalive_mode == "explore"
-            and self._settings.cache_keepalive_index_results
-        ):
+        # Log and optionally index exploration results
+        if self._settings.cache_keepalive_mode == "explore":
             try:
                 response_text = self._extract_text(response)
                 if response_text:
-                    await self._maybe_index_result(module, response_text)
+                    # Always log exploration output for auditability
+                    logger.info(
+                        "Cache keepalive [%s]: exploration output (%d chars): %.200s%s",
+                        module.module_name,
+                        len(response_text),
+                        response_text,
+                        "..." if len(response_text) > 200 else "",
+                    )
+                    if self._settings.cache_keepalive_index_results:
+                        await self._maybe_index_result(module, response_text)
             except Exception:
                 logger.debug(
                     "Cache keepalive [%s]: indexing skipped", module.module_name
@@ -683,7 +924,86 @@ class CacheKeepaliveEngine:
                             break
             except Exception:
                 pass
-        # Email indexing can be added here when email wrapper supports it
+        elif module.module_name == "email":
+            try:
+                import re
+
+                from gmail.email_wrapper_api import parse_email_dsl
+
+                # Look for email DSL patterns (e.g. ε[...] or EmailSpec{...})
+                dsl_candidates = re.findall(r"ε\[[^\]]*\]", response_text)
+                for candidate in dsl_candidates:
+                    result = parse_email_dsl(candidate)
+                    if result and getattr(result, "is_valid", False):
+                        logger.debug(
+                            "Cache keepalive [email]: validated email DSL pattern"
+                        )
+                        break
+            except Exception:
+                pass
+
+    # -- persistence --------------------------------------------------------
+
+    def _load_persisted_stats(self) -> None:
+        """Load previously persisted cost stats from JSON file on startup."""
+        path_str = getattr(self._settings, "sampling_cost_persistence_file", "")
+        if not path_str:
+            return
+        p = Path(path_str)
+        if not p.exists():
+            return
+        try:
+            data = _json.loads(p.read_text())
+            for mod_name, stats in data.get("modules", {}).items():
+                mod = self._modules.get(mod_name)
+                if mod is None:
+                    continue
+                mod.total_keepalive_calls = stats.get("total_calls", 0)
+                mod.total_cached_tokens = stats.get("total_cached_tokens", 0)
+                mod.total_input_tokens = stats.get("total_input_tokens", 0)
+                mod.total_output_tokens = stats.get("total_output_tokens", 0)
+                mod.total_cost_usd = stats.get("total_cost_usd", 0.0)
+                mod.total_full_price_usd = stats.get("total_full_price_usd", 0.0)
+                mod.total_savings_usd = stats.get("total_savings_usd", 0.0)
+            self._validation_total_cost_usd = data.get(
+                "validation_total_cost_usd", 0.0
+            )
+            self._validation_total_calls = data.get("validation_total_calls", 0)
+            logger.info("Cache keepalive: loaded persisted stats from %s", path_str)
+        except Exception as exc:
+            logger.warning(
+                "Cache keepalive: failed to load persisted stats: %s", exc
+            )
+
+    def _save_persisted_stats(self) -> None:
+        """Atomically write cost stats to the persistence file."""
+        path_str = getattr(self._settings, "sampling_cost_persistence_file", "")
+        if not path_str:
+            return
+        p = Path(path_str)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            stats = self.get_stats()
+            stats["validation_total_cost_usd"] = self._validation_total_cost_usd
+            stats["validation_total_calls"] = self._validation_total_calls
+            stats["last_saved_at"] = time.time()
+            # Atomic write: temp file + rename
+            fd, tmp = tempfile.mkstemp(dir=str(p.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    _json.dump(stats, f, indent=2)
+                os.replace(tmp, str(p))
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+            logger.debug("Cache keepalive: persisted stats to %s", path_str)
+        except Exception as exc:
+            logger.warning(
+                "Cache keepalive: failed to persist stats: %s", exc
+            )
 
     # -- stats --------------------------------------------------------------
 
@@ -730,6 +1050,8 @@ class CacheKeepaliveEngine:
                 (total_savings / total_full_price * 100) if total_full_price > 0 else 0,
                 1,
             ),
+            "validation_total_cost_usd": round(self._validation_total_cost_usd, 6),
+            "validation_total_calls": self._validation_total_calls,
         }
 
 # ---------------------------------------------------------------------------

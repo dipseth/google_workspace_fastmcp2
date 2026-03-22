@@ -504,7 +504,7 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "CACHE_KEEPALIVE_JITTER_SECONDS"},
     )
     cache_keepalive_modules: str = Field(
-        default="gchat,email,qdrant",
+        default="gchat,email,qdrant,execute",
         description="Comma-separated module names to keep warm",
         json_schema_extra={"env": "CACHE_KEEPALIVE_MODULES"},
     )

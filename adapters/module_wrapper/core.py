@@ -11,7 +11,6 @@ in this package.
 
 import importlib
 import inspect
-from config.enhanced_logging import setup_logger
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Union
@@ -36,6 +35,7 @@ from adapters.module_wrapper.types import (
     ReverseSymbolMapping,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
@@ -191,6 +191,10 @@ class ModuleComponent:
         self.source = source
         self.parent = parent
         self.children: Dict[ComponentName, "ModuleComponent"] = {}
+        self.fields: Dict[str, Dict[str, Any]] = {}
+
+        # Auto-extract Pydantic model fields if available
+        self._extract_pydantic_fields()
 
     @property
     def full_path(self) -> ComponentPath:
@@ -198,6 +202,61 @@ class ModuleComponent:
         if self.parent:
             return f"{self.parent.full_path}.{self.name}"
         return f"{self.module_path}.{self.name}"
+
+    def _extract_pydantic_fields(self) -> None:
+        """Extract field info from Pydantic BaseModel subclasses."""
+        try:
+            from pydantic import BaseModel as _BM
+
+            if not (isinstance(self.obj, type) and issubclass(self.obj, _BM)):
+                return
+            from pydantic_core import PydanticUndefined as _Undef
+
+            for fname, finfo in self.obj.model_fields.items():
+                default = finfo.default
+                if default is _Undef or default is None:
+                    default_repr = None
+                else:
+                    default_repr = repr(default)
+                self.fields[fname] = {
+                    "type": self._format_annotation(finfo.annotation),
+                    "required": finfo.is_required(),
+                    "default": default_repr,
+                    "description": finfo.description or "",
+                }
+        except Exception:
+            pass
+
+    @staticmethod
+    def _format_annotation(annotation: Any) -> str:
+        """Render a type annotation as a readable string."""
+        if annotation is None:
+            return "Any"
+        import typing
+
+        origin = getattr(annotation, "__origin__", None)
+        args = getattr(annotation, "__args__", None)
+
+        # Handle Optional[X] → "X?"
+        if origin is typing.Union and args and len(args) == 2 and type(None) in args:
+            inner = [a for a in args if a is not type(None)][0]
+            return f"{ModuleComponent._format_annotation(inner)}?"
+
+        # Handle Literal["a", "b"] → '"a" | "b"'
+        if origin is typing.Literal and args:
+            return " | ".join(repr(a) for a in args)
+
+        # Handle List[X], Dict[K, V], etc.
+        if origin is not None and args:
+            name = getattr(origin, "__name__", str(origin))
+            inner = ", ".join(ModuleComponent._format_annotation(a) for a in args)
+            return f"{name}[{inner}]"
+
+        # Simple type
+        name = getattr(annotation, "__name__", None)
+        if name:
+            return name
+        return str(annotation)
 
     def add_child(self, child: "ModuleComponent") -> None:
         """Add a child component."""

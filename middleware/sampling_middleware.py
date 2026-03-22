@@ -47,7 +47,7 @@ from fastmcp.tools import Tool
 from fastmcp.tools.tool_transform import forward
 from mcp.types import SamplingMessage as MCPSamplingMessage
 from mcp.types import TextContent as MCPTextContent
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 # ============================================================================
 # DSL TOOL CONFIG — registration dataclass for domain-specific DSL tools
@@ -90,7 +90,7 @@ class ValidationAgentConfig:
         "pre"  # "pre" (sync, applies corrections) or "parallel" (async, advisory)
     )
     enabled: bool = True
-    max_tokens: int = 400
+    max_tokens: int = 800
     temperature: float = 0.1
     generate_variations: bool = False
     syntax_bypass_confidence: float = 1.0  # skip if DSL syntax already valid
@@ -1019,6 +1019,8 @@ Provide personalized recommendations based on historical success patterns.""",
             try:
                 from middleware.langfuse_integration import (
                     get_sampling_trace_context as _get_ctx,
+                )
+                from middleware.langfuse_integration import (
                     start_phase_span,
                 )
 
@@ -1262,13 +1264,30 @@ class EnhancedSamplingMiddleware(Middleware):
                 + json.dumps(target_args, indent=2, default=str)
             )
 
-            result = await sctx.sample(
-                messages=user_message,
-                system_prompt=system_prompt,
-                temperature=config.temperature,
-                max_tokens=config.max_tokens,
-                result_type=ValidationResult,
-            )
+            try:
+                result = await sctx.sample(
+                    messages=user_message,
+                    system_prompt=system_prompt,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    result_type=ValidationResult,
+                )
+            except ToolError as te:
+                # FastMCP raises RuntimeError (wrapped as ToolError) when the LLM
+                # returns text instead of calling the final_response tool.
+                # Retry without result_type and parse JSON from the text response.
+                if "final_response" not in str(te):
+                    raise
+                logger.info(
+                    f"🔄 Structured output failed for {tool_name}, "
+                    "retrying without result_type"
+                )
+                result = await sctx.sample(
+                    messages=user_message,
+                    system_prompt=system_prompt,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                )
 
             # Clear phase so subsequent sampling calls in the tool don't inherit it
             try:
@@ -1286,9 +1305,17 @@ class EnhancedSamplingMiddleware(Middleware):
             elif isinstance(result, ValidationResult):
                 validation = result
             else:
-                # Try to parse from text
+                # Parse ValidationResult from text (handles plain JSON or
+                # markdown-fenced JSON from the fallback path)
                 text = getattr(result, "text", str(result))
-                validation = ValidationResult.model_validate_json(text)
+                json_text = text.strip()
+                if json_text.startswith("```"):
+                    lines = json_text.split("\n")
+                    lines = [
+                        ln for ln in lines if not ln.strip().startswith("```")
+                    ]
+                    json_text = "\n".join(lines).strip()
+                validation = ValidationResult.model_validate_json(json_text)
 
             if self.enable_debug:
                 logger.debug(
@@ -1462,8 +1489,26 @@ class EnhancedSamplingMiddleware(Middleware):
                         f"✅ Enhanced context stored for elicitation-enabled tool: {tool_name}"
                     )
 
-            # Execute tool and capture result
-            result = await call_next(context)
+            # Execute tool and capture result — with argument recovery on
+            # Pydantic ValidationError (e.g. wrong param names from the LLM)
+            try:
+                result = await call_next(context)
+            except (ValidationError, Exception) as call_exc:
+                if isinstance(call_exc, ValidationError):
+                    logger.info(
+                        "ValidationError for %s — attempting argument recovery: %s",
+                        tool_name,
+                        call_exc,
+                    )
+                    recovery = await self._attempt_argument_recovery(
+                        context, tool_name, call_exc, call_next
+                    )
+                    if recovery is not None:
+                        result = recovery
+                    else:
+                        raise
+                else:
+                    raise
 
             # Post-call: enrich DSL errors with diagnostics
             if self._is_dsl_tool(tool_name):
@@ -1636,6 +1681,138 @@ class EnhancedSamplingMiddleware(Middleware):
             logger.debug(f"Enriched DSL error diagnostics for {tool_name}")
 
         return result
+
+    async def _attempt_argument_recovery(
+        self,
+        context: MiddlewareContext,
+        tool_name: str,
+        error: ValidationError,
+        call_next: Any,
+    ) -> Any:
+        """Attempt to fix tool arguments via LLM when Pydantic validation fails.
+
+        Builds a correction prompt with the tool's JSON schema, the original
+        arguments, and the validation error.  Uses a low-temperature sampling
+        call to produce corrected arguments, then retries once.
+
+        Returns the tool result on success, or None if recovery fails.
+        """
+        try:
+            from config.settings import settings as _settings
+
+            if not getattr(_settings, "sampling_argument_recovery_enabled", True):
+                return None
+        except Exception:
+            pass
+
+        try:
+            # Get the tool's parameter schema
+            tool = await context.fastmcp_context.fastmcp.get_tool(tool_name)
+            if tool is None:
+                return None
+            schema = tool.parameters  # JSON schema dict
+
+            original_args = dict(context.message.arguments or {})
+            error_details = str(error)
+
+            # Use the shared keepalive system prompt so the Anthropic
+            # prompt cache prefix matches the keepalive engine's calls.
+            try:
+                from middleware.cache_keepalive import _build_execute_system_prompt
+
+                system_prompt = _build_execute_system_prompt()
+            except Exception:
+                system_prompt = (
+                    "You are a tool argument correction agent. A tool call "
+                    "failed because the arguments did not match the expected "
+                    "schema. Fix the arguments by mapping incorrect parameter "
+                    "names to the correct ones, adding missing required "
+                    "parameters with sensible defaults, and removing unknown "
+                    "parameters.\n\n"
+                    "IMPORTANT: Return ONLY a valid JSON object with the "
+                    "corrected arguments. No explanation, no markdown, "
+                    "no code fences — just the JSON object."
+                )
+
+            user_message = (
+                f"Tool: {tool_name}\n"
+                f"Description: {tool.description or 'N/A'}\n\n"
+                f"Expected parameter schema:\n"
+                f"{json.dumps(schema, indent=2)}\n\n"
+                f"Original arguments provided:\n"
+                f"{json.dumps(original_args, indent=2, default=str)}\n\n"
+                f"Validation error:\n{error_details}\n\n"
+                "Return the corrected arguments as a JSON object."
+            )
+
+            # Set Langfuse trace phase
+            try:
+                from middleware.langfuse_integration import set_sampling_trace_context
+
+                set_sampling_trace_context(phase="arg_recovery")
+            except Exception:
+                pass
+
+            sctx = SamplingContext(
+                fastmcp_context=context.fastmcp_context,
+                tool_name=tool_name,
+                enable_debug=self.enable_debug,
+            )
+
+            sampling_result = await sctx.sample(
+                messages=user_message,
+                system_prompt=system_prompt,
+                temperature=0.0,
+                max_tokens=300,
+            )
+
+            if not sampling_result:
+                return None
+
+            corrected_text = str(
+                getattr(sampling_result, "text", sampling_result) or ""
+            ).strip()
+
+            # Strip markdown code fences if present
+            if corrected_text.startswith("```"):
+                lines = corrected_text.split("\n")
+                corrected_text = "\n".join(
+                    line for line in lines if not line.strip().startswith("```")
+                )
+
+            corrected_args = json.loads(corrected_text)
+            if not isinstance(corrected_args, dict):
+                return None
+
+            logger.info(
+                "Argument recovery for %s: original_keys=%s corrected_keys=%s",
+                tool_name,
+                list(original_args.keys()),
+                list(corrected_args.keys()),
+            )
+
+            # Apply corrected arguments and retry once
+            context.message.arguments.clear()
+            context.message.arguments.update(corrected_args)
+
+            try:
+                return await call_next(context)
+            except Exception as retry_exc:
+                logger.warning(
+                    "Argument recovery retry failed for %s: %s",
+                    tool_name,
+                    retry_exc,
+                )
+                # Restore original args so error message makes sense
+                context.message.arguments.clear()
+                context.message.arguments.update(original_args)
+                return None
+
+        except Exception as exc:
+            logger.warning(
+                "Argument recovery failed for %s: %s", tool_name, exc
+            )
+            return None
 
     async def _store_enhanced_context(self, context: MiddlewareContext, tool_name: str):
         """Store enhanced sampling context for tools that support elicitation."""
