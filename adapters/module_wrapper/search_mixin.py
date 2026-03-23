@@ -1544,24 +1544,41 @@ class SearchMixin:
         candidate_pool_size: int = 20,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Dispatch to search_hybrid or search_hybrid_multidim based on settings.
+        Dispatch to search_hybrid, search_hybrid_multidim, or search_hybrid_learned.
 
-        Reads ENABLE_MULTIDIM_SEARCH from settings. When enabled, uses
-        multiplicative cross-dimensional scoring (POC: +9.5%). When disabled
-        (default), uses Qdrant's native RRF fusion.
+        Reads SEARCH_MODE from settings:
+          - 'rrf' (default): Qdrant's native RRF fusion
+          - 'multidim': multiplicative cross-dimensional scoring (H1: +9.5%)
+          - 'learned': trained SimilarityScorerMW MLP (H2: 100% val acc on MW)
 
-        Same signature as search_hybrid / search_hybrid_multidim.
+        Falls back to ENABLE_MULTIDIM_SEARCH for backwards compatibility.
+        Same signature as search_hybrid / search_hybrid_multidim / search_hybrid_learned.
         """
-        use_multidim = False
+        search_mode = "rrf"
         try:
             from config.settings import Settings
             settings = Settings()
-            use_multidim = settings.enable_multidim_search
+            search_mode = settings.search_mode
+            # Backwards compat: ENABLE_MULTIDIM_SEARCH overrides if search_mode is default
+            if search_mode == "rrf" and settings.enable_multidim_search:
+                search_mode = "multidim"
         except Exception:
-            pass  # Default to legacy
+            pass
 
-        if use_multidim:
-            logger.info("Using multi-dimensional scoring (ENABLE_MULTIDIM_SEARCH=true)")
+        if search_mode == "learned":
+            logger.info("Using learned scorer (SEARCH_MODE=learned)")
+            return self.search_hybrid_learned(
+                description=description,
+                component_paths=component_paths,
+                limit=limit,
+                token_ratio=token_ratio,
+                content_feedback=content_feedback,
+                form_feedback=form_feedback,
+                include_classes=include_classes,
+                candidate_pool_size=candidate_pool_size,
+            )
+        elif search_mode == "multidim":
+            logger.info("Using multi-dimensional scoring (SEARCH_MODE=multidim)")
             return self.search_hybrid_multidim(
                 description=description,
                 component_paths=component_paths,
@@ -2122,6 +2139,328 @@ class SearchMixin:
         except Exception as e:
             logger.error(f"Multi-dimensional search failed: {e}", exc_info=True)
             return [], [], []
+
+    # =========================================================================
+    # LEARNED SCORING (Horizon 2 — 100% val acc on MW gchat cards)
+    # =========================================================================
+
+    _learned_model = None  # class-level cache for the trained model
+
+    @classmethod
+    def _load_learned_model(cls):
+        """Load the trained SimilarityScorerMW model (cached at class level)."""
+        if cls._learned_model is not None:
+            return cls._learned_model
+
+        try:
+            import torch
+            import torch.nn as nn
+        except ImportError:
+            logger.warning("torch not installed — learned scorer unavailable. Install with: pip install torch")
+            return None
+
+        class _ScorerMLP(nn.Module):
+            """Minimal MLP matching SimilarityScorerMW architecture."""
+            def __init__(self, hidden_dim=32, dropout=0.15):
+                super().__init__()
+                self.mlp = nn.Sequential(
+                    nn.Linear(9, hidden_dim), nn.SiLU(), nn.Dropout(dropout),
+                    nn.Linear(hidden_dim, hidden_dim), nn.SiLU(), nn.Dropout(dropout),
+                    nn.Linear(hidden_dim, 1),
+                )
+            def forward(self, x):
+                return self.mlp(x)
+
+        # Look for checkpoint in research/trm/h2/checkpoints/ or configured path
+        import os
+        checkpoint_path = os.environ.get("LEARNED_SCORER_CHECKPOINT")
+        if not checkpoint_path:
+            # Default: relative to project root
+            from pathlib import Path
+            candidates = [
+                Path(__file__).parent.parent.parent / "research" / "trm" / "h2" / "checkpoints" / "best_model_mw.pt",
+                Path.cwd() / "research" / "trm" / "h2" / "checkpoints" / "best_model_mw.pt",
+            ]
+            for p in candidates:
+                if p.exists():
+                    checkpoint_path = str(p)
+                    break
+
+        if not checkpoint_path or not os.path.exists(checkpoint_path):
+            logger.warning(f"Learned scorer checkpoint not found. Tried: {candidates if not checkpoint_path else checkpoint_path}")
+            return None
+
+        try:
+            ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            hidden_dim = ckpt.get("hidden_dim", 32)
+            dropout = ckpt.get("dropout", 0.15)
+            model = _ScorerMLP(hidden_dim=hidden_dim, dropout=dropout)
+            model.load_state_dict(ckpt["model_state_dict"])
+            model.eval()
+            cls._learned_model = model
+            logger.info(f"Loaded learned scorer from {checkpoint_path} (params={sum(p.numel() for p in model.parameters())})")
+            return model
+        except Exception as e:
+            logger.error(f"Failed to load learned scorer: {e}")
+            return None
+
+    def search_hybrid_learned(
+        self,
+        description: str,
+        component_paths: Optional[List[str]] = None,
+        limit: int = 10,
+        token_ratio: float = 1.0,
+        content_feedback: Optional[str] = None,
+        form_feedback: Optional[str] = None,
+        include_classes: bool = True,
+        candidate_pool_size: int = 20,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Search using the trained SimilarityScorerMW for reranking.
+
+        Same prefetch pipeline as search_hybrid_multidim, but replaces
+        multiplicative scoring (sim_c × sim_r × sim_i) with a learned
+        MLP on [sim_c, sim_i, sim_r, norms].
+
+        Architecture: MLP(9 → 32 → 32 → 1), 1,409 params, trained on
+        gchat card data with listwise contrastive loss.
+        """
+        import math
+
+        try:
+            import torch
+        except ImportError:
+            logger.warning("torch not installed, falling back to multidim")
+            return self.search_hybrid_multidim(
+                description=description, component_paths=component_paths,
+                limit=limit, token_ratio=token_ratio,
+                content_feedback=content_feedback, form_feedback=form_feedback,
+                include_classes=include_classes, candidate_pool_size=candidate_pool_size,
+            )
+
+        model = self._load_learned_model()
+        if model is None:
+            logger.warning("Learned scorer not available, falling back to multidim")
+            return self.search_hybrid_multidim(
+                description=description,
+                component_paths=component_paths,
+                limit=limit,
+                token_ratio=token_ratio,
+                content_feedback=content_feedback,
+                form_feedback=form_feedback,
+                include_classes=include_classes,
+                candidate_pool_size=candidate_pool_size,
+            )
+
+        # Reuse multidim's prefetch pipeline for candidate expansion
+        # (Steps 1-2 are identical — embed query, build prefetch, search Qdrant)
+        try:
+            # --- Step 1: Embed query (same as multidim) ---
+            query_colbert = None
+            query_minilm = None
+
+            if hasattr(self, 'embed_multivector_sync'):
+                query_colbert = self.embed_multivector_sync(description)
+            elif hasattr(self, '_embedding_service') and self._embedding_service:
+                query_colbert = self._embedding_service.embed_multivector_sync(description)
+
+            rel_text = description
+            if component_paths:
+                rel_text = f"{description} components: {', '.join(component_paths)}"
+
+            if hasattr(self, 'embed_dense_sync'):
+                query_minilm = self.embed_dense_sync(rel_text)
+            elif hasattr(self, '_embedding_service') and self._embedding_service:
+                query_minilm = self._embedding_service.embed_dense_sync(rel_text)
+
+            if not query_colbert or not query_minilm:
+                logger.warning("Could not embed query for learned search")
+                return [], [], []
+
+            # --- Step 2: Prefetch candidates from Qdrant (same as multidim) ---
+            from qdrant_client.models import (
+                FieldCondition,
+                Filter,
+                Fusion,
+                FusionQuery,
+                MatchValue,
+                Prefetch,
+            )
+
+            prefetch_list = []
+            comp_filter = Filter(must=[FieldCondition(key="type", match=MatchValue(value="class"))]) if include_classes else None
+            prefetch_list.append(
+                Prefetch(query=query_colbert, using="components", limit=candidate_pool_size, filter=comp_filter)
+            )
+
+            inp_filter = None
+            if content_feedback:
+                inp_filter = Filter(must=[
+                    FieldCondition(key="type", match=MatchValue(value="instance_pattern")),
+                    FieldCondition(key="content_feedback", match=MatchValue(value=content_feedback)),
+                ])
+            prefetch_list.append(
+                Prefetch(query=query_colbert, using="inputs", limit=candidate_pool_size, filter=inp_filter)
+            )
+
+            rel_filter = None
+            if form_feedback:
+                rel_filter = Filter(must=[
+                    FieldCondition(key="type", match=MatchValue(value="instance_pattern")),
+                    FieldCondition(key="form_feedback", match=MatchValue(value=form_feedback)),
+                ])
+            prefetch_list.append(
+                Prefetch(query=query_minilm, using="relationships", limit=candidate_pool_size, filter=rel_filter)
+            )
+
+            results = self.client.query_points(
+                collection_name=self.collection_name,
+                prefetch=prefetch_list,
+                query=FusionQuery(fusion=Fusion.RRF),
+                limit=candidate_pool_size * 3,
+                with_payload=True,
+                with_vectors=True,
+            )
+
+            if not results.points:
+                logger.info("Learned search: no candidates found")
+                return [], [], []
+
+            # --- Step 3: Compute similarity features + learned scoring ---
+            features_list = []
+            points_list = []
+
+            for point in results.points:
+                vectors = point.vector or {}
+                comp_vec = vectors.get("components") if isinstance(vectors, dict) else None
+                inp_vec = vectors.get("inputs") if isinstance(vectors, dict) else None
+                rel_vec = vectors.get("relationships") if isinstance(vectors, dict) else None
+
+                sim_c = 0.0
+                sim_i = 0.0
+                sim_r = 0.0
+
+                if comp_vec and query_colbert:
+                    sim_c = self._maxsim(query_colbert, comp_vec) if isinstance(comp_vec[0], list) else self._cosine_similarity(query_colbert[0], comp_vec)
+                if inp_vec and query_colbert:
+                    sim_i = self._maxsim(query_colbert, inp_vec) if isinstance(inp_vec[0], list) else self._cosine_similarity(query_colbert[0], inp_vec)
+                if rel_vec and query_minilm:
+                    if isinstance(rel_vec, list) and rel_vec and not isinstance(rel_vec[0], list):
+                        sim_r = self._cosine_similarity(query_minilm, rel_vec)
+
+                # Compute norms
+                def _vec_norm(v):
+                    if not v:
+                        return 0.0
+                    flat = []
+                    if isinstance(v[0], list):
+                        for sub in v:
+                            flat.extend(sub)
+                    else:
+                        flat = v
+                    return math.sqrt(sum(x * x for x in flat))
+
+                q_c_norm = _vec_norm(query_colbert)
+                q_i_norm = _vec_norm(query_colbert)
+                q_r_norm = _vec_norm(query_minilm) if query_minilm else 0.0
+                c_c_norm = _vec_norm(comp_vec)
+                c_i_norm = _vec_norm(inp_vec)
+                c_r_norm = _vec_norm(rel_vec)
+
+                features_list.append([sim_c, sim_i, sim_r, q_c_norm, q_i_norm, q_r_norm, c_c_norm, c_i_norm, c_r_norm])
+                points_list.append((sim_c, sim_r, sim_i, point))
+
+            # Batch score all candidates through the MLP
+            features_tensor = torch.tensor(features_list, dtype=torch.float32)
+            with torch.no_grad():
+                scores_tensor = model(features_tensor).squeeze(-1)
+            learned_scores = scores_tensor.tolist()
+
+            # Apply feedback boost on top of learned scores
+            scored = []
+            for idx, (sim_c, sim_r, sim_i, point) in enumerate(points_list):
+                score = learned_scores[idx]
+                payload = point.payload or {}
+                cf = payload.get("content_feedback")
+                ff = payload.get("form_feedback")
+                if cf == "positive":
+                    score *= 1.1
+                elif cf == "negative":
+                    score *= 0.8
+                if ff == "positive":
+                    score *= 1.1
+                elif ff == "negative":
+                    score *= 0.8
+                scored.append((score, sim_c, sim_r, sim_i, point))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+
+            # --- Step 4: Categorize results (same as multidim) ---
+            class_results = []
+            pattern_results = []
+            relationship_results = []
+
+            for score, sim_c, sim_r, sim_i, point in scored:
+                payload = point.payload or {}
+                result = {
+                    "id": point.id,
+                    "score": score,
+                    "sim_components": sim_c,
+                    "sim_relationships": sim_r,
+                    "sim_inputs": sim_i,
+                    "name": payload.get("name"),
+                    "type": payload.get("type"),
+                    "full_path": payload.get("full_path"),
+                    "symbol": payload.get("symbol"),
+                    "docstring": payload.get("docstring", "")[:200],
+                    "content_feedback": payload.get("content_feedback"),
+                    "form_feedback": payload.get("form_feedback"),
+                    "parent_paths": payload.get("parent_paths", []),
+                    "structure_description": payload.get("structure_description", ""),
+                    "card_description": payload.get("card_description", ""),
+                    "relationship_text": payload.get("relationship_text", ""),
+                    "instance_params": payload.get("instance_params", {}),
+                }
+
+                point_type = payload.get("type")
+                if point_type == "class":
+                    class_results.append(result)
+                elif point_type == "instance_pattern":
+                    if payload.get("content_feedback") == "positive":
+                        pattern_results.append(result)
+                    if payload.get("form_feedback") == "positive":
+                        relationship_results.append(result)
+                    if result not in pattern_results:
+                        if payload.get("content_feedback") != "positive" and payload.get("form_feedback") != "positive":
+                            pattern_results.append(result)
+                else:
+                    class_results.append(result)
+
+            logger.info(
+                f"Learned search: {len(class_results)} classes, "
+                f"{len(pattern_results)} patterns, {len(relationship_results)} relationships "
+                f"(from {len(results.points)} candidates)"
+            )
+
+            return (
+                class_results[:limit],
+                pattern_results[:limit],
+                relationship_results[:limit],
+            )
+
+        except Exception as e:
+            logger.error(f"Learned search failed: {e}", exc_info=True)
+            logger.info("Falling back to multi-dimensional search")
+            return self.search_hybrid_multidim(
+                description=description,
+                component_paths=component_paths,
+                limit=limit,
+                token_ratio=token_ratio,
+                content_feedback=content_feedback,
+                form_feedback=form_feedback,
+                include_classes=include_classes,
+                candidate_pool_size=candidate_pool_size,
+            )
 
     # =========================================================================
     # RESULT PROCESSING

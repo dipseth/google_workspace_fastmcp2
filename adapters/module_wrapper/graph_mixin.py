@@ -1438,6 +1438,63 @@ class GraphMixin:
         """Get all registered heterogeneous containers."""
         return self._heterogeneous_containers.copy()
 
+    def find_required_wrapper(
+        self, component: str, target_parent: str
+    ) -> Optional[str]:
+        """Find the required wrapper for a component to be valid in target_parent.
+
+        Uses DAG and registered metadata to determine if wrapping is needed:
+        1. Check if component is a valid direct child of target_parent
+        2. If not, check for explicit wrapper requirement registration
+        3. If not found, try common naming pattern (Component → ComponentList)
+        4. Fall back to DAG path-finding
+
+        Args:
+            component: Component to potentially wrap (e.g., "Button")
+            target_parent: Target container (e.g., "Section")
+
+        Returns:
+            Required wrapper component name, or None if no wrapping needed
+
+        Example:
+            >>> wrapper.find_required_wrapper("Button", "Section")
+            "ButtonList"  # Button needs ButtonList wrapper to go in Section
+            >>> wrapper.find_required_wrapper("DecoratedText", "Section")
+            None  # DecoratedText can go directly in Section
+        """
+        valid_children = self.get_valid_children_for_parent(target_parent)
+
+        # 1. Check if component is already a valid direct child
+        if component in valid_children:
+            return None
+
+        # Also check can_contain for direct containment
+        if self.can_contain(target_parent, component, direct_only=True):
+            return None
+
+        # 2. Check for explicit wrapper requirement registration
+        explicit_wrapper = self.get_required_wrapper(component)
+        if explicit_wrapper:
+            if explicit_wrapper in valid_children:
+                return explicit_wrapper
+            if self.can_contain(target_parent, explicit_wrapper, direct_only=False):
+                return explicit_wrapper
+
+        # 3. Try common naming pattern: Component → ComponentList
+        wrapper_name = f"{component}List"
+        if wrapper_name in valid_children:
+            return wrapper_name
+
+        # 4. Use DAG path-finding as fallback
+        path = self.get_path(target_parent, component)
+        if path and len(path) >= 3:
+            # Path is [target_parent, ..., wrapper, component]
+            intermediate = path[-2]  # Second-to-last is the direct parent
+            if intermediate != target_parent and intermediate in valid_children:
+                return intermediate
+
+        return None
+
 # Export for convenience
 __all__ = [
     "GraphMixin",
