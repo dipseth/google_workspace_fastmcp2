@@ -325,6 +325,47 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
             require_authorization_consent=False,  # Google already has its own consent screen
         )
 
+        # ─── CIMD Redirect URI Fix ───
+        # The CIMD document at claude.ai/oauth/claude-code-client-metadata lists
+        # http://localhost/callback (no port wildcard), but Claude Code uses dynamic
+        # ports (e.g., http://localhost:59957/callback). FastMCP's CIMD validation
+        # rejects these. Patch get_client to inject wildcard port patterns into
+        # fetched CIMD documents so dynamic-port clients can authenticate.
+        _cimd_mgr = getattr(google_auth_provider, "_cimd_manager", None)
+        if _cimd_mgr is not None:
+            _original_get_client = _cimd_mgr.get_client
+            _localhost_wildcards = [
+                "http://localhost:*/callback",
+                "http://127.0.0.1:*/callback",
+            ]
+
+            _in_patched_get_client = [False]
+
+            async def _patched_get_client(client_id_url: str):
+                if _in_patched_get_client[0]:
+                    # Prevent infinite recursion: _original_get_client internally
+                    # calls self._cimd_manager.get_client which is now this function.
+                    # Temporarily restore the original to break the cycle.
+                    _cimd_mgr.get_client = _original_get_client
+                    try:
+                        return await _original_get_client(client_id_url)
+                    finally:
+                        _cimd_mgr.get_client = _patched_get_client
+                _in_patched_get_client[0] = True
+                try:
+                    client = await _original_get_client(client_id_url)
+                finally:
+                    _in_patched_get_client[0] = False
+                if client and client.cimd_document:
+                    existing = list(client.cimd_document.redirect_uris or [])
+                    for pattern in _localhost_wildcards:
+                        if pattern not in existing:
+                            existing.append(pattern)
+                    client.cimd_document.redirect_uris = existing
+                return client
+
+            _cimd_mgr.get_client = _patched_get_client
+
         # ─── API Key + Per-User Key Authentication ───
         # Intercepts load_access_token to check two key types before OAuth:
         #   1. MCP_API_KEY — shared admin/master key (optional, from .env)
@@ -427,11 +468,11 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
         # via DCR), FastMCP's get_client() returns None → "Client Not Registered" error.
         # This patch auto-registers unknown clients as proxy DCR clients so they go
         # through the server's OAuth proxy (using the server's Google credentials).
-        _original_get_client = google_auth_provider.get_client
+        _original_provider_get_client = google_auth_provider.get_client
 
         async def _get_client_with_auto_register(client_id: str):
             """Auto-register unknown clients instead of rejecting them."""
-            client = await _original_get_client(client_id)
+            client = await _original_provider_get_client(client_id)
             if client is not None:
                 return client
 
@@ -459,7 +500,7 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                 logger.info(f"✅ Auto-registered client: {client_id[:30]}...")
 
                 # Return the newly registered client
-                return await _original_get_client(client_id)
+                return await _original_provider_get_client(client_id)
             except Exception as e:
                 logger.warning(
                     f"⚠️ Auto-registration failed for {client_id[:30]}...: {e}"

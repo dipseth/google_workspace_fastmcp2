@@ -99,6 +99,39 @@ PROVIDER_SELECT_HTML = """<!DOCTYPE html>
     line-height: 1.5;
   }}
   .note a {{ color: #888; }}
+  .star-callout {{
+    background: #1e1033;
+    border: 1px solid #6e40c9;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    text-align: left;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }}
+  .star-callout .star-icon {{
+    font-size: 22px;
+    line-height: 1;
+    flex-shrink: 0;
+  }}
+  .star-callout .star-text {{
+    font-size: 13px;
+    color: #d1c4e9;
+    line-height: 1.5;
+  }}
+  .star-callout .star-text strong {{
+    color: #e1bee7;
+    font-weight: 600;
+  }}
+  .star-callout .star-text a {{
+    color: #bb86fc;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }}
+  .star-callout .star-text a:hover {{
+    color: #e1bee7;
+  }}
   .alpha-badge {{
     display: inline-block;
     background: #4a148c;
@@ -121,6 +154,8 @@ PROVIDER_SELECT_HTML = """<!DOCTYPE html>
   {google_button}
 
   {divider}
+
+  {star_callout}
 
   {github_button}
 
@@ -168,13 +203,22 @@ def build_provider_select_html(
     if google_url and github_url:
         divider = '<div class="divider">or</div>'
 
-    note_parts = []
-    if alpha_mode and github_gating_repo:
-        note_parts.append(
-            f'GitHub sign-in requires starring '
-            f'<a href="https://github.com/{github_gating_repo}" '
-            f'target="_blank">{github_gating_repo}</a>.'
+    # Prominent star callout above GitHub button
+    star_callout = ""
+    if alpha_mode and github_gating_repo and github_url:
+        star_callout = (
+            '<div class="star-callout">'
+            '<span class="star-icon">&#11088;</span>'
+            '<span class="star-text">'
+            "<strong>Star required for access</strong><br>"
+            f'Star <a href="https://github.com/{github_gating_repo}" '
+            f'target="_blank">{github_gating_repo}</a> on GitHub '
+            "before signing in."
+            "</span>"
+            "</div>"
         )
+
+    note_parts = []
     if alpha_mode and google_url:
         note_parts.append("Google sign-in is limited to approved accounts.")
     note = " ".join(note_parts)
@@ -187,6 +231,7 @@ def build_provider_select_html(
         google_button=google_button,
         github_button=github_button,
         divider=divider,
+        star_callout=star_callout,
         note=note,
     )
 
@@ -394,12 +439,18 @@ class DualOAuthRouter:
             request.query_params.get("state", ""),
         )
 
+        # Grab the upstream Google OAuth URL so that after GitHub gating
+        # succeeds we can continue the Google OAuth flow (which issues the
+        # real FastMCP tokens that Claude Code expects).
+        upstream_google_url = select_txn.get("upstream_google_url", "")
+
         self._github_transactions[txn_id] = {
             "state": state,
             "created_at": time.time(),
             "original_params": dict(request.query_params),
             "client_redirect_uri": client_redirect_uri,
             "client_state": client_state,
+            "upstream_google_url": upstream_google_url,
         }
 
         # Clean up old transactions (> 15 min)
@@ -532,22 +583,113 @@ class DualOAuthRouter:
 body {{ font-family: -apple-system, sans-serif; background: #0a0a0a; color: #e5e5e5;
        display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
 .card {{ background: #1a1a1a; border: 1px solid #333; border-radius: 16px;
-         padding: 40px; max-width: 420px; text-align: center; }}
+         padding: 40px; max-width: 440px; text-align: center; }}
 h1 {{ color: #e1bee7; font-size: 20px; margin-bottom: 16px; }}
 p {{ color: #888; font-size: 14px; line-height: 1.6; margin-bottom: 20px; }}
 a {{ color: #bb86fc; text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
-.btn {{ display: inline-block; padding: 10px 24px; background: #6e40c9;
-        color: #fff; border-radius: 8px; margin-top: 12px; }}
-.btn:hover {{ background: #7c4dff; text-decoration: none; }}
+.star-btn {{
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 14px 20px; border: 1px solid #6e40c9; border-radius: 10px;
+  background: #1e1033; color: #e1bee7; font-size: 15px; font-weight: 500;
+  cursor: pointer; transition: all 0.25s; margin-bottom: 12px;
+}}
+.star-btn:hover {{ background: #2a1745; border-color: #9c64ff; }}
+.star-btn.starred {{ border-color: #ffd54f; background: #2e2614; color: #ffd54f; }}
+.star-btn.starred:hover {{ background: #3a2e16; }}
+.star-btn .star-icon {{ font-size: 20px; transition: transform 0.3s; }}
+.star-btn.loading .star-icon {{ animation: spin 0.8s linear infinite; }}
+@keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+.star-btn .repo-name {{ font-size: 12px; color: #888; margin-top: 2px; }}
+.continue-btn {{
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; padding: 14px 20px; border: 1px solid #333; border-radius: 10px;
+  background: #222; color: #888; font-size: 14px; cursor: not-allowed;
+  transition: all 0.25s; text-decoration: none; margin-top: 8px; opacity: 0.5;
+}}
+.continue-btn.active {{
+  background: #6e40c9; color: #fff; border-color: #6e40c9;
+  cursor: pointer; opacity: 1;
+}}
+.continue-btn.active:hover {{ background: #7c4dff; }}
+.status-msg {{ font-size: 12px; color: #666; margin-top: 12px; min-height: 18px; }}
 </style></head><body><div class="card">
 <h1>&#11088; Star Required for Alpha Access</h1>
-<p>Hi <strong>{github_login}</strong>! To get alpha access, please star the repository:</p>
-<a href="https://github.com/{repo}" target="_blank" class="btn">
-Star {repo} on GitHub</a>
-<p style="margin-top:24px;font-size:12px;color:#666;">
-After starring, <a href="/auth/github/authorize?{retry_params}">
-click here to retry</a>.</p>
+<p>Hi <strong>{github_login}</strong>! Star the repo below to unlock access.</p>
+
+<button id="starBtn" class="star-btn" onclick="toggleStar()">
+  <span class="star-icon">&#9734;</span>
+  <span>
+    <span id="starLabel">Star this repo</span><br>
+    <span class="repo-name">{repo}</span>
+  </span>
+</button>
+
+<a id="continueBtn" class="continue-btn" href="/auth/github/authorize?{retry_params}">
+  Continue to sign in
+</a>
+
+<p id="statusMsg" class="status-msg"></p>
+
+<script>
+const TOKEN = "{access_token}";
+const REPO = "{repo}";
+const API = "https://api.github.com/user/starred/" + REPO;
+const HDR = {{ "Authorization": "Bearer " + TOKEN,
+              "Accept": "application/vnd.github.v3+json" }};
+let isStarred = false;
+
+async function checkStar() {{
+  try {{
+    const r = await fetch(API, {{ headers: HDR }});
+    if (r.status === 204) {{ setStarred(true); }}
+  }} catch(e) {{}}
+}}
+
+function setStarred(v) {{
+  isStarred = v;
+  const btn = document.getElementById("starBtn");
+  const label = document.getElementById("starLabel");
+  const cont = document.getElementById("continueBtn");
+  const msg = document.getElementById("statusMsg");
+  btn.classList.remove("loading");
+  if (v) {{
+    btn.classList.add("starred");
+    label.textContent = "Starred";
+    btn.querySelector(".star-icon").innerHTML = "&#11088;";
+    cont.classList.add("active");
+    msg.textContent = "\\u2705 You're all set — click continue below!";
+    msg.style.color = "#81c784";
+  }} else {{
+    btn.classList.remove("starred");
+    label.textContent = "Star this repo";
+    btn.querySelector(".star-icon").innerHTML = "\\u2606";
+    cont.classList.remove("active");
+    msg.textContent = "";
+  }}
+}}
+
+async function toggleStar() {{
+  const btn = document.getElementById("starBtn");
+  btn.classList.add("loading");
+  try {{
+    if (isStarred) {{
+      await fetch(API, {{ method: "DELETE", headers: HDR }});
+      setStarred(false);
+    }} else {{
+      await fetch(API, {{ method: "PUT", headers: HDR,
+                         body: "", headers: {{ ...HDR, "Content-Length": "0" }} }});
+      setStarred(true);
+    }}
+  }} catch(e) {{
+    btn.classList.remove("loading");
+    document.getElementById("statusMsg").textContent = "Request failed — try again.";
+    document.getElementById("statusMsg").style.color = "#ef5350";
+  }}
+}}
+
+checkStar();
+</script>
 </div></body></html>""",
                         status_code=403,
                     )
@@ -567,7 +709,109 @@ click here to retry</a>.</p>
                 "starred_gating_repo": True,
             }
 
-        # Redirect back to the MCP client with the GitHub token
+        # After GitHub gating succeeds, continue to Google OAuth so that
+        # FastMCP's OAuth proxy can issue proper JWT tokens.  GitHub was just
+        # the gate; Google provides the actual Workspace credentials.
+        upstream_google_url = txn.get("upstream_google_url", "")
+
+        if upstream_google_url:
+            logger.info(
+                f"✅ GitHub gating passed for {github_login}, "
+                f"continuing to Google OAuth"
+            )
+            repo = self._settings.github_oauth_gating_repo or ""
+            return HTMLResponse(
+                f"""<!DOCTYPE html>
+<html><head><title>Access Granted</title>
+<style>
+body {{ font-family: -apple-system, sans-serif; background: #0a0a0a; color: #e5e5e5;
+       display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
+.card {{ background: #1a1a1a; border: 1px solid #333; border-radius: 16px;
+         padding: 40px; max-width: 440px; text-align: center; }}
+h1 {{ color: #81c784; font-size: 20px; margin-bottom: 12px; }}
+p {{ color: #aaa; font-size: 14px; line-height: 1.6; margin-bottom: 8px; }}
+.star-toggle {{
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 12px 16px; border: 1px solid #ffd54f; border-radius: 10px;
+  background: #2e2614; color: #ffd54f; font-size: 14px; font-weight: 500;
+  cursor: pointer; transition: all 0.25s; margin: 16px 0 8px;
+}}
+.star-toggle:hover {{ background: #3a2e16; }}
+.star-toggle.unstarred {{ border-color: #555; background: #1e1033; color: #aaa; }}
+.star-toggle.unstarred:hover {{ border-color: #6e40c9; }}
+.star-toggle .icon {{ font-size: 18px; transition: transform 0.3s; }}
+.star-toggle.loading .icon {{ animation: spin 0.8s linear infinite; }}
+@keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+.continue-btn {{
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; padding: 14px 20px; border: 1px solid #2e7d32; border-radius: 10px;
+  background: #1b5e20; color: #fff; font-size: 15px; font-weight: 500;
+  cursor: pointer; text-decoration: none; transition: all 0.2s; margin-top: 8px;
+}}
+.continue-btn:hover {{ background: #2e7d32; }}
+.redirect-note {{ color: #666; font-size: 12px; margin-top: 12px; }}
+</style></head><body><div class="card">
+<h1>&#x2705; Welcome, {github_login}!</h1>
+<p>Your alpha access has been verified.</p>
+
+<button id="starBtn" class="star-toggle" onclick="toggleStar()">
+  <span class="icon">&#11088;</span>
+  <span id="starLabel">Starred {repo}</span>
+</button>
+
+<a class="continue-btn" href="{upstream_google_url}">
+  Continue to Google sign-in &rarr;
+</a>
+
+<p class="redirect-note">You'll sign in with Google for Workspace access.</p>
+
+<script>
+const TOKEN = "{access_token}";
+const REPO = "{repo}";
+const API = "https://api.github.com/user/starred/" + REPO;
+const HDR = {{ "Authorization": "Bearer " + TOKEN,
+              "Accept": "application/vnd.github.v3+json" }};
+let isStarred = true;
+
+function render() {{
+  const btn = document.getElementById("starBtn");
+  const label = document.getElementById("starLabel");
+  btn.classList.remove("loading");
+  if (isStarred) {{
+    btn.classList.remove("unstarred");
+    btn.querySelector(".icon").innerHTML = "&#11088;";
+    label.textContent = "Starred " + REPO;
+  }} else {{
+    btn.classList.add("unstarred");
+    btn.querySelector(".icon").innerHTML = "\\u2606";
+    label.textContent = "Star " + REPO;
+  }}
+}}
+
+async function toggleStar() {{
+  const btn = document.getElementById("starBtn");
+  btn.classList.add("loading");
+  try {{
+    if (isStarred) {{
+      await fetch(API, {{ method: "DELETE", headers: HDR }});
+      isStarred = false;
+    }} else {{
+      await fetch(API, {{ method: "PUT", headers: HDR,
+                         headers: {{ ...HDR, "Content-Length": "0" }} }});
+      isStarred = true;
+    }}
+    render();
+  }} catch(e) {{
+    btn.classList.remove("loading");
+  }}
+}}
+</script>
+</div></body></html>"""
+            )
+
+        # Fallback: no upstream Google URL (e.g. GitHub-only mode or
+        # direct /auth/github/authorize without going through /auth/select).
+        # Return the GitHub token directly for browser-based clients.
         client_redirect = txn.get("client_redirect_uri", "")
         client_state = txn.get("client_state", "")
 
@@ -583,7 +827,7 @@ click here to retry</a>.</p>
                 status_code=302,
             )
 
-        # No client redirect — show success page
+        # No redirect info at all — show success page
         return HTMLResponse(
             f"""<!DOCTYPE html>
 <html><head><title>Authenticated</title>
