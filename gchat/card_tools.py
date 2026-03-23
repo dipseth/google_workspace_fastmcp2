@@ -1008,6 +1008,18 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             "Card structure built, preparing message..."
                         )
 
+                        # Extract mapping report from card (attached by builder as dict)
+                        inner_card = google_format_card.get("card", {})
+                        if isinstance(inner_card, dict):
+                            report_dict = inner_card.pop("_mapping_report", None)
+                            if isinstance(report_dict, dict):
+                                input_mapping_info = InputMappingInfo(
+                                    mappings=report_dict.get("mappings", []),
+                                    unconsumed=report_dict.get("unconsumed", {}),
+                                    dsl_demands=report_dict.get("dsl_demands"),
+                                    auto_corrections=report_dict.get("auto_corrections"),
+                                )
+
                         # Extract DSL structure and Jinja template status from card
                         inner_card = google_format_card.get("card", {})
                         if isinstance(inner_card, dict):

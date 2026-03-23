@@ -367,6 +367,9 @@ class ComponentBuilder:
             component_name in ("DecoratedText", "TextParagraph")
             and "text" not in params
         ):
+            if consumed.get("_placeholder"):
+                logger.debug(f"Skipping placeholder {component_name} (no real content)")
+                return None
             params["text"] = "\u00a0"  # non-breaking space
 
         # 3. Container components - build children recursively
@@ -492,6 +495,13 @@ class ComponentBuilder:
                 child_params = consume_from_context(
                     expected_child_type, context, wrapper
                 )
+                # Skip placeholder children that lack required fields
+                if child_params.get("_placeholder"):
+                    if expected_child_type in ("Button", "Chip") and not child_params.get("url"):
+                        logger.debug(
+                            f"Skipping placeholder {expected_child_type} (no URL)"
+                        )
+                        continue
                 if expected_child_type == "Chip":
                     if "text" in child_params and "label" not in child_params:
                         child_params["label"] = child_params.pop("text")

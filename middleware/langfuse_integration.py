@@ -50,6 +50,7 @@ class _SamplingTraceContext:
     phase: str = (
         ""  # e.g. "validation" — disambiguates sub-calls within a tool execution
     )
+    search_mode: str = ""  # e.g. "rrf", "multidim", "learned"
 
 _current_trace: ContextVar[Optional[_SamplingTraceContext]] = ContextVar(
     "langfuse_trace_ctx", default=None
@@ -80,6 +81,7 @@ def set_sampling_trace_context(
     has_tools: bool = False,
     input_char_count: int = 0,
     phase: str = "",
+    search_mode: str = "",
 ) -> None:
     """Enrich the current trace context with per-sample-call details.
 
@@ -103,6 +105,8 @@ def set_sampling_trace_context(
         ctx.input_char_count = input_char_count
     if phase:
         ctx.phase = phase
+    if search_mode:
+        ctx.search_mode = search_mode
 
 def get_sampling_trace_context() -> Optional[_SamplingTraceContext]:
     """Return the current trace context, or None if not set."""

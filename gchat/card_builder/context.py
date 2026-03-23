@@ -189,8 +189,8 @@ def consume_from_context(
                     )
         context[index_key] = current_index + 1
     else:
-        # No more resources - don't use placeholder, let caller handle missing text
-        # Button and Chip still need labels for UX
+        # No more resources — mark as placeholder so builder can skip non-functional widgets
+        params["_placeholder"] = True
         if component_name == "Button":
             params["text"] = f"Button {current_index + 1}"
         elif component_name == "Chip":

@@ -687,6 +687,31 @@ class SmartCardBuilderV2:
     # CARD BUILDING FROM DSL
     # =========================================================================
 
+    @staticmethod
+    def _extract_demands(parsed_components) -> Dict[str, int]:
+        """Extract component demands (multipliers) from a parsed DSL tree.
+
+        Recursively walks the component tree and sums up multipliers per
+        component type, skipping containers (Section, ButtonList, etc.)
+        to focus on leaf components that consume params.
+        """
+        demands: Dict[str, int] = {}
+        for comp in parsed_components:
+            name = comp.get("name", "") if isinstance(comp, dict) else getattr(comp, "component", "")
+            mult = comp.get("multiplier", 1) if isinstance(comp, dict) else getattr(comp, "multiplier", 1)
+            children = comp.get("children", []) if isinstance(comp, dict) else getattr(comp, "children", [])
+
+            # Only count leaf-ish components that consume from context
+            # (not containers like Section, ButtonList, Grid, Carousel, Columns)
+            if name not in ("Section", "ButtonList", "ChipList", "Grid", "Carousel", "Columns", "Column"):
+                demands[name] = demands.get(name, 0) + mult
+
+            if children:
+                child_demands = SmartCardBuilderV2._extract_demands(children)
+                for k, v in child_demands.items():
+                    demands[k] = demands.get(k, 0) + v
+        return demands
+
     def _build_from_dsl(
         self,
         structure_dsl: str,
@@ -761,24 +786,46 @@ class SmartCardBuilderV2:
                     content_texts.append(content_entry)
                 logger.info(f"📝 Added {len(items)} items to content_texts")
 
+            # Build supply map for mismatch detection
+            supply_map = {
+                "buttons": buttons or [],
+                "content_texts": content_texts,
+                "chips": chips or [],
+                "carousel_cards": cards or [],
+                "grid_items": grid_items or items or [],
+            }
+
+            # Detect DSL-to-param mismatches (corrections applied via placeholder skip logic)
+            demands = {}
+            corrections = {}
+            if wrapper and hasattr(wrapper, "detect_param_mismatches"):
+                demands = self._extract_demands(parsed)
+                mismatch_result = wrapper.detect_param_mismatches(
+                    demands, supply_map
+                )
+                corrections = mismatch_result.get("corrections", {})
+                for warning in mismatch_result.get("warnings", []):
+                    logger.info(f"🔧 {warning}")
+
             # Create shared context for unified resource consumption
-            # This ensures buttons, texts, chips, cards, etc. are consumed sequentially across all components
             context = {
                 "buttons": buttons or [],
                 "chips": chips or [],
-                "carousel_cards": cards
-                or [],  # For carousel DSL (symbols from ModuleWrapper)
-                "grid_items": grid_items
-                or items
-                or [],  # Prefer explicit grid_items, fall back to items
+                "carousel_cards": cards or [],
+                "grid_items": grid_items or items or [],
                 "image_url": image_url,
                 "content_texts": content_texts,
-                "_button_index": 0,  # Track button consumption
-                "_chip_index": 0,  # Track chip consumption
-                "_carousel_card_index": 0,  # Track carousel card consumption
-                "_grid_item_index": 0,  # Track grid item consumption
-                "_text_index": 0,  # Track text consumption
-                "_mapping_report": InputMappingReport(),  # Track input consumption
+                "_button_index": 0,
+                "_chip_index": 0,
+                "_carousel_card_index": 0,
+                "_grid_item_index": 0,
+                "_text_index": 0,
+                "_mapping_report": InputMappingReport(
+                    supplies={k: len(v) if isinstance(v, list) else (1 if v else 0)
+                              for k, v in supply_map.items()},
+                    demands=demands,
+                    corrections=corrections,
+                ),
             }
 
             logger.info(
@@ -832,6 +879,11 @@ class SmartCardBuilderV2:
                 card["header"] = {"title": title}
                 if subtitle:
                     card["header"]["subtitle"] = subtitle
+
+            # Attach mapping report as serializable dict (not the dataclass)
+            mapping_report = context.get("_mapping_report")
+            if mapping_report and hasattr(mapping_report, "to_dict"):
+                card["_mapping_report"] = mapping_report.to_dict()
 
             return card
 
@@ -1833,8 +1885,17 @@ class SmartCardBuilderV2:
             else:
                 card["sections"] = [divider_section, feedback]
 
+        # Extract mapping report before cleanup (underscore keys get removed)
+        mapping_report = card.pop("_mapping_report", None)
+
         # Clean metadata before returning (Google Chat rejects underscore-prefixed keys)
-        return self._clean_card_metadata(card)
+        cleaned = self._clean_card_metadata(card)
+
+        # Re-attach report dict for upstream extraction (card_tools.py)
+        if mapping_report and isinstance(cleaned, dict):
+            cleaned["_mapping_report"] = mapping_report
+
+        return cleaned
 
     def initialize(self):
         """Initialize the builder (v1 compatibility)."""

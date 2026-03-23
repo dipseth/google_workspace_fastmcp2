@@ -1565,6 +1565,12 @@ class SearchMixin:
         except Exception:
             pass
 
+        try:
+            from middleware.langfuse_integration import set_sampling_trace_context
+            set_sampling_trace_context(search_mode=search_mode)
+        except ImportError:
+            pass
+
         if search_mode == "learned":
             logger.info("Using learned scorer (SEARCH_MODE=learned)")
             return self.search_hybrid_learned(
@@ -2256,22 +2262,13 @@ class SearchMixin:
         # (Steps 1-2 are identical — embed query, build prefetch, search Qdrant)
         try:
             # --- Step 1: Embed query (same as multidim) ---
-            query_colbert = None
-            query_minilm = None
-
-            if hasattr(self, 'embed_multivector_sync'):
-                query_colbert = self.embed_multivector_sync(description)
-            elif hasattr(self, '_embedding_service') and self._embedding_service:
-                query_colbert = self._embedding_service.embed_multivector_sync(description)
+            query_colbert = self._embed_with_colbert(description, token_ratio)
 
             rel_text = description
             if component_paths:
                 rel_text = f"{description} components: {', '.join(component_paths)}"
 
-            if hasattr(self, 'embed_dense_sync'):
-                query_minilm = self.embed_dense_sync(rel_text)
-            elif hasattr(self, '_embedding_service') and self._embedding_service:
-                query_minilm = self._embedding_service.embed_dense_sync(rel_text)
+            query_minilm = self._embed_with_minilm(rel_text)
 
             if not query_colbert or not query_minilm:
                 logger.warning("Could not embed query for learned search")
