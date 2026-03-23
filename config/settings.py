@@ -317,6 +317,12 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "ENABLE_MULTIDIM_SEARCH"},
     )
 
+    search_mode: str = Field(
+        default="rrf",
+        description="Search scoring mode: 'rrf' (legacy), 'multidim' (multiplicative), 'learned' (trained MLP)",
+        json_schema_extra={"env": "SEARCH_MODE"},
+    )
+
     # Response Limiting Configuration
     response_limit_max_size: int = Field(
         default=500_000,

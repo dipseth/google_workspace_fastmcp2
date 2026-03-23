@@ -120,6 +120,8 @@ class ScopeRegistry:
             "app_spaces": "https://www.googleapis.com/auth/chat.app.spaces",
             "app_spaces_create": "https://www.googleapis.com/auth/chat.app.spaces.create",
             "app_delete": "https://www.googleapis.com/auth/chat.app.delete",
+            # Bot identity scope (SA acts as the Chat app itself — required for sending cards)
+            "bot": "https://www.googleapis.com/auth/chat.bot",
         },
         # Google Forms scopes
         "forms": {
@@ -394,6 +396,10 @@ class ScopeRegistry:
             "chat.memberships_readonly",
             "chat.memberships",
             "people.readonly",
+        ],
+        # Bot identity scope (SA acts as Chat app — can send cards)
+        "chat_bot": [
+            "chat.bot",
         ],
         # Service account (app-level) scopes for Chat API
         "chat_app": [
