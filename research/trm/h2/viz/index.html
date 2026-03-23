@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TRPN Inference Visualizer</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 4px; }
+    .subtitle { color: #94a3b8; font-size: 0.85rem; margin-bottom: 20px; }
+
+    .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
+    .controls input { width: 80px; padding: 6px 10px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; font-size: 0.9rem; }
+    .controls button { padding: 6px 16px; border-radius: 6px; border: none; background: #6366f1; color: white; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
+    .controls button:hover { background: #4f46e5; }
+    .controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 16px; }
+    .panel { background: #1e293b; border-radius: 10px; padding: 16px; }
+    .panel-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 10px; font-weight: 600; }
+
+    .board-outer { display: flex; align-items: stretch; gap: 8px; margin-bottom: 14px; }
+    .board-store { display: flex; align-items: center; justify-content: center; width: 40px; min-height: 96px; border-radius: 20px; background: #064e3b; color: #6ee7b7; font-weight: 700; font-size: 1.1rem; flex-shrink: 0; }
+    .board-pits { display: flex; flex-direction: column; gap: 0; flex: 1; }
+    .board-row { display: flex; gap: 4px; }
+    .board-row-labels { display: flex; gap: 4px; padding: 1px 0; }
+    .board-divider { height: 6px; }
+    .pit { display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 8px; font-weight: 700; font-size: 1rem; flex-shrink: 0; }
+    .pit-p1 { background: #1e40af; color: #93c5fd; }
+    .pit-p2 { background: #7f1d1d; color: #fca5a5; }
+    .pit-label { font-size: 0.55rem; color: #64748b; text-align: center; width: 38px; flex-shrink: 0; line-height: 1; }
+    .pit-highlight { outline: 3px solid #facc15; outline-offset: -2px; }
+
+    .predictions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    .pred-card { padding: 10px; border-radius: 8px; text-align: center; }
+    .pred-card.correct { background: #065f46; border: 1px solid #10b981; }
+    .pred-card.wrong { background: #7f1d1d; border: 1px solid #ef4444; }
+    .pred-label { font-size: 0.7rem; text-transform: uppercase; color: #94a3b8; margin-bottom: 4px; }
+    .pred-move { font-size: 1.4rem; font-weight: 700; }
+    .pred-method { font-size: 0.75rem; color: #cbd5e1; margin-top: 2px; }
+
+    .ric-texts { font-size: 0.75rem; line-height: 1.4; }
+    .ric-texts details { margin-bottom: 6px; }
+    .ric-texts summary { cursor: pointer; color: #94a3b8; font-weight: 500; }
+    .ric-texts pre { white-space: pre-wrap; color: #cbd5e1; margin-top: 4px; padding: 6px; background: #0f172a; border-radius: 4px; }
+
+    .cand-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .cand-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #334155; color: #94a3b8; font-weight: 500; font-size: 0.7rem; text-transform: uppercase; }
+    .cand-table td { padding: 6px 8px; border-bottom: 1px solid #1e293b; }
+    .cand-table tr.correct { background: rgba(16, 185, 129, 0.1); }
+    .cand-table tr:hover { background: rgba(99, 102, 241, 0.1); }
+
+    .bar { height: 16px; border-radius: 3px; min-width: 2px; display: inline-block; vertical-align: middle; }
+    .bar-sim { background: #6366f1; }
+    .bar-multi { background: #f59e0b; }
+    .bar-learned { background: #10b981; }
+
+    .legend { display: flex; gap: 16px; margin-bottom: 10px; font-size: 0.75rem; color: #94a3b8; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 4px; vertical-align: middle; }
+
+    .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+    .tag-correct { background: #065f46; color: #6ee7b7; }
+    .tag-wrong { background: #7f1d1d; color: #fca5a5; }
+    .tag-rank { background: #1e3a5f; color: #93c5fd; }
+
+    .loading { text-align: center; padding: 40px; color: #94a3b8; }
+
+    .lookahead-panel { margin-top: 16px; }
+    .la-moves { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .la-move { padding: 8px 14px; border-radius: 8px; text-align: center; cursor: pointer; border: 2px solid transparent; min-width: 70px; }
+    .la-move:hover { border-color: #6366f1; }
+    .la-move.la-best { border-color: #10b981; }
+    .la-move.la-correct { background: #065f46; }
+    .la-move.la-wrong { background: #1e293b; }
+    .la-move-label { font-size: 0.65rem; color: #94a3b8; text-transform: uppercase; }
+    .la-move-name { font-size: 1.1rem; font-weight: 700; }
+    .la-move-score { font-size: 0.75rem; color: #cbd5e1; margin-top: 2px; }
+
+    .la-tree { font-size: 0.8rem; }
+    .la-node { padding: 6px 10px; margin: 3px 0; border-radius: 6px; background: #0f172a; display: flex; align-items: center; gap: 8px; }
+    .la-node-best { border-left: 3px solid #10b981; }
+    .la-children { margin-left: 20px; border-left: 1px solid #334155; padding-left: 8px; }
+    .la-score-bar { height: 12px; border-radius: 3px; background: #6366f1; display: inline-block; vertical-align: middle; }
+    .info-row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 0.8rem; }
+    .info-label { color: #94a3b8; }
+    .info-value { font-weight: 600; }
+    .info-value.highlight { color: #facc15; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    function MancalaBoard({ board, currentPlayer, legalMoves, optimalMove }) {
+      /*  Board indices: [p1_0..p1_5, store1, p2_0..p2_5, store2]
+       *  Visual layout (classic Mancala):
+       *
+       *          ← P2 plays this direction ←
+       *  [S2]  12  11  10   9   8   7  [  ]
+       *  [  ]   0   1   2   3   4   5  [S1]
+       *          → P1 plays this direction →
+       */
+      const p1Pits = board.slice(0, 6);
+      const store1 = board[6];
+      const p2Pits = board.slice(7, 13);
+      const store2 = board[13];
+      const p2Reversed = [...p2Pits].reverse(); // display right-to-left
+
+      return (
+        <div className="board-outer">
+          {/* Left store (P2) */}
+          <div className="board-store">{store2}</div>
+
+          {/* Center: two rows of 6 pits */}
+          <div className="board-pits">
+            {/* P2 pits (top row, reversed so 12 is leftmost) */}
+            <div className="board-row">
+              {p2Reversed.map((s, i) => {
+                const pitIdx = 12 - i;
+                const isOpt = currentPlayer === 2 && pitIdx === optimalMove;
+                return <div key={`p2-${i}`} className={`pit pit-p2 ${isOpt ? 'pit-highlight' : ''}`}>{s}</div>;
+              })}
+            </div>
+            {/* Shared index labels: P2 above / P1 below */}
+            <div className="board-row-labels">
+              {p2Reversed.map((_, i) => <div key={`l-${i}`} className="pit-label">{12 - i}/{i}</div>)}
+            </div>
+            {/* P1 pits (bottom row) */}
+            <div className="board-row">
+              {p1Pits.map((s, i) => {
+                const isOpt = currentPlayer === 1 && i === optimalMove;
+                return <div key={`p1-${i}`} className={`pit pit-p1 ${isOpt ? 'pit-highlight' : ''}`}>{s}</div>;
+              })}
+            </div>
+          </div>
+
+          {/* Right store (P1) */}
+          <div className="board-store">{store1}</div>
+        </div>
+      );
+    }
+
+    function PredictionCards({ predictions, trueMove }) {
+      const methods = [
+        { key: 'single_pass', label: 'RRF', color: '#ef4444' },
+        { key: 'multi_dimensional', label: 'Multi-Dim', color: '#f59e0b' },
+        { key: 'learned', label: 'Learned', color: '#10b981' },
+      ];
+      return (
+        <div className="predictions">
+          {methods.map(m => {
+            const p = predictions[m.key];
+            return (
+              <div key={m.key} className={`pred-card ${p.correct ? 'correct' : 'wrong'}`}>
+                <div className="pred-label">{m.label}</div>
+                <div className="pred-move" style={{color: m.color}}>
+                  Pit {p.move ?? '?'}
+                </div>
+                <div className="pred-method">{p.correct ? 'Correct' : `Wrong (true: ${trueMove})`}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function CandidateTable({ candidates }) {
+      const maxLearned = Math.max(...candidates.map(c => c.learned_score), 0.01);
+      const minLearned = Math.min(...candidates.map(c => c.learned_score));
+      const range = maxLearned - minLearned || 1;
+
+      return (
+        <div>
+          <div className="legend">
+            <span><span className="legend-dot" style={{background:'#6366f1'}}></span>Cosine Sims</span>
+            <span><span className="legend-dot" style={{background:'#f59e0b'}}></span>Multi-Dim Score</span>
+            <span><span className="legend-dot" style={{background:'#10b981'}}></span>Learned Score</span>
+          </div>
+          <table className="cand-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Move</th>
+                <th>Match</th>
+                <th>Sim-C</th>
+                <th>Sim-I</th>
+                <th>Sim-R</th>
+                <th>Multi Score</th>
+                <th>Learned Score</th>
+                <th>Multi Rank</th>
+              </tr>
+            </thead>
+            <tbody>
+              {candidates.map((c, i) => (
+                <tr key={c.id} className={c.is_correct ? 'correct' : ''}>
+                  <td style={{color:'#94a3b8'}}>{i + 1}</td>
+                  <td><strong>Pit {c.optimal_move ?? '?'}</strong></td>
+                  <td>
+                    <span className={`tag ${c.is_correct ? 'tag-correct' : 'tag-wrong'}`}>
+                      {c.is_correct ? 'YES' : 'no'}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="bar bar-sim" style={{width: `${Math.max(c.sim_components * 60, 2)}px`}}></div>
+                    {' '}{c.sim_components.toFixed(3)}
+                  </td>
+                  <td>
+                    <div className="bar bar-sim" style={{width: `${Math.max(c.sim_inputs * 60, 2)}px`}}></div>
+                    {' '}{c.sim_inputs.toFixed(3)}
+                  </td>
+                  <td>
+                    <div className="bar bar-sim" style={{width: `${Math.max(c.sim_relationships * 60, 2)}px`}}></div>
+                    {' '}{c.sim_relationships.toFixed(3)}
+                  </td>
+                  <td>
+                    <div className="bar bar-multi" style={{width: `${Math.max(c.multi_score * 300, 2)}px`}}></div>
+                    {' '}{c.multi_score.toFixed(4)}
+                  </td>
+                  <td>
+                    <div className="bar bar-learned" style={{width: `${Math.max(((c.learned_score - minLearned) / range) * 80, 2)}px`}}></div>
+                    {' '}{c.learned_score.toFixed(3)}
+                  </td>
+                  <td><span className="tag tag-rank">#{c.multi_rank}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function PathTree({ node, bestMove, depth = 0 }) {
+      if (!node) return null;
+      const isBest = depth === 0 && node.move === bestMove;
+      return (
+        <div>
+          <div className={`la-node ${isBest ? 'la-node-best' : ''}`}>
+            <span style={{color: '#94a3b8', minWidth: 50}}>Pit {node.move}</span>
+            <span style={{color: '#cbd5e1', minWidth: 20}}>P{node.current_player}</span>
+            <div className="la-score-bar" style={{width: Math.max((node.score - 50) * 8, 2) + 'px'}}></div>
+            <span style={{color: '#93c5fd', minWidth: 55}}>{node.score.toFixed(1)}</span>
+            {node.predicted_move != null && (
+              <span style={{color: '#64748b', fontSize: '0.7rem'}}>pred: pit {node.predicted_move}</span>
+            )}
+          </div>
+          {node.children && node.children.length > 0 && (
+            <div className="la-children">
+              {node.children.map((c, i) => <PathTree key={i} node={c} bestMove={bestMove} depth={depth + 1} />)}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function LookaheadPanel({ laData }) {
+      if (!laData) return null;
+      const { query, move_scores, best_move, is_correct, paths, depth } = laData;
+      const sortedMoves = Object.entries(move_scores)
+        .sort(([,a], [,b]) => b - a)
+        .map(([m, s]) => ({ move: parseInt(m), score: s }));
+
+      return (
+        <div className="lookahead-panel">
+          <div className="panel">
+            <div className="panel-title">
+              Lookahead Search ({depth}-step) — {is_correct
+                ? <span style={{color:'#10b981'}}>Correct: Pit {best_move}</span>
+                : <span style={{color:'#ef4444'}}>Wrong: Pit {best_move} (true: {query.true_optimal_move})</span>
+              }
+            </div>
+
+            <div className="la-moves">
+              {sortedMoves.map(({ move, score }) => (
+                <div key={move}
+                  className={`la-move ${move === best_move ? 'la-best' : ''} ${move === query.true_optimal_move ? 'la-correct' : 'la-wrong'}`}>
+                  <div className="la-move-label">
+                    {move === best_move ? 'Best' : ''}
+                    {move === query.true_optimal_move ? ' True' : ''}
+                  </div>
+                  <div className="la-move-name" style={{color: move === best_move ? '#10b981' : '#cbd5e1'}}>
+                    Pit {move}
+                  </div>
+                  <div className="la-move-score">avg: {score.toFixed(1)}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="la-tree">
+              <div style={{color: '#94a3b8', fontSize: '0.7rem', marginBottom: 6}}>Path tree (score = model evaluation of each resulting position):</div>
+              {sortedMoves.slice(0, 4).map(({ move }) => (
+                <div key={move} style={{marginBottom: 8}}>
+                  <PathTree node={paths[String(move)]} bestMove={best_move} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [stateIdx, setStateIdx] = useState(500);
+      const [data, setData] = useState(null);
+      const [laData, setLaData] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [laLoading, setLaLoading] = useState(false);
+
+      const fetchInference = useCallback(async (idx) => {
+        setLoading(true);
+        setLaData(null);
+        try {
+          const res = await fetch(`/api/infer?idx=${idx}`);
+          const json = await res.json();
+          setData(json);
+        } catch (e) {
+          console.error(e);
+        }
+        setLoading(false);
+      }, []);
+
+      const fetchLookahead = useCallback(async (idx, depth = 3) => {
+        setLaLoading(true);
+        try {
+          const res = await fetch(`/api/lookahead?idx=${idx}&depth=${depth}`);
+          const json = await res.json();
+          setLaData(json);
+        } catch (e) {
+          console.error(e);
+        }
+        setLaLoading(false);
+      }, []);
+
+      useEffect(() => { fetchInference(stateIdx); }, []);
+
+      const handleRun = () => fetchInference(stateIdx);
+      const handleRandom = () => {
+        // Pick from test states only (not training states already in the index)
+        const trainSize = data?.train_size ?? 500;
+        const totalStates = data?.total_states ?? 600;
+        const idx = trainSize + Math.floor(Math.random() * (totalStates - trainSize));
+        setStateIdx(idx);
+        fetchInference(idx);
+      };
+      const handleLookahead = (depth) => fetchLookahead(stateIdx, depth);
+
+      return (
+        <div className="container">
+          <h1>TRPN Inference Visualizer</h1>
+          <p className="subtitle">Mancala: Learned SimilarityScorer (4,865 params) vs Multi-Dimensional vs RRF</p>
+
+          <div className="controls">
+            <label>State #</label>
+            <input type="number" value={stateIdx} onChange={e => setStateIdx(+e.target.value)} />
+            <button onClick={handleRun} disabled={loading}>Run Inference</button>
+            <button onClick={handleRandom} disabled={loading}>Random State</button>
+            <span style={{color: '#334155'}}>|</span>
+            <button onClick={() => handleLookahead(2)} disabled={laLoading} style={{background:'#065f46'}}>Lookahead 2</button>
+            <button onClick={() => handleLookahead(3)} disabled={laLoading} style={{background:'#065f46'}}>Lookahead 3</button>
+            {(loading || laLoading) && <span style={{color:'#94a3b8'}}>Loading...</span>}
+          </div>
+
+          {data && (
+            <div className="grid">
+              {/* Left panel: query state */}
+              <div>
+                <div className="panel" style={{marginBottom: 12}}>
+                  <div className="panel-title">Query State (Player {data.query.current_player})</div>
+                  <MancalaBoard
+                    board={data.query.board}
+                    currentPlayer={data.query.current_player}
+                    legalMoves={data.query.legal_moves}
+                    optimalMove={data.query.true_optimal_move}
+                  />
+                  <div className="info-row">
+                    <span className="info-label">Optimal Move:</span>
+                    <span className="info-value highlight">Pit {data.query.true_optimal_move}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Legal Moves:</span>
+                    <span className="info-value">{data.query.legal_moves.join(', ')}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Candidates Retrieved:</span>
+                    <span className="info-value">{data.total_candidates}</span>
+                  </div>
+                </div>
+
+                <div className="panel" style={{marginBottom: 12}}>
+                  <div className="panel-title">Predictions</div>
+                  <PredictionCards predictions={data.predictions} trueMove={data.query.true_optimal_move} />
+                </div>
+
+                <div className="panel">
+                  <div className="panel-title">RIC Texts (what the embedder sees)</div>
+                  <div className="ric-texts">
+                    <details>
+                      <summary>Components (identity)</summary>
+                      <pre>{data.query.component_text}</pre>
+                    </details>
+                    <details>
+                      <summary>Inputs (actions)</summary>
+                      <pre>{data.query.inputs_text}</pre>
+                    </details>
+                    <details>
+                      <summary>Relationships (structure)</summary>
+                      <pre>{data.query.relationships_text}</pre>
+                    </details>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right panel: candidate scoring + lookahead */}
+              <div>
+                <div className="panel">
+                  <div className="panel-title">
+                    Candidate Ranking (top 15 by learned score)
+                  </div>
+                  <CandidateTable candidates={data.candidates} />
+                </div>
+
+                <LookaheadPanel laData={laData} />
+              </div>
+            </div>
+          )}
+
+          {!data && !loading && <div className="loading">Click "Run Inference" to start</div>}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

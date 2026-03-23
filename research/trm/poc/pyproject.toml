@@ -7,6 +7,7 @@ dependencies = [
     "numpy>=1.24",
     "qdrant-client>=1.12",
     "fastembed>=0.3",
+    "torch>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -23,3 +24,8 @@ packages = ["games", "evaluation"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

@@ -707,7 +707,7 @@ This is exactly TRM's "self-improving patterns" — but operating in embedding s
 |---------|------------|--------|---------|-----------|
 | **H0** | Wrapper-Agnosticism | **Complete 2026-03-22** | None | — (prerequisite for H3) |
 | **H1** | Multi-Dimensional Scoring | **Live-tested 2026-03-22** | None | Comparative A/B metrics (multidim vs RRF) in production |
-| **H2** | Tiny Projection Network | Not started | Needs H1 A/B data | Design training data pipeline from Qdrant history |
+| **H2** | Learned Similarity Scorer | **MW validated 2026-03-22: 100% val acc** | None | Integrate into `search_hybrid_dispatch()` |
 | **H3** | Full Recursive Embedding Network | Vision | Needs H2 | Domain-agnosticism prerequisite met (H0) |
 
 ### H1 Implementation Details
@@ -844,6 +844,551 @@ network" is clean end-to-end.
 
 ---
 
+## 15. H2 DESIGN — Tiny Projection Network
+
+> This section is the concrete architecture for Horizon 2. It translates TRM's
+> recursive reasoning into a network that operates on RIC embedding space, trained
+> entirely from module wrapper execution data.
+
+### 15.1 Why a Learned Network (and Why Now)
+
+The POC (Section 11) proved two things:
+1. **Cross-dimensional scoring works** (+9.5%) — but it's still a hand-tuned heuristic (multiply 3 similarities).
+2. **Vector arithmetic fails** (-22% to -28%) — the embedding geometry can't be manipulated with linear ops.
+
+A learned network fills the gap: it can discover non-linear relationships between the 3 RIC
+vectors that multiplicative fusion cannot express, while preserving embedding geometry that
+arithmetic destroys.
+
+**Why now:** H1 is live and generating cross-dimensional similarity data in production.
+H0 made the wrapper domain-agnostic. The training data pipeline can be built on top of
+what already exists.
+
+### 15.2 Architecture
+
+TRM uses a 2-layer block (RMSNorm → Attention → SwiGLU) with hidden_size=512. Our network
+is smaller — we don't need sequence-level attention because RIC vectors are fixed-size
+per point. We use the same recursive structure but with MLPs instead of attention.
+
+```mermaid
+graph TD
+    subgraph Init["Initialization"]
+        Q_COL["Query ColBERT<br/>N×128D"] --> MAXSIM_Q["MaxSim Pool<br/>→ 128D"]
+        Q_MIN["Query MiniLM<br/>384D"] --> X_PROJ["Linear(384→D)"]
+
+        CAND_C["Candidate components<br/>M×128D"] --> MAXSIM_C["MaxSim Pool<br/>→ 128D"]
+        CAND_I["Candidate inputs<br/>M×128D"] --> MAXSIM_I["MaxSim Pool<br/>→ 128D"]
+        CAND_R["Candidate relationships<br/>384D"] --> ZL_PROJ["Linear(384→D)"]
+
+        MAXSIM_Q --> ZH_INIT["z_H₀ = Linear(128→D)"]
+        MAXSIM_C --> ZH_INIT
+        MAXSIM_I --> X_INIT["x = Linear(128→D)"]
+        ZL_PROJ --> ZL_INIT["z_L₀"]
+        X_PROJ --> X_INIT
+    end
+
+    subgraph Network["Recursive Block (shared weights)"]
+        direction TB
+        ZH_IN["z_H + x"] --> NORM1["RMSNorm"]
+        NORM1 --> MLP1["SwiGLU(D→4D→D)"]
+        MLP1 --> ZL_IN["z_L context"]
+        ZL_IN --> RES1["z_L' = z_L + MLP1_out"]
+
+        RES1 --> NORM2["RMSNorm"]
+        ZH_UPDATE["z_H context"] --> NORM2
+        NORM2 --> MLP2["SwiGLU(D→4D→D)"]
+        MLP2 --> RES2["z_H' = z_H + MLP2_out"]
+    end
+
+    subgraph Decode["Output Heads"]
+        RES2 --> SCORE_HEAD["Linear(D→1)<br/>→ relevance score"]
+        RES2 --> HALT_HEAD["Linear(D→2)<br/>→ halt / continue"]
+        RES2 --> RANK_HEAD["Linear(D→K)<br/>→ candidate ranking"]
+    end
+
+    Init --> Network
+    Network --> |"L_cycles × H_cycles"| Network
+    Network --> Decode
+
+    style MAXSIM_Q fill:#4a9eff,color:#fff
+    style MAXSIM_C fill:#ff6b6b,color:#fff
+    style MAXSIM_I fill:#4a9eff,color:#fff
+    style ZL_PROJ fill:#ffd93d,color:#000
+    style MLP1 fill:#6c5ce7,color:#fff
+    style MLP2 fill:#6c5ce7,color:#fff
+    style SCORE_HEAD fill:#00b894,color:#fff
+    style HALT_HEAD fill:#fdcb6e,color:#000
+```
+
+**Hyperparameters (starting point, tunable):**
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| D (hidden_size) | 256 | Large enough for 384→D projection, small enough to stay tiny |
+| L_cycles | 4 | TRM uses 6 on 9×9 grids; our structures are simpler |
+| H_cycles | 2 | TRM uses 3; we have fewer compositional levels |
+| SwiGLU expansion | 4× | Same as TRM |
+| Normalization | RMSNorm (eps=1e-5) | Same as TRM |
+| Forward dtype | float32 | Small enough that bf16 isn't needed |
+| halt_max_steps | 8 | Upper bound on H_cycles during inference |
+| **Total params** | **~180K** | See breakdown below |
+
+**Parameter count breakdown:**
+
+| Component | Parameters |
+|-----------|-----------|
+| Input projections (128→256, 384→256) ×3 | ~230K |
+| SwiGLU block (256→1024→256) ×2 layers | ~1.3M |
+| RMSNorm ×4 | ~1K |
+| Output heads (256→1, 256→2, 256→K) | ~1K |
+| **Total** | **~1.5M** |
+
+> Note: At ~1.5M params this is 5× smaller than TRM's 7M. The reduction comes from
+> replacing attention (which needs QKV projections + multi-head) with pure MLPs.
+> If 1.5M proves insufficient, adding a single attention layer (for cross-candidate
+> reasoning) would bring it to ~3M — still tiny.
+
+### 15.3 Recursion Mechanics
+
+Following TRM's exact recursion pattern (trm.py:196-222):
+
+```
+initialize z_H₀, z_L₀, x from RIC vectors
+
+for h in range(H_cycles):
+    # Inner loop: refine reasoning state
+    for l in range(L_cycles):
+        z_L = z_L + SwiGLU(RMSNorm(z_L), context=z_H + x)
+
+    # Outer loop: update answer state
+    z_H = z_H + SwiGLU(RMSNorm(z_H), context=z_L)
+
+    # Halting check
+    halt_logits = halt_head(z_H)
+    if halt_logits[HALT] > halt_logits[CONTINUE]:
+        break
+
+# Decode
+score = score_head(z_H)        # per-candidate relevance
+ranking = rank_head(z_H)       # candidate ordering
+```
+
+**Key TRM design decisions we preserve:**
+1. **Gradient only on last H_cycle** — first (H-1) cycles run in `torch.no_grad()` (saves memory, acts as exploration)
+2. **Input injection every L_cycle** — x is added to z_H before each inner iteration, grounding reasoning in the query
+3. **Shared weights** — the same SwiGLU blocks process both z_L and z_H updates (different behavior via different inputs)
+
+**Key differences from TRM:**
+1. **No attention** — TRM uses multi-head attention because it processes sequences (puzzle grids). Our inputs are fixed-size vectors, so MLPs suffice. If cross-candidate reasoning proves important, we add attention over the candidate dimension.
+2. **ColBERT MaxSim as preprocessing** — TRM embeds tokens directly. We have multi-vector ColBERT embeddings that need MaxSim pooling before entering the network. This happens once at init, not per cycle.
+3. **Per-candidate scoring** — TRM decodes a single output sequence. We score K candidates independently (or via attention if cross-candidate is needed).
+
+### 15.4 Training Data Pipeline
+
+```mermaid
+graph TD
+    subgraph Sources["Data Sources (already in Qdrant)"]
+        IP["Instance Patterns<br/>~500 with feedback labels"]
+        VAR["Variation Families<br/>~5000 synthetic"]
+        SEARCH["Search Logs<br/>(query, results, scores)"]
+    end
+
+    subgraph Extract["Extraction"]
+        IP --> EXTRACT_IP["For each pattern:<br/>3 named vectors +<br/>content_fb + form_fb"]
+        VAR --> EXTRACT_VAR["For each (original, variation):<br/>vectors + variation_type +<br/>expected similarity"]
+        SEARCH --> EXTRACT_SEARCH["For each query:<br/>ColBERT + MiniLM embeds +<br/>ranked candidate list"]
+    end
+
+    subgraph Format["Training Examples"]
+        EXTRACT_IP --> PAIR_FB["(query_vec, candidate_vecs) →<br/>feedback label ∈ {-1, 0, 1}"]
+        EXTRACT_VAR --> PAIR_SIM["(original_vec, varied_vec) →<br/>similarity score"]
+        EXTRACT_SEARCH --> PAIR_RANK["(query_vec, K candidates) →<br/>correct ranking"]
+    end
+
+    subgraph Augment["Augmentation"]
+        PAIR_FB --> AUG["Gaussian noise σ=0.01<br/>+ dropout (p=0.1)<br/>+ vector permutation"]
+        PAIR_SIM --> AUG
+        PAIR_RANK --> AUG
+        AUG --> FINAL["~50K training examples"]
+    end
+
+    style IP fill:#ff6b6b,color:#fff
+    style VAR fill:#ffd93d,color:#000
+    style SEARCH fill:#4a9eff,color:#fff
+    style FINAL fill:#00b894,color:#fff
+```
+
+**Three training signals (matching TRM's multi-task loss):**
+
+| Signal | TRM Equivalent | Source | Loss |
+|--------|---------------|--------|------|
+| Candidate ranking | lm_head (token prediction) | Search results with feedback | ListMLE or LambdaRank |
+| Feedback prediction | Deep supervision at each H_cycle | Instance patterns with ±1 labels | Binary cross-entropy |
+| Halting correctness | q_head (halt/continue) | Was first search pass sufficient? | BCE on halt logits |
+
+**Combined loss (following TRM's losses.py:102):**
+```python
+loss = ranking_loss + 0.5 * (feedback_loss + halt_loss)
+```
+
+### 15.5 Training Loop
+
+```python
+# Pseudocode — follows pretrain.py patterns
+
+optimizer = AdamW(net.parameters(), lr=1e-4, betas=(0.9, 0.95), weight_decay=0.1)
+scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=1000, eta_min=1e-6)
+
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        query_colbert, query_minilm = batch["query_vectors"]
+        candidate_vectors = batch["candidate_vectors"]  # K × (128D, 128D, 384D)
+        target_ranking = batch["ranking"]
+        target_feedback = batch["feedback"]
+
+        # Initialize RIC states
+        z_H = project_components(query_colbert, candidate_vectors.components)
+        z_L = project_relationships(candidate_vectors.relationships)
+        x = project_inputs(query_colbert, candidate_vectors.inputs)
+
+        # Recursive refinement (gradient only on last H_cycle)
+        for h in range(H_cycles):
+            with torch.set_grad_enabled(h == H_cycles - 1):
+                for l in range(L_cycles):
+                    z_L = z_L + swiglu_block(rmsnorm(z_L), context=z_H + x)
+                z_H = z_H + swiglu_block(rmsnorm(z_H), context=z_L)
+
+        # Decode
+        scores = score_head(z_H)           # (batch, K)
+        halt_logits = halt_head(z_H)       # (batch, 2)
+
+        # Loss
+        loss = (
+            lambda_rank_loss(scores, target_ranking)
+            + 0.5 * bce_loss(halt_logits, target_halt)
+            + 0.5 * bce_loss(scores, target_feedback)
+        )
+
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+```
+
+**Training budget:**
+- ~50K examples × 100 epochs = 5M forward passes
+- ~1.5M params × float32 = 6MB model
+- Estimated: <1 hour on a single GPU, <30 min on Apple M-series (MPS)
+
+### 15.6 Integration with Module Wrapper
+
+The network slots in alongside `search_hybrid_multidim()` — not replacing it, but
+providing an alternative scoring backend:
+
+```mermaid
+graph TD
+    subgraph Dispatch["search_hybrid_dispatch()"]
+        ENV["SEARCH_MODE env var"]
+        ENV --> |"rrf"| RRF["search_hybrid()<br/>(legacy RRF)"]
+        ENV --> |"multidim"| MD["search_hybrid_multidim()<br/>(H1: multiplicative)"]
+        ENV --> |"recursive"| REC["search_hybrid_recursive()<br/>(H2: tiny network)"]
+    end
+
+    subgraph H2["search_hybrid_recursive()"]
+        Q2["Query"] --> EMBED["Embed → ColBERT + MiniLM"]
+        EMBED --> EXPAND["Qdrant prefetch → K candidates<br/>(same as multidim)"]
+        EXPAND --> NET["Tiny Projection Network<br/>(L_cycles=4, H_cycles=2)"]
+        NET --> RERANK["Reranked candidates"]
+        RERANK --> RETURN["Return (class_results,<br/>content_patterns, form_patterns)"]
+    end
+
+    REC --> H2
+
+    style RRF fill:#e17055,color:#fff
+    style MD fill:#ffd93d,color:#000
+    style REC fill:#00b894,color:#fff
+    style NET fill:#6c5ce7,color:#fff
+```
+
+**Integration contract:**
+- Same return signature as `search_hybrid()` — 3-tuple of (class_results, content_patterns, form_patterns)
+- Same Qdrant prefetch pipeline as `search_hybrid_multidim()` (1 round-trip)
+- Network runs client-side on retrieved vectors (same as multidim's client-side rerank)
+- Model file loaded at wrapper init, cached in memory (~6MB)
+- Feature flag: `SEARCH_MODE=recursive` (extends existing `ENABLE_MULTIDIM_SEARCH`)
+
+**What changes in callers:** Nothing. `search_hybrid_dispatch()` already abstracts the backend.
+
+### 15.7 Evaluation Plan
+
+**Offline (before deployment):**
+
+| Metric | Method | Target |
+|--------|--------|--------|
+| Top-1 accuracy | Held-out 20% of instance patterns | > 60% (vs. 56% multidim, 46.5% RRF) |
+| Top-3 accuracy | Same holdout | > 85% (vs. 78% baseline) |
+| Ranking correlation | Spearman's ρ against human feedback | > 0.7 |
+| Halting efficiency | Avg H_cycles used vs. max | < 3 (of 8 max) |
+| Latency overhead | Time per candidate batch | < 5ms for K=20 candidates |
+
+**Online (A/B in production):**
+
+| Metric | Method | Target |
+|--------|--------|--------|
+| DSL validation pass rate | % of generated DSL that parses | > current baseline |
+| Feedback ratio | positive / (positive + negative) | > current baseline |
+| Recursion depth | Avg H_cycles before halt | Decreasing over time |
+| Cache hit rate | L1 hits after recursive scoring | Increasing over time |
+
+### 15.8 Risks and Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| Training data too small (~500 labeled patterns) | Overfitting, poor generalization | 10× augmentation, variation families, dropout, early stopping |
+| ColBERT MaxSim pooling loses token-level signal | Lower quality z_H initialization | Keep top-3 token vectors instead of single pool; attention over tokens if needed |
+| Network adds latency to every search | User-visible slowdown | Profile early; target <5ms; fall back to multidim if exceeded |
+| Domain-specific patterns don't transfer | Network trained on cards doesn't work for email | Train per-domain initially; unify once H0's domain-agnosticism proves cross-domain embedding compatibility |
+| Halting learns to always halt at step 1 | No recursion benefit | TRM's exploration trick: 10% of training steps force random min_halt_step (trm.py:280-283) |
+
+### 15.9 Implementation Roadmap
+
+| Step | Description | Prerequisite | Deliverable |
+|------|-------------|-------------|-------------|
+| **1** | Export training data from Qdrant | H1 in production, feedback accumulating | `research/trm/h2/export_training_data.py` |
+| **2** | Build PyTorch model class | Step 1 data format finalized | `research/trm/h2/model.py` (~200 lines) |
+| **3** | Training script with Langfuse logging | Steps 1+2 | `research/trm/h2/train.py` |
+| **4** | Offline evaluation on holdout set | Step 3 produces checkpoint | `research/trm/h2/evaluate.py` |
+| **5** | Integrate `search_hybrid_recursive()` | Step 4 passes targets | `adapters/module_wrapper/search_mixin.py` |
+| **6** | Online A/B: recursive vs. multidim | Step 5 wired | `SEARCH_MODE` flag, Langfuse dashboards |
+| **7** | Iterate: tune cycles, add attention if needed | Step 6 data | Updated model + checkpoint |
+
+### 15.10 What This Section Doesn't Cover (Deferred to H3)
+
+- **Cross-domain composition** — using z_H from cards + z_L from email to compose multi-service workflows
+- **Online learning** — updating the network from production feedback without retraining
+- **Distributed inference** — running the network server-side in Qdrant (custom scorer plugin)
+- **Full DSL generation** — decoding z_H directly into DSL strings (vs. ranking pre-existing candidates)
+
+These are Horizon 3 concerns. H2's job is to prove that a learned network outperforms
+hand-tuned heuristics on the ranking task.
+
+---
+
+## 16. H2 POC RESULTS — Learned Similarity Scorer on Mancala
+
+> Added 2026-03-22. Full pipeline: Mancala states → RIC vectors → Qdrant →
+> listwise contrastive training → learned scorer vs baselines.
+
+### 16.1 Experiment Setup
+
+- **Game:** Mancala (Kalah, 2×6 pits, depth-8 negamax solver)
+- **Data:** 2000 train states / 500 test states (random self-play, deterministic seed=42)
+- **RIC vectors:** 3×384D dense (MiniLM-L6-v2), indexed in in-memory Qdrant
+- **Candidate retrieval:** Top-20 per vector × 3 vectors → ~25-50 unique candidates per query
+- **Evaluation:** Top-1 and Top-3 accuracy — does the highest-scored candidate have the same optimal move?
+
+### 16.2 Results
+
+| Method | Top-1 | Top-1% | Top-3 | Top-3% | Params | Delta vs RRF |
+|--------|-------|--------|-------|--------|--------|-------------|
+| Single-pass (RRF) | 85/500 | 17.0% | 249/500 | 49.8% | 0 | baseline |
+| Multi-dimensional (multiply) | 155/500 | 31.0% | 301/500 | 60.2% | 0 | +14.0% |
+| Multi-dimensional (harmonic) | 155/500 | 31.0% | 301/500 | 60.2% | 0 | +14.0% |
+| **Learned SimilarityScorer** | **192/500** | **38.4%** | **327/500** | **65.4%** | **4,865** | **+21.4%** |
+
+### 16.3 What the SimilarityScorer Learns
+
+The model does NOT project raw 384D vectors (that destroys embedding geometry — see Section 16.5).
+Instead it operates on **9 features derived from raw cosine similarities**:
+
+```
+Input features (per query-candidate pair):
+  sim_c = cosine(query.components, candidate.components)   # identity match
+  sim_i = cosine(query.inputs, candidate.inputs)           # parameter match
+  sim_r = cosine(query.relationships, candidate.relationships)  # structure match
+  + 3 query vector norms + 3 candidate vector norms
+
+Model: MLP(9 → 64 → 64 → 1) = 4,865 parameters
+Output: relevance score (higher = better candidate)
+```
+
+**Comparison to hand-tuned scoring:**
+```
+multi_dimensional:   score = sim_c × sim_r × sim_i        (fixed multiplication)
+SimilarityScorer:    score = MLP([sim_c, sim_i, sim_r, norms])  (learned nonlinear)
+```
+
+The MLP learns interaction effects that multiplication cannot capture.
+
+### 16.4 Training Details
+
+- **Loss function:** Listwise contrastive (softmax cross-entropy over K candidates per query)
+  - Each query's K candidates are scored, softmax produces a distribution
+  - Target: uniform distribution over correct candidates (same optimal_move)
+  - This directly teaches ranking — no degenerate "predict majority class" solution
+- **Optimizer:** AdamW (lr=5e-3, weight_decay=0.01), CosineAnnealingLR
+- **Gradient clipping:** max_norm=1.0
+- **Deep supervision:** Loss computed at every H_cycle (weighted 0.3×)
+- **Epochs:** 16 (early stopped at patience=15), best at epoch 1
+- **Device:** Apple M5 Pro MPS, ~0.6s/epoch
+- **Overfitting:** Train accuracy hit 100% by epoch 2 (4,865 params on 2000 groups)
+
+### 16.5 What Failed — and Why
+
+**TinyProjectionNetwork (529K params, full TRM recursion) failed completely:**
+- Loss flatlined at the "predict majority class" value across all configurations
+- Binary CE on individual (query, candidate) pairs with 82% negative class imbalance
+  → model learns to output a constant score, achieving ~82% "accuracy"
+- Disabling `no_grad` on early H_cycles did not help
+- Adding deep supervision did not help
+- Reducing to H=1/L=1 (no recursion) did not help
+
+**Root cause 1: Binary CE cannot teach ranking.** Each pair is scored independently.
+The model has no incentive to rank correct candidates HIGHER than incorrect ones —
+only to predict the correct binary label. With heavy class imbalance, predicting
+"all negative" is a strong local minimum.
+
+**Root cause 2: Random linear projections destroy embedding geometry.** MiniLM
+vectors live on a learned manifold. Projecting 384D → 128D through random init
+Linear layers maps semantically similar vectors to random directions. The model
+must first LEARN to preserve similarity — but with binary CE it has no gradient
+signal to do so.
+
+**Fix: Preserve geometry, learn on top.** The SimilarityScorer computes cosine
+similarities FIRST (preserving the original embedding geometry), then learns a
+nonlinear combination. The listwise contrastive loss provides direct ranking signal.
+
+### 16.6 Key Insights
+
+1. **Embedding geometry is sacred.** Don't project through random linear layers.
+   Compute similarities in the original space, then learn on the similarity features.
+
+2. **Listwise loss is essential for ranking.** Binary CE on pairs cannot escape
+   the "predict majority class" trap. Softmax cross-entropy over candidates creates
+   competition — the correct candidate MUST score higher.
+
+3. **Tiny models can outperform hand-tuned heuristics.** 4,865 parameters trained
+   for 1 epoch beat the hand-tuned multiplicative fusion by +7.4% Top-1.
+
+4. **Overfitting is the next challenge.** 100% train accuracy by epoch 2 with
+   stagnant val accuracy (~39%) means the model memorizes rather than generalizes.
+   Path forward: regularization (dropout, weight decay), more training data,
+   or cross-validation.
+
+5. **Recursion needs a foundation.** The full TRM recursion pattern (H/L cycles,
+   SwiGLU blocks, learned z_H/z_L) is still the Horizon 3 vision — but it needs
+   to build on the SimilarityScorer's success, not replace it. Next step:
+   use similarity features as z_L initialization, then recurse.
+
+### 16.7 Architecture Evolution Path
+
+```
+H1 (done):      score = sim_c × sim_r × sim_i                 (hand-tuned, +14%)
+H2 game:        score = MLP([sim_c, sim_i, sim_r, norms])     (learned, +21.4% on Mancala)
+H2 MW:          score = MLP([MaxSim_c, MaxSim_i, cos_r, norms]) (100% val acc on gchat cards)
+H2→prod:        integrate into search_hybrid_dispatch()        (next step)
+H3 (vision):    full domain-agnostic recursive embedding network
+```
+
+---
+
+## 17. H2 MODULE WRAPPER RESULTS — Learned Scorer on Production Data
+
+> Added 2026-03-22. Ported the SimilarityScorer from Mancala to real MW
+> gchat card component data from cloud Qdrant.
+
+### 17.1 Why This Matters
+
+The Mancala POC (Section 16) proved a learned scorer outperforms hand-tuned
+multiplication, but hit a ceiling because text embeddings can't distinguish
+Mancala board states (all cosine sims 0.99+). The critical question was:
+**does the same approach work on the actual MW domain where RIC was designed?**
+
+### 17.2 Data Source
+
+- **Collection:** `mcp_gchat_cards_v8` (cloud Qdrant)
+- **Points extracted:** 500 (66 classes, 106 functions, 95 methods, 41 instance patterns, 167 variables, 25 modules)
+- **Instance patterns with feedback:** 10 positive content feedback, 0 negative
+- **Query groups built:** 72 (41 from instance patterns → class candidates, 31 from class → class)
+- **Positive rate per group:** 13.5% mean
+
+### 17.3 The Critical Difference: Similarity Distribution
+
+```
+MW gchat cards:    Mean=0.60, Std=0.15, Range=[0.35, 0.99]
+Mancala (game):    Mean=0.99, Std=0.002, Range=[0.98, 1.00]
+```
+
+MW components have **real semantic differences** — a Section (§) embeds very
+differently from a Button (ᵬ) or DecoratedText (δ). The 3 cosine similarity
+features contain genuine discriminative signal, not noise.
+
+### 17.4 Results
+
+| Metric | Value |
+|--------|-------|
+| **Validation accuracy** | **100%** (15/15 groups correct) |
+| Training accuracy | 100% (57/57 groups) |
+| Random baseline | 5% (1/20 candidates) |
+| Parameters | 1,409 |
+| Epochs to 100% val | 18 |
+| Architecture | MLP(9 → 32 → 32 → 1) with SiLU + dropout |
+
+**Training curve:**
+```
+Epoch  1: val_acc=33%  (learning)
+Epoch  5: val_acc=66%  (rapid improvement)
+Epoch  9: val_acc=80%  (approaching convergence)
+Epoch 13: val_acc=94%  (near perfect)
+Epoch 18: val_acc=100% (perfect — held for 20 epochs)
+```
+
+### 17.5 Feature Space
+
+The MW scorer uses the same 9 features as the Mancala scorer, but adapted
+for MW's mixed-dimension RIC schema:
+
+| Feature | Computation | Dimension |
+|---------|-------------|-----------|
+| sim_components | ColBERT MaxSim (late interaction) | 128D multi-vector |
+| sim_inputs | ColBERT MaxSim (late interaction) | 128D multi-vector |
+| sim_relationships | Dense cosine similarity | 384D MiniLM |
+| query norms (×3) | L2 norm of each query vector | scalar |
+| candidate norms (×3) | L2 norm of each candidate vector | scalar |
+
+**MaxSim** (vs plain cosine in Mancala): for each query token embedding, find
+the max similarity to any candidate token embedding, then average across query
+tokens. This preserves ColBERT's late-interaction design — the same scoring
+used by `search_hybrid_multidim()` in production.
+
+### 17.6 What This Proves
+
+1. **The SimilarityScorer architecture works on production MW data.** 100% val
+   accuracy with only 1,409 parameters, trained in seconds.
+
+2. **RIC embeddings ARE discriminative** when the domain has genuine semantic
+   variety. The problem was never the embedding approach — it was testing on a
+   domain (Mancala) where all states look identical in text space.
+
+3. **The path to production is clear.** The scorer takes the same inputs as
+   `search_hybrid_multidim()` (3 similarity scores + norms) and produces a
+   single relevance score. Integration requires:
+   - Loading the 1,409-param model at wrapper init (~6KB file)
+   - Adding a `search_hybrid_learned()` method to `search_mixin.py`
+   - Extending `search_hybrid_dispatch()` with `SEARCH_MODE=learned`
+
+### 17.7 Caveats
+
+- **Small validation set** (15 groups). Need more instance patterns with feedback
+  to validate at scale. The 100% may partially reflect the small sample.
+- **Training labels from path matching** (is class X in pattern's parent_paths?),
+  not from end-to-end card generation success. Production integration should
+  use actual card generation feedback as the training signal.
+- **No comparison to production multidim scoring** on the same queries yet —
+  the 100% tells us the model can rank correctly, but we need A/B with the
+  existing system to measure the real improvement.
+
+---
+
 ## References
 
 - TRM Paper: "Less is More: Recursive Reasoning with Tiny Networks" (arXiv:2510.04871)
@@ -857,3 +1402,20 @@ network" is clean end-to-end.
 - Wrapper Agnosticism Guardrail: tests/module/test_wrapper_agnostic.py
 - POC Code: research/trm/poc/ (games, evaluation, recursive search)
 - POC Results: research/trm/poc/README.md
+- TRM Model Architecture: research/trm/official-repo/models/recursive_reasoning/trm.py (recursion at lines 196-222)
+- TRM Losses: research/trm/official-repo/models/losses.py (stablemax_cross_entropy, ACTLossHead)
+- TRM Config: research/trm/official-repo/config/arch/trm.yaml (H_cycles=3, L_cycles=6, hidden=512)
+- Training Data Sources: gchat/feedback_loop.py (instance patterns), search_mixin.py (cross-dim scores)
+- Instance Pattern Variations: adapters/module_wrapper/instance_pattern_mixin.py (StructureVariator, ParameterVariator)
+- H2 POC: research/trm/h2/ (SimilarityScorer + TinyProjectionNetwork, training, evaluation)
+- H2 SimilarityScorer: research/trm/h2/model.py — SimilarityScorer (4,865 params, +21.4% Top-1 on Mancala)
+- H2 TinyProjectionNetwork: research/trm/h2/model.py — TinyProjectionNetwork (529K params, failed — see Section 16.5)
+- H2 MW Extractor: research/trm/h2/mw_extract.py — Qdrant data extraction with MaxSim scoring
+- H2 MW Training: research/trm/h2/train_mw.py — SimilarityScorerMW (1,409 params, 100% val acc on gchat cards)
+- H2 MW Checkpoint: research/trm/h2/checkpoints/best_model_mw.pt
+- H2 MW Data: research/trm/h2/mw_groups.json — 72 query groups from mcp_gchat_cards_v8
+- H2 Retrospective: research/trm/h2/RETRO.md
+- H2 Training: research/trm/h2/train.py (listwise contrastive loss, MPS-accelerated)
+- H2 Evaluation: research/trm/h2/evaluate.py (comparison table: RRF vs multi-dim vs learned)
+- H2 Visual Guide: research/trm/h2/HOW_IT_WORKS.md (Mermaid diagrams of data flow and training)
+- H2 Tests: research/trm/h2/tests/test_model.py (13 tests, all passing)

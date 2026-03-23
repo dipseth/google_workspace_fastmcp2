@@ -22,8 +22,11 @@ INITIAL_STONES = 4
 
 
 class Mancala(Game):
-    def __init__(self, search_depth: int = 8):
+    def __init__(self, search_depth: int = 12):
         self._search_depth = search_depth
+        # Transposition table: (board, player) → (depth, value, move, flag)
+        # flag: 'exact', 'lower', 'upper' for alpha-beta bounds
+        self._tt: dict[tuple, tuple] = {}
 
     @property
     def name(self) -> str:
@@ -119,8 +122,16 @@ class Mancala(Game):
         moves = self.legal_moves(state)
         if not moves:
             return None
-        _, move = self._negamax(state, self._search_depth, -100000, 100000)
-        return move
+        # Iterative deepening: search progressively deeper, TT carries forward
+        best_move = moves[0]
+        for d in range(2, self._search_depth + 1, 2):
+            _, m = self._negamax(state, d, -100000, 100000)
+            if m is not None:
+                best_move = m
+        return best_move
+
+    def _tt_key(self, state: GameState) -> tuple:
+        return (state.board, state.current_player)
 
     def _negamax(
         self, state: GameState, depth: int, alpha: int, beta: int
@@ -132,6 +143,27 @@ class Mancala(Game):
         if not moves:
             return self._evaluate(state), None
 
+        # Transposition table lookup
+        tt_key = self._tt_key(state)
+        if tt_key in self._tt:
+            tt_depth, tt_val, tt_move, tt_flag = self._tt[tt_key]
+            if tt_depth >= depth:
+                if tt_flag == "exact":
+                    return tt_val, tt_move
+                elif tt_flag == "lower":
+                    alpha = max(alpha, tt_val)
+                elif tt_flag == "upper":
+                    beta = min(beta, tt_val)
+                if alpha >= beta:
+                    return tt_val, tt_move
+
+        # Move ordering: try TT best move first (huge speedup)
+        if tt_key in self._tt:
+            tt_best = self._tt[tt_key][2]
+            if tt_best in moves:
+                moves = [tt_best] + [m for m in moves if m != tt_best]
+
+        orig_alpha = alpha
         best_val = -100000
         best_move = moves[0]
 
@@ -150,6 +182,15 @@ class Mancala(Game):
             alpha = max(alpha, val)
             if alpha >= beta:
                 break
+
+        # Store in transposition table
+        if best_val <= orig_alpha:
+            flag = "upper"
+        elif best_val >= beta:
+            flag = "lower"
+        else:
+            flag = "exact"
+        self._tt[tt_key] = (depth, best_val, best_move, flag)
 
         return best_val, best_move
 
